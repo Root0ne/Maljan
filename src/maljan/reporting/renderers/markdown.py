@@ -1741,6 +1741,7 @@ class MarkdownRenderer:
             "returned them. Assessed sections are the models' conclusions, reported as "
             "they wrote them; the checks above are the platform's comments on them."
         )
+        lines.extend(_claims_not_discussed_lines(report, ctx))
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
@@ -2484,6 +2485,32 @@ def _reputations(report: MalwareReport) -> dict[str, str]:
 def _title_heading(title: str) -> str:
     """The report's H1: its title, on one line."""
     return f"# {_one_line(title)}"
+
+
+def _claims_not_discussed_lines(report: MalwareReport, ctx: _Context) -> list[str]:
+    """The claims in force the body neither cites nor discusses, each whole, with the rule."""
+    from maljan.reporting.claim_coverage import COVERAGE_RULE, carried_sentence, claim_label
+
+    rows = list(getattr(report, "claims_not_discussed", None) or [])
+    if not rows:
+        return []
+    lines = ["", _subheading("13.1", CLAIMS_NOT_DISCUSSED_TITLE, MEASURED), "", COVERAGE_RULE, ""]
+    for row in rows:
+        stated = (
+            f"confidence {row.confidence:.2f}; " if isinstance(row.confidence, int | float) else ""
+        )
+        evidence = f" Evidence: {row.evidence_ref}" if row.evidence_ref.strip() else ""
+        lines.append(
+            _item(
+                f"**{claim_label(row.agent, row.claim_number)}** ({stated}"
+                f"{carried_sentence(row)}): {ctx.plain(row.claim)}{ctx.plain(evidence)}"
+            )
+        )
+    return lines
+
+
+# The heading of the list of claims in force the body does not discuss.
+CLAIMS_NOT_DISCUSSED_TITLE = "Claims not discussed in the body"
 
 
 def _heading(number: int, title: str, voice: str) -> str:

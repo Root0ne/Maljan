@@ -121,13 +121,19 @@ from maljan.reporting.composer import (
     _INSTRUCTIONS,
     _PROSE_SECTIONS,
     _SYSTEM,
+    ANALYST_CLAIMS_HEADING,
     PUBLISHED_TECHNIQUES_HEADING,
     RULE_ONLY_NOTE,
     SECTION_SCHEMAS,
     WHERE_QUOTED_LEAD,
     section_contract,
 )
-from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXAMPLE_OBJECT, EXPECTED_OBJECT
+from maljan.reporting.narrative_agent import (
+    _SYSTEM_PROMPT,
+    CLAIMS_IN_FORCE_HEADING,
+    EXAMPLE_OBJECT,
+    EXPECTED_OBJECT,
+)
 from maljan.reporting.renderers.stix_renderer import (
     BENIGN_NAME_IN_A_URL,
     BENIGN_NAME_RESOLVED,
@@ -141,6 +147,7 @@ from maljan.schemas.isr_models import (
     JUDGE_ONLY_TECHNIQUE_MARKER,
     JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
     ClaimEvidence,
+    judge_and_findings_note,
     judge_dropped_reason,
     judge_kept_note,
 )
@@ -391,6 +398,10 @@ PROMPTS: dict[str, str] = {
     ),
     "rule-match-only note": RULE_ONLY_NOTE,
     "judge-only technique note": JUDGE_ONLY_TECHNIQUE_MARKER,
+    "judge-named technique named on findings note": judge_and_findings_note(["a", "b"]),
+    "the claims headings of a composer section and the narrative round": (
+        f"{ANALYST_CLAIMS_HEADING} {CLAIMS_IN_FORCE_HEADING}"
+    ),
     "analyst retry closing line": ANALYST_FEEDBACK_CLOSING,
     "judge technique question": " ".join(
         [

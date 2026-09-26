@@ -1,0 +1,2081 @@
+{
+ "claims": {
+  "triage": [
+   {
+    "claim": "64-bit Windows PE **DLL** (machine 0x8664, IMAGE_FILE_DLL, GUI), 60,928 bytes, sha256 6091f2…b21ef / md5 71d29d… / sha1 e456eb… / imphash db7aeb…; 5 sections (.text 50,176 B/5.42, .rdata 1,536/4.68, .data 5,632/6.48, .pdata 2,048/3.87, .reloc 512/0.08), linker 14.0, Rich header, timestamp 2024-03-25, no Authenticode signature, no debug/PDB, no resources, no overlay; export-directory name \"UpdaterTag.dll\"; submitted as an `.exe`. No embedded second stage by any tested method (carve 0 payloads; four hidden/encrypted-PE checks negative). No known packer — the `packed: true` boolean is driven only by the Rich-header marker and is unsupported; [ev_0004]'s \"no packer signatures\" stands. Code-level masquerade: install copies itself to `%APPDATA%\\Custom_update\\Update_<hex>.<ext>` with the extension chosen *opposite* to its real type. REVISION: adds masquerade and resolves the packer dispute (sides with [ev_0004]).",
+    "evidence_ref": "[ev_0001], [ev_0002], [ev_0003], [ev_0004], [ev_0083], [ev_0139], [ev_0144], [ev_0145], [ev_0148], [ev_0149], [ev_0189]",
+    "confidence": 0.95
+   },
+   {
+    "claim": "all operational strings live in `.data` as header-validated rolling-XOR blobs (seed 0x33629d40, 2-byte length XOR seed low-16, key from 0x41, UTF-16LE payloads) — 101 texts decode statically and the same 81 decode by emulation in two independent FLOSS runs; decode is done at runtime by routine 0xae78 (called from ~20 sites). capa asserts obfuscated stackstrings @0x9484 (which is also the hashed-API table) and T1027. YARA RECONCILIATION: my clean re-run of the 31-rule default corpus returns 0 matches [ev_0249] — the pack's zero was not a failure artifact, it is the corpus's real result; qu1cksc0pe's *bundled* ruleset separately matches two generic markers (`CRC32_poly_Constant` @0x5f0c, `win_mutex` on the literal \"CreateMutex\" @0xcd72) [ev_0144]. Both stand; neither set contains a family rule; a raw-string negative remains scope-limited, not exculpatory. UNRESOLVED MICRO-DISCREPANCY: the token `init -zzzz=\"%s\\%s\"` (header-validated static decode [ev_0021]) vs `init -=\"%s\\%s\"` (FLOSS emulation, reconfirmed this round [ev_0250]) — one token in a downstream format string; I hold both readings and treat it as unsettled. REVISION: YARA discrepancy resolved as corpus difference; FLOSS discrepancy confirmed stable.",
+    "evidence_ref": "[ev_0008], [ev_0021], [ev_0019], [ev_0250], [ev_0089], [ev_0249], [ev_0144], [ev_0006], [ev_0004]",
+    "confidence": 0.95
+   },
+   {
+    "claim": "only 5 static imports exist (KERNEL32!PeekNamedPipe, KERNEL32!GetLastError, KERNEL32!CreateMutexW, USER32!MessageBeep, USER32!MessageBoxA) — the 3-import display elsewhere is a filtered view. The API surface is rebuilt from 32-bit CRC32 name hashes: resolver fcn.0x869c decompiled walking the export directory, 90 {hash, module, slot} triples materialised at start-up, CRC32 table for 0xEDB88320, 164 values resolving to ~10 DLLs (kernel32, user32, wininet, shell32, advapi32, urlmon, shlwapi, ole32, iphlpapi, ntdll). Note: the IAT thunks for CreateMutexW and PeekNamedPipe have **no code callers** — the code uses the hashed slots instead. REVISION: strengthened with resolver decompilation + concrete slot map.",
+    "evidence_ref": "[ev_0004], [ev_0020], [ev_0167], [ev_0168], [ev_0100], [ev_0101], [ev_0102], [ev_0137], [ev_0114], [ev_0119], [ev_0144], [ev_0008]",
+    "confidence": 0.92
+   },
+   {
+    "claim": "four exports `extra`/`follower`/`run`/`scub` (ord 1–4) all alias RVA 0x3ce4 → 0x3cb4 → worker fcn.0x3868; DllMain only stores the module handle. The sandbox invoked it as `rundll32.exe …6091f2….dll,#1` (ordinal export) — observed twice, pid 83 then pid 89 as pid 83's child with a byte-identical command line. LOLBin table asserts T1218.011; sigma flags DLL-call-by-ordinal. REVISION (downgrade): I do **not** treat the second process as evidence of the sample's own relaunch. The relaunch/next-stage code path is established at code level (rundll32 templates `…rundll32.exe %s,%s` and `…%s`, wsprintf, CreateProcessW call sites; commands 0xd/0x12 download-and-rundll32), but the identical child command line, the inert run, and harness duplication unexcluded leave the dynamic attribution unresolved (attribution confidence ~0.5 now; cf. DYNAMIC's withholding). The one point in favour of attribution: the child's recorded parent is pid 83.",
+    "evidence_ref": "[ev_0083], [ev_0084], [ev_0086], [ev_0087], [ev_0011], [ev_0012], [ev_0019], [ev_0021], [ev_0214], [ev_0219], [ev_0091], [ev_0125], [ev_0189], [ev_0195]",
+    "confidence": 0.9
+   },
+   {
+    "claim": "two hardcoded HTTPS endpoints `https://titnovacrion.top/live/` and `https://skinnyjeanso.com/live/` decoded at runtime into a candidate array; HTTP verbs POST/GET, `Content-Type: application/x-www-form-urlencoded`, accept `*/*`, UAs `Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; Tob 1.1)` and `curl/7.88.1`. Bodies RC4-encrypted with the runtime-decoded key `\"12345\"` and base64-encoded; the reply is decrypted and tokenised (`URLS`, `URLS|%d|%s`, `COMMAND`, `CLEARURL`, `ERROR`) and dispatched to a command table (ids 2,3,4,0xc,0xd,0xe,0xf,0x11,0x12,0x13,0x14,0x15: collectors, downloads, in-memory exec, uninstall, sleep modes). Beacon format `counter=%d&type=%d&guid=%s&os=%d&arch=%d&username=%s&group=%lu&ver=%d.%d&up=%d&direction=%s`; built-in timing 180 s pre-contact, 450–599 s cycles (1500–2099 s long-sleep mode). `InternetSetOptionA(hRequest, 0x1f, &0x4380, 4)` (TLS/redirect validation weakening) is a single-locus reading, held at lower weight. **No contact to either endpoint was observed** — static config only.",
+    "evidence_ref": "[ev_0021], [ev_0019], [ev_0090], [ev_0129], [ev_0136], [ev_0137], [ev_0167], [ev_0169], [ev_0175], [ev_0191], [ev_0193], [ev_0203], [ev_0008]",
+    "confidence": 0.85
+   },
+   {
+    "claim": "implemented in fcn.0x1030 — CreatePipe with inheritable SA, SetHandleInformation, CreateProcessW at 0x1360bc01251, PeekNamedPipe/ReadFile polling in 0x200-byte chunks, STILL_ACTIVE check, Sleep(0x64); dispatched from the command table (command 4 → thread fcn.0x2200) with eight call sites for the `/c …` lines and `C:\\Windows\\System32\\cmd.exe`. Not observed executing in the sandbox run (no shell child). REVISION: resolves qu1cksc0pe's \"lead\" — the pipe/capture wiring is now shown in decompilation.",
+    "evidence_ref": "[ev_0131], [ev_0111], [ev_0202], [ev_0021], [ev_0019], [ev_0214]",
+    "confidence": 0.85
+   },
+   {
+    "claim": "`/c systeminfo`, `/c ipconfig /all`, `/c net config workstation`, `/c net view /all`, `/c net view /all /domain`, `/c nltest /domain_trusts`, `/c nltest /domain_trusts /all_trusts`, `/c net group \"Domain Admins\" /domain`, `/c whoami /groups`, and `wmic.exe /Node:localhost /Namespace:\\\\root\\SecurityCenter2 AntiVirusProduct Get … | findstr … || echo No Antivirus installed`, each paired with an upload key (`&systeminfo=`, `&ipconfig=`, `&net_config_ws=`, `&net_view_all=(_domain=)`, `&domain_trusts=(_all=)`, `&net_group=`, `&whoami_group=`, `&net_wmic_av=`). Literal strings, stage-only; not executed in the run.",
+    "evidence_ref": "[ev_0021], [ev_0019], [ev_0169], [ev_0202]",
+    "confidence": 0.85
+   },
+   {
+    "claim": "process list (`&proclist=[`, `\"proc\"`, `\"subproc\": [` via CreateToolhelp32Snapshot/Process32FirstW/NextW + Thread32*), desktop-link/`*.dll` enumeration (`&desklinks=[`), `&mac=` (`%02x`/`:%02x` via GetAdaptersInfo), `&computername=%s`, `&domain=%s`, `&stiller=`, plus identity values: `username` via GetUserNameA; `guid` produced by the volume-info `%04X%04X%04X%04X%08X%04X` formatter (not demonstrated to come from the registry); `group` = FNV(\"Littlehw\"). REVISION: guid derivation now traced to volume info; registry identity left unresolved (see DISPUTE 2).",
+    "evidence_ref": "[ev_0021], [ev_0019], [ev_0177], [ev_0198], [ev_0178], [ev_0109], [ev_0169], [ev_0103], [ev_0135], [ev_0008]",
+    "confidence": 0.8
+   },
+   {
+    "claim": "`/files/`, `files/bp.dat`, `%d.dat`, `%s%d.exe`, `%s%d.dll`, `%s\\%d.dll`, `Update_%x`, `Custom_update`, `front`, `\\update_data.dat` (an RC4-encrypted on-disk URL/state file, re-written as `URLS|%d|%s\\r\\n`); handlers rebuild URLs as `<server>/files/<token>` and save to `%LOCALAPPDATA%\\<tick>.exe|.dll` and `%APPDATA%…\\files\\`; URLDownloadToFileW/A, CreateFileW/WriteFile/ReadFile in the resolved set. Nothing downloaded/dropped was observed.",
+    "evidence_ref": "[ev_0092], [ev_0169], [ev_0195], [ev_0188], [ev_0189], [ev_0182], [ev_0021], [ev_0019], [ev_0020], [ev_0015], [ev_0213], [ev_0225]",
+    "confidence": 0.8
+   },
+   {
+    "claim": "scheduled-task registration is traced in code (COM Task Scheduler: CLSID {0F87369F-…}, IID {4C3D624D-…}, `LogonTrigger`, RegisterTaskDefinition flag 6 = TASK_CREATE_OR_UPDATE; parent then launches the task and exits). Registration was **not** observed (0 task/service rows, 0 registry rows, 0 writes — with the caveat that API telemetry was empty for every process). Startup-folder autostart is **not** demonstrated (see DISPUTE 1); the Shell-Folders names are used to resolve folder paths, not shown to write into Startup.",
+    "evidence_ref": "[ev_0196], [ev_0113], [ev_0123], [ev_0120], [ev_0020], [ev_0213], [ev_0211], [ev_0225], [ev_0182]",
+    "confidence": 0.75
+   },
+   {
+    "claim": "self-rename + delete-on-close via SetFileInformationByHandle classes 3/4 using decoded `:wtfbbq`, and an uninstall command that deletes the installed module before ExitProcess. Code-level; not observed.",
+    "evidence_ref": "[ev_0093], [ev_0184], [ev_0094], [ev_0095], [ev_0195]",
+    "confidence": 0.75
+   },
+   {
+    "claim": "PEB getter + `BeingDebugged` check that aborts; process-count gate (>75 or >50 depending on OS id) with −1 return; single-instance mutex `\"runnung\"` aborting on ERROR_ALREADY_EXISTS (0xB7); adapter-length check. The sandbox run is behaviourally inert (0 API/registry/mutex/task/write rows, no shell, no C2); the gates are a plausible suppression explanation, but the negatives lean partly on empty telemetry — not exculpatory either way.",
+    "evidence_ref": "[ev_0174], [ev_0181], [ev_0088], [ev_0135], [ev_0169], [ev_0204], [ev_0212], [ev_0213], [ev_0210], [ev_0221], [ev_0214], [ev_0227]",
+    "confidence": 0.7
+   },
+   {
+    "claim": "the resolved set contains a full injection primitive set (OpenProcess, VirtualAllocEx, WriteProcessMemory, ReadProcessMemory, VirtualProtect, CreateRemoteThread, QueueUserAPC, ResumeThread, DuplicateHandle, Nt* equivalents), but the slots have **zero code cross-references** (only the resolver writes them); the single OpenProcess call is a self-read (mask 0x410, own PID); capa fires no injection rule; dynamic showed no cross-process target. Injection remains capability, not demonstrated behaviour. Direct Nt* allocation (RWX) is real for the sample's own buffers.",
+    "evidence_ref": "[ev_0104], [ev_0105], [ev_0106], [ev_0108], [ev_0110], [ev_0124], [ev_0128], [ev_0198], [ev_0204], [ev_0008], [ev_0212]",
+    "confidence": 0.85
+   },
+   {
+    "claim": "VT 52/75 engines malicious, 47 distinct labels clustering as Latrodectus-, IcedId/Banker- and Ulise-named; sandbox signatures `Detect larodectus Loader variant 2` / `Family: Latrodectus loader` and cti family latrodectus; configured infrastructure also flagged (titnovacrion.top 16/91 + URL 18/91; skinnyjeanso.com 19/91 + URL 21/91). Knowledge-base family/prior-case lookups returned unrelated or generic results and add nothing. The file establishes a loader-shaped DLL with the behaviour above; the family name stays attribution-only.",
+    "evidence_ref": "[ev_0018], [ev_0014], [ev_0218], [ev_0228], [ev_0232], [ev_0233], [ev_0241], [ev_0244], [ev_0237], [ev_0238]",
+    "confidence": 0.85
+   },
+   {
+    "claim": "over the 600 s run and the 9,087-packet / 587 s capture there is no contact to either C2 endpoint (windows exceed the 180 s pre-beacon sleep), no dropped files, no channels; sandbox flows belong to other pids; capture traffic is ambient Windows Update/telemetry/OCSP/CRL (GET-only, standard ports, no regular interval). I revise my round-0 note that the top flow 104.18.19.203:443 was unattributed-and-worth-a-look: no evidence ties it to the sample, and NETWORK's ambient classification is the better-evidenced reading — caveat: the capture extracted no SNI, so 443 destination classification is contextual, not definitive. Sandbox \"3 hosts\" vs capture \"17 conversations\" are different scopes, both recorded. Sigma: use only the sample-linked process items (rundll32 ordinal call, unsigned DLL load); the RDP/foreign-auth/svchost-parent hits are ambient.",
+    "evidence_ref": "[ev_0227], [ev_0209], [ev_0214], [ev_0017], [ev_0234], [ev_0235], [ev_0236], [ev_0049], [ev_0013], [ev_0015], [ev_0016], [ev_0009], [ev_0219]",
+    "confidence": 0.85
+   },
+   {
+    "claim": "whether either /live/ endpoint is contacted and what it returns; the contents of the `%s%d.exe` / `%s%d.dll` next stages (none embedded); whether the scheduled task / install / self-delete chain actually runs (gates untouched); any injection target; which of the two rundll32 processes is the sample's; and the exact `init -…` token (needs a single-step of the 0xae78 decoder on the blob at .data+0xfac0). Next step: instrumented run with network simulation and API/task/file telemetry (the current run's telemetry was empty for all processes, so its negatives are coverage-limited).",
+    "evidence_ref": "[ev_0015], [ev_0249], [ev_0250], [ev_0227], [ev_0212], [ev_0213], [ev_0221], [ev_0203], [ev_0191]",
+    "confidence": 0.9
+   }
+  ],
+  "static": [
+   {
+    "claim": "The artifact is a 64-bit Windows DLL (IMAGE_FILE_DLL, machine 0x8664) whose four exports `extra` (1), `follower` (2), `run` (3), `scub` (4) all alias RVA 0x3ce4 → stub fcn.0x3cb4 → worker fcn.0x3868; DllMain at 0x3c7c only stores the module handle at image-base+0x104a0. The dynamic record fixes the invocation exactly: `rundll32.exe C:\\Users\\Admin\\AppData\\Local\\Temp\\6091f2….dll,#1` (pid 83), which the LOLBin matcher attributes to T1218.011 and Sigma flags as \"DLL Call by Ordinal Via Rundll32.EXE\" / \"Unsigned DLL Loaded by Windows Utility\".",
+    "evidence_ref": "[ev_0083], [ev_0084], [ev_0086], [ev_0087], [ev_0004], [ev_0214], [ev_0219], [ev_0221], [ev_0011], [ev_0009]",
+    "confidence": 0.92
+   },
+   {
+    "claim": "All operational text is stored as encoded, length-prefixed blobs in .data and decoded in memory by FUN_0xae78 (header = 4-byte seed 0x33629d40 + 2-byte length XOR the seed's low 16 bits; first key byte 0x41). Ghidra re-derived the keystream independently — byte *i* uses `(seed+i+1)&0xFF` via the 4-byte helper at 0x9040 (`8B 44 24 08 FF C0 C3` = mov eax,[rsp+8]; inc eax; ret) — and byte-for-byte reproduced the blobs (\"12345\"@0xfd30, \"&mac=\"@0x100e8, \"PT0S\"@0x10118, CLEARURL/URLS/COMMAND @0xfce0–0xfd20). 101 texts decode statically, 81 by emulation; raw-string IOC extraction is empty. R2's alternative keystream formulation (\"key += byte + 0x0A\") differs in wording but yields the same 0x41 start and the same decoded set — no content conflict.",
+    "evidence_ref": "[ev_0168], [ev_0021], [ev_0019], [ev_0006], [ev_0008]",
+    "confidence": 0.95
+   },
+   {
+    "claim": "The API surface is rebuilt at run time by CRC32 name hashing (T1027.007) — not merely \"prepared\": FUN_0x6aa4 builds the 256-entry table for reflected polynomial 0xEDB88320 (independently matched by YARA `CRC32_poly_Constant` at file offset 0x5f0c); FUN_0x869c(moduleBase, crc32, 0) walks IMAGE_EXPORT_DIRECTORY, hashes each exported name and returns the function address; FUN_0x9484 materialises 90 (hash, module-name ptr, destination slot) triples at start-up. 164 embedded values resolve to Windows function/module names across ~10 DLLs against only 5 static imports. Concrete slot mapping (R2): [0x10bc8]=CreateFileW, [0x10bd8]=ReadFile, [0x10b38]=CreateProcessW, [0x10b00]=OpenProcess, [0x10b30]=CreateToolhelp32Snapshot, [0x10e10]=HttpOpenRequestA, [0x10e18]=HttpSendRequestA, [0x10e30]=InternetReadFile. capa corroborates: \"resolve function by parsing PE exports\" @0x869c, \"PEB access\" @0x8690.",
+    "evidence_ref": "[ev_0167], [ev_0171], [ev_0178], [ev_0144], [ev_0100], [ev_0101], [ev_0102], [ev_0020], [ev_0008], [ev_0004]",
+    "confidence": 0.95
+   },
+   {
+    "claim": "The C2 is an HTTPS web-command channel. FUN_0x6988 decodes `https://titnovacrion.top/live/` (.data+0x10250, ref 0x69b3) and `https://skinnyjeanso.com/live/` (.data+0x10278, ref 0x6a1f) into a candidate array at 0x10568; FUN_0x5030 issues HttpOpenRequestA (slot 0x10e10) with the decoded verb POST/GET and `Content-Type: application/x-www-form-urlencoded` @0xfb68, then HttpSendRequestA (0x10e18) and InternetReadFile (0x10e30). Sub-point held at lower confidence: `InternetSetOptionA(hRequest, 0x1f, &0x4380, 4)` relaxes TLS/redirect validation — that flag reading rests on a single decompiler locus (0.70). The beacon body is `counter=%d&type=%d&guid=%s&os=%d&arch=%d&username=%s&group=%lu&ver=%d.%d&up=%d&direction=%s`; replies are tokenised on `\\r\\n` then `|` and dispatched (URLS / `URLS|%d|%s` / COMMAND / CLEARURL / ERROR) in FUN_0x541c.",
+    "evidence_ref": "[ev_0090], [ev_0129], [ev_0136], [ev_0137], [ev_0203], [ev_0021], [ev_0019]",
+    "confidence": 0.9
+   },
+   {
+    "claim": "Beacon thread FUN_0x5750 (CreateThread slot 0x10bc0, started by FUN_0x6250) decodes \"12345\", waits 180 s (0x708 × 100 ms) before first contact, then loops: URL-list iteration under the \"runnung\" mutex, wsprintfA of the beacon body (type = 2 at install, 1 otherwise, ver 1.2), POST, reply decrypt, counter increment, sleep 450–599 s (1500–2099 s after C2 command 0x13), polling its workers every 100 ms. Outgoing bodies and replies are RC4-encrypted with the run-time-decoded key \"12345\" (KSA FUN_0xca08 / PRGA FUN_0xcaac wrapper FUN_0xc964) and base64-coded with the standard alphabet installed by FUN_0x6864 (encode FUN_0x6634, decode FUN_0x6370).",
+    "evidence_ref": "[ev_0169], [ev_0191], [ev_0175], [ev_0177], [ev_0193], [ev_0185], [ev_0167], [ev_0021]",
+    "confidence": 0.85
+   },
+   {
+    "claim": "Output-capturing shell execution is fully wired, not implied: FUN_0x1030 fills STARTUPINFOA (cb=0x68, dwFlags |= 0x101), creates inheritable pipes (CreatePipe slot 0x10d68 with SECURITY_ATTRIBUTES nLength=0x18/bInheritHandle=1, then SetHandleInformation 0x10d70 to clear inherit on the parent end), calls CreateProcessW (0x10b38) at 0x1360bc01251, polls with PeekNamedPipe (0x10d78)/ReadFile (0x10bd8) in 0x200-byte chunks, checks GetExitCodeProcess against STILL_ACTIVE (0x103) and Sleep(0x64); it is called from eight sites inside the cmd.exe command builder FUN_0x2200, started by command 4. The `/c …` lines exist only after decoding (Claim 2); execution was not observed in the run.",
+    "evidence_ref": "[ev_0131], [ev_0111], [ev_0202], [ev_0021], [ev_0019], [ev_0214]",
+    "confidence": 0.9
+   },
+   {
+    "claim": "Each captured command's stdout has its own upload key: `/c ipconfig /all`→`&ipconfig=`, `/c systeminfo`→`&systeminfo=`, `/c net config workstation`→`&net_config_ws=`, `/c net view /all`(/` /domain`)→`&net_view_all=`(`_domain=`), `/c nltest /domain_trusts`(/` /all_trusts`)→`&domain_trusts=`(`_all=`), `/c net group \"Domain Admins\" /domain` and `/c whoami /groups`→`&net_group=`/`&whoami_group=`, and `wmic.exe /Node:localhost /Namespace:\\\\root\\SecurityCenter2 path AntiVirusProduct Get DisplayName | findstr … || echo No Antivirus installed`→`&net_wmic_av=`.",
+    "evidence_ref": "[ev_0021], [ev_0019], [ev_0169], [ev_0202]",
+    "confidence": 0.85
+   },
+   {
+    "claim": "The collectors are bound to concrete handlers: command 3 (FUN_0x1c38) builds `&proclist=[` with `\"proc\"`/`\"subproc\"` fields via CreateToolhelp32Snapshot (0x10b30)/Process32FirstW (0x10b48)/Process32NextW (0x10b58); command 2 (FUN_0x1a08) builds `&desklinks=[` over shell folders + `\\*.dll` @0x101a8 (ref 0xa37c) with SHGetFolderPathW (csidl 0x10)/FindFirstFileW/Next/Close; FUN_0x7fa8 uses GetAdaptersInfo (0x10eb8) and GetComputerNameExA (0x10dc0) for `&mac=` (`%02x`/`:%02x`), `&computername=%s`, `&domain=%s`; FUN_0x8ae0 calls GetUserNameA (0x10e68) for `username=%s`; `group=%lu` is FNV(\"Littlehw\") (FUN_0xc99c → 0x10464).",
+    "evidence_ref": "[ev_0202], [ev_0182], [ev_0177], [ev_0198], [ev_0185], [ev_0109], [ev_0021], [ev_0019]",
+    "confidence": 0.85
+   },
+   {
+    "claim": "No Startup-folder autostart is implemented. The shell-folder names (AppData/Desktop/Startup/Personal/Local AppData) are resolved from `Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders` @0x10330 (ref 0x7df1) in FUN_0x7b98 to build collection targets (the `Startup` entry serves desklinks enumeration, not a write) and the install directory; no code path writes into Startup. T1547.001 is withdrawn from my report.",
+    "evidence_ref": "[ev_0182], [ev_0195], [ev_0021], [ev_0020]",
+    "confidence": 0.75
+   },
+   {
+    "claim": "Persistence is a scheduled task registered through the COM Task Scheduler API: FUN_0x3728 → FUN_0xb344 → FUN_0xc5e8 (CoCreateInstance/Connect, CLSID {0F87369F-A4E5-4CFC-BD3E-73E6154572DD} / IID {4C3D624D-FDA9-49A3-B9B7-09CB3CD3F047}) → FUN_0xc42c → FUN_0xc2c4, which sets the registration info `LogonTrigger` (@0x10030, ref 0xc3a4) and a logon trigger and calls RegisterTaskDefinition with flag 6 (TASK_CREATE_OR_UPDATE); the parent then launches the task (FUN_0xb400) and exits with ExitProcess(0). Not registered in the 600 s run (registry/services/tasks/commands tables all empty).",
+    "evidence_ref": "[ev_0196], [ev_0195], [ev_0193], [ev_0189], [ev_0021], [ev_0019], [ev_0213], [ev_0211], [ev_0221]",
+    "confidence": 0.8
+   },
+   {
+    "claim": "FUN_0x33ac copies the running image to `%APPDATA%\\Custom_update\\Update_<hex>.<ext>` — directory from FUN_0x30d0 (Shell Folders `AppData` + `Custom_update` @0xf940 ref 0x312b), name from wsprintfW(\"Update_%x\") @0xf920 (ref 0x31f1), extension chosen by FUN_0x3250 as `.exe` @0xf978 or `.dll` @0xf968 opposite the running file's own type. With the export-directory name `UpdaterTag.dll` and the `.exe` submission name that is three deliberately conflicting name/type layers.",
+    "evidence_ref": "[ev_0189], [ev_0182], [ev_0091], [ev_0144], [ev_0021], [ev_0019]",
+    "confidence": 0.75
+   },
+   {
+    "claim": "Anti-forensics on its own files: FUN_0x3a24 opens the module path held at image-base+0x10448 (filled by GetModuleFileNameW slot 0x10b70 from FUN_0x841c) with CreateFileW(path, DELETE 0x10000, 0, NULL, OPEN_EXISTING 3, 0x80, NULL) at 0x3a6d, builds a FILE_RENAME_INFO-shaped buffer from the decoded string `:wtfbbq` (.data+0xfa18 ref 0x3a99), calls SetFileInformationByHandle (0x10d50) with class 3 (FileRenameInfo) and then class 4 (FileDispositionInfo, TRUE), and closes the handle (0x10b28); the uninstall command 0xf deletes the installed file and module before ExitProcess(0).",
+    "evidence_ref": "[ev_0093], [ev_0094], [ev_0095], [ev_0184], [ev_0195], [ev_0021], [ev_0019]",
+    "confidence": 0.8
+   },
+   {
+    "claim": "The in-memory injection primitive set is resolved but never invoked. Slots VirtualAllocEx [0x10b08], WriteProcessMemory [0x10b18], CreateRemoteThread [0x10b20], QueueUserAPC [0x10ba8], VirtualProtect [0x10b40] have zero call cross-references — only the resolver table `lea`s them; OpenProcess [0x10b00] is called exactly once, from FUN_0x463c at 0x479d with mask 0x410 (PROCESS_QUERY_INFORMATION|PROCESS_VM_READ) on the PID from GetCurrentProcessId [0x10b98] — a self-read. Dynamic agrees: 0 API rows for every process, no cross-process target. capa fired no injection rule. T1055 is capability, not behaviour.",
+    "evidence_ref": "[ev_0104], [ev_0110], [ev_0105], [ev_0106], [ev_0108], [ev_0124], [ev_0128], [ev_0212], [ev_0214], [ev_0008]",
+    "confidence": 0.85
+   },
+   {
+    "claim": "Native API is actually used, not merely hashed: every allocation goes through FUN_0xad34 = `NtAllocateVirtualMemory(-1,&p,0,&sz, MEM_COMMIT|MEM_RESERVE 0x3000, PAGE_EXECUTE_READWRITE 0x40)`, and the command-line read uses NtQueryInformationProcess (slot 0x109d8) + ReadProcessMemory; the ntdll hash block at 0xa59c carries 37 entries; capa independently flags PEB access @0x8690, where the getter is `65 48 8B 04 25 60 00 00 00 C3` (`mov rax, gs:[0x60]; ret`).",
+    "evidence_ref": "[ev_0204], [ev_0198], [ev_0180], [ev_0020], [ev_0008]",
+    "confidence": 0.85
+   },
+   {
+    "claim": "Debugger/environment gating explains the inert run: FUN_0x309c returns *(BYTE*)(PEB+2) (BeingDebugged), FUN_0x3074 returns −1 when set, and the init chain FUN_0x3868 aborts (iVar1=−1) on that value; the same chain requires the process count from FUN_0x8820 to exceed 0x4B (75) or 0x32 (50) depending on the OS id from FUN_0x8560 (RtlGetVersion/IsWow64Process), requires IsWow64Process == 0, aborts on `CreateMutexW(NULL,FALSE,\"runnung\")` + GetLastError()==0xB7 (ERROR_ALREADY_EXISTS), and FUN_0x68e8 rejects adapters whose address length exceeds 6. The sandbox had 4 processes.",
+    "evidence_ref": "[ev_0180], [ev_0174], [ev_0181], [ev_0169], [ev_0088], [ev_0135], [ev_0204], [ev_0214]",
+    "confidence": 0.85
+   },
+   {
+    "claim": "The C2-task dispatcher builds download URLs by copying the stored C2 entry up to `//`, appending `/files/` (@0xfb00 ref 0x3ef6) and the token from offset 8; commands 0xc/0xd/0x12/0x15 fetch to `%LOCALAPPDATA%\\<tick>.exe`, `<tick>.dll`, `%APPDATA%…\\files\\…` (`files/bp.dat` @0xfa58 ref 0x4317, `%d.dat` @0xfa90), command 0xd/0x12 then executes the fetched DLL as `rundll32 <dll>,<token>` via the templates @0xfe90/0xfef0 in fcn.0xb4cc (CreateProcessW slot 0x10b38 at 0xb63d), and command 0xe downloads a payload, allocates `VirtualAlloc(0,n,0x1000,0x40)` (RWX) and starts thread FUN_0xb398 on it — a no-file in-memory execution path. Nothing is embedded in the file (0 carved payloads, 4 independent embedded-PE checks negative) and nothing was dropped in the run.",
+    "evidence_ref": "[ev_0169], [ev_0195], [ev_0188], [ev_0092], [ev_0125], [ev_0189], [ev_0021], [ev_0019], [ev_0015], [ev_0025], [ev_0142]",
+    "confidence": 0.8
+   },
+   {
+    "claim": "The URL list is persisted encrypted: `%APPDATA%\\Custom_update\\update_data.dat` @0x103b8 (ref 0xced2) is read and RC4-decrypted by FUN_0xcea4/FUN_0xcf14 (`URLS` @0x103f0 ref 0xd0c4) and re-encrypted on change by FUN_0xd1c8 with `URLS|%d|%s\\r\\n` @0x10400 (ref 0xd247).",
+    "evidence_ref": "[ev_0177], [ev_0175], [ev_0169], [ev_0021], [ev_0019]",
+    "confidence": 0.8
+   },
+   {
+    "claim": "`guid=%s` is not a registry-derived identity — it comes from the volume-information path FUN_0x7b80 → FUN_0x89d4 (FindFirstVolumeW/GetVolumeInformationW) feeding the `%04X%04X%04X%04X%08X%04X` formatter @0x8c69 (routine 0x8c4c, duplicate copy @0x101c0). The literal `\\Registry\\Machine\\x5c` @0x10220 is consumed at 0x891e inside FUN_0x88f8, with NtOpenKey/NtQueryValueKey/NtSetValueKey merely present in the ntdll hash block: no query or write is traced at that site. Unresolved; T1012 dropped.",
+    "evidence_ref": "[ev_0198], [ev_0185], [ev_0204], [ev_0021], [ev_0019], [ev_0020]",
+    "confidence": 0.7
+   },
+   {
+    "claim": "My round-0 use of \"0 hits of 31 rules\" [ev_0007] was scope-limited and must not be propagated as a clean bill: the triage yara_scan failed twice, and the q1cksc0pe server's own run matched two generic marker rules with named offsets — `CRC32_poly_Constant` @0x5f0c and `win_mutex` (\"CreateMutex\" @0xcd72) — both consistent with decoded facts (the 0xEDB88320 table in FUN_0x6aa4; the CreateMutexW \"runnung\" gate, of which the 0xcd72 string is the import name). Its \"packer signatures\" outcome: `packed: true` is unsupported — the only match is the Rich-header marker (b'Rich' @0xb8) with \"Nothing found\" from strings — so I keep [ev_0004]'s \"no packer signatures\"; the obfuscation is in strings/API resolution, not packing. Neither corpus identifies a family.",
+    "evidence_ref": "[ev_0007], [ev_0144], [ev_0139], [ev_0145], [ev_0138], [ev_0167], [ev_0181], [ev_0004]",
+    "confidence": 0.8
+   },
+   {
+    "claim": "The run is inert for a reason that is visible in the code. 600 s run, 4 processes total, 0 API rows, 0 registry rows, 0 tasks/services/commands, 0 mutexes, 0 file writes, 0 dropped files, no cmd.exe/powershell/wmic child, no DNS/HTTP and no flow owned by pids 83/89; the 587 s / 9,087-packet capture has 17 external conversations, none to the decoded endpoints, none at a regular interval, and no SNI was extracted (443 destinations classified by DNS/pid context only). Given the process-count (75/50) and PEB BeingDebugged gates and the 180 s pre-beacon delay, the correct reading is: the sample did not reach its C2 stage in this environment — not that C2, tasking, second stage or persistence are absent.",
+    "evidence_ref": "[ev_0212], [ev_0213], [ev_0211], [ev_0210], [ev_0225], [ev_0015], [ev_0214], [ev_0209], [ev_0017], [ev_0234], [ev_0227], [ev_0226], [ev_0088], [ev_0174], [ev_0191]",
+    "confidence": 0.85
+   },
+   {
+    "claim": "The code-level relaunch exists with high confidence (fcn.0xb4cc decodes `C:\\WINDOWS\\SYSTEM32\\rundll32.exe %s,%s` @0xfe90 / `…%s` @0xfef0 and calls CreateProcessW at 0xb63d; the same templates execute C2-downloaded DLLs), but I will not attribute the observed pid 83→89 pair to it at TRIAGE's 0.90: the child's command line is byte-identical to the parent's, including the `…\\Temp\\6091f2….dll` path and `,#1`, whereas the template is parameterised with a target path (the `%APPDATA%\\Custom_update` install, per Claim 11) and a token. Harness duplication cannot be excluded — attribution ≤0.6. Also unresolved: the launcher token reads `init -zzzz=\"%s\\%s\"` (header-validated static decode, @0xfac0 ref 0x456d in 0x4110) vs `init -=\"%s\\%s\"` (same site, emulation @0x4571).",
+    "evidence_ref": "[ev_0125], [ev_0189], [ev_0195], [ev_0021], [ev_0019], [ev_0214], [ev_0221]",
+    "confidence": 0.85
+   },
+   {
+    "claim": "VT reports 52/75 engines malicious with 47 distinct labels clustering as Latrodectus / IcedId-Banker / Ulise; the sandbox carries `Detect larodectus Loader variant 2` and `Family: Latrodectus loader` (severity 10) and the cti section returns family `latrodectus` score 10. Independently, the code exhibits the trait set public Latrodectus reporting keys on — mutex \"runnung\", the two `/live/` endpoints, RC4 key \"12345\", `%APPDATA%\\Custom_update\\Update_%x.(dll|exe)`, the `LogonTrigger` task, the `&stiller=` plugin field, `rundll32 …,#1` execution. The file establishes a loader-shaped DLL with the behaviours above; the family name stays sourced attribution to verify.",
+    "evidence_ref": "[ev_0018], [ev_0014], [ev_0218], [ev_0228], [ev_0169], [ev_0191], [ev_0189], [ev_0196], [ev_0195], [ev_0004]",
+    "confidence": 0.85
+   },
+   {
+    "claim": "Third-party verdicts on the decoded indicators (not on the file): `titnovacrion.top` 16/91 engines malicious and its `/live/` URL 18/91; `skinnyjeanso.com` 19/91 and its `/live/` URL 21/91, with malware/phishing category labels.",
+    "evidence_ref": "[ev_0232], [ev_0233], [ev_0241], [ev_0244]",
+    "confidence": 0.85
+   }
+  ],
+  "all_tools_static_r2": [
+   {
+    "claim": "The four exports `extra`/`follower`/`run`/`scub` (ordinals 1–4) all alias one stub at RVA 0x3ce4 → fcn.0x3cb4 → the real worker fcn.0x3868; DllMain at 0x3c7c only stores the module handle at image-base+0x104a0. The observed load is `rundll32.exe <temp>.dll,#1` — an ordinal-export entry, not a library load.",
+    "evidence_ref": "my exports/stub/DllMain evidence [ev_0083], [ev_0084], [ev_0086], [ev_0087]; PE is DLL with 4 exports [ev_0004]; sandbox `rundll32.exe …,#1` [ev_0012], [ev_0214]; GHIDRA independently decompiled the same chain (its claim 9).",
+    "confidence": 0.88
+   },
+   {
+    "claim": "All operational strings live in `.data` as header-validated XOR blobs: 4-byte seed + 2-byte length (XORed with the seed's low 16 bits) + payload; keystream byte *i* = `(seed + i + 1) & 0xFF`, so the first key 0x41 is the low byte of seed 0x33629d40 + 1 — matching the platform's \"first_key 0x41\". GHIDRA re-derived this keystream byte-for-byte and decoded the blobs; I withdraw my round-0 phrasing \"key += byte + 0x0A\" as a misreading of the 4-byte increment helper at 0x9040 (`mov eax,[rsp+8]; inc eax; ret`). 101 blobs decode statically, 81 also by emulation; the empty raw-IOC/string scans are therefore expected, not exculpatory. The \"packed: true\" boolean is unsupported — its only match is the Rich-header marker (a linker artifact, consistent with linker 14.0) and section entropy is max 6.48.",
+    "evidence_ref": "[ev_0021] (scheme, seed, first key for every text), [ev_0019] (81 via emulation), [ev_0168] (GHIDRA byte-level re-derivation), [ev_0008] (capa stackstrings/RC4/CRC32/FNV), [ev_0006] (plain IOC scan empty), [ev_0139]/[ev_0145] (packer boolean + Rich-only match), [ev_0004] (.data entropy 6.48, no packer signatures).",
+    "confidence": 0.95
+   },
+   {
+    "claim": "The API surface is hidden behind CRC32 name hashing. fcn.0x9484 holds 90 records `{hash @+0, module-name pointer @+8, destination slot @+0x10}` (stride 0x18); the loop calls fcn.0x869c (PEB getter at 0x8690, IMAGE_EXPORT_DIRECTORY walk) and writes each resolved pointer into a global slot: `[0x10bc8]`=CreateFileW, `[0x10bd0]`=WriteFile, `[0x10bd8]`=ReadFile, `[0x10b38]`=CreateProcessW, `[0x10b00]`=OpenProcess, `[0x10b08]`=VirtualAllocEx, `[0x10b18]`=WriteProcessMemory, `[0x10b20]`=CreateRemoteThread, `[0x10b40]`=VirtualProtect, `[0x10ba8]`=QueueUserAPC, `[0x10d50]`=SetFileInformationByHandle, `[0x10d68]`=CreatePipe, `[0x10d78]`=PeekNamedPipe, `[0x10e10]`=HttpOpenRequestA, `[0x10e18]`=HttpSendRequestA, `[0x10e30]`=InternetReadFile, `[0x10e38]`=InternetCrackUrlA, `[0x10e40]`=InternetSetOptionA. The visible IAT is a decoy: the CreateMutexW thunk at 0xd3ae and the PeekNamedPipe thunk have zero code xrefs — the mutex gate and the pipe polling run through resolved slots. CRC32 identity is now rule-backed: YARA `CRC32_poly_Constant` @0x5f0c = little-endian 0xEDB88320.",
+    "evidence_ref": "[ev_0100] (resolver loop + fcn.0x869c), [ev_0101], [ev_0102], [ev_0099], [ev_0136], [ev_0137] (slot stores), [ev_0020] (164 resolved hashes), [ev_0008] (PEB/export parsing), [ev_0114], [ev_0116], [ev_0119] (unreferenced IAT thunks), [ev_0144] (YARA poly constant); GHIDRA claims 4–5 agree with independent decompilation [ev_0167], [ev_0171], [ev_0185], [ev_0204].",
+    "confidence": 0.9
+   },
+   {
+    "claim": "Command execution with output capture is implemented in fcn.0x1030: STARTUPINFOA `cb=0x68`, `dwFlags |= 0x101`; CreatePipe via `[0x10d68]` with SECURITY_ATTRIBUTES `nLength=0x18, bInheritHandle=1`; SetHandleInformation `[0x10d70]` clears inherit on the parent end; CreateProcessW `[0x10b38]` at 0x1360bc01251; the child's pipe is polled with PeekNamedPipe `[0x10d78]` + ReadFile `[0x10bd8]` in 0x200-byte chunks; exit checked against STILL_ACTIVE (0x103) with Sleep(0x64). It is called from eight sites (0x24c7…0x28f6) in the command-builder that decrypts `C:\\Windows\\System32\\cmd.exe` and the `/c …` lines, dispatched from the pointer table in fcn.0x2118.",
+    "evidence_ref": "[ev_0131] (decompiled fcn.0x1030), [ev_0111] (dispatch table → fcn.0x2200), [ev_0021], [ev_0019] (cmd.exe path + `/c` lines with refs in 0x2200), [ev_0020] (CreatePipe/PeekNamedPipe/SetHandleInformation hashed); GHIDRA claim 19 reaches the same routine (command 4 → thread fcn.0x2200) [ev_0202].",
+    "confidence": 0.87
+   },
+   {
+    "claim": "Host/domain discovery is wired to those captured commands with per-command upload keys: `/c ipconfig /all`→`&ipconfig=`@0xf2b8, `/c systeminfo`→`&systeminfo=`@0xf6f0, `/c net config workstation`→`&net_config_ws=`@0xf7a0, `/c net view /all`→`&net_view_all=`@0xf760, `/c net view /all /domain`→`&net_view_all_domain=`@0xf740, `/c nltest /domain_trusts`(/all)→`&domain_trusts=`@0xf708/`&domain_trusts_all=`@0xf720, `/c net group \"Domain Admins\" /domain`→`&net_group=`@0xf778, `/c whoami /groups`→`&whoami_group=`@0xf7d0, wmic AntiVirusProduct→`&net_wmic_av=`@0xf7b8. fcn.0x2118 is called from fcn.0x3cf4 at 0x40bb, which also calls the file handler fcn.0x4110.",
+    "evidence_ref": "[ev_0021] (every command/key pair with in-0x2200 refs), [ev_0019] (call sites 0x227d…0x2fd7), [ev_0132] (dispatch call site).",
+    "confidence": 0.85
+   },
+   {
+    "claim": "C2 is an HTTPS web-command channel. fcn.0x6988 decodes `https://titnovacrion.top/live/` (@0x10250, ref 0x69b3) and `https://skinnyjeanso.com/live/` (@0x10278, ref 0x6a1f) into the slot array at [0x10568]; fcn.0x5030 issues the request (`HttpOpenRequestA` [0x10e10] with decoded verb POST/GET, accept types `*/*`, `HttpSendRequestA` [0x10e18] with `Content-Type: application/x-www-form-urlencoded` @0xfb68, read via `InternetReadFile` [0x10e30]). `InternetSetOptionA(hRequest, 0x1f /*INTERNET_OPTION_SECURITY_FLAGS*/, &0x4380, 4)` SETS SECURITY_FLAG_IGNORE_REVOCATION|IGNORE_UNKNOWN_CA|IGNORE_WRONG_USAGE|IGNORE_REDIRECT_TO_HTTPS — weakened cert/redirect validation. Beacon/task vocabulary: `counter=%d&type=%d&guid=%s&os=%d&arch=%d&username=%s&group=%lu&ver=%d.%d&up=%d&direction=%s`, `URLS`/`URLS|%d|%s`/`COMMAND`/`CLEARURL`/`ERROR`, UAs @0xfbe0/0xfbc0. GHIDRA adds the beacon thread (fcn.0x5750: 180 s pre-contact, then 450–599 s jitter) and RC4(\"12345\")+base64 on the bodies. No run or capture contact to either endpoint.",
+    "evidence_ref": "[ev_0090], [ev_0129], [ev_0136], [ev_0137], [ev_0021], [ev_0019], [ev_0017] (17 capture conversations, none to the domains), [ev_0169], [ev_0191] (beacon thread/timing), [ev_0193] (base64).",
+    "confidence": 0.85
+   },
+   {
+    "claim": "The relaunch code path exists, but I no longer attribute the observed child to it. fcn.0x33ac decrypts `Updater`/`rundll32.exe` (@0xf988/0xf9b8), formats with the wsprintf slot [0x10de8], calls fcn.0x3728; fcn.0xb4cc decrypts `C:\\WINDOWS\\SYSTEM32\\rundll32.exe %s,%s` / `…%s` (@0xfe90/0xfef0, refs 0xb559/0xb5b3) and calls CreateProcessW [0x10b38] at 0xb63d. The `%s` operands are the *installed* copy — fcn.0x33ac copies the running image to `%APPDATA%\\Custom_update\\Update_<hex>.<ext>` (wsprintfW `Update_%x` @0xf920, extension chosen opposite to its own type), and download commands run `rundll32 <dll>,<token>`. The observed pid 89 has a byte-identical command line to pid 83, still pointing at the Temp DLL, so it does not match the sample's own template; harness duplication is not excluded. (The `init -zzzz=\"%s\\%s\"` vs `init -=\"%s\\%s\"` decode disagreement @0xfac0 remains unresolved; either reading is a two-argument format template, and it changes no conclusion.)",
+    "evidence_ref": "[ev_0091], [ev_0121], [ev_0123], [ev_0125] (CreateProcessW call sites), [ev_0021], [ev_0019], [ev_0012], [ev_0214] (pid 89 identical cmdline), [ev_0189], [ev_0195], [ev_0182] (install copy + opposite extension).",
+    "confidence": 0.75
+   },
+   {
+    "claim": "Persistence is a scheduled task registered through the COM Task Scheduler API: fcn.0xc2c4 dispatches through interface vtables (`vt[0x48]`, `vt[0x50]`, `vt[0x10]`, `vt[0xb8]`) and passes the decrypted `LogonTrigger` (@0x10030, ref 0xc3a4); the chain is fcn.0x33ac → fcn.0x3728 → fcn.0xb344 → fcn.0xc42c → fcn.0xc2c4, preceded by `CoCreateInstance` and reached with CLSID {0F87369F-A4E5-4CFC-BD3E-73E6154572DD} / IID {4C3D624D-FDA9-49A3-B9B7-09CB3CD3F047}, then `RegisterTaskDefinition` with flag 6 (TASK_CREATE_OR_UPDATE), launch (fcn.0xb400) and ExitProcess(0). Not registered during the run (registry 0 rows, tasks 0) — code-level, unexecuted.",
+    "evidence_ref": "[ev_0113] (decompiled fcn.0xc2c4 + decoded LogonTrigger), [ev_0115], [ev_0120], [ev_0123], [ev_0196] (GHIDRA: CLSID/IID + flag 6), [ev_0189], [ev_0021], [ev_0019], [ev_0020] (ole32 CoInitialize*/CoCreateInstance), [ev_0213], [ev_0211] (empty registry/task tables).",
+    "confidence": 0.82
+   },
+   {
+    "claim": "Self-erase/rename. fcn.0x3a24 opens the module path at image-base+0x10448 (filled by GetModuleFileNameW [0x10b70] from fcn.0x841c) with `CreateFileW(path, DELETE=0x10000, 0, NULL, OPEN_EXISTING=3, FILE_ATTRIBUTE_NORMAL=0x80, NULL)` at 0x3a6d, builds a FILE_RENAME_INFO-shaped buffer (length at +0x10, name at +0x14) from `:wtfbbq` (@0xfa18, ref 0x3a99), calls `[0x10d50]` class 3 then class 4 (FileDispositionInfo TRUE), closes via [0x10b28]. GHIDRA adds the uninstall command 0xf path (SetEvent/ReleaseMutex/CloseHandle on `\"runnung\"`, delete the installed file, delete the module, ExitProcess(0)).",
+    "evidence_ref": "[ev_0093], [ev_0094], [ev_0095], [ev_0127], [ev_0109], [ev_0021], [ev_0019], [ev_0184], [ev_0195].",
+    "confidence": 0.82
+   },
+   {
+    "claim": "Injection is capability, not behaviour. VirtualAllocEx [0x10b08], WriteProcessMemory [0x10b18], CreateRemoteThread [0x10b20], QueueUserAPC [0x10ba8], VirtualProtect [0x10b40] have zero call xrefs (resolver-table writes only); `OpenProcess` [0x10b00] is called exactly once, fcn.0x463c @0x479d, mask 0x410 on the PID from GetCurrentProcessId [0x10b98] — a self-read; dynamic api_calls is empty for pids 83/89. New nuance: a separate in-memory execution path exists for fetched payloads — command 0xe (fcn.0x7170) downloads, allocates RWX (0x40) and starts a thread (fcn.0xb398) on it (reflective code loading capability, T1620). Direct native-API use is real: allocations route through fcn.0xad34 = `NtAllocateVirtualMemory(-1,…,0x3000,0x40)` and command lines are read via NtQueryInformationProcess + ReadProcessMemory.",
+    "evidence_ref": "[ev_0104], [ev_0105], [ev_0106], [ev_0108], [ev_0110], [ev_0124], [ev_0128], [ev_0008], [ev_0010], [ev_0212], [ev_0217], [ev_0195], [ev_0188], [ev_0198], [ev_0204], [ev_0020].",
+    "confidence": 0.8
+   },
+   {
+    "claim": "Process enumeration is real and coupled to environment gates. CreateToolhelp32Snapshot [0x10b30] is called in fcn.0x14d8/0x1c38/0x8820; fcn.0x8820 counts processes via Process32FirstW/NextW; fcn.0x3868 returns −1 when the count is below 0x32/0x4B (OS-dependent); GHIDRA adds the IsWow64Process==0 check, the single-instance `CreateMutexW(NULL, FALSE, \"runnung\")` with ERROR_ALREADY_EXISTS (0xB7) abort, the GetAdaptersInfo adapter-length check, and the PEB `BeingDebugged` stub at 0x8690/fcn.0x309c. The 600 s run had 4 processes and 0 mutexes — consistent with a gate abort; that run is not exculpatory either way.",
+    "evidence_ref": "[ev_0107], [ev_0103], [ev_0135], [ev_0088], [ev_0021], [ev_0019], [ev_0169], [ev_0174], [ev_0181], [ev_0185], [ev_0214], [ev_0210], [ev_0226].",
+    "confidence": 0.78
+   },
+   {
+    "claim": "`Littlehw` (@0xfb10, ref 0x46b1) is FNV-hashed by fcn.0xc99c into [0x10464] and that value is the beacon's `group=%lu` field — GHIDRA and NETWORK both trace it to `group`, not `guid`. My round-0 loose association with `guid` is withdrawn: `guid=%s` is produced by the volume-information formatter `%04X%04X%04X%04X%08X%04X` (@0x8c69, routine 0x8c4c) fed from FindFirstVolumeW/GetVolumeInformationW (fcn.0x89d4).",
+    "evidence_ref": "[ev_0109], [ev_0008] (FNV @0xc99c), [ev_0021], [ev_0019], [ev_0198], [ev_0169], [ev_0185].",
+    "confidence": 0.78
+   },
+   {
+    "claim": "Next-stage/loader plumbing. fcn.0x4110 builds paths from `/files/` (@0xfb00), `files/bp.dat` (@0xfa58, ref 0x4317) and `%d.dat` (@0xfa90, ref 0x4445) and calls the HTML-sniffing handler fcn.0x6f48 (`<!DOCTYPE` ref 0x70a4); download commands 0xc/0xd/0x12/0x15 fetch payloads to `%LOCALAPPDATA%\\<tick>.exe`/`.dll` and `%APPDATA%…\\files\\…`, while installation copies the running image to `%APPDATA%\\Custom_update\\Update_<hex>.<ext>`; the URL list is kept RC4-encrypted in `%APPDATA%\\Custom_update\\update_data.dat` (@0x103b8, ref 0xced2; readers fcn.0xcea4/0xcf14, writer fcn.0xd1c8 with `URLS|%d|%s\\r\\n` @0x10400/ref 0xd247). URLDownloadToFileW/A in the hash set; 0 files dropped in the run.",
+    "evidence_ref": "[ev_0092], [ev_0021], [ev_0019], [ev_0020], [ev_0015], [ev_0195], [ev_0189], [ev_0182], [ev_0177].",
+    "confidence": 0.78
+   },
+   {
+    "claim": "The pack's YARA zero [ev_0007] should not be propagated — the pack's `yara_scan` failed twice (run state) and QU1CKSC0PE's clean run matched `CRC32_poly_Constant` @0x5f0c (0xEDB88320, corroborating the hash-resolved names) and `win_mutex` (\"CreateMutex\" @0xcd72, a `.rdata` string-table literal — not proof of use). Family attribution remains source-only: VT 52/75, 47 labels split Latrodectus/IcedId/Ulise, sandbox `Detect larodectus Loader variant 2`; my static reading establishes a loader with the behaviours above, not a family name.",
+    "evidence_ref": "[ev_0144], [ev_0138], [ev_0018], [ev_0014], [ev_0002], [ev_0003], [ev_0007].",
+    "confidence": 0.85
+   }
+  ],
+  "all_tools_qu1cksc0pe": [
+   {
+    "claim": "Same artifact, re-identified. The fresh full analysis returns the identical hash set (MD5 71d29d71641017e51b3685ce2f417796 / SHA1 e456eb… / SHA256 6091f2… / imphash db7aeb…), timestamp Mon Mar 25 15:54:25 2024 UTC, the same five sections with the same extents and entropies (.text 0xc400/5.42; .rdata 0x600/4.68; .data 0x1600/6.48; .pdata 0x800/3.87; .reloc 0x200/0.08), and no debug section. The tool labels it \"Windows Executable\"; the header is DLL-flagged per [ev_0004] — same file, different depth; trust [ev_0004]. Conclusion: every claim below is about the same binary the rest of the team characterized.",
+    "evidence_ref": "[ev_0252]; corroborates [ev_0002], [ev_0004], [ev_0003].",
+    "confidence": 0.95
+   },
+   {
+    "claim": "YARA re-match on a clean run (`yara_scan_warnings: []`): `win_mutex` @0xcd72 matching b'CreateMutex' (emitted twice — a duplicate listing, not two sites) and `CRC32_poly_Constant` @0x5f0c matching b' \\x83\\xb8\\xed' (little-endian 0xEDB88320, the reflected CRC32 polynomial). Both are generic marker rules — no family signature in the set. The CRC32 constant corroborates the CRC32-based name-hash table and capa's \"hash data with CRC32\". Conclusion: CRC32 name hashing is compiled in, and the local rule set here is not a family classifier. Revision: round-0 YARA claim re-grounded on this clean re-run; the [ev_0007] dispute is hardened (see D1).",
+    "evidence_ref": "[ev_0252]; cross-refs [ev_0020], [ev_0008].",
+    "confidence": 0.9
+   },
+   {
+    "claim": "Server-side ATT&CK mapping is empty again (mitre_attack {}, technique count 0, API-match count 0) in the same report that warns \"This file might be obfuscated or encrypted\"; special-artifact and registry-key raw scans also return nothing. I resolve this against the mapping's zero: the rule-asserted capa set (obfuscated stackstrings @0x9484, RC4 PRGA, CRC32, FNV, PEB access, PE-export parsing) plus 101 XOR8-decoded .data texts show the content is deliberately suppressed from cleartext — the mapping is heuristic over the cleartext layer it cannot see. Conclusion: assess on decoded/rule evidence; the empty map is a coverage artifact, not exculpatory.",
+    "evidence_ref": "[ev_0252]; cross-refs [ev_0008] (rule-asserted), [ev_0021], [ev_0019].",
+    "confidence": 0.85
+   },
+   {
+    "claim": "Import screen and its category groups — leads, not behaviour. Shown: 3 of \"All Imports,Exports 9\" — Process: PeekNamedPipe, CreateMutexW; Other/Unknown: GetLastError; linked KERNEL32.dll, USER32.dll. This is a filtered display, not the table: the 5-import table of [ev_0004]/[ev_0023] (adding USER32!MessageBeep, USER32!MessageBoxA) reconciles as 5 imports + 4 exports = 9. For PeekNamedPipe to be a behaviour the code must obtain a spawned child's pipe and poll it — the code-level reports (STATIC_R2 claim 4 / REVERSER-GHIDRA claim 19) show such a routine, but no execution was observed (DYNAMIC claim 5), and this screen alone shows nothing. CreateMutexW would be a named-mutex/single-instance marker; the `win_mutex` hit is only the import-name literal at 0xcd72. GetLastError is boilerplate. Conclusion: minimal static import surface; pipe-capture must be shown at code/execution level.",
+    "evidence_ref": "[ev_0252]; reconcile [ev_0004], [ev_0023]; cross-ref [ev_0010] (catalogue association only).",
+    "confidence": 0.85
+   },
+   {
+    "claim": "Packer scan repeats `\"packed\": true` with zero support — string scan \"Nothing found\" (0 hits), sole matched rule `HasRichSignature` @0xb8 (b'Rich', the MSVC Rich header), no packer name/signature anywhere. Disagreement: the tool's boolean vs its own evidence and [ev_0004]'s \"packer signatures none\". I trust \"no known packer\" (Rich header + linker 14.0 + entropy profile = encrypted config, not packed code); do not propagate the boolean.",
+    "evidence_ref": "[ev_0251]; cross-ref [ev_0004].",
+    "confidence": 0.8
+   },
+   {
+    "claim": "Cleartext IOC extraction empty again — 0 URLs, 0 IPs, 0 emails (\"no possible domain strings found\"). The two `llm_extracted_iocs` paths (`Z:\\1^3`ab@`, `Z:\\1^3`AbLd`) are misdecoded noise — discard, never ship. Scope-limited: the indicators of record are decode-backed (e.g. `https://titnovacrion.top/live/`, `https://skinnyjeanso.com/live/` [ev_0021]); likewise the raw registry-key scan is empty [ev_0252] while decoded content carries `\\Registry\\Machine\\x5c` and a Shell Folders key [ev_0021]. Conclusion: on this sample raw-string negatives are scope-limited and non-exculpatory.",
+    "evidence_ref": "[ev_0254], [ev_0252]; cross-refs [ev_0021], [ev_0006].",
+    "confidence": 0.9
+   },
+   {
+    "claim": "No carried second stage by either check. Resource carve ran four methods — hidden-PE via strings (8/16-bit), split data, bitmap, encrypted-PE — all negative; the magic scan sees only the file's own `MZ\\x90\\x00` @0x0, no corrupted-PE patterns; the full analysis also reports \"no embedded PE file\". Bounded caveat: carve methods are not exhaustive. Conclusion: any next stage must be fetched/built at runtime (consistent with decoded `/files/`, `%s%d.exe`, `%s%d.dll` and URLDownloadToFileW in the resolved set; 0 dropped files in the sandbox [ev_0015]) — none observed.",
+    "evidence_ref": "[ev_0255], [ev_0256], [ev_0252]; cross-refs [ev_0021], [ev_0020], [ev_0015].",
+    "confidence": 0.85
+   },
+   {
+    "claim": "Language fingerprint degenerate again — \"C\" at 100% confidence with 0 pattern hits, 0 strong/weak matches, score 2.0, no matched signatures. Only usable facts: is_pe true, is_dotnet false. Do not forward \"written in C\".",
+    "evidence_ref": "[ev_0253]; cross-ref [ev_0004].",
+    "confidence": 0.85
+   },
+   {
+    "claim": "Interesting-string panel surfaces `UpdaterTag.dll` (plus the two linked-DLL names), all marked not suspicious. Lead only: updater/theming naming consistent with decoded `Updater`/`Custom_update`/`Update_%x` [ev_0021]; no naming behaviour demonstrated.",
+    "evidence_ref": "[ev_0252]; cross-ref [ev_0021].",
+    "confidence": 0.75
+   },
+   {
+    "claim": "Execution surface (carried, unchanged): DLL-flagged PE, exports aliasing one function; sandbox invoked it as `rundll32.exe <temp>.dll,#1` twice (pid 83 → child pid 89); LOLBIN table attributes T1218.011; decoded templates `C:\\WINDOWS\\SYSTEM32\\rundll32.exe %s,%s`. Keep \"possible self-relaunch\" — the second invocation's origin is not established (see D4); the T1218.011 observation itself is agreed.",
+    "evidence_ref": "[ev_0012], [ev_0011], [ev_0021], [ev_0004].",
+    "confidence": 0.8
+   },
+   {
+    "claim": "Family attribution stays source-reported: VT 52/75 with 47 labels (Latrodectus/IcedId/Ulise clusters) [ev_0018]; sandbox signatures \"Detect larodectus Loader variant 2\" / \"Family: Latrodectus loader\" [ev_0014]. My run adds no family rule (its two YARA hits are generic). I state no family verdict of my own.",
+    "evidence_ref": "[ev_0018], [ev_0014], [ev_0252].",
+    "confidence": 0.9
+   }
+  ],
+  "all_tools_reverser_ghidra": [
+   {
+    "claim": "C2 channel logic (T1071.001).**\n`FUN_1360bc06988` decodes `https://titnovacrion.top/live/`@0x10250 and `https://skinnyjeanso.com/live/`@0x10278 into the candidate array at 0x10568; `FUN_1360bc05030`/`FUN_1360bc04d20` issue requests (`POST`/`GET`, `Content-Type: application/x-www-form-urlencoded`@0xfb68, UAs MSIE \"Tob 1.1\" and `curl/7.88.1`) and read replies with InternetReadFile. Request body `counter=%d&type=%d&guid=%s&os=%d&arch=%d&username=%s&group=%lu&ver=%d.%d&up=%d&direction=%s`; task vocabulary `URLS`, `URLS|%d|%s`, `COMMAND`, `CLEARURL`, `ERROR` parsed by `FUN_1360bc0541c` (tokenize on CRLF then `|`). `guid` is volume-derived (see CLAIM 12). TLS weakening via `InternetSetOptionA(h,0x1f,&0x4380,4)` stands at 0.70 — single decompiler locus, no second evidence.",
+    "evidence_ref": "ev_0021, ev_0019, ev_0090, ev_0129, ev_0136, ev_0137, ev_0175, ev_0203, ev_0307.",
+    "confidence": 0.85
+   },
+   {
+    "claim": "Payload crypto: RC4 KSA/PRGA identified, no independent emulation ran, so capped (T1573.001/T1132.001).**\n`FUN_1360bc0cbe0` initialises state+0x100 = keylen, S; `FUN_1360bc0ca08` is the KSA (`j += S[i] + key[i % keylen]`, swap); `FUN_1360bc0caac` is the PRGA (`i++`, `j += S[i]`, swap, `out = S[(S[i]+S[j])&0xFF] ^ in`); key is the runtime-decoded `\"12345\"` (5 bytes). The standard base64 alphabet `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/`@0x10160 is decoded and installed by `FUN_1360bc06864`; encode `FUN_1360bc06634`, decode `FUN_1360bc06370`. Per verification discipline the RC4 algorithm name stays capped: the dataflow provider errored (ev_0298) and script/emulation of the state machine was unavailable.",
+    "evidence_ref": "ev_0294, ev_0260, ev_0193, ev_0185, ev_0021, ev_0008.",
+    "confidence": 0.7
+   },
+   {
+    "claim": "Registry access is Shell-Folders path resolution, not machine identity (T1012 residual).**\n`FUN_1360bc07b98(i)` decodes `AppData/Desktop/Startup/Personal/Local AppData` and `…\\Shell Folders`; `FUN_1360bc0b154(0, key, name, &out)` → `FUN_1360bc088f8(0)` builds the per-user NT key prefix via `RtlFormatCurrentUserKeyPath` (slot 0x10ae0), or with param 1 the literal `\\Registry\\Machine\\` prefix; `FUN_1360bc0b1d4` opens (0x20019) and queries (REG_SZ). The only observed consumer of the resolver is `FUN_1360bc030d0` calling index 0 (AppData) for the install directory. No registry value feeding `guid=` was observed.",
+    "evidence_ref": "ev_0270, ev_0274, ev_0283, ev_0285.",
+    "confidence": 0.85
+   }
+  ],
+  "dynamic": [
+   {
+    "claim": "The DLL was started as an ordinal export call through the LOLBin rundll32: pid 83 `C:\\Windows\\system32\\rundll32.exe` (ppid 56) with command line `rundll32.exe C:\\Users\\Admin\\AppData\\Local\\Temp\\6091f2589fef42e0ab3d7975806cd8a0da012b519637c03b73f702f7586b21ef.dll,#1`, first seen 141 (ms clock; last process in the run reads 585063 ≈ 585 s of the 600 s run). The LOLBin matcher attributes T1218.011 to that exact string; the file is a DLL whose four exports alias one function at RVA 0x3ce4, so `,#1` is an ordinal export call.",
+    "evidence_ref": "[ev_0214] (pid 83, ppid 56, first seen 141), [ev_0221] (same command line; behavior block), [ev_0219] (LOLBin: rundll32, T1218.011, exact command-line pattern), [ev_0004] (dll, 4 exports), [ev_0052] (exports alias one function)",
+    "confidence": 0.9
+   },
+   {
+    "claim": "The second rundll32 (pid 89, first seen 172) is a **sample-created child**: its parent is pid 83, the sample's own rundll32 — a harness-side relaunch would not be a child of the sample. The spawn happened ~31 units after the parent, i.e. during init and before any C2 exchange (no C2 contact ever occurred), so it is not a C2-commanded download/launch; the natural source is the sample's own relaunch code (`C:\\WINDOWS\\SYSTEM32\\rundll32.exe %s,%s` @0xfe90 ref 0xb555 and the one-arg form @0xfef0 ref 0xb5af, CreateProcessW call site 0xb63d). Residual doubt (why I stay below the static analysts' 0.85–0.90): the child's command line is a byte-for-byte copy of the harness's original invocation including `,#1` — reproducible only by echoing its own command line — the child points at its own Temp module rather than an installed copy, and no install/file artifacts accompany the spawn.",
+    "evidence_ref": "[ev_0214] (pid 89, ppid 83, identical command line, 141 → 172), [ev_0221], [ev_0021] (templates @0xfe90/0xfef0, refs 0xb555/0xb5af, `LogonTrigger`@0x10030 ref 0xc3a4), [ev_0019], [ev_0125] (CreateProcessW slot call sites incl. 0xb63d), [ev_0091]/[ev_0121]/[ev_0123] (install/launch chain fcn.0x33ac → fcn.0x3728 → fcn.0xb344 → fcn.0xc42c)",
+    "confidence": 0.7
+   },
+   {
+    "claim": "No autostart persistence was registered during this run. The registry-operation table has 0 rows (no Run/RunOnce, no service key), the services/tasks/commands table has 0 rows, the behavior summary lists `executed_commands`, `created_services`, `started_services` empty, file writes are 0 and dropped files 0. The Task-Scheduler chain (`LogonTrigger` registration info ref 0xc3a4, RegisterTaskDefinition/TASK_CREATE_OR_UPDATE via COM CLSID {0F87369F-A4E5-4CFC-BD3E-73E6154572DD}) and the `%APPDATA%\\Custom_update\\Update_%x.(dll|exe)` / `update_data.dat` install path exist in code only. Coverage caveat lowering the score: the run's per-sample dynamic data was unavailable, so empty tables are weaker negatives than they look.",
+    "evidence_ref": "[ev_0213] (registry: 0 rows), [ev_0211] (tasks/services/commands: 0), [ev_0221] (empty lists; mutexes []), [ev_0225] (file_writes 0), [ev_0023]/[ev_0015] (0 dropped files), [ev_0196] (task-registration chain, code-level), [ev_0021] (`LogonTrigger`@0x10030 ref 0xc3a4; `Custom_update`/`Update_%x`/`update_data.dat`)",
+    "confidence": 0.7
+   },
+   {
+    "claim": "No process-injection behavior was observed — the resolved primitive set is capability, not demonstrated behavior. The slots VirtualAllocEx (0x10b08), WriteProcessMemory (0x10b18), CreateRemoteThread (0x10b20), QueueUserAPC (0x10ba8) and VirtualProtect (0x10b40) have no call cross-references (only the resolver writes them), and the single OpenProcess call (fcn.0x463c @0x479d, ecx=0x410, PID from GetCurrentProcessId) is a self-read. api_calls is 0 and capa fired no injection rule.",
+    "evidence_ref": "[ev_0108]/[ev_0106]/[ev_0105]/[ev_0128]/[ev_0124] (no xrefs for the injection slots), [ev_0104]/[ev_0110] (OpenProcess @0x479d, mask 0x410, self PID), [ev_0212]/[ev_0217] (api_calls 0), [ev_0008] (capa: no injection rule), [ev_0010] (catalogue association only)",
+    "confidence": 0.85
+   },
+   {
+    "claim": "No command execution was observed in this run — no `cmd.exe`, `powershell.exe` or `wmic.exe` process exists between 141 ms and the end of the run, and `executed_commands` is empty. The `/c ipconfig /all`, `/c systeminfo`, `/c net view /all(/domain)`, `/c nltest /domain_trusts`, `/c net group \"Domain Admins\" /domain`, `/c whoami /groups` and wmic AntiVirusProduct set, plus the cmd.exe output-capture routine (`CreatePipe` → `CreateProcessW` @0x1360bc01251 → `PeekNamedPipe`/`ReadFile` loop in fcn.0x1030), remain code-level.",
+    "evidence_ref": "[ev_0214] (only pid 83/89 rundll32, pid 90 svchost, pid 102 SecurityHealthHost), [ev_0211] (commands: 0), [ev_0221] (`executed_commands: []`), [ev_0021]/[ev_0019] (cmd.exe path and `/c …` set), [ev_0131] (pipe/capture routine)",
+    "confidence": 0.8
+   },
+   {
+    "claim": "No C2 contact. Neither hardcoded endpoint was resolved or contacted anywhere in the evidence: the sandbox network record has `dns: []`, `http: []` and every TCP/UDP flow carries other pids (2928, 5800, 6092, 4264, 2508, 1380 — none is 83/89); the 9,087-packet capture over 587 s has 17 external conversations, none to titnovacrion.top or skinnyjeanso.com, and its DNS extract contains no query for either domain — the beacon cannot reach its C2 without that name resolution. The 600 s run exceeds the 180 s pre-beacon sleep, so non-contact is not a timing artifact.",
+    "evidence_ref": "[ev_0209] (dns/http empty; flows with other pids), [ev_0234] (17 conversations), [ev_0235] (DNS extract without the domains), [ev_0236] (GET-only HTTP, no POST), [ev_0017], [ev_0019]/[ev_0021] (endpoints @0x10250/0x10278), [ev_0191] (180 s pre-beacon wait), [ev_0227] (600 s limit)",
+    "confidence": 0.9
+   },
+   {
+    "claim": "The run is behaviorally inert in the record, but I no longer attribute that to a demonstrated gate failure. The gates exist in code — PEB `BeingDebugged` → −1, process-count >75/50 else return −1, `CreateMutexW(NULL, FALSE, \"runnung\")` abort, IsWow64Process must be 0 — yet the sample did spawn a child rundll32 (so the export worker advanced), the 4-entry process table is plausibly a filtered view rather than the host's true process count, and the run's per-sample dynamic data was unavailable. Cause unresolved; this run is not exculpatory.",
+    "evidence_ref": "[ev_0088]/[ev_0135] (process-count gate → −1), [ev_0174]/[ev_0181] (BeingDebugged check), [ev_0169] (mutex gate in init chain), [ev_0214] (child exists; only 4 processes listed), [ev_0212]/[ev_0213]/[ev_0210]/[ev_0226] (empty API/registry/mutex tables; ttp_tags 0), [ev_0227] (600 s limit)",
+    "confidence": 0.5
+   },
+   {
+    "claim": "Family attribution is carried, not established by me: sandbox signatures `Detect larodectus Loader variant 2` and `Family: Latrodectus loader` (severity 10 each) plus cti family `latrodectus`, score 10; VirusTotal 52/75 malicious with 47 distinct labels across Latrodectus-, IcedId/Banker- and Ulise-named clusters. The file is unsigned.",
+    "evidence_ref": "[ev_0218] (signature list), [ev_0228] (cti family), [ev_0014] (sandbox signatures), [ev_0018] (VT labels), [ev_0003] (no signature)",
+    "confidence": 0.85
+   },
+   {
+    "claim": "The non-sample processes and all observed network flows are ambient host/OS activity. `C:\\Windows\\system32\\svchost.exe -k GPSvcGroup` pid 90 (ppid 6, first seen 188375) and `\\\\?\\C:\\Windows\\System32\\SecurityHealthHost.exe {08728914-…} -Embedding` pid 102 (ppid 8, 585063) are host processes; every flow in the sandbox record belongs to other pids, and the capture's DNS/HTTP is the Windows Update/OCSP/CRL estate. The top capture flow 104.18.19.203:443 (3,666 packets, 229 KB) has no sample attribution and nothing ties it to the sample's infrastructure, which never appears.",
+    "evidence_ref": "[ev_0214] (pids 90/102, ppids 6/8), [ev_0209] (flows with pids 2928/5800/6092/4264/2508/1380), [ev_0234]/[ev_0235]/[ev_0236] (ambient DNS/HTTP), [ev_0245] (spot-checked capture IP, 0 engines)",
+    "confidence": 0.8
+   },
+   {
+    "claim": "No named mutex was observed at runtime although the init chain contains the single-instance `CreateMutexW(NULL, FALSE, \"runnung\")` gate that aborts on ERROR_ALREADY_EXISTS (0xB7). The mutex table is empty and the behavior summary lists no mutexes; the `win_mutex` YARA hit is the literal string \"CreateMutex\" at 0xcd72 in .rdata, not proof of use.",
+    "evidence_ref": "[ev_0210] (mutexes: 0), [ev_0221] (summary mutexes: []), [ev_0169]/[ev_0019] (`runnung` gate, code-level), [ev_0144] (win_mutex / CRC32_poly_Constant YARA hits), [ev_0145]",
+    "confidence": 0.55
+   }
+  ],
+  "network": [
+   {
+    "claim": "The sample's only network transport is a web-protocol C2 over two hardcoded HTTPS endpoints — `https://titnovacrion.top/live/` and `https://skinnyjeanso.com/live/` — decoded at run time (fcn.0x6988) into a candidate array; requests are built with HttpOpenRequestA/HttpSendRequestA using the decoded verb POST/GET, accept `*/*`, `Content-Type: application/x-www-form-urlencoded`, and UAs `Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; Tob 1.1)` / `curl/7.88.1`. No IP-literal, DNS-tunnel or other transport appears in the decoded config or resolved API set (WinINet/urlmon only). (Revised: unchanged substance; now corroborated by the reverser's independent read of fcn.0x6988/fcn.0x5030.)",
+    "evidence_ref": "[ev_0021] (`https://titnovacrion.top/live/`@0x10250 ref 0x69af; `https://skinnyjeanso.com/live/`@0x10278 ref 0x6a1b; `POST`@0xfba0 ref 0x5100; `Content-Type…`@0xfb68 ref 0x5076), [ev_0019] (call sites 0x69b3/0x6a1f), [ev_0090] (fcn.0x6988 builds candidate array), [ev_0129], [ev_0137] (slots 0x10e10/0x10e18).",
+    "confidence": 0.85
+   },
+   {
+    "claim": "`InternetSetOptionA(hRequest, 0x1f /*INTERNET_OPTION_SECURITY_FLAGS*/, &0x4380, 4)` **sets** the ignore flags — 0x4380 = SECURITY_FLAG_IGNORE_REVOCATION(0x80) | IGNORE_UNKNOWN_CA(0x100) | IGNORE_WRONG_USAGE(0x200) | IGNORE_REDIRECT_TO_HTTPS(0x4000) — i.e. revocation/CA/wrong-usage validation is disabled for the C2 channel and redirects away from HTTPS are permitted. My round-0 phrasing (\"clears the ignore-* flags\") was wrong and is withdrawn; setting those flags is exactly what weakens validation, and the flag arithmetic matches the named SECURITY_FLAG constants. The reverser reads the same locus independently.",
+    "evidence_ref": "[ev_0129] (call site), [ev_0136] (slot 0x10e40 = InternetSetOptionA), [ev_0185].",
+    "confidence": 0.75
+   },
+   {
+    "claim": "Tasking arrives over the same web channel: the check-in body `counter=%d&type=%d&guid=%s&os=%d&arch=%d&username=%s&group=%lu&ver=%d.%d&up=%d&direction=%s` is sent in the HTTP request, and the reply is tokenised into `URLS` / `URLS|<id>|<url>` / `COMMAND|<id>|<payload>` / `CLEARURL` / `ERROR`, with the COMMAND dispatch table mapping ids 2,3,4,0xc–0xf,0x11–0x15 to handlers (type = 2 at install / 1 otherwise, ver 1.2). `guid` is produced by the volume-info `%04X…` formatter; `group` is FNV of decoded `Littlehw`.",
+    "evidence_ref": "[ev_0021] (body@0xfd40 refs 0x5b0f/0x5bfe/0x5d23; `URLS`@0xfd00 ref 0x55b4; `COMMAND`@0xfd10 ref 0x564a; `CLEARURL`@0xfcf0 ref 0x5556), [ev_0019], [ev_0169], [ev_0203] (tokeniser/dispatch: CLEARURL→0xce20, URLS|id|url→0xccbc, COMMAND→0x3cf4, ERROR ignored), [ev_0171], [ev_0175].",
+    "confidence": 0.85
+   },
+   {
+    "claim": "C2 bodies are symmetric-encrypted with the run-time-decoded RC4 key `\"12345\"` (KSA/PRGA; wrapper fcn.0xc964) and base64-encoded with the standard alphabet before POST; replies are decrypted the same way, so any on-wire body would be non-plaintext at the application layer. (Revised: confidence raised — the reverser independently traced the key to the decoded blob @0xfd30 and read the encode/decode pair.)",
+    "evidence_ref": "[ev_0167] (RC4 KSA/PRGA key trace), [ev_0175], [ev_0191], [ev_0193] (alphabet install fcn.0x6864; encode 0x6634 / decode 0x6370), [ev_0185], [ev_0008] (capa `encrypt data using RC4 PRGA`@0xcaac), [ev_0021] (`\"12345\"`@0xfd30).",
+    "confidence": 0.85
+   },
+   {
+    "claim": "Built-in beacon timing: 180 s wait before first contact, then 450–599 s jittered cycles, switching to 1500–2099 s after C2 command 0x13 (0x14 resets the counter), with URL-list refresh from the C2; polling of worker threads every 100 ms. The capture shows no regular contact interval, consistent with the channel never being reached. (Revised: confidence up; the dynamic run's 600 s window exceeded the 180 s delay, so non-contact is not a timing artifact.)",
+    "evidence_ref": "[ev_0191] (180 s = 0x708×100 ms; jitter and long-sleep logic), [ev_0175], [ev_0169] (CreateThread start / init chain), [ev_0017] (no regular interval).",
+    "confidence": 0.8
+   },
+   {
+    "claim": "Exfiltration is staged over the C2 channel itself: outputs of systeminfo / ipconfig / net config workstation / net view (all, domain) / nltest domain trusts / whoami groups / WMIC AV query plus process lists, desktop links, MAC and computer/domain/user identity are keyed for upload (`&systeminfo=`, `&ipconfig=`, `&net_config_ws=`, `&net_view_all=`, `&net_view_all_domain=`, `&domain_trusts=`, `&domain_trusts_all=`, `&net_group=`, `&whoami_group=`, `&net_wmic_av=`, `&proclist=[`, `&desklinks=[`, `&mac=`); nothing was observed leaving the host. (Revised: dynamic confirms no cmd.exe ran and no files were written in the run, so delivery remains code-level.)",
+    "evidence_ref": "[ev_0021], [ev_0019], [ev_0169], [ev_0177] (collection/beacon assembly), [ev_0202] (command execution thread), [ev_0236] (all-GET HTTP extract), [ev_0231] (T1041 mapping).",
+    "confidence": 0.8
+   },
+   {
+    "claim": "Neither configured endpoint appears in any telemetry: across the 9,087-packet / 587 s capture there is no DNS lookup, no HTTP request (no `/live/`, no POST) and no TCP flow to either domain; the sandbox network record has no DNS and no HTTP, and its 5 TCP / 1 UDP flows carry pids 2928, 5800, 6092, 4264, 2508, 1380 — none is the sample's 83/89. Both observation windows (587 s capture, 600 s run) exceed the sample's 180 s pre-beacon delay, so non-contact is not a timing artifact of this run; in-sample environment/debugger gates (process-count/OS check, PEB BeingDebugged, single-instance `\"runnung\"` mutex) plausibly suppressed execution instead.",
+    "evidence_ref": "[ev_0234], [ev_0235] (DNS extract without the domains), [ev_0236], [ev_0209] (sandbox network: dns [], http [], flow pids), [ev_0214] (sample pids 83/89), [ev_0227] (600 s), [ev_0191] (180 s sleep), [ev_0174], [ev_0181] (gates).",
+    "confidence": 0.9
+   },
+   {
+    "claim": "No observed traffic is attributed to the sample; DNS names are Windows Update/telemetry/OCSP/CRL estate (`settings-win.data.microsoft.com`, `ctldl.windowsupdate.com`, `login.live.com`, `arc.msn.com`, `ocsp.digicert.com`, `oneocsp.microsoft.com`, `c.pki.goog`, …) and HTTP is GET-only to the same estate. Only standard ports appear (443/80/53), so no non-standard-port channel (T1571 not observed) and no DGA-shaped/encoded query names (T1568 not observed). I accept triage's framing for the single largest flow: 104.18.19.203:443 (3,666 pkts / 229 KB) is **unattributed by any evidence** — I withdraw the stronger \"ambient\" label for that one flow; no SNI was extracted (`\"sni\": {}`), it has 0 engine flags, and it stays a low-likelihood open item, not an indicator. All other endpoints spot-checked returned 0 malicious engines.",
+    "evidence_ref": "[ev_0234] (17 conversations; `\"sni\": {}`; no regular interval), [ev_0235], [ev_0236], [ev_0049], [ev_0240], [ev_0242], [ev_0243], [ev_0245], [ev_0246], [ev_0247], [ev_0248].",
+    "confidence": 0.75
+   },
+   {
+    "claim": "Independent reputation marks the configured C2 infrastructure malicious: `titnovacrion.top` 16/91 engines and `https://titnovacrion.top/live/` 18/91; `skinnyjeanso.com` 19/91 and `https://skinnyjeanso.com/live/` 21/91 (malware/phishing labels). Third-party verdict on the indicators, not on the file's behaviour. (Unchanged.)",
+    "evidence_ref": "[ev_0232], [ev_0233], [ev_0241], [ev_0244].",
+    "confidence": 0.85
+   },
+   {
+    "claim": "Family attribution stays source-reported: VT labels (Latrodectus/IcedId/Ulise clusters), sandbox signatures `Detect larodectus Loader variant 2` / `Family: Latrodectus loader`, and now the sandbox CTI section (`family: latrodectus`, score 10). The knowledge-base family lookup returned no Latrodectus fingerprint and prior-case retrieval only generic obfuscation cases, so carry \"Latrodectus-family loader\" as attribution to verify, not as established.",
+    "evidence_ref": "[ev_0018], [ev_0014], [ev_0228], [ev_0237], [ev_0238].",
+    "confidence": 0.7
+   }
+  ]
+ },
+ "body": {
+  "executive_summary": "The sample is an unsigned 64-bit Windows DLL loader, classified as malware at High severity and attributed to the Latrodectus loader family at 0.80 confidence. The single most important risk is the intact command-and-control path: two hardcoded HTTPS endpoints would deliver tasking and further payloads on any host with egress, and this run recorded no contact, no download and no registered persistence, so the quiet telemetry reflects a gated or unexercised execution rather than a benign one. Containment should proceed on the assumption of compromise: isolate every host that loaded the DLL, block titnovacrion.top and skinnyjeanso.com at DNS and egress, and hunt for the %APPDATA%\\Custom_update install and its logon-triggered task before returning hosts to service.",
+  "key_findings": [
+   {
+    "text": "The sample is an unsigned 60,928-byte 64-bit Windows DLL with no packer signatures and only five static imports from KERNEL32.dll and USER32.dll, while 164 embedded values resolve to Windows functions and modules across roughly ten DLLs, so the API surface is rebuilt at run time rather than imported [ev_0001, ev_0003, ev_0004, ev_0008, ev_0020].",
+    "evidence_ids": [
+     "ev_0001",
+     "ev_0003",
+     "ev_0004",
+     "ev_0008",
+     "ev_0020"
+    ]
+   },
+   {
+    "text": "52 of 75 engines flag the file as malicious under 47 distinct labels, several naming Latrodectus and adjacent loader families, and the sandbox records 'Family: Latrodectus loader' and 'Latrodectus Loader variant 2' alongside an unsigned-PE signature, giving a family attribution of 0.80 confidence [ev_0018, ev_0014].",
+    "evidence_ids": [
+     "ev_0018",
+     "ev_0014"
+    ]
+   },
+   {
+    "text": "The sample's only transport is a hardcoded web channel to https://titnovacrion.top/live/ and https://skinnyjeanso.com/live/, decoded at run time from rolling-XOR .data blobs and used with form-urlencoded POST/GET requests, Mozilla/IE and curl user agents, and bodies that are RC4-encrypted and base64-encoded [ev_0019, ev_0008].",
+    "evidence_ids": [
+     "ev_0019",
+     "ev_0008"
+    ]
+   },
+   {
+    "text": "Tasking handling is implemented end to end: the check-in string carries counter, type, guid, os, arch, username, group, version, up and direction, the reply parser recognises URLS, URLS|<id>|<url>, COMMAND, CLEARURL and ERROR tokens, and the command set runs cmd.exe discovery - ipconfig /all, systeminfo, nltest /domain_trusts, net view /all /domain, net group \"Domain Admins\" /domain, whoami /groups and a WMIC AntiVirusProduct query - with each output keyed for upload [ev_0019].",
+    "evidence_ids": [
+     "ev_0019"
+    ]
+   },
+   {
+    "text": "Persistence material is visible in the decoded strings: Custom_update, Update_%x, Updater, LogonTrigger, rundll32.exe and the Explorer Shell Folders registry path, consistent with a self-copy placed under %APPDATA%\\Custom_update and a task registered with a logon trigger through the COM Task Scheduler API [ev_0019].",
+    "evidence_ids": [
+     "ev_0019"
+    ]
+   },
+   {
+    "text": "Platform detection is mixed and must not be read as a clean bill: capa records eight capabilities including PEB access, obfuscated stackstrings, CRC32 hashing and RC4 PRGA, and five of the seven Sigma hits are process or LOLBin rules matching the observed rundll32-ordinal launch, while 31 YARA rules returned zero hits, two yara_scan calls failed, and the two remaining Sigma hits (a publicly accessible RDP service and failed authentications from out-of-scope countries) are environment-level findings unrelated to the DLL [ev_0007, ev_0008, ev_0009].",
+    "evidence_ids": [
+     "ev_0007",
+     "ev_0008",
+     "ev_0009"
+    ]
+   },
+   {
+    "text": "Nothing in the run executed to network effect: no files were dropped, no command-and-control channel was recorded, the two hardcoded C2 endpoints were never contacted, and the four observed processes are the sample's two rundll32 instances together with svchost.exe and SecurityHealthHost.exe [ev_0012, ev_0015, ev_0016, ev_0017].",
+    "evidence_ids": [
+     "ev_0012",
+     "ev_0015",
+     "ev_0016",
+     "ev_0017"
+    ]
+   },
+   {
+    "text": "Two attribution limits remain: the second rundll32 process is a child of the first, but its command line duplicates the harness invocation byte-for-byte including the .dll,#1 token, so the self-relaunch reading is held below 0.6 confidence, and the launcher token decodes as init -zzzz=\"%s\\%s\" under one scheme versus init -=\"%s\\%s\" under emulation, an unresolved discrepancy [ev_0012, ev_0019, ev_0021].",
+    "evidence_ids": [
+     "ev_0012",
+     "ev_0019",
+     "ev_0021"
+    ]
+   }
+  ],
+  "capabilities_narrative": [],
+  "defensive_recommendations": [
+   {
+    "action": "Block and log DNS resolution and TLS/HTTP egress for titnovacrion.top and skinnyjeanso.com, and alert on any request to a /live/ path carrying a form-urlencoded body.",
+    "category": "firewall",
+    "priority": "P0",
+    "detection": "Sysmon EventID 22 for QueryName in {titnovacrion.top, skinnyjeanso.com} and EventID 3 for the resulting connects; proxy or Zeek http.log entries with uri containing /live/ or User-Agent 'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; Tob 1.1)' from a process other than a browser.",
+    "rationale": "These two endpoints are the loader's only transport, decoded from its XOR-obfuscated configuration, and this run never exercised them, so the channel remains intact and is the route by which tasking, further payloads and staged host data would move.",
+    "technique_id": "T1071.001"
+   },
+   {
+    "action": "Hunt for rundll32.exe loading unsigned DLLs from user-writable directories through ordinal exports and convert the pattern into a standing alert.",
+    "category": "edr_hunting",
+    "priority": "P1",
+    "detection": "Sysmon EventID 1 where Image ends in rundll32.exe and CommandLine matches the ordinal form ',\\\\#\\\\d+' or references \\\\AppData\\\\Local\\\\Temp\\\\; Sysmon EventID 7 for an unsigned module loaded by rundll32.exe; the Sigma rule 'DLL Call by Ordinal Via Rundll32.EXE' that already fired.",
+    "rationale": "The sample is a DLL whose four exports alias a single worker reached at ordinal #1, and the recorded launch is rundll32.exe against a copy in the user Temp directory, so the ordinal-export load is a stable artifact of this loader rather than an incidental host quirk.",
+    "technique_id": "T1218.011"
+   },
+   {
+    "action": "Hunt for the installed copy and its accompanying logon-triggered task: files matching Update_<hex>.dll or .exe under %APPDATA%\\Custom_update, and tasks registered with a logon trigger by a non-administrative process.",
+    "category": "edr_hunting",
+    "priority": "P1",
+    "detection": "Sysmon EventID 11 where TargetFilename matches '\\\\AppData\\\\Roaming\\\\Custom_update\\\\Update_[0-9a-fA-F]+\\\\.(dll|exe)'; Security EventID 4698 and Microsoft-Windows-TaskScheduler/Operational EventID 106; the new task's key under HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Schedule\\TaskCache\\Tree.",
+    "rationale": "The install directory, the Update_%x naming pattern and the LogonTrigger Task Scheduler idiom are recovered from the sample's own decoded strings, so both artifacts are expected on a host where execution reached the persistence stage even though neither appeared in this run.",
+    "technique_id": "T1053.005"
+   },
+   {
+    "action": "Alert when a DLL host process spawns cmd.exe with the sample's fixed reconnaissance command set, and preserve the child's piped output for triage.",
+    "category": "edr_hunting",
+    "priority": "P1",
+    "detection": "Sysmon EventID 1 with ParentImage ending in rundll32.exe (or any unsigned DLL host) and CommandLine containing '/c ipconfig /all', '/c systeminfo', '/c nltest /domain_trusts', '/c net view /all' or '/c wmic.exe /node:localhost /namespace:\\\\root\\\\SecurityCenter2'.",
+    "rationale": "The command builder is fully wired to run one discovery set with output captured through anonymous pipes and keyed for upload, so that child process is the earliest host-side evidence that live tasking has begun.",
+    "technique_id": "T1059.003"
+   },
+   {
+    "action": "Enforce a WDAC or AppLocker policy that prevents Microsoft-signed utilities such as rundll32.exe from loading unsigned DLLs out of %TEMP% and %APPDATA%.",
+    "category": "gpo",
+    "priority": "P1",
+    "detection": "Microsoft-Windows-CodeIntegrity/Operational EventID 3077 (blocked image) or 3076 (audit) and AppLocker EventID 8004 for rundll32.exe, filtered on file paths under \\\\AppData\\\\Local\\\\Temp\\\\ and \\\\AppData\\\\Roaming\\\\.",
+    "rationale": "The loader depends on an existing signed binary to reach its ordinal export, so removing that hosting path stops the current sample and the same execution primitive in future loaders without touching legitimate application delivery.",
+    "technique_id": "T1218.011"
+   },
+   {
+    "action": "Sweep the estate retroactively for the sample's hashes and for the landed install naming pattern.",
+    "category": "edr_hunting",
+    "priority": "P2",
+    "detection": "EDR or OSQuery file inventory with path LIKE '%\\\\AppData\\\\Roaming\\\\Custom_update\\\\%'; IoC scan on SHA256 6091f2589fef42e0ab3d7975806cd8a0da012b519637c03b73f702f7586b21ef, MD5 71d29d71641017e51b3685ce2f417796 and imphash db7aeb75528663639689f852fd366243; Sysmon EventID 11 for the same path pattern.",
+    "rationale": "The install step renames the running image to Update_<hex> and may switch its extension between .dll and .exe, so a hash-only search can miss the persisted copy while the file name pattern and imphash remain stable.",
+    "technique_id": "T1036.008"
+   }
+  ],
+  "intro_background": "The sample is a 60,928-byte Windows PE image, md5 71d29d71641017e51b3685ce2f417796, sha1 e456eb06758c7349a3636c15c91e1a9c30bb7927, sha256 6091f2589fef42e0ab3d7975806cd8a0da012b519637c03b73f702f7586b21ef, imphash db7aeb75528663639689f852fd366243 [ev_0001][ev_0002]. The platform records it under category executable [ev_0001]; the PE header is DLL-flagged — machine 34404 (x64), five sections, four exports, linker 14.0, export-directory name UpdaterTag.dll, highest section entropy 6.48 in .data, no packer signature — and the file is unsigned [ev_0003][ev_0004]. Its complete static import surface is five functions from KERNEL32.dll and USER32.dll; the networking and ntdll functions the code uses are absent from the import directory and are resolved by name hash at run time instead [ev_0004][ev_0020].\n\nOne tool emitted a packed: true boolean during the run; that boolean is unsupported and is not carried into this report — its only hit is the MSVC Rich-header marker, while the parser records no packer signature [ev_0004][ev_0139]. We assess the obfuscation in this file is applied to strings and to API names rather than to the code image itself [ev_0020][ev_0021].\n\nThe platform classifies the artifact as a loader; the Latrodectus family name is source-derived. VirusTotal reports 52 of 75 engines as malicious with 47 distinct labels clustering as Latrodectus-, IcedId/Banker- and Ulise-named [ev_0018], and the sandbox signature engine reports Detect larodectus Loader variant 2 and Family: Latrodectus loader [ev_0014]. Those are third-party attributions carried as context; the capabilities asserted below are the ones the code and the decoded configuration establish.\n\nTwo properties of the file shape the evidence base. All operational text is stored in .data as encoded, length-prefixed blobs and decoded in memory at run time: 81 strings were recovered by emulation [ev_0019] and 101 texts by static decoding of the same region [ev_0021]. The import table is deliberately thin — five static entries [ev_0004] against 164 embedded values that resolve to Windows functions and modules across about ten libraries, including wininet, shell32, advapi32, urlmon, shlwapi, ole32, iphlpapi and ntdll [ev_0020] — with the PE-export walker and PEB access independently flagged by capa at 0x869c and 0x8690 [ev_0008]. Raw scans are consequently near-empty: 218 extracted strings [ev_0005], no IOCs [ev_0006], no match from the run's 31-rule YARA corpus [ev_0007], and from a separate file analyzer only two generic markers — CRC32_poly_Constant at 0x5f0c and win_mutex at 0xcd72, neither a family rule [ev_0144][ev_0252]. Those negatives are scope-limited, not exculpatory.\n\nDecoding and decompilation establish a loader with a web-command channel. Two HTTPS endpoints are decoded at run time, https://titnovacrion.top/live/ and https://skinnyjeanso.com/live/ [ev_0019][ev_0021]; the decoded string set supplies the request side (POST and GET, Content-Type: application/x-www-form-urlencoded, the MSIE-style user agent, curl/7.88.1) [ev_0021] and the reply vocabulary URLS, URLS|%d|%s, COMMAND, CLEARURL, ERROR [ev_0019][ev_0021]. It also carries the cmd.exe command set with its per-command upload keys — /c systeminfo, /c ipconfig /all, /c net config workstation, /c net view /all and /all /domain, /c nltest /domain_trusts and /all_trusts, /c net group Domain Admins /domain, /c whoami /groups, and a WMIC AntiVirusProduct query paired with &net_wmic_av= — plus install and update templates (Custom_update, Update_%x, %s%d.exe, %s%d.dll, files/bp.dat, update_data.dat), the rundll32 relaunch templates, a Task Scheduler registration chain keyed on LogonTrigger, the single-instance mutex name runnung, and the rename/delete-on-close string :wtfbbq [ev_0019][ev_0021]. An output-capturing cmd.exe execution routine is decompiled in the code [ev_0131][ev_0202], and capa independently asserts obfuscated stackstrings, RC4 PRGA encryption, CRC32 and FNV hashing, PE-export parsing and PEB access [ev_0008], matching the string decoder, the hashed API table and the RC4-plus-base64 pair built on the runtime-decoded key 12345 and the standard base64 alphabet [ev_0021]. No embedded payload was found by the run's carving and embedded-PE checks [ev_0255][ev_0256].\n\nThe 600-second dynamic run did not exercise the loader. The sandbox process table holds four processes — two rundll32.exe entries plus host svchost.exe and SecurityHealthHost.exe — with no dropped files and no channels [ev_0012][ev_0015][ev_0016]; its network record holds 3 hosts, 5 TCP and 1 UDP flow [ev_0013]; the 587-second capture contains 9,087 packets over 17 external conversations, none at a regular interval [ev_0017], and its DNS extract contains no query for either decoded domain [ev_0021][ev_0235]. The one sample-linked execution event is the load itself: rundll32.exe C:\\Users\\Admin\\AppData\\Local\\Temp\\6091f2589fef42e0ab3d7975806cd8a0da012b519637c03b73f702f7586b21ef.dll,#1, an ordinal-export call that the LOLBin table maps to T1218.011 and Sigma flags as a DLL call by ordinal via rundll32 [ev_0009][ev_0011][ev_0012][ev_0214]. A second rundll32 process appears in that table with the same recorded command line; the sample contains rundll32 relaunch templates, but the record does not establish that process's origin and this report does not attribute it to them [ev_0012][ev_0019][ev_0021][ev_0214]. Because the sample's own init chain includes anti-analysis gates and a 180-second pre-beacon delay [ev_0088][ev_0174][ev_0181][ev_0191], we assess that it did not reach its C2 stage in this environment — the inert run is not evidence that C2, tasking, download or persistence are absent from the file.\n\nTwo caveats apply throughout. Negative results are coverage-limited: several tool calls failed during the run, and the dynamic record is empty for API, registry, mutex, task and file-write events for every process [ev_0210][ev_0211][ev_0212][ev_0213][ev_0225], so an unobserved behaviour is not an absent one. Third-party material also stays third-party: the family labels [ev_0018][ev_0014] and the engine verdicts on the decoded C2 domains (titnovacrion.top 16/91 and its /live/ URL 18/91; skinnyjeanso.com 19/91 and its /live/ URL 21/91) [ev_0232][ev_0233][ev_0241][ev_0244] are reported as sourced context. The report publishes the techniques the code supports — obfuscation and dynamic API resolution [ev_0008], rundll32 execution (T1218.011) [ev_0011], web-protocol C2 with symmetric encryption and standard encoding [ev_0008][ev_0021], and Windows discovery and command execution [ev_0019][ev_0021] — together with the persistence, deletion and exfiltration paths traced in the sections that follow, and it separates code-level capability from observed behaviour throughout.",
+  "technical_analysis": {
+   "commands": [
+    {
+     "id": "URLS",
+     "name": "URLS",
+     "description": "Reply token: the C2 URL list. The task dispatcher FUN_0x541c tokenises the decrypted reply (`URLS` @0xfd00, ref 0x55b4) and the URL set is persisted as `URLS|%d|%s` records in the RC4-encrypted state file \\update_data.dat under %APPDATA%\\Custom_update (writer fcn.0xd1c8).",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019",
+      "ev_0203",
+      "ev_0182"
+     ]
+    },
+    {
+     "id": "URLS|%d|%s",
+     "name": "URLS|%d|%s",
+     "description": "Reply token adding one entry (id, URL) to the beacon URL list; dispatcher handler 0xccbc. The same format is what fcn.0xd1c8 writes into the URL state file (`URLS|%d|%s` @0x10400, ref 0xd247).",
+     "evidence_refs": [
+      "ev_0203",
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "id": "COMMAND",
+     "name": "COMMAND",
+     "description": "Reply token carrying a task (command id plus payload); the dispatcher routes COMMAND to FUN_0x3cf4, which reaches the reconnaissance cmd.exe builder FUN_0x2118 and the file/download handler FUN_0x4110. Replies are RC4-decrypted with the runtime-decoded key `12345` and base64-decoded before tokenisation; no C2 contact, and therefore no task, was observed in this run.",
+     "evidence_refs": [
+      "ev_0203",
+      "ev_0132",
+      "ev_0169",
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "id": "CLEARURL",
+     "name": "CLEARURL",
+     "description": "Reply token clearing the stored URL list; dispatcher handler 0xce20.",
+     "evidence_refs": [
+      "ev_0203",
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "id": "ERROR",
+     "name": "ERROR",
+     "description": "Reply token ignored by the task dispatcher.",
+     "evidence_refs": [
+      "ev_0203",
+      "ev_0021"
+     ]
+    },
+    {
+     "id": "2",
+     "name": "desktop-link collector",
+     "description": "Collector: handler FUN_0x1a08 fills the `&desklinks=[` upload field from shell folders (SHGetFolderPathW, csidl 0x10) and a `\\*.dll` listing (FindFirstFileW/FindNextFileW/FindClose). Code-level; not exercised in this run.",
+     "evidence_refs": [
+      "ev_0202",
+      "ev_0177",
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "id": "3",
+     "name": "process-list collector",
+     "description": "Collector: handler FUN_0x1c38 enumerates processes via CreateToolhelp32Snapshot/Process32FirstW/Process32NextW into the `&proclist=[` field with `\"proc\"`/`\"subproc\"` entries. Code-level; not exercised in this run.",
+     "evidence_refs": [
+      "ev_0202",
+      "ev_0177",
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "id": "4",
+     "name": "reconnaissance shell execution with output capture",
+     "description": "Dispatches the fixed cmd.exe line set: /c ipconfig /all, /c systeminfo, /c net config workstation, /c net view /all, /c net view /all /domain, /c nltest /domain_trusts, /c nltest /domain_trusts /all_trusts, /c net group \"Domain Admins\" /domain, /c whoami /groups and the WMIC AntiVirusProduct query. Each line runs through FUN_0x1030 (inheritable pipes via CreatePipe/SetHandleInformation, CreateProcessW, PeekNamedPipe/ReadFile in 0x200-byte chunks, STILL_ACTIVE check with Sleep(0x64)) and its stdout is keyed for upload (&ipconfig=, &systeminfo=, &net_config_ws=, &net_view_all=, &net_view_all_domain=, &domain_trusts=, &domain_trusts_all=, &net_group=, &whoami_group=, &net_wmic_av=). No cmd.exe child and no executed commands were recorded in this run.",
+     "evidence_refs": [
+      "ev_0111",
+      "ev_0131",
+      "ev_0202",
+      "ev_0021",
+      "ev_0019",
+      "ev_0214",
+      "ev_0221"
+     ]
+    },
+    {
+     "id": "0xc",
+     "name": "payload download",
+     "description": "Download: the handler rebuilds the URL from the stored C2 entry up to `//` plus `/files/` (@0xfb00) and the token, fetches it with URLDownloadToFileW/A and writes it under %LOCALAPPDATA% (`<tick>.exe`/`<tick>.dll`) or %APPDATA%\\...\\files\\ (`files/bp.dat`, `%d.dat` name templates). Nothing was downloaded or dropped in this run.",
+     "evidence_refs": [
+      "ev_0169",
+      "ev_0195",
+      "ev_0188",
+      "ev_0092",
+      "ev_0021",
+      "ev_0019",
+      "ev_0020",
+      "ev_0015"
+     ]
+    },
+    {
+     "id": "0xd",
+     "name": "download and execute DLL via rundll32",
+     "description": "Same file fetch as the other download ids, then the fetched DLL is started as `rundll32 <dll>,<token>` from the templates `C:\\WINDOWS\\SYSTEM32\\rundll32.exe %s,%s` @0xfe90 (ref 0xb555) and `...%s` @0xfef0 (ref 0xb5af) in fcn.0xb4cc, through CreateProcessW at 0xb63d. Not exercised in this run.",
+     "evidence_refs": [
+      "ev_0169",
+      "ev_0195",
+      "ev_0188",
+      "ev_0092",
+      "ev_0125",
+      "ev_0189",
+      "ev_0021",
+      "ev_0019",
+      "ev_0015"
+     ]
+    },
+    {
+     "id": "0xe",
+     "name": "download and execute in memory",
+     "description": "Handler fcn.0x7170 downloads a payload, allocates RWX memory (VirtualAlloc(0,n,0x1000,0x40)) and starts thread FUN_0xb398 on it - a no-file execution path (reflective code loading). Not exercised in this run.",
+     "evidence_refs": [
+      "ev_0169",
+      "ev_0195",
+      "ev_0188"
+     ]
+    },
+    {
+     "id": "0xf",
+     "name": "uninstall",
+     "description": "Sets the event, releases/closes the `runnung` mutex, deletes the installed file and the installed module, and calls ExitProcess(0); the delete path uses the self-rename/delete-on-close routine (CreateFileW with DELETE, SetFileInformationByHandle class 3 with `:wtfbbq`, then class 4). Code-level; not observed in this run.",
+     "evidence_refs": [
+      "ev_0195",
+      "ev_0093",
+      "ev_0094",
+      "ev_0095",
+      "ev_0184",
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "id": "0x11",
+     "name": "",
+     "description": "",
+     "evidence_refs": [
+      "ev_0169",
+      "ev_0171",
+      "ev_0175"
+     ]
+    },
+    {
+     "id": "0x12",
+     "name": "download and execute DLL via rundll32",
+     "description": "Download followed by `rundll32 <dll>,<token>` execution of the fetched DLL, as for 0xd. Not exercised in this run.",
+     "evidence_refs": [
+      "ev_0169",
+      "ev_0195",
+      "ev_0188",
+      "ev_0092",
+      "ev_0125",
+      "ev_0214"
+     ]
+    },
+    {
+     "id": "0x13",
+     "name": "long-sleep mode",
+     "description": "Switches the beacon cycle from the normal 450-599 s jitter to the 1500-2099 s long-sleep interval. Code-level; no beacon cycle ran in this run.",
+     "evidence_refs": [
+      "ev_0191",
+      "ev_0175",
+      "ev_0169"
+     ]
+    },
+    {
+     "id": "0x14",
+     "name": "reset counter",
+     "description": "Resets the beacon's counter.",
+     "evidence_refs": [
+      "ev_0191"
+     ]
+    },
+    {
+     "id": "0x15",
+     "name": "payload download",
+     "description": "Payload fetch to %LOCALAPPDATA%/%APPDATA% as for 0xc, per the C2-task dispatcher. Nothing was downloaded in this run.",
+     "evidence_refs": [
+      "ev_0169",
+      "ev_0195",
+      "ev_0188",
+      "ev_0092",
+      "ev_0015"
+     ]
+    }
+   ],
+   "payloads": {
+    "body": "**No carried payload.** The sample is one 60,928-byte DLL [ev_0001], [ev_0004], and no second stage is embedded in it: carving returned 0 payloads and four independent checks for a hidden or encrypted embedded PE (8- and 16-bit string, split-data, bitmap, encrypted-PE) were negative, matching the analysis's \"no embedded PE file\" [ev_0255], [ev_0252]; the signature scan recorded only the sample's own `MZ\\x90\\x00` at offset 0 [ev_0256], and the PE analysis reports no resource directory and no overlay [ev_0083]. Carve methods are not exhaustive, so this bounds the search rather than excluding a carried stage, but no section of the module is a second binary [ev_0004]. The file is a DLL submitted under an `.exe` name, and its install routine, if reached, copies the running image into `%APPDATA%\\Custom_update\\Update_%x.<ext>`, choosing the extension opposite to its real type (T1036.008) [ev_0021], [ev_0019], [ev_0182].\n\n**No dropped files in this run.** The sandbox reported 0 dropped files [ev_0015], 0 file writes [ev_0225], no channels [ev_0016], and a four-process list of two rundll32.exe instances plus svchost.exe and SecurityHealthHost.exe [ev_0012]; the 587 s / 9,087-packet capture held no traffic attributable to the sample's pids [ev_0017]. The negative is coverage-limited — the run's per-process API and registry tables were empty [ev_0212], [ev_0213] — so \"0 files\" records what the harness captured, not a limit of the code.\n\n**Download and install plumbing is code-level only.** The static import table holds five imports from KERNEL32.dll and USER32.dll only [ev_0004]; every download, file and network API in play is materialised at run time by the CRC32 resolver [ev_0020], whose entries include `urlmon.dll!URLDownloadToFileW`/`URLDownloadToFileA`, the wininet HTTP set (`InternetConnectA`, `HttpOpenRequestA`, `HttpSendRequestA`, `InternetReadFile`), `CreateFileW`/`WriteFile`/`ReadFile`, `DeleteFileW` and `CreateProcessW` [ev_0020]. The `.data` string blobs supply the fetch paths and file-name templates — `/files/`, `files/bp.dat`, `%d.dat`, `%s%d.exe`, `%s%d.dll`, `%s\\%d.dll` — plus the install tokens `Custom_update`/`Update_%x` and the URL/state file `\\update_data.dat`, rewritten as `URLS|%d|%s\\r\\n` [ev_0019], [ev_0021]. The decompiled handlers rebuild URLs as `<server>/files/<token>` and save under `%LOCALAPPDATA%\\<tick>.exe|.dll` and `%APPDATA%…\\files\\`, and fcn.0xb4cc holds the `rundll32 <dll>,<token>` execution template over the CreateProcessW slot [ev_0125], [ev_0195], [ev_0019]; one command (0xe) takes a no-file route — download, `VirtualAlloc(0,n,0x1000,0x40)` (RWX) and a thread started on the buffer (fcn.0xb398) — the sample's reflective-load capability (T1620) [ev_0188], [ev_0195]. Nothing was fetched or written: 0 drops, no contact to either decoded endpoint, no flow owned by the sample's pids [ev_0015], [ev_0017]. We assess the run did not reach the C2 stage [ev_0212], [ev_0213].\n\n**Process pair, no file artifacts.** The observed second rundll32 (pid 89, child of pid 83) [ev_0214] was accompanied by no installed copy, downloaded module or other on-disk artifact [ev_0015]; whether the sample spawned it remains unresolved, and neither reading makes it a dropped payload.",
+    "title": "Payloads and Dropped Files",
+    "evidence_refs": [
+     "ev_0001",
+     "ev_0004",
+     "ev_0012",
+     "ev_0015",
+     "ev_0016",
+     "ev_0017",
+     "ev_0019",
+     "ev_0020",
+     "ev_0021",
+     "ev_0083",
+     "ev_0125",
+     "ev_0182",
+     "ev_0188",
+     "ev_0195",
+     "ev_0212",
+     "ev_0213",
+     "ev_0214",
+     "ev_0225",
+     "ev_0252",
+     "ev_0255",
+     "ev_0256"
+    ]
+   },
+   "cli_flags": [
+    {
+     "flag": "/c",
+     "description": "cmd.exe switch prefixed to every decrypted shell line the command builder assembles (`/c ipconfig /all`, `/c systeminfo`, `/c nltest /domain_trusts`, `/c nltest /domain_trusts /all_trusts`, `/c net view /all`, `/c net view /all /domain`, `/c net group \"Domain Admins\" /domain`, `/c net config workstation`, `/c whoami /groups`, `/c wmic.exe ...`). fcn.0x2200 decrypts `C:\\Windows\\System32\\cmd.exe` together with these lines and calls the pipe-capturing routine fcn.0x1030 from eight sites; the lines are the sample's own decoded data and were not executed in the run.",
+     "evidence_ref": "ev_0019, ev_0021, ev_0131"
+    },
+    {
+     "flag": "/all",
+     "description": "Switch in the decrypted discovery lines `/c ipconfig /all` and `/c net view /all`, and part of `/c net view /all /domain`; each resolves through references inside the command builder fcn.0x2200.",
+     "evidence_ref": "ev_0019, ev_0021"
+    },
+    {
+     "flag": "/domain_trusts",
+     "description": "nltest switch in `/c nltest /domain_trusts` and `/c nltest /domain_trusts /all_trusts` — domain-trust enumeration.",
+     "evidence_ref": "ev_0019, ev_0021"
+    },
+    {
+     "flag": "/all_trusts",
+     "description": "Second nltest switch in `/c nltest /domain_trusts /all_trusts`.",
+     "evidence_ref": "ev_0019, ev_0021"
+    },
+    {
+     "flag": "/domain",
+     "description": "net switch in `/c net view /all /domain` and `/c net group \"Domain Admins\" /domain`.",
+     "evidence_ref": "ev_0019, ev_0021"
+    },
+    {
+     "flag": "/groups",
+     "description": "whoami switch in `/c whoami /groups`.",
+     "evidence_ref": "ev_0019, ev_0021"
+    },
+    {
+     "flag": "/node:localhost",
+     "description": "wmic node selector in `/c wmic.exe /node:localhost /namespace:\\\\root\\SecurityCenter2 path AntiVirusProduct Get DisplayName | findstr /V /B /C:displayName || echo No Antivirus installed`; the sibling wmic line uses the capitalised `/Node:localhost`.",
+     "evidence_ref": "ev_0019, ev_0021"
+    },
+    {
+     "flag": "/namespace:\\\\root\\SecurityCenter2",
+     "description": "wmic namespace selector in both decrypted antivirus-enumeration command lines.",
+     "evidence_ref": "ev_0019, ev_0021"
+    },
+    {
+     "flag": "/Format:List",
+     "description": "wmic output-format switch in `/Node:localhost /Namespace:\\\\root\\SecurityCenter2 Path AntiVirusProduct Get * /Format:List`.",
+     "evidence_ref": "ev_0019, ev_0021"
+    },
+    {
+     "flag": "/V",
+     "description": "findstr switch in the antivirus-enumeration pipeline (`... Get DisplayName | findstr /V /B /C:displayName || echo No Antivirus installed`), decoded at ref 0x27dd in fcn.0x2200.",
+     "evidence_ref": "ev_0019, ev_0021"
+    },
+    {
+     "flag": "/B",
+     "description": "findstr switch in the same antivirus-enumeration pipeline.",
+     "evidence_ref": "ev_0019, ev_0021"
+    },
+    {
+     "flag": "/C:displayName",
+     "description": "findstr literal-search argument in the same antivirus-enumeration pipeline.",
+     "evidence_ref": "ev_0019, ev_0021"
+    },
+    {
+     "flag": "init -zzzz=\"%s\\%s\"",
+     "description": "Entry-point token carried on the download/relaunch path that starts a fetched or installed DLL through rundll32 (`C:\\WINDOWS\\SYSTEM32\\rundll32.exe %s,%s` and the one-argument `... %s`, CreateProcessW at 0xb63d). The header-validated static decode of the site at 0xfac0 (ref 0x456d, fcn.0x4110) yields `init -zzzz=\"%s\\%s\"`; emulation of the same site (0x4571) yields `init -=\"%s\\%s\"`. The disagreement is unresolved; both readings are two-argument format templates.",
+     "evidence_ref": "ev_0021, ev_0019"
+    },
+    {
+     "flag": ",#1",
+     "description": "Ordinal export selector in the command line the run recorded: `rundll32.exe C:\\Users\\Admin\\AppData\\Local\\Temp\\6091f2589fef42e0ab3d7975806cd8a0da012b519637c03b73f702f7586b21ef.dll,#1` (pid 83, ppid 56, first seen 141), with a byte-identical second invocation recorded for pid 89. The file is a DLL whose four exports alias one function (RVA 0x3ce4; `extra`, `follower`, `run`, `scub` appear in its export/string data), so `,#1` is an ordinal-1 export call; the LOLBin matcher attributes T1218.011 to that exact string and Sigma reports 'DLL Call by Ordinal Via Rundll32.EXE' and 'Unsigned DLL Loaded by Windows Utility'. The sample's own relaunch templates are parameterised (`...rundll32.exe %s,%s` / `... %s`) rather than fixed copies of this command line; whether they or harness duplication produced the second process is not settled by this evidence.",
+     "evidence_ref": "ev_0214, ev_0219, ev_0011, ev_0009, ev_0004"
+    }
+   ],
+   "discovery": {
+    "body": "The discovery stage runs the system's own administration tools rather than enumerating from the module's own code, and it keeps the enumeration primitives out of the import table. The import directory is a complete list of five functions in two libraries — kernel32!PeekNamedPipe, kernel32!GetLastError, kernel32!CreateMutexW and user32!MessageBeep/!MessageBoxA — and the reference catalogue's only association for those five is persistence, not discovery [ev_0004, ev_0010]. The single discovery-associated API that this run's deterministic pass counted therefore sits in the file's own name-resolution table, whose 164 values are CRC32 hashes of function and module names in ASCII and UTF-16LE form; capa marks the PEB read and export-directory walk that feed that table at 0x8690 and 0x869c [ev_0008, ev_0020]. GetComputerNameExA, GetAdaptersInfo, GetUserNameA, SHGetFolderPathW/A, CreateToolhelp32Snapshot, the Process32/Thread32 families and the FindFirstVolumeW/GetVolumeInformationW pair all stand in it [ev_0020].\n\nMost of the enumeration is one routine at offset 0x2200 (decompiled as FUN_1360bc02200). It decodes eleven (executable, command-line) pairs from the sample's XOR-rolling blobs (scheme 'xor8_rolling_header layout seed (4), text length (2), text, seed 0x33629d40, first_key 0x41', with the command text held as UTF-16LE) [ev_0021] and hands each pair to the launcher at 0x1030: ten pairs name C:\\Windows\\System32\\cmd.exe and one names C:\\Windows\\System32\\wbem\\wmic.exe. The command lines are /c ipconfig /all, /c systeminfo, /c net config workstation, /c net view /all, /c net view /all /domain, /c nltest /domain_trusts, /c nltest /domain_trusts /all_trusts, /c net group \\\"Domain Admins\\\" /domain, /c whoami /groups, the cmd-hosted 'wmic.exe /node:localhost /namespace:\\\\root\\SecurityCenter2 path AntiVirusProduct Get DisplayName | findstr /V /B /C:displayName || echo No Antivirus installed', and the wmic-hosted '/Node:localhost /Namespace:\\\\root\\SecurityCenter2 Path AntiVirusProduct Get * /Format:List' [ev_0019, ev_0021]. Each child's output is concatenated behind a fixed field name — &ipconfig=, &systeminfo=, &net_config_ws=, &net_view_all=, &net_view_all_domain=, &domain_trusts=, &domain_trusts_all=, &net_group=, &whoami_group=, &wmic=, &net_wmic_av= — into one URL-encoded body fragment (the same handler's strings include 'POST' and 'Content-Type: application/x-www-form-urlencoded') [ev_0019, ev_0021]. The finished fragment is cached in the global at 0x1360bc10548 and returned through the caller's out-parameter, so the eleven commands are prepared at most once per process, the build path being guarded by a null-check on that global.\n\nThe launcher at 0x1030 is the child-process engine. It allocates a 0x2800-byte (10,240) accumulation buffer, creates three pipes under one inheritable SECURITY_ATTRIBUTES (nLength 0x18, bInheritHandle 1), fills a STARTUPINFO whose cb is 0x68 and whose dwFlags it ORs with 0x101 (STARTF_USESHOWWINDOW|STARTF_USESTDHANDLES), zeroes a 0x18-byte PROCESS_INFORMATION, and calls through the hash-resolved slot at 0x1360bc10b38; kernel32/kernelbase!CreateProcessW is among the resolved names and we assess that slot is it [ev_0020]. The child's pipe output is read in 0x200-byte chunks, null-terminated and appended through the helper at 0xb984; the routine then polls the child's status through another slot, compares the value against 0x103 (259, STILL_ACTIVE) and calls fcn.0x0c934 with 100 while the child is still running — the same routine is called with 1000 from the entry stub, so we assess it is a millisecond sleep. PeekNamedPipe, one of the five static imports, fits this read logic [ev_0004].\n\nIdentity data is also assembled without a child process. Routine 0x7fa8 builds &mac= with the '%02x' and ':%02x' formats together with &computername=%s and &domain=%s [ev_0021]; we assess iphlpapi!GetAdaptersInfo supplies the MAC bytes and kernel32!GetComputerNameExA the name and domain values, both standing in the resolved-hash table [ev_0020]. Routine 0x5750's request parameters — counter, type, guid, os, arch, username, group, ver, up and direction — carry the same host and user identity with each beacon [ev_0019, ev_0021].\n\nTwo further enumerations are signalled only by their upload keys; the routines that build them (0x1c38 and 0x1a08) were not decompiled in this run. &proclist=[ with the fragments '\\\"proc\\\": ' and '\\\"subproc\\\": [' [ev_0021] is consistent with a process list assembled through the resolved CreateToolhelp32Snapshot, Process32FirstW/Process32NextW, Thread32First/Thread32Next, OpenProcess and VirtualQuery names [ev_0020], and &desklinks=[ [ev_0021] fits the shell-folder vocabulary — AppData, Desktop, Startup, Personal and Local AppData read under Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Explorer\\\\Shell Folders in routine 0x7b98 [ev_0021]. A '\\\\*.dll' search pattern in the decoded blob set [ev_0021] and FindFirstVolumeW/GetVolumeInformationW/FindVolumeClose in the resolved table [ev_0020] point to file and volume enumeration.\n\nObserved activity: the sandbox process record for this run lists four processes — two rundll32.exe, svchost.exe and SecurityHealthHost.exe — with no cmd.exe or wmic.exe among them [ev_0012], so the command-driven half of this stage was not observed executing and the description above rests on static artifacts. Mapping to this report's table: T1082 System Information Discovery (the systeminfo request), T1016 System Network Configuration Discovery (ipconfig /all and net config workstation), T1482 Domain Trust Discovery (nltest /domain_trusts, its /all_trusts variant and the domain views), T1069.002 Domain Groups (net group \\\"Domain Admins\\\" /domain), T1518.001 Security Software Discovery (both AntiVirusProduct queries), T1057 Process Discovery (the proclist field), T1033 System Owner/User Discovery (whoami /groups, GetUserNameA and the beacon username field), T1083 File and Directory Discovery (desklinks, the shell folders, \\\\*.dll), and T1027.007 Dynamic API Resolution for the name-hash table that carries all of it.",
+    "title": "Discovery & Enumeration",
+    "evidence_refs": [
+     "ev_0004",
+     "ev_0008",
+     "ev_0010",
+     "ev_0012",
+     "ev_0019",
+     "ev_0020",
+     "ev_0021"
+    ]
+   },
+   "ransom_note": null,
+   "configuration": [
+    {
+     "key": "C2 endpoint 1",
+     "value": "https://titnovacrion.top/live/",
+     "how_obtained": "decrypted",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "key": "C2 endpoint 2",
+     "value": "https://skinnyjeanso.com/live/",
+     "how_obtained": "decrypted",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "key": "Transport",
+     "value": "HTTPS web-command channel over WinINet (HttpOpenRequestA slot 0x10e10, HttpSendRequestA 0x10e18, InternetReadFile 0x10e30); no IP-literal, DNS-tunnel or other transport in the decoded config",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0020",
+      "ev_0021"
+     ]
+    },
+    {
+     "key": "HTTP verbs",
+     "value": "POST, GET",
+     "how_obtained": "decrypted",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "key": "HTTP Content-Type",
+     "value": "application/x-www-form-urlencoded",
+     "how_obtained": "decrypted",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "key": "HTTP accept types",
+     "value": "*/*",
+     "how_obtained": "static-string",
+     "evidence_refs": [
+      "ev_0129"
+     ]
+    },
+    {
+     "key": "User-Agent (MSIE)",
+     "value": "Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; Tob 1.1)",
+     "how_obtained": "decrypted",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "key": "User-Agent (curl)",
+     "value": "curl/7.88.1",
+     "how_obtained": "decrypted",
+     "evidence_refs": [
+      "ev_0021"
+     ]
+    },
+    {
+     "key": "TLS/redirect validation option",
+     "value": "InternetSetOptionA(hRequest, 0x1f, &0x4380, 4); 0x4380 = SECURITY_FLAG_IGNORE_REVOCATION|IGNORE_UNKNOWN_CA|IGNORE_WRONG_USAGE|IGNORE_REDIRECT_TO_HTTPS (flag-name reading rests on a single decompiler locus)",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0129",
+      "ev_0136"
+     ]
+    },
+    {
+     "key": "Cipher",
+     "value": "RC4 (KSA fcn.0xca08, PRGA fcn.0xcaac, wrapper fcn.0xc964)",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0008",
+      "ev_0167",
+      "ev_0175"
+     ]
+    },
+    {
+     "key": "Symmetric key",
+     "value": "12345",
+     "how_obtained": "decrypted",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "key": "Payload encoding",
+     "value": "RC4(\"12345\") then base64 with the standard alphabet before POST; replies decrypted the same way",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0008",
+      "ev_0021",
+      "ev_0193"
+     ]
+    },
+    {
+     "key": "Base64 alphabet",
+     "value": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+     "how_obtained": "decrypted",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "key": "Beacon body format",
+     "value": "counter=%d&type=%d&guid=%s&os=%d&arch=%d&username=%s&group=%lu&ver=%d.%d&up=%d&direction=%s",
+     "how_obtained": "decrypted",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "key": "Beacon version",
+     "value": "1.2",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0169",
+      "ev_0191"
+     ]
+    },
+    {
+     "key": "Beacon type field",
+     "value": "2 at install, 1 otherwise",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0169",
+      "ev_0191"
+     ]
+    },
+    {
+     "key": "Initial beacon delay",
+     "value": "180 s (0x708 x 100 ms) before first C2 contact",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0191"
+     ]
+    },
+    {
+     "key": "Beacon sleep interval",
+     "value": "450-599 s",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0191",
+      "ev_0175"
+     ]
+    },
+    {
+     "key": "Long-sleep interval",
+     "value": "1500-2099 s after C2 command 0x13; command 0x14 resets the counter",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0191",
+      "ev_0175"
+     ]
+    },
+    {
+     "key": "Worker poll interval",
+     "value": "100 ms",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0191"
+     ]
+    },
+    {
+     "key": "Single-instance mutex",
+     "value": "runnung (CreateMutexW; GetLastError 0xB7 ERROR_ALREADY_EXISTS aborts init)",
+     "how_obtained": "decrypted",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "key": "String-blob obfuscation scheme",
+     "value": "4-byte seed 0x33629d40 + 2-byte length XOR seed low 16 bits + payload XOR8, keystream byte i = (seed+i+1)&0xFF, first key 0x41; decoded in memory by fcn.0xae78",
+     "how_obtained": "decrypted",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0168"
+     ]
+    },
+    {
+     "key": "C2 reply/command tokens",
+     "value": "URLS, URLS|%d|%s, COMMAND, CLEARURL, ERROR; replies tokenised on CRLF then |",
+     "how_obtained": "decrypted",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "key": "Upload field keys",
+     "value": "&ipconfig=, &systeminfo=, &net_config_ws=, &net_view_all=, &net_view_all_domain=, &domain_trusts=, &domain_trusts_all=, &net_group=, &whoami_group=, &net_wmic_av=, &proclist=[, &desklinks=[, &mac=, &stiller=",
+     "how_obtained": "decrypted",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "key": "Beacon group identifier",
+     "value": "Littlehw (FNV-1a hashed; the result fills group=%lu)",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0008",
+      "ev_0109"
+     ]
+    },
+    {
+     "key": "Beacon guid source",
+     "value": "volume information via FindFirstVolumeW/GetVolumeInformationW formatted with %04X%04X%04X%04X%08X%04X (routine 0x8c4c); not registry-derived",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0198",
+      "ev_0185"
+     ]
+    },
+    {
+     "key": "Username source",
+     "value": "GetUserNameA (hashed slot 0x10e68) feeding username=%s",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0202"
+     ]
+    },
+    {
+     "key": "Host identity fields",
+     "value": "&computername=%s (GetComputerNameExA), &domain=%s, &mac= (%02x/:%02x via GetAdaptersInfo)",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0198"
+     ]
+    },
+    {
+     "key": "Install directory",
+     "value": "%APPDATA%\\Custom_update\\",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019",
+      "ev_0182"
+     ]
+    },
+    {
+     "key": "Installed file name format",
+     "value": "Update_%x.dll or Update_%x.exe (extension chosen opposite to the running module's own type)",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019",
+      "ev_0182"
+     ]
+    },
+    {
+     "key": "URL-list state file",
+     "value": "%APPDATA%\\Custom_update\\update_data.dat; RC4-encrypted URL list, re-written as URLS|%d|%s\\r\\n",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0177",
+      "ev_0019"
+     ]
+    },
+    {
+     "key": "Stage download path templates",
+     "value": "%LOCALAPPDATA%\\<tick>.exe, %LOCALAPPDATA%\\<tick>.dll, %APPDATA%...\\files\\...; also files/bp.dat, %d.dat, %s%d.exe, %s%d.dll, %s\\%d.dll",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0092",
+      "ev_0019"
+     ]
+    },
+    {
+     "key": "Stage download URL construction",
+     "value": "<server>/files/<token> (stored C2 entry copied up to //, then /files/ @0xfb00)",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0092"
+     ]
+    },
+    {
+     "key": "Execution template (rundll32)",
+     "value": "C:\\WINDOWS\\SYSTEM32\\rundll32.exe %s,%s and C:\\WINDOWS\\SYSTEM32\\rundll32.exe %s",
+     "how_obtained": "decrypted",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "key": "Task registration name",
+     "value": "LogonTrigger",
+     "how_obtained": "decrypted",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "key": "Task Scheduler COM identifiers",
+     "value": "CLSID {0F87369F-A4E5-4CFC-BD3E-73E6154572DD}, IID {4C3D624D-FDA9-49A3-B9B7-09CB3CD3F047}, RegisterTaskDefinition flag 6 (TASK_CREATE_OR_UPDATE) with a logon trigger",
+     "how_obtained": "inferred",
+     "evidence_refs": [
+      "ev_0196",
+      "ev_0113"
+     ]
+    }
+   ],
+   "execution_flow": [
+    {
+     "order": 1,
+     "voice": "observed",
+     "action": "A 64-bit DLL (submitted as an .exe) is loaded through the rundll32 LOLBin: the run records pid 83 C:\\Windows\\system32\\rundll32.exe (ppid 56) with command line rundll32.exe C:\\Users\\Admin\\AppData\\Local\\Temp\\6091f2....dll,#1, an ordinal export call; the LOLBin table attributes T1218.011 and Sigma flags DLL Call by Ordinal Via Rundll32.EXE and Unsigned DLL Loaded by Windows Utility.",
+     "evidence_refs": [
+      "ev_0001",
+      "ev_0004",
+      "ev_0011",
+      "ev_0009",
+      "ev_0012",
+      "ev_0214"
+     ]
+    },
+    {
+     "order": 2,
+     "voice": "assessed",
+     "action": "The ordinal entry lands on the four exports extra/follower/run/scub (ordinals 1-4), all aliasing RVA 0x3ce4 to stub fcn.0x3cb4 and worker fcn.0x3868; DllMain only stores the module handle.",
+     "evidence_refs": [
+      "ev_0083",
+      "ev_0084",
+      "ev_0086",
+      "ev_0087",
+      "ev_0004"
+     ]
+    },
+    {
+     "order": 3,
+     "voice": "assessed",
+     "action": "The worker runs anti-analysis gates before operational work: PEB access and a BeingDebugged check that aborts, a process-count threshold (75 or 50 depending on the OS id), IsWow64Process must be 0, and the single-instance mutex runnung that aborts on ERROR_ALREADY_EXISTS (0xB7).",
+     "evidence_refs": [
+      "ev_0008",
+      "ev_0174",
+      "ev_0181",
+      "ev_0135",
+      "ev_0088",
+      "ev_0169",
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "order": 4,
+     "voice": "assessed",
+     "action": "Resolves its API surface at start-up from CRC32 name hashes (256-entry table for 0xEDB88320, export-directory walker fcn.0x869c, 90 {hash, module, slot} triples materialised into global slots); 164 embedded values resolve to about 10 DLLs against only 5 static imports, and the visible CreateMutexW/PeekNamedPipe IAT thunks have no code callers.",
+     "evidence_refs": [
+      "ev_0020",
+      "ev_0167",
+      "ev_0171",
+      "ev_0204",
+      "ev_0100",
+      "ev_0101",
+      "ev_0102",
+      "ev_0114",
+      "ev_0116",
+      "ev_0119",
+      "ev_0008",
+      "ev_0144"
+     ]
+    },
+    {
+     "order": 5,
+     "voice": "assessed",
+     "action": "Decodes its operational strings from header-validated rolling-XOR blobs in .data via routine 0xae78 (4-byte seed 0x33629d40, 2-byte length XORed with the seed's low 16 bits, first key 0x41): 101 texts decode statically and 81 also by emulation.",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019",
+      "ev_0168",
+      "ev_0008"
+     ]
+    },
+    {
+     "order": 6,
+     "voice": "assessed",
+     "action": "Copies itself to %APPDATA%\\Custom_update\\Update_<hex>.<ext> - directory from the Shell Folders AppData path, name from wsprintfW(Update_%x), extension chosen opposite to its own type - a name/type masquerade layer beneath the export-directory name UpdaterTag.dll.",
+     "evidence_refs": [
+      "ev_0189",
+      "ev_0195",
+      "ev_0091",
+      "ev_0182",
+      "ev_0021",
+      "ev_0019",
+      "ev_0004"
+     ]
+    },
+    {
+     "order": 7,
+     "voice": "assessed",
+     "action": "Registers persistence as a scheduled task through the COM Task Scheduler (CLSID {0F87369F-A4E5-4CFC-BD3E-73E6154572DD}, IID {4C3D624D-FDA9-49A3-B9B7-09CB3CD3F047}) with the decoded LogonTrigger registration info and RegisterTaskDefinition flag 6 (TASK_CREATE_OR_UPDATE).",
+     "evidence_refs": [
+      "ev_0196",
+      "ev_0113",
+      "ev_0115",
+      "ev_0120",
+      "ev_0123",
+      "ev_0021"
+     ]
+    },
+    {
+     "order": 8,
+     "voice": "assessed",
+     "action": "Launches the registered task and exits the parent with ExitProcess(0), using the decoded templates C:\\WINDOWS\\SYSTEM32\\rundll32.exe %s,%s and the one-argument form in fcn.0xb4cc with the CreateProcessW call site.",
+     "evidence_refs": [
+      "ev_0195",
+      "ev_0125",
+      "ev_0021",
+      "ev_0019",
+      "ev_0189"
+     ]
+    },
+    {
+     "order": 9,
+     "voice": "observed",
+     "action": "The run also records a second rundll32.exe (pid 89, first seen 172 against 141) as a child of pid 83 with a byte-identical command line; whether the sample relaunched itself is not established, since the child points at the same Temp module rather than an installed copy and harness duplication is not excluded.",
+     "evidence_refs": [
+      "ev_0214",
+      "ev_0012",
+      "ev_0195",
+      "ev_0021"
+     ]
+    },
+    {
+     "order": 10,
+     "voice": "assessed",
+     "action": "Start-up decodes the two hardcoded HTTPS endpoints https://titnovacrion.top/live/ and https://skinnyjeanso.com/live/ into the candidate array at 0x10568.",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0019",
+      "ev_0090"
+     ]
+    },
+    {
+     "order": 11,
+     "voice": "assessed",
+     "action": "Keeps the URL list RC4-encrypted at %APPDATA%\\Custom_update\\update_data.dat, read at start-up and rewritten in the URLS|%d|%s record format when the list changes.",
+     "evidence_refs": [
+      "ev_0177",
+      "ev_0175",
+      "ev_0169",
+      "ev_0021"
+     ]
+    },
+    {
+     "order": 12,
+     "voice": "assessed",
+     "action": "Beacon thread waits 180 s before first contact, then loops: iterate the URL list under the runnung mutex, build counter=%d&type=%d&guid=%s&os=%d&arch=%d&username=%s&group=%lu&ver=%d.%d&up=%d&direction=%s, RC4-encrypt the body with the runtime-decoded key 12345, base64-encode it, POST it to a /live/ endpoint, and sleep 450-599 s (1500-2099 s after C2 command 0x13).",
+     "evidence_refs": [
+      "ev_0191",
+      "ev_0169",
+      "ev_0175",
+      "ev_0177",
+      "ev_0193",
+      "ev_0021",
+      "ev_0129",
+      "ev_0136",
+      "ev_0137"
+     ]
+    },
+    {
+     "order": 13,
+     "voice": "assessed",
+     "action": "Decrypts and tokenises the reply (URLS, URLS|%d|%s, COMMAND, CLEARURL, ERROR) and dispatches command ids 2, 3, 4, 0xc, 0xd, 0xe, 0xf, 0x11, 0x12, 0x13, 0x14 and 0x15 to their handlers.",
+     "evidence_refs": [
+      "ev_0203",
+      "ev_0169",
+      "ev_0171",
+      "ev_0175",
+      "ev_0021"
+     ]
+    },
+    {
+     "order": 14,
+     "voice": "assessed",
+     "action": "Command 4 runs the cmd.exe builder with output capture - inheritable pipes via CreatePipe, CreateProcessW, PeekNamedPipe/ReadFile polling in 0x200-byte chunks, STILL_ACTIVE check, Sleep(0x64) - for /c systeminfo, /c ipconfig /all, /c net config workstation, /c net view /all( /domain), /c nltest /domain_trusts( /all_trusts), /c net group \"Domain Admins\" /domain, /c whoami /groups and the wmic AntiVirusProduct query, each paired with its upload key (&systeminfo=, &ipconfig=, &net_config_ws=, &net_view_all=, &net_view_all_domain=, &domain_trusts=, &domain_trusts_all=, &net_group=, &whoami_group=, &net_wmic_av=).",
+     "evidence_refs": [
+      "ev_0131",
+      "ev_0111",
+      "ev_0202",
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "order": 15,
+     "voice": "assessed",
+     "action": "Collectors assemble host identity for the beacon: process list (&proclist=[, \"proc\"/\"subproc\"), desktop-link and DLL enumeration over shell folders (&desklinks=[), MAC (&mac=), &computername=%s, &domain=%s, username via GetUserNameA, and group as FNV(\"Littlehw\").",
+     "evidence_refs": [
+      "ev_0202",
+      "ev_0182",
+      "ev_0177",
+      "ev_0198",
+      "ev_0185",
+      "ev_0109",
+      "ev_0021",
+      "ev_0008"
+     ]
+    },
+    {
+     "order": 16,
+     "voice": "assessed",
+     "action": "Task handlers fetch and run next stages: build <server>/files/<token>, save to %LOCALAPPDATA%\\<tick>.exe or .dll and %APPDATA%\\...\\files\\, execute a fetched DLL as rundll32 <dll>,<token>, or for command 0xe download a payload, allocate RWX (VirtualAlloc 0x40) and start a thread on it; nothing is embedded in this file (0 carved payloads).",
+     "evidence_refs": [
+      "ev_0195",
+      "ev_0188",
+      "ev_0092",
+      "ev_0125",
+      "ev_0189",
+      "ev_0021",
+      "ev_0020",
+      "ev_0025",
+      "ev_0142"
+     ]
+    },
+    {
+     "order": 17,
+     "voice": "assessed",
+     "action": "On demand, anti-forensics on its own module: rename through SetFileInformationByHandle with the decoded name :wtfbbq (class 3 FileRenameInfo then class 4 FileDispositionInfo TRUE); uninstall command 0xf deletes the installed file and module before ExitProcess(0).",
+     "evidence_refs": [
+      "ev_0093",
+      "ev_0094",
+      "ev_0095",
+      "ev_0184",
+      "ev_0195",
+      "ev_0127",
+      "ev_0021",
+      "ev_0019"
+     ]
+    },
+    {
+     "order": 18,
+     "voice": "observed",
+     "action": "The observed run never reached steady state: 0 C2 DNS or HTTP to either endpoint across the 600 s run and the 587 s / 9,087-packet capture (17 external conversations, ambient Windows Update/OCSP/CRL estate, GET-only, no regular interval), 0 dropped files, 0 executed commands, 0 registry/task/service/mutex rows and empty API telemetry for every process.",
+     "evidence_refs": [
+      "ev_0214",
+      "ev_0209",
+      "ev_0234",
+      "ev_0235",
+      "ev_0236",
+      "ev_0017",
+      "ev_0015",
+      "ev_0211",
+      "ev_0213",
+      "ev_0210",
+      "ev_0212",
+      "ev_0221",
+      "ev_0225",
+      "ev_0227"
+     ]
+    },
+    {
+     "order": 19,
+     "voice": "assessed",
+     "action": "We assess the inert record has no demonstrated cause: the gates of step 3 exist in code, the run's process table lists only four processes (possibly a filtered view), and the per-process dynamic data was empty, so the run is neither proof of execution nor exculpatory.",
+     "evidence_refs": [
+      "ev_0088",
+      "ev_0135",
+      "ev_0174",
+      "ev_0181",
+      "ev_0214",
+      "ev_0212",
+      "ev_0213",
+      "ev_0227"
+     ]
+    }
+   ],
+   "host_identifiers": [
+    {
+     "kind": "Mutex name",
+     "value": "runnung",
+     "purpose": "Single-instance mutex created with CreateMutexW; the init chain aborts on ERROR_ALREADY_EXISTS (0xB7).",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0169"
+     ]
+    },
+    {
+     "kind": "Folder name",
+     "value": "Custom_update",
+     "purpose": "Install directory name under the user's AppData shell folder; holds the installed copy and the URL-list file.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0189"
+     ]
+    },
+    {
+     "kind": "File name format",
+     "value": "Update_%x",
+     "purpose": "wsprintfW format for the installed copy's name; the extension is chosen opposite to the running file's own type.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0189"
+     ]
+    },
+    {
+     "kind": "File name",
+     "value": "\\update_data.dat",
+     "purpose": "File that stores the RC4-encrypted URL list under the install directory.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0195"
+     ]
+    },
+    {
+     "kind": "File path",
+     "value": "files/bp.dat",
+     "purpose": "Path built by the loader plumbing for a file fetched under the C2 base's /files/ path.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0054"
+     ]
+    },
+    {
+     "kind": "File name format",
+     "value": "%d.dat",
+     "purpose": "Format used when building a downloaded data-file path in the loader plumbing.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "File name format",
+     "value": "%s%d.dll",
+     "purpose": "Format for the name of a downloaded next-stage DLL.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "File name format",
+     "value": "%s%d.exe",
+     "purpose": "Format for the name of a downloaded next-stage EXE.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "File path format",
+     "value": "%s\\%d.dll",
+     "purpose": "Format used when building the path of a downloaded DLL in the loader plumbing.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "URL path",
+     "value": "/files/",
+     "purpose": "Appended to the stored C2 base URL (up to '//') when building payload-download URLs.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0195"
+     ]
+    },
+    {
+     "kind": "Search pattern",
+     "value": "\\*.dll",
+     "purpose": "Pattern used when enumerating desktop-link folders for the &desklinks=[ collection.",
+     "evidence_refs": [
+      "ev_0021",
+      "ev_0182"
+     ]
+    },
+    {
+     "kind": "Registry key",
+     "value": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders",
+     "purpose": "Opened and queried (REG_SZ) to resolve shell folder paths (AppData, Desktop, Startup, Personal, Local AppData) for the install directory and collection targets.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0270"
+     ]
+    },
+    {
+     "kind": "Registry key path prefix",
+     "value": "\\Registry\\Machine\\x5c",
+     "purpose": "NT registry path prefix used by the sample's key-path resolver when building machine-hive key paths.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0283"
+     ]
+    },
+    {
+     "kind": "File path",
+     "value": "C:\\Windows\\System32\\cmd.exe",
+     "purpose": "Command interpreter the sample's pipe/capture routine launches for the /c discovery commands.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0131"
+     ]
+    },
+    {
+     "kind": "File path",
+     "value": "C:\\Windows\\System32\\wbem\\wmic.exe",
+     "purpose": "WMI executable path decoded alongside the AntiVirusProduct WMI query string; used for security-software discovery.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "Command template",
+     "value": "C:\\WINDOWS\\SYSTEM32\\rundll32.exe %s,%s",
+     "purpose": "Template used to execute a fetched DLL through rundll32 (target path and token); formatted and passed to CreateProcessW.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0195"
+     ]
+    },
+    {
+     "kind": "Command template",
+     "value": "C:\\WINDOWS\\SYSTEM32\\rundll32.exe %s",
+     "purpose": "Relaunch template that starts a module path through rundll32.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0195"
+     ]
+    },
+    {
+     "kind": "Executable name",
+     "value": "rundll32.exe",
+     "purpose": "Decoded with Updater in the install/relaunch path and formatted into the launch command.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0189"
+     ]
+    },
+    {
+     "kind": "String",
+     "value": "Updater",
+     "purpose": "Decoded in the install/relaunch path and formatted via a wsprintf before the task-registration call chain.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0189"
+     ]
+    },
+    {
+     "kind": "Rename target name",
+     "value": ":wtfbbq",
+     "purpose": "Used to build the FILE_RENAME_INFO buffer that renames the sample's module before it is marked for deletion.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0093"
+     ]
+    },
+    {
+     "kind": "Export-directory name",
+     "value": "UpdaterTag.dll",
+     "purpose": "Name in the PE export directory; part of the name/type masquerade (real type is DLL, submitted as .exe).",
+     "evidence_refs": [
+      "ev_0004",
+      "ev_0005",
+      "ev_0023"
+     ]
+    },
+    {
+     "kind": "Export name",
+     "value": "extra",
+     "purpose": "Ordinal 1 export aliasing the module's worker routine at RVA 0x3ce4; the observed rundll32 invocation used #1.",
+     "evidence_refs": [
+      "ev_0004",
+      "ev_0023"
+     ]
+    },
+    {
+     "kind": "Export name",
+     "value": "follower",
+     "purpose": "Ordinal 2 export aliasing the module's worker routine at RVA 0x3ce4.",
+     "evidence_refs": [
+      "ev_0004",
+      "ev_0023"
+     ]
+    },
+    {
+     "kind": "Export name",
+     "value": "run",
+     "purpose": "Ordinal 3 export aliasing the module's worker routine at RVA 0x3ce4.",
+     "evidence_refs": [
+      "ev_0004",
+      "ev_0023"
+     ]
+    },
+    {
+     "kind": "Export name",
+     "value": "scub",
+     "purpose": "Ordinal 4 export aliasing the module's worker routine at RVA 0x3ce4.",
+     "evidence_refs": [
+      "ev_0004",
+      "ev_0023"
+     ]
+    },
+    {
+     "kind": "Scheduled task registration info",
+     "value": "LogonTrigger",
+     "purpose": "Registration information set on the scheduled task created through the COM Task Scheduler API with a logon trigger.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0196"
+     ]
+    },
+    {
+     "kind": "URL",
+     "value": "https://titnovacrion.top/live/",
+     "purpose": "C2 web-channel endpoint decoded into the candidate URL array; not contacted during this run.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0017"
+     ]
+    },
+    {
+     "kind": "URL",
+     "value": "https://skinnyjeanso.com/live/",
+     "purpose": "C2 web-channel endpoint decoded into the candidate URL array; not contacted during this run.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0017"
+     ]
+    },
+    {
+     "kind": "User-Agent",
+     "value": "Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; Tob 1.1)",
+     "purpose": "HTTP User-Agent used by the sample's web-request routine.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "User-Agent",
+     "value": "curl/7.88.1",
+     "purpose": "Second HTTP User-Agent decoded in .data and cited in the C2 channel analysis.",
+     "evidence_refs": [
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "Command line",
+     "value": "/c ipconfig /all",
+     "purpose": "Discovery command in the /c set; its captured output is uploaded under the &ipconfig= field.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "Command line",
+     "value": "/c systeminfo",
+     "purpose": "Discovery command in the /c set; its captured output is uploaded under the &systeminfo= field.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "Command line",
+     "value": "/c net config workstation",
+     "purpose": "Discovery command in the /c set; its captured output is uploaded under the &net_config_ws= field.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "Command line",
+     "value": "/c net view /all",
+     "purpose": "Discovery command in the /c set; its captured output is uploaded under the &net_view_all= field.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "Command line",
+     "value": "/c net view /all /domain",
+     "purpose": "Discovery command in the /c set; its captured output is uploaded under the &net_view_all_domain= field.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "Command line",
+     "value": "/c nltest /domain_trusts",
+     "purpose": "Discovery command in the /c set; its captured output is uploaded under the &domain_trusts= field.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "Command line",
+     "value": "/c nltest /domain_trusts /all_trusts",
+     "purpose": "Discovery command in the /c set; its captured output is uploaded under the &domain_trusts_all= field.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "Command line",
+     "value": "/c net group \"Domain Admins\" /domain",
+     "purpose": "Discovery command in the /c set; its captured output is uploaded under the &net_group= field.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "Command line",
+     "value": "/c whoami /groups",
+     "purpose": "Discovery command in the /c set; its captured output is uploaded under the &whoami_group= field.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "Command line",
+     "value": "/c wmic.exe /node:localhost /namespace:\\\\root\\SecurityCenter2 path AntiVirusProduct Get DisplayName | findstr /V /B /C:displayName || echo No Antivirus installed",
+     "purpose": "Security-software discovery command; its captured output is uploaded under the &net_wmic_av= field.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "Command line",
+     "value": "/Node:localhost /Namespace:\\\\root\\SecurityCenter2 Path AntiVirusProduct Get * /Format:List",
+     "purpose": "WMI AntiVirusProduct query string decoded alongside the wbem\\wmic.exe path; likely used for security-software discovery.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021"
+     ]
+    },
+    {
+     "kind": "File record format",
+     "value": "URLS|%d|%s",
+     "purpose": "Record format written by the URL-list writer into update_data.dat and parsed from the C2 reply vocabulary.",
+     "evidence_refs": [
+      "ev_0019",
+      "ev_0021",
+      "ev_0195"
+     ]
+    }
+   ],
+   "encryption_scheme": {
+    "iv": "none described — the KSA/PRGA state machine takes only keylen and the S-box; no nonce or IV parameter appears in the identified routines [ev_0294]",
+    "mode": "not applicable (stream cipher; no block mode evidenced)",
+    "cipher": "RC4 (symmetric stream cipher), applied after base64 encoding: C2 POST bodies and replies are RC4-encrypted with the runtime-decoded key \"12345\" and base64-coded with the standard alphabet, and the on-disk URL list is RC4-encrypted whole. KSA at 0xca08 (j += S[i] + key[i % keylen]; swap), PRGA at 0xcaac (i++, j += S[i], swap, out = S[(S[i]+S[j])&0xFF] ^ in), wrapper 0xc964; capa rule 'encrypt data using RC4 PRGA' @0xcaac. Identification rests on the decompiled KSA/PRGA state machine — the crypto-constant detector returned only 'Not yet implemented' [ev_0161], so no independent constant-pattern confirmation exists.",
+    "library": "none — RC4 implemented in-sample (KSA 0xca08, PRGA 0xcaac, wrapper 0xc964); the complete import list is kernel32.dll and user32.dll [ev_0004], so no crypto library (bcrypt/crypt32/etc.) is linked or imported",
+    "extension": ".dat for the RC4-encrypted state file (%APPDATA%\\Custom_update\\update_data.dat); no file-encrypting extension — the sample is a loader, not a file encryptor [ev_0021]",
+    "key_source": "hardcoded in the sample, not negotiated: the 5-byte ASCII key \"12345\" @0xfd30 in .data, stored as a rolling-XOR blob (4-byte seed 0x33629d40, first key byte 0x41, keystream byte i = (seed+i+1)&0xFF) and decoded at runtime by routine 0xae78 before KSA use [ev_0021]; the same decode path supplies the base64 alphabet @0x10160 installed by routine 0x6864 [ev_0019]",
+    "file_marker": "none observed",
+    "evidence_ref": "ev_0004, ev_0008, ev_0019, ev_0021, ev_0161, ev_0167, ev_0169, ev_0175, ev_0185, ev_0193, ev_0294",
+    "per_file_key": false,
+    "key_management": "single static key reused for every beacon POST body, every C2 reply and the %APPDATA%\\Custom_update\\update_data.dat URL/state file; no rotation, no per-host or per-session derivation, no key exchange — none observed statically or in the run [ev_0169][ev_0175][ev_0193]",
+    "partial_threshold": null
+   },
+   "string_resolution": {
+    "body": "The DLL's linkage is deliberately thin. The import directory holds five entries from two libraries [ev_0004]; the import-name listing shows KERNEL32!PeekNamedPipe, KERNEL32!GetLastError, KERNEL32!CreateMutexW and USER32!MessageBeep, USER32!MessageBoxA (list_strings). The functions the sample actually operates with are not in that table. FUN_0x6aa4 builds the 256-entry table for the reflected CRC32 polynomial 0xEDB88320, FUN_0x869c walks IMAGE_EXPORT_DIRECTORY and returns the export whose hashed name matches, and per-block initialisers materialise {hash, module reference, destination slot} triples at start-up; capa independently asserts 'hash data with CRC32' at 0x6aa4 and 'resolve function by parsing PE exports' at 0x869c, the latter beside 'PEB access' at 0x8690 [ev_0008]. Against those five static imports, 164 embedded 32-bit values resolve to Windows function or module names across roughly ten DLLs — kernel32, user32, wininet, shell32, advapi32, urlmon, shlwapi, ole32, iphlpapi, ntdll [ev_0020].\n\nOne block can be read directly. FUN_0xa59c places 0x25 (37) triples in a stack array, every one referencing the same module-name pointer at image base + 0x10ec8, then loops calling the resolver FUN_0x869c with the module reference, the hash and 0, storing each returned pointer into the slot field (decompile_function 0x1360bc0a59c). The constants in that loop are the ones recovered as ntdll!NtAllocateVirtualMemory (0xe0762feb), ntdll!RtlGetVersion (0xb46508b5), ntdll!NtCreateThread (0xca6b0d7b), ntdll!NtQueryInformationProcess (0xa5c44c50), ntdll!NtProtectVirtualMemory (0x5c2d1a97), ntdll!LdrLoadDll (0x183679f2), ntdll!RtlFormatCurrentUserKeyPath (0x7fa58340) and thirty more ntdll entries in the same list [ev_0020]. Resolution is load-bearing, not decorative: allocation is traced through the resolved NtAllocateVirtualMemory slot and the command line is read with NtQueryInformationProcess plus ReadProcessMemory [ev_0204], [ev_0198]. The FNV routine does the same to a decoded string — FUN_0x463c decodes the blob at image base + 0xfb10 ('Littlehw') and passes it to FUN_0xc99c, storing the 32-bit result at image base + 0x10464 (decompile_function 0x1360bc0463c), matching capa's 'hash data using fnv' at 0xc99c [ev_0008], [ev_0021]. Two of the five visible imports are reported to be decoys: the CreateMutexW and PeekNamedPipe thunks carry no code cross-references, and the mutex gate and pipe polling are reached through resolved slots [ev_0114], [ev_0119].\n\nStrings receive the same treatment. The operational text is absent from the cleartext listing: 81 of the sample's strings were recovered only by emulation inside decoder routine 0xae78 [ev_0019], and the platform's static scheme decodes 101 texts from the data sections from a header of 4-byte seed 0x33629d40, a 2-byte length XORed with the seed's low 16 bits and a first key byte of 0x41, listing the offset that refers to each [ev_0021]. Decompilation of FUN_0xae78 confirms that header read followed by a 4-byte state advanced with the helper at 0x9040 (decompile_function 0x1360bc0ae78), and an independent re-derivation reproduced the blobs byte-for-byte [ev_0168]. What comes out is the sample's configuration and tooling: the two HTTPS endpoints, the cmd.exe launch templates, the /c discovery command lines, the wmic antivirus query, the beacon format string counter=%d&type=%d&guid=%s&…, the RC4 key '12345', the standard base64 alphabet, the rundll32 relaunch templates and the ':wtfbbq' rename token [ev_0019], [ev_0021]. The blobs sit in .data, which is also the file's highest-entropy section at 6.48 [ev_0004], and capa's 'contain obfuscated stackstrings' rule fires at 0x9484 [ev_0008].\n\nThe raw-layer negatives follow from this design and are not exculpatory. A string scan sees 218 strings of length ≥6 [ev_0005], the 31-rule default corpus returns no hit [ev_0007], and the cleartext IOC scan returns nothing [ev_0006]. The recording scheme itself bounds the recovered set: text whose encoded bytes already read as printable text is not decoded unless a header states where it ends, so further encoded text may remain [ev_0021]. One token is contested between the two decoding paths — the header-validated static decode yields 'init -zzzz=\"%s\\%s\"' at 0xfac0 [ev_0021] while emulation yields 'init -=\"%s\\%s\"' at the same site [ev_0019]; the disagreement is confined to that one format string and is left unsettled. On this record the sample supports T1027 Obfuscated Files or Information (operational strings stored as encoded blobs, decoded only in memory), T1027.007 Dynamic API Resolution (no static import for the operational API surface, which is rebuilt from export-name CRC32 hashes) and T1140 Deobfuscate/Decode Files or Information (runtime decode of those blobs).",
+    "title": "API and String Resolution",
+    "evidence_refs": [
+     "ev_0004",
+     "ev_0005",
+     "ev_0006",
+     "ev_0007",
+     "ev_0008",
+     "ev_0019",
+     "ev_0020",
+     "ev_0021",
+     "ev_0114",
+     "ev_0119",
+     "ev_0168",
+     "ev_0198",
+     "ev_0204"
+    ]
+   },
+   "persistence_detail": {
+    "body": "The run's parsed persistence view lists twelve persistence-mechanism entries, four persistence-related API references and one registry API; the API catalogue association flags a persistence behaviour [ev_0010]. The mechanism the code implements is a scheduled task registered through the COM Task Scheduler interface.\n\nThe chain is reached from the DLL's own export stub: the decompiled `sym.UpdaterTag.dll_extra` (export name `extra` [ev_0004], [ev_0083]; stub decompile [ev_0084], [ev_0086]) calls fcn.0x3cb4, which calls fcn.0x3868; fcn.0x3868 calls fcn.0x33ac, and fcn.0x33ac calls fcn.0x3728 -> fcn.0xb344 -> fcn.0xc5e8 -> fcn.0xc42c -> fcn.0xc2c4 [ev_0113], [ev_0115], [ev_0120], [ev_0123], [ev_0189]. fcn.0xc5e8 is the COM creation/connect stage, reached with CLSID {0F87369F-A4E5-4CFC-BD3E-73E6154572DD} and IID {4C3D624D-FDA9-49A3-B9B7-09CB3CD3F047}; fcn.0xc2c4 dispatches through interface vtables (offsets 0x48, 0x50, 0x10, 0xb8), applies the registration-info string `LogonTrigger` (data @0x10030, referenced at 0xc3a4) to a logon trigger, and calls RegisterTaskDefinition with flag 6 (TASK_CREATE_OR_UPDATE) [ev_0113], [ev_0196], [ev_0019], [ev_0021]. The flow then invokes the task launcher fcn.0xb400 and calls through the resolved slot at 0x1360bc10b68 with argument 0, which the code-level reading names ExitProcess(0) [ev_0113], [ev_0123], [ev_0020]. The launcher templates are `C:\\WINDOWS\\SYSTEM32\\rundll32.exe %s,%s` and `C:\\WINDOWS\\SYSTEM32\\rundll32.exe %s` (data @0xfe90 / @0xfef0, referenced at 0xb555 / 0xb5af inside fcn.0xb4cc) [ev_0019], [ev_0021]. None of this sits in the static import table, which the complete DLL list limits to kernel32.dll and user32.dll [ev_0004]: ole32 CoInitializeEx/CoCreateInstance/CoInitialize are among the 164 CRC32-resolved names the binary builds at run time [ev_0020] through the PE-export parser at 0x869c, beside PEB access at 0x8690 [ev_0008].\n\nNo other autostart is traced. Registry access is a Shell Folders path resolver, not an autostart writer: fcn.0x7b98 decodes the folder names `AppData`, `Desktop`, `Startup`, `Personal`, `Local AppData` and `Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders` (data @0x10330, referenced at 0x7df1) [ev_0021], [ev_0019]; the resolver builds a per-user NT key prefix with RtlFormatCurrentUserKeyPath or the literal `\\Registry\\Machine\\` prefix and opens (0x20019) and queries the value (REG_SZ) [ev_0020], [ev_0270], [ev_0274], [ev_0283], [ev_0285]. The only consumer traced is fcn.0x30d0 taking index 0 (AppData) for the install directory [ev_0270], [ev_0274], [ev_0283], [ev_0285]. Startup-folder autostart is not implemented in the code read: `Startup` is one of the folder names the resolver returns, no code path writing into Startup is traced, and the report withdraws T1547.001 [ev_0182], [ev_0195], [ev_0021]. The resolved-name table does carry shlwapi SHGetValueA/SHSetValueA and SHGetValueW/SHSetValueW [ev_0020]; no autostart value written through them is traced. Single-instance primitives (CreateMutexW/OpenMutexW/ReleaseMutex) are in the same table [ev_0020]; no mutex was observed at run time [ev_0221].\n\nPersistence-adjacent state that does not autostart sits under `%APPDATA%\\Custom_update\\`: the URL list (`URLS`, data @0x103f0, ref 0xd0c4) is read and RC4-decrypted from `update_data.dat` (data @0x103b8, ref 0xced2) by fcn.0xcea4/fcn.0xcf14 [ev_0019], [ev_0021], [ev_0177], [ev_0175] and re-encrypted on change by fcn.0xd1c8 with `URLS|%d|%s\\r\\n` (data @0x10400, ref 0xd247) [ev_0021], [ev_0169]. The staging names `Custom_update` (ref 0x312b in fcn.0x30d0) and `Update_%x` (ref 0x31f1 in fcn.0x3194), with the path formats `%s%d.dll` / `%s%d.exe` (refs 0x6cc5 / 0x6e55), describe the drop path this reading places in that directory [ev_0021], [ev_0019]. That is configuration retention and staging, not an autostart entry.\n\nNo autostart was registered during the run: registry 0 rows, tasks/services/commands 0 rows, `executed_commands` / `created_services` / `started_services` empty, file writes 0, dropped files 0 [ev_0213], [ev_0211], [ev_0221], [ev_0225], [ev_0015]. Those negatives are coverage-limited — per-process API telemetry was empty, so a registration could run without leaving a row [ev_0212], [ev_0221]. The run's process list holds two rundll32.exe instances [ev_0012]; the launcher templates show the chain re-enters the DLL through rundll32 [ev_0021], but neither instance is tied to a task registration on this evidence, and which of the two is the sample's remains unresolved. Read with the process-count/PEB gates and the 180 s pre-beacon delay, the published reading is that the sample did not reach its C2/tasking stage in this environment, not that persistence is absent [ev_0212], [ev_0214], [ev_0017]. Confirming registration needs an instrumented run with task, registry and file telemetry [ev_0221], [ev_0227].",
+    "title": "Persistence",
+    "evidence_refs": [
+     "ev_0004",
+     "ev_0008",
+     "ev_0010",
+     "ev_0012",
+     "ev_0015",
+     "ev_0017",
+     "ev_0019",
+     "ev_0020",
+     "ev_0021",
+     "ev_0083",
+     "ev_0084",
+     "ev_0086",
+     "ev_0113",
+     "ev_0115",
+     "ev_0120",
+     "ev_0123",
+     "ev_0169",
+     "ev_0175",
+     "ev_0177",
+     "ev_0182",
+     "ev_0189",
+     "ev_0195",
+     "ev_0196",
+     "ev_0211",
+     "ev_0212",
+     "ev_0213",
+     "ev_0214",
+     "ev_0221",
+     "ev_0225",
+     "ev_0227",
+     "ev_0270",
+     "ev_0274",
+     "ev_0283",
+     "ev_0285"
+    ]
+   },
+   "command_and_control": {
+    "body": "Configuration. The sample's C2 configuration is two HTTPS endpoints, carried encoded in the data section and reconstructed at run time: `https://titnovacrion.top/live/` (.data+0x10250, decoder reference 0x69b3) and `https://skinnyjeanso.com/live/` (.data+0x10278, reference 0x6a1f) [ev_0019], [ev_0021]. fcn.0x6988 decodes both and writes them into the candidate slot array at 0x10568 under a byte counter, then admits a third, caller-supplied URL before writing the null terminator; we assess that third slot is where a server-pushed URL from the `URLS|%d|%s` reply is installed, making the built-in pair a bootstrap list rather than the full contact set [ev_0090], [ev_0169], [ev_0182], [ev_0019], [ev_0021]. Raw-string IOC extraction returned neither domain — cleartext-string negatives on this sample are scope-limited, and the decode-backed endpoints are the indicators of record [ev_0254], [ev_0006].\n\nTransport. The channel is WinINet over TCP/443 (T1071.001 Web Protocols), and every network API it needs is resolved at run time by CRC32 name hashing rather than imported: the resolved hash set covers InternetOpen*, InternetConnectA, HttpOpenRequestA, HttpSendRequestA, InternetReadFile, InternetCrackUrlA and InternetSetOptionA, against only 5 static imports from kernel32/user32 [ev_0020], [ev_0004], [ev_0136], [ev_0137]. fcn.0x5030 builds the request. It decodes `Content-Type: application/x-www-form-urlencoded` (.data+0xfb68, reference 0x5076), decodes the verb from the `POST`/`GET` strings (.data+0xfba0 / 0xfbb0, references 0x5100 / 0x5180), passes the accept-type array `*/*` (.data+0xfb60) to HttpOpenRequestA through slot 0x10e10, and on the variant that carries a body passes the content-type and the body buffer to HttpSendRequestA (slot 0x10e18), while the alternate variant calls HttpSendRequestA with no headers or body [ev_0019], [ev_0021], [ev_0129], [ev_0175]. The reply is read with InternetReadFile (slot 0x10e30) [ev_0136], [ev_0137]. The same function calls InternetSetOptionA(hRequest, 0x1f, &0x4380, 4) through slot 0x10e40; 0x4380 is bit-for-bit the combination of SECURITY_FLAG_IGNORE_REVOCATION, IGNORE_UNKNOWN_CA, IGNORE_WRONG_USAGE and IGNORE_REDIRECT_TO_HTTPS, so we assess the channel is configured to proceed past certificate and redirect validation failures — a reading held at lower weight because it rests on a single decompiler locus [ev_0129], [ev_0136], [ev_0185].\n\nBeacon and tasking. The reversing pass identifies the beacon thread as fcn.0x5750, started from fcn.0x6250 after the install branch sets a global to 2 and the non-install path sets it to 1, i.e. type = 2 on a fresh install and 1 thereafter [ev_0169], [ev_0191], [ev_0185], [ev_0175]. The check-in body is `counter=%d&type=%d&guid=%s&os=%d&arch=%d&username=%s&group=%lu&ver=%d.%d&up=%d&direction=%s` (.data+0xfd40, references 0x5b0f / 0x5bfe / 0x5d23), sent as the POST payload [ev_0019], [ev_0021]. The same pass records a 180 s (0x708 × 100 ms) wait before first contact, then jittered 450–599 s cycles that stretch to 1500–2099 s after C2 command 0x13 [ev_0191]. The identifying fields are host-derived: `group` is traced to the FNV hash of the decoded string `Littlehw` and `guid` to the volume formatter `%04X%04X%04X%04X%08X%04X` fed by FindFirstVolumeW/GetVolumeInformationW [ev_0021], [ev_0019], [ev_0109], [ev_0198]. Bodies and replies are handled by the KSA/PRGA pair that capa flags as RC4 at 0xcaac, keyed with the run-time-decoded string `12345` (.data+0xfd30) and encoded with the standard base64 alphabet (.data+0x10160) [ev_0008], [ev_0019], [ev_0021], [ev_0167], [ev_0175], [ev_0193]. Replies are tokenised on CRLF then `|` into `URLS`, `URLS|%d|%s`, `COMMAND`, `CLEARURL` and `ERROR` [ev_0019], [ev_0021], and routed to handlers (URLS|id|url → 0xccbc, CLEARURL → 0xce20, COMMAND → 0x3cf4, ERROR ignored), with the COMMAND ids 2, 3, 4, 0xc–0xf and 0x11–0x15 covering collectors, downloaders, in-memory execution, cleanup and sleep-mode changes [ev_0203], [ev_0169], [ev_0175]. No second stage is embedded: the file yields 0 carved payloads and 4 independent embedded-PE checks were negative, so tasking must be fetched [ev_0025], [ev_0142]; download URLs are assembled from the stored C2 entry up to `//` plus `/files/` (.data+0xfb00, reference 0x3ef6) and a token [ev_0021], [ev_0019], and the results reach execution through the parameterised rundll32 templates in fcn.0xb4cc or the VirtualAlloc(RWX)+thread path [ev_0195], [ev_0189], [ev_0125].\n\nNot observed. Neither endpoint appears in any telemetry from this run. The sandbox network record has no DNS entry, no HTTP entry and no channel, and all of its flows belong to other pids (2928, 5800, 6092, 4264, 2508, 1380; the sample's processes are 83 and 89) [ev_0209], [ev_0214], [ev_0016]. The 587 s / 9,087-packet capture holds 17 external conversations, none of them to the two endpoints decoded from the data section [ev_0021], [ev_0019]; its DNS extract contains no query for either name, its HTTP extract is GET-only against the ambient Microsoft/OCSP/CRL estate, it shows no regular contact interval, and no SNI was extracted, so 443 destinations are classified by context alone [ev_0234], [ev_0235], [ev_0236], [ev_0017]. The largest conversation, 104.18.19.203:443 (3,666 packets / 229 KB), is attributed by no evidence to the sample and has no tie to these endpoints [ev_0017], [ev_0234]. Both observation windows (600 s run, 587 s capture) exceed the 180 s pre-beacon wait, so non-contact is not a timing artifact of this run [ev_0191], [ev_0227]; the in-sample gates — the process-count 75/50 check and the PEB BeingDebugged check [ev_0088], [ev_0174], [ev_0181], [ev_0225], and the single-instance mutex `runnung` [ev_0019], [ev_0021] — are the better-supported explanation for the channel never being reached. The C2 capability is therefore established at code level only: no session, no tasking reply, no downloaded payload and no exfiltrated body were observed, and 0 files were dropped [ev_0015].\n\nIndicators and attribution. The two endpoints are the indicators of record, and third-party lookups returned malicious verdicts on both domains and both URLs (16/91 and 18/91 for titnovacrion.top and its /live/ path; 19/91 and 21/91 for skinnyjeanso.com and its /live/ path) [ev_0027], [ev_0028], [ev_0034], [ev_0035], [ev_0232], [ev_0233], [ev_0241], [ev_0244]. Family naming attached to the file and to this infrastructure (Latrodectus / IcedId / Ulise) comes from third-party reputation and sandbox classification, not from a C2 session in this run [ev_0018], [ev_0014], [ev_0232], [ev_0241].",
+    "title": "Command and Control",
+    "evidence_refs": [
+     "ev_0004",
+     "ev_0006",
+     "ev_0008",
+     "ev_0014",
+     "ev_0015",
+     "ev_0016",
+     "ev_0017",
+     "ev_0018",
+     "ev_0019",
+     "ev_0020",
+     "ev_0021",
+     "ev_0025",
+     "ev_0027",
+     "ev_0028",
+     "ev_0034",
+     "ev_0035",
+     "ev_0088",
+     "ev_0090",
+     "ev_0109",
+     "ev_0125",
+     "ev_0129",
+     "ev_0136",
+     "ev_0137",
+     "ev_0142",
+     "ev_0167",
+     "ev_0169",
+     "ev_0174",
+     "ev_0175",
+     "ev_0181",
+     "ev_0182",
+     "ev_0185",
+     "ev_0189",
+     "ev_0191",
+     "ev_0193",
+     "ev_0195",
+     "ev_0198",
+     "ev_0203",
+     "ev_0209",
+     "ev_0214",
+     "ev_0225",
+     "ev_0227",
+     "ev_0232",
+     "ev_0233",
+     "ev_0234",
+     "ev_0235",
+     "ev_0236",
+     "ev_0241",
+     "ev_0244",
+     "ev_0254"
+    ]
+   },
+   "packing_obfuscation": {
+    "body": "**No packer.** The file is an unpacked PE: 5 sections, maximum section entropy 6.48 in .data, 5 imports from only 2 libraries (kernel32.dll, user32.dll), and \"packer signatures none\" [ev_0004]. The packer scan's `\"packed\": true` boolean is refuted by its own output: the sole matching rule is `HasRichSignature` @0xb8 (the b'Rich' MSVC linker marker) with no packer name and a \"Nothing found\" string scan [ev_0139][ev_0145][ev_0251]. That boolean is an artifact of the Rich header and must not be propagated; [ev_0004] stands. What the sample does carry in .data is encrypted configuration, not packed code.\n\n**String obfuscation is the primary mechanism.** All operational text lives in .data as header-validated rolling-XOR blobs: 4-byte seed 0x33629d40, 2-byte length XOR the seed's low 16 bits, then the payload, with keystream byte *i* = `(seed + i + 1) & 0xFF` so the first key byte is 0x41 [ev_0021]. Decoding is performed at run time by routine 0xae78, called from roughly twenty sites; 101 texts decode under the platform's static scheme and 81 of the same set decode by FLOSS emulation [ev_0021][ev_0019], and an independent Ghidra re-derivation reproduced the keystream byte-for-byte [ev_0168]. The consequence is visible in the parsers: 218 strings were recorded but the IOC scan returned none [ev_0005][ev_0006], and the default 31-rule YARA corpus returned 0 hits [ev_0007] — a zero that cannot be read as exculpatory, since the `yara_scan` tool failed twice in this run [ev_0048][ev_0050] and no rule in the corpus targets this family. One token remains unsettled between the two decoders: the header-validated static decode yields `init -zzzz=\"%s\\%s\"` @0xfac0 [ev_0021] while emulation yields `init -=\"%s\\%s\"` @0x4571 [ev_0019]; both readings are held, and the divergence is confined to one format-string token.\n\n**Dynamic API resolution.** The import directory is complete at 2 DLLs, yet the binary embeds 164 name-hash constants that resolve to functions of wininet, shell32, advapi32, urlmon, shlwapi, iphlpapi, ole32 and ntdll — the full HTTP, filesystem, registry and native-API surface used by the sample [ev_0004][ev_0020]. capa independently matches \"resolve function by parsing PE exports\" @0x869c and \"PEB access\" @0x8690 for the walk that finds them, and \"contain obfuscated stackstrings\" @0x9484, the routine region holding the hashed name table [ev_0008]. We assess this is why the visible import table understates the sample's capabilities, and it is the source of the T1027.007 behaviour rather than any code packer.\n\n**Encrypted content, not encrypted code.** The C2 endpoints [ev_0021] and the entire task vocabulary (`URLS`, `URLS|%d|%s`, `COMMAND`, `CLEARURL`, `ERROR`) [ev_0019] are decoded from the same .data blobs at run time, the RC4 key `\"12345\"` is itself a decoded blob @0xfd30 and the standard base64 alphabet sits at 0x10160 [ev_0021]; capa corroborates RC4 PRGA @0xcaac, CRC32 @0x6aa4 and FNV @0xc99c [ev_0008]. Application-layer bodies are therefore non-plaintext on the wire. A server-side report for this sample returned an empty ATT&CK mapping while warning that the file \"might be obfuscated or encrypted\" [ev_0252]; consistent with the above, that zero reflects a heuristic operating on a cleartext layer the sample deliberately does not expose. In summary: no known packer, obfuscation applied to strings, API names and configuration rather than to the code image, and no hidden embedded image in the sections parsed [ev_0004].",
+    "title": "Packing & Obfuscation",
+    "evidence_refs": [
+     "ev_0004",
+     "ev_0005",
+     "ev_0006",
+     "ev_0007",
+     "ev_0008",
+     "ev_0019",
+     "ev_0020",
+     "ev_0021",
+     "ev_0048",
+     "ev_0050",
+     "ev_0139",
+     "ev_0145",
+     "ev_0168",
+     "ev_0251",
+     "ev_0252"
+    ]
+   },
+   "service_process_kill": null,
+   "evasion_antiforensics": {
+    "body": "**Encoded strings, decoded just before use.** No operational literal is stored in the clear. All 101 texts the platform recovered from the data sections use one encoding: a 4-byte seed header, a 2-byte length XORed with the seed's low 16 bits, and an xor8 rolling stream over the text [ev_0021]; FLOSS recovered 81 of the same strings through the same routine at 0xae78 [ev_0019]. The disassembly agrees with that scheme: the decoder reads the seed, derives the length, and walks the ciphertext byte by byte into a caller-supplied stack buffer, so a literal is plaintext only in the frame of the statement using it. The stored bytes still read as encoded data — the blob at image-base+0xfa00, for example, is the stored form of \"runnung\". The two /live/ URLs, the reconnaissance command lines (ipconfig /all, systeminfo, nltest, net view/group, wmic), the install-path fragments and the HTTP body field names therefore never appear as contiguous readable text: the run's IOC extraction returned nothing [ev_0006] and 0 of 31 YARA rules matched [ev_0007].\n\n**Hashed API resolution against a nearly empty import table.** The import directory names five functions from exactly two libraries, kernel32.dll and user32.dll, and that list is complete [ev_0004]. Everything else is obtained through hashes resolved at run time: the file holds 164 constants matching CRC32/FNV hashes of Windows export and module names across kernel32/kernelbase, user32, wininet, shell32, advapi32, urlmon, shlwapi, ole32, iphlpapi and ntdll [ev_0020], with a PEB walk at 0x8690, PE-export parsing at 0x869c, CRC32 hashing at 0x6aa4 and FNV hashing at 0xc99c [ev_0008]. The decompilation captured this run shows the mechanism: sub_0xa59c places 37 crc32_ascii ntdll hashes on the stack as constants — 0xe0762feb (NtAllocateVirtualMemory), 0xb46508b5 (RtlGetVersion), 0xca6b0d7b (NtCreateThread), 0xa5c44c50 (NtQueryInformationProcess), … 0xf675d37d (NtQueryInformationFile) — and resolves each in a loop; all 37 values appear in [ev_0020]. capa records the hash tables at 0x9484 as obfuscated stackstrings and tags this behaviour T1027 [ev_0008]. Nothing in the static import table names either these ntdll primitives or the wininet HTTP calls (InternetOpenW, HttpSendRequestA, InternetReadFile) that are also held as hashes [ev_0020].\n\n**Name and type masquerade; execution through a signed utility.** The artifact is a DLL (IMAGE_FILE_DLL) with four exports, exposed through a routine the reversing tool labels UpdaterTag.dll_extra [ev_0004], and the submission is named as an .exe. The install code builds copy names from \"Custom_update\" and \"Update_%x\" and supplies both \".dll\" and \".exe\" extensions [ev_0019], [ev_0021]; the reversing pass reports the extension is chosen opposite to the payload's real type [ev_0083], [ev_0139]. Execution is proxied through rundll32: the sample's own string table carries \"C:\\WINDOWS\\SYSTEM32\\rundll32.exe %s,%s\" and a single-argument form [ev_0019], [ev_0021], the sandbox record lists two rundll32.exe processes [ev_0012], Sigma fired on \"DLL Call by Ordinal Via Rundll32.EXE\" and \"Unsigned DLL Loaded by Windows Utility\" [ev_0009], and the LOLBIN catalogue records rundll32 (T1218.011) over three command lines [ev_0011]. The file is unsigned [ev_0003] and \"Unsigned PE\" is among the sandbox's own signatures [ev_0014].\n\n**Rename-then-delete of the sample's own file.** The routine at 0x3a24 acts on the module path cached at image-base+0x10448. It opens that file with CreateFileW(path, 0x10000 /*DELETE*/, 0, NULL, 3 /*OPEN_EXISTING*/, 0x80, NULL), builds a FILE_RENAME_INFO-shaped buffer sized to the wide name plus 0x18 bytes around the decoded string \":wtfbbq\" [ev_0019], [ev_0021], and calls SetFileInformationByHandle with class 3 (FileRenameInfo). It then frees the buffer, closes the handle, reopens the same path with DELETE access, passes a one-byte TRUE with class 4 (FileDispositionInfo), and closes again. Class 4 with TRUE is delete-on-close, and the reversing pass reads the function as the uninstall path (command 0xf) that deletes the installed file and the running module before ExitProcess(0) [ev_0093], [ev_0094], [ev_0095], [ev_0184], [ev_0195]. Renaming the file into the colon-prefixed `:wtfbbq` name first, we assess, is intended to take it out of ordinary name-based enumeration and recovery before the delete completes. The sandbox record lists no dropped files [ev_0015], which is consistent with a self-deleting sample, although that record alone does not show the delete executing.\n\n**Packing is not the mechanism.** We do not assess the file as packed: [ev_0004] records no packer signature and the highest section entropy is 6.48 (.data), and the `packed: true` boolean recorded for the sample in this run is driven only by the Rich-header artifact and is unsupported by the PE facts — the reversing pass reached the same conclusion. The hiding in this sample is string encoding, API-name hashing and file-name churn, not wrapped code.",
+    "title": "Defense Evasion & Anti-Forensics",
+    "evidence_refs": [
+     "ev_0003",
+     "ev_0004",
+     "ev_0006",
+     "ev_0007",
+     "ev_0008",
+     "ev_0009",
+     "ev_0011",
+     "ev_0012",
+     "ev_0014",
+     "ev_0015",
+     "ev_0019",
+     "ev_0020",
+     "ev_0021",
+     "ev_0083",
+     "ev_0093",
+     "ev_0094",
+     "ev_0095",
+     "ev_0139",
+     "ev_0184",
+     "ev_0195"
+    ]
+   },
+   "shadow_copy_destruction": [],
+   "message_packet_structure": null
+  },
+  "c2_channels": [
+   {
+    "name": "HTTPS web-command C2 (check-in, tasking, payload retrieval)",
+    "protocol": "HTTPS through a WinINet HTTP client. Two endpoints are decoded at run time from a rolling-XOR blob header into a candidate array: https://titnovacrion.top/live/ (@0x10250, referrer 0x69b3) and https://skinnyjeanso.com/live/ (@0x10278, referrer 0x6a1f) [ev_0021][ev_0019]. The client API is resolved by CRC32 name hashing rather than the static IAT: the file holds wininet.dll!InternetOpenW, InternetConnectA, HttpOpenRequestA, HttpSendRequestA, InternetReadFile, InternetCrackUrlA, InternetCloseHandle, InternetSetOptionA, InternetOpenUrlA and InternetOpenUrlW hashes, plus urlmon.dll!URLDownloadToFileW/URLDownloadToFileA, against only 5 static imports [ev_0020]. No IP-literal, DNS-tunnel or non-web transport appears in the decoded configuration; only the two HTTPS endpoints are present [ev_0021][ev_0019].",
+    "endpoints": [
+     "https://titnovacrion.top/live/",
+     "https://skinnyjeanso.com/live/"
+    ],
+    "encryption": "Request and reply bodies are RC4 stream-encrypted with the run-time-decoded key \"12345\" and base64-coded with the standard alphabet ABC...+/ [ev_0021][ev_0019]; capa independently flags 'encrypt data using RC4 PRGA' @0xcaac [ev_0008], and the base64 codec and alphabet install are separately traced [ev_0193]. Transport is TLS; one decompiler locus reads InternetSetOptionA(hRequest, 0x1f, &0x4380, 4), which we assess sets the SECURITY_FLAG_IGNORE_REVOCATION / IGNORE_UNKNOWN_CA / IGNORE_WRONG_USAGE / IGNORE_REDIRECT_TO_HTTPS bits and so weakens certificate and redirect validation - a single-locus reading held at lower confidence [ev_0129][ev_0020].",
+    "evidence_ref": "ev_0019",
+    "beacon_format": "counter=%d&type=%d&guid=%s&os=%d&arch=%d&username=%s&group=%lu&ver=%d.%d&up=%d&direction=%s (type 2 at install, 1 otherwise, version 1.2; group is FNV-1 of the decoded 'Littlehw' [ev_0008][ev_0021], guid is volume-derived). Reply vocabulary: URLS, URLS|%d|%s, COMMAND, CLEARURL, ERROR, dispatched to a command table mapping ids 2,3,4,0xc-0xf,0x11-0x15 to collectors, downloads, in-memory execution, uninstall and sleep-mode handlers [ev_0019][ev_0021][ev_0169]. Timing: 180 s before first contact, then 450-599 s jittered cycles, lengthened to 1500-2099 s after command 0x13 [ev_0191].",
+    "evidence_refs": [
+     "ev_0008",
+     "ev_0017",
+     "ev_0019",
+     "ev_0020",
+     "ev_0021",
+     "ev_0125",
+     "ev_0129",
+     "ev_0169",
+     "ev_0191",
+     "ev_0193"
+    ],
+    "packet_layout": "Form-encoded HTTP request with the check-in in the body: verb POST (GET is also present as a decoded verb), header 'Content-Type: application/x-www-form-urlencoded', accept '*/*' [ev_0129], User-Agent either 'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; Tob 1.1)' or 'curl/7.88.1' [ev_0019][ev_0021]. The body is RC4-then-base64; the reply is read with InternetReadFile and tokenised on CRLF then '|' in the dispatcher [ev_0020][ev_0169]. Download URLs are assembled from the stored C2 entry truncated at '//' plus '/files/' and a token (e.g. 'files/bp.dat', '%d.dat'), with fetched modules written as <tick>.exe / <tick>.dll under the user profile, and one command path allocates RWX memory for a fetched payload and starts a thread on it [ev_0021][ev_0019][ev_0169][ev_0125]. Neither endpoint was reached in this run; the 587 s capture holds 17 external conversations with no regular-interval contact, so the layout is code-level and unexercised [ev_0017]."
+   }
+  ]
+ }
+}

@@ -34,6 +34,23 @@ JUDGE_ONLY_TECHNIQUE_MARKER = (
     "stated by the judge and claimed by no analyst; a technique the judge states is "
     "published as its own claim"
 )
+
+
+def judge_and_findings_note(agents: list[str]) -> str:
+    """The note on a technique the judge named and analysts named on findings only.
+
+    The judge's rule publishes it; no analyst claim carries it, and the
+    analysts that named it on a finding are named, since they are the
+    sources the run's corroboration record lists for it. Said instead of
+    ``JUDGE_ONLY_TECHNIQUE_MARKER``, which would deny that any analyst named it.
+    """
+    named = ", ".join(dict.fromkeys(str(a) for a in agents if str(a).strip()))
+    return (
+        f"stated by the judge; named on a finding, not on a claim, by {named}; a technique "
+        "the judge states is published as its own claim"
+    )
+
+
 # The note on a technique the judge was asked about after its verdict and gave
 # no answer for: it is published, or not, as it would have been without the
 # question, and the row says the judge did not confirm it.

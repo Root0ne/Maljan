@@ -935,6 +935,27 @@ class EmulatedStrings(BaseModel):
     recovered_by: dict[str, list[RecoveredValue]] = Field(default_factory=dict)
 
 
+class ClaimNotDiscussed(BaseModel):
+    """An analyst claim in force the report's body neither cites nor discusses.
+
+    Listed by ``reporting.claim_coverage`` after the body is composed, with
+    the claim as the analyst wrote it and what the check found: how many of
+    the identifiers (or, for a claim that names none, the words) it names the
+    body carries.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    agent: str
+    claim_number: int
+    claim: str
+    evidence_ref: str = ""
+    confidence: float | None = None
+    carried: int = 0
+    named: int = 0
+    counted: str = "identifiers"
+
+
 class FlaggedStatement(BaseModel):
     """A sentence of the report model's that a check asked about and that survived the retry.
 
@@ -1191,6 +1212,10 @@ class MalwareReport(BaseModel):
     # about and the retry left standing, marked in place by the renderers;
     # empty on a report stored before the field existed.
     flagged_statements: list[FlaggedStatement] = Field(default_factory=list)
+    # The analyst claims in force the body neither cites nor discusses, listed
+    # after the body is composed (``reporting.claim_coverage``) and printed in
+    # a section of their own; empty on a report stored before the field existed.
+    claims_not_discussed: list[ClaimNotDiscussed] = Field(default_factory=list)
     # For each technique a YARA rule of this run asserted, the rules and how
     # many of each rule's own strings matched (``{"rule", "strings"}``), as the
     # scan answered. Read by the ATT&CK table's "rule match only" note and by

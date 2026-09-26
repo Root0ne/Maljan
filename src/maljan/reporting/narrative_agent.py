@@ -281,11 +281,36 @@ def _coerce_narrative_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def build_prompt_text(report: MalwareReport) -> str:
+# The heading of the narrative round's list of the analysts' claims in force.
+CLAIMS_IN_FORCE_HEADING = (
+    "Analyst claims in force (each under its analyst and claim number; the body may cite "
+    "a claim by that label):"
+)
+
+
+def claims_in_force_lines(isr_reports: Any) -> list[str]:
+    """Every claim in force, whole, under its label, for the narrative round's prompt."""
+    from maljan.reporting.claim_coverage import claims_in_force
+
+    claims = claims_in_force(isr_reports)
+    if not claims:
+        return []
+    lines = [CLAIMS_IN_FORCE_HEADING]
+    for claim in claims:
+        evidence = f" — {claim.evidence_ref}" if claim.evidence_ref.strip() else ""
+        lines.append(f"  - [{claim.label}] {claim.claim}{evidence}")
+    lines.append("")
+    return lines
+
+
+def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
     """Return the human-readable prompt body (used by ``_build_prompt`` and tests).
 
     Every published technique, signature, indicator and persistence entry,
-    each whole: the model reads all of what the run established.
+    each whole: the model reads all of what the run established. With
+    ``isr_reports``, every analyst claim in force too, each whole under its
+    label, so the summary and the key findings are written over every claim
+    the run holds.
     """
     lines: list[str] = [
         "DETERMINISTIC FINDINGS",
@@ -414,6 +439,9 @@ def build_prompt_text(report: MalwareReport) -> str:
             ind = ", ".join(report.static.obfuscation_indicators)
             lines.append(f"Obfuscation indicators: {ind}")
         lines.append("")
+
+    # --- The analysts' claims in force -----------------------------------
+    lines.extend(claims_in_force_lines(isr_reports))
 
     lines.extend(
         [
@@ -592,11 +620,15 @@ class NarrativeAgent:
             logger.warning("NarrativeAgent: %s", reason)
 
     def prompt_chars(
-        self, report: MalwareReport, facts_block: str = "", run_state: str = ""
+        self,
+        report: MalwareReport,
+        facts_block: str = "",
+        run_state: str = "",
+        isr_reports: Any = None,
     ) -> int:
         """The characters of this round's first prompt, as :meth:`generate` builds it."""
         try:
-            messages = self._build_prompt(report, facts_block, run_state)
+            messages = self._build_prompt(report, facts_block, run_state, isr_reports)
             return sum(len(str(message.content)) for message in messages)
         except Exception:  # noqa: BLE001 — a size is never worth a lost round
             return len(_SYSTEM_PROMPT) + len(facts_block) + len(run_state)
@@ -617,7 +649,7 @@ class NarrativeAgent:
         Both surfaces are wrapped in broad ``except`` so the report node can
         always rely on the fallback narrative.
         """
-        messages = self._build_prompt(report, facts_block, run_state)
+        messages = self._build_prompt(report, facts_block, run_state, isr_reports)
         self._note_room(sum(len(str(message.content)) for message in messages))
         # Where the sentences a check leaves standing are recorded, to be
         # marked where they stand.
@@ -849,7 +881,11 @@ class NarrativeAgent:
         return output
 
     def _build_prompt(
-        self, report: MalwareReport, facts_block: str = "", run_state: str = ""
+        self,
+        report: MalwareReport,
+        facts_block: str = "",
+        run_state: str = "",
+        isr_reports: Any = None,
     ) -> list[BaseMessage]:
         """The system turn and the human turn, the two standing blocks leading the human turn.
 
@@ -859,7 +895,7 @@ class NarrativeAgent:
         """
         from maljan.pipeline.run_state import with_run_state
 
-        body = build_prompt_text(report)
+        body = build_prompt_text(report, isr_reports)
         if facts_block:
             body = f"{facts_block}\n\n{body}"
         if run_state:

@@ -126,13 +126,15 @@ if TYPE_CHECKING:
 _NARRATIVE_TIMEOUT_SECONDS = 600
 
 
-def _narrative_timeout(narrative_agent: Any, report: Any, facts: str, run_state: str) -> float:
+def _narrative_timeout(
+    narrative_agent: Any, report: Any, facts: str, run_state: str, isr_reports: Any = None
+) -> float:
     """The narrative round's wait: sized from its output cap and the measured pace."""
     try:
         return float(
             narrative_agent.round_timeout(
                 _NARRATIVE_TIMEOUT_SECONDS,
-                narrative_agent.prompt_chars(report, facts, run_state),
+                narrative_agent.prompt_chars(report, facts, run_state, isr_reports),
             )
         )
     except Exception as exc:  # noqa: BLE001 — a wait that cannot be sized is the configured one
@@ -4900,7 +4902,13 @@ def make_report_node(
         _narrative_facts = pack_text(state, container)
         _narrative_state = render_run_state(state)
         narrative_seconds = (
-            _narrative_timeout(narrative_agent, report, _narrative_facts, _narrative_state)
+            _narrative_timeout(
+                narrative_agent,
+                report,
+                _narrative_facts,
+                _narrative_state,
+                state.get("isr_reports"),
+            )
             if narrative_agent is not None
             else float(_NARRATIVE_TIMEOUT_SECONDS)
         )
@@ -5006,6 +5014,26 @@ def make_report_node(
             for _reason in getattr(composer, "degradations", None) or []:
                 if _reason not in report.degradation_reasons:
                     report.degradation_reasons.append(str(_reason))
+
+        # Every claim in force the composed body neither cites nor discusses,
+        # listed in a section of its own rather than lost with nothing saying
+        # so (``reporting.claim_coverage``). Read once the body is written.
+        try:
+            from maljan.reporting.claim_coverage import claims_not_discussed
+
+            report.claims_not_discussed = claims_not_discussed(report, state.get("isr_reports"))
+            report.run_summary = {
+                **(report.run_summary or {}),
+                "claims_not_discussed": len(report.claims_not_discussed),
+            }
+            if report.claims_not_discussed:
+                logger.info(
+                    "report_node: %d claim(s) in force are neither cited nor discussed in "
+                    "the body; they are listed in their own section.",
+                    len(report.claims_not_discussed),
+                )
+        except Exception as exc:  # noqa: BLE001 — a coverage read never costs the report
+            logger.warning("report_node: the claim coverage was not read (%s).", exc)
 
         # Deterministic figures (inline SVG + Ghidra
         # code listings) generated from the report's own data — real charts, no

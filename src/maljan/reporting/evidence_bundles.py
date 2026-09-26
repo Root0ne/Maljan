@@ -170,18 +170,24 @@ _SECTION_CLAIM_KEYWORDS: dict[str, tuple[str, ...]] = {
 
 
 def _claims_text(report: MalwareReport, isr_reports: dict[str, Any] | None) -> list[dict[str, str]]:
-    """Flatten every ISR claim into ``{claim, evidence_ref, agent}`` dicts."""
-    out: list[dict[str, str]] = []
-    for agent_id, isr in (isr_reports or {}).items():
-        for c in getattr(isr, "claims", None) or []:
-            out.append(
-                {
-                    "claim": str(getattr(c, "claim", "")),
-                    "evidence_ref": str(getattr(c, "evidence_ref", "")),
-                    "agent": str(agent_id),
-                }
-            )
-    return out
+    """Every claim in force as ``{claim, evidence_ref, agent, label}``, in the answers' order.
+
+    ``label`` names the claim by its analyst and its number in the answer in
+    force (``claim_coverage.claim_label``): the name the coverage check reads
+    a citation of the claim by, and the one the report lists it under when the
+    body neither cites nor discusses it.
+    """
+    from maljan.reporting.claim_coverage import claims_in_force
+
+    return [
+        {
+            "claim": claim.claim,
+            "evidence_ref": claim.evidence_ref,
+            "agent": claim.agent,
+            "label": claim.label,
+        }
+        for claim in claims_in_force(isr_reports)
+    ]
 
 
 def _filter_claims(claims: list[dict[str, str]], keywords: tuple[str, ...]) -> list[dict[str, str]]:
