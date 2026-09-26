@@ -3318,21 +3318,20 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             )
 
         # Slot-topology parity with the initial fan-out (builder.py). On a
-        # single-slot local llama-server the analysts' revise calls must NOT
+        # single-slot local llama-server the analysts' revise calls must not
         # run concurrently or they clobber each other's per-slot recurrent
-        # DeltaNet state → full re-prefill every step (the 2026-07-13 root
-        # cause; see LLMConfig.parallel_analysts). The initial pass is
-        # serialised by the graph edges, but this revision node fans out
-        # itself, so it must honour the same flag. When sequential, await each
-        # revise in turn (exclusive slot use); when parallel, keep the
-        # concurrent gather for hosted multi-slot APIs. Both branches tolerate
-        # a per-analyst failure (mirrors gather(return_exceptions=True)) so one
-        # bad revise never aborts the round.
-        parallel = True
-        try:
-            parallel = bool(container.config.llm.parallel_analysts)
-        except AttributeError:
-            parallel = True
+        # state and every step re-processes its prompt (see
+        # LLMConfig.parallel_analysts). The initial pass is serialised by the
+        # graph edges, but this revision node fans out itself, so it follows
+        # the job's resolved analyst mode (``pipeline.analyst_mode``). When
+        # sequential, await each revise in turn (exclusive slot use); when
+        # parallel, keep the concurrent gather for hosted multi-slot APIs.
+        # Both branches tolerate a per-analyst failure (mirrors
+        # gather(return_exceptions=True)) so one bad revise never aborts the
+        # round.
+        from maljan.pipeline.analyst_mode import analyst_mode_of
+
+        parallel = analyst_mode_of(container).parallel
 
         results: list[Any] = []
         if parallel:
@@ -3529,6 +3528,16 @@ def _generation_snapshot(container: Any) -> dict[str, Any] | None:
         logger.debug("the generation rate was not recorded on the run summary: %s", exc)
         return None
     return snapshot if isinstance(snapshot, dict) else None
+
+
+def _analyst_mode_record(container: Any) -> dict[str, Any]:
+    """The run summary's ``profile.analyst_mode``: the mode this job ran its analysts in."""
+    from maljan.pipeline.analyst_mode import analyst_mode_of
+
+    try:
+        return analyst_mode_of(container).to_dict()
+    except Exception:  # noqa: BLE001 — a record is never worth a lost summary
+        return {}
 
 
 def _spend_stop_of(exc: BaseException) -> SpendCeilingStop | None:
@@ -4211,6 +4220,7 @@ def make_judge_node(
                         container.config.agents.profile,
                         _analyst_keys,
                         [k for k in _analyst_keys if k not in BUILTIN_AGENTS],
+                        analyst_mode=_analyst_mode_record(container),
                     )
                     .set_stages(
                         stage_rollup(

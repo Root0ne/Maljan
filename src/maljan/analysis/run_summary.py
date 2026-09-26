@@ -1638,17 +1638,27 @@ class RunSummaryBuilder:
         self._stages = [dict(row) for row in stages]
         return self
 
-    def set_profile(self, name: str, analysts: list[str], custom: list[str]) -> RunSummaryBuilder:
+    def set_profile(
+        self,
+        name: str,
+        analysts: list[str],
+        custom: list[str],
+        *,
+        analyst_mode: dict[str, Any] | None = None,
+    ) -> RunSummaryBuilder:
         """Record which ensemble ran (spec §5).
 
         ``custom`` is the subset of ``analysts`` that is not one of the four
         built-in definitions — what the report and the pipeline panel badge, so
         a reader can tell a measured run from an operator's own arrangement.
+        ``analyst_mode`` is the run mode the job resolved for its analysts
+        (``mode``, ``setting``, ``reason``), present when one was recorded.
         """
         self._profile = {
             "name": name,
             "analysts": list(analysts),
             "custom": list(custom),
+            **({"analyst_mode": dict(analyst_mode)} if analyst_mode else {}),
         }
         return self
 

@@ -551,6 +551,54 @@ def window_from_llama_props(payload: Any, _model: str = "") -> int:
     return 0
 
 
+def slots_from_llama_props(payload: Any) -> int:
+    """llama.cpp's ``/props``: how many requests the server serves at once, or ``0``.
+
+    ``total_slots`` is the number of slots the server was started with
+    (``--parallel``). Read from the same answer the window is, so knowing it
+    costs no request of its own.
+    """
+    if not isinstance(payload, dict):
+        return 0
+    value = payload.get("total_slots")
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return 0
+    return value
+
+
+_slots_lock = threading.Lock()
+# Server root -> (when it was read, the slot count its ``/props`` reported).
+_slots: dict[str, tuple[float, int]] = {}
+
+
+def _note_slots(props_url: str, slots: int) -> None:
+    """Remember the slot count the ``/props`` at ``props_url`` reported."""
+    if slots <= 0:
+        return
+    root = props_url[: -len(LLAMA_PROPS_PATH)] if props_url.endswith(LLAMA_PROPS_PATH) else ""
+    if not root:
+        return
+    with _slots_lock:
+        _slots[root.rstrip("/")] = (time.monotonic(), slots)
+
+
+def reported_slots(endpoint: object) -> int:
+    """The slot count the llama.cpp server at ``endpoint`` last reported, or ``0``.
+
+    Known only from a window probe that read its ``/props``, and believed for
+    as long as that probe's window is (:data:`WINDOW_CACHE_SECONDS`).
+    """
+    root = _root_of(endpoint).rstrip("/")
+    with _slots_lock:
+        held = _slots.get(root)
+    if held is None:
+        return 0
+    stamp, slots = held
+    if time.monotonic() - stamp > WINDOW_CACHE_SECONDS:
+        return 0
+    return slots
+
+
 def window_from_model_list(payload: Any, model: str = "") -> int:
     """An OpenAI-compatible model list: the entry for ``model``, if it says.
 
@@ -736,6 +784,8 @@ def _window_in(ask: Ask, body: bytes | None, model: str) -> tuple[int, str]:
         reported = ask.read(payload, model)
     except Exception:  # noqa: BLE001 — a shape nobody anticipated is not a window
         return 0, ""
+    if ask.read is window_from_llama_props:
+        _note_slots(ask.url, slots_from_llama_props(payload))
     if ask.read is window_from_model_list:
         try:
             from maljan.llm.model_output_limits import note_from_model_list
@@ -926,6 +976,8 @@ def forget_learned_windows() -> None:
     """Drop every cached answer. For a test, and for a settings import."""
     with _learned_lock:
         _learned.clear()
+    with _slots_lock:
+        _slots.clear()
 
 
 def learn_window(

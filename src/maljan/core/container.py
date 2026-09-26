@@ -418,6 +418,9 @@ class ServiceContainer:
         self._server_registry_cache: ServerRegistry | None = None
         self._function_summarizer_cache: FunctionSummarizer | None = None
         self._narrative_agent_cache: Any | None = None
+        # The analyst run mode this job resolved (``pipeline.analyst_mode``),
+        # once; ``None`` until the first read.
+        self._analyst_mode: Any = None
         self._report_composer_cache: Any | None = None
         self._samples_dir = str(resolve_data(samples_dir))
 
@@ -1025,10 +1028,42 @@ class ServiceContainer:
     # ------------------------------------------------------------------
 
     def active_profile(self) -> Any:
-        """The ``ProfileDefinition`` this job runs."""
-        from maljan.agents.composition import active_profile
+        """The ``ProfileDefinition`` this job runs, its unset stage modes resolved.
 
-        return active_profile(self.config)
+        An analysis stage with no run mode of its own runs in the job's
+        resolved analyst mode (:meth:`analyst_mode`); a copy is returned and
+        the stored profile is never changed.
+        """
+        from maljan.agents.composition import active_profile
+        from maljan.pipeline.analyst_mode import with_resolved_modes
+
+        profile = active_profile(self.config)
+        if not any(s.kind == "analysis" and s.mode is None for s in profile.stages):
+            return profile
+        return with_resolved_modes(profile, self.analyst_mode())
+
+    def analyst_mode(self) -> Any:
+        """Whether this job's analysts run in parallel, and why (``pipeline.analyst_mode``).
+
+        Resolved once per job and logged. A mock job asks nothing of any
+        server; with ``llm.parallel_analysts`` on ``auto`` it runs its
+        analysts one after another.
+        """
+        held = self._analyst_mode
+        if held is not None:
+            return held
+        from maljan.agents.composition import analyst_keys
+        from maljan.pipeline.analyst_mode import mock_mode, resolve_analyst_mode
+
+        if self.mock:
+            resolved = mock_mode(self.config)
+        else:
+            resolved = resolve_analyst_mode(self.config, analyst_keys(self.config), probe=True)
+        with self._lock:
+            if self._analyst_mode is None:
+                self._analyst_mode = resolved
+                logger.info("%s", resolved.sentence())
+            return self._analyst_mode
 
     def analyst_keys(self) -> list[str]:
         """The ordered analyst keys of the active profile.

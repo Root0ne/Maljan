@@ -30,9 +30,10 @@ predicted, compared or drawn before the sample arrived.
 Analyst mode is per analysis stage now. ``parallel`` fans the stage's agents
 out and joins them in one barrier edge, which is right for a hosted
 multi-slot API; ``sequential`` chains them so each gets the single local
-llama-server slot to itself for its whole timeout budget. The global
-``llm.parallel_analysts`` still decides the mode of a profile that is stored as
-a plain analyst list and has never been opened as stages.
+llama-server slot to itself for its whole timeout budget. A stage that sets no
+mode of its own arrives here already given the job's resolved mode
+(``container.active_profile``, ``pipeline.analyst_mode``); one that still has
+none is read as sequential.
 """
 
 import asyncio

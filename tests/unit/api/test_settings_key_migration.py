@@ -300,9 +300,18 @@ def test_the_migration_s_stage_form_is_the_one_the_settings_model_produces():
     from maljan.core.config import stages_from_analysts
 
     mod = _load_stages_rev()
+
+    def _as_run(stages: list[dict]) -> list[dict]:
+        # A stage that is not an analysis stage runs no agents side by side, so
+        # its mode means nothing: the revision wrote ``sequential`` there, and
+        # the model now leaves it unset.
+        return [s if s["kind"] == "analysis" else {**s, "mode": None} for s in stages]
+
     # Without the triage pack: that stage is the later revision's
     # (``20260919000000_seed_triage_stage``), which inserts it in front.
-    assert mod.stage_form(["static", "dynamic"], parallel=False, max_rounds=5, consensus=0.85) == [
+    assert _as_run(
+        mod.stage_form(["static", "dynamic"], parallel=False, max_rounds=5, consensus=0.85)
+    ) == [
         stage.model_dump()
         for stage in stages_from_analysts(
             ["static", "dynamic"],
