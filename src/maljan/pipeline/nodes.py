@@ -1876,6 +1876,22 @@ def label_of(container: ServiceContainer, key: str) -> str:
         return str(key)
 
 
+def _stage_place(container: ServiceContainer, key: str, stage: Any) -> tuple[str, int, int] | None:
+    """``(stage key, place, count)`` for an agent named by its stage, or ``None`` for a label.
+
+    ``None`` when the agent has a label, a key short enough to publish, or no
+    stage to be named by; a place of 0 when it is the stage's only agent.
+    """
+    label = label_of(container, key)
+    stage_key = str(getattr(stage, "key", "") or "")
+    if label != key or len(key) < 24 or not stage_key:
+        return None
+    agents = list(getattr(stage, "agents", None) or ())
+    if len(agents) > 1 and key in agents:
+        return stage_key, agents.index(key) + 1, len(agents)
+    return stage_key, 0, 1
+
+
 def spoken_name(container: ServiceContainer, key: str, stage: Any) -> str:
     """The name a published sentence gives an agent: its label, or its stage for a long key.
 
@@ -1886,14 +1902,27 @@ def spoken_name(container: ServiceContainer, key: str, stage: Any) -> str:
     more than one, so two such agents are never named alike. The line's
     identity fields keep the key either way.
     """
-    label = label_of(container, key)
-    stage_key = str(getattr(stage, "key", "") or "")
-    if label != key or len(key) < 24 or not stage_key:
-        return label
-    agents = list(getattr(stage, "agents", None) or ())
-    if len(agents) > 1 and key in agents:
-        return f"{stage_key} analyst {agents.index(key) + 1} of {len(agents)}"
-    return f"{stage_key} analyst"
+    place = _stage_place(container, key, stage)
+    if place is None:
+        return label_of(container, key)
+    stage_key, index, count = place
+    return f"{stage_key} analyst {index} of {count}" if index else f"{stage_key} analyst"
+
+
+def claims_source(container: ServiceContainer, key: str, stage: Any) -> str:
+    """Where a debate line says an agent's claims come from, as a whole phrase.
+
+    "the <label> layer" for a named agent; for one named by its stage, the
+    stage said as a place: "analyst 2 of 3 in the analysis stage", or "the
+    analyst in the reversing stage" for a stage's only agent.
+    """
+    place = _stage_place(container, key, stage)
+    if place is None:
+        return f"the {label_of(container, key)} layer"
+    stage_key, index, count = place
+    if index:
+        return f"analyst {index} of {count} in the {stage_key} stage"
+    return f"the analyst in the {stage_key} stage"
 
 
 def announce_started(container: ServiceContainer, stage: Any) -> None:
@@ -2412,6 +2441,7 @@ def make_stage_agent_node(
                 text=summarize_claims(
                     isr.claims,
                     speaker=spoken_name(container, agent_name, stage),
+                    source=claims_source(container, agent_name, stage),
                 ),
                 round_index=0,
                 status=isr_status(isr),
@@ -3298,6 +3328,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             revised_isrs[name] = kept
             label = label_of(container, name)
             spoken = spoken_name(container, name, _home_stage(container, name))
+            source = claims_source(container, name, _home_stage(container, name))
             logger.warning(
                 "%s: the round-%d revision was not made (%s); its answer in force stands with "
                 "%d claim(s).",
@@ -3311,7 +3342,8 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 speaker=name,
                 role="reviser",
                 text=(
-                    f"{summarize_claims(kept.claims, speaker=spoken)} The revision was not made "
+                    f"{summarize_claims(kept.claims, speaker=spoken, source=source)} "
+                    "The revision was not made "
                     f"({why}); this answer stands."
                 ),
                 round_index=iteration,
@@ -3385,6 +3417,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     text=summarize_claims(
                         isr.claims,
                         speaker=spoken_name(container, name, _home_stage(container, name)),
+                        source=claims_source(container, name, _home_stage(container, name)),
                     ),
                     round_index=iteration,
                     status=isr_status(isr),

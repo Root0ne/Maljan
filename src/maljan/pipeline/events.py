@@ -316,7 +316,7 @@ def emit_agent_message(
     emit(sink, AGENT_MESSAGE, payload)
 
 
-def summarize_claims(claims: Any, *, speaker: str) -> str:
+def summarize_claims(claims: Any, *, speaker: str, source: str = "") -> str:
     """One skimmable line standing in for an analyst's full ISR text.
 
     The raw ``to_text_summary()`` is several hundred words that already restate
@@ -326,6 +326,10 @@ def summarize_claims(claims: Any, *, speaker: str) -> str:
     read differently live and on replay, which is exactly what one shared
     transcript model is supposed to prevent. The structured ``claims`` payload
     carries the detail; this is the headline.
+
+    ``source`` is the whole phrase the claims come "from", where the speaker's
+    name does not read inside "the … layer" (``nodes.claims_source``: an
+    agent named by its place in a stage); the name's layer otherwise.
     """
     items = list(claims or [])
     if not items:
@@ -337,7 +341,9 @@ def summarize_claims(claims: Any, *, speaker: str) -> str:
     if len(lead) > 240:
         lead = lead[:239] + "…"
     plural = "" if len(items) == 1 else "s"
-    headline = f"{len(items)} evidence-backed claim{plural} from the {speaker} layer."
+    headline = (
+        f"{len(items)} evidence-backed claim{plural} from {source or f'the {speaker} layer'}."
+    )
     return f"{headline} Leading: {lead}" if lead else headline
 
 
