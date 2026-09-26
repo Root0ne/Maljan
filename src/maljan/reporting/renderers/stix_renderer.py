@@ -1850,11 +1850,15 @@ def indicator_publish_reason(
     recorded the row, and ``corroborated_by`` is what a caller found for a row
     whose source is by construction the string sweep.
 
-    A network value the sample hid and only emulation recovered — a decoded,
-    stack or tight string in the run's FLOSS entry that the static string sweep
-    did not also read as a plain string (``also_plain`` names the sweep's entry
-    when it did, and the value is then the sweep's) — is a source of its own
-    (``recovered``: "recovered by emulation (decoded strings), ev_NNNN"). Hiding
+    A network value the sample hid and only a recovering tool read — one the
+    run's record (:func:`emulation_from_ledger`) holds from a FLOSS decoded,
+    stack or tight string or a ``decode_string_blobs`` result, that the static
+    string sweep did not also read as a plain string (``also_plain`` names the
+    sweep's entry when it did, and the value is then the sweep's) — is a
+    source of its own (``recovered``: "recovered by emulation (decoded
+    strings), ev_NNNN" or "decoded from the file's own bytes
+    (decode_string_blobs), ev_NNNN"). It gives standing to a row somebody
+    recorded and creates none. Hiding
     a host behind encoding is a deliberate act benign software rarely performs,
     where a plain string in a binary is routinely benign. It admits a domain,
     an address or a URL that passes every other question here — the host
@@ -2198,7 +2202,8 @@ _EMULATED_KINDS = frozenset({"decoded", "stack", "tight"})
 
 
 def _emulation_admits(host: str, recovered: str, verdict: Any) -> str | None:
-    """``recovered`` when emulation may stand as this value's source, else ``None``.
+    """``recovered`` when a recovering tool (FLOSS or the static decoder) may stand as
+    this value's source, else ``None``.
 
     Never under a Benign verdict, nor under one the judge did not state with a
     confidence (a fallback's default word), nor for a well-known benign host.
@@ -2297,12 +2302,8 @@ def _decoder_provenance(row: dict[str, Any], entry: str) -> RecoveredValue:
     references = [ref for ref in row.get("references") or [] if isinstance(ref, dict)]
     functions = [str(ref["function"]) for ref in references if ref.get("function")]
     sites = [str(ref["at"]) for ref in references if ref.get("at")]
-    floss = row.get("floss")
-    if isinstance(floss, dict):
-        if floss.get("function_rva"):
-            functions.append(str(floss["function_rva"]))
-        if floss.get("called_at_rva"):
-            sites.append(str(floss["called_at_rva"]))
+    # The row's ``floss`` is FLOSS's routine and call site, not the decoder's
+    # reading: FLOSS's own entry states it under FLOSS's name.
     return RecoveredValue(
         tool=DECODER_TOOL,
         entry=entry,
@@ -2314,13 +2315,15 @@ def _decoder_provenance(row: dict[str, Any], entry: str) -> RecoveredValue:
 
 
 def decoded_indicators(text: Any) -> list[str]:
-    """The domains, addresses and URLs a decoded text holds, as the existing parsers read them.
+    """The domains, addresses and URLs a recovered text holds, as the existing parsers read them.
 
-    The text as one value (``ledger_projection.cell_network_values``: a URL
+    The one reader for both recovering tools (FLOSS and the static decoder):
+    the text as one value (``ledger_projection.cell_network_values``: a URL
     and its host, an address, a name that could be a host and is not a file's
     name) and the network indicators the string sweep's own scan finds inside
-    it (``tools.strings.iter_string_iocs``). Anything else a decoder reads —
-    a format string, a user agent, a path — holds none and is no candidate.
+    it (``tools.strings.iter_string_iocs``), so ``host:port``, a ``Host:``
+    line or a URL inside a sentence yields its value. Anything else — a
+    format string, a user agent, a path — holds none and is no candidate.
     """
     from maljan.reporting.ledger_projection import cell_network_values
     from maljan.tools.strings import iter_string_iocs
@@ -2342,12 +2345,13 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
 
     A decoded, stack or tight string FLOSS returned, folded to lower case (a
     URL adds its host), with the entry it came from — the pack's own entry
-    first, since it is issued first. The static decoder's results
-    (``decode_string_blobs``: text the sample keeps encoded in its own bytes,
-    undone by arithmetic) are a second source of the same kind: each domain,
-    address or URL the existing parsers read in a result's text or in a base64
-    layer under it (:func:`decoded_indicators`) is recorded the same way, and
-    a text that holds none is no candidate. ``recovered_by`` keeps, for each
+    first, since it is issued first — and each domain, address or URL the one
+    reader (:func:`decoded_indicators`) finds in it. The static decoder's
+    results (``decode_string_blobs``: text the sample keeps encoded in its own
+    bytes, undone by arithmetic) are a second source of the same kind: each
+    domain, address or URL the same reader finds in a result's text or in a
+    base64 layer under it is recorded the same way, and a text that holds none
+    is no candidate. ``recovered_by`` keeps, for each
     value, every tool that recovered it with its entry, scheme, file offset
     and the functions around the code that uses it. A value the static string
     sweep also read as a whole value (the ``strings`` entries, the
@@ -2374,13 +2378,11 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
             floss_whole = floss_whole or _whole_listing(structured, rows)
             for row in rows:
                 if isinstance(row, dict) and str(row.get("kind") or "").lower() in _EMULATED_KINDS:
-                    _add_emulated(
-                        values,
-                        row.get("string"),
-                        entry_id,
-                        provenance,
-                        _floss_provenance(row, entry_id),
-                    )
+                    how = _floss_provenance(row, entry_id)
+                    # The whole string, as before, and each indicator the one
+                    # reader finds in it, as for the decoder's texts.
+                    for value in [row.get("string"), *decoded_indicators(row.get("string"))]:
+                        _add_emulated(values, value, entry_id, provenance, how)
         elif tool == DECODER_TOOL:
             saw_decoder = True
             rows = _rows_of(structured, "results")
@@ -2446,7 +2448,7 @@ _FROM_KEPT_ROWS = "read from the kept rows of a report stored before the record 
 
 
 def emulation_record(report: Any) -> EmulatedStrings:
-    """The report's record of what emulation alone recovered.
+    """The report's record of what only a recovering tool (FLOSS or the static decoder) read.
 
     The one built from the ledger at build time (``emulated_strings``), or, for
     a report stored before it existed, one read from the report's kept section
@@ -2479,7 +2481,8 @@ def emulation_record(report: Any) -> EmulatedStrings:
                 if len(row) > max(at_kind, at_string) and (
                     str(row[at_kind]).strip().lower() in _EMULATED_KINDS
                 ):
-                    _add_emulated(values, row[at_string], entry)
+                    for value in [row[at_string], *decoded_indicators(row[at_string])]:
+                        _add_emulated(values, value, entry)
         elif key == "strings" and "Text" in columns:
             at_text = columns.index("Text")
             plain_texts.extend(
@@ -2554,10 +2557,18 @@ def _recovery_words(how: RecoveredValue) -> str:
         where.append(f"{how.scheme} string" if how.tool == "floss" else how.scheme)
     if how.offset:
         where.append(f"at file offset {how.offset}")
-    if how.functions:
-        where.append("in function " + ", ".join(how.functions))
-    if how.sites:
-        where.append("used at " + ", ".join(how.sites))
+    if how.tool == "floss" and how.scheme == "decoded":
+        # A FLOSS decoded string names the routine that decoded it and where
+        # that routine was called, which is FLOSS's own wording.
+        if how.functions:
+            where.append("routine " + ", ".join(how.functions))
+        if how.sites:
+            where.append("called at " + ", ".join(how.sites))
+    else:
+        if how.functions:
+            where.append("in function " + ", ".join(how.functions))
+        if how.sites:
+            where.append("used at " + ", ".join(how.sites))
     return f"{head} ({', '.join(where)})" if where else head
 
 

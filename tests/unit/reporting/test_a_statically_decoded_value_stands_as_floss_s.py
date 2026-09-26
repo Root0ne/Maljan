@@ -9,7 +9,9 @@ the one publish rule reads it through the same record (``emulated_strings``),
 with the same standing and the same refusals. The decoder's provenance rides
 along: the rule's reason names the tool and its entry, and the IOC table and
 the report state which tool recovered the value and where. A decoded text that
-holds no indicator stays a decoded string fact and is no candidate.
+holds no indicator stays a decoded string fact and is no candidate. One reader
+finds the candidates in both tools' texts, so the same text from either tool
+gets the same answer.
 
 Every value here is synthetic: example names and a documentation address.
 """
@@ -22,6 +24,7 @@ from maljan.reporting.builder import build_consolidated_iocs
 from maljan.reporting.models import (
     EmulatedStrings,
     EvidenceIndexRow,
+    EvidenceSection,
     FileHashes,
     JudgeIndicator,
     MalwareReport,
@@ -35,6 +38,7 @@ from maljan.reporting.renderers.stix_renderer import (
     decoded_indicators,
     emulation_from_ledger,
     emulation_kwargs,
+    emulation_record,
     indicator_publish_reason,
     recovered_by_words,
 )
@@ -86,7 +90,13 @@ def _decoder_entry(*rows: dict[str, Any], entry: str = DECODER_ENTRY, **page: An
 
 def _floss_entry(*strings: str, entry: str = FLOSS_ENTRY) -> LedgerEntry:
     rows = [
-        {"kind": "decoded", "string": text, "encoding": "ASCII", "function_rva": "0x1a00"}
+        {
+            "kind": "decoded",
+            "string": text,
+            "encoding": "ASCII",
+            "function_rva": "0x1a00",
+            "called_at_rva": "0x1b10",
+        }
         for text in strings
     ]
     return LedgerEntry(
@@ -209,7 +219,7 @@ class TestADecodedDocumentationAddress:
     def test_is_a_candidate_and_is_refused_as_the_floss_value_is(self) -> None:
         text = f"{DOC_ADDRESS}:8443"
         decoded = _decoded(text, ("ip", DOC_ADDRESS))
-        floss = _floss(DOC_ADDRESS, ("ip", DOC_ADDRESS))
+        floss = _floss(text, ("ip", DOC_ADDRESS))
 
         record = decoded.emulated_strings
         assert record is not None and record.values[DOC_ADDRESS] == DECODER_ENTRY
@@ -280,8 +290,64 @@ class TestBothTools:
             f"{RECOVERED_BY_EMULATION}, {FLOSS_ENTRY}"
         )
         said = _row(report, C2).recovered_by
-        assert said.startswith(f"floss, {FLOSS_ENTRY} (decoded string, in function 0x1a00); ")
+        assert said.startswith(
+            f"floss, {FLOSS_ENTRY} (decoded string, routine 0x1a00, called at 0x1b10); "
+        )
         assert f"decode_string_blobs, {DECODER_ENTRY} (xor8" in said
+
+    def test_the_decoder_s_provenance_takes_nothing_from_floss_s_row(self) -> None:
+        row = _decoder_row(C2, floss={"function_rva": "0x3000", "called_at_rva": "0x3050"})
+        record = emulation_from_ledger([_strings_entry("x"), _decoder_entry(row)])
+
+        (how,) = record.recovered_by[C2]
+        assert how.functions == ["0x1a00"] and how.sites == ["0x1a2b", "0x1c40"]
+
+
+class TestTheSameTextFromEitherTool:
+    """One reader: a text gets the same candidates and the same answer from both tools."""
+
+    CASES = (
+        (f"Host: {C2}", "domain", C2),
+        (f"{C2}:443", "domain", C2),
+        (f"connecting to {C2_URL} now", "url", C2_URL),
+        (f"{C2}|8443|k3y", "domain", C2),
+    )
+
+    def test_each_text_publishes_alike_with_the_reason_but_for_the_tool(self) -> None:
+        for text, kind, value in self.CASES:
+            decoded, floss = _decoded(text, (kind, value)), _floss(text, (kind, value))
+
+            assert _row(decoded, value).published == _row(floss, value).published == "yes", text
+            reasons = [
+                indicator_publish_reason(kind, value, "strings", **emulation_kwargs(r, kind, value))
+                for r in (decoded, floss)
+            ]
+            assert reasons[0] == f"{DECODED_FROM_THE_BYTES}, {DECODER_ENTRY}", text
+            assert _as_floss(str(reasons[0])) == reasons[1], text
+
+    def test_a_floss_string_keeps_its_whole_value_too(self) -> None:
+        record = emulation_from_ledger([_strings_entry("x"), _floss_entry(f"Host: {C2}")])
+
+        assert record.values == {f"host: {C2}": FLOSS_ENTRY, C2: FLOSS_ENTRY}
+
+    def test_a_report_stored_before_the_record_reads_its_kept_rows_alike(self) -> None:
+        report = _floss(f"Host: {C2}", ("domain", C2)).model_copy(
+            update={
+                "emulated_strings": None,
+                "sections": [
+                    EvidenceSection(
+                        key="tool_floss_strings",
+                        title="Floss: strings",
+                        kind="table",
+                        columns=["kind", "string"],
+                        rows=[["decoded", f"Host: {C2}"]],
+                        evidence_ids=[FLOSS_ENTRY],
+                    )
+                ],
+            }
+        )
+
+        assert emulation_record(report).values[C2] == FLOSS_ENTRY
 
 
 class TestARecordStoredBeforeTheProvenance:
