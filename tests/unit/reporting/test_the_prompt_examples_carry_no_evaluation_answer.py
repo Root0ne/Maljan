@@ -476,12 +476,38 @@ PROMPTS: dict[str, str] = {
             triage_pack.LONE_HITS_ROOM_SENTENCE,
         ]
     ),
-    "the name data's source, license and module set, and the algorithm ids": " ".join(
+    "the name data's source, license and module set, and the algorithms' descriptions": " ".join(
         [
             str(api_hashes.load_export_names().get("source") or ""),
             str(api_hashes.load_export_names().get("license") or ""),
             str((api_hashes.load_export_names().get("modules") or {}).get("source") or ""),
-            *(str(entry["id"]) for entry in api_hashes.load_algorithms()),
+            *(str(entry.get("description") or "") for entry in api_hashes.load_algorithms()),
+        ]
+    ),
+    "pack lines around real catalogue ids": " ".join(
+        [
+            triage_pack._hash_item(
+                {
+                    "value": "0x00000001",
+                    "readings": [
+                        {"algorithm": entry["id"], "set": "exports", "name": "N", "dlls": ["d"]}
+                        for entry in api_hashes.load_algorithms()
+                    ],
+                    "occurrences": [{"rva": "0x1", "function": "0x0"}],
+                }
+            ),
+            *(
+                triage_pack._blob_item(
+                    {
+                        "text": "t",
+                        "rva": "0x1",
+                        "scheme": scheme,
+                        "parameters": {},
+                        "references": [],
+                    }
+                )
+                for scheme in string_blobs.SCHEMES
+            ),
         ]
     ),
     "the two resolving tools' descriptions": _analysis_tool_descriptions(
@@ -713,9 +739,49 @@ def test_no_example_carries_a_term_the_key_scores(name: str) -> None:
     assert not shared, f"the {name} example carries {shared}"
 
 
+# The tools' own catalogue identifiers, let through the scan as whole tokens.
+# A resolved hash is reported with the id of the algorithm it resolves under
+# and a decoded text with the id of its scheme; the catalogues list every
+# algorithm and scheme side by side, all tried alike, so an id says nothing
+# about which one a sample uses — that pairing only ever comes from arithmetic
+# on the sample's bytes. Built from the two vendored catalogues and nothing
+# else (``test_the_catalogue_allowance_is_the_two_catalogues_and_nothing_else``);
+# every sentence around an id, and every description in the catalogues, is
+# still scanned.
+TOOL_CATALOGUE_IDENTIFIERS: frozenset[str] = frozenset(
+    [str(entry["id"]) for entry in api_hashes.load_algorithms()] + list(string_blobs.SCHEMES)
+)
+_CATALOGUE_TOKEN = re.compile(r"[a-z0-9_]+")
+
+
+def _without_catalogue_identifiers(text: str) -> str:
+    """``text`` with each whole-token catalogue identifier taken out."""
+    return _CATALOGUE_TOKEN.sub(
+        lambda match: " " if match.group(0) in TOOL_CATALOGUE_IDENTIFIERS else match.group(0),
+        text,
+    )
+
+
+def test_the_catalogue_allowance_is_the_two_catalogues_and_nothing_else() -> None:
+    algorithm_ids = {str(entry["id"]) for entry in api_hashes.load_algorithms()}
+    assert TOOL_CATALOGUE_IDENTIFIERS == algorithm_ids | set(string_blobs.SCHEMES)
+    assert all(_CATALOGUE_TOKEN.fullmatch(identifier) for identifier in TOOL_CATALOGUE_IDENTIFIERS)
+    # Only whole tokens are let through: a scored term inside a sentence, or
+    # joined to an identifier, is still found.
+    assert "crc32" in _without_catalogue_identifiers("resolved by crc32 over the names")
+    assert "crc32_ascii" not in _without_catalogue_identifiers("[crc32_ascii]")
+    assert "crc32_asciix" in _without_catalogue_identifiers("crc32_asciix")
+
+
+def test_the_catalogues_descriptions_are_scanned_as_prose() -> None:
+    name = "the name data's source, license and module set, and the algorithms' descriptions"
+    for entry in api_hashes.load_algorithms():
+        assert str(entry["description"]).lower() in PROMPTS[name].lower()
+
+
 @pytest.mark.parametrize("name", sorted(PROMPTS))
 def test_no_contract_prompt_or_instruction_carries_a_term_the_key_scores(name: str) -> None:
-    text = PROMPTS[name].lower()
+    text = _without_catalogue_identifiers(PROMPTS[name].lower())
     shared = [term for term in KEY_TERMS if term in text]
     assert not shared, f"the {name} carries {shared}"
 

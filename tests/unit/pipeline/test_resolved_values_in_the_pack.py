@@ -126,7 +126,7 @@ class TestTheLines:
     def test_each_value_is_named_where_it_stands(self, tmp_path: Path) -> None:
         hashes, _ = _lines(tmp_path)
         value = f"{zlib.crc32(b'VirtualAlloc'):#010x}"
-        assert f"{value} = kernel32.dll/kernelbase.dll!VirtualAlloc [poly_edb88320_ascii]" in hashes
+        assert f"{value} = kernel32.dll/kernelbase.dll!VirtualAlloc [crc32_ascii]" in hashes
         assert f"@ {hex(TEXT_RVA + 0x41)} (in {hex(TEXT_RVA)})" in hashes
         assert "all 2 shown" in hashes
 
@@ -234,7 +234,7 @@ class TestTheReverser:
         agent = _Agent()
         state = {"evidence_ledger": [entry.model_dump(mode="json") for entry in result.entries]}
         brief_agent(agent, state, _Container())  # type: ignore[arg-type]
-        assert "!VirtualAlloc [poly_edb88320_ascii]" in agent.facts_block
+        assert "!VirtualAlloc [crc32_ascii]" in agent.facts_block
         assert '"open the settings file"@' in agent.facts_block
 
     def test_it_is_told_to_name_the_function_and_the_text(self) -> None:

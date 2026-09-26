@@ -3,7 +3,7 @@
  "source": "Published name-hash algorithms a Windows program uses to find a function by a 32-bit value instead of by its name. Each entry names the primitive (implemented in maljan.tools.api_hashes), the encoding the name is hashed in, the case it is folded to first, whether its terminating NUL is hashed too, and, for the forms that add a hash of the module's name, how that name is hashed.",
  "algorithms": [
   {
-   "id": "poly_edb88320_ascii",
+   "id": "crc32_ascii",
    "primitive": "crc32",
    "encoding": "ascii",
    "case": "as-is",
@@ -11,7 +11,7 @@
    "description": "CRC-32 (the zlib/IEEE polynomial, reflected 0xEDB88320) of the ASCII function name"
   },
   {
-   "id": "poly_edb88320_ascii_lower",
+   "id": "crc32_ascii_lower",
    "primitive": "crc32",
    "encoding": "ascii",
    "case": "lower",
@@ -19,7 +19,7 @@
    "description": "CRC-32 of the lower-cased ASCII function name"
   },
   {
-   "id": "poly_edb88320_utf16le",
+   "id": "crc32_utf16le",
    "primitive": "crc32",
    "encoding": "utf16le",
    "case": "as-is",
@@ -27,7 +27,7 @@
    "description": "CRC-32 of the function name as UTF-16LE"
   },
   {
-   "id": "poly_edb88320_utf16le_lower",
+   "id": "crc32_utf16le_lower",
    "primitive": "crc32",
    "encoding": "utf16le",
    "case": "lower",
@@ -68,20 +68,20 @@
    "description": "djb2 of the lower-cased ASCII function name"
   },
   {
-   "id": "prime_01000193",
+   "id": "fnv1a32",
    "primitive": "fnv1a32",
    "encoding": "ascii",
    "case": "as-is",
    "terminator": false,
-   "description": "FNV-1a 32-bit (offset basis 0x811C9DC5, prime 0x01000193) of the ASCII function name"
+   "description": "Fowler-Noll-Vo, 1a variant, 32-bit (offset basis 0x811C9DC5, prime 0x01000193) of the ASCII function name"
   },
   {
-   "id": "prime_01000193_lower",
+   "id": "fnv1a32_lower",
    "primitive": "fnv1a32",
    "encoding": "ascii",
    "case": "lower",
    "terminator": false,
-   "description": "FNV-1a 32-bit of the lower-cased ASCII function name"
+   "description": "Fowler-Noll-Vo, 1a variant, 32-bit, of the lower-cased ASCII function name"
   }
  ]
 }

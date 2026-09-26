@@ -127,10 +127,12 @@ module hash to a function hash. The algorithms are
 name, each also lower-cased; ror13; ror13 of the name with its NUL added to
 ror13 of the upper-cased UTF-16LE module name with its NUL (the form common
 position-independent code uses); djb2 and FNV-1a 32, each also lower-cased.
-The ids an answer carries name an algorithm by its defining constant where its
-common name is one of the terms model-facing text is held free of
-(`poly_edb88320_*` is CRC-32, `prime_01000193*` is FNV-1a); each entry's
-`description` in the data file names it plainly.
+The ids an answer carries are the algorithms' plain names (`crc32_ascii`,
+`fnv1a32_lower`, …). They and the decoder's scheme names are the tools' own
+catalogue identifiers: the leak test lets these single-token ids through by a
+named allowance (`TOOL_CATALOGUE_IDENTIFIERS`, built from this data file and
+`string_blobs.SCHEMES` alone) and scans every sentence around them, the data
+file's descriptions included.
 With `hashes` the caller's values are resolved, and the answer adds
 `unresolved` and `unreadable`. Without, the candidates are the 32-bit
 immediates of every byte pattern encoding `push imm32`, `mov r32, imm32`,

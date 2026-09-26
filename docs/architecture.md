@@ -404,7 +404,7 @@ baseline has no triage stage at all.
 line each — `[ev_0001] identity: pe windows, 4,486,656 bytes, …`,
 `[ev_0003] signature: none`, `[ev_0007] yara: 2 hits of 30 rules (…)`,
 `[ev_0008] capa: 6 capabilities (parse PE header @ 0x1a20 0x2b40, …), ATT&CK T1027, T1055 (rule-asserted)`,
-`[ev_0014] resolved hashes: 2 values the file holds name Windows functions or modules (…); all 2 shown: 0x09ce0d4a = kernel32.dll/kernelbase.dll!VirtualAlloc [poly_edb88320_ascii] @ 0x1041 (in 0x1000); …`,
+`[ev_0014] resolved hashes: 2 values the file holds name Windows functions or modules (…); all 2 shown: 0x09ce0d4a = kernel32.dll/kernelbase.dll!VirtualAlloc [crc32_ascii] @ 0x1041 (in 0x1000); …`,
 `[ev_0015] decoded blobs: 1 texts decoded from the data sections by the platform's static schemes, nothing run (…); all 1 shown: "open the settings file"@0x3080 [xor8 key 0x9c] referred to at 0x1123 (in 0x1100)`,
 `[ev_0017] reputation: VirusTotal: 31 of 75 engines flag it as malicious, labels Filisto` — cut at
 `reporting.upstream_findings_max_chars` (derived from the served window at
