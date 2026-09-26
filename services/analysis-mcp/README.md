@@ -131,10 +131,14 @@ ror13 of the upper-cased UTF-16LE module name with its NUL (the form common
 position-independent code uses); djb2 and FNV-1a 32, each also lower-cased.
 The ids an answer carries are the algorithms' plain names (`crc32_ascii`,
 `fnv1a32_lower`, …). They and the decoder's scheme names are the tools' own
-catalogue identifiers: the leak test lets these single-token ids through by a
-named allowance (`TOOL_CATALOGUE_IDENTIFIERS`, built from this data file and
-`string_blobs.SCHEMES` alone) and scans every sentence around them, the data
-file's descriptions included.
+catalogue identifiers. The leak test lets them through by a named allowance
+(`TOOL_CATALOGUE_IDENTIFIERS`, built from this data file and
+`string_blobs.SCHEMES` alone), only in the entries that render tool output and
+only where a renderer writes one: the bracketed algorithm of a hash reading and
+the leading scheme token of a decoded blob. The same id written as a word in
+any instruction or sentence is still flagged. Each algorithm's `description` is
+developer-facing and is not scanned; a test holds that no description appears
+in a tool answer, a server tool description or a pack line.
 With `hashes` the caller's values are resolved, and the answer adds
 `unresolved` and `unreadable`. Without, the candidates are the 32-bit
 immediates of every byte pattern encoding `push imm32`, `mov r32, imm32`,

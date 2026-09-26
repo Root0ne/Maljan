@@ -73,7 +73,7 @@
    "encoding": "ascii",
    "case": "as-is",
    "terminator": false,
-   "description": "Fowler-Noll-Vo, 1a variant, 32-bit (offset basis 0x811C9DC5, prime 0x01000193) of the ASCII function name"
+   "description": "FNV-1a 32-bit (offset basis 0x811C9DC5, prime 0x01000193) of the ASCII function name"
   },
   {
    "id": "fnv1a32_lower",
@@ -81,7 +81,7 @@
    "encoding": "ascii",
    "case": "lower",
    "terminator": false,
-   "description": "Fowler-Noll-Vo, 1a variant, 32-bit, of the lower-cased ASCII function name"
+   "description": "FNV-1a 32-bit of the lower-cased ASCII function name"
   }
  ]
 }

@@ -476,12 +476,11 @@ PROMPTS: dict[str, str] = {
             triage_pack.LONE_HITS_ROOM_SENTENCE,
         ]
     ),
-    "the name data's source, license and module set, and the algorithms' descriptions": " ".join(
+    "the name data's source, license and module set": " ".join(
         [
             str(api_hashes.load_export_names().get("source") or ""),
             str(api_hashes.load_export_names().get("license") or ""),
             str((api_hashes.load_export_names().get("modules") or {}).get("source") or ""),
-            *(str(entry.get("description") or "") for entry in api_hashes.load_algorithms()),
         ]
     ),
     "pack lines around real catalogue ids": " ".join(
@@ -739,49 +738,119 @@ def test_no_example_carries_a_term_the_key_scores(name: str) -> None:
     assert not shared, f"the {name} example carries {shared}"
 
 
-# The tools' own catalogue identifiers, let through the scan as whole tokens.
-# A resolved hash is reported with the id of the algorithm it resolves under
-# and a decoded text with the id of its scheme; the catalogues list every
-# algorithm and scheme side by side, all tried alike, so an id says nothing
-# about which one a sample uses — that pairing only ever comes from arithmetic
-# on the sample's bytes. Built from the two vendored catalogues and nothing
-# else (``test_the_catalogue_allowance_is_the_two_catalogues_and_nothing_else``);
-# every sentence around an id, and every description in the catalogues, is
-# still scanned.
+# The tools' own catalogue identifiers. A resolved hash is rendered with the id
+# of the algorithm it resolves under, and a decoded text with the id of its
+# scheme. The catalogues list every algorithm and scheme side by side, all
+# tried alike, so an id says nothing about which one a sample uses: that
+# pairing only ever comes from arithmetic on the sample's bytes. Built from the
+# two vendored catalogues and nothing else
+# (``test_the_catalogue_allowance_is_the_two_catalogues_and_nothing_else``).
 TOOL_CATALOGUE_IDENTIFIERS: frozenset[str] = frozenset(
     [str(entry["id"]) for entry in api_hashes.load_algorithms()] + list(string_blobs.SCHEMES)
 )
 _CATALOGUE_TOKEN = re.compile(r"[a-z0-9_]+")
 
+# The entries that render tool output, and the one place in them a renderer
+# writes a catalogue id: right after an opening bracket, as the bracketed
+# algorithm of a hash reading (``!Name [crc32_ascii]``) or the leading scheme
+# token of a decoded blob (``"text"@0x3010 [xor8 key 0x9c]``). The allowance
+# applies there and nowhere else; every other entry, and every other word of
+# these, is scanned as it stands, so a catalogue id written as a word in any
+# instruction or sentence is still a scored term.
+RENDERED_TOOL_OUTPUT: frozenset[str] = frozenset(
+    {
+        "the pack's resolved hashes and decoded blobs lines",
+        "pack lines around real catalogue ids",
+    }
+)
+_RENDERED_ID = re.compile(r"\[([a-z0-9_]+)(?=[\] ,])")
 
-def _without_catalogue_identifiers(text: str) -> str:
-    """``text`` with each whole-token catalogue identifier taken out."""
-    return _CATALOGUE_TOKEN.sub(
-        lambda match: " " if match.group(0) in TOOL_CATALOGUE_IDENTIFIERS else match.group(0),
+
+def _without_rendered_identifiers(text: str) -> str:
+    """``text`` with each catalogue id a renderer put after an opening bracket taken out."""
+    return _RENDERED_ID.sub(
+        lambda match: "[" if match.group(1) in TOOL_CATALOGUE_IDENTIFIERS else match.group(0),
         text,
     )
+
+
+def _scanned(name: str) -> str:
+    """The text of one ``PROMPTS`` entry as the scan reads it."""
+    text = PROMPTS[name].lower()
+    return _without_rendered_identifiers(text) if name in RENDERED_TOOL_OUTPUT else text
 
 
 def test_the_catalogue_allowance_is_the_two_catalogues_and_nothing_else() -> None:
     algorithm_ids = {str(entry["id"]) for entry in api_hashes.load_algorithms()}
     assert TOOL_CATALOGUE_IDENTIFIERS == algorithm_ids | set(string_blobs.SCHEMES)
     assert all(_CATALOGUE_TOKEN.fullmatch(identifier) for identifier in TOOL_CATALOGUE_IDENTIFIERS)
-    # Only whole tokens are let through: a scored term inside a sentence, or
-    # joined to an identifier, is still found.
-    assert "crc32" in _without_catalogue_identifiers("resolved by crc32 over the names")
-    assert "crc32_ascii" not in _without_catalogue_identifiers("[crc32_ascii]")
-    assert "crc32_asciix" in _without_catalogue_identifiers("crc32_asciix")
+    assert RENDERED_TOOL_OUTPUT <= set(PROMPTS)
 
 
-def test_the_catalogues_descriptions_are_scanned_as_prose() -> None:
-    name = "the name data's source, license and module set, and the algorithms' descriptions"
+def test_an_id_is_allowed_only_where_a_renderer_puts_one() -> None:
+    blob = triage_pack._blob_item(
+        {"text": "t", "rva": "0x1", "scheme": "base64", "parameters": {}, "references": []}
+    ).lower()
+    reading = triage_pack._hash_item(
+        {
+            "value": "0x00000001",
+            "readings": [{"algorithm": "crc32_ascii", "set": "exports", "name": "n", "dlls": []}],
+            "occurrences": [],
+        }
+    ).lower()
+    assert "base64" not in _without_rendered_identifiers(blob)
+    assert "crc32" not in _without_rendered_identifiers(reading)
+    # The same ids written as words are not renderer output.
+    sentence = "the replies are base64 encoded, then read with crc32_ascii"
+    assert "base64" in _without_rendered_identifiers(sentence)
+    assert "crc32" in _without_rendered_identifiers(sentence)
+    assert "crc32" in _without_rendered_identifiers("[crc32 over the names]")
+
+
+def test_a_bare_id_in_an_instruction_entry_is_flagged(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(PROMPTS, "an instruction naming a scheme", "Decode each reply as base64.")
+    with pytest.raises(AssertionError, match="base64"):
+        test_no_contract_prompt_or_instruction_carries_a_term_the_key_scores(
+            "an instruction naming a scheme"
+        )
+
+
+def test_no_catalogue_description_reaches_a_model(tmp_path: Path) -> None:
+    """The algorithms' descriptions are developer-facing data and are not scanned.
+
+    That holds only while no model reads them: not in a tool's answer, not in a
+    server's tool descriptions, not in a pack line. If one ever does, this
+    fails, and the description is then scanned as prose like any other.
+    """
+    import struct
+    import zlib
+
+    from tests.unit.tools.synthetic_pe import SyntheticPE
+
+    image = SyntheticPE()
+    for offset, name in ((0x10, b"VirtualAlloc"), (0x20, b"CreateFileW")):
+        image.put("data", offset, struct.pack("<I", zlib.crc32(name)))
+    target = tmp_path / "s.exe"
+    target.write_bytes(image.build())
+    answer = api_hashes.resolve_api_hashes(str(target))
+    assert answer["hits"], "the answer the check reads resolves something"
+    seen = " ".join(
+        [
+            json.dumps(answer),
+            json.dumps(string_blobs.decode_string_blobs(str(target))),
+            triage_pack._resolved_hashes(answer),
+            _analysis_tool_descriptions(
+                "resolve_api_hashes", "decode_string_blobs", "capabilities"
+            ),
+        ]
+    ).lower()
     for entry in api_hashes.load_algorithms():
-        assert str(entry["description"]).lower() in PROMPTS[name].lower()
+        assert str(entry["description"]).lower() not in seen, entry["id"]
 
 
 @pytest.mark.parametrize("name", sorted(PROMPTS))
 def test_no_contract_prompt_or_instruction_carries_a_term_the_key_scores(name: str) -> None:
-    text = _without_catalogue_identifiers(PROMPTS[name].lower())
+    text = _scanned(name)
     shared = [term for term in KEY_TERMS if term in text]
     assert not shared, f"the {name} carries {shared}"
 
