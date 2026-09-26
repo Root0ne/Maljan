@@ -39,6 +39,7 @@ import re
 import sys
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / "data" / "windows_export_names_v1.json"
@@ -151,7 +152,12 @@ def main(argv: list[str] | None = None) -> int:
     sources: dict[str, dict[str, str]] = {}
     for dll in DLLS:
         url = SPEC_URL.format(tag=args.tag, dll=dll)
-        with urllib.request.urlopen(url, timeout=60) as response:  # noqa: S310 - fixed https URL
+        # The URL is the module's constant with a tag and a module name filled in; any scheme
+        # other than https is refused so urllib is never pointed at a local file.
+        if urlparse(url).scheme != "https":
+            raise SystemExit(f"refusing a non-https spec URL: {url!r}")
+        # nosemgrep: dynamic-urllib-use-detected — scheme validated; constant https URL
+        with urllib.request.urlopen(url, timeout=60) as response:  # noqa: S310
             body = response.read()
         dlls[f"{dll}.dll"] = exported_names(body.decode("utf-8", errors="replace"))
         sources[f"{dll}.dll"] = {"url": url, "sha256": hashlib.sha256(body).hexdigest()}
