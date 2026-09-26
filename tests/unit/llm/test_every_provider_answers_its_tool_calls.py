@@ -48,6 +48,16 @@ def _openai(model: str = "m", **kwargs: Any) -> Any:
     return OpenAIProvider(_settings()).build_model(model, 0.0, max_tokens=64, **kwargs)
 
 
+def _codex() -> Any:
+    # A model name the OpenAI client sends through the Responses API.
+    return _openai("gpt-5-codex")
+
+
+def _reasoning() -> Any:
+    # ``reasoning`` set sends any model through the Responses API.
+    return _openai("m", reasoning={"effort": "low"})
+
+
 def _anthropic() -> Any:
     from maljan.llm.anthropic_provider import AnthropicProvider
 
@@ -69,6 +79,13 @@ def _ollama() -> Any:
 def _openai_history(model: Any, messages: list[Any], *, base: bool = False) -> list[Any]:
     owner = type(model).__mro__[1] if base else type(model)
     return owner._get_request_payload(model, messages)["messages"]  # type: ignore[no-any-return]
+
+
+def _responses_history(model: Any, messages: list[Any], *, base: bool = False) -> list[Any]:
+    owner = type(model).__mro__[1] if base else type(model)
+    payload = owner._get_request_payload(model, messages)
+    assert "messages" not in payload
+    return payload["input"]  # type: ignore[no-any-return]
 
 
 def _anthropic_history(model: Any, messages: list[Any], *, base: bool = False) -> list[Any]:
@@ -109,6 +126,19 @@ def _openai_unanswered(sent: list[dict[str, Any]]) -> list[str]:
         else:
             owner = set()
     return missing
+
+
+def _responses_unanswered(sent: list[dict[str, Any]]) -> list[str]:
+    """Each ``function_call`` with no output, and each output with no call."""
+    calls = [str(i["call_id"]) for i in sent if i.get("type") == "function_call"]
+    outputs = [str(i["call_id"]) for i in sent if i.get("type") == "function_call_output"]
+    return [c for c in calls if c not in outputs] + [
+        f"orphan {o}" for o in outputs if o not in calls
+    ]
+
+
+def _responses_replies(sent: list[dict[str, Any]]) -> dict[str, str]:
+    return {str(i["call_id"]): i["output"] for i in sent if i.get("type") == "function_call_output"}
 
 
 def _openai_replies(sent: list[dict[str, Any]]) -> dict[str, str]:
@@ -191,6 +221,10 @@ def _gemini_replies(sent: list[Any]) -> list[tuple[str, Any]]:
 
 PROVIDERS = [
     pytest.param(_openai, _openai_history, _openai_unanswered, id="openai"),
+    pytest.param(_codex, _responses_history, _responses_unanswered, id="openai-responses-codex"),
+    pytest.param(
+        _reasoning, _responses_history, _responses_unanswered, id="openai-responses-reasoning"
+    ),
     pytest.param(_anthropic, _anthropic_history, _anthropic_unanswered, id="anthropic"),
     pytest.param(_gemini, _gemini_history, _gemini_unanswered, id="gemini"),
     pytest.param(_ollama, _ollama_history, _openai_unanswered, id="ollama"),
@@ -507,6 +541,16 @@ def test_gemini_pairs_two_calls_of_one_name_by_position() -> None:
     sent = _gemini_history(_gemini(), history)
 
     assert _gemini_replies(sent) == [("lookup", NO_REPLY_RECORDED), ("lookup", "b's answer")]
+
+
+def test_the_replies_on_the_responses_api_serializer() -> None:
+    sent = _responses_history(_codex(), _with_unparsed())
+
+    # The client writes the cut call as a function_call, so its output says not run.
+    assert _responses_replies(sent) == {"one": NO_REPLY_RECORDED, "cut": NOT_RUN_REPLY}
+    kinds = [i.get("type") for i in sent]
+    assert kinds.index("function_call_output") > kinds.index("function_call")
+    assert sent[-1]["role"] == "user"
 
 
 def test_the_completion_counts_what_it_wrote() -> None:

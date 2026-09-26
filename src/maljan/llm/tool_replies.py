@@ -10,6 +10,8 @@ pairs a call with its reply and refuses a history where one is missing:
   answered a revision loop's turn with 400, "An assistant message with
   'tool_calls' must be followed by tool messages responding to each
   'tool_call_id'", and the analyst was lost for the round;
+* OpenAI's Responses API wants a ``function_call_output`` item for every
+  ``function_call`` item's ``call_id``;
 * Anthropic wants every ``tool_use`` block answered by a ``tool_result`` block
   at the front of the next user turn;
 * Gemini wants a model turn's ``functionCall`` parts answered by as many
@@ -173,6 +175,56 @@ def answered_tool_calls(
         out.extend(replies)
     if not written and not moved:
         return messages, 0
+    return out, written
+
+
+def answered_responses_input(
+    items: list[Any],
+    not_run: frozenset[str] | set[str] = frozenset(),
+    *,
+    record: Record | None = None,
+) -> tuple[list[Any], int]:
+    """OpenAI Responses API input items with every ``function_call`` answered.
+
+    The Responses API pairs a ``function_call`` with the
+    ``function_call_output`` of the same ``call_id``, wherever it stands in the
+    input, so a call counts as answered when any output carries its id. A
+    missing one is written right after the run of call and output items its
+    call stands in, in call order. Returns the items and how many replies were
+    written; an input that is already well formed comes back as it was.
+    """
+    answered = {
+        str(item.get("call_id") or "")
+        for item in items
+        if isinstance(item, dict) and item.get("type") == "function_call_output"
+    }
+    out: list[Any] = []
+    written = 0
+    pending: list[str] = []
+    for index, item in enumerate(items):
+        out.append(item)
+        kind = item.get("type") if isinstance(item, dict) else None
+        if kind == "function_call":
+            call_id = str(item.get("call_id") or "")
+            if call_id not in answered:
+                pending.append(call_id)
+        following = items[index + 1] if index + 1 < len(items) else None
+        run_goes_on = isinstance(following, dict) and following.get("type") in (
+            "function_call",
+            "function_call_output",
+        )
+        if pending and not run_goes_on:
+            for call_id in pending:
+                out.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": _reply(call_id, not_run, record),
+                    }
+                )
+                answered.add(call_id)
+                written += 1
+            pending = []
     return out, written
 
 
@@ -387,12 +439,15 @@ def _anthropic_ids(ids: frozenset[str]) -> frozenset[str]:
 
 
 def _complete_openai(payload: Any, not_run: frozenset[str], record: Record) -> None:
-    """Chat completions (``messages``)."""
+    """Chat completions (``messages``) or the Responses API (``input``), as the client chose."""
     if not isinstance(payload, dict):
         return
     if isinstance(payload.get("messages"), list):
         answered, _ = answered_tool_calls(payload["messages"], not_run, record=record)
         payload["messages"] = answered
+    elif isinstance(payload.get("input"), list):
+        answered, _ = answered_responses_input(payload["input"], not_run, record=record)
+        payload["input"] = answered
 
 
 def _complete_anthropic(payload: Any, not_run: frozenset[str], record: Record) -> None:
