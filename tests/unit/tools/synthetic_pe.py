@@ -36,8 +36,11 @@ class SyntheticPE:
     text: bytearray = field(default_factory=lambda: bytearray(0x400))
     rdata: bytearray = field(default_factory=lambda: bytearray(0x400))
     data: bytearray = field(default_factory=lambda: bytearray(0x400))
-    # (start RVA, end RVA) of each function, written as the x64 function table.
-    functions: list[tuple[int, int]] = field(default_factory=list)
+    # (start RVA, end RVA) or (start, end, unwind RVA) of each entry, written
+    # as the x64 function table.
+    functions: list[tuple[int, ...]] = field(default_factory=list)
+    # Bytes written inside the function table's directory after its entries.
+    pdata_tail: bytes = b""
 
     def put(self, section: str, offset: int, blob: bytes) -> int:
         """Write ``blob`` at ``offset`` inside a section; answer its RVA."""
@@ -61,7 +64,13 @@ class SyntheticPE:
         ]
         pdata = b""
         if self.is64 and self.functions:
-            pdata = b"".join(struct.pack("<III", start, end, 0) for start, end in self.functions)
+            pdata = b"".join(
+                struct.pack("<III", entry[0], entry[1], entry[2] if len(entry) > 2 else 0)
+                for entry in self.functions
+            )
+            # A zero entry ends the table; anything after it is still inside the directory.
+            if self.pdata_tail:
+                pdata += b"\0" * 12 + self.pdata_tail
             sections.append((b".pdata", PDATA_RVA, pdata, _RDATA))
         optional_size = 0xF0 if self.is64 else 0xE0
         headers_size = _align(0x80 + 24 + optional_size + 40 * len(sections), FILE_ALIGNMENT)

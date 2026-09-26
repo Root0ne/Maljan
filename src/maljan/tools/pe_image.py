@@ -12,9 +12,19 @@ What it states and where it stops:
   section (the headers, an overlay) has a file offset and no RVA.
 * **The function around an address** comes from the file's own function table,
   the exception directory (``.pdata``) of an x64 image, which lists the start
-  and end of every function that has unwind data. An x86 image has no such
-  table, and an address outside every listed function has no function stated:
-  a start that is not in the table is not guessed at.
+  and end of every function that has unwind data. An entry whose unwind data
+  is chained to another entry is a fragment of that entry's function (a cold
+  part moved away from it), and its addresses are stated with the start of the
+  function the chain leads to — or with none when the chain cannot be followed.
+  An x86 image has no such table: when the caller has capa's function starts
+  for the file, the start stated is the nearest of them at or before the
+  address in the same section, and the answer says that this is what it is
+  (capa lists where functions start, not where they end); otherwise an address
+  is stated alone. An address outside every listed function has no function
+  stated: a start is never guessed at.
+* **The exception directory is not program data.** The tools that read the
+  data sections read them with its bytes set to zero, so a table of function
+  addresses is not searched for text or hash values.
 * **References to an address** are found by a scan, not by disassembly: every
   position in an executable section whose four bytes, read as a signed
   displacement from the end of those four bytes, land on the address (the
@@ -32,6 +42,7 @@ import struct
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -81,9 +92,19 @@ class Image:
     is64: bool
     size_of_image: int
     sections: list[Section] = field(default_factory=list)
-    # Sorted function starts and the matching ends (exclusive), from ``.pdata``.
+    # The ranges of ``.pdata``, sorted by their begin: the begin, the end
+    # (exclusive) and the start of the function each belongs to (a chained
+    # fragment's primary entry), ``None`` when a chain could not be followed.
     function_starts: list[int] = field(default_factory=list)
     function_ends: list[int] = field(default_factory=list)
+    function_owners: list[int | None] = field(default_factory=list)
+    # Function starts handed in from elsewhere (capa), for an image with no
+    # table of its own; only starts, so the nearest one before an address is
+    # what is stated, and said to be.
+    outside_starts: list[int] = field(default_factory=list)
+    outside_source: str = ""
+    # The file offset and length of the exception directory, when there is one.
+    exception_directory: tuple[int, int] | None = None
 
     # -- mapping ------------------------------------------------------------
 
@@ -114,6 +135,18 @@ class Image:
     def section_bytes(self, section: Section) -> bytes:
         return self.data[section.raw_offset : section.raw_offset + section.mapped_size]
 
+    def data_bytes(self, section: Section) -> bytes:
+        """A data section's bytes with the exception directory's bytes set to zero."""
+        raw = self.section_bytes(section)
+        if self.exception_directory is None:
+            return raw
+        start, length = self.exception_directory
+        low = max(start, section.raw_offset) - section.raw_offset
+        high = min(start + length, section.raw_offset + len(raw)) - section.raw_offset
+        if high <= low:
+            return raw
+        return raw[:low] + b"\0" * (high - low) + raw[high:]
+
     def data_sections(self) -> list[Section]:
         """The sections that hold bytes from the file, are not code and stay loaded.
 
@@ -133,19 +166,52 @@ class Image:
     # -- functions ----------------------------------------------------------
 
     def function_at(self, rva: int) -> int | None:
-        """The start of the listed function whose range holds ``rva``, or ``None``."""
-        index = bisect_right(self.function_starts, rva) - 1
-        if index < 0:
-            return None
-        if rva < self.function_ends[index]:
-            return self.function_starts[index]
+        """The start of the function whose range holds ``rva``, or ``None``."""
+        if self.function_starts:
+            index = bisect_right(self.function_starts, rva) - 1
+            if index < 0 or rva >= self.function_ends[index]:
+                return None
+            return self.function_owners[index]
+        if self.outside_starts:
+            index = bisect_right(self.outside_starts, rva) - 1
+            if index < 0:
+                return None
+            start = self.outside_starts[index]
+            section = self.section_at_rva(rva)
+            if section is None or self.section_at_rva(start) is not section:
+                return None
+            return start
         return None
+
+    def use_function_starts(self, starts: list[int], source: str) -> None:
+        """Take function starts from elsewhere, for an image with no table of its own."""
+        if self.function_starts:
+            return
+        self.outside_starts = sorted({int(start) for start in starts})
+        self.outside_source = source
 
     @property
     def function_table(self) -> str:
         """Which table the functions come from, said in the answers."""
         if self.function_starts:
-            return f"exception directory, {len(self.function_starts)} functions"
+            chained = sum(
+                1
+                for begin, owner in zip(self.function_starts, self.function_owners, strict=False)
+                if owner != begin
+            )
+            said = f"exception directory, {len(self.function_starts)} entries"
+            if chained:
+                said += (
+                    f" ({chained} chained fragments stated with the start of the function they "
+                    "belong to, or with none when the chain could not be followed)"
+                )
+            return said
+        if self.outside_starts:
+            return (
+                f"{self.outside_source}, {len(self.outside_starts)} function starts (they list "
+                "where functions start, not where they end: the function stated is the nearest "
+                "start at or before the address in the same section)"
+            )
         return "none (the image lists no functions; addresses are stated without one)"
 
     # -- scanning -----------------------------------------------------------
@@ -220,6 +286,22 @@ class Image:
         return found
 
 
+def take_function_starts(image: Image, starts: Any, source: str) -> None:
+    """Hand an image function starts (``0x..`` strings or ints) from ``source``.
+
+    Only an image with no function table of its own takes them; anything that
+    is not a number is left out.
+    """
+    values: list[int] = []
+    for start in starts or []:
+        try:
+            values.append(int(start, 16) if isinstance(start, str) else int(start))
+        except (TypeError, ValueError):
+            continue
+    if values:
+        image.use_function_starts(values, source)
+
+
 def load(path: str | Path) -> Image:
     """The image ``path`` maps to, or :class:`NotAPortableExecutable`."""
     data = Path(path).read_bytes()
@@ -278,19 +360,54 @@ def parse(data: bytes) -> Image:
     return image
 
 
+# UNW_FLAG_CHAININFO: the unwind data ends in the RUNTIME_FUNCTION of the entry
+# this one continues.
+_CHAININFO = 0x4
+# How many links a chain is followed through before it is called unfollowable.
+_CHAIN_DEPTH = 32
+
+
+def _chained_to(image: Image, unwind: int) -> tuple[int, int] | None:
+    """The (begin, unwind) of the entry an unwind record chains to, or ``None``."""
+    offset = image.offset_of_rva(unwind)
+    if offset is None or offset + 4 > len(image.data):
+        return None
+    header, _prolog, codes = image.data[offset], image.data[offset + 1], image.data[offset + 2]
+    if not (header >> 3) & _CHAININFO:
+        return None
+    chained = offset + 4 + 2 * ((codes + 1) & ~1)
+    if chained + 12 > len(image.data):
+        return None
+    begin, _finish, next_unwind = struct.unpack_from("<III", image.data, chained)
+    return begin, next_unwind
+
+
+def _owner(image: Image, begin: int, unwind: int) -> int | None:
+    """The start of the function an entry belongs to: its own begin, or its chain's end."""
+    current_begin, current_unwind = begin, unwind
+    for _ in range(_CHAIN_DEPTH):
+        link = _chained_to(image, current_unwind)
+        if link is None:
+            return current_begin
+        current_begin, current_unwind = link
+    return None
+
+
 def _read_function_table(image: Image, rva: int, size: int) -> None:
     """The x64 RUNTIME_FUNCTION entries: begin, end and unwind RVAs, twelve bytes each."""
     offset = image.offset_of_rva(rva) if rva else None
     if offset is None or size < 12:
         return
     end = min(len(image.data), offset + size)
-    ranges: dict[int, int] = {}
+    image.exception_directory = (offset, end - offset)
+    ranges: dict[int, tuple[int, int]] = {}
     for at in range(offset, end - 11, 12):
-        begin, finish, _unwind = struct.unpack_from("<III", image.data, at)
+        begin, finish, unwind = struct.unpack_from("<III", image.data, at)
         if begin == 0 and finish == 0:
             break
         if finish > begin and begin not in ranges:
-            ranges[begin] = finish
+            ranges[begin] = (finish, unwind)
     starts = sorted(ranges)
     image.function_starts = starts
-    image.function_ends = [ranges[start] for start in starts]
+    image.function_ends = [ranges[start][0] for start in starts]
+    image.function_owners = [_owner(image, start, ranges[start][1]) for start in starts]

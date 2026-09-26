@@ -288,7 +288,7 @@ def candidate_values(image: pe_image.Image) -> list[int]:
     for section in image.code_sections():
         values |= _code_immediates(image.section_bytes(section), image.is64)
     for section in image.data_sections():
-        raw = image.section_bytes(section)
+        raw = image.data_bytes(section)
         usable = len(raw) // 4 * 4
         if usable:
             values.update(int(v) for v in np.unique(np.frombuffer(raw[:usable], dtype="<u4")))
@@ -330,6 +330,8 @@ def resolve_api_hashes(
     limit: int | None = None,
     names_path: str = DEFAULT_EXPORT_NAMES,
     algorithms_path: str = DEFAULT_ALGORITHMS,
+    function_starts: Sequence[Any] | None = None,
+    function_source: str = "capa",
 ) -> dict[str, Any]:
     """Resolve 32-bit values in a PE to the function names they are hashes of.
 
@@ -337,6 +339,8 @@ def resolve_api_hashes(
     candidates. ``algorithms`` keeps some of the data file's algorithm ids;
     with none every one is tried. ``offset``/``limit`` page ``hits`` when the
     caller wants pages; ``limit`` of ``None`` is every hit.
+    ``function_starts`` (offsets from the image base, from ``function_source``)
+    stand in for a function table the image lacks (``pe_image``).
     """
     try:
         image = pe_image.load(path)
@@ -344,6 +348,7 @@ def resolve_api_hashes(
         return _error(f"no such file: {path}")
     except pe_image.NotAPortableExecutable as exc:
         return _error(f"this tool reads Windows PE images only; {exc}")
+    pe_image.take_function_starts(image, function_starts, function_source)
     known = [str(entry["id"]) for entry in load_algorithms(algorithms_path)]
     wanted = tuple(known) if not algorithms else tuple(str(a).strip() for a in algorithms)
     unknown = [a for a in wanted if a not in known]

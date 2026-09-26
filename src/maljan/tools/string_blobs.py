@@ -687,7 +687,7 @@ def decode(
     wanted = set(schemes)
     candidates: list[Found] = []
     for section in image.data_sections():
-        raw = image.section_bytes(section)
+        raw = image.data_bytes(section)
         base = section.raw_offset
         if "xor_keyed_header" in wanted:
             candidates.extend(_keyed_headers(raw, base, min_len))
@@ -747,6 +747,8 @@ def decode_string_blobs(
     offset: int = 0,
     limit: int | None = None,
     include_unreferenced: bool = False,
+    function_starts: Sequence[Any] | None = None,
+    function_source: str = "capa",
 ) -> dict[str, Any]:
     """Decode the text a PE keeps encoded in its data sections (see the module docstring).
 
@@ -766,6 +768,7 @@ def decode_string_blobs(
         return _error(f"no such file: {path}")
     except pe_image.NotAPortableExecutable as exc:
         return _error(f"this tool reads Windows PE images only; {exc}")
+    pe_image.take_function_starts(image, function_starts, function_source)
     minimum = max(_HEADER_MIN_LENGTH, int(min_len))
     decoded = decode(image, minimum, wanted)
     items = decoded.items

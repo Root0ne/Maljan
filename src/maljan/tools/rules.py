@@ -390,7 +390,11 @@ def capa(
             ),
             "tool": "capa",
         }
-    return {"capabilities": _capa_capabilities(document), "meta": _capa_meta(document)}
+    return {
+        "capabilities": _capa_capabilities(document),
+        "meta": _capa_meta(document),
+        "function_starts": capa_function_starts(document),
+    }
 
 
 def _capa_capabilities(document: dict[str, Any]) -> list[dict[str, Any]]:
@@ -428,6 +432,28 @@ def _capa_capabilities(document: dict[str, Any]) -> list[dict[str, Any]]:
         )
     rows.sort(key=lambda r: (r["namespace"], r["rule"]))
     return rows
+
+
+def capa_function_starts(document: dict[str, Any]) -> list[str]:
+    """Every function capa found, as the offset of its start from the image base.
+
+    Read from the document's feature counts, which list each function capa
+    analysed with its address. Only addresses inside the image are kept, and
+    only when capa names the base, so each is the number a disassembler agrees
+    with; the list says where functions start, not where they end.
+    """
+    base = _capa_base_address(document)
+    if base is None:
+        return []
+    analysis = (document.get("meta") or {}).get("analysis") or {}
+    counts = analysis.get("feature_counts") or {}
+    starts: list[str] = []
+    for row in counts.get("functions") or []:
+        address = row.get("address") if isinstance(row, dict) else None
+        where = _capa_address(address, base)
+        if where and where.startswith("0x") and where not in starts:
+            starts.append(where)
+    return starts
 
 
 def _capa_base_address(document: dict[str, Any]) -> int | None:

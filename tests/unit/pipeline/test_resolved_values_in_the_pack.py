@@ -16,6 +16,8 @@ import zlib
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.agents.prompts import REVERSER_PROMPT
 from maljan.pipeline import triage_pack
@@ -72,6 +74,30 @@ class TestThePackRunsThem:
         target.write_text("plain text\n", encoding="utf-8")
         tools = [entry.tool for entry in _pack(str(target), "text").entries]
         assert "resolve_api_hashes" not in tools and "decode_string_blobs" not in tools
+
+
+class TestAnImageWithoutAFunctionTable:
+    def test_capa_s_function_starts_are_handed_to_both_steps(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.tools import rules
+
+        image = SyntheticPE(is64=False, image_base=0x400000)
+        for offset, name in ((0x140, b"VirtualAlloc"), (0x160, b"CreateFileW")):
+            image.put("text", offset, b"\x3d" + struct.pack("<I", zlib.crc32(name)))
+        target = tmp_path / "s.exe"
+        target.write_bytes(image.build())
+        monkeypatch.setattr(
+            rules,
+            "capa",
+            lambda path, **_: {"capabilities": [], "meta": {}, "function_starts": ["0x1100"]},
+        )
+        result = _pack(str(target))
+        hashes = next(e for e in result.entries if e.tool == "resolve_api_hashes")
+        assert hashes.args["function_starts"] == "capa's 1 function starts"
+        assert hashes.structured["function_table"].startswith("capa, 1 function starts")
+        places = [p for row in hashes.structured["hits"] for p in row["occurrences"]]
+        assert {p["function"] for p in places} == {hex(TEXT_RVA + 0x100)}
 
 
 def _entry(tool: str, payload: dict[str, Any], seq: int) -> Any:

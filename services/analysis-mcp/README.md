@@ -98,9 +98,15 @@ own, so a call here emulates the file once more for this server's kept result.
 Both read a PE's bytes and nothing else; nothing is run or emulated, and both
 answer in seconds. Their addresses are offsets from the image base, and "the
 function around" an address is the one the file's own function table (the x64
-exception directory, `.pdata`) lists; an x86 image has no such table, and its
-addresses are stated alone. No start is guessed. Neither limits its answer by
-default: `limit` pages it only when the caller asks.
+exception directory, `.pdata`) lists; an entry whose unwind data chains to
+another is a fragment, stated with the start of the function the chain leads to
+or with none when it cannot be followed. An x86 image has no such table: the
+triage pack hands both tools capa's function starts when capa ran, and the
+function stated is then the nearest start at or before the address in the same
+section, which `function_table` says; otherwise, and on a direct call, an x86
+address is stated alone. No start is guessed. The exception directory's bytes
+are not read as program data. Neither limits its answer by default: `limit`
+pages it only when the caller asks.
 
 `resolve_api_hashes` names the 32-bit values a PE holds that are hashes of
 Windows function names — the values a program compares with the hash of each

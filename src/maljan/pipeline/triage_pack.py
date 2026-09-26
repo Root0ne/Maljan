@@ -507,6 +507,9 @@ class _Pack:
         self.has_signature = False
         self.yara_hits = 0
         self.capa_hits = 0
+        # Where capa found functions, for the readers of an image with no
+        # function table of its own.
+        self.capa_function_starts: list[str] = []
         self.reputation_malicious: int | None = None
         # FLOSS, started beside the rest of the pack when it can be. Recorded
         # in its own place at the end, so every id keeps its value.
@@ -719,6 +722,7 @@ class _Pack:
         )
         if found is not None:
             self.capa_hits = len(found.get("capabilities") or [])
+            self.capa_function_starts = list(found.get("function_starts") or [])
         report = observed_report(self.inputs.sandbox_report)
         if report:
             self.record(
@@ -1002,13 +1006,21 @@ class _Pack:
         if routed != "pe":
             return
         path = self.inputs.sample_path
+        starts = self.capa_function_starts
+        # The starts are an input the entry's arguments name by count, not by
+        # value: a large sample has thousands of them.
+        args: dict[str, Any] = {"path": path}
+        if starts:
+            args["function_starts"] = f"capa's {len(starts)} function starts"
         self.record(
-            "resolve_api_hashes", {"path": path}, lambda: api_hashes.resolve_api_hashes(path)
+            "resolve_api_hashes",
+            args,
+            lambda: api_hashes.resolve_api_hashes(path, function_starts=starts),
         )
         self.record(
             "decode_string_blobs",
-            {"path": path},
-            lambda: string_blobs.decode_string_blobs(path),
+            args,
+            lambda: string_blobs.decode_string_blobs(path, function_starts=starts),
         )
 
 
