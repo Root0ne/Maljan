@@ -14,10 +14,10 @@ The schemes, each named in the answer with its parameters:
 * ``xor8`` — every byte XOR one key byte (1–255).
 * ``xor8_rolling`` — XOR a key byte that increases by one per byte; the
   parameter is the key at the text's first byte.
-* ``xor_keyed_header`` — XOR with a repeating key stored in front of the text,
-  in one of three layouts: key length (one byte), key, text ending at a decoded
-  NUL; key length, key, text length (two bytes), text; key length, key, text
-  length (four bytes), text.
+* ``xor_keyed_header`` — XOR with a repeating key of up to 32 bytes stored in
+  front of the text, in one of three layouts: key length (one byte), key, text
+  ending at a decoded NUL; key length, key, text length (two bytes), text; key
+  length, key, text length (four bytes), text.
 * ``xor8_rolling_header`` — the rolling key with a header in front of the text:
   a 32-bit seed followed by a 16-bit text length stored plain or XOR the seed's
   low 16 bits, the key starting at the seed's low byte or one past it. A
@@ -26,17 +26,33 @@ The schemes, each named in the answer with its parameters:
 * ``base64`` — a base64 run among the plain strings of those sections, and a
   base64 layer on top of any text decoded above (reported under ``layers``).
 
-What reads as text, the stated test every decoding passes before it is
-reported:
+A header that states the text's length carries structure of its own. When
+the stated span ends exactly in the text's own terminator — one NUL, or a NUL
+pair for UTF-16LE — and holds no other NUL, the header and the decoded bytes
+agree on where the text ends, and the span is accepted when its characters are
+printable, at least half letters or digits, not a repeated pattern, changed by
+the key at half its bytes or more, and at least three characters long under the
+seed-and-length header (tried four ways at each offset) or six under a stored
+key (tried at every key length). A format string, a command line or a user
+agent passes; none of the vetoes below applies to such a span, because they
+exist for text whose ends nothing but the surrounding bytes mark. Measured on
+54 benign PEs of this project's host, the rule and the tightened test below
+together report six decodings no program wrote.
+
+What reads as text for every other decoding, the stated test it passes before
+it is reported:
 
 * printable ASCII (0x20–0x7E, tab, CR, LF) throughout, trailing NULs aside,
   or, where a header states the length, UTF-16LE whose characters are;
-* at least ``min_len`` characters when nothing but the surrounding bytes marks
-  where the text starts and ends (``xor8``, ``xor8_rolling``: the text must be
-  bounded on both sides by a decoded NUL, a zero byte or the section's edge),
-  and at least four when a header states the length;
+* at least ``min_len`` (eight by default) characters when nothing but the
+  surrounding bytes marks where the text starts and ends (``xor8``,
+  ``xor8_rolling``: the text must be bounded on both sides by a decoded NUL, a
+  zero byte or the section's edge; and the stored-key layout that runs to a
+  NUL), four under a seed-and-length header and six under a stored key;
 * at least half of it letters or digits, at least four distinct characters
-  (three for a four-character text) and no character more than half of it;
+  (three for a four-character text), no character more than half of it (a
+  third from eight characters on), and, from twelve characters on, no
+  three-character sequence at more than a quarter of its positions;
 * few changes of character class — lower case, upper case, digit, space and
   punctuation, a capital before lower case not counting — at most one per
   three characters, which is how words, numbers, paths and URLs read and how
@@ -55,8 +71,8 @@ And the encoded bytes under the text:
   half of them. A key below 0x40 moves letters onto other printable
   characters, so plain text under such a key "decodes" as readily as an
   encoded string does and nothing in the bytes says which is the writing. The
-  price is stated: a string whose encoded bytes are printable is not decoded
-  here, and is in the ``strings`` tool's answer as it stands;
+  price is stated: such a string whose encoded bytes are printable is not
+  decoded here, and is in the ``strings`` tool's answer as it stands;
 * under the rolling key, hold no byte three times in a row, which is a
   constant or a fill (the bytes of a floating-point number) and not text.
 
@@ -101,14 +117,21 @@ TOOL = "decode_string_blobs"
 
 SCHEMES = ("xor8", "xor8_rolling", "xor_keyed_header", "xor8_rolling_header", "base64")
 
-DEFAULT_MIN_LENGTH = 6
+DEFAULT_MIN_LENGTH = 8
 # The shortest text a header that states its length may carry.
 _HEADER_MIN_LENGTH = 4
 # From this length on, text whose characters are mostly evenly spaced is not
 # text (``readable``); a shorter one may be a number such as a port or a count.
 _PROGRESSION_FROM = 6
-# The longest repeating key the keyed-header layouts read.
-_LONGEST_KEY = 32
+# The shortest text a header-stated span that ends in its own terminator may
+# carry: under the seed-and-length header, which is tried four ways at each
+# offset, and under a stored key with a length, which is tried at every key
+# length up to ``LONGEST_KEY`` and so needs a longer text to be told from chance.
+_STATED_MIN_LENGTH = {"xor8_rolling_header": 3, "xor_keyed_header": 6}
+# The longest repeating key the keyed-header layouts read, stated in every
+# answer (``readable_test`` and ``longest_key``): every key length tried is
+# another chance for bytes to read as text by accident.
+LONGEST_KEY = 32
 
 _PRINTABLE = frozenset(range(0x20, 0x7F)) | {0x09, 0x0A, 0x0D}
 _PRINTABLE_TABLE = np.array([byte in _PRINTABLE for byte in range(256)], dtype=bool)
@@ -118,13 +141,20 @@ _BASE64 = re.compile(rb"[A-Za-z0-9+/]{12,}={0,2}")
 # Stated with the answer, so a reader knows what "reads as text" meant. Kept to
 # general words: it reaches every agent that calls the tool.
 READABLE_TEST = (
-    "printable characters throughout (two-byte characters where a header states the length); "
-    "at least min_len characters for a text bounded only by the bytes around it, four where a "
-    "header states its length; at least half letters or digits; at least four distinct "
-    "characters and none over half the text; at most one change of character class per three "
-    "characters; no evenly spaced run of characters; a text-encoding layer whose content "
-    "passes counts as text; and encoded bytes that hold no zero byte and do not already read "
-    "as text, so a string whose encoded bytes are printable is not decoded here"
+    "a span whose header states its length, ends in the text's own terminator and holds no "
+    "other zero: printable characters, at least half letters or digits, none over half the "
+    "text (a third from eight characters on), no short pattern repeated through it, the key "
+    "changing at least half the bytes, and at least three characters under the seed-and-length "
+    "header or six under a stored key; any other text: printable characters throughout (two-byte "
+    "characters where a header states the length), at least min_len characters when only the "
+    "bytes around it bound it, four under a seed-and-length header and six under a stored key, "
+    "at least half letters or digits, at "
+    "least four distinct characters, none over half the text (a third from eight characters "
+    "on), no short pattern repeated through it, at most one change of character class per "
+    "three characters and no evenly spaced run of characters, a text-encoding layer whose "
+    "content passes counting as text, and encoded bytes that hold no zero byte and do not "
+    "already read as text, so such a string whose encoded bytes are printable is not decoded "
+    "here; a stored key is read up to 32 bytes long"
 )
 
 
@@ -152,7 +182,7 @@ def readable(text: bytes, min_len: int) -> bool:
     distinct = len(set(text))
     if distinct < (3 if length <= 4 else 4):
         return False
-    if max(text.count(bytes([byte])) for byte in set(text)) * 2 > length:
+    if _repetitive(text):
         return False
     changes = 0
     steps: dict[int, int] = {}
@@ -166,6 +196,28 @@ def readable(text: bytes, min_len: int) -> bool:
     # A run of evenly spaced characters is a table of numbers under a key, not
     # text: the bytes of a counter or an index read "defghijk" once decoded.
     return length < _PROGRESSION_FROM or max(steps.values()) * 3 <= length - 1
+
+
+def _repetitive(text: bytes) -> bool:
+    """Whether one character, or one three-character pattern, fills the text.
+
+    A character over half the text (a third from eight characters on), or a
+    three-character sequence standing at more than a quarter of the positions
+    of a text of twelve or more: the rows of a table read under a key, not
+    writing.
+    """
+    length = len(text)
+    most = max(text.count(bytes([byte])) for byte in set(text)) if text else 0
+    if most * (3 if length >= 8 else 2) > length:
+        return True
+    if length >= 12:
+        grams: dict[bytes, int] = {}
+        for at in range(length - 2):
+            gram = text[at : at + 3]
+            grams[gram] = grams.get(gram, 0) + 1
+        if max(grams.values()) * 4 > length - 2:
+            return True
+    return False
 
 
 def _reads_as_text(raw: bytes) -> bool:
@@ -366,14 +418,65 @@ def _repeat_xor(data: bytes, key: bytes) -> bytes:
     return _xor(data, stream)
 
 
-def _header_text(decoded: bytes, encoded: bytes, rolling: bool = False) -> tuple[bytes, str] | None:
+def _terminated(decoded: bytes) -> tuple[bytes, str] | None:
+    """The characters of a span that ends in its own terminator and holds no other NUL.
+
+    ASCII ends in one NUL; UTF-16LE in one NUL pair, with a zero high byte
+    after every character before it. ``None`` for any other span.
+    """
+    if len(decoded) >= 2 and decoded[-1] == 0 and 0 not in decoded[:-1]:
+        return decoded[:-1], "ascii"
+    if (
+        len(decoded) >= 4
+        and len(decoded) % 2 == 0
+        and decoded[-2:] == b"\0\0"
+        and not any(decoded[1:-2:2])
+        and all(decoded[0:-2:2])
+    ):
+        return decoded[0:-2:2], "utf-16le"
+    return None
+
+
+def _structural(characters: bytes, decoded: bytes, encoded: bytes, scheme: str) -> bool:
+    """The test a header-stated, terminated span passes (``READABLE_TEST``, first half).
+
+    Printable, at least half letters or digits, not a repeated pattern, long
+    enough for its scheme, and changed by the key at half its bytes or more:
+    a key that leaves the bytes as they were has decoded nothing.
+    """
+    if len(characters) < _STATED_MIN_LENGTH[scheme]:
+        return False
+    if any(byte not in _PRINTABLE for byte in characters) or _repetitive(characters):
+        return False
+    alnum = sum(1 for byte in characters if _char_class(byte) in (0, 1, 2))
+    if alnum * 2 < len(characters):
+        return False
+    changed = sum(1 for clear, stored in zip(decoded, encoded, strict=False) if clear != stored)
+    return changed * 2 >= len(decoded)
+
+
+def _header_text(
+    decoded: bytes, encoded: bytes, rolling: bool = False, stated: bool = True
+) -> tuple[bytes, str] | None:
     """The text a header-stated span holds and its encoding, when it passes the test.
 
-    ASCII, or UTF-16LE when every second byte of the span is zero (the text is
-    then tested on its characters). Trailing NULs are not the text's. The
-    encoded bytes under the text hold no zero byte: a key over zeros is the key
-    itself, and a key that happens to be text then reads as a decoding.
+    A span whose stated length ends exactly in the text's own terminator — one
+    NUL, or a NUL pair for UTF-16LE — and holds no other NUL carries its
+    structure with it: the header said where the text ends and the decoded
+    bytes agree. It is accepted when its characters are printable and at least
+    half letters or digits, which is what a format string, a command line or a
+    user agent is. The vetoes below are for spans with no such agreement.
+
+    Any other span: ASCII, or UTF-16LE when every second byte is zero (tested
+    on its characters); trailing NULs are not the text's; and the encoded bytes
+    under the text hold no zero byte (a key over zeros is the key itself), do
+    not already read as text, and, under a rising key, repeat no byte three
+    times.
     """
+    terminated = _terminated(decoded) if stated else None
+    if terminated is not None:
+        scheme = "xor8_rolling_header" if rolling else "xor_keyed_header"
+        return terminated if _structural(terminated[0], decoded, encoded, scheme) else None
     text = decoded.rstrip(b"\0")
     encoding = "ascii"
     if len(text) >= 2 and not any(text[1::2]):
@@ -441,10 +544,10 @@ def _printable_heads(array: np.ndarray, key_length: int, gap: int) -> np.ndarray
     return kept
 
 
-def _keyed_headers(raw: bytes, base: int) -> Iterator[Found]:
+def _keyed_headers(raw: bytes, base: int, min_len: int) -> Iterator[Found]:
     size = len(raw)
     array = np.frombuffer(raw, dtype=np.uint8)
-    for key_length in range(1, _LONGEST_KEY + 1):
+    for key_length in range(1, LONGEST_KEY + 1):
         # key length, key, text to a decoded NUL.
         for at in _printable_heads(array, key_length, 0).tolist():
             key_end = at + 1 + key_length
@@ -452,8 +555,8 @@ def _keyed_headers(raw: bytes, base: int) -> Iterator[Found]:
             end = _to_nul(raw, key_end, key)
             if end is None or end - key_end < _HEADER_MIN_LENGTH:
                 continue
-            read = _header_text(_repeat_xor(raw[key_end:end], key), raw[key_end:end])
-            if read is not None and read[1] == "ascii":
+            read = _header_text(_repeat_xor(raw[key_end:end], key), raw[key_end:end], stated=False)
+            if read is not None and read[1] == "ascii" and len(read[0]) >= min_len:
                 text = read[0]
                 yield Found(
                     base + at,
@@ -473,7 +576,7 @@ def _keyed_headers(raw: bytes, base: int) -> Iterator[Found]:
                     continue
                 body = raw[start : start + length]
                 read = _header_text(_repeat_xor(body, key), body)
-                if read is not None:
+                if read is not None and len(read[0]) >= _STATED_MIN_LENGTH["xor_keyed_header"]:
                     text, encoding = read
                     yield Found(
                         base + at,
@@ -587,7 +690,7 @@ def decode(
         raw = image.section_bytes(section)
         base = section.raw_offset
         if "xor_keyed_header" in wanted:
-            candidates.extend(_keyed_headers(raw, base))
+            candidates.extend(_keyed_headers(raw, base, min_len))
         if "xor8_rolling" in wanted or "xor8_rolling_header" in wanted:
             candidates.extend(
                 _rolling(
@@ -734,6 +837,7 @@ def decode_string_blobs(
         "sections": [s.name for s in image.data_sections()],
         "readable_test": READABLE_TEST,
         "min_len": minimum,
+        "longest_key": LONGEST_KEY,
         "floss_rows_compared": len(floss),
         "also_recovered_by_floss": also_floss,
         "results": page,

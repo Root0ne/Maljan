@@ -93,7 +93,7 @@ own, so a call here emulates the file once more for this server's kept result.
 | tool | arguments |
 | --- | --- |
 | `resolve_api_hashes` | `path`, `carved_path=""`, `hashes=null`, `algorithms=null`, `offset=0`, `limit=null` |
-| `decode_string_blobs` | `path`, `carved_path=""`, `min_len=6`, `schemes=null`, `offset=0`, `limit=null`, `include_unreferenced=false` |
+| `decode_string_blobs` | `path`, `carved_path=""`, `min_len=8`, `schemes=null`, `offset=0`, `limit=null`, `include_unreferenced=false` |
 
 Both read a PE's bytes and nothing else; nothing is run or emulated, and both
 answer in seconds. Their addresses are offsets from the image base, and "the
@@ -138,14 +138,27 @@ a decoded NUL; or key length, key, a two- or four-byte text length, text),
 seed's low half, the rising key starting at the seed's low byte or one past
 it) and `base64`, alone among the plain strings or as a layer on top of any of
 them (`layers`). A decoding is reported only when it passes the test the answer
-states in `readable_test`: printable throughout (UTF-16LE where a header gives
-the length); at least `min_len` characters when only the bytes around the text
-bound it, four when a header does; half letters or digits; few changes of
-character class; no evenly spaced run; and encoded bytes that hold no zero byte
-and do not already read as text. The last rule has a price, stated in the
-answer: a key below 0x40 over letters leaves them printable, plain text under
-such a key "decodes" just as readily, and nothing in the bytes says which is the
-writing, so a string whose encoded bytes are printable is not decoded here.
+states in `readable_test`, in two halves.
+
+A span whose header states its length, ends exactly in the text's own
+terminator (one NUL, or a NUL pair for UTF-16LE) and holds no other NUL carries
+its own structure: it is accepted when its characters are printable, at least
+half letters or digits, not a repeated pattern, changed by the key at half its
+bytes or more, and three characters or more under the seed-and-length header
+(tried four ways at each offset) or six under a stored key (tried at every key
+length). Format strings, command lines and user-agent strings pass.
+
+Any other decoding: printable throughout (UTF-16LE where a header gives the
+length); at least `min_len` (8) characters when only the bytes around the text
+bound it, four under a seed-and-length header and six under a stored key; half
+letters or digits; no character over half the text (a third from eight on) and
+no three-character pattern at over a quarter of a long text's positions; few
+changes of character class; no evenly spaced run; and encoded bytes that hold
+no zero byte and do not already read as text. That last rule has a price,
+stated in the answer: a key below 0x40 over letters leaves them printable,
+plain text under such a key "decodes" just as readily, and nothing in the bytes
+says which is the writing, so such a string whose encoded bytes are printable is
+not decoded here.
 A span one scheme reads under two keys is dropped (`ambiguous_spans`), and of
 two decodings of overlapping bytes the one a header placed, else the longer, is
 kept. `results` holds the decodings some code or data refers to — a scan for
@@ -153,7 +166,9 @@ RIP-relative displacements in x64 code and absolute virtual addresses anywhere
 that land on the blob or its text — or that FLOSS recovered too in this
 process (`floss`, with FLOSS's routine and call site; FLOSS's kept result is
 read, never run); the rest are counted under `unreferenced` and listed with
-`include_unreferenced`. Measured on the same five benign PEs: no results.
+`include_unreferenced`. Measured on 54 benign PEs on this project's host
+(launcher and runtime binaries, DirectX and Wine-built system DLLs, the five
+above): 6 results in all, none written by the program as encoded text.
 
 The triage pack runs both on every PE as its last two steps, and every agent
 reads their lines in the pack.

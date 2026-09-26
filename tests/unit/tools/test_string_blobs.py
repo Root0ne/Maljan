@@ -146,6 +146,56 @@ class TestEachScheme:
         assert row["text"] == inner.decode()
 
 
+class TestAHeaderThatStatesWhereTheTextEnds:
+    """A stated length that ends in the text's own terminator is structure enough."""
+
+    def test_a_small_rising_key_that_leaves_the_bytes_printable(self, tmp_path: Path) -> None:
+        seed = 0x00000011
+        text = b"remote settings folder\0"
+        encoded = _rising(text, seed & 0xFF)
+        printable = sum(32 <= b < 127 for b in encoded[:-1])
+        assert printable * 5 >= (len(text) - 1) * 4, "most of it printable as stored"
+        blob = struct.pack("<IH", seed, len(text)) + encoded
+        row = _only(_decode(tmp_path, _with_blob(blob)))
+        assert row["scheme"] == "xor8_rolling_header"
+        assert row["text"] == "remote settings folder"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            b"%s\\%s_%x.dat\0",
+            b"cmd.exe /c dir /a %TEMP%\0",
+            b"Agent/5.0 (Machine; Model 10.0; x64)\0",
+        ],
+    )
+    def test_format_strings_command_lines_and_agent_strings(
+        self, tmp_path: Path, text: bytes
+    ) -> None:
+        seed = 0x3A5C0091
+        blob = struct.pack("<IH", seed, len(text)) + _rising(text, (seed + 1) & 0xFF)
+        row = _only(_decode(tmp_path, _with_blob(blob)))
+        assert row["text"] == text[:-1].decode()
+
+    def test_under_a_stored_key_too(self, tmp_path: Path) -> None:
+        key = b"\x01\x02\x03"
+        text = b"%s?id=%d\0"
+        blob = bytes([len(key)]) + key + struct.pack("<H", len(text)) + _repeating(text, key)
+        row = _only(_decode(tmp_path, _with_blob(blob)))
+        assert row["scheme"] == "xor_keyed_header"
+        assert row["text"] == "%s?id=%d"
+
+    def test_a_key_that_changes_almost_nothing_decodes_nothing(self, tmp_path: Path) -> None:
+        key = b"\x00\x00\x00\x01"
+        text = b"plain words kept here\0"
+        blob = bytes([len(key)]) + key + struct.pack("<H", len(text)) + _repeating(text, key)
+        assert _decode(tmp_path, _with_blob(blob))["total"] == 0
+
+    def test_the_stored_key_length_read_is_stated(self, tmp_path: Path) -> None:
+        answer = _decode(tmp_path, _image())
+        assert answer["longest_key"] == string_blobs.LONGEST_KEY
+        assert "32 bytes" in answer["readable_test"]
+
+
 class TestWhatIsNotReported:
     def test_random_bytes_decode_to_nothing(self, tmp_path: Path) -> None:
         noise = random.Random(11)
