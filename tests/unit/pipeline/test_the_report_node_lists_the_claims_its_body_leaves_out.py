@@ -60,5 +60,5 @@ async def test_a_claim_the_body_leaves_out_is_stored_counted_and_printed(contain
     assert (row.agent, row.claim_number, row.claim) == ("static", 1, CLAIM)
     assert stored.run_summary["claims_not_discussed"] == 1
     served = MarkdownRenderer().render(stored)
-    assert "Claims not discussed in the body" in served
+    assert "Claims whose code locations or API names the body does not name" in served
     assert "**static claim 1** (confidence 0.80; " in served

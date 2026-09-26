@@ -1,11 +1,11 @@
-"""Every analyst claim in force reaches the report: cited, discussed, or listed.
+"""Every analyst claim in force reaches the report: cited, named, or listed.
 
 The report models are handed the claims; what they leave out of the body was
 gone with nothing saying so. After the body is composed a deterministic check
 reads it claim by claim, and the report lists every claim in force the body
-neither cites (by its label, the analyst and the claim's number) nor discusses
-(more than half of the identifiers the claim names, or of its words when it
-names none), with the count the check found.
+does not cite by its label and whose code locations or API names the body does
+not all name, with the names it lacks; a claim that names none is read by its
+words.
 
 The fixture is one run's claims in force and the body its report models wrote
 over them.
@@ -77,13 +77,12 @@ class TestTheRunsClaimsAgainstItsBody:
         listed = [claim_label(row.agent, row.claim_number) for row in rows]
 
         assert sum(len(v) for v in RUN["claims"].values()) == 87
-        # The three analysts' statements that the injection functions are
-        # resolved and never called: the body never discusses them.
         for label in ("triage claim 13", "static claim 13", "dynamic claim 4"):
             assert label in listed
-        # A gating claim the body carries most of is discussed, not listed.
-        assert "static claim 15" not in listed
-        assert len(listed) == 14
+        # A gating claim whose other checks the body carries: the one clause it
+        # dropped shows through the function names only that clause names.
+        assert "static claim 15" in listed
+        assert len(listed) == 23
 
     def test_each_row_carries_the_claim_whole_and_the_count_found(self) -> None:
         rows = claims_not_discussed(_run_report(), _isrs(RUN["claims"]))
@@ -92,7 +91,10 @@ class TestTheRunsClaimsAgainstItsBody:
         row = by_label["static claim 13"]
         assert row.claim == RUN["claims"]["static"][12]["claim"]
         assert row.evidence_ref == RUN["claims"]["static"][12]["evidence_ref"]
-        assert (row.carried, row.named, row.counted) == (3, 20, "identifiers")
+        assert "VirtualAllocEx" in row.missing
+        gating = by_label["static claim 15"]
+        assert "FUN_0x68e8" in gating.missing
+        assert gating.counted == "names"
 
     def test_the_report_prints_them_in_their_own_section(self) -> None:
         report = _run_report()
@@ -101,21 +103,22 @@ class TestTheRunsClaimsAgainstItsBody:
         markdown = MarkdownRenderer().render(report)
         section = markdown[markdown.index(CLAIMS_NOT_DISCUSSED_TITLE) :]
 
-        assert "### 13.1 Claims not discussed in the body" in markdown
-        assert "**static claim 13** (confidence 0.85; the body carries 3 of the 20" in section
-        assert section.count("\n- **") == 14
+        assert f"### 13.1 {CLAIMS_NOT_DISCUSSED_TITLE}" in markdown
+        assert "**static claim 15** (confidence 0.85; the body never names " in section
+        assert "FUN_0x68e8" in section
+        assert section.count("\n- **") == 23
 
 
 class TestTheRule:
     def test_a_claim_cited_by_its_label_is_covered(self) -> None:
         report = _report(executive_summary="As static claim 2 says, the table is read at start.")
-        isrs = _isrs({"static": [_claim("First."), _claim("The value `zeta-table` is read.")]})
+        isrs = _isrs({"static": [_claim("First."), _claim("FUN_0x4a10 calls ReadTable.")]})
 
         listed = [r.claim_number for r in claims_not_discussed(report, isrs)]
 
         assert listed == [1]
 
-    def test_an_address_is_the_same_place_when_its_digits_end_the_other(self) -> None:
+    def test_an_address_plus_an_image_base_is_the_same_place(self) -> None:
         report = _report(
             technical_analysis=TechnicalAnalysis(
                 evasion_antiforensics=TechnicalSubsection(
@@ -127,17 +130,42 @@ class TestTheRule:
 
         assert claims_not_discussed(report, isrs) == []
 
-    def test_a_claim_whose_identifiers_the_body_mostly_lacks_is_listed_with_its_count(
-        self,
-    ) -> None:
-        report = _report(key_findings=[KeyFinding(text="The file calls OpenTable at 0x4010.")])
+    def test_one_missing_name_lists_the_claim_whatever_the_body_carries(self) -> None:
+        body = "FUN_0x4010 calls OpenTable and CloseTable, and FUN_0x4020 reads 0x100 bytes."
+        report = _report(key_findings=[KeyFinding(text=body)])
         isrs = _isrs(
-            {"dynamic": [_claim("OpenTable, CloseTable and ReadTable at 0x4010, 0x4020, 0x4030.")]}
+            {
+                "dynamic": [
+                    _claim(
+                        "FUN_0x4010 and FUN_0x4020 call OpenTable, CloseTable and ReadTable; "
+                        "FUN_0x4030 checks a flag of 0x8664."
+                    )
+                ]
+            }
         )
 
         (row,) = claims_not_discussed(report, isrs)
 
-        assert (row.agent, row.claim_number, row.carried, row.named) == ("dynamic", 1, 2, 6)
+        # A bare 0x value in a claim is not a code location: 0x8664 is not asked for.
+        assert row.missing == ["FUN_0x4030", "ReadTable"]
+
+    def test_an_address_matches_exactly_not_by_any_shared_ending(self) -> None:
+        report = _report(executive_summary="The routine at 0x1000 sets it up; so does 0x20000.")
+        isrs = _isrs(
+            {
+                "static": [
+                    _claim("FUN_0x11000 sets it up."),
+                    _claim("FUN_0x10000 sets it up too."),
+                    _claim("FUN_0x401000 sets it up as well."),
+                ]
+            }
+        )
+
+        listed = [r.claim_number for r in claims_not_discussed(report, isrs)]
+
+        # 0x11000 only ends in 1000; 0x10000 has as many digits as 0x20000; 0x401000
+        # is 0x1000 plus a 64 KiB-aligned base.
+        assert listed == [1, 2]
 
     def test_a_claim_that_names_no_identifier_is_read_by_its_words(self) -> None:
         body = "The loader waits before its first contact and then repeats on a schedule."
@@ -156,7 +184,7 @@ class TestTheRule:
         assert [(r.claim_number, r.counted) for r in rows] == [(2, "words")]
 
     def test_the_attack_table_s_quotes_are_not_the_body(self) -> None:
-        text = "The value `zeta-table` is read."
+        text = "FUN_0x4a10 reads the table through ReadTable."
         report = _report(
             ttp_mappings=[
                 TTPMapping(technique_id="T0001", technique_name="n", evidence_quotes=[text])

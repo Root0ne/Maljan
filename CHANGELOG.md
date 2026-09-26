@@ -8,18 +8,17 @@ change landed on `main`.
 
 ### Added
 
-- **Every analyst claim in force reaches the report: cited, discussed, or
+- **Every analyst claim in force reaches the report: cited, named, or
   listed.** Each composer section and, new, the narrative round show every
   claim in force under its label (`static claim 15`: the analyst and the
   claim's number in its answer in force); the narrative round is handed every
-  claim whole. After the body is composed, `reporting.claim_coverage` reads it
-  claim by claim: a claim is covered when the body names its label or carries
-  more than half of the identifiers it names (addresses and function names by
-  their hexadecimal digits, quoted values, API-style names, numbers of three
-  digits or more; a claim that names none, by its words). Every claim neither
-  cited nor discussed is stored (`MalwareReport.claims_not_discussed`),
-  counted (`run_summary.claims_not_discussed`) and printed under §13.1
-  "Claims not discussed in the body" with the rule and the count found.
+  claim whole. After the body is composed, `reporting.claim_coverage` lists
+  every claim not cited by its label whose code locations (function names) or
+  API-style names the body does not all name, with the names it lacks (a
+  claim naming none is read by its words). It is stored
+  (`MalwareReport.claims_not_discussed`), counted
+  (`run_summary.claims_not_discussed`) and printed under §13.1 "Claims whose
+  code locations or API names the body does not name".
 - **A decoded string loaded as a call argument is joined to that call.**
   `decode_string_blobs` states `passed_to` beside a reference: the callee (an
   import, a function address, or the slot a runtime pointer is read from) and

@@ -946,12 +946,12 @@ class EmulatedStrings(BaseModel):
 
 
 class ClaimNotDiscussed(BaseModel):
-    """An analyst claim in force the report's body neither cites nor discusses.
+    """An analyst claim in force whose code locations or API names the body does not name.
 
     Listed by ``reporting.claim_coverage`` after the body is composed, with
-    the claim as the analyst wrote it and what the check found: how many of
-    the identifiers (or, for a claim that names none, the words) it names the
-    body carries.
+    the claim as the analyst wrote it and what the check found: ``missing``,
+    the names the body never names, as the claim wrote them; or, for a claim
+    that names none, how many of its words the body carries.
     """
 
     model_config = _STRICT_CONFIG
@@ -961,9 +961,10 @@ class ClaimNotDiscussed(BaseModel):
     claim: str
     evidence_ref: str = ""
     confidence: float | None = None
+    missing: list[str] = Field(default_factory=list)
     carried: int = 0
     named: int = 0
-    counted: str = "identifiers"
+    counted: str = "names"
 
 
 class FlaggedStatement(BaseModel):

@@ -1,32 +1,33 @@
-"""Which analyst claims in force the report's body neither cites nor discusses.
+"""Which analyst claims in force the report's body does not name the code of.
 
 The report models write the body from bundles that carry the analysts' claims,
-and a claim they leave out is otherwise gone without a trace: a run's report
-dropped a check three analysts had stated, in force and read, for the fourth
-run in a row. After the body is composed this check reads it once, claim by
-claim, and the report prints every claim it finds neither cited nor discussed
-in a section of its own. Nothing is decided about the claim; it is listed, with
-what the check found.
+and a claim they leave out, or a clause of one, is otherwise gone without a
+trace. After the body is composed this check reads it once, claim by claim, and
+the report prints every claim whose code the body does not name in a section of
+its own, with the names it lacks. Nothing is decided about the claim; what the
+check states is a fact about the two texts: the body never names these.
 
 The rule, stated in the report beside the list:
 
-* **Cited.** The body names the claim by its label (``claim_label``: the
-  analyst and the claim's number in its answer in force), the label every
-  report model's input shows the claim under.
-* **Discussed.** The body carries more than half of the identifiers the claim
-  names: its addresses and function names (compared by their hexadecimal
-  digits, so ``FUN_1400068e8`` and ``0x68e8`` are the same place when one's
-  digits end the other's, from four digits on), the values it quotes in
-  backticks or double quotes, its API-style names (a word with two or more
-  capitals, six characters or more), and its numbers of three digits or more.
-  A claim that names no identifier at all is read by its words of five letters
-  or more, with the same majority.
-
-A claim that is neither is listed with the count the check found ("the body
-carries 8 of the 20 identifiers it names"). The check is arithmetic over the
-two texts: a claim the body restates in other words is listed, and one whose
-identifiers the body carries for another reason is not; the count says which
-reading a reader is looking at.
+* **Cited.** A claim the body names by its label (``claim_label``: the analyst
+  and the claim's number in its answer in force), the label every report
+  model's input shows the claim under, is not listed.
+* **Code locations and API names.** Otherwise a claim is listed when the body
+  does not name one or more of its code locations — ``FUN_``, ``fcn.``,
+  ``sub_``, ``LAB_`` and ``DAT_`` names of four hex digits or more — or its
+  API-style names (a word of six characters or more with lower case and two or
+  more capitals: ``GetAdaptersInfo``), whatever share of them the body does
+  name. Each row lists the names the body lacks, as the claim wrote them. A
+  bare ``0x`` value in a claim is not one of them: it is as often a flag, a size
+  or a machine type as a place. In the body every ``0x`` value and function
+  name is read as a place, so a body that writes ``0x68e8`` names
+  ``FUN_0x68e8``. Two places are one when their values are equal, or when the
+  longer is the shorter plus an image base: a difference of 1 MiB or more
+  that is a whole number of 64 KiB and leaves the longer with more digits
+  (``FUN_1400068e8`` and ``0x68e8``). No other shared ending makes two one.
+* **Words.** A claim that names no code location and no API-style name is
+  listed when the body carries half or fewer of its words of five letters or
+  more; its row says how many.
 
 What counts as the body is what the report models wrote: the summary, the key
 findings, the capability narrative, the recommendations, the background, the
@@ -56,24 +57,24 @@ BODY_FIELDS = (
 
 # The sentence the report prints above the list: the rule, as applied.
 COVERAGE_RULE = (
-    "A claim in force is listed here when the body neither names it by its label nor "
-    "carries more than half of the identifiers it names (addresses and function names, "
-    "quoted values, API-style names, numbers of three digits or more; for a claim that "
-    "names none, its words of five letters or more). Each row says how many the body "
-    "carries."
+    "A claim in force is listed here when the body does not name it by its label and does "
+    "not name one or more of its code locations (function names of four hex digits or "
+    "more) or API-style names; each row lists the names the body lacks. A claim "
+    "that names none of these is listed when the body carries half or fewer of its words of "
+    "five letters or more."
 )
 
-# Addresses and function names, by their hexadecimal digits.
+# Code locations: a function or label name, or an address, by its hexadecimal digits.
 _ADDRESS_RE = re.compile(
-    r"(?<![0-9A-Za-z_])(?:0x|FUN_(?:0x)?|fcn\.(?:0x)?|sub_|LAB_|DAT_)([0-9a-fA-F]{3,16})\b"
+    r"(?<![0-9A-Za-z_])(?:0x|FUN_(?:0x)?|fcn\.(?:0x)?|sub_|LAB_|DAT_)([0-9a-fA-F]{4,16})\b"
 )
-_BACKTICKED_RE = re.compile(r"`([^`\n]{3,})`")
-_QUOTED_RE = re.compile(r"\"([^\"\n]{3,})\"")
 _IDENTIFIER_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{5,}\b")
-_NUMBER_RE = re.compile(r"(?<![0-9A-Za-z_.])(\d{3,})(?![0-9A-Za-z_])")
 _WORD_RE = re.compile(r"\b[A-Za-z]{5,}\b")
-# Digits two addresses must share, at the least, to be read as one place.
-_SHORTEST_SHARED_DIGITS = 4
+# An image base is a whole number of 64 KiB, and a linker's default one is far
+# above an image's own offsets: 0x400000 for an x86 program, 0x10000000 for a
+# DLL, 0x140000000 on x64. A difference of less than 1 MiB is read as two places.
+_IMAGE_BASE_ALIGNMENT = 0x10000
+_SMALLEST_IMAGE_BASE = 0x100000
 
 
 def claim_label(agent: str, number: int) -> str:
@@ -133,100 +134,109 @@ def body_text(report: MalwareReport) -> str:
     return "\n".join(text for name in BODY_FIELDS for text in _strings(getattr(report, name, None)))
 
 
-def _addresses(text: str) -> set[str]:
-    return {m.group(1).lower().lstrip("0") or "0" for m in _ADDRESS_RE.finditer(text)}
+def _address(digits: str) -> int:
+    return int(digits, 16)
 
 
-def _markers(text: str) -> set[tuple[str, str]]:
-    """The identifiers a claim names, each as ``(kind, value)``."""
-    found: set[tuple[str, str]] = {("address", digits) for digits in _addresses(text)}
-    for pattern in (_BACKTICKED_RE, _QUOTED_RE):
-        found.update(("text", m.group(1).strip().lower()) for m in pattern.finditer(text))
+def code_names(text: str) -> dict[tuple[str, int | str], str]:
+    """The code locations and API-style names ``text`` names: ``{key: as written}``.
+
+    An address is keyed by its value, an API-style name by its lower case.
+    """
+    found: dict[tuple[str, int | str], str] = {}
+    for m in _ADDRESS_RE.finditer(text):
+        if not m.group(0).startswith("0x"):
+            found.setdefault(("address", _address(m.group(1))), m.group(0))
     for m in _IDENTIFIER_RE.finditer(text):
         word = m.group(0)
-        if sum(ch.isupper() for ch in word) >= 2 and not _ADDRESS_RE.fullmatch(word):
-            found.add(("text", word.lower()))
-    found.update(("number", m.group(1)) for m in _NUMBER_RE.finditer(text))
-    return {(kind, value) for kind, value in found if value}
+        camel = any(ch.islower() for ch in word) and sum(ch.isupper() for ch in word) >= 2
+        if camel and not _ADDRESS_RE.fullmatch(word):
+            found.setdefault(("name", word.lower()), word)
+    return found
+
+
+def _same_place(one: int, other: int) -> bool:
+    """Equal, or the longer is the shorter plus an image base (64 KiB aligned, 1 MiB or more)."""
+    if one == other:
+        return True
+    longer, shorter = (one, other) if one > other else (other, one)
+    return (
+        (longer - shorter) % _IMAGE_BASE_ALIGNMENT == 0
+        and len(f"{longer:x}") > len(f"{shorter:x}")
+        and longer - shorter >= _SMALLEST_IMAGE_BASE
+    )
 
 
 @dataclass(frozen=True)
 class _Body:
     lowered: str
-    addresses: frozenset[str]
-    numbers: frozenset[str]
+    addresses: frozenset[int]
 
     @classmethod
     def of(cls, text: str) -> _Body:
         return cls(
             lowered=text.lower(),
-            addresses=frozenset(_addresses(text)),
-            numbers=frozenset(m.group(1) for m in _NUMBER_RE.finditer(text)),
+            addresses=frozenset(_address(m.group(1)) for m in _ADDRESS_RE.finditer(text)),
         )
 
-    def carries(self, marker: tuple[str, str]) -> bool:
-        kind, value = marker
-        if kind == "address":
-            if value in self.addresses:
-                return True
-            if len(value) < _SHORTEST_SHARED_DIGITS:
-                return False
-            return any(
-                len(held) >= _SHORTEST_SHARED_DIGITS
-                and (held.endswith(value) or value.endswith(held))
-                for held in self.addresses
-            )
-        if kind == "number":
-            return value in self.numbers
-        return value in self.lowered
+    def names(self, key: tuple[str, int | str]) -> bool:
+        kind, value = key
+        if kind == "address" and isinstance(value, int):
+            return any(_same_place(value, held) for held in self.addresses)
+        return str(value) in self.lowered
 
 
-def coverage_of(claim: ClaimInForce, body: _Body) -> tuple[bool, int, int, str]:
-    """``(covered, carried, named, what)`` for one claim against the body.
-
-    ``what`` names what was counted: ``identifiers``, or ``words`` for a claim
-    that names no identifier.
-    """
+def coverage_of(claim: ClaimInForce, body: _Body) -> ClaimNotDiscussed | None:
+    """The row for one claim the body does not name the code of, or ``None`` when it does."""
     if claim.label.lower() in body.lowered:
-        return True, 0, 0, "label"
-    markers = _markers(claim.claim)
-    what = "identifiers"
-    if not markers:
-        markers = {("text", word.lower()) for word in _WORD_RE.findall(claim.claim)}
-        what = "words"
-    if not markers:
-        return False, 0, 0, what
-    carried = sum(1 for marker in markers if body.carries(marker))
-    return carried * 2 > len(markers), carried, len(markers), what
+        return None
+    names = code_names(claim.claim)
+    if names:
+        missing = [written for key, written in names.items() if not body.names(key)]
+        if not missing:
+            return None
+        return _row(claim, missing=missing, named=len(names), counted="names")
+    words = {word.lower() for word in _WORD_RE.findall(claim.claim)}
+    carried = sum(1 for word in words if word in body.lowered)
+    if words and carried * 2 > len(words):
+        return None
+    return _row(claim, carried=carried, named=len(words), counted="words")
+
+
+def _row(
+    claim: ClaimInForce,
+    *,
+    missing: list[str] | None = None,
+    carried: int = 0,
+    named: int = 0,
+    counted: str,
+) -> ClaimNotDiscussed:
+    return ClaimNotDiscussed(
+        agent=claim.agent,
+        claim_number=claim.number,
+        claim=claim.claim,
+        evidence_ref=claim.evidence_ref,
+        confidence=claim.confidence,
+        missing=list(missing or []),
+        carried=carried,
+        named=named,
+        counted=counted,
+    )
 
 
 def claims_not_discussed(
     report: MalwareReport, isr_reports: Mapping[str, Any] | None
 ) -> list[ClaimNotDiscussed]:
-    """The claims in force the report's body neither cites nor discusses, in the answers' order."""
+    """The claims in force whose code the report's body does not name, in the answers' order."""
     body = _Body.of(body_text(report))
-    out: list[ClaimNotDiscussed] = []
-    for claim in claims_in_force(isr_reports):
-        covered, carried, named, what = coverage_of(claim, body)
-        if covered:
-            continue
-        out.append(
-            ClaimNotDiscussed(
-                agent=claim.agent,
-                claim_number=claim.number,
-                claim=claim.claim,
-                evidence_ref=claim.evidence_ref,
-                confidence=claim.confidence,
-                carried=carried,
-                named=named,
-                counted=what,
-            )
-        )
-    return out
+    rows = [coverage_of(claim, body) for claim in claims_in_force(isr_reports)]
+    return [row for row in rows if row is not None]
 
 
 def carried_sentence(row: ClaimNotDiscussed) -> str:
     """What the check found for one listed claim, in words."""
+    if row.missing:
+        return "the body never names " + ", ".join(row.missing)
     if not row.named:
         return "it names nothing the check can look for"
     return f"the body carries {row.carried} of the {row.named} {row.counted} it names"

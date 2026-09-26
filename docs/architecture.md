@@ -693,19 +693,25 @@ Two producers use it:
   the narrative round's prompt show every claim under its label, the analyst
   and the claim's number in its answer in force (`static claim 15`); the
   narrative round is handed every claim whole. After the body is composed a
-  deterministic check (`reporting.claim_coverage`) reads it claim by claim: a
-  claim is covered when the body names its label or carries more than half of
-  the identifiers it names (addresses and function names by their hexadecimal
-  digits, so `FUN_1400068e8` and `0x68e8` are one place; quoted values;
-  API-style names; numbers of three digits or more; for a claim that names
-  none, its words of five letters or more). The body is what the report models
-  wrote (summary, key findings, recommendations, background, technical
-  analysis, C2 channels); the ATT&CK table quotes claims and is not a
-  discussion of them. Every claim neither cited nor discussed is stored
+  deterministic check (`reporting.claim_coverage`) reads it claim by claim. A
+  claim the body cites by its label is not listed. Any other claim is listed
+  when the body does not name one or more of its code locations (`FUN_`,
+  `fcn.`, `sub_`, `LAB_`, `DAT_` names of four hex digits or more) or API-style
+  names (six characters or more, lower case and two or more capitals), whatever
+  share it does name; the row lists the names the body lacks. A bare `0x` value
+  in a claim is not asked for, being as often a flag or a size as a place; in
+  the body every `0x` value is read as a place. Two places are one when equal,
+  or when the longer is the shorter plus an image base (a 64 KiB-aligned
+  difference of 1 MiB or more, so `FUN_1400068e8` and `0x68e8` are one place);
+  no other shared ending counts. A claim that names none of these is listed
+  when the body carries half or fewer of its words of five letters or more. The
+  body is what the report models wrote (summary, key findings,
+  recommendations, background, technical analysis, C2 channels); the ATT&CK
+  table quotes claims and is not part of it. Every listed claim is stored
   (`MalwareReport.claims_not_discussed`), counted
-  (`run_summary.claims_not_discussed`) and printed under §13.1 "Claims not
-  discussed in the body" with the rule and how many of its identifiers the
-  body carries. Nothing is decided about a listed claim.
+  (`run_summary.claims_not_discussed`) and printed under §13.1 "Claims whose
+  code locations or API names the body does not name", with the names it
+  lacks. Nothing is decided about a listed claim.
 
   A function name the run resolved at runtime from a stored value is not an
   import. `api_capability` takes such names as `resolved_names` and marks them

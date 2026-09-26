@@ -2500,7 +2500,7 @@ def _title_heading(title: str) -> str:
 
 
 def _claims_not_discussed_lines(report: MalwareReport, ctx: _Context) -> list[str]:
-    """The claims in force the body neither cites nor discusses, each whole, with the rule."""
+    """The claims in force whose code the body does not name, each whole, with what it lacks."""
     from maljan.reporting.claim_coverage import COVERAGE_RULE, carried_sentence, claim_label
 
     rows = list(getattr(report, "claims_not_discussed", None) or [])
@@ -2522,7 +2522,7 @@ def _claims_not_discussed_lines(report: MalwareReport, ctx: _Context) -> list[st
 
 
 # The heading of the list of claims in force the body does not discuss.
-CLAIMS_NOT_DISCUSSED_TITLE = "Claims not discussed in the body"
+CLAIMS_NOT_DISCUSSED_TITLE = "Claims whose code locations or API names the body does not name"
 
 
 def _heading(number: int, title: str, voice: str) -> str:
