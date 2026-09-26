@@ -891,13 +891,40 @@ class C2Channel(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
+class RecoveredValue(BaseModel):
+    """Which tool recovered one hidden value, from which entry, and where in the file.
+
+    ``tool`` is ``floss`` (emulation) or ``decode_string_blobs`` (a static
+    decoding of the file's own bytes); ``entry`` is the ledger entry that
+    holds the tool's answer. ``scheme`` is FLOSS's string kind (``decoded``,
+    ``stack``, ``tight``) or the decoder's scheme with any base64 layer under
+    it (``xor8``, ``xor8+base64``); ``offset`` the decoded blob's file offset;
+    ``functions`` the functions the tool names around the code that uses the
+    text, and ``sites`` the addresses of that code. Each is what the tool's
+    own answer states, or empty.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    tool: str
+    entry: str = ""
+    scheme: str = ""
+    offset: str = ""
+    functions: list[str] = Field(default_factory=list)
+    sites: list[str] = Field(default_factory=list)
+
+
 class EmulatedStrings(BaseModel):
-    """What emulation alone recovered in a run: network-shaped values and their entry.
+    """What only a recovering tool read in a run: network-shaped values and their entry.
 
     ``values`` maps a recovered value (lower case; a URL adds its host) to the
-    FLOSS entry that recovered it, with every value the static string sweep
-    also read held out into ``plain`` (value to the sweep's entry). ``partial``
-    says why the record may not be the run's whole, or is empty.
+    entry that recovered it first — a FLOSS entry, or a ``decode_string_blobs``
+    entry for an indicator the decoder read out of the file's bytes — with
+    every value the static string sweep also read held out into ``plain``
+    (value to the sweep's entry). ``recovered_by`` lists, for each value in
+    ``values``, every tool that recovered it and where; a record stored before
+    it existed has none, and its values are FLOSS's. ``partial`` says why the
+    record may not be the run's whole, or is empty.
     """
 
     model_config = _STRICT_CONFIG
@@ -905,6 +932,7 @@ class EmulatedStrings(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
     plain: dict[str, str] = Field(default_factory=dict)
     partial: str = ""
+    recovered_by: dict[str, list[RecoveredValue]] = Field(default_factory=dict)
 
 
 class FlaggedStatement(BaseModel):
@@ -959,6 +987,11 @@ class ConsolidatedIOC(BaseModel):
     source: str | None = None
     context: str = ""
     published: str | None = None
+    # For a network value a tool recovered from text the sample hid: which
+    # tool, its ledger entry and where in the file (``floss``, emulation;
+    # ``decode_string_blobs``, a static decoding of the file's bytes). Empty
+    # for every other row.
+    recovered_by: str = ""
 
 
 class Figure(BaseModel):

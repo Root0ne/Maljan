@@ -1121,13 +1121,13 @@ def kept_network_values(artifact: Any) -> list[tuple[str, str]]:
             continue
         hint = _TYPE_ALIASES.get(word) if word else None
         if hint is not None and value_at is not None:
-            typed = _of_kind(_cell_values(row[value_at], hint), hint)
+            typed = _of_kind(cell_network_values(row[value_at], hint), hint)
             if not typed and headed is None and type_at and value_at == type_at + 1:
                 # Value first, a note after the type ("relay.top", "domain",
                 # "C2"): the cell after the type is no value of it, so the
                 # value is the one before.
                 value_at = type_at - 1
-                typed = _of_kind(_cell_values(row[value_at], hint), hint)
+                typed = _of_kind(cell_network_values(row[value_at], hint), hint)
             _keep(typed)
         if not bare:
             continue
@@ -1136,11 +1136,11 @@ def kept_network_values(artifact: Any) -> list[tuple[str, str]]:
                 continue
             if index == type_at:
                 continue
-            _keep(_cell_values(cell, None))
+            _keep(cell_network_values(cell, None))
     return out
 
 
-def _cell_values(cell: str, hint: str | None) -> list[tuple[str, str]]:
+def cell_network_values(cell: str, hint: str | None) -> list[tuple[str, str]]:
     """What one cell holds: a URL and its host, an address, or a name; nothing otherwise."""
     from maljan.extractors.network_extractor import (
         host_is_public,

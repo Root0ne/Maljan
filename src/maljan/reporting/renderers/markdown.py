@@ -1347,7 +1347,15 @@ class MarkdownRenderer:
                     row.type,
                     f"`{defang(row.value, row.kind or '')}`",
                     _port_or_path(row, report),
-                    row.context or "-",
+                    "; ".join(
+                        part
+                        for part in (
+                            row.context,
+                            f"recovered by {row.recovered_by}" if row.recovered_by else "",
+                        )
+                        if part
+                    )
+                    or "-",
                     row.source or "-",
                     row.published or "-",
                 ]
