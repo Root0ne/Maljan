@@ -33,15 +33,25 @@ ALL_TOOLS = (
 
 
 class _Container:
-    """What ``build_graph`` reads of a container: the settings and the active profile."""
+    """What ``build_graph`` reads of a container: the settings and the active profile.
 
-    def __init__(self, settings: Settings) -> None:
+    ``parallel`` is the analyst mode the job resolved, applied to every stage
+    that sets no mode of its own as the real container applies it; ``None``
+    leaves those stages unset, which the builder reads as sequential.
+    """
+
+    def __init__(self, settings: Settings, parallel: bool | None = None) -> None:
         self.config = settings
+        self.parallel = parallel
 
     def active_profile(self) -> Any:
         from maljan.agents.composition import active_profile
+        from maljan.pipeline.analyst_mode import AnalystMode, with_resolved_modes
 
-        return active_profile(self.config)
+        profile = active_profile(self.config)
+        if self.parallel is None:
+            return profile
+        return with_resolved_modes(profile, AnalystMode(self.parallel, "auto", "resolved"))
 
 
 class _Router:
@@ -57,7 +67,13 @@ class _Router:
         return "revision" if self._asked <= self.loops else "judge"
 
 
-def _run(settings: Settings, monkeypatch: pytest.MonkeyPatch, *, loops: int = 0) -> Counter:
+def _run(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    loops: int = 0,
+    parallel: bool | None = None,
+) -> Counter:
     runs: Counter = Counter()
 
     def stub(name: str, _fn: Any) -> Any:
@@ -86,7 +102,7 @@ def _run(settings: Settings, monkeypatch: pytest.MonkeyPatch, *, loops: int = 0)
     router = type("Router", (_Router,), {"loops": loops})
     monkeypatch.setattr(graph_builder, "ConsensusRouter", router)
 
-    compiled = graph_builder.build_graph(_Container(settings))  # type: ignore[arg-type]
+    compiled = graph_builder.build_graph(_Container(settings, parallel))  # type: ignore[arg-type]
     # Streamed in the modes ``MaljanApp`` runs the graph in, so the nodes of
     # each step are known: the updates that arrive between two ``values``.
     steps: list[list[str]] = [[]]
@@ -134,9 +150,10 @@ def _all_tools() -> Settings:
     )
 
 
-def _assert_once_each(runs: Counter, settings: Settings) -> None:
+def _assert_once_each(runs: Counter, settings: Settings, parallel: bool | None = None) -> None:
+    container = _Container(settings, parallel)
     compiled_nodes = set(
-        graph_builder.build_graph(_Container(settings)).get_graph().nodes  # type: ignore[arg-type]
+        graph_builder.build_graph(container).get_graph().nodes  # type: ignore[arg-type]
     ) - {"__start__", "__end__"}
     # With the router answering ``judge`` at once, a revision node is the one
     # node of the graph that has no reason to run.
@@ -257,6 +274,34 @@ class TestANodeRunsOnceAfterEveryStageItDependsOn:
         assert profile in settings.agents.profiles
         runs = _run(settings, monkeypatch)
         _assert_once_each(runs, settings)
+
+    @pytest.mark.parametrize(
+        "profile", ["all_tools", "default", "measurement", "mobile", "deep_static", "team_lead"]
+    )
+    @pytest.mark.parametrize("parallel", [False, True])
+    def test_every_team_in_the_mode_auto_resolved(
+        self, profile: str, parallel: bool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``llm.parallel_analysts`` on ``auto``: the stages that set no mode take the job's."""
+        settings = _all_tools() if profile == "all_tools" else Settings(_env_file=None)
+        settings.agents.profile = profile
+        assert settings.llm.parallel_analysts == "auto"
+        container = _Container(settings, parallel)
+        modes = {
+            stage.mode for stage in container.active_profile().stages if stage.kind == "analysis"
+        }
+        assert modes == {"parallel" if parallel else "sequential"}
+        runs = _run(settings, monkeypatch, parallel=parallel)
+        _assert_once_each(runs, settings, parallel)
+        runs = _run(settings, monkeypatch, loops=1, parallel=parallel)
+        debates = [s for s in container.active_profile().stages if s.kind == "debate"]
+        revisions = {name: n for name, n in runs.items() if name.endswith(REVISION_NODE)}
+        # One revision round per debate, each taken once; a team with no
+        # debate (the lead's) has none.
+        assert len(revisions) == len(debates)
+        assert set(revisions.values()) <= {1}
+        assert runs[JUDGE_NODE] == 1
+        assert runs[REPORT_NODE] == 1
 
     @pytest.mark.parametrize("profile", ["default", "mobile", "deep_static"])
     def test_every_seeded_team_with_the_revision_loop_taken_once(

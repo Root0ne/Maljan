@@ -50,11 +50,20 @@ class TestCallsInFlight:
         )
         assert held is not None and abs(held - 40_000) <= 1  # the 0.16 USD left
 
+        # The third fits only once the others' reservations settle: it waits
+        # for them as long as its own deadline allows, and is then not made —
+        # which, with calls still in flight, does not exhaust the spend.
         with pytest.raises(SpendCeilingStop):
             meter.admit(
-                kind="revision", model=MODEL, prompt_chars=0, cap_tokens=200_000, slot=third
+                kind="revision",
+                model=MODEL,
+                prompt_chars=0,
+                cap_tokens=200_000,
+                slot=third,
+                deadline_s=0.05,
             )
         assert meter.committed() <= 1.0 + 1e-9
+        assert meter.exhausted() is False
 
     def test_a_returned_call_settles_at_its_cost_and_frees_the_rest(self) -> None:
         meter = _meter(measured=10_000)
@@ -109,28 +118,35 @@ class TestTheReserveForTheVerdictAndTheReport:
 
     def test_is_sized_from_the_measured_prompt_and_answer(self) -> None:
         snapshot = self._planned().snapshot()
-        # The verdict and the first report call: 20,000 prompt tokens uncached at
-        # 1.0 and 10,000 answer tokens at 4.0 per million, 0.06 USD each. The three
-        # report calls after the first share its prefix: its prompt at the cached
-        # 0.1 while no share is measured, 0.042 USD each.
-        assert snapshot["reserve_usd"] == pytest.approx(0.246)
+        # Every planned call at what its admission demands: 20,000 prompt tokens
+        # uncached at 1.0 and 10,000 answer tokens at 4.0 per million, 0.06 USD
+        # each, five of them; and, with no verdict or report call made yet, one
+        # validation retry each, sent with the answer it corrects in its prompt
+        # (30,000 tokens), 0.07 USD each. The expected charge prices the three
+        # report calls after the first, and every retry, at the cached 0.1
+        # while no share is measured.
+        assert snapshot["reserve_usd"] == pytest.approx(0.65)
+        expected = {row["kind"]: row["expected_usd"] for row in snapshot["reserve"]}
+        assert expected == {"verdict": pytest.approx(0.103), "report": pytest.approx(0.358)}
         rows = {row["kind"]: row for row in snapshot["reserve"]}
         assert rows["report"]["calls"] == 4 and rows["report"]["prompt_tokens"] == 20_000
+        assert rows["report"]["retries"] == 4 and rows["report"]["retry_prompt_tokens"] == 30_000
+        assert "one per planned call" in rows["report"]["retries_from"]
         assert rows["verdict"]["answer_tokens"] == 10_000
 
     def test_other_calls_spend_only_above_it(self) -> None:
-        meter = self._planned()  # 0.96 left, 0.30 kept
+        meter = self._planned()  # 0.96 left, 0.65 kept
         held = meter.admit(kind="loop turn", model=MODEL, prompt_chars=0, cap_tokens=393_216)
-        # 0.714 USD above the reserve, less the closing answer's 0.04 USD.
-        assert held is not None and abs(held - 168_500) <= 1
+        # 0.31 USD above the reserve, less the closing answer's 0.04 USD.
+        assert held is not None and abs(held - 67_500) <= 1
         assert (
-            "0.2460 USD being kept for the verdict and the report"
+            "0.6500 USD being kept for the verdict and the report"
             in (meter.snapshot()["held_calls"][-1])
         )
 
     def test_the_verdict_and_the_report_spend_it(self) -> None:
         meter = self._planned()
-        meter.settle({"input_tokens": 710_000, "output_tokens": 0}, MODEL)  # 0.25 left
+        meter.settle({"input_tokens": 310_000, "output_tokens": 0}, MODEL)  # 0.65 left
         with pytest.raises(SpendCeilingStop, match="kept for the verdict and the report"):
             meter.admit(kind="revision", model=MODEL, prompt_chars=0, cap_tokens=10_000)
         assert meter.admit(kind="verdict", model=MODEL, prompt_chars=0, cap_tokens=10_000) is None

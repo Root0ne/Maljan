@@ -42,6 +42,7 @@ from maljan.agents.base_agent import (
     TOOL_LOOP_TURN_CALL,
     BudgetMeter,
     LoopBudget,
+    _hold_the_turn,
     _message_chars,
     _trim_for_synthesis,
     _turn_key,
@@ -50,6 +51,7 @@ from maljan.agents.base_agent import (
     is_the_graph_s_step_stop,
     limit_text,
     loop_limits,
+    model_held_per_turn,
     note_a_window_that_moved,
     nudge_turns,
     recursion_limit,
@@ -1286,6 +1288,7 @@ class JudgeAgent(BudgetMeter):
         slot: Any = None,
         holdable: bool | None = None,
         deadline_s: float | None = None,
+        wait_s: float | None = None,
     ) -> int | None:
         """The spend ceiling's word on one judge call before it is made (``SpendMeter.admit``).
 
@@ -1318,6 +1321,7 @@ class JudgeAgent(BudgetMeter):
                 deadline_s=(
                     call_deadline_of(self.llm, messages) if deadline_s is None else deadline_s
                 ),
+                wait_s=wait_s,
             ),
         )
 
@@ -1653,16 +1657,25 @@ class JudgeAgent(BudgetMeter):
             budget.own_steps += 1
             _note_the_conversation(conversation)
             # The spend ceiling's word on the turn about to be sent, reserved
-            # under the loop's key until the step is counted. The executor
-            # binds the model itself, so a turn cannot be held: it is made at
-            # its whole cap or not at all.
-            self._spend_admits("mediation turn", conversation, slot=spend_key, holdable=False)
+            # under the loop's key until the step is counted, and held as an
+            # analyst's turn is: the model is bound to its tools here, so the
+            # held cap is set on the binding the turn is sent through. A model
+            # that cannot be bound that way is admitted only at its whole cap.
+            held = self._spend_admits(
+                "mediation turn",
+                conversation,
+                slot=spend_key,
+                holdable=held_binding is not None,
+                wait_s=budget.seconds_left(),
+            )
+            _hold_the_turn(held_binding, self.llm, held)
             self._publish_questions(conversation, asked)
             return conversation
 
         # The key this loop's turns are counted and reserved under.
         spend_key = object()
-        agent_executor = create_react_agent(self.llm, recorded, prompt=_count_the_turns)
+        loop_model, held_binding = model_held_per_turn(self.llm, recorded)
+        agent_executor = create_react_agent(loop_model, recorded, prompt=_count_the_turns)
         self.logger.info(
             "JudgeAgent invoking ReAct (timeout=%s, steps=%s, tools=%d)...",
             limit_text(timeout, "s"),
@@ -1683,6 +1696,8 @@ class JudgeAgent(BudgetMeter):
         }
         # The sentence of a model call deadline that ended the tool phase.
         deadline_said: dict[str, str] = {"why": ""}
+        # The refusal that ended it, when the spend ceiling refused its next turn.
+        spend_said: dict[str, str] = {"why": ""}
 
         async def _until_it_answers_or_runs_out() -> None:
             stream: Any = agent_executor.astream(
@@ -1712,8 +1727,9 @@ class JudgeAgent(BudgetMeter):
                             if spend_meter.exhausted():
                                 ended["spend"] = True
                                 break
-                except SpendCeilingStop:
+                except SpendCeilingStop as stop:
                     ended["spend"] = True
+                    spend_said["why"] = str(stop)
                 except ModelCallDeadline as exc:
                     # One model call ran past its whole-call deadline: a failed
                     # turn, not the loop's clock. With something gathered the
@@ -1776,7 +1792,7 @@ class JudgeAgent(BudgetMeter):
                     else "no_room"
                 )
                 why = (
-                    "the job's spend ceiling was reached"
+                    (spend_said["why"] or "the job's spend ceiling was reached")
                     if ended["spend"]
                     else deadline_said["why"]
                     if ended["call_deadline"]
@@ -1822,6 +1838,11 @@ class JudgeAgent(BudgetMeter):
             _record_the_turns()
             raise
         finally:
+            # A loop a cancellation ended (``JobCancelled``, ``CancelledError``:
+            # not ``Exception``s) made the calls it made too, and its loop's
+            # reservation with the spend meter goes with them. Once only.
+            with contextlib.suppress(Exception):
+                _record_the_turns()
             # In a ``finally`` for the reason the analysts' loop uses one: a
             # mediation that timed out still made the calls it made.
             self._evidence_entries.extend(recorder.entries)

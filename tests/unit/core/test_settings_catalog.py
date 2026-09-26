@@ -29,7 +29,9 @@ def test_types_and_choices():
     assert by_path["reporting.default_tlp"].choices == expected_tlp_choices
     assert by_path["negotiation.max_iterations"].type == "int"
     assert by_path["negotiation.consensus_threshold"].type == "float"
-    assert by_path["llm.parallel_analysts"].type == "bool"
+    assert by_path["llm.parallel_analysts"].type == "enum"
+    assert by_path["llm.parallel_analysts"].choices == ["auto", "true", "false"]
+    assert by_path["llm.parallel_analysts"].default == "auto"
     assert by_path["llm.frontier.arms"].type == "json"
     assert by_path["react_agent_timeout_overrides"].type == "dict"
     assert by_path["static.ghidra.args"].type == "list"

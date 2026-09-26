@@ -168,7 +168,7 @@ def _is_the_seeded_profile(entry: Any, seed: Any) -> bool:
     expected = seed.model_dump()
     for dump in (current, expected):
         # The three fields the identity check forgives on a built-in team, and
-        # the two per-stage fields it forgives inside one.
+        # the three per-stage fields it forgives inside one.
         dump.pop("exclude_servers", None)
         dump.pop("analysts", None)
         dump.pop("derived_from_analysts", None)

@@ -45,6 +45,7 @@ class MaljanApp:
         samples_dir: str = "data/samples",
         event_sink: EventSink | None = None,
         job_id: str = "",
+        analyst_mode: Any = None,
     ) -> None:
         self.config = config or Settings()
         self.container = ServiceContainer(
@@ -53,6 +54,10 @@ class MaljanApp:
             samples_dir=samples_dir,
             event_sink=event_sink,
             job_id=job_id,
+            # Resolved by the caller off its event loop where it has one
+            # (``pipeline.analyst_mode.resolve_for``): resolving it names
+            # hosts and asks a server for its slot count.
+            resolved_mode=analyst_mode,
         )
         self.graph = build_graph(self.container)
         # What the report node built, with the state it built it from, as soon

@@ -13,7 +13,7 @@ function starterStages(): StageEntry[] {
   const base = {
     label: "",
     when: "",
-    mode: "sequential" as const,
+    mode: null,
     inject_upstream: "none" as const,
     debate: null,
     builtin_tools: true,

@@ -447,37 +447,41 @@ class LLMConfig(BaseModel):
     # above 0 is the operator's and is used as set.
     judge_max_tokens: Annotated[int, Field(ge=0)] = 0
 
-    # When True, analysts run in parallel —
-    # correct for hosted multi-slot LLMs. When False (the default), the
-    # pipeline runs analysts sequentially so a single-slot
-    # local llama-server gives each analyst exclusive slot use for its
-    # per-agent timeout budget instead of letting them choke each other in the
-    # request queue. Set ``LLM__PARALLEL_ANALYSTS=true`` only for a hosted
-    # multi-slot API with real per-request isolation.
+    # Whether the analysts of a stage that sets no run mode of its own, and the
+    # revision round, run at once or one after another. Three values:
     #
-    # 2026-07-13 ROOT-CAUSE (supersedes the "SWA re-prefill" misdiagnosis in
-    # findings-log): the served Qwen3.6-35B-A3B is a HYBRID Gated-DeltaNet
-    # (recurrent) + attention MoE — NOT a sliding-window model. On a single
-    # llama-server slot, "parallel" analysts interleave their requests and each
-    # one CLOBBERS the others' per-slot recurrent DeltaNet state; llama.cpp /
-    # ik_llama cannot restore the recurrent context checkpoint (open bug
-    # ik_llama#1762 / ggml-org#20225), so every ReAct step then does a FULL
-    # prompt re-processing → minutes/turn → the revision round hit
-    # request_timeout (900s) and runs took ~41 min. Sequential (False) gives
-    # each analyst exclusive slot use, so its recurrent state survives across
-    # its own ReAct steps → only new tokens are processed → no re-prefill, no
-    # timeout. MEASURED on sample 11e77149 + CAPE: parallel 2480s (revision
-    # timed out) → sequential 743s (3.3×, zero timeouts).
+    # * ``"auto"`` (the default) decides per job from the endpoints of the
+    #   models the analysts call (``pipeline.analyst_mode``): a host that
+    #   resolves only to public addresses is a hosted API and runs them in
+    #   parallel; Ollama, or a host that is or resolves to a local address or
+    #   is a name only a local resolver answers, runs them one at a time
+    #   unless its llama.cpp ``/props`` reports more than one slot; a host that
+    #   does not resolve runs them one at a time. The mode and why are logged
+    #   and in the run summary.
+    # * ``"true"`` always runs them in parallel.
+    # * ``"false"`` always runs them one after another.
     #
-    # Honoured in BOTH phases: the initial fan-out (pipeline/builder.py —
-    # parallel edges vs a sequential chain) AND the revision node
-    # (pipeline/nodes.py — concurrent asyncio.gather vs a sequential await
-    # loop). The default flipped True→False (2026-07-13) so a run WITHOUT a
-    # local .env (CI, fresh clone, deploy) is safe by default — otherwise
-    # parallel + the restored deep static budget = the exact uncapped
-    # re-prefill the old caps once masked. Do NOT re-enable on a single-slot
-    # hybrid-model deployment.
-    parallel_analysts: bool = False
+    # Why a single-slot local server needs them one at a time: a hybrid
+    # recurrent model (Qwen3.6-35B-A3B, Gated-DeltaNet and attention) keeps
+    # per-slot recurrent state that concurrent requests on one llama-server
+    # slot clobber, and llama.cpp cannot restore it from a context checkpoint,
+    # so every ReAct step re-processes its whole prompt. Measured on one sample
+    # with CAPE: parallel 2,480 s with the revision round timing out,
+    # sequential 743 s with none.
+    #
+    # A stored JSON boolean keeps its meaning: ``true`` and ``false`` are the
+    # explicit choices they always were.
+    parallel_analysts: Literal["auto", "true", "false"] = "auto"
+
+    @field_validator("parallel_analysts", mode="before")
+    @classmethod
+    def _a_boolean_is_the_same_choice(cls, value: Any) -> Any:
+        """A stored JSON boolean is the explicit choice it always was."""
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, str) and value.strip().lower() in ("auto", "true", "false"):
+            return value.strip().lower()
+        return value
 
     # View-decomposition pilot (findings-log §3.6). 0 = off (today's single
     # monolithic analyst call). N > 0 splits the analyst's text-evidence into N
@@ -1480,6 +1484,12 @@ class StageDefinition(BaseModel):
     deterministic tools over the sample and writing each result to the
     evidence ledger before any analyst starts (``pipeline.triage_pack``), so
     the facts a model may or may not ask for exist either way.
+
+    ``mode`` is how an analysis stage runs its agents. Set, it is the
+    operator's and is used as set. Unset (``None``, the default), the stage
+    follows the job's resolved analyst mode (``llm.parallel_analysts``, see
+    ``pipeline.analyst_mode``); read without a job, an unset stage is
+    sequential.
     """
 
     key: Annotated[str, Field(pattern=SERVER_KEY_PATTERN)]
@@ -1488,7 +1498,7 @@ class StageDefinition(BaseModel):
     agents: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
     when: str = ""
-    mode: Literal["parallel", "sequential"] = "sequential"
+    mode: Literal["parallel", "sequential"] | None = None
     inject_upstream: Literal["none", "findings", "full"] = "findings"
     debate: DebateOptions | None = None
     builtin_tools: bool = True
@@ -1585,10 +1595,27 @@ def triage_stage() -> StageDefinition:
     )
 
 
+def explicit_parallel(value: Any) -> bool | None:
+    """What ``llm.parallel_analysts`` says for itself: ``True``, ``False``, or ``None`` for auto.
+
+    Read tolerantly, because the value arrives as the validated string, as a
+    stored JSON boolean, or from a caller that assigned a boolean after
+    validation.
+    """
+    if isinstance(value, bool):
+        return value
+    said = str(value or "").strip().lower()
+    if said == "true":
+        return True
+    if said == "false":
+        return False
+    return None
+
+
 def stages_from_analysts(
     analysts: list[str],
     *,
-    parallel: bool = False,
+    parallel: bool | None = None,
     max_rounds: int = 3,
     consensus_threshold: float = 0.8,
     triage: bool = True,
@@ -1604,6 +1631,10 @@ def stages_from_analysts(
     ``triage`` puts the deterministic triage pack in front of the four. It is
     on for every team but the measurement baseline, whose whole purpose is to
     show what the models do with nothing established for them.
+
+    ``parallel`` is the analysis stage's run mode: ``True`` or ``False`` when
+    ``llm.parallel_analysts`` says so, ``None`` (unset) when it is ``auto`` and
+    the job decides.
     """
     head = [triage_stage()] if triage else []
     return [
@@ -1613,7 +1644,7 @@ def stages_from_analysts(
             label="Analysis",
             kind="analysis",
             agents=list(analysts),
-            mode="parallel" if parallel else "sequential",
+            mode=None if parallel is None else ("parallel" if parallel else "sequential"),
             inject_upstream="none",
         ),
         StageDefinition(
@@ -2515,16 +2546,19 @@ def convert_builtin_profile_document(name: str, entry: Any) -> Any:
 
 
 def _profile_stage_identity(stages: Any) -> Any:
-    """A built-in profile's stages with the two editable fields taken out.
+    """A built-in profile's stages with the fields that are not its architecture taken out.
 
     Used only by the identity check: ``debate`` options and ``builtin_tools``
     are what an operator may tune on a seeded profile, so they are removed from
     both sides of the comparison rather than compared and forgiven afterwards.
+    ``mode`` is how a stage runs its agents on the deployment's models, not
+    which agents it runs: a stored built-in that says ``sequential`` (what an
+    unset mode used to be written as) is the same team as its seed.
     """
     if not isinstance(stages, list):
         return stages
     return [
-        {k: v for k, v in stage.items() if k not in ("debate", "builtin_tools")}
+        {k: v for k, v in stage.items() if k not in ("debate", "builtin_tools", "mode")}
         if isinstance(stage, dict)
         else stage
         for stage in stages
@@ -2851,9 +2885,11 @@ def builtin_profile_changed(name: str, profile: ProfileDefinition) -> bool:
     # The stages of a built-in are the paper's architecture and stay
     # fixed, with two exceptions an operator legitimately needs: how
     # hard the debate argues, and whether a stage gets the built-in
-    # tool servers. Everything else about a stage — its kind, its
-    # agents, what it depends on, when it runs — is the architecture
-    # itself, and editing it means cloning the profile.
+    # tool servers. A stage's run mode is not compared either: it is how
+    # the stage runs on this deployment's models, not the architecture.
+    # Everything else about a stage — its kind, its agents, what it
+    # depends on, when it runs — is the architecture itself, and editing
+    # it means cloning the profile.
     current_profile["stages"] = _profile_stage_identity(current_profile.get("stages"))
     expected_profile["stages"] = _profile_stage_identity(expected_profile.get("stages"))
     return current_profile != expected_profile
@@ -3623,7 +3659,7 @@ class Settings(BaseSettings):
                 continue
             profile.stages = stages_from_analysts(
                 list(profile.analysts),
-                parallel=bool(self.llm.parallel_analysts),
+                parallel=explicit_parallel(self.llm.parallel_analysts),
                 max_rounds=self.negotiation.max_iterations,
                 consensus_threshold=self.negotiation.consensus_threshold,
                 triage=has_triage_stage(profile.stages),

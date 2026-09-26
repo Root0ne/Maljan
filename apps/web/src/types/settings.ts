@@ -173,7 +173,8 @@ export interface StageEntry {
   agents: string[];
   depends_on: string[];
   when: string;
-  mode: StageMode;
+  /** `null` is unset: the stage follows the job's resolved `llm.parallel_analysts`. */
+  mode: StageMode | null;
   inject_upstream: InjectUpstream;
   debate: DebateOptionsEntry | null;
   builtin_tools: boolean;

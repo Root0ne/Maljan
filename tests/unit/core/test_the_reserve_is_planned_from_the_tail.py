@@ -3,14 +3,16 @@
 The first reserve priced the largest prompt the job had sent — a tool-loop
 turn of 200,000 tokens — as uncached input for every one of the eighteen
 planned calls, and at peak it kept 1.64 of a 2.00 USD ceiling from the tool
-phases. The reserve is now the next planned call's worst case (what its
-admission will demand) plus the expected charge of the others: each at its own
-kind's prompt (the window accounting's allowance, or the prompt actually sent),
-the first of a kind uncached and the ones after it at the cache-hit share
-measured over calls that were not the first of their conversation — the cached
-rate of their shared prefix until one is measured — and the answer measured of
-single-shot calls. A planned call spends only above the share of the planned
-calls after it.
+phases. The next one priced a report call's prompt at the window's whole
+allowance and its answer at the largest single-shot answer measured, which
+kept 0.90 USD of a 2.00 USD ceiling for a tail that cost about 0.3. The reserve
+is now what each planned call's admission demands — its prompt as uncached
+input and its planned answer — at the prompt it will be sent (the largest of
+its kind, else the largest single-shot prompt, else the largest opening
+prompt of a conversation, bounded by the window's allowance) and the answer
+this job measured (the verdict's largest single-shot answer, a report call's
+mean). Each row also states its expected charge at the cache-hit share. A
+planned call spends only above the share of the planned calls after it.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from datetime import UTC, datetime
 import pytest
 from langchain_core.messages import AIMessage
 
-from maljan.core.spend import LOOP_TURN_CALL, SpendCeilingStop, SpendMeter
+from maljan.core.spend import LOOP_TURN_CALL, SpendCeilingStop, SpendMeter, validation_retry
 from maljan.llm.context_window import CHARS_PER_TOKEN
 
 FLASH = "deepseek-flash"
@@ -101,11 +103,12 @@ class TestALongPaidRun:
 
     def test_its_derivation_is_stated(self) -> None:
         rows = {row["kind"]: row for row in _a_long_paid_run(FRIDAY_OFF_PEAK).snapshot()["reserve"]}
-        assert rows["report"]["prompt_tokens"] == ALLOWED
-        assert "window accounting allows" in rows["report"]["prompt_from"]
+        # The prompt a report call will be sent, not the window's allowance.
+        assert rows["report"]["prompt_tokens"] == 46_000
+        assert "largest single-shot prompt sent" in rows["report"]["prompt_from"]
         assert rows["verdict"]["prompt_tokens"] == 46_000
         assert rows["report"]["answer_tokens"] == 9_000
-        assert "single-shot" in rows["report"]["answer_from"]
+        assert "mean of the 1 single-shot answer(s)" in rows["report"]["answer_from"]
         # The loop's first turn, which read nothing from the cache, is left out.
         assert rows["report"]["cache_hit_share"] == pytest.approx(0.85, abs=0.001)
 
@@ -142,18 +145,22 @@ class TestTheFirstCallsOfAJob:
             )
         assert meter.exhausted() is False
         reserve = meter.snapshot()["reserve_usd"]
-        # The plan with no share measured: the verdict at what its admission
-        # demands, the first report call uncached and the rest at the cached rate.
-        assert reserve < 0.60
-        assert reserve == pytest.approx(
-            _a_long_paid_run(FRIDAY_OFF_PEAK).snapshot()["reserve_usd"],
-            abs=0.10,
-        )
+        # With no single-shot answer measured the verdict is planned at its
+        # whole cap, and every planned call with one validation retry: the
+        # largest the plan is, and the tool phases still keep most of the
+        # ceiling.
+        assert reserve < 0.80
+        assert 2.00 - reserve > 1.20
 
     def test_at_the_peak_rate_the_plan_still_leaves_the_tool_phases_the_most(self) -> None:
         meter = SpendMeter(2.00, clock=lambda: FRIDAY_PEAK)
         _plan(meter)
         meter.settle({"input_tokens": 20_000, "output_tokens": 3_000}, FLASH, LOOP_TURN_CALL)
+        # Once a single-shot answer is measured (a validation retry of 46k
+        # prompt tokens and a 9k answer), the plan stops counting on the
+        # verdict's whole cap.
+        meter.settle({"input_tokens": 46_000, "output_tokens": 9_000}, FLASH)
+        meter._largest_prompt["single"] = 46_000
         assert 2.00 - meter.snapshot()["reserve_usd"] >= LONG_RUN_LOOPS_PEAK
 
 
@@ -169,13 +176,16 @@ class TestTheVerdictsRowCoversItsAdmission:
             FLASH,
             LOOP_TURN_CALL,
         )
-        # What the verdict's admission demands — its prompt and its whole cap,
-        # no single-shot answer being measured — is what was kept: it is made.
+        # What the verdict's admission demands — the prompt planned for it (the
+        # opening prompt measured) and its whole cap, no single-shot answer
+        # being measured — is what was kept: it is made.
+        row = {r["kind"]: r for r in meter.snapshot()["reserve"]}["verdict"]
+        assert row["prompt_tokens"] == 1_000
         assert (
             meter.admit(
                 kind="verdict",
                 model=FLASH,
-                prompt_chars=ALLOWED * CHARS_PER_TOKEN,
+                prompt_chars=1_000 * CHARS_PER_TOKEN,
                 cap_tokens=CAP,
             )
             is None
@@ -188,20 +198,28 @@ class TestAPlannedCallSpendsItsOwnShare:
         meter = SpendMeter(1.0, prices, table={})
         meter.settle({"input_tokens": 0, "output_tokens": 10_000}, "m")  # 0.10 spent
         meter.plan_tail({"verdict": ("m", 1, 1_000), "report": ("m", 1, 1_000)})
-        # The report's planned share: 10,000 answer tokens at 10 USD a million.
+        # Kept: the verdict's own validation retry, the report call and its
+        # retry, 10,000 answer tokens at 10 USD a million each.
         held = meter.admit(kind="verdict", model="m", prompt_chars=0, cap_tokens=393_216)
-        assert held is not None and abs(held - 80_000) <= 1  # 0.90 left less 0.10 kept
+        assert held is not None and abs(held - 60_000) <= 1  # 0.90 left less 0.30 kept
         said = meter.snapshot()["held_calls"][-1]
         assert "being kept for the other planned verdict and report calls" in said
 
-    def test_an_unplanned_retry_spends_only_what_is_left_above_the_plan(self) -> None:
+    def test_a_planned_retry_is_made_and_an_unplanned_call_spends_only_above_the_plan(
+        self,
+    ) -> None:
         prices = {"m": {"input_usd_per_mtok": 0.0, "output_usd_per_mtok": 10.0}}
-        meter = SpendMeter(0.45, prices, table={})
+        meter = SpendMeter(0.75, prices, table={})
         meter.settle({"input_tokens": 0, "output_tokens": 10_000}, "m")  # 0.10 spent
         meter.plan_tail({"verdict": ("m", 1, 1_000), "report": ("m", 2, 1_000)})
         meter.admit(kind="verdict", model="m", prompt_chars=0, cap_tokens=10_000)
-        meter.settle({"input_tokens": 0, "output_tokens": 10_000}, "m")  # 0.20 spent
-        # A second verdict call is not planned: the two reports' 0.20 stay kept.
+        meter.settle({"input_tokens": 0, "output_tokens": 10_000}, "m", "verdict")  # 0.20
+        # The verdict's validation retry was planned: it is made.
+        with validation_retry():
+            assert meter.admit(kind="verdict", model="m", prompt_chars=0, cap_tokens=10_000) is None
+        meter.settle({"input_tokens": 0, "output_tokens": 10_000}, "m", "verdict")  # 0.30
+        # A third verdict call is planned by nothing: the two reports and their
+        # retries, 0.40, stay kept.
         with pytest.raises(SpendCeilingStop, match="other planned verdict and report calls"):
             meter.admit(kind="verdict", model="m", prompt_chars=0, cap_tokens=10_000)
         assert meter.admit(kind="report", model="m", prompt_chars=0, cap_tokens=10_000) is None

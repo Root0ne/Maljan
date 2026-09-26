@@ -1969,7 +1969,19 @@ def claims_source(container: ServiceContainer, key: str, stage: Any) -> str:
 
 
 def announce_started(container: ServiceContainer, stage: Any) -> None:
-    """``stage_started``, from the one node of the stage that announces it."""
+    """``stage_started``, from the one node of the stage that announces it.
+
+    The spend meter hears it too: the kinds of call it asks "does anything
+    still fit" of are the ones made since the latest stage began.
+    """
+    meter = _spend_meter(container)
+    if meter is not None:
+        try:
+            from maljan.core.spend import STAGE_CALL_KINDS
+
+            meter.begin_stage(STAGE_CALL_KINDS.get(str(getattr(stage, "kind", "")), ()))
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs a stage
+            logger.debug("the spend meter did not hear the stage start (%s).", exc)
     emit(
         container.event_sink,
         "stage_started",
@@ -3318,21 +3330,27 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             )
 
         # Slot-topology parity with the initial fan-out (builder.py). On a
-        # single-slot local llama-server the analysts' revise calls must NOT
+        # single-slot local llama-server the analysts' revise calls must not
         # run concurrently or they clobber each other's per-slot recurrent
-        # DeltaNet state → full re-prefill every step (the 2026-07-13 root
-        # cause; see LLMConfig.parallel_analysts). The initial pass is
-        # serialised by the graph edges, but this revision node fans out
-        # itself, so it must honour the same flag. When sequential, await each
-        # revise in turn (exclusive slot use); when parallel, keep the
-        # concurrent gather for hosted multi-slot APIs. Both branches tolerate
-        # a per-analyst failure (mirrors gather(return_exceptions=True)) so one
-        # bad revise never aborts the round.
-        parallel = True
-        try:
-            parallel = bool(container.config.llm.parallel_analysts)
-        except AttributeError:
-            parallel = True
+        # state and every step re-processes its prompt (see
+        # LLMConfig.parallel_analysts). The initial pass is serialised by the
+        # graph edges, but this revision node fans out itself, so it follows
+        # the mode of the stages it revises (``pipeline.analyst_mode``), the
+        # job's where none is found. When sequential, await each revise in
+        # turn (exclusive slot use); when parallel, keep the concurrent gather
+        # for hosted multi-slot APIs. Both branches tolerate a per-analyst
+        # failure (mirrors gather(return_exceptions=True)) so one bad revise
+        # never aborts the round.
+        from maljan.pipeline.analyst_mode import analyst_mode_of
+        from maljan.pipeline.analyst_mode import revision_mode as mode_of_revision
+
+        job_mode = analyst_mode_of(container)
+        parallel = job_mode.parallel
+        if stage is not None:
+            try:
+                parallel, _source = mode_of_revision(container.active_profile(), stage, job_mode)
+            except Exception as exc:  # noqa: BLE001 — a stand-in profile keeps the job's mode
+                logger.debug("revision: the revised stages' mode was not read (%s)", exc)
 
         results: list[Any] = []
         if parallel:
@@ -3529,6 +3547,16 @@ def _generation_snapshot(container: Any) -> dict[str, Any] | None:
         logger.debug("the generation rate was not recorded on the run summary: %s", exc)
         return None
     return snapshot if isinstance(snapshot, dict) else None
+
+
+def _analyst_mode_record(container: Any) -> dict[str, Any]:
+    """The run summary's ``profile.analyst_mode``: the mode this job ran its analysts in."""
+    from maljan.pipeline.analyst_mode import analyst_mode_of
+
+    try:
+        return analyst_mode_of(container).to_dict()
+    except Exception:  # noqa: BLE001 — a record is never worth a lost summary
+        return {}
 
 
 def _spend_stop_of(exc: BaseException) -> SpendCeilingStop | None:
@@ -4211,6 +4239,7 @@ def make_judge_node(
                         container.config.agents.profile,
                         _analyst_keys,
                         [k for k in _analyst_keys if k not in BUILTIN_AGENTS],
+                        analyst_mode=_analyst_mode_record(container),
                     )
                     .set_stages(
                         stage_rollup(

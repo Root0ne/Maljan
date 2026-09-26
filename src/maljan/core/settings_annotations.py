@@ -641,13 +641,20 @@ ANNOTATIONS: dict[str, Annotation] = {
     "llm.parallel_analysts": {
         "title": "Run analysts in parallel",
         "description": (
-            "The run mode a team gets when it is still written as a plain list of "
-            "analysts rather than as stages: true runs them concurrently, which is "
-            "correct only for a hosted, multi-slot LLM API, and false (the default) "
-            "runs them one at a time, which is required for a single-slot local "
-            "llama.cpp/Ollama server where parallel requests would clobber each "
-            "other's KV/recurrent state and cause timeouts. A team written as stages "
-            "sets this per analysis stage and ignores this key."
+            "How the analysts of an analysis stage that sets no run mode of its own "
+            "run. auto (the default) decides per job from the endpoints of the models "
+            "the analysts call: a host that resolves only to public addresses runs "
+            "them in parallel; Ollama, or a host that is or resolves to a loopback, "
+            "private, link-local or shared-range address, or a name only a local "
+            "resolver answers (host.docker.internal), runs them one at a time unless "
+            "its llama.cpp /props reports more than one slot; a host that does not "
+            "resolve runs them one at a time. A revision round follows the stages it "
+            "revises. The job logs the mode, the fact that decided it and what each "
+            "stage ran in, and the run summary carries them. true always runs them in "
+            "parallel; false "
+            "always runs them one at a time, which a single-slot local server needs: "
+            "parallel requests there clobber each other's KV/recurrent state and "
+            "cause timeouts. A stage whose own run mode is set keeps it."
         ),
     },
     "llm.provider": {

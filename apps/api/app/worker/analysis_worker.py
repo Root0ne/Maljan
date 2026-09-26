@@ -1927,10 +1927,17 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
         memprobe.reset()
         memprobe.probe("job:start", job_id=job_id)
+        # Whether the analysts run in parallel is decided from their
+        # endpoints: a name resolved and a server's /props asked, which are
+        # network round trips and do not belong on this loop.
+        from maljan.pipeline.analyst_mode import resolve_for
+
+        _analyst_mode = await asyncio.to_thread(resolve_for, core_settings, mock=_mock_active)
         app = MaljanApp(
             config=core_settings,
             mock=_mock_active,
             job_id=job_id,
+            analyst_mode=_analyst_mode,
             event_sink=_make_event_sink(
                 redis_conn,
                 job_id,
