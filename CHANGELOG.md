@@ -2263,6 +2263,12 @@ change landed on `main`.
 
 ### Fixed
 
+- **A stored reverser row saved under an earlier release loads as the seed again.** The two
+  reverser prompts shipped before the dispatcher-branch and resolved-hash paragraphs were not
+  listed in `FORMER_SEED_PROMPT_DIGESTS`, so a database that had saved the definition map under
+  either of them held a `reverser` row that no longer matched its seed, and every settings save
+  was refused ("'reverser' is built in; clone it to change it"). Both digests are listed, and a
+  test pins them.
 - **Every claim an analyst begins is read, or the run says it was not.** The
   base analyst's reader split an answer only on `---` lines and kept the first
   `CLAIM:` of each block, so claims separated by blank lines were read as one:
