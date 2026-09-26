@@ -474,7 +474,26 @@ PROMPTS: dict[str, str] = {
                             "rva": "0x1",
                             "scheme": "s",
                             "parameters": {"key": "0x1"},
-                            "references": [{"at": "0x2", "function": "0x0"}],
+                            "references": [
+                                {"at": "0x2", "function": "0x0"},
+                                {
+                                    "at": "0x3",
+                                    "function": "0x0",
+                                    "passed_to": {
+                                        "call_at": "0x9",
+                                        "callee": {"slot": "0x10"},
+                                        "argument": 2,
+                                    },
+                                },
+                                {
+                                    "at": "0x4",
+                                    "passed_to": {
+                                        "call_at": "0xa",
+                                        "callee": {"function": "0x20"},
+                                        "argument": 1,
+                                    },
+                                },
+                            ],
                             "floss": {"function_rva": "0x0", "called_at_rva": "0x2"},
                         }
                     ],

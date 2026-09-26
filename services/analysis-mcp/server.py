@@ -1090,7 +1090,11 @@ def decode_string_blobs(
     image base, the scheme and its parameters, the text, and the places that
     refer to it with the function around each when the file's function table
     says (``floss`` gives FLOSS's routine and call site when it decoded the
-    same text). The others are counted under ``unreferenced`` and listed with
+    same text). Where a place loads the address as an argument and the next
+    transfer of control in its function is a call, ``passed_to`` names that
+    call's target (an import, a function address, or the slot a pointer is
+    read from) and the argument position; it is absent where the code does not
+    show it. The others are counted under ``unreferenced`` and listed with
     ``include_unreferenced``. Use it beside ``floss``: FLOSS runs the sample's
     own routines under emulation, this undoes the common schemes those routines
     use when the emulation does not reach them. The triage pack already ran it

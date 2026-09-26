@@ -1964,6 +1964,14 @@ def _around(place: dict[str, Any]) -> str:
     return ""
 
 
+def _passed_to(place: dict[str, Any]) -> str:
+    """`` as argument 4 of the call at 0x1210 to …`` where the tool joined the two, or ``""``."""
+    from maljan.tools.call_sites import passed_to_words
+
+    said = passed_to_words(place.get("passed_to"))
+    return f" as {said}" if said else ""
+
+
 def _hash_place(place: dict[str, Any]) -> str:
     where = str(place.get("rva") or f"file {place.get('offset')}")
     return f"{where}{_around(place)}"
@@ -2102,7 +2110,7 @@ def _blob_item(row: dict[str, Any]) -> str:
     places = [p for p in row.get("references") or [] if isinstance(p, dict)]
     head = _detail().list_head
     shown = places if head is None else places[:head]
-    refs = " ".join(f"{p.get('at')}{_around(p)}" for p in shown)
+    refs = " ".join(f"{p.get('at')}{_around(p)}{_passed_to(p)}" for p in shown)
     if len(shown) < len(places):
         refs += f" (+{len(places) - len(shown)} more)"
     where = row.get("rva") or f"file {row.get('offset')}"

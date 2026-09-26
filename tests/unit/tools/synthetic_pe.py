@@ -41,6 +41,45 @@ class SyntheticPE:
     functions: list[tuple[int, ...]] = field(default_factory=list)
     # Bytes written inside the function table's directory after its entries.
     pdata_tail: bytes = b""
+    # The import directory's (RVA, size), once ``imports_at`` wrote one.
+    import_directory: tuple[int, int] | None = None
+
+    def imports_at(self, offset: int, imports: dict[str, list[str]]) -> dict[str, int]:
+        """Write an import table into ``.rdata`` at ``offset``; answer each name's slot RVA.
+
+        Descriptors first (the all-zero one last), then per library its lookup
+        table, its address table (the slots), its name and its hint/name rows.
+        """
+        width = 8 if self.is64 else 4
+        descriptors = 20 * (len(imports) + 1)
+        cursor = offset + descriptors
+        slots: dict[str, int] = {}
+        for index, (dll, names) in enumerate(imports.items()):
+            table_size = width * (len(names) + 1)
+            lookup, address = cursor, cursor + table_size
+            cursor = address + table_size
+            dll_name = cursor
+            self.put("rdata", dll_name, dll.encode() + b"\0")
+            cursor += len(dll) + 1
+            entries: list[int] = []
+            for name in names:
+                entries.append(RDATA_RVA + cursor)
+                self.put("rdata", cursor, b"\0\0" + name.encode() + b"\0")
+                cursor += 2 + len(name) + 1
+            packing = "<Q" if self.is64 else "<I"
+            for position, entry in enumerate(entries):
+                self.put("rdata", lookup + width * position, struct.pack(packing, entry))
+                self.put("rdata", address + width * position, struct.pack(packing, entry))
+                slots[names[position]] = RDATA_RVA + address + width * position
+            self.put(
+                "rdata",
+                offset + 20 * index,
+                struct.pack(
+                    "<IIIII", RDATA_RVA + lookup, 0, 0, RDATA_RVA + dll_name, RDATA_RVA + address
+                ),
+            )
+        self.import_directory = (RDATA_RVA + offset, descriptors)
+        return slots
 
     def put(self, section: str, offset: int, blob: bytes) -> int:
         """Write ``blob`` at ``offset`` inside a section; answer its RVA."""
@@ -101,6 +140,8 @@ class SyntheticPE:
         struct.pack_into("<I", optional, directories - 4, 16)
         if pdata:
             struct.pack_into("<II", optional, directories + 3 * 8, PDATA_RVA, len(pdata))
+        if self.import_directory is not None:
+            struct.pack_into("<II", optional, directories + 1 * 8, *self.import_directory)
 
         table = bytearray()
         bodies = bytearray()

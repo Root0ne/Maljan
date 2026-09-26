@@ -111,7 +111,7 @@ from typing import Any
 
 import numpy as np
 
-from maljan.tools import emulated_strings, pe_image
+from maljan.tools import call_sites, emulated_strings, pe_image
 
 TOOL = "decode_string_blobs"
 
@@ -798,7 +798,11 @@ def decode_string_blobs(
         for rva in (blob_rva, text_rva):
             if rva is not None:
                 sites.extend(references.get(rva, []))
-        places = [image.where(at) for at in sorted(set(sites))]
+        ordered = sorted(set(sites))
+        places = [image.where(at) for at in ordered]
+        # Where the reference loads the address as a call's argument, which
+        # call and which argument (``call_sites.passed_to``); absent otherwise.
+        calls = [call_sites.passed_to(image, at) for at in ordered]
         row: dict[str, Any] = {
             "offset": hex(item.blob_offset),
             "rva": hex(blob_rva) if blob_rva is not None else None,
@@ -818,8 +822,9 @@ def decode_string_blobs(
                         for key in ("after_function_start", "function_source")
                         if key in place
                     },
+                    **({"passed_to": call} if call else {}),
                 }
-                for place in places
+                for place, call in zip(places, calls, strict=True)
             ],
         }
         if item.layers:

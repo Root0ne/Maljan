@@ -58,6 +58,8 @@ _DISCARDABLE = 0x02000000
 _AMD64 = 0x8664
 # The exception directory's index in the data directory array.
 _EXCEPTION_DIRECTORY = 3
+# The import directory's index.
+_IMPORT_DIRECTORY = 1
 
 
 class NotAPortableExecutable(ValueError):
@@ -107,6 +109,9 @@ class Image:
     outside_source: str = ""
     # The file offset and length of the exception directory, when there is one.
     exception_directory: tuple[int, int] | None = None
+    # The import directory's RVA and size, when the header names one.
+    import_directory: tuple[int, int] | None = None
+    _imports: dict[int, str] | None = field(default=None, repr=False)
 
     # -- mapping ------------------------------------------------------------
 
@@ -188,6 +193,42 @@ class Image:
                 return None
             return start
         return None
+
+    def function_bounds(self, rva: int) -> tuple[int, int] | None:
+        """The start and end (exclusive) of the stated code range around ``rva``, or ``None``.
+
+        From the file's function table, the range of the entry that holds the
+        address (a chained fragment is its own range: it starts at an
+        instruction and ends where its entry says). From function starts handed
+        in from elsewhere, the nearest start at or before the address up to the
+        next start after it, or the section's end. With neither, ``None``.
+        """
+        if self.function_starts:
+            index = bisect_right(self.function_starts, rva) - 1
+            if index < 0 or rva >= self.function_ends[index]:
+                return None
+            return self.function_starts[index], self.function_ends[index]
+        before = self.start_before(rva)
+        if before is None:
+            return None
+        section = self.section_at_rva(rva)
+        if section is None:
+            return None
+        later = [start for start in self.outside_starts if start > rva]
+        end = min([*later, section.rva + section.mapped_size])
+        return before, end
+
+    def imports_by_slot(self) -> dict[int, str]:
+        """``{slot RVA: "DLL!name"}`` for every import-table entry, read once.
+
+        The import address table as the file stores it: each entry's slot is
+        where the loader writes the function's address, so a call through that
+        slot calls that import. An entry imported by ordinal is named
+        ``DLL!#ordinal``. Nothing is read that the headers do not point at.
+        """
+        if self._imports is None:
+            self._imports = _read_imports(self)
+        return self._imports
 
     def use_function_starts(self, starts: list[int], source: str) -> None:
         """Take function starts from elsewhere, for an image with no table of its own."""
@@ -361,6 +402,12 @@ def parse(data: bytes) -> Image:
         size_of_image=size_of_image,
         sections=sections,
     )
+    if directory_count > _IMPORT_DIRECTORY:
+        entry = directories + _IMPORT_DIRECTORY * 8
+        if entry + 8 <= len(data):
+            rva, size = struct.unpack_from("<II", data, entry)
+            if rva:
+                image.import_directory = (rva, size)
     if machine == _AMD64 and directory_count > _EXCEPTION_DIRECTORY:
         entry = directories + _EXCEPTION_DIRECTORY * 8
         if entry + 8 <= len(data):
@@ -420,3 +467,48 @@ def _read_function_table(image: Image, rva: int, size: int) -> None:
     image.function_starts = starts
     image.function_ends = [ranges[start][0] for start in starts]
     image.function_owners = [_owner(image, start, ranges[start][1]) for start in starts]
+
+
+def _c_string(data: bytes, offset: int) -> str:
+    """The NUL-terminated name at ``offset``, as latin-1."""
+    end = data.find(b"\0", offset)
+    return data[offset : end if end != -1 else len(data)].decode("latin-1")
+
+
+def _read_imports(image: Image) -> dict[int, str]:
+    """``{slot RVA: "DLL!name"}`` from the import directory the header points at.
+
+    Each descriptor is read until the all-zero one that ends the table or the
+    file's end; each thunk array until its zero entry or the file's end. The
+    names come from the lookup table, or from the address table where the
+    lookup table is absent (the two hold the same entries before binding).
+    """
+    found: dict[int, str] = {}
+    if image.import_directory is None:
+        return found
+    data = image.data
+    width = 8 if image.is64 else 4
+    ordinal_flag = 1 << (width * 8 - 1)
+    at = image.offset_of_rva(image.import_directory[0])
+    while at is not None and at + 20 <= len(data):
+        lookup, _stamp, _chain, name_rva, address = struct.unpack_from("<IIIII", data, at)
+        if not (lookup or name_rva or address):
+            break
+        at += 20
+        name_at = image.offset_of_rva(name_rva)
+        dll = _c_string(data, name_at) if name_at is not None else ""
+        table = image.offset_of_rva(lookup or address)
+        index = 0
+        while table is not None and table + width * (index + 1) <= len(data):
+            (value,) = struct.unpack_from("<Q" if image.is64 else "<I", data, table + width * index)
+            if not value:
+                break
+            if value & ordinal_flag:
+                function = f"#{value & 0xFFFF}"
+            else:
+                hint_at = image.offset_of_rva(value & 0x7FFFFFFF)
+                function = _c_string(data, hint_at + 2) if hint_at is not None else ""
+            if function:
+                found[address + width * index] = f"{dll}!{function}" if dll else function
+            index += 1
+    return found

@@ -918,6 +918,10 @@ class RecoveredValue(BaseModel):
     offset: str = ""
     functions: list[str] = Field(default_factory=list)
     sites: list[str] = Field(default_factory=list)
+    # The calls the decoder joined a use of the text to, each in the words of
+    # ``call_sites.passed_to_words`` ("argument 4 of the call at 0x1210 to
+    # …"); empty where it joined none, or on a record stored before the field.
+    passed_to: list[str] = Field(default_factory=list)
 
 
 class EmulatedStrings(BaseModel):

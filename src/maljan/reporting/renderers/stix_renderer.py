@@ -86,6 +86,7 @@ from maljan.schemas.stix_pattern import (
     stray_backslash_values,
     unknown_object_types,
 )
+from maljan.tools.call_sites import passed_to_words
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
@@ -2302,6 +2303,7 @@ def _decoder_provenance(row: dict[str, Any], entry: str) -> RecoveredValue:
     references = [ref for ref in row.get("references") or [] if isinstance(ref, dict)]
     functions = [str(ref["function"]) for ref in references if ref.get("function")]
     sites = [str(ref["at"]) for ref in references if ref.get("at")]
+    calls = [passed_to_words(ref.get("passed_to")) for ref in references]
     # The row's ``floss`` is FLOSS's routine and call site, not the decoder's
     # reading: FLOSS's own entry states it under FLOSS's name.
     return RecoveredValue(
@@ -2311,6 +2313,7 @@ def _decoder_provenance(row: dict[str, Any], entry: str) -> RecoveredValue:
         offset=str(row.get("offset") or ""),
         functions=list(dict.fromkeys(functions)),
         sites=list(dict.fromkeys(sites)),
+        passed_to=list(dict.fromkeys(call for call in calls if call)),
     )
 
 
@@ -2569,6 +2572,8 @@ def _recovery_words(how: RecoveredValue) -> str:
             where.append("in function " + ", ".join(how.functions))
         if how.sites:
             where.append("used at " + ", ".join(how.sites))
+        if how.passed_to:
+            where.append("passed as " + "; ".join(how.passed_to))
     return f"{head} ({', '.join(where)})" if where else head
 
 
