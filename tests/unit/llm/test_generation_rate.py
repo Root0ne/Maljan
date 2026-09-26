@@ -816,7 +816,10 @@ class TestTheRequestCarriesItsOwnTimeout:
         rates.observe(model_name_of(built), 4000, 100.0, "output tokens over the call's wall clock")
         attach_rate_meter(built, rates)
 
-        with patch.object(type(built).__mro__[1], "_prepare_request", lambda _self, _m, **kw: kw):
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        # The client's own method, under every layer the provider adds.
+        with patch.object(ChatGoogleGenerativeAI, "_prepare_request", lambda _self, _m, **kw: kw):
             sent = built._prepare_request([HumanMessage(content="write the report")])
 
         assert sent["timeout"] == pytest.approx(64000 / 40 * TIMEOUT_MARGIN)

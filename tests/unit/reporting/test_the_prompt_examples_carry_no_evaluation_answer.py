@@ -81,7 +81,7 @@ from maljan.agents.tool_pinning import (
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
 from maljan.analysis.pcap_summary import CaptureRead
 from maljan.extractors.capability_matrix import NOT_ASKED_UNKNOWN_ID, TechniqueQuestion
-from maljan.llm.openai_provider import NO_REPLY_RECORDED, NOT_RUN_REPLY
+from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.pipeline import triage_pack
 from maljan.pipeline.nodes import (
     NO_SANDBOX_DATA_REASON,
