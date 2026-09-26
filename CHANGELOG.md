@@ -2263,6 +2263,20 @@ change landed on `main`.
 
 ### Fixed
 
+- **An indicator the static decoder read stands where FLOSS's would.** The
+  publish record (`emulated_strings`) reads `decode_string_blobs` results as
+  a second source of hidden text the platform recovered: each domain, address
+  or URL the existing parsers read in a result's text or in a base64 layer
+  under it is recorded with the decoder's entry and asked the one rule's
+  questions exactly as a FLOSS decoded string is, with the reason "decoded
+  from the file's own bytes (decode_string_blobs), ev_NNNN". A value the
+  static string sweep also read stays the sweep's, and a decoded text holding
+  no indicator is no candidate. The record keeps every tool that recovered a
+  network value (`recovered_by`: tool, entry, scheme, file offset, functions
+  and the addresses of the code that uses the text), and the IOC table states
+  it on the row (`ConsolidatedIOC.recovered_by`, printed in the report's
+  Context cell). The refusal for a value the sweep also read now ends "so not
+  a value the sample hid", since it answers for both tools.
 - **Every claim an analyst begins is read, or the run says it was not.** The
   base analyst's reader split an answer only on `---` lines and kept the first
   `CLAIM:` of each block, so claims separated by blank lines were read as one:
