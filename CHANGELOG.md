@@ -2331,7 +2331,9 @@ change landed on `main`.
   model made with fewer claims still replaces the answer in force, and
   `run_summary.negotiation.revision_replacements` states it.
 - **Names resolved at runtime from hashes are not imports.** `api_capability`
-  takes `resolved_names` and marks them; the report's projection also reads
+  takes `resolved_names` and marks them; the triage pack records one more
+  lookup after `resolve_api_hashes` with the resolved names the import table
+  lacks; the report's projection also reads
   the ledger's `resolve_api_hashes` answers and counts such names apart
   (`static.api_capabilities_resolved`, `resolved_apis` on a rule row). The
   ATT&CK table no longer prints them as "imports". A rule that matched only

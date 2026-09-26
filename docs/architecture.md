@@ -402,7 +402,11 @@ function's end, a write to the argument register, another stack move for a
 pushed one, or a call through a register leave it absent. Both state addresses as offsets from the image base and the function
 around each from the file's own function table (`tools.pe_image`), and neither
 guesses one. The decoder runs after FLOSS so it can read FLOSS's kept result;
-both run after every other step so no earlier id moves. The analysis server
+both run after every other step so no earlier id moves. Where the resolution names
+functions the import table lacks, the pack then records one more
+`api_capability` entry, last, with those names as `resolved_names` and no
+import names, under the platform the import-set lookup was asked under: the
+capability picture of what the sample resolves at runtime, marked as such. The analysis server
 serves the same two functions (see its README for the algorithms, the schemes
 and the readability test). A domain, an address or a URL in a decoded text is
 hidden text the platform recovered, and the publish rule reads it as it reads

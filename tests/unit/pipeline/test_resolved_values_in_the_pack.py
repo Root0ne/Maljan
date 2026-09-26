@@ -63,11 +63,37 @@ class TestThePackRunsThem:
     def test_a_pe_gets_both_after_every_other_step(self, tmp_path: Path) -> None:
         result = _pack(_sample(tmp_path))
         tools = [entry.tool for entry in result.entries]
-        assert tools[-2:] == ["resolve_api_hashes", "decode_string_blobs"]
-        hashes, blobs = result.entries[-2:]
+        assert tools[-3:] == ["resolve_api_hashes", "decode_string_blobs", "api_capability"]
+        hashes, blobs, _lookup = result.entries[-3:]
         assert hashes.ok and blobs.ok
         assert hashes.structured["total"] == 2
         assert blobs.structured["results"][0]["text"] == "open the settings file"
+
+    def test_the_resolved_names_the_import_table_lacks_go_to_the_capability_lookup(
+        self, tmp_path: Path
+    ) -> None:
+        result = _pack(_sample(tmp_path))
+        lookup = result.entries[-1]
+
+        assert lookup.tool == "api_capability"
+        assert lookup.args["api_names"] == []
+        assert sorted(lookup.args["resolved_names"]) == ["CreateFileW", "VirtualAlloc"]
+        assert sorted(lookup.structured["resolved_at_runtime_from_hashes"]) == [
+            "CreateFileW",
+            "VirtualAlloc",
+        ]
+        line = triage_pack._api_capability(lookup.structured)
+        assert "names resolved at runtime from hashes, not imports" in line
+
+    def test_a_resolved_name_the_import_table_holds_is_not_asked_again(self) -> None:
+        answer = {
+            "hits": [
+                {"readings": [{"set": "exports", "name": "CreateFileW"}]},
+                {"readings": [{"set": "modules", "name": "kernel32.dll"}]},
+                {"readings": [{"set": "exports", "name": "VirtualAlloc"}]},
+            ]
+        }
+        assert triage_pack._resolved_not_imported(answer, ["CreateFileW"]) == ["VirtualAlloc"]
 
     def test_a_file_that_is_not_routed_as_a_pe_does_not(self, tmp_path: Path) -> None:
         target = tmp_path / "a.txt"
