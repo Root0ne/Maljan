@@ -88,6 +88,18 @@ class TestAFormerSeedPromptIsTheSeed:
         digest = hashlib.sha256(prompt.encode()).hexdigest()
         assert digest not in FORMER_SEED_PROMPT_DIGESTS.get(key, frozenset())
 
+    @pytest.mark.parametrize(
+        "digest",
+        [
+            # The reverser prompt before it asked for every branch of a dispatcher.
+            "486bffd12746ef38cdd4bcdc94413e03584a5009abb2e4f5bfde6a6d6d3e2875",
+            # The reverser prompt before it was handed resolved hashes and decoded strings.
+            "f0add93b08ffd9897fdb84d80f16f8b956681e28c2c3fbce8276f2746c6388b7",
+        ],
+    )
+    def test_every_reverser_prompt_a_release_shipped_is_listed(self, digest: str) -> None:
+        assert digest in FORMER_SEED_PROMPT_DIGESTS["reverser"]
+
     def test_only_seeded_keys_are_listed(self) -> None:
         seeded = set(Settings(_env_file=None).agents.definitions)
         assert set(FORMER_SEED_PROMPT_DIGESTS) <= seeded
