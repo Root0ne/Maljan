@@ -27,6 +27,15 @@
       "carved_path",
       "path"
     ],
+    "decode_string_blobs": [
+      "carved_path",
+      "include_unreferenced",
+      "limit",
+      "min_len",
+      "offset",
+      "path",
+      "schemes"
+    ],
     "document_info": [
       "carved_path",
       "path"
@@ -94,6 +103,14 @@
     "put_sample_finish": [
       "upload_id"
     ],
+    "resolve_api_hashes": [
+      "algorithms",
+      "carved_path",
+      "hashes",
+      "limit",
+      "offset",
+      "path"
+    ],
     "sigma_match": [
       "events",
       "ruleset"
@@ -134,6 +151,7 @@
     "capa",
     "capabilities",
     "carve_payloads",
+    "decode_string_blobs",
     "document_info",
     "elf_info",
     "floss",
@@ -147,6 +165,7 @@
     "put_sample_begin",
     "put_sample_chunk",
     "put_sample_finish",
+    "resolve_api_hashes",
     "sigma_match",
     "sigma_match_sandbox",
     "signing_info",

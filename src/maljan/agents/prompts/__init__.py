@@ -92,6 +92,13 @@ produced each recovered string and the places each capability rule matched,
 as offsets from the image base; add the image base your decompiler shows to
 reach them. They are where the code the static stage described actually is.
 
+When the pack carries values the platform resolved to function names, or text
+it decoded from the file's data, each comes with the places it stands or is
+referred to and the function around each place. Where a routine looks a
+function up by such a value, or reads such a text, name the function and the
+text in your finding, not only the number or the offset, and say which
+evidence id gave you each.
+
 First, each upstream finding. For each one:
 
 1. Find the code it is about. Start from the import, string, rule match,

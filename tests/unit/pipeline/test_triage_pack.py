@@ -146,6 +146,8 @@ class TestTheOrderAndTheIds:
             "api_capability",
             "sandbox_status",
             "floss",
+            "resolve_api_hashes",
+            "decode_string_blobs",
         ]
         assert [entry.id for entry in result.entries] == [
             f"ev_{index:04d}" for index in range(1, len(result.entries) + 1)
@@ -322,7 +324,7 @@ class TestFailures:
     def test_the_counts_the_run_summary_reports(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setattr(rules, "capa", lambda path, **_: {"error": "no", "tool": "capa"})
         state = _pack(_write(tmp_path, "s.exe", _pe()), "pe").to_state()
-        assert state["entries"] == 11
+        assert state["entries"] == 13
         assert state["failed"] == 1
         assert state["duration_ms"] >= 0
         assert state["degradation_reasons"] == ["triage.capa_failed"]
@@ -345,6 +347,8 @@ class TestTheSandboxSteps:
             "sandbox_dropped_files",
             "sandbox_channels",
             "floss",
+            "resolve_api_hashes",
+            "decode_string_blobs",
         ]
         (lolbin,) = [entry for entry in result.entries if entry.tool == "lolbin_lookup"]
         assert lolbin.args == {"command_lines": ["rundll32.exe javascript:x"]}
@@ -591,17 +595,22 @@ class TestTheNode:
             "sandbox_status",
             "reputation",
             "floss",
+            "resolve_api_hashes",
+            "decode_string_blobs",
         ]
         assert [row["id"] for row in ledger][:2] == ["ev_0001", "ev_0002"]
         assert all(row["agent"] == PIPELINE and row["stage"] == "triage_pack" for row in ledger)
-        assert ledger[-2]["ok"] is False
+        assert ledger[-4]["ok"] is False
         # No build on a test host: the entry says so, and it is not a failure.
-        assert ledger[-1]["ok"] is False
-        assert ledger[-1]["error"].startswith("not run: floss is not installed")
+        assert ledger[-3]["ok"] is False
+        assert ledger[-3]["error"].startswith("not run: floss is not installed")
+        # The platform's own readings of the bytes answer on any host.
+        assert ledger[-2]["ok"] is True
+        assert ledger[-1]["ok"] is True
         assert "tool_evidence" not in update
 
         facts = update["triage_facts"]
-        assert facts["entries"] == 12
+        assert facts["entries"] == 14
         assert facts["failed"] == 0
         assert facts["has_signature"] is False
         assert facts["capa_hits"] == 1

@@ -185,7 +185,7 @@ class TestBesideCapa:
         took = time.monotonic() - started
 
         assert took < 2 * WORK, f"{took:.2f}s: capa and FLOSS still ran one after the other"
-        assert result.entries[-1].tool == "floss"
+        assert result.entries[-3].tool == "floss"
         entry = _floss_entry(result)
         assert entry.ok is True
         assert entry.duration_ms < 2 * WORK * 1000, "the entry's clock is FLOSS's own"
@@ -200,7 +200,7 @@ class TestBesideCapa:
         result = _pack(tmp_path)
 
         assert time.monotonic() - started >= 2 * WORK
-        assert result.entries[-1].tool == "floss"
+        assert result.entries[-3].tool == "floss"
         assert result.to_state()["floss"] == (
             "in turn: capa's memory has not been measured in this worker yet"
         )

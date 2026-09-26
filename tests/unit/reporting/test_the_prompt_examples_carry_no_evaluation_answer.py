@@ -144,7 +144,7 @@ from maljan.schemas.isr_models import (
     judge_kept_note,
 )
 from maljan.schemas.stix_models import Bundle
-from maljan.tools import knowledge
+from maljan.tools import api_hashes, knowledge, string_blobs
 from maljan.tools.errors import CAPTURES_REMEDIATION, NO_CAPTURE_REMEDIATION
 
 # The distinctive terms of the evaluation key: how the scored sample resolves its
@@ -306,6 +306,20 @@ _TEAM_DOCUMENT_PROMPTS = " ".join(
 )
 
 
+def _analysis_tool_descriptions(*names: str) -> str:
+    """The descriptions the analysis server gives these tools, as every bound agent reads them."""
+    import importlib.util
+    import sys
+
+    path = Path(__file__).resolve().parents[3] / "services" / "analysis-mcp" / "server.py"
+    spec = importlib.util.spec_from_file_location("analysis_mcp_leak_scan", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return " ".join(str(getattr(module, name).__doc__ or "") for name in names)
+
+
 # Everything else a report model is shown on every run, as plain text.
 PROMPTS: dict[str, str] = {
     "example team document prompts": _TEAM_DOCUMENT_PROMPTS,
@@ -406,6 +420,57 @@ PROMPTS: dict[str, str] = {
     "an ask refused for a mutual wait": WAITING_ON_EACH_OTHER_REFUSAL.format(callee="'helper'"),
     "the pack's decoded strings in part": triage_pack.DECODED_STRINGS_ROOM_SENTENCE.format(
         shown=10, total=90, offset=10
+    ),
+    "the pack's resolved hashes and decoded blobs in part": " ".join(
+        [
+            triage_pack.RESOLVED_HASHES_ROOM_SENTENCE.format(shown=10, total=90, offset=10),
+            triage_pack.DECODED_BLOBS_ROOM_SENTENCE.format(shown=10, total=90, offset=10),
+        ]
+    ),
+    "the pack's resolved hashes and decoded blobs lines": " ".join(
+        [
+            triage_pack._resolved_hashes(
+                {
+                    "hits": [
+                        {
+                            "value": "0x00000001",
+                            "readings": [{"algorithm": "a", "name": "N", "dlls": ["d"]}],
+                            "occurrences": [{"rva": "0x1", "function": "0x0"}],
+                        }
+                    ],
+                    "lone_hits": [{"value": "0x00000002", "readings": [], "occurrences": []}],
+                    "total": 1,
+                    "candidates": {"scanned": 3},
+                    "algorithms": ["a"],
+                    "names": {"names": 1, "dlls": 1},
+                }
+            ),
+            triage_pack._resolved_hashes({"hits": [], "total": 0, "candidates": {"given": 1}}),
+            triage_pack._decoded_blobs(
+                {
+                    "results": [
+                        {
+                            "text": "t",
+                            "rva": "0x1",
+                            "scheme": "s",
+                            "parameters": {"key": "0x1"},
+                            "references": [{"at": "0x2", "function": "0x0"}],
+                            "floss": {"function_rva": "0x0", "called_at_rva": "0x2"},
+                        }
+                    ],
+                    "total": 1,
+                    "unreferenced": 1,
+                    "also_recovered_by_floss": 1,
+                }
+            ),
+            triage_pack._decoded_blobs({"results": [], "total": 0}),
+        ]
+    ),
+    "the stated candidate scan and readability test": (
+        f"{api_hashes.SCAN_HEURISTIC} {string_blobs.READABLE_TEST}"
+    ),
+    "the two resolving tools' descriptions": _analysis_tool_descriptions(
+        "resolve_api_hashes", "decode_string_blobs"
     ),
     "a term's example ids and how many more": _term_ids_said(["T1000", "T1001", "T1002"]),
     "run-state budget line of a loop with no limit": budget_line(NO_LIMIT, NO_LIMIT),
