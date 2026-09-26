@@ -56,6 +56,7 @@ from maljan.reporting.models import (
     NetworkIP,
     NetworkURL,
     ProcessNode,
+    RecoveredValue,
     StringIOC,
 )
 from maljan.schemas.judgement import indicator_type_for
@@ -1849,11 +1850,15 @@ def indicator_publish_reason(
     recorded the row, and ``corroborated_by`` is what a caller found for a row
     whose source is by construction the string sweep.
 
-    A network value the sample hid and only emulation recovered — a decoded,
-    stack or tight string in the run's FLOSS entry that the static string sweep
-    did not also read as a plain string (``also_plain`` names the sweep's entry
-    when it did, and the value is then the sweep's) — is a source of its own
-    (``recovered``: "recovered by emulation (decoded strings), ev_NNNN"). Hiding
+    A network value the sample hid and only a recovering tool read — one the
+    run's record (:func:`emulation_from_ledger`) holds from a FLOSS decoded,
+    stack or tight string or a ``decode_string_blobs`` result, that the static
+    string sweep did not also read as a plain string (``also_plain`` names the
+    sweep's entry when it did, and the value is then the sweep's) — is a
+    source of its own (``recovered``: "recovered by emulation (decoded
+    strings), ev_NNNN" or "decoded from the file's own bytes
+    (decode_string_blobs), ev_NNNN"). It gives standing to a row somebody
+    recorded and creates none. Hiding
     a host behind encoding is a deliberate act benign software rarely performs,
     where a plain string in a binary is routinely benign. It admits a domain,
     an address or a URL that passes every other question here — the host
@@ -2184,13 +2189,21 @@ def _judge_url_hosts(report: Any) -> frozenset[tuple[str, str]]:
 # What the rule writes for a value emulation recovered, before the entry id.
 RECOVERED_BY_EMULATION = "recovered by emulation (decoded strings)"
 
+# The analysis server's static decoder of encoded text, by its tool name.
+DECODER_TOOL = "decode_string_blobs"
+
+# What the rule writes for an indicator the static decoder read out of text the
+# sample keeps encoded in its own bytes, before the entry id.
+DECODED_FROM_THE_BYTES = f"decoded from the file's own bytes ({DECODER_TOOL})"
+
 # The FLOSS string kinds that are text the sample hid: a decoded string, a
 # stack string, a tight string. A static string FLOSS also lists is not.
 _EMULATED_KINDS = frozenset({"decoded", "stack", "tight"})
 
 
 def _emulation_admits(host: str, recovered: str, verdict: Any) -> str | None:
-    """``recovered`` when emulation may stand as this value's source, else ``None``.
+    """``recovered`` when a recovering tool (FLOSS or the static decoder) may stand as
+    this value's source, else ``None``.
 
     Never under a Benign verdict, nor under one the judge did not state with a
     confidence (a fallback's default word), nor for a well-known benign host.
@@ -2244,34 +2257,117 @@ def _hold_out_plain(
     return kept, plain
 
 
-def _add_emulated(values: dict[str, str], text: Any, entry: str) -> None:
+def _add_emulated(
+    values: dict[str, str],
+    text: Any,
+    entry: str,
+    provenance: dict[str, list[RecoveredValue]] | None = None,
+    how: RecoveredValue | None = None,
+) -> None:
     value = str(text or "").strip().lower()
     if not value:
         return
-    values.setdefault(value.rstrip("."), entry)
+    keys = [value.rstrip(".")]
     host = url_host(value)
     if host:
-        values.setdefault(host, entry)
+        keys.append(host)
+    for key in keys:
+        values.setdefault(key, entry)
+        if provenance is not None and how is not None:
+            listed = provenance.setdefault(key, [])
+            if how not in listed:
+                listed.append(how)
+
+
+def _floss_provenance(row: dict[str, Any], entry: str) -> RecoveredValue:
+    """Where FLOSS says one recovered string came from: its kind, routine and call site."""
+    function = str(row.get("function_rva") or "")
+    site = str(row.get("called_at_rva") or "")
+    return RecoveredValue(
+        tool="floss",
+        entry=entry,
+        scheme=str(row.get("kind") or "").lower(),
+        functions=[function] if function else [],
+        sites=[site] if site else [],
+    )
+
+
+def _decoder_provenance(row: dict[str, Any], entry: str) -> RecoveredValue:
+    """Where the static decoder says one decoded text came from, as its answer states it."""
+    layers = [
+        str(layer.get("scheme") or "")
+        for layer in row.get("layers") or []
+        if isinstance(layer, dict) and layer.get("scheme")
+    ]
+    references = [ref for ref in row.get("references") or [] if isinstance(ref, dict)]
+    functions = [str(ref["function"]) for ref in references if ref.get("function")]
+    sites = [str(ref["at"]) for ref in references if ref.get("at")]
+    # The row's ``floss`` is FLOSS's routine and call site, not the decoder's
+    # reading: FLOSS's own entry states it under FLOSS's name.
+    return RecoveredValue(
+        tool=DECODER_TOOL,
+        entry=entry,
+        scheme="+".join(part for part in [str(row.get("scheme") or ""), *layers] if part),
+        offset=str(row.get("offset") or ""),
+        functions=list(dict.fromkeys(functions)),
+        sites=list(dict.fromkeys(sites)),
+    )
+
+
+def decoded_indicators(text: Any) -> list[str]:
+    """The domains, addresses and URLs a recovered text holds, as the existing parsers read them.
+
+    The one reader for both recovering tools (FLOSS and the static decoder):
+    the text as one value (``ledger_projection.cell_network_values``: a URL
+    and its host, an address, a name that could be a host and is not a file's
+    name) and the network indicators the string sweep's own scan finds inside
+    it (``tools.strings.iter_string_iocs``), so ``host:port``, a ``Host:``
+    line or a URL inside a sentence yields its value. Anything else — a
+    format string, a user agent, a path — holds none and is no candidate.
+    """
+    from maljan.reporting.ledger_projection import cell_network_values
+    from maljan.tools.strings import iter_string_iocs
+
+    whole = str(text or "").strip("\x00").strip()
+    if not whole:
+        return []
+    found = [value for _kind, value in cell_network_values(whole, None)]
+    found.extend(
+        str(row.get("value") or "")
+        for row in iter_string_iocs(whole.encode("utf-8", errors="ignore"))
+        if row.get("kind") in ("domain", "ip", "url")
+    )
+    return [value for value in dict.fromkeys(found) if value]
 
 
 def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
-    """What emulation alone recovered in this run, read from every FLOSS entry the ledger holds.
+    """What only a recovering tool read in this run: every FLOSS and static decoder entry.
 
     A decoded, stack or tight string FLOSS returned, folded to lower case (a
     URL adds its host), with the entry it came from — the pack's own entry
-    first, since it is issued first. A value the static string sweep also read
-    as a whole value (the ``strings`` entries, the ``iocs_from_file`` rows) is
-    held out: text the sample did not hide is not recovered by emulation,
-    whatever kind FLOSS gave it. ``partial`` says why the record may not be
-    the run's whole: no FLOSS entry listed every string it recovered, or no
-    ``strings`` entry listed every plain string, so a value past a page could
-    be missing from either side. Built at build time and stored on the report,
-    so no kept-row cap of a section decides a publish answer.
+    first, since it is issued first — and each domain, address or URL the one
+    reader (:func:`decoded_indicators`) finds in it. The static decoder's
+    results (``decode_string_blobs``: text the sample keeps encoded in its own
+    bytes, undone by arithmetic) are a second source of the same kind: each
+    domain, address or URL the same reader finds in a result's text or in a
+    base64 layer under it is recorded the same way, and a text that holds none
+    is no candidate. ``recovered_by`` keeps, for each
+    value, every tool that recovered it with its entry, scheme, file offset
+    and the functions around the code that uses it. A value the static string
+    sweep also read as a whole value (the ``strings`` entries, the
+    ``iocs_from_file`` rows) is held out: text the sample did not hide is not
+    recovered, whatever kind a tool gave it. ``partial`` says why the record
+    may not be the run's whole: no FLOSS entry listed every string it
+    recovered, no decoder entry listed every result, or no ``strings`` entry
+    listed every plain string, so a value past a page could be missing from
+    either side. Built at build time and stored on the report, so no kept-row
+    cap of a section decides a publish answer.
     """
     values: dict[str, str] = {}
+    provenance: dict[str, list[RecoveredValue]] = {}
     plain_texts: list[tuple[str, str]] = []
-    floss_whole = strings_whole = False
-    saw_floss = saw_strings = False
+    floss_whole = strings_whole = decoder_whole = False
+    saw_floss = saw_strings = saw_decoder = False
     for entry in ledger or ():
         tool = str(getattr(entry, "tool", "") or "").rsplit("__", 1)[-1]
         entry_id = str(getattr(entry, "id", "") or getattr(entry, "entry_id", "") or "")
@@ -2282,7 +2378,27 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
             floss_whole = floss_whole or _whole_listing(structured, rows)
             for row in rows:
                 if isinstance(row, dict) and str(row.get("kind") or "").lower() in _EMULATED_KINDS:
-                    _add_emulated(values, row.get("string"), entry_id)
+                    how = _floss_provenance(row, entry_id)
+                    # The whole string, as before, and each indicator the one
+                    # reader finds in it, as for the decoder's texts.
+                    for value in [row.get("string"), *decoded_indicators(row.get("string"))]:
+                        _add_emulated(values, value, entry_id, provenance, how)
+        elif tool == DECODER_TOOL:
+            saw_decoder = True
+            rows = _rows_of(structured, "results")
+            decoder_whole = decoder_whole or _whole_listing(structured, rows)
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                how = _decoder_provenance(row, entry_id)
+                texts = [row.get("text")] + [
+                    layer.get("text")
+                    for layer in row.get("layers") or []
+                    if isinstance(layer, dict)
+                ]
+                for text in texts:
+                    for value in decoded_indicators(text):
+                        _add_emulated(values, value, entry_id, provenance, how)
         elif tool == "strings":
             saw_strings = True
             rows = _rows_of(structured, "strings")
@@ -2302,9 +2418,28 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
     why: list[str] = []
     if saw_floss and not floss_whole:
         why.append("no FLOSS entry listed every string it recovered")
+    if saw_decoder and not decoder_whole:
+        why.append(f"no {DECODER_TOOL} entry listed every result it decoded")
     if kept and not (saw_strings and strings_whole):
         why.append("no strings entry listed every plain string in the file")
-    return EmulatedStrings(values=kept, plain=plain, partial="; ".join(why))
+    # Every string FLOSS recovered is a value of the record, and most are not
+    # network values: the stored provenance is kept for the values the decoder
+    # read and for the FLOSS values that are a domain, an address or a URL.
+    # A value with none stored is FLOSS's (``recovered_by_words``).
+    return EmulatedStrings(
+        values=kept,
+        plain=plain,
+        partial="; ".join(why),
+        recovered_by={
+            key: provenance[key]
+            for key in kept
+            if key in provenance
+            and (
+                any(how.tool != "floss" for how in provenance[key])
+                or key in decoded_indicators(key)
+            )
+        },
+    )
 
 
 # Why a record read back from a stored report is partial: it holds only the
@@ -2313,7 +2448,7 @@ _FROM_KEPT_ROWS = "read from the kept rows of a report stored before the record 
 
 
 def emulation_record(report: Any) -> EmulatedStrings:
-    """The report's record of what emulation alone recovered.
+    """The report's record of what only a recovering tool (FLOSS or the static decoder) read.
 
     The one built from the ledger at build time (``emulated_strings``), or, for
     a report stored before it existed, one read from the report's kept section
@@ -2346,7 +2481,8 @@ def emulation_record(report: Any) -> EmulatedStrings:
                 if len(row) > max(at_kind, at_string) and (
                     str(row[at_kind]).strip().lower() in _EMULATED_KINDS
                 ):
-                    _add_emulated(values, row[at_string], entry)
+                    for value in [row[at_string], *decoded_indicators(row[at_string])]:
+                        _add_emulated(values, value, entry)
         elif key == "strings" and "Text" in columns:
             at_text = columns.index("Text")
             plain_texts.extend(
@@ -2400,7 +2536,9 @@ def emulation_kwargs(
     entry = found.values.get(key)
     if not entry:
         return dict(observed)
-    reason = f"{RECOVERED_BY_EMULATION}, {entry}"
+    first = next(iter(found.recovered_by.get(key) or []), None)
+    decoded = first is not None and first.tool == DECODER_TOOL
+    reason = f"{DECODED_FROM_THE_BYTES if decoded else RECOVERED_BY_EMULATION}, {entry}"
     if found.partial:
         reason += f" (the record is partial: {found.partial})"
     stated = _field(report, "overall_confidence") is not None
@@ -2409,6 +2547,49 @@ def emulation_kwargs(
         "verdict": _field(report, "verdict") if stated else UNSTATED_VERDICT,
         **observed,
     }
+
+
+def _recovery_words(how: RecoveredValue) -> str:
+    """One tool's recovery of a value, as the IOC table states it."""
+    head = f"{how.tool}, {how.entry}" if how.entry else how.tool
+    where: list[str] = []
+    if how.scheme:
+        where.append(f"{how.scheme} string" if how.tool == "floss" else how.scheme)
+    if how.offset:
+        where.append(f"at file offset {how.offset}")
+    if how.tool == "floss" and how.scheme == "decoded":
+        # A FLOSS decoded string names the routine that decoded it and where
+        # that routine was called, which is FLOSS's own wording.
+        if how.functions:
+            where.append("routine " + ", ".join(how.functions))
+        if how.sites:
+            where.append("called at " + ", ".join(how.sites))
+    else:
+        if how.functions:
+            where.append("in function " + ", ".join(how.functions))
+        if how.sites:
+            where.append("used at " + ", ".join(how.sites))
+    return f"{head} ({', '.join(where)})" if where else head
+
+
+def recovered_by_words(record: EmulatedStrings, kind: str, value: str) -> str:
+    """Which tools recovered a network value the sample hid, and where; ``""`` for any other.
+
+    Read from the run's record (:func:`emulation_record`): every tool that
+    recovered the value, its entry, the scheme, the file offset and the
+    functions around the code that uses it. A value the static sweep also read
+    is the sweep's and states none. A record stored before ``recovered_by``
+    existed names the entry and FLOSS, the only tool such a record was built
+    from.
+    """
+    if kind not in ("domain", "ip", "url"):
+        return ""
+    key = str(value or "").strip().lower().rstrip(".")
+    entry = record.values.get(key)
+    if not entry:
+        return ""
+    listed = record.recovered_by.get(key) or [RecoveredValue(tool="floss", entry=entry)]
+    return "; ".join(_recovery_words(how) for how in listed)
 
 
 _WHOLE_DIGEST_RE = re.compile(r"^[0-9a-fA-F]+$")
@@ -2495,7 +2676,7 @@ def publish_answer(
     if also_plain:
         return (
             f"no: seen only in the file's strings — also a plain string in the file "
-            f"({also_plain}), so not recovered by emulation"
+            f"({also_plain}), so not a value the sample hid"
         )
     if recovered and is_well_known_benign_host(url_host(text) if kind == "url" else text):
         return f"no: {recovered}, but it is a well-known benign host"

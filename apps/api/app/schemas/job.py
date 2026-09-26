@@ -312,6 +312,11 @@ class IOCEntry(BaseModel):
     # bundle is built with. A feed another system consumes returns only these
     # by default; ``include`` widens it.
     published: bool = True
+    # For a domain, address or URL a recovering tool read from text the sample
+    # hid: which tool (``floss``, emulation; ``decode_string_blobs``, a static
+    # decoding of the file's bytes), its ledger entry and where in the file,
+    # as the report's IOC table states it. Absent for every other row.
+    recovered_by: str | None = None
 
 
 class IOCListResponse(BaseModel):

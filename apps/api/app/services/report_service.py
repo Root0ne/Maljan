@@ -14,6 +14,7 @@ from maljan.reporting.renderers.stix_renderer import (
     judge_indicator_rows,
     one_reading,
     published_url_hosts,
+    recovered_by_words,
 )
 from maljan.reporting.run_diff import RunRecord, diff_runs
 from sqlalchemy import select
@@ -616,8 +617,8 @@ class ReportService:
             if isinstance(dom, dict)
         }
         out: list[dict] = []
-        # What the run's FLOSS entry recovered by emulation, read from the
-        # stored report the way the report's own table reads it.
+        # What only a recovering tool (FLOSS or the static decoder) read, from
+        # the stored report the way the report's own table reads it.
         emulated = emulation_record(mr)
         # The rule's report-dependent arguments are asked of the report as the
         # export reads it: a sandbox row's attribution, the models that named a
@@ -712,6 +713,14 @@ class ReportService:
             _with_the_judge_s_values(out, mr, kind, typed)
             _with_the_hosts_of_published_urls(out, typed, kind)
             rows = [row for row in out if row.get("value")]
+            # Which tool recovered each hidden network value, and where, as
+            # the report's IOC table states it.
+            for row in rows:
+                said = recovered_by_words(
+                    emulated, str(row.get("kind") or ""), str(row.get("value") or "")
+                )
+                if said:
+                    row["recovered_by"] = said
             wanted = str(include or "published").strip().lower()
             if wanted == "all":
                 return rows

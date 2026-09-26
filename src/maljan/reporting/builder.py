@@ -581,13 +581,15 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         emulation_record,
         path_names_a_file,
         publish_answer,
+        recovered_by_words,
     )
 
     rows: list[ConsolidatedIOC] = []
     seen: set[tuple[str, str]] = set()
     corroborating = corroborating_values(report)
-    # What the run's FLOSS entry recovered by emulation: a network value it
-    # holds is a source of its own under the one rule.
+    # What the run's FLOSS entry recovered by emulation and the static decoder
+    # read out of the file's bytes: a network value it holds is a source of
+    # its own under the one rule.
     emulated = emulation_record(report)
 
     def _add(
@@ -809,7 +811,15 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 is_network=True,
             )
 
-    return _with_the_hosts_of_published_urls(_with_the_judge_s_values(rows, report), report)
+    table = _with_the_hosts_of_published_urls(_with_the_judge_s_values(rows, report), report)
+    # Which tool recovered each network value the sample hid, and where: the
+    # table states it on every row the record holds, whoever recorded the row.
+    return [
+        row.model_copy(update={"recovered_by": said})
+        if (said := recovered_by_words(emulated, row.kind or "", row.value))
+        else row
+        for row in table
+    ]
 
 
 # The table's type for each kind a judge indicator can name.

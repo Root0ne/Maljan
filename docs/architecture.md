@@ -386,7 +386,10 @@ around each from the file's own function table (`tools.pe_image`), and neither
 guesses one. The decoder runs after FLOSS so it can read FLOSS's kept result;
 both run after every other step so no earlier id moves. The analysis server
 serves the same two functions (see its README for the algorithms, the schemes
-and the readability test).
+and the readability test). A domain, an address or a URL in a decoded text is
+hidden text the platform recovered, and the publish rule reads it as it reads
+a FLOSS decoded string (see "A value a tool recovered from hidden text is a
+source of its own" under the indicator rule).
 
 The pack states facts and draws no conclusion, and it never fails a job: a
 tool that raises or answers with an error is an entry with `ok=False` and a
@@ -2754,34 +2757,61 @@ is assembled from what the run gathered rather than recomputed beside it:
   listed four hashes; under the rule both are unpublished rows ("seen only in
   the file's strings") and the export declines them. A test holds the export
   and the table to one decision.
-* **A value emulation recovered is a source of its own.** A domain, an
-  address or a URL that the run's FLOSS entry holds as a decoded, stack or
-  tight string — text the sample hid and only running it recovers — is
-  publishable when it passes every other question of the rule (the host
-  question, the address classes, the reputation half, the URL host denylist)
-  and is not a well-known benign host; the reason reads "recovered by
-  emulation (decoded strings), ev_NNNN", the FLOSS entry's own id. Hiding a
-  host behind encoding is a deliberate act benign software rarely performs,
-  while a plain string in a binary is routinely benign, so a value only the
-  static string sweep read stays unpublished — and so does a value FLOSS
-  gives a decoded kind that the sweep also read as a whole value in the
-  file's plain strings (a `strings` or `iocs_from_file` entry): text the
-  sample did not hide is not recovered by emulation, and the refusal names
-  the sweep's entry. Under a Benign verdict it publishes nothing, nor under a
-  verdict the judge did not state with a confidence (a fallback's default
-  word), and the table's refusal says so. A well-known benign host is read by
-  its registered name (`*.co.uk` included), and a public resolver's address
-  is one too. The record (`emulated_strings` on the report) is built at build
-  time from every FLOSS, `strings` and `iocs_from_file` entry on the ledger,
-  so no kept-row cap of a section decides an answer; it says why it is partial
-  when no FLOSS entry listed every string it recovered, or no `strings` entry
+* **A value a tool recovered from hidden text is a source of its own.** Two
+  tools recover text the sample hid: FLOSS, by emulation (its decoded, stack
+  and tight strings), and the static decoder (`decode_string_blobs`), which
+  undoes the simple encodings a sample keeps text under in its own bytes, by
+  arithmetic. One reader finds the candidates in both tools' texts
+  (`stix_renderer.decoded_indicators`): the text as one value, as an
+  analyst's endpoint cell is read, and the string sweep's own indicator scan
+  inside it, over the decoder's result text and each base64 layer under it
+  and over each FLOSS string, which is also kept whole as before. So a
+  `host:port`, a `Host:` line or a URL inside a sentence yields its value
+  from either tool; until this a FLOSS string was read only whole, and such a
+  value from FLOSS was missed. A text that holds no domain, address or URL
+  stays a string fact and is no candidate. A recovered value is publishable
+  when it passes every other question of the rule (the host question, the
+  address classes, the reputation half, the URL host denylist) and is not a
+  well-known benign host; the reason reads "recovered by emulation (decoded
+  strings), ev_NNNN" or "decoded from the file's own bytes
+  (decode_string_blobs), ev_NNNN", the recovering entry's own id. It gives
+  standing to a row the sandbox, the sweep, an analyst or the judge recorded,
+  and creates no row of its own: a recovered indicator nobody named is not in
+  the table and is not published. Hiding a host behind encoding is a
+  deliberate act benign software rarely performs, while a plain string in a
+  binary is routinely benign, so a value only the static string sweep read
+  stays unpublished — and so does a value a tool recovered that the sweep
+  also read as a whole value in the file's plain strings (a `strings` or
+  `iocs_from_file` entry): text the sample did not hide is not recovered, and
+  the refusal names the sweep's entry. Under a Benign verdict it publishes
+  nothing, nor under a verdict the judge did not state with a confidence (a
+  fallback's default word), and the table's refusal says so. A well-known
+  benign host is read by its registered name (`*.co.uk` included), and a
+  public resolver's address is one too. The record (`emulated_strings` on the
+  report) is built at build time from every FLOSS, `decode_string_blobs`,
+  `strings` and `iocs_from_file` entry on the ledger, so no kept-row cap of a
+  section decides an answer; the first entry to recover a value answers for
+  it. The record keeps, for each network value, every tool that recovered it
+  (`recovered_by`), each with its own facts only: FLOSS's string kind, and for
+  a decoded string the routine that decoded it and where that routine was
+  called; the decoder's scheme with any base64 layer, the blob's file offset,
+  the functions around the code that refers to the text and that code's
+  addresses. The IOC table states it on the value's row (`recovered_by`; the
+  report prints it in the row's Context cell), and `/iocs` carries the same
+  words. It says why it is partial when no FLOSS entry listed every string it
+  recovered, no decoder entry listed every result, or no `strings` entry
   listed every plain string, and the reason carries that. A report stored
   before the record existed is read from its kept `tool_floss_strings` and
-  `strings` rows, and the reason says the record is partial. The export, the
-  IOC table and `/iocs` read it through the one rule. Replayed on the
-  benchmark's stored runs, the two C2 names the sample decrypted publish on
-  both models' runs (the static sweep's complete listing does not hold them),
-  and nothing new publishes on the benign control.
+  `strings` rows with the same reader, and the reason says the record is
+  partial. The export, the IOC table and `/iocs` read it through the one
+  rule. Replayed on the benchmark's stored runs when FLOSS strings were read
+  whole only, the two C2 names the sample decrypted published on both models'
+  runs (the static sweep's complete listing does not hold them), and nothing
+  new published on the benign control. Replayed again after the one reader
+  was added (23 stored runs, under each run's own verdict and with the
+  verdict forced to malicious), no published row was added or dropped. No
+  stored run holds a `decode_string_blobs` entry, so the decoder half is not
+  measured by that replay.
 * **Draft detection rules match only what the run publishes.** The YARA,
   Sigma and Suricata drafts (`reporting.detection_signatures`) are generated
   after the export. A YARA string or a Suricata alert matches on the IOC

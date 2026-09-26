@@ -816,7 +816,7 @@ function DownloadBar({
       <button
         onClick={downloadJson("iocs")}
         disabled={!reportId || busy === "iocs"}
-        title="Every indicator the report holds, as JSON"
+        title="Every indicator the report holds, as JSON, with the tool that recovered each hidden network value"
         className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted disabled:text-text-disabled disabled:cursor-not-allowed"
       >
         {busy === "iocs" ? "fetching..." : "\u2193 IOC list"}

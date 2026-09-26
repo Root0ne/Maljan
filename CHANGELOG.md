@@ -2263,6 +2263,39 @@ change landed on `main`.
 
 ### Fixed
 
+- **An indicator the static decoder read stands where FLOSS's would.** The
+  publish record (`emulated_strings`) reads `decode_string_blobs` results as
+  a second source of hidden text the platform recovered: each domain, address
+  or URL the existing parsers read in a result's text or in a base64 layer
+  under it is recorded with the decoder's entry and asked the one rule's
+  questions exactly as a FLOSS decoded string is, with the reason "decoded
+  from the file's own bytes (decode_string_blobs), ev_NNNN". A value the
+  static string sweep also read stays the sweep's, and a decoded text holding
+  no indicator is no candidate. The record keeps every tool that recovered a
+  network value (`recovered_by`: tool, entry, scheme, file offset, functions
+  and the addresses of the code that uses the text, each tool with its own
+  facts only; a FLOSS decoded string reads "routine X, called at Y"), and the
+  IOC table states it on the row (`ConsolidatedIOC.recovered_by`, printed in
+  the report's Context cell); `/iocs` carries the same words as an optional
+  `recovered_by`, which the web `IOCRow` type declares. The refusal for a
+  value the sweep also read now ends "so not a value the sample hid", since
+  it answers for both tools. A recovered value still only gives standing to a
+  row the sandbox, the sweep, an analyst or the judge recorded; it creates no
+  row.
+- **FLOSS strings are read by the same indicator reader.** A FLOSS decoded,
+  stack or tight string is still kept whole in the record, and each domain,
+  address or URL the reader finds inside it is now recorded too (in the
+  ledger record and in the kept-rows reading of an older report). A
+  `host:port`, a `Host:` line or a URL inside a sentence recovered by FLOSS
+  was missed and now gets the standing the same text from the static decoder
+  gets, so such a value named by a model may now publish where it did not.
+  Replayed offline on the benchmark's 23 stored runs (their evidence and
+  report, under each run's own verdict and again with the verdict forced to
+  malicious), the one reader added and dropped no published row: on the
+  benign control it finds only a value already kept whole, and on the other
+  runs the hosts it finds were already published through their URLs. No
+  stored run holds a `decode_string_blobs` entry, so the decoder half is not
+  measured by that replay.
 - **A stored reverser row saved under an earlier release loads as the seed again.** The two
   reverser prompts shipped before the dispatcher-branch and resolved-hash paragraphs were not
   listed in `FORMER_SEED_PROMPT_DIGESTS`, so a database that had saved the definition map under

@@ -255,7 +255,7 @@ class TestAPlainStringTheSweepRead:
         assert swept not in _exported(report)
         assert _published(report, swept) == (
             "no: seen only in the file's strings — also a plain string in the file "
-            "(ev_0005), so not recovered by emulation"
+            "(ev_0005), so not a value the sample hid"
         )
         assert not _publishable(
             "domain", swept, "strings", None, emulation_kwargs(report, "domain", swept)
