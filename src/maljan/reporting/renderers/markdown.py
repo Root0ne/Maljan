@@ -3130,7 +3130,9 @@ def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     if mapping is None or not mapping.is_corroborated:
         return ""
     if rules and all(_resolved_only(hit) for hit in rules):
-        layers = len([lyr for lyr in mapping.contributing_layers if lyr != "judge"])
+        from maljan.extractors.capability_matrix import JUDGE_SOURCE
+
+        layers = len([lyr for lyr in mapping.contributing_layers if lyr != JUDGE_SOURCE])
         return (
             f", corroborated (named by {layers} analyst layers; their statements are listed "
             "below the table)"

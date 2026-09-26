@@ -19,9 +19,9 @@ change landed on `main`.
   (`MalwareReport.claims_not_discussed`), counted
   (`run_summary.claims_not_discussed`) and printed under §13.1 "Claims whose
   code locations or API names the body does not name".
-- **An encoded string is joined to the call its bytes go to, and that call's
-  output to its consumer.** `decode_string_blobs` states `passed_to` beside a
-  reference: the call the address of the encoded bytes is passed to (usually
+- **An encoded string is joined to the call its bytes go to, and to the next
+  call that receives that call's frame slot or return value.**
+  `decode_string_blobs` states `passed_to` beside a reference: the call the address of the encoded bytes is passed to (usually
   the program's decoder) with its callee (an import, a function address, or
   the slot a runtime pointer is read from) and argument position, read
   statically by `tools.call_sites` from an x64 `lea` into an argument register

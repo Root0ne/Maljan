@@ -252,6 +252,8 @@ def build_capability_matrix(
 # analysts rather than the sample, so counting it would turn one analyst's
 # claim into two agreeing sources.
 _JUDGE_SOURCE = "judge"
+# The layer name the judge contributes under, for renderers that count analyst layers.
+JUDGE_SOURCE = _JUDGE_SOURCE
 
 # Why an id that reached the report on a finding alone is not published. A
 # claim is questioned in its analyst's own loop — its technique id is asked

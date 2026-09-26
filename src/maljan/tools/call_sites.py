@@ -1,10 +1,11 @@
-"""Which call a static address is passed to, and where that call's output goes, read from the code.
+"""Which call a static address is passed to, and which call next receives what it gave.
 
 ``decode_string_blobs`` states the places in the code that refer to an encoded
 string. At such a place the program loads the address of the string's encoded
 bytes, not the decoded text: what this module reads, without running
 anything, is which call that address is passed to (usually the program's own
-decoding routine), and then where the output of that call goes next.
+decoding routine), and then which later call receives the frame slot that
+call was given, or its return value in rax.
 
 What counts, and nothing else:
 
