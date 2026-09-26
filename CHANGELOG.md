@@ -972,6 +972,32 @@ change landed on `main`.
 
 ### Changed
 
+- **Analysts run in parallel on a hosted API and one after another on a
+  single-slot local server, decided per job.** `llm.parallel_analysts` is now
+  `auto` (the default), `true` or `false`. `auto` reads the models the
+  analysts call: Ollama, or an OpenAI-compatible server at a loopback,
+  link-local or private address, runs them one after another unless its
+  llama.cpp `/props` reports more than one slot (read from the answer the
+  window probe already asks for); any other endpoint runs them in parallel;
+  one single-slot model makes the whole job sequential. The mode and its
+  reason are logged and in `run_summary.profile.analyst_mode`. A stage's own
+  `mode` wins; `StageDefinition.mode` is unset by default and an unset
+  analysis stage follows the job, as does the revision round (an unset stage a
+  debate hands over to stays one node). The console's run-mode selector has an
+  `auto` choice. In the DeepSeek runs every stage ran its agents one after
+  another although the API serves requests concurrently.
+- **The reserve for the verdict and the report is the tail's real size.** Each
+  planned call is kept at what its admission demands, at the prompt it will be
+  sent (the largest of its kind, else the largest single-shot prompt, else a
+  conversation's opening prompt, bounded by the window allowance, which alone
+  is used only before any prompt was sent) and at the answer this job measured
+  (the verdict's largest single-shot answer; a report call's mean report or
+  other single-shot answer, which is also the smallest answer its admission
+  demands). Each row of `run_summary.spend.reserve` adds `expected_usd`, its
+  charge at the measured cache-hit share. Run 4 kept 0.90 USD of a 2.00 USD
+  ceiling for a tail that costs about 0.3; the same shape now keeps about 0.34
+  and every planned call is made on it.
+
 - **The reverser reaches every branch of a dispatcher it finds.** The seeded
   reverser prompt, and the example team's reverser, ask of a switch or a table
   over command or message ids that each branch's handler be decompiled or
@@ -2262,6 +2288,19 @@ change landed on `main`.
   `MALJAN_FLOSS_PATH` to a missing file unless a test names a build.
 
 ### Fixed
+
+- **One refused call no longer ends the job.** A refusal used to latch the
+  spend as exhausted: in run 4 one mediation turn refused at its whole cap
+  stopped every revision after it with 0.12 USD still spendable. A refusal is
+  now recorded (`run_summary.spend.refused_calls`, and the run summary's spend
+  lines) and its caller takes its salvage path; the spend is exhausted only
+  when the ceiling is reached or no call of any kind the job makes, at the
+  smallest prompt it has sent, would still be admitted.
+- **The judge's mediation turns are held like an analyst's.** The mediation
+  loop handed the bare model to the ReAct executor, which bound the tools
+  itself, so no turn could be held and each was admitted only at its whole
+  cap. The model is bound to its tools before the loop and each turn's held
+  cap is set on that binding.
 
 - **An indicator the static decoder read stands where FLOSS's would.** The
   publish record (`emulated_strings`) reads `decode_string_blobs` results as
@@ -5393,6 +5432,25 @@ change landed on `main`.
   benign PuTTY control after its verdict fell back.
 
 ### Upgrading
+
+**Analysts run in parallel on a hosted API.** `llm.parallel_analysts` is `auto`
+by default. A deployment that never set it and calls a hosted API now runs its
+analysts, and the revision round, in parallel; one on Ollama or a single-slot
+local llama.cpp server keeps running them one after another. A stored `true` or
+`false` keeps its meaning. The database revision `20261002000000` takes the
+`sequential` the old default wrote off every analysis stage of a written team,
+so the stage follows the job, except where `llm.parallel_analysts` is stored
+`true`; pick `sequential` on a stage card to pin a stage. Consumers of stage
+documents should read a missing or `null` `mode` as "follows the job", and
+`run_summary.profile` may carry `analyst_mode`.
+
+**Spend.** The ceiling still has no default: an unset
+`llm.max_spend_usd_per_job` is no ceiling, and nothing is held or refused for
+spend. With one set, a refused call no longer exhausts the spend by itself
+(`run_summary.spend.exhausted` means nothing more fits, or the ceiling was
+reached), `run_summary.spend` may carry `refused_calls`, each reserve row
+carries `expected_usd`, and the reserve is smaller and follows this job's own
+call sizes, so the tool phases keep more of the ceiling.
 
 **The spend ceiling.** `llm.max_spend_usd_per_job` is now a hard bound and
 counts the charged price: the same ceiling allows about twice the work it did

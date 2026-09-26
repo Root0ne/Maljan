@@ -268,19 +268,20 @@ work over whichever tools the operator connected for that format.
 ## The pipeline
 
 A LangGraph `StateGraph` over one shared state (`src/maljan/pipeline/`). The
-triage pack runs first; the analyst stage after it has two shapes and
-`parallel_analysts` chooses between them:
+triage pack runs first; the analyst stage after it has two shapes, and the
+job's analyst mode (`llm.parallel_analysts`: `auto`, `true` or `false`)
+chooses between them for a stage that sets no mode of its own:
 
 ```
 START
   │
 triage_pack   the deterministic tools, run by the pipeline, one ledger entry each
   │
-  ├─ parallel_analysts = False  (the default)
+  ├─ sequential  (false; auto on a single-slot local server)
   │     static_analyst -> dynamic_analyst -> network_analyst
   │
-  └─ parallel_analysts = True
-        START fans out to all three, then fans in
+  └─ parallel    (true; auto on a hosted API or a multi-slot server)
+        the pack fans out to all three, then fans in
   │
 negotiation  <-------- revision
   │  (consensus, or the iteration cap)   ^
@@ -310,9 +311,13 @@ confidence and its `status` (`failed` or `timeout`); the run summary's
 loop goes to the judge. It used to record 0.0, which the run summary then
 published as the negotiation's final confidence.
 
-Sequential is the default because a single local model server has one slot, and
-fanning out three analysts onto it produces queue thrash rather than speed. Set
-`parallel_analysts` when each request gets its own slot, as with a hosted API.
+A single local model server has one slot, and fanning out three analysts onto
+it produces queue thrash rather than speed; a hosted API serves each request on
+its own. `auto` tells them apart per job (`pipeline/analyst_mode.py`): Ollama,
+or an OpenAI-compatible server at a local address, runs the analysts one after
+another unless its llama.cpp `/props` reports more than one slot; anything else
+runs them in parallel. The revision round follows the same mode, and the run
+summary's `profile.analyst_mode` says which it was and why.
 
 ### The triage pack
 

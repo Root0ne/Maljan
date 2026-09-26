@@ -1127,7 +1127,9 @@ deployment budget (`core.mcp.breaker.call_timeout_seconds`, derived as that
 row says), or as long as Ghidra takes with none.
 
 **The spend ceiling.** `core.llm.max_spend_usd_per_job` is the most one job may
-spend on its models, in US dollars; empty, the default, is none. It is a hard
+spend on its models, in US dollars. It has no default: while it is empty a job
+has no spend ceiling, nothing is priced against one, and no call is held or
+refused for spend. Set it on a paid provider. It is a hard
 bound against the platform's own measure of a prompt — its characters over
 three, the measure the window accounting uses — so nothing is sent that could
 take the job past it by that measure. A prompt that tokenises denser than that
@@ -1190,10 +1192,13 @@ below the smallest answer it can give, measured per group: for a tool-loop turn
 the largest turn (reasoning and answer together) this job has measured of that
 model, for any other call the largest single-shot or verdict/report answer
 measured of it, and with none of its group measured the call's own configured
-output cap — there is no fixed floor. A call that cannot be handed a cap of
-its own (a model that takes no output cap per call, the judge's mediation
-turns, the structured technique question and mediation extraction) is made
-only at its whole cap. A call the ceiling refuses is not sent: a revision leaves
+output cap — there is no fixed floor; a report call's is the answer planned
+for it (below). The judge's mediation turns are held as an analyst's turns
+are: the model is bound to its tools before the loop starts and each turn's
+held cap is set on that binding. A call that cannot be handed a cap of its own
+(a model that takes no output cap per call, the structured technique question
+and mediation extraction) is made only at its whole cap, and the refusal says
+so. A call the ceiling refuses is not sent: a revision leaves
 the analyst's answer in force, the mediator's fast path leaves no reasoning
 (no agreement), the extraction falls back to reading the text, a summary keeps
 the raw text, a report section is recorded as not written, and a verdict the
@@ -1206,39 +1211,57 @@ what it was charged, so calls running at the same time never spend the same
 remainder. A tool loop's turn also keeps room for the loop's closing answer:
 it is sent only when what is left after it still pays for the smallest answer.
 
-*The reserve for the verdict and the report.* At the start of a job the
-verdict call and the report calls (one per section the composer writes, and
-the narrative round) are planned, each with the prompt the window accounting
-allows it: its model's window less its report-stage output budget, from what is
-already known of the window. The reserve is derived from that plan and this
-job's own calls, with no fixed fraction:
+*The reserve for the verdict and the report.* A job plans its verdict call and
+its report calls (one per section the composer writes, and the narrative
+round) and keeps aside, for each of them, what its admission will demand: its
+prompt as uncached input and the answer planned for it, at the rates in force.
+The reserve is therefore never below what the tail needs to be made, and it is
+sized from this job's own calls rather than from the window, with no fixed
+fraction:
 
-- the verdict: its prompt as uncached input plus the answer its admission
-  will demand (its configured cap until a single-shot answer is measured, then
-  the largest such answer), so what is kept for it is what it needs to be made;
-- the first report call: its prompt as uncached input plus the planned answer;
-- every report call after the first, which shares the first one's prefix: its
-  prompt at this job's cache-hit share for the model — cached input tokens over
-  input tokens, measured only over calls that were not the first of their
-  conversation (a tool loop's turns after its first), since a conversation's
-  first call has nothing cached to read — and at the model's cached rate while
-  no such share is measured, plus the planned answer.
+- a planned call's prompt is the prompt it will be sent: the largest prompt of
+  its own kind once one was sent; before that the largest single-shot prompt
+  this job has sent (a revision's prompt carries the same reports), else the
+  largest opening prompt of a conversation (a tool loop's first turn); each
+  bounded by what the window accounting allows that kind of call (its model's
+  window less its report-stage output budget). The allowance alone is used only
+  while no prompt has been sent at all. A tool loop's conversation is never
+  used;
+- the verdict's answer is what its admission demands: its configured cap until
+  a single-shot answer is measured, then the largest such answer;
+- a report call's answer is the mean answer of the report calls measured of
+  its model once one returned, and before that the mean answer of the model's
+  other single-shot calls (the verdict's is left out, so the verdict does not
+  move the report's plan), else its largest tool-loop turn. It is also the
+  smallest answer a report call's admission demands, so what is kept for a
+  report call is what makes it. With no answer measured the reserve is not
+  sized.
 
-A planned call's prompt is the largest prompt of its own kind once one was
-sent; before that the verdict's is the largest single-shot prompt sent (a
-revision's prompt carries the same reports), bounded by its allowance, and a
-report call's is its allowance. A tool loop's conversation is never used. The
-planned answer is the largest single-shot or verdict/report answer measured of
-the model, else its largest tool-loop turn; with no answer measured the reserve
-is not sized. All at the rates in force. Tool-loop turns, revisions,
-negotiation rounds, asks and summaries spend only above the whole reserve; a
-verdict or report call spends above the reserve of the planned calls after it,
-so the verdict cannot take the report's share and an unplanned retry spends
-only what is left above the plan. `run_summary.spend.reserve` shows the
-derivation, row by row, as it stood when the summary was written.
+Each row of `run_summary.spend.reserve` also states its expected charge
+(`expected_usd`): the first call of a kind with its prompt uncached, and the
+ones after it, which share its prefix, at this job's cache-hit share for the
+model — cached input tokens over input tokens, measured only over calls that
+were not the first of their conversation (a tool loop's turns after its
+first), since a conversation's first call has nothing cached to read — and at
+the model's cached rate while no such share is measured. The reserve does not
+count on that share, because each call's admission prices its prompt uncached.
+Tool-loop turns, revisions, negotiation rounds, asks and summaries spend only
+above the whole reserve; a verdict or report call spends above the reserve of
+the planned calls after it, so the verdict cannot take the report's share and
+an unplanned retry spends only what is left above the plan.
+`run_summary.spend.reserve` shows the derivation, row by row, as it stood when
+the summary was written.
 
-The first refusal exhausts the spend: from then on every gate reads it as the
-ceiling reached, `run_summary.spend` says `exhausted` with when and why, no
+*A refusal is not exhaustion.* A call the ceiling refuses is not sent, its
+refusal is logged with its numbers and counted (`run_summary.spend.refused_calls`),
+and its caller takes its salvage path: a tool loop whose next turn is refused
+ends its tool phase and its agent writes its answer from what it gathered, and
+the budget record says which call was refused. The job goes on while a call of
+any kind it makes — each at the smallest prompt it has sent, with its own cap —
+would still be admitted: a mediation turn refused at its whole cap does not
+stop the revisions after it. The spend is *exhausted* when the ceiling is
+reached, or when a refusal leaves nothing else that fits. From then on every
+gate reads it, `run_summary.spend` says `exhausted` with when and why, no
 further negotiation round, chunk or tool loop is started, an ask is refused,
 every running tool loop ends its tool phase and its agent writes its answer
 from what it gathered, and only the verdict, the report and a loop's closing
@@ -1522,10 +1545,47 @@ pipeline → Teams) is an ordered list of stages. Each stage is:
 | `agents` | Definition keys this stage runs. Empty on a triage or debate stage. |
 | `depends_on` | Earlier stage keys this one runs after. |
 | `when` | Condition deciding whether it runs. Empty means always. |
-| `mode` | `sequential` (default) or `parallel`, for an analysis stage. |
+| `mode` | `parallel` or `sequential`, for an analysis stage. Unset (the default), the stage follows the job's analyst mode (below). |
 | `inject_upstream` | `none`, `findings` (default) or `full`. |
 | `debate` | Round limit, consensus threshold and sycophancy check, for a debate stage. |
 | `builtin_tools` | `false` withholds every built-in server (`analysis`, `knowledge`, `network`, `threatintel`, `virustotal`) from this stage's agents. |
+
+### How an analysis stage runs its agents
+
+`core.llm.parallel_analysts` is `auto` (the default), `true` or `false`. It
+decides how the agents of every analysis stage whose own `mode` is unset run —
+all at once, or one after another — and how the debate's revision round runs
+its analysts. A stage whose `mode` is set keeps it, whatever this key says.
+
+- `true` always runs them in parallel; `false` always runs them one after
+  another.
+- `auto` is decided per job from the models the analysts call (every model an
+  analyst may call, its fallbacks included). A model served by Ollama, or by an
+  OpenAI-compatible server at a loopback, link-local or private address, is a
+  runtime on one machine and is taken to serve one request at a time — unless
+  it is a llama.cpp server whose `/props` reports `total_slots` above one. Any
+  other endpoint is a hosted API and serves requests concurrently — unless its
+  `/props` reports exactly one slot. The slot count is read from the `/props`
+  answer the context-window probe already asks for; no request is added. One
+  model taken to serve one request at a time makes the whole job sequential,
+  because concurrent analysts on a single-slot server clobber each other's
+  per-slot state and every step re-processes its prompt. A mock job runs its
+  analysts one after another.
+
+The job logs the mode it chose and why (`Analysts run in parallel: …`), and
+`run_summary.profile.analyst_mode` carries `mode`, `setting` and `reason`. An
+unset stage that cannot run in parallel in its team — a debate hands over to
+exactly one node, and a parallel stage of two agents is two nodes — runs one
+after another, and the log says why.
+
+A stored `true` or `false` (a JSON boolean) keeps its meaning. Stages used to
+be written with `sequential` whether or not anybody chose it; the database
+revision `20261002000000` takes that word off every analysis stage, so the
+stage follows the job, except where `core.llm.parallel_analysts` is stored
+`true` (there a `sequential` stage was running one after another while the key
+said parallel, and it is left as written). A team still derived from its
+analyst list is rebuilt from the key on every load and is not touched. Pick
+`sequential` on a stage card to pin a stage.
 
 ### Checking a team before it is saved
 
@@ -1847,12 +1907,15 @@ conditional edge, and a conditional edge has one destination per branch, so a
 debate may not feed two stages — and may not feed a parallel analysis stage
 with more than one agent, which is two nodes even though it is one stage. A
 sequential stage of any size is one node and is fine. This is refused when the
-team is saved, not when the first job builds its graph.
+team is saved, not when the first job builds its graph. A stage with no mode of
+its own is one node when the team is checked, and runs one after another
+wherever a debate hands over to it, whatever the job's analyst mode.
 
 A team stored as a plain list of analysts — every team written before stages
 existed — is read as the four stages that list has always meant: `analysis`
-(those analysts, in `llm.parallel_analysts`' mode) → `debate` (with the round
-limit and threshold from `negotiation.*`) → `verdict` (the judge) → `report`
+(those analysts, in the mode `llm.parallel_analysts` gives — unset on `auto`, so
+the job decides) → `debate` (with the round limit and threshold from
+`negotiation.*`) → `verdict` (the judge) → `report`
 (the reporter). The stored `analysts` list is kept alongside the stages it
 produced; the model reads the stages.
 
