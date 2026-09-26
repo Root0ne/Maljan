@@ -2255,13 +2255,17 @@ change landed on `main`.
   next claim's CONFIDENCE, TECHNIQUE or EVIDENCE; list-marker headings count;
   fields are read in the block's tail, from the first line-start field label,
   where a label also counts after whitespace (EVIDENCE, CONFIDENCE and
-  TECHNIQUE on one line are all read), and never from the claim sentence. The DISPUTES section opens at
+  TECHNIQUE on one line are all read), and never from the claim sentence.
+  EVIDENCE runs to the next field label that starts a line when one follows,
+  so a label word inside the evidence never cuts it or drops an id after it. The DISPUTES section opens at
   its case-sensitive label or heading, a one-line `DISPUTES: NONE` opens none,
   and claims under it are recorded when none of the answer's own was read;
   beside the answer's own claims, the analyst is asked once whether they are
-  its own (`isr.claims_under_disputes`), and an answer kept with them there
-  says so. The reason is kept on the answer and carried only for the answers in
-  force.
+  its own (`isr.claims_under_disputes`). Kept there when asked, they are the
+  analyst's answer, recorded in the validation findings and not a
+  degradation; an answer the question was never put to says so as a
+  degradation reason. The reason is kept on the answer and carried only for
+  the answers in force.
 - **A technique line is one id, or it is kept whole and asked about.**
   `TECHNIQUE: T1027.002 not supported` was read as a claim of T1027.002, and
   `T1055, T1106` as T1055 alone. A line that is more than one id or `NONE`

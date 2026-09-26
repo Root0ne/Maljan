@@ -58,10 +58,12 @@ from maljan.pipeline.validation import (
     ALIGNMENT_MARGIN,
     ANALYST_CUT_CODE,
     CLAIM_DOES_NOT_DESCRIBE_CODE,
+    CLAIMS_UNDER_DISPUTES_CODE,
     VALIDITY_CODE,
     ValidationTally,
     Violation,
     analyst_cut_violation,
+    claims_kept_under_disputes_finding,
     mark_invalid_technique_ids,
     parse_violations,
     retry_with_feedback_sync,
@@ -1396,10 +1398,17 @@ _TAIL_START_RE = re.compile(
     r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|(?i:TECHNIQUE)):", re.MULTILINE
 )
 _INLINE = r"(?:^|(?<=[\s*_>#]))"
-_BLOCK_EVIDENCE_RE = re.compile(
-    _INLINE + r"EVIDENCE:\s*(.+?)(?=\s+" + LINE_PREFIX + r"(?:CONFIDENCE|(?i:TECHNIQUE)):|\Z)",
-    re.DOTALL | re.MULTILINE,
+# EVIDENCE runs to the next CONFIDENCE or TECHNIQUE label that starts a line
+# when one follows it, so words inside the evidence ("maps to MITRE
+# technique: T1055", "the tool said CONFIDENCE: 0.2") never cut it and every
+# id written after them stays cited. Only when no such line follows does it
+# end at a label written later on its own line, spelled in capitals as the
+# labels are ("EVIDENCE: [ev_0309]. CONFIDENCE: 0.65 TECHNIQUE: T1071.001").
+_BLOCK_EVIDENCE_LABEL_RE = re.compile(_INLINE + r"EVIDENCE:[ \t]*", re.MULTILINE)
+_EVIDENCE_ENDS_AT_LINE_START_RE = re.compile(
+    r"\n" + LINE_PREFIX + r"(?:CONFIDENCE|(?i:TECHNIQUE)):"
 )
+_EVIDENCE_ENDS_INLINE_RE = re.compile(r"\s+" + LINE_PREFIX + r"(?:CONFIDENCE|TECHNIQUE):")
 _LINE_CONFIDENCE_RE = re.compile(
     r"^" + LINE_PREFIX + r"CONFIDENCE:\s*(?:\*\*)?\s*([\d.]+)", re.MULTILINE
 )
@@ -1421,6 +1430,16 @@ def _field_tail(block: str) -> str:
     """The part of a block its fields are read from: from the first line-start label on."""
     start = _TAIL_START_RE.search(block)
     return block[start.start() :] if start else ""
+
+
+def _evidence_field(tail: str) -> str | None:
+    """The EVIDENCE value in a block's tail as written, or ``None`` when it has no label."""
+    label = _BLOCK_EVIDENCE_LABEL_RE.search(tail)
+    if label is None:
+        return None
+    rest = tail[label.end() :]
+    end = _EVIDENCE_ENDS_AT_LINE_START_RE.search(rest) or _EVIDENCE_ENDS_INLINE_RE.search(rest)
+    return rest[: end.start()] if end else rest
 
 
 def _field(
@@ -1657,9 +1676,9 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
         # in the claim. Cleaned to nothing it means what a missing EVIDENCE
         # line means.
         tail = _field_tail(block)
-        evidence_match = _BLOCK_EVIDENCE_RE.search(tail)
+        evidence_value = _evidence_field(tail)
         evidence_text = (
-            strip_tool_call_scaffolding(evidence_match.group(1)).strip() if evidence_match else ""
+            strip_tool_call_scaffolding(evidence_value).strip() if evidence_value else ""
         )
         if require_evidence and not evidence_text:
             continue
@@ -5891,7 +5910,13 @@ class BaseAnalyst(BudgetMeter, ABC):
                     sentence="",
                     asked=False,
                 )
-                if v.code in (ABSENCE_CLAIM_CODE, CLAIM_DOES_NOT_DESCRIBE_CODE, ANALYST_CUT_CODE)
+                if v.code
+                in (
+                    ABSENCE_CLAIM_CODE,
+                    CLAIM_DOES_NOT_DESCRIBE_CODE,
+                    ANALYST_CUT_CODE,
+                    CLAIMS_UNDER_DISPUTES_CODE,
+                )
                 else v
                 for v in initial
             ]
@@ -6093,6 +6118,21 @@ class BaseAnalyst(BudgetMeter, ABC):
         self.validation_retries += retries
         for code, count in tally.by_code.items():
             self.validation_fed_back[code] = self.validation_fed_back.get(code, 0) + count
+
+        # Asked about claim headings under its DISPUTES section, the analyst
+        # kept them there: that is its answer, since the question told it a
+        # peer's claim it disputes stays under the section. The answer kept
+        # says it was asked, so the judge node states no degradation for it,
+        # and the row records what the analyst answered.
+        if CLAIMS_UNDER_DISPUTES_CODE in tally.by_code and revised.claims_under_disputes:
+            revised.note_claims_under_disputes_asked()
+            answered = claims_kept_under_disputes_finding(revised.claims_under_disputes)
+            violations = [
+                answered if v.code == CLAIMS_UNDER_DISPUTES_CODE else v for v in violations
+            ]
+            if all(v.code != CLAIMS_UNDER_DISPUTES_CODE for v in violations):
+                violations.append(answered)
+            self.logger.info("Validation: '%s': %s", self.name, answered.message)
 
         if violations:
             mark_invalid_technique_ids(revised, violations)
@@ -6341,21 +6381,24 @@ class BaseAnalyst(BudgetMeter, ABC):
         """The sentence for an answer whose claims were begun and not all read, logged; or ``""``.
 
         Claim headings written under the DISPUTES section, beside the
-        analyst's own claims read, are not read as its own: the analyst is
-        asked once in its validation turn whether they are
-        (``isr.claims_under_disputes``), and the answer kept that still has
-        them says so (:func:`claims_under_disputes_sentence`).
+        analyst's own claims read, are not a shortfall: the ISR counts them
+        (``claims_under_disputes``) and the analyst is asked once in its
+        validation turn whether they are its own (``isr.claims_under_disputes``).
+        Until then their status is unknown, so they are logged at info here; the
+        judge node states them as a degradation reason only for an answer in
+        force the question was never put to (``nodes.claims_under_disputes_unasked``).
         """
-        said: list[str] = []
         if read.after_disputes and read.claims:
-            said.append(
-                claims_under_disputes_sentence(self.name, read.after_disputes, revision_round)
+            self.logger.info(
+                "%s: %s",
+                self.name,
+                claims_under_disputes_sentence(self.name, read.after_disputes, revision_round),
             )
-        if read.unread:
-            said.insert(0, claims_unread_sentence(self.name, read, revision_round))
-        for sentence in said:
-            self.logger.warning("%s: %s", self.name, sentence)
-        return " ".join(said)
+        if not read.unread:
+            return ""
+        sentence = claims_unread_sentence(self.name, read, revision_round)
+        self.logger.warning("%s: %s", self.name, sentence)
+        return sentence
 
     def _with_claims_read(self, isr: AgentISR) -> AgentISR:
         """``isr`` with the shortfall of the strict read its claims came from, taken once."""

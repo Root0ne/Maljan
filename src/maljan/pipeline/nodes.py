@@ -20,7 +20,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from maljan.agents.base_agent import NO_STRUCTURED_REPORT_STATUS
+from maljan.agents.base_agent import NO_STRUCTURED_REPORT_STATUS, claims_under_disputes_sentence
 from maljan.agents.delegation import REFUSAL_PREFIX
 from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.agents.judge_agent import (
@@ -1878,6 +1878,31 @@ def claims_unread_in_force(isr_reports: Mapping[str, Any]) -> list[str]:
         reason = str(getattr(isr, "claims_unread_reason", "") or "")
         if reason and reason not in out:
             out.append(reason)
+    return out
+
+
+def claims_under_disputes_unasked(isr_reports: Mapping[str, Any]) -> list[str]:
+    """What the answers in force wrote under their DISPUTES sections unasked, in the reports' order.
+
+    Claim headings under the section, beside an analyst's own claims read,
+    are asked about once in its validation turn. Asked and kept, they are the
+    analyst's answer and the validation record says so. An answer the question
+    was never put to (a nudged answer, a validation turn not asked for want of
+    time, a path with no validation turn) leaves their status unknown, and
+    that is what the sentence states.
+    """
+    out: list[str] = []
+    for key, isr in isr_reports.items():
+        count = int(getattr(isr, "claims_under_disputes", 0) or 0)
+        if not count or bool(getattr(isr, "claims_under_disputes_asked", False)):
+            continue
+        sentence = claims_under_disputes_sentence(
+            str(getattr(isr, "agent_id", "") or key),
+            count,
+            int(getattr(isr, "revision_round", 0) or 0),
+        )
+        if sentence not in out:
+            out.append(sentence)
     return out
 
 
@@ -3881,6 +3906,15 @@ def make_judge_node(
                 _degradation_reasons.extend(
                     reason
                     for reason in claims_unread_in_force(isr_reports)
+                    if reason not in _degradation_reasons
+                )
+            # Claim headings under an answer's DISPUTES section, when the
+            # analyst was never asked whether they are its own. Asked and kept,
+            # they are its answer and are in the validation record instead.
+            with suppress(Exception):
+                _degradation_reasons.extend(
+                    reason
+                    for reason in claims_under_disputes_unasked(isr_reports)
                     if reason not in _degradation_reasons
                 )
             if _failed_analysts:

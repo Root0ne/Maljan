@@ -97,6 +97,7 @@ from maljan.pipeline.validation import (
     absence_claim_violation,
     analyst_cut_violation,
     claim_does_not_describe_violation,
+    claims_kept_under_disputes_finding,
     claims_under_disputes_violation,
     gate_removed_note,
     misstated_entry_contents,
@@ -525,6 +526,9 @@ PROMPTS: dict[str, str] = {
     "the question and the reason for claim headings under DISPUTES": (
         f"{claims_under_disputes_violation(2).message} "
         f"{claims_under_disputes_sentence('reverser', 2, 1)}"
+    ),
+    "the recorded answer when claim headings are kept under DISPUTES": (
+        claims_kept_under_disputes_finding(2).message
     ),
     "the degradation reason for claims begun and not read": claims_unread_sentence(
         "reverser", ClaimRead(claims=[], without_confidence=1, begun=4, after_disputes=2), 2

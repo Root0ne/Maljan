@@ -292,6 +292,22 @@ def claims_under_disputes_violation(count: int) -> Violation:
     )
 
 
+def claims_kept_under_disputes_finding(count: int) -> Violation:
+    """The analyst's answer to the question about claim headings under its DISPUTES section.
+
+    Recorded when the analyst was asked and kept them there: the question told
+    it a peer's claim it disputes stays under the section, so keeping them is
+    an answer, not a loss, and the row says what the answer was.
+    """
+    return Violation(
+        code=CLAIMS_UNDER_DISPUTES_CODE,
+        message=(
+            f"Asked, the analyst kept {int(count)} CLAIM heading(s) under its DISPUTES section; "
+            "they are not read as its own claims."
+        ),
+    )
+
+
 def technique_line_violation(lines: list[str]) -> Violation:
     """What an analyst is asked about TECHNIQUE lines no single id could be read from."""
     shown = "; ".join(f'"{safe_finding_value(line)}"' for line in lines)

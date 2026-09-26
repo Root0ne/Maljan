@@ -254,6 +254,11 @@ class AgentISR(BaseModel):
     # its own claims read: a peer's claims quoted, or its own written in the
     # wrong place. The validation turn asks once which.
     _claims_under_disputes: int = PrivateAttr(default=0)
+    # Whether this answer is the one the validation turn kept after asking
+    # about those headings. Asked and kept, they are the analyst's answer; a
+    # question never put leaves their status unknown, and the judge node
+    # states them as a degradation reason (``nodes.claims_under_disputes_unasked``).
+    _claims_under_disputes_asked: bool = PrivateAttr(default=False)
 
     @property
     def unparsed_answer(self) -> str:
@@ -295,6 +300,15 @@ class AgentISR(BaseModel):
     def note_claims_under_disputes(self, count: int) -> None:
         """Record the claim headings under the DISPUTES section, beside the answer's own."""
         self._claims_under_disputes = max(0, int(count or 0))
+
+    @property
+    def claims_under_disputes_asked(self) -> bool:
+        """Whether the analyst was asked about those headings and this answer kept them."""
+        return self._claims_under_disputes_asked
+
+    def note_claims_under_disputes_asked(self) -> None:
+        """Record that the analyst was asked about those headings and kept them there."""
+        self._claims_under_disputes_asked = True
 
     @property
     def blocks_without_confidence(self) -> int:
