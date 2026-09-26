@@ -3825,6 +3825,14 @@ def make_judge_node(
                     for reason in container.get_truncation_ledger().input_shortened
                     if str(reason) not in _degradation_reasons
                 )
+            # An analyst answer whose claims were begun and not all read: the
+            # findings the run carries are fewer than the analyst wrote.
+            with suppress(Exception):
+                _degradation_reasons.extend(
+                    str(reason)
+                    for reason in container.get_truncation_ledger().claims_unread
+                    if str(reason) not in _degradation_reasons
+                )
             if _failed_analysts:
                 _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")
             # Two sentences, each saying what happened: an analyst skipped for

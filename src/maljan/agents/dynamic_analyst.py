@@ -23,7 +23,7 @@ from maljan.agents.prompt_fragments import (
     tools_statement,
 )
 from maljan.agents.registry import register_agent
-from maljan.agents.static_analyst import _parse_claim_blocks, _parse_disputes
+from maljan.agents.static_analyst import _parse_disputes
 from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
 from maljan.schemas.isr_models import AgentISR
 
@@ -282,7 +282,7 @@ class DynamicAnalyst(BaseAnalyst):
         ]
 
         content = self.execute_tool_loop(prompt_messages)
-        claims = _parse_claim_blocks(content)
+        claims = self._read_claims(content)
 
         if not claims:
             return self._text_to_isr(content, revision_round=0)
@@ -347,7 +347,7 @@ class DynamicAnalyst(BaseAnalyst):
             self.ask_the_model(self.frame_messages(messages), what="revision")
         )
 
-        claims = _parse_claim_blocks(content)
+        claims = self._read_claims(content, revision_round)
         dissent = _parse_disputes(content)
 
         if not claims:

@@ -29,6 +29,7 @@ from typing import Any, get_args, get_origin
 
 from pydantic import ValidationError
 
+from maljan.agents.claim_headings import count_claims_begun
 from maljan.agents.run_evidence_corpus import CorpusState, both_searched
 
 # The row helpers live with the shape (``analysis.corroboration``) and are
@@ -2587,9 +2588,6 @@ SECTION_CUT_CODE = "composer.cut_at_output_cap"
 # the retry's whole cap again, and returned no claim at all.
 ANALYST_CUT_CODE = "isr.cut_at_output_cap"
 
-# A claim begun in an analyst's answer: the label every claim block opens with.
-_CLAIM_BEGUN_RE = re.compile(r"^\s*CLAIM:", re.MULTILINE)
-
 
 def analyst_cut_violation(cap: int, text: str = "") -> Violation:
     """What an analyst the cap cut is told: the cap, what was begun, and the bound.
@@ -2601,7 +2599,7 @@ def analyst_cut_violation(cap: int, text: str = "") -> Violation:
     than the evidence holds, and the cap it names is the one in force: nothing
     here raises it.
     """
-    begun = len(_CLAIM_BEGUN_RE.findall(text))
+    begun = count_claims_begun(text)
     size = (
         f" It ran to {len(text):,} characters"
         + (f" and began {begun} CLAIM block(s)" if begun else "")

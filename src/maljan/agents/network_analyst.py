@@ -34,7 +34,7 @@ from maljan.agents.prompt_fragments import (
     tools_statement,
 )
 from maljan.agents.registry import register_agent
-from maljan.agents.static_analyst import _parse_claim_blocks, _parse_disputes
+from maljan.agents.static_analyst import _parse_disputes
 from maljan.schemas.isr_models import AgentISR
 
 # The platform-independent head of the network system prompt. Traffic looks the
@@ -322,7 +322,7 @@ class NetworkAnalyst(BaseAnalyst):
                     ),
                 ]
                 content = self.execute_tool_loop(prompt_messages)
-                claims = _parse_claim_blocks(content)
+                claims = self._read_claims(content)
 
                 if not claims:
                     return self._text_to_isr(content, revision_round=0)
@@ -361,7 +361,7 @@ class NetworkAnalyst(BaseAnalyst):
                 )
             )
 
-        claims = _parse_claim_blocks(content)
+        claims = self._read_claims(content)
 
         if not claims:
             return self._text_to_isr(content, revision_round=0)
@@ -398,7 +398,7 @@ class NetworkAnalyst(BaseAnalyst):
             self.ask_the_model(self.frame_messages(prompt_to_messages(messages)), what="revision")
         )
 
-        claims = _parse_claim_blocks(content)
+        claims = self._read_claims(content, revision_round)
         dissent = _parse_disputes(content)
 
         if not claims:

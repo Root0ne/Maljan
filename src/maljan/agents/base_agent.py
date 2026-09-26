@@ -22,7 +22,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -32,6 +32,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
 
+from maljan.agents.claim_headings import claims_headed, count_claims_begun
 from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
@@ -1373,8 +1374,8 @@ def describe_exception_for_log(exc: BaseException) -> str:
     return type(exc).__name__
 
 
-# Structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block parsing, used by the
-# view- and tier-decomposition paths whose prompts explicitly demand that shape.
+# Structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block parsing
+# (``read_claim_blocks``), the one reader every path that reads claims uses.
 _BLOCK_SPLIT_RE = re.compile(r"(?:^|\r?\n)\s*-{3,}\s*(?:\r?\n|$)", flags=re.MULTILINE)
 _BLOCK_CLAIM_RE = re.compile(
     r"CLAIM:\s*(.+?)(?=\s*\n\s*(?:EVIDENCE|CONFIDENCE|TECHNIQUE):|\Z)", re.DOTALL
@@ -1511,25 +1512,52 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
     The claims alone; ``parse_structured_claims_counted`` also says how many
     blocks were not claims for want of a confidence.
     """
-    return parse_structured_claims_counted(text)[0]
+    return read_claim_blocks(text).claims
 
 
 def parse_structured_claims_counted(text: str) -> tuple[list[ClaimEvidence], int]:
-    """``(claims, blocks that stated no confidence)`` for the ``CLAIM:`` blocks in ``text``.
+    """``(claims, blocks that stated no confidence)`` for the ``CLAIM:`` blocks in ``text``."""
+    read = read_claim_blocks(text)
+    return read.claims, read.without_confidence
 
-    The view/tier decomposition prompts (``_VIEW_SYSTEM``)
-    require this exact format; the parsed output used to be handed to a
-    free-text sentence splitter, which has no notion of a ``TECHNIQUE:`` line,
-    so every technique ID produced through those paths was dropped and the raw
-    "CLAIM: ..." prefix leaked into the claim text.
 
-    More lenient than the static analyst's strict variant about the citation:
-    a block without ``EVIDENCE:`` is still a finding, recorded as unsourced.
-    Not about the confidence. A block that states none, or one that cannot be
-    read as a number, is not a claim: the confidence on a claim is the
-    analyst's own statement, and this parser used to write 0.5 where the
-    analyst wrote nothing. Such blocks are counted instead, and the count is
-    what the validation turn asks the analyst about.
+@dataclass(frozen=True)
+class ClaimRead:
+    """What one read of an answer's claim blocks found.
+
+    ``begun`` is the claim headings the answer opened
+    (``claim_headings.count_claims_begun``). A block that stated no confidence
+    is not a claim and is counted apart, because the validation turn asks the
+    analyst about it. Whatever else the model began and the reader did not
+    read is ``unread``, which the caller records rather than lets pass.
+    """
+
+    claims: list[ClaimEvidence]
+    without_confidence: int
+    begun: int
+
+    @property
+    def unread(self) -> int:
+        """Claims begun that are neither read nor counted as stating no confidence."""
+        return max(0, self.begun - len(self.claims) - self.without_confidence)
+
+
+def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead:
+    """The one reader of an analyst's ``CLAIM`` blocks, for every path that reads claims.
+
+    The answer is split at every claim heading where a block can begin
+    (``claim_headings.claims_headed``: plain, numbered or marked, with or
+    without a ``---`` line between claims) and at the model's own ``---``
+    lines. Each block yields at most one claim; the heading count says how
+    many the model began, so a block the reader could not split is visible.
+
+    ``require_evidence`` is the static, dynamic and network analysts'
+    stricter reading: a block without an ``EVIDENCE:`` line, or with one that
+    was nothing but tool-call scaffolding, is not their claim. Everywhere else
+    such a block is still a finding, recorded as unsourced. Neither reading
+    puts a confidence on a block that states none: the confidence on a claim
+    is the analyst's own statement, so such blocks are counted instead, and
+    the count is what the validation turn asks the analyst about.
     """
     claims: list[ClaimEvidence] = []
     without_confidence = 0
@@ -1537,7 +1565,7 @@ def parse_structured_claims_counted(text: str) -> tuple[list[ClaimEvidence], int
     # that sat between ``CLAIM:`` and ``EVIDENCE:`` would leave the claim
     # marker with nothing after it, and the next line would slide up into the
     # claim. A block whose claim is nothing but scaffolding is dropped below.
-    for raw_block in _BLOCK_SPLIT_RE.split(text):
+    for raw_block in _BLOCK_SPLIT_RE.split(claims_headed(text or "")):
         block = raw_block.strip()
         if not block or "CLAIM:" not in block:
             continue
@@ -1546,28 +1574,27 @@ def parse_structured_claims_counted(text: str) -> tuple[list[ClaimEvidence], int
             continue
         claim_text = strip_tool_call_scaffolding(claim_match.group(1)).strip()
         if not claim_text:
-            # C1: the whole claim was a tool call. An empty finding is worse
-            # than none at all -- it reaches the operator as a blank row.
+            # The whole claim was a tool call. An empty finding is worse than
+            # none at all -- it reaches the operator as a blank row.
             continue
 
         # The citation is model output too, and a model that writes a tool
         # call while it is naming an artifact puts the block here rather than
         # in the claim. Cleaned to nothing it means what a missing EVIDENCE
-        # line already means to this lenient parser: a finding worth keeping,
-        # recorded as unsourced.
+        # line means.
         evidence_match = _BLOCK_EVIDENCE_RE.search(block)
         evidence_text = (
             strip_tool_call_scaffolding(evidence_match.group(1)).strip() if evidence_match else ""
         )
-        confidence_match = _BLOCK_CONFIDENCE_RE.search(block)
-        technique_match = _BLOCK_TECHNIQUE_RE.search(block)
-
-        confidence = _stated_confidence(confidence_match)
+        if require_evidence and not evidence_text:
+            continue
+        confidence = _stated_confidence(_BLOCK_CONFIDENCE_RE.search(block))
         if confidence is None:
             without_confidence += 1
             continue
 
         technique_id: str | None = None
+        technique_match = _BLOCK_TECHNIQUE_RE.search(block)
         if technique_match:
             raw_tid = technique_match.group(1).upper()
             # Kept as written. Whether the id is real, retired or a
@@ -1587,7 +1614,24 @@ def parse_structured_claims_counted(text: str) -> tuple[list[ClaimEvidence], int
                 technique_id=technique_id,
             )
         )
-    return claims, without_confidence
+    return ClaimRead(
+        claims=claims,
+        without_confidence=without_confidence,
+        begun=count_claims_begun(text or ""),
+    )
+
+
+def claims_unread_sentence(agent: str, read: ClaimRead, revision_round: int = 0) -> str:
+    """The sentence a run records for an answer whose claims were not all read."""
+    stage = f" (round {int(revision_round)})" if int(revision_round) else ""
+    declined = (
+        f", {read.without_confidence} stated no confidence" if read.without_confidence else ""
+    )
+    return (
+        f"The {agent} analyst's answer{stage} began {read.begun} claim(s) and "
+        f"{len(read.claims)} were read{declined}; {read.unread} could not be read as a "
+        "claim and are not in its findings."
+    )
 
 
 def _stated_confidence(match: re.Match[str] | None) -> float | None:
@@ -6174,6 +6218,39 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         return [c for c in claims if not self._is_meta_claim_text(c.claim)]
 
+    def _read_claims(
+        self, content: str, revision_round: int = 0, *, require_evidence: bool = True
+    ) -> list[ClaimEvidence]:
+        """The claims ``content`` carries, through the one reader, with its shortfall recorded.
+
+        Every CLAIM heading the answer began is counted against the claims
+        read (``read_claim_blocks``). A claim begun and not read — a block the
+        reader could not split, or one the stricter reading turned away — is
+        logged and recorded on the run's ledger as a degradation naming this
+        analyst and both numbers. Blocks that stated no confidence are counted
+        apart: the validation turn asks the analyst about them.
+
+        The stricter reading that finds no claim at all records nothing: its
+        caller hands the answer to :meth:`_text_to_isr`, whose own read is the
+        one that counts.
+        """
+        read = read_claim_blocks(content, require_evidence=require_evidence)
+        if read.unread and (read.claims or not require_evidence):
+            self._record_claims_unread(read, revision_round)
+        return read.claims
+
+    def _record_claims_unread(self, read: ClaimRead, revision_round: int) -> None:
+        """Log and record an answer whose claims were begun and not all read."""
+        sentence = claims_unread_sentence(self.name, read, revision_round)
+        self.logger.warning("%s: %s", self.name, sentence)
+        ledger = getattr(self, "truncation_ledger", None)
+        record = getattr(ledger, "record_claims_unread", None)
+        if callable(record):
+            try:
+                record(sentence)
+            except Exception as exc:  # noqa: BLE001 — a record never costs an analysis
+                self.logger.debug("%s: the unread claims were not recorded (%s).", self.name, exc)
+
     def _parsed_isr(
         self, claims: list[ClaimEvidence], content: str, domain: str, revision_round: int = 0
     ) -> AgentISR:
@@ -6253,8 +6330,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         # prompt asks for it.
         structured: list[ClaimEvidence] = []
         without_confidence = 0
-        if "CLAIM:" in text:
-            structured, without_confidence = parse_structured_claims_counted(text)
+        if "CLAIM:" in text or count_claims_begun(text):
+            read = read_claim_blocks(text)
+            structured, without_confidence = read.claims, read.without_confidence
+            if read.unread:
+                self._record_claims_unread(read, revision_round)
         if structured:
             isr = AgentISR(
                 agent_id=self.name,
