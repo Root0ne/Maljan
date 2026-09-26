@@ -521,7 +521,7 @@ PROMPTS: dict[str, str] = {
         ["T1000 (candidate)", "T1001, T1002"]
     ).message,
     "the degradation reason for claims begun and not read": claims_unread_sentence(
-        "reverser", ClaimRead(claims=[], without_confidence=1, begun=4), 2
+        "reverser", ClaimRead(claims=[], without_confidence=1, begun=4, after_disputes=2), 2
     ),
     "failure of a capture the platform filled in": " ".join(
         [UNREADABLE_FILLED_CAPTURE, UNREADABLE_FILLED_CAPTURE_REMEDIATION]

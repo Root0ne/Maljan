@@ -1235,12 +1235,19 @@ EVIDENCE line required; the base analyst's path records a block without one as
 unsourced. Each read counts the claim headings the answer began before its
 DISPUTES section against the claims it read and the blocks that stated no
 confidence; what is left is claims begun and not read, which is logged and
-recorded naming the analyst, the round and both numbers. The judge node
-carries it as a degradation reason only when that round's answer is the one
-in force; a round a later answer replaced stays in the log. Every heading
-opens a block, so no claim is read with another's CONFIDENCE, TECHNIQUE or
-EVIDENCE, and a heading behind a list marker (`- CLAIM:`, `1. CLAIM:`) counts.
-Nothing after the DISPUTES line is read or counted. A TECHNIQUE line is one
+kept on the answer it was read from (`AgentISR.claims_unread_reason`),
+naming the analyst, the round and both numbers. The judge node carries it as a
+degradation reason only from the answers in force, so an answer a retry or a
+later round replaced leaves it in the log. Every heading opens a block, so no
+claim is read with another's CONFIDENCE, TECHNIQUE or EVIDENCE, and a heading
+behind a list marker (`- CLAIM:`, `1. CLAIM:`) counts; the field lines are read
+only where a line begins. The DISPUTES section opens at its label,
+case-sensitive, with its colon (`DISPUTES:`) or as a Markdown heading; a label
+that says there is none on its own line (`DISPUTES: NONE`, `N/A`, a dash)
+opens no section, and prose beginning "Disputes …" is prose. Claims under the
+section are a peer's quoted and are not read; they are counted apart, and when
+none of the answer's own claims was read they are recorded as unread, else
+logged. A TECHNIQUE line is one
 id, or `NONE` or a dash for none; any other line (a qualifier, a negation,
 several ids) claims no id, is kept on the claim as `technique_line`, and the
 validation turn asks once for one id per claim (`isr.technique_line_unread`).

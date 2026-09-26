@@ -244,6 +244,12 @@ class AgentISR(BaseModel):
     # the answer is shown back whole, and the question says which of its
     # claims no longer stand.
     _gate_removed: list[str] = PrivateAttr(default_factory=list)
+    # Why claims this answer began are not in its findings, as the reader
+    # found it (``BaseAnalyst._claims_shortfall``), or ``""``. Kept with the
+    # answer rather than the run, so the judge node states it only for an
+    # answer in force: a retry or a later round that replaced this answer
+    # carries its own.
+    _claims_unread_reason: str = PrivateAttr(default="")
 
     @property
     def unparsed_answer(self) -> str:
@@ -267,6 +273,15 @@ class AgentISR(BaseModel):
     def note_gate_removed(self, claims: list[str]) -> None:
         """Record the claims of the written answer the consistency gate set aside."""
         self._gate_removed = [str(c) for c in claims]
+
+    @property
+    def claims_unread_reason(self) -> str:
+        """Why claims this answer began are not in its findings, or ``""``."""
+        return self._claims_unread_reason
+
+    def note_claims_unread(self, reason: str) -> None:
+        """Record why claims this answer began are not in its findings."""
+        self._claims_unread_reason = str(reason or "")
 
     @property
     def blocks_without_confidence(self) -> int:

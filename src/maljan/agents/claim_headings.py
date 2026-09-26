@@ -26,21 +26,59 @@ CLAIM_HEAD_RE = re.compile(
     r"^" + LINE_PREFIX + r"CLAIM(?:[ \t]*#?\d+)?(?:[ \t]*\([^)\n]*\))?[ \t]*(?:\*\*)?[ \t]*"
     r"(?::|—|–|-(?=\s))[ \t]*(?:\*\*)?[ \t]*"
 )
-_DISPUTES_LINE_RE = re.compile(r"^[ \t>*_#]*DISPUTES\b", flags=re.IGNORECASE)
+# The DISPUTES section's label: ``DISPUTES:`` (marks and a list marker
+# allowed before it, ``**`` before the colon), or a Markdown heading naming
+# it. Case-sensitive, and with its colon or its heading marks, so a claim's
+# own sentence beginning "Disputes the static analyst's reading" is prose.
+_DISPUTES_LABEL_RE = re.compile(
+    r"^" + LINE_PREFIX + r"DISPUTES[ \t]*(?:\*\*)?[ \t]*:(?P<rest>.*)$"
+    r"|^#+[ \t]*\**[ \t]*DISPUTES\b(?P<heading_rest>.*)$"
+)
+# What a label says on its own line to state that there is no dispute. Such a
+# line closes itself: it opens no section, and what follows it is read.
+_NO_DISPUTE = frozenset({"NONE", "N/A", "—", "–", "-"})
+
+
+def _opens_disputes(line: str) -> bool:
+    """Whether ``line`` opens the DISPUTES section: its label, not one that says there is none."""
+    match = _DISPUTES_LABEL_RE.match(line)
+    if match is None:
+        return False
+    rest = match.group("rest")
+    if rest is None:
+        rest = match.group("heading_rest") or ""
+    rest = rest.strip().lstrip(":").strip("*_` ").rstrip(".").strip()
+    # A label with nothing after it opens the section its items follow.
+    return not rest or rest.upper() not in _NO_DISPUTE
+
+
+def _split_at_disputes(text: str) -> tuple[list[str], list[str]]:
+    lines = (text or "").splitlines()
+    for index, line in enumerate(lines):
+        if _opens_disputes(line):
+            return lines[:index], lines[index:]
+    return lines, []
 
 
 def before_disputes(text: str) -> str:
     """``text`` up to its DISPUTES section: what is the analyst's own.
 
     A peer's claim quoted under DISPUTES, with or without a ``---`` line before
-    it, is not this analyst's claim, and neither the reader nor the count
-    reads past the section's line.
+    it, is not this analyst's claim, and the reader does not read past the
+    section's label. A label that says there is no dispute (``DISPUTES:
+    NONE``) opens no section, wherever it stands.
     """
-    lines = (text or "").splitlines()
-    for index, line in enumerate(lines):
-        if _DISPUTES_LINE_RE.match(line):
-            return "\n".join(lines[:index])
-    return "\n".join(lines)
+    return "\n".join(_split_at_disputes(text)[0])
+
+
+def count_claims_after_disputes(text: str) -> int:
+    """How many claim headings ``text`` writes under its DISPUTES section.
+
+    Not the analyst's own claims, so neither read nor counted as begun; the
+    reader says when there are some and none of the analyst's own was read,
+    which is the one case they could be the answer's only claims.
+    """
+    return sum(1 for line in _split_at_disputes(text)[1] if CLAIM_HEAD_RE.match(line))
 
 
 def claims_headed(text: str) -> str:

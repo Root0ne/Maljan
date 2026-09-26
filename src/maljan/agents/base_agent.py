@@ -32,7 +32,12 @@ from langchain_core.language_models.chat_models import BaseChatModel
 if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
 
-from maljan.agents.claim_headings import LINE_PREFIX, claims_headed, count_claims_begun
+from maljan.agents.claim_headings import (
+    LINE_PREFIX,
+    claims_headed,
+    count_claims_after_disputes,
+    count_claims_begun,
+)
 from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
@@ -1381,14 +1386,23 @@ _BLOCK_CLAIM_RE = re.compile(
     r"CLAIM:\s*(.+?)(?=\s*\n" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|TECHNIQUE):|\Z)",
     re.DOTALL,
 )
+# The field lines are read where a line begins, so a claim whose own text
+# says "TECHNIQUE:" or "CONFIDENCE:" mid-sentence does not lend it a field.
 _BLOCK_EVIDENCE_RE = re.compile(
-    r"EVIDENCE:\s*(.+?)(?=\s*\n" + LINE_PREFIX + r"(?:CONFIDENCE|TECHNIQUE):|\Z)", re.DOTALL
+    r"^"
+    + LINE_PREFIX
+    + r"EVIDENCE:\s*(.+?)(?=\s*\n"
+    + LINE_PREFIX
+    + r"(?:CONFIDENCE|TECHNIQUE):|\Z)",
+    re.DOTALL | re.MULTILINE,
 )
-_BLOCK_CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*([\d.]+)")
+_BLOCK_CONFIDENCE_RE = re.compile(r"^" + LINE_PREFIX + r"CONFIDENCE:\s*([\d.]+)", re.MULTILINE)
 # The whole TECHNIQUE line as written: one id is a claimed technique, and
 # anything more (a qualifier, a negation, a second id) is the analyst's line,
 # kept and asked about rather than read for the first id in it.
-_BLOCK_TECHNIQUE_LINE_RE = re.compile(r"TECHNIQUE:[ \t]*([^\n]*)", re.IGNORECASE)
+_BLOCK_TECHNIQUE_LINE_RE = re.compile(
+    r"^" + LINE_PREFIX + r"TECHNIQUE:[ \t]*([^\n]*)", re.IGNORECASE | re.MULTILINE
+)
 _ONE_TECHNIQUE_RE = re.compile(r"T\d{4}(?:\.\d{3})?", re.IGNORECASE)
 # What a TECHNIQUE line says to claim none.
 _NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
@@ -1556,16 +1570,23 @@ class ClaimRead:
     is not a claim and is counted apart, because the validation turn asks the
     analyst about it. Whatever else the model began and the reader did not
     read is ``unread``, which the caller records rather than lets pass.
+
+    ``after_disputes`` is the claim headings written under the DISPUTES
+    section, which are not the analyst's own and are not read. They count as
+    unread only when none of the answer's own claims was read: then they may
+    be the answer's only claims, and saying nothing would lose them silently.
     """
 
     claims: list[ClaimEvidence]
     without_confidence: int
     begun: int
+    after_disputes: int = 0
 
     @property
     def unread(self) -> int:
         """Claims begun that are neither read nor counted as stating no confidence."""
-        return max(0, self.begun - len(self.claims) - self.without_confidence)
+        own = max(0, self.begun - len(self.claims) - self.without_confidence)
+        return own + (self.after_disputes if not self.claims else 0)
 
 
 def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead:
@@ -1643,6 +1664,7 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
         claims=claims,
         without_confidence=without_confidence,
         begun=count_claims_begun(text or ""),
+        after_disputes=count_claims_after_disputes(text or ""),
     )
 
 
@@ -1652,8 +1674,13 @@ def claims_unread_sentence(agent: str, read: ClaimRead, revision_round: int = 0)
     declined = (
         f", {read.without_confidence} stated no confidence" if read.without_confidence else ""
     )
+    quoted = (
+        f" and wrote {read.after_disputes} more under its DISPUTES section"
+        if read.after_disputes and not read.claims
+        else ""
+    )
     return (
-        f"The {agent} analyst's answer{stage} began {read.begun} claim(s) and "
+        f"The {agent} analyst's answer{stage} began {read.begun} claim(s){quoted}, and "
         f"{len(read.claims)} were read{declined}; {read.unread} could not be read as a "
         "claim and are not in its findings."
     )
@@ -6246,35 +6273,54 @@ class BaseAnalyst(BudgetMeter, ABC):
     def _read_claims(
         self, content: str, revision_round: int = 0, *, require_evidence: bool = True
     ) -> list[ClaimEvidence]:
-        """The claims ``content`` carries, through the one reader, with its shortfall recorded.
+        """The claims ``content`` carries, through the one reader, with its shortfall kept.
 
         Every CLAIM heading the answer began is counted against the claims
         read (``read_claim_blocks``). A claim begun and not read — a block the
         reader could not split, or one the stricter reading turned away — is
-        logged and recorded on the run's ledger as a degradation naming this
-        analyst and both numbers. Blocks that stated no confidence are counted
-        apart: the validation turn asks the analyst about them.
+        logged, and the sentence naming this analyst and both numbers waits
+        for the ISR built from these claims (:meth:`_parsed_isr`,
+        :meth:`_with_claims_read`), which carries it to the judge node. Blocks
+        that stated no confidence are counted apart: the validation turn asks
+        the analyst about them.
 
-        The stricter reading that finds no claim at all records nothing: its
+        The stricter reading that finds no claim at all keeps nothing: its
         caller hands the answer to :meth:`_text_to_isr`, whose own read is the
         one that counts.
         """
         read = read_claim_blocks(content, require_evidence=require_evidence)
-        if read.unread and (read.claims or not require_evidence):
-            self._record_claims_unread(read, revision_round)
+        self._pending_claims_unread = (
+            self._claims_shortfall(read, revision_round) if read.claims else ""
+        )
         return read.claims
 
-    def _record_claims_unread(self, read: ClaimRead, revision_round: int) -> None:
-        """Log and record an answer whose claims were begun and not all read."""
+    # The shortfall of the last strict read, until an ISR takes it.
+    _pending_claims_unread: str = ""
+
+    def _claims_shortfall(self, read: ClaimRead, revision_round: int) -> str:
+        """The sentence for an answer whose claims were begun and not all read, logged; or ``""``.
+
+        Claim headings written under the DISPUTES section are a peer's claims
+        quoted; when the analyst's own were read beside them, that is said at
+        info and nothing more.
+        """
+        if read.after_disputes and read.claims:
+            self.logger.info(
+                "%s: %d claim heading(s) under the DISPUTES section were not read as its own.",
+                self.name,
+                read.after_disputes,
+            )
+        if not read.unread:
+            return ""
         sentence = claims_unread_sentence(self.name, read, revision_round)
         self.logger.warning("%s: %s", self.name, sentence)
-        ledger = getattr(self, "truncation_ledger", None)
-        record = getattr(ledger, "record_claims_unread", None)
-        if callable(record):
-            try:
-                record(sentence, self.name, int(revision_round))
-            except Exception as exc:  # noqa: BLE001 — a record never costs an analysis
-                self.logger.debug("%s: the unread claims were not recorded (%s).", self.name, exc)
+        return sentence
+
+    def _with_claims_read(self, isr: AgentISR) -> AgentISR:
+        """``isr`` with the shortfall of the strict read its claims came from, taken once."""
+        isr.note_claims_unread(self._pending_claims_unread)
+        self._pending_claims_unread = ""
+        return isr
 
     def _parsed_isr(
         self, claims: list[ClaimEvidence], content: str, domain: str, revision_round: int = 0
@@ -6283,7 +6329,8 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         With the count of CLAIM blocks the strict parser passed over for
         stating no confidence, which the validation turn asks about: a strict
-        parser that drops a block says nothing, and the analyst wrote it.
+        parser that drops a block says nothing, and the analyst wrote it. And
+        with the read's shortfall, when claims it began were not read.
         """
         isr = AgentISR(
             agent_id=self.name,
@@ -6293,7 +6340,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             revision_round=revision_round,
         )
         isr.note_parse(blocks_without_confidence=parse_structured_claims_counted(content)[1])
-        return isr
+        return self._with_claims_read(isr)
 
     def _text_to_isr(self, text: str, revision_round: int) -> AgentISR:
         """Convert a free-text report into a minimal AgentISR.
@@ -6355,11 +6402,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         # prompt asks for it.
         structured: list[ClaimEvidence] = []
         without_confidence = 0
-        if "CLAIM:" in text or count_claims_begun(text):
+        shortfall = ""
+        if "CLAIM:" in text or count_claims_begun(text) or count_claims_after_disputes(text):
             read = read_claim_blocks(text)
             structured, without_confidence = read.claims, read.without_confidence
-            if read.unread:
-                self._record_claims_unread(read, revision_round)
+            shortfall = self._claims_shortfall(read, revision_round)
         if structured:
             isr = AgentISR(
                 agent_id=self.name,
@@ -6369,6 +6416,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 revision_round=revision_round,
             )
             isr.note_parse(blocks_without_confidence=without_confidence)
+            isr.note_claims_unread(shortfall)
             return isr
 
         # An answer with no claim this parser can read is prose, and prose is
@@ -6385,6 +6433,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             revision_round=revision_round,
         )
         isr.note_parse(unparsed_answer=text.strip(), blocks_without_confidence=without_confidence)
+        isr.note_claims_unread(shortfall)
         isr.status = NO_STRUCTURED_REPORT_STATUS
         isr.status_reason = UNPARSED_ANSWER_REASON
         return isr

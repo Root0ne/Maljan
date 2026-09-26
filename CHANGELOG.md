@@ -2253,7 +2253,11 @@ change landed on `main`.
   force; a block that stated no confidence is counted apart and asked about,
   as before. Every heading opens a block, so a claim is never read with the
   next claim's CONFIDENCE, TECHNIQUE or EVIDENCE; list-marker headings count;
-  nothing after DISPUTES is read.
+  field lines are read only at a line's start. The DISPUTES section opens at
+  its case-sensitive label or heading, a one-line `DISPUTES: NONE` opens none,
+  and claims quoted under it are recorded when none of the answer's own was
+  read. The reason is kept on the answer and carried only for the answers in
+  force.
 - **A technique line is one id, or it is kept whole and asked about.**
   `TECHNIQUE: T1027.002 not supported` was read as a claim of T1027.002, and
   `T1055, T1106` as T1055 alone. A line that is more than one id or `NONE`

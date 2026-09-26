@@ -144,6 +144,17 @@ def merge_chunk_isrs(chunk_isrs: list[AgentISR]) -> AgentISR:
         dissent_items=merged_dissent,
         revision_round=max_round,
     )
+    # Each chunk's answer is part of the merged one: claims a chunk began and
+    # did not have read are not in the merged findings either.
+    merged.note_claims_unread(
+        " ".join(
+            reason
+            for reason in dict.fromkeys(
+                str(getattr(isr, "claims_unread_reason", "") or "") for isr in chunk_isrs
+            )
+            if reason
+        )
+    )
 
     keyed_kept = sum(1 for c in all_claims if c.technique_id)
     unkeyed_kept = len(all_claims) - keyed_kept

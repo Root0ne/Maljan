@@ -360,4 +360,5 @@ class DynamicAnalyst(BaseAnalyst):
             dissent_items=dissent,
             revision_round=revision_round,
         )
+        self._with_claims_read(isr)
         return content, isr

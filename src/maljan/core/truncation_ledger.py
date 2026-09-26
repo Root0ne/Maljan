@@ -251,15 +251,6 @@ class TruncationLedger:
         # (``BaseAnalyst._truncate_input``): one sentence per shortening, read by
         # the judge node into the run's degradation reasons.
         self.input_shortened: list[str] = []
-        # An analyst answer whose claim blocks were not all read
-        # (``BaseAnalyst._read_claims``): one sentence per such answer, naming
-        # the analyst, the claims it began and the claims read. Read by the
-        # judge node into the run's degradation reasons.
-        self.claims_unread: list[str] = []
-        # The same, as ``(analyst, round, sentence)``: the judge node carries
-        # only the ones of each analyst's answer in force.
-        self.claims_unread_by: list[tuple[str, int, str]] = []
-
         # ReAct loop step ceiling (agents/base_agent, LangGraph recursion_limit).
         self.react_invocations = 0
         self.react_step_cap_hits = 0
@@ -373,13 +364,6 @@ class TruncationLedger:
         with self._lock:
             if sentence not in self.input_shortened:
                 self.input_shortened.append(sentence)
-
-    def record_claims_unread(self, sentence: str, agent: str = "", revision_round: int = 0) -> None:
-        """One analyst answer with claims begun and not read, in the sentence the run records."""
-        with self._lock:
-            if sentence not in self.claims_unread:
-                self.claims_unread.append(sentence)
-                self.claims_unread_by.append((str(agent), int(revision_round), sentence))
 
     def record_react_loop(self, *, hit_step_cap: bool) -> None:
         with self._lock:

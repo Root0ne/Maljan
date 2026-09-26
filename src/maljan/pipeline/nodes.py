@@ -1866,23 +1866,18 @@ def stage_key_of(stage: Any, default: str) -> str:
 ROOM_SPEAKER = "pipeline"
 
 
-def claims_unread_in_force(
-    recorded: Sequence[tuple[str, int, str]], isr_reports: Mapping[str, Any]
-) -> list[str]:
-    """The unread-claims reasons of each analyst's answer in force, in the order recorded.
+def claims_unread_in_force(isr_reports: Mapping[str, Any]) -> list[str]:
+    """The unread-claims reasons of the analysts' answers in force, in the reports' order.
 
-    A reason is about one answer, an analyst's in one round. When the answer
-    in force is another round's, the reason is no longer about the findings
-    the run carries, and it is left to the log. An analyst with no answer in
-    the reports keeps every reason recorded for it.
+    Each answer carries its own (``AgentISR.claims_unread_reason``): an
+    answer a retry or a later round replaced is not in force, and what its
+    read lost is in the log, not in the run's degradation reasons.
     """
     out: list[str] = []
-    for agent, revision_round, sentence in recorded:
-        isr = isr_reports.get(agent)
-        if isr is not None and int(getattr(isr, "revision_round", 0) or 0) != int(revision_round):
-            continue
-        if sentence not in out:
-            out.append(str(sentence))
+    for isr in isr_reports.values():
+        reason = str(getattr(isr, "claims_unread_reason", "") or "")
+        if reason and reason not in out:
+            out.append(reason)
     return out
 
 
@@ -3885,9 +3880,7 @@ def make_judge_node(
             with suppress(Exception):
                 _degradation_reasons.extend(
                     reason
-                    for reason in claims_unread_in_force(
-                        container.get_truncation_ledger().claims_unread_by, isr_reports
-                    )
+                    for reason in claims_unread_in_force(isr_reports)
                     if reason not in _degradation_reasons
                 )
             if _failed_analysts:
