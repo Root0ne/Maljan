@@ -31,6 +31,8 @@ from maljan.agents.base_agent import (
     FINAL_ANSWER_NUDGE,
     INPUT_SHORTENED_NOTICE,
     SPEND_CEILING_QUESTION,
+    ClaimRead,
+    claims_unread_sentence,
 )
 from maljan.agents.delegation import (
     SPEND_CEILING_REFUSAL,
@@ -78,6 +80,7 @@ from maljan.agents.tool_pinning import (
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
 from maljan.analysis.pcap_summary import CaptureRead
 from maljan.extractors.capability_matrix import NOT_ASKED_UNKNOWN_ID, TechniqueQuestion
+from maljan.llm.openai_provider import NO_REPLY_RECORDED
 from maljan.pipeline import triage_pack
 from maljan.pipeline.nodes import (
     NO_SANDBOX_DATA_REASON,
@@ -502,7 +505,15 @@ PROMPTS: dict[str, str] = {
             BENIGN_NAME_RESOLVED,
             BENIGN_NAME_IN_A_URL,
             not_kept_reason("x", "a claim by the network analyst"),
+            not_kept_reason(
+                f"{FLOW_OUTSIDE_THE_TREE} (SearchHost.exe (procid 104))",
+                "a claim by the dynamic analyst",
+            ),
         ]
+    ),
+    "the reply a tool call that was not run is sent with": NO_REPLY_RECORDED,
+    "the degradation reason for claims begun and not read": claims_unread_sentence(
+        "reverser", ClaimRead(claims=[], without_confidence=1, begun=4), 2
     ),
     "failure of a capture the platform filled in": " ".join(
         [UNREADABLE_FILLED_CAPTURE, UNREADABLE_FILLED_CAPTURE_REMEDIATION]
