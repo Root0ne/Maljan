@@ -622,3 +622,25 @@ def floss(
         "truncated": more,
         "meta": _meta(document),
     }
+
+
+def remembered_rows(path: str | Path) -> list[dict[str, Any]]:
+    """FLOSS's rows for this file when a result document is remembered for it, else none.
+
+    Never runs FLOSS: a tool that compares its own findings with FLOSS's asks
+    what an earlier call in this process already recovered, and a file FLOSS
+    has not been run on has nothing to compare with. Any length the document
+    was made with will do; the rows are the same strings above it.
+    """
+    target = Path(path)
+    try:
+        info = target.stat()
+    except OSError:
+        return []
+    with _LOCK:
+        documents = [
+            document
+            for (name, size, mtime, _min_len), document in _REMEMBERED.items()
+            if name == str(target) and size == info.st_size and mtime == info.st_mtime_ns
+        ]
+    return _rows(documents[0]) if documents else []
