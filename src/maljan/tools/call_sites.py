@@ -1,11 +1,10 @@
-"""Which call an address loaded as an argument is passed to, read statically from the code.
+"""Which call a static address is passed to, and where that call's output goes, read from the code.
 
-``decode_string_blobs`` states the places in the code that refer to a decoded
-string. This module reads what happens next at such a place, without running
-anything: when the reference is the operand of an instruction that loads the
-string's address as a call argument, and the next instruction that transfers
-control within the same function is a call, the answer is that call's target
-and the argument position the address fills.
+``decode_string_blobs`` states the places in the code that refer to an encoded
+string. At such a place the program loads the address of the string's encoded
+bytes, not the decoded text: what this module reads, without running
+anything, is which call that address is passed to (usually the program's own
+decoding routine), and then where the output of that call goes next.
 
 What counts, and nothing else:
 
@@ -20,24 +19,34 @@ What counts, and nothing else:
   one), and only when decoding that function from its start, instruction
   after instruction, lands exactly on it: the same bytes inside another
   instruction are not a load.
-* **The walk.** Instruction by instruction from the load, each decoded for its
-  length and for the registers it may write. It stops, and nothing is stated,
-  at an instruction it cannot decode, at any transfer of control that is not a
-  call (a jump, a return, an interrupt), at the end of the function the file's
-  own function table puts around the load, or — for a register argument — at
-  any instruction that may write that register; for a pushed argument, at any
-  instruction that moves the stack pointer other than a push. The first call
-  it reaches is the one the argument goes to.
+* **The walk to the first call.** Instruction by instruction from the load,
+  each decoded for its length and for the registers it may write. It stops,
+  and nothing is stated, at an instruction it cannot decode, at any transfer
+  of control that is not a call (a jump, a return, an interrupt), at the end
+  of the function, or — for a register argument — at any instruction that may
+  write that register; for a pushed argument, at any instruction that moves
+  the stack pointer other than a push. The first call it reaches is the one
+  the address goes to.
 * **The callee.** A direct call names the function at its target, or the
   import a jump thunk there goes through (``jmp [slot]``). A call through a
   memory slot names the import the file's import table puts in that slot, or
   the slot's address when the table has none there (a pointer the program
   fills at runtime). A call through a register, or through any other operand,
   has no callee this reading can state, and nothing is stated.
+* **The output, followed (x64).** After that call, its output is followed to
+  the next call in the same function that receives it (``output_passed_to``):
+  the one frame slot whose address the call was given as another argument
+  (``lea r, [rsp+d]`` or ``[rbp+d]`` in the straight run of code before the
+  call), else its return value in ``rax``. The walk tracks the registers and
+  frame slots holding the output's address or value, follows unconditional
+  jumps and falls through conditional ones (and says so), and stops with
+  nothing stated at a return, an undecodable byte, a jump back, the
+  function's end, or a write to the stack or frame pointer. The answer names
+  the consumer, the argument position and how the output was followed.
 
-A pointer loaded into another register and moved into an argument register
-later, an argument passed on the x64 stack, or a load in one basic block and
-a call in another, are not read: the answer is absent rather than guessed.
+A pointer passed on the x64 stack, a consumer in another function, or a second
+hop (the output of the consumer) are not read: the answer is absent rather
+than guessed.
 """
 
 from __future__ import annotations
@@ -66,6 +75,8 @@ class Instruction:
     writes: frozenset[int] = field(default_factory=frozenset)
     # For a call: ("rel", target offset from the instruction's end), ("mem", slot
     # displacement) with ``rip_relative`` said, or ("none", 0) for any other operand.
+    # For a relative jump: ("jump", target offset from the instruction's end), and
+    # ("branch", …) for a conditional one.
     target: tuple[str, int] = ("none", 0)
     rip_relative: bool = False
     moves_stack: bool = False
@@ -162,9 +173,13 @@ def decode(code: bytes, at: int, is64: bool) -> Instruction | None:
         length = at + 4 - start
         if op == 0xE8:
             return Instruction(length, "call", _ANY, ("rel", rel))
-        return Instruction(length, "stop")
+        return Instruction(length, "stop", target=("jump", rel))
     if op == 0xEB or 0x70 <= op <= 0x7F or 0xE0 <= op <= 0xE3:
-        return Instruction(at + 1 - start, "stop")
+        if at >= len(code):
+            return None
+        rel8 = int.from_bytes(code[at : at + 1], "little", signed=True)
+        kind = "jump" if op == 0xEB else "branch"
+        return Instruction(at + 1 - start, "stop", target=(kind, rel8))
     if op in (0xC2, 0xCA):
         return Instruction(at + 2 - start, "stop")
     if op in (0xC3, 0xCB, 0xCC, 0xCE, 0xCF, 0xF1, 0xF4):
@@ -305,7 +320,11 @@ def _decode_two_byte(
     at += 1
     rex_r, rex_b = (rex >> 2) & 1, rex & 1
     if 0x80 <= op <= 0x8F:
-        return Instruction(at + (2 if operand16 else 4) - start, "stop")
+        width = 2 if operand16 else 4
+        if at + width > len(code):
+            return None
+        rel = int.from_bytes(code[at : at + width], "little", signed=True)
+        return Instruction(at + width - start, "stop", target=("branch", rel))
     if op in (0x05, 0x34, 0x07, 0x35, 0x0B):
         return Instruction(at - start, "stop")
     if op == 0x0F:
@@ -435,23 +454,48 @@ def _callee(image: Image, call_rva: int, instruction: Instruction) -> dict[str, 
     return None
 
 
-def passed_to_words(joined: Any) -> str:
-    """``argument 4 of the call at 0x1210 to KERNEL32.dll!CreateMutexW``, or ``""``.
-
-    The one wording of a ``passed_to`` answer, for every place that prints one.
-    """
-    if not isinstance(joined, dict):
-        return ""
+def _callee_words(joined: dict[str, Any]) -> str:
     stated = joined.get("callee")
     callee: dict[str, Any] = stated if isinstance(stated, dict) else {}
-    named = (
+    return (
         str(callee.get("import") or "")
         or (f"the function at {callee['function']}" if callee.get("function") else "")
         or (f"the pointer stored at {callee['slot']}" if callee.get("slot") else "")
     )
+
+
+def _call_words(joined: Any) -> str:
+    """``argument 4 of the call at 0x1210 to KERNEL32.dll!CreateMutexW``, or ``""``."""
+    if not isinstance(joined, dict):
+        return ""
+    named = _callee_words(joined)
     if not named or not joined.get("argument") or not joined.get("call_at"):
         return ""
     return f"argument {joined['argument']} of the call at {joined['call_at']} to {named}"
+
+
+def passed_to_words(joined: Any) -> str:
+    """The one wording of a ``passed_to`` answer, for every place that prints one, or ``""``.
+
+    What is stated is what the code shows: the address a reference loads is the
+    address of the text's encoded bytes, and the call it is passed to is named
+    as such; where the output of that call was followed to a later call, that
+    call, and how it was followed.
+    """
+    said = _call_words(joined)
+    if not said:
+        return ""
+    what = (
+        "the address of the text inside its encoded blob"
+        if joined.get("address_of") == "text"
+        else "the address of its encoded bytes"
+    )
+    out = f"{what} is {said}"
+    then = joined.get("output_passed_to")
+    then_said = _call_words(then)
+    if then_said and isinstance(then, dict):
+        out += f"; that call's output ({then.get('followed')}) is {then_said}"
+    return out
 
 
 def _begins_an_instruction(
@@ -474,6 +518,281 @@ def _begins_an_instruction(
             return False
         at += instruction.length
     return at == target
+
+
+# Registers a call leaves as they were under the Windows x64 convention: a value
+# a caller keeps in one survives the calls between.
+_X64_NONVOLATILE = frozenset({3, 5, 6, 7, 12, 13, 14, 15})
+_REGISTER_NAMES = "rax rcx rdx rbx rsp rbp rsi rdi r8 r9 r10 r11 r12 r13 r14 r15".split()
+
+
+def _stack_lea(code: bytes, at: int) -> tuple[int, int, int] | None:
+    """``(register, base, displacement)`` for an x64 ``lea r64, [rsp+d]`` or ``[rbp+d]``.
+
+    Only those two forms: the address of a slot in the function's own frame.
+    """
+    if at + 4 > len(code):
+        return None
+    rex, op, modrm = code[at], code[at + 1], code[at + 2]
+    if rex & 0xF8 != 0x48 or op != 0x8D:
+        return None
+    mod, reg, rm = modrm >> 6, ((modrm >> 3) & 7) | (((rex >> 2) & 1) << 3), modrm & 7
+    if mod not in (1, 2) or rex & 1:
+        return None
+    width = 1 if mod == 1 else 4
+    if rm == 4:
+        sib = code[at + 3]
+        if sib != 0x24 or rex & 2:
+            return None
+        disp_at, base = at + 4, 4
+    elif rm == 5:
+        disp_at, base = at + 3, 5
+    else:
+        return None
+    if disp_at + width > len(code):
+        return None
+    displacement = int.from_bytes(code[disp_at : disp_at + width], "little", signed=True)
+    return reg, base, displacement
+
+
+def _register_move(code: bytes, at: int) -> tuple[int, int] | None:
+    """``(destination, source)`` for an x64 ``mov r64, r64``."""
+    if at + 3 > len(code):
+        return None
+    rex, op, modrm = code[at], code[at + 1], code[at + 2]
+    if rex & 0xF8 != 0x48 or op not in (0x89, 0x8B) or modrm >> 6 != 3:
+        return None
+    reg = ((modrm >> 3) & 7) | (((rex >> 2) & 1) << 3)
+    rm = (modrm & 7) | ((rex & 1) << 3)
+    return (rm, reg) if op == 0x89 else (reg, rm)
+
+
+def _straight_run_before(
+    code: bytes, section_rva: int, bounds: tuple[int, int], call_rva: int
+) -> list[tuple[int, Instruction]] | None:
+    """The instructions from the last jump target or transfer before ``call_rva`` up to it.
+
+    Decoded from the function's start, so every one is an instruction; the run
+    begins after the last instruction that transfers control and at the last
+    address any jump in the function lands on, so each instruction in it runs
+    before the call on every path that reaches the call.
+    """
+    at = bounds[0] - section_rva
+    end = bounds[1] - section_rva
+    decoded: list[tuple[int, Instruction]] = []
+    targets: set[int] = set()
+    while at < end:
+        instruction = decode(code, at, True)
+        if instruction is None:
+            return None
+        rva = section_rva + at
+        decoded.append((rva, instruction))
+        kind, value = instruction.target
+        if kind in ("jump", "branch"):
+            targets.add(rva + instruction.length + value)
+        at += instruction.length
+    run: list[tuple[int, Instruction]] = []
+    for rva, instruction in decoded:
+        if rva >= call_rva:
+            break
+        if instruction.kind in ("stop", "call") or rva in targets:
+            run = []
+            if instruction.kind in ("stop", "call"):
+                continue
+        run.append((rva, instruction))
+    return run if any(rva == call_rva for rva, _ in decoded) else None
+
+
+def _output_buffer(
+    code: bytes, section_rva: int, run: list[tuple[int, Instruction]], skip: int
+) -> tuple[int, int, int] | None:
+    """``(argument register, base, displacement)`` of a frame slot's address passed to the call.
+
+    The last ``lea`` of a frame slot into an argument register other than
+    ``skip`` in the straight run before the call, with nothing after it in the
+    run writing that register. Two such arguments leave the output unstated.
+    """
+    found: dict[int, tuple[int, int, int]] = {}
+    for rva, instruction in run:
+        for register in list(found):
+            if register in instruction.writes:
+                found.pop(register)
+        lea = _stack_lea(code, rva - section_rva)
+        if lea is not None and lea[0] in _X64_ARGUMENTS and lea[0] != skip:
+            found[lea[0]] = lea
+    return next(iter(found.values())) if len(found) == 1 else None
+
+
+def _frame_ref(code: bytes, at: int) -> tuple[int, int, int, int, int] | None:
+    """``(rex, opcode, reg field, base, displacement)`` for a one-byte-opcode x64
+    instruction whose memory operand is ``[rsp+d]`` or ``[rbp+d]``; ``None`` otherwise."""
+    rex = 0
+    if at < len(code) and 0x40 <= code[at] <= 0x4F:
+        rex = code[at]
+        at += 1
+    if at + 2 > len(code) or code[at] == 0x0F or code[at] in _LEGACY_PREFIXES:
+        return None
+    op, modrm = code[at], code[at + 1]
+    mod, reg, rm = modrm >> 6, ((modrm >> 3) & 7) | (((rex >> 2) & 1) << 3), modrm & 7
+    if mod == 3 or rex & 1:
+        return None
+    at += 2
+    if rm == 4:
+        if at >= len(code) or code[at] != 0x24 or rex & 2:
+            return None
+        base = 4
+        at += 1
+    elif rm == 5 and mod != 0:
+        base = 5
+    else:
+        return None
+    width = {0: 0, 1: 1, 2: 4}[mod]
+    if at + width > len(code):
+        return None
+    displacement = int.from_bytes(code[at : at + width], "little", signed=True) if width else 0
+    return rex, op, reg, base, displacement
+
+
+# One-byte opcodes that read a memory operand and write nothing there: compare
+# and test forms.
+_READS_ONLY = frozenset({0x38, 0x39, 0x3A, 0x3B, 0x84, 0x85})
+
+
+def output_passed_to(image: Image, call_rva: int, skip: int) -> dict[str, Any] | None:
+    """Where the output of the call at ``call_rva`` goes next in its function, or ``None``.
+
+    x64 only. Two outputs are followed, the first found stated: a frame slot
+    whose address the call was given as an argument (the only such argument
+    besides ``skip``, the one the encoded text went in), and the call's return
+    value in ``rax``. What is tracked from the call, instruction by instruction
+    in the same function: the registers holding the output's address or value
+    (a ``lea`` of the frame slot, a ``mov`` from a register holding it, a load
+    from a frame slot holding it) and the frame slots a register holding it was
+    stored to. An unconditional jump is followed to its target and a
+    conditional one falls through, and the answer says so: it is what happens
+    on the path where every conditional jump falls through. The first call
+    that receives the output in an argument register is the answer. A return,
+    an interrupt, an undecodable byte, a jump back to where the walk has been,
+    the function's end, or a write to the stack or frame pointer ends the walk
+    with nothing stated; so does a call that receives it in no argument
+    register when nothing of it is left that the call preserves.
+    """
+    if not image.is64:
+        return None
+    section = image.section_at_rva(call_rva)
+    bounds = image.function_bounds(call_rva)
+    if section is None or bounds is None:
+        return None
+    code = image.section_bytes(section)
+    run = _straight_run_before(code, section.rva, bounds, call_rva)
+    if run is None:
+        return None
+    call = decode(code, call_rva - section.rva, True)
+    if call is None or call.kind != "call":
+        return None
+    after = call_rva + call.length
+    buffer = _output_buffer(code, section.rva, run, skip)
+    followed = ""
+    answer = None
+    if buffer is not None:
+        register, base, displacement = buffer
+        followed = (
+            f"the frame slot [{_REGISTER_NAMES[base]}{displacement:+#x}] the call was given "
+            f"as argument {_X64_ARGUMENTS[register]}"
+        )
+        answer = _follow(code, section.rva, bounds, after, set(), (base, displacement))
+    if answer is None:
+        followed = "the call's return value in rax"
+        answer = _follow(code, section.rva, bounds, after, {0}, None)
+    if answer is None:
+        return None
+    callee_rva, instruction, register, branched = answer
+    callee = _callee(image, callee_rva, instruction)
+    if callee is None:
+        return None
+    if branched:
+        followed += ", on the path where every conditional jump falls through"
+    return {
+        "call_at": hex(callee_rva),
+        "callee": callee,
+        "argument": _X64_ARGUMENTS[register],
+        "register": _X64_REGISTER_NAMES[register],
+        "followed": followed,
+    }
+
+
+def _follow(
+    code: bytes,
+    section_rva: int,
+    bounds: tuple[int, int],
+    start_rva: int,
+    carriers: set[int],
+    buffer: tuple[int, int] | None,
+) -> tuple[int, Instruction, int, bool] | None:
+    """The first call after ``start_rva`` that receives the output, the register, and
+    whether a conditional jump was passed on the way."""
+    at = start_rva - section_rva
+    held = set(carriers)
+    slots: set[tuple[int, int]] = set()
+    visited: set[int] = set()
+    branched = False
+    while bounds[0] <= section_rva + at < bounds[1] and at not in visited:
+        visited.add(at)
+        rva = section_rva + at
+        instruction = decode(code, at, True)
+        if instruction is None:
+            return None
+        kind, value = instruction.target
+        if instruction.kind == "stop":
+            if kind == "jump":
+                at = at + instruction.length + value
+                continue
+            if kind == "branch":
+                branched = True
+                at += instruction.length
+                continue
+            return None
+        if instruction.kind == "call":
+            passed = sorted(held & set(_X64_ARGUMENTS), key=lambda r: _X64_ARGUMENTS[r])
+            if passed:
+                return rva, instruction, passed[0], branched
+            held &= _X64_NONVOLATILE
+            if not held and not slots and buffer is None:
+                return None
+            at += instruction.length
+            continue
+        # The stack and frame pointers every tracked slot is read against.
+        if instruction.moves_stack or 5 in instruction.writes:
+            return None
+        before = set(held)
+        held -= set(instruction.writes)
+        ref = _frame_ref(code, at)
+        moved = _register_move(code, at)
+        if ref is not None:
+            rex, op, reg, base, displacement = ref
+            place = (base, displacement)
+            wide = bool(rex & 8)
+            if op == 0x8D and wide and place == buffer:
+                held.add(reg)
+            elif op == 0x89 and wide:
+                if reg in before:
+                    slots.add(place)
+                else:
+                    slots.discard(place)
+            elif op == 0x8B and wide and place in slots:
+                held.add(reg)
+            elif (
+                place in slots
+                and op not in _READS_ONLY
+                and not (op in (0x80, 0x81, 0x83) and (reg & 7) == 7)
+            ):
+                slots.discard(place)
+        elif moved is not None and moved[1] in before:
+            held.add(moved[0])
+        if not held and not slots and buffer is None:
+            return None
+        at += instruction.length
+    return None
 
 
 def passed_to(image: Image, site: int) -> dict[str, Any] | None:
@@ -516,6 +835,9 @@ def passed_to(image: Image, site: int) -> dict[str, Any] | None:
             if isinstance(argument, int) and image.is64:
                 answer["argument"] = _X64_ARGUMENTS[argument]
                 answer["register"] = _X64_REGISTER_NAMES[argument]
+                then = output_passed_to(image, rva, argument)
+                if then is not None:
+                    answer["output_passed_to"] = then
             elif argument == "push":
                 answer["argument"] = pushes + 1
             else:

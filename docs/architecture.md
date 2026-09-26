@@ -389,8 +389,9 @@ vendored set of published algorithms, each with every reading and every place
 the value stands; and `decode_string_blobs` (`tools.string_blobs`), the text
 its data sections keep encoded under a stated set of generic key schemes, each
 with the code that refers to it and, when FLOSS recovered the same text, FLOSS's
-routine. Where a reference loads the text's address as a call argument, the
-decoder states that call beside it (`passed_to`: the callee and the argument
+routine. Where a reference loads the address of the text's encoded bytes as a
+call argument, the decoder states that call beside it, as the call the encoded
+bytes are passed to (`passed_to`, `address_of`: the callee and the argument
 position, `tools.call_sites`): an x64 `lea` into `rcx`, `rdx`, `r8` or `r9`, or
 an x86 `push` of the address or a store to `[esp+n]`, confirmed as an
 instruction by decoding its function from the start, then decoded instruction
@@ -399,7 +400,7 @@ the file's import table puts in the slot a call or a jump thunk goes through,
 the function at a direct call's target, or the slot a runtime pointer is read
 from. A jump or return before the call, a byte the decoder cannot read, the
 function's end, a write to the argument register, another stack move for a
-pushed one, or a call through a register leave it absent. Both state addresses as offsets from the image base and the function
+pushed one, or a call through a register leave it absent. After that call, the output is followed to the next call in the same function that receives it (`output_passed_to`, x64): the one frame slot whose address the call was given as another argument, else its return value in `rax`, tracked through registers and frame slots, through unconditional jumps and along the fall-through of conditional ones (said), with the consumer, the argument position and how it was followed; absent at a return, an undecodable byte, a jump back, the function's end or a stack or frame pointer write. Both state addresses as offsets from the image base and the function
 around each from the file's own function table (`tools.pe_image`), and neither
 guesses one. The decoder runs after FLOSS so it can read FLOSS's kept result;
 both run after every other step so no earlier id moves. Where the resolution names

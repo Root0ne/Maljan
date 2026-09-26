@@ -276,11 +276,13 @@ def test_decode_string_blobs_states_the_call_beside_the_reference(tmp_path: Path
 
     (row,) = [r for r in answer["results"] if r["text"] == "open the settings file"]
     (reference,) = row["references"]
+    # The reference loads the encoded blob's address: said as such.
     assert reference["passed_to"] == {
         "call_at": hex(TEXT_RVA + 0x0B),
         "callee": {"function": hex(CALLEE)},
         "argument": 4,
         "register": "r9",
+        "address_of": "blob",
     }
 
 
@@ -307,7 +309,119 @@ def test_the_pack_line_and_the_indicator_provenance_state_the_call() -> None:
             }
         ],
     }
-    said = "argument 1 of the call at 0x100b to KERNEL32.dll!CreateFileA"
+    said = (
+        "the address of its encoded bytes is argument 1 of the call at 0x100b to "
+        "KERNEL32.dll!CreateFileA"
+    )
 
-    assert f"referred to at 0x1007 (in 0x1000) as {said}" in _blob_item(row)
-    assert f"passed as {said}" in _recovery_words(_decoder_provenance(row, "ev_0021"))
+    assert f"referred to at 0x1007 (in 0x1000) ({said})" in _blob_item(row)
+    assert said in _recovery_words(_decoder_provenance(row, "ev_0021"))
+
+
+DECODER = TEXT_RVA + 0x200
+CONSUMER = TEXT_RVA + 0x240
+
+
+class TestTheDecodersOutputIsFollowedToItsConsumer:
+    """After the call the encoded bytes go to, its output is followed to the next call."""
+
+    def _image(self) -> tuple[SyntheticPE, _Code]:
+        image = SyntheticPE(
+            functions=[
+                (TEXT_RVA, FUNCTION_END),
+                (DECODER, DECODER + 0x20),
+                (CONSUMER, CONSUMER + 0x20),
+            ]
+        )
+        return image, _Code(image)
+
+    def test_an_out_buffer_through_a_branch_and_a_frame_slot(self, tmp_path: Path) -> None:
+        image, code = self._image()
+        code.raw(b"\x48\x8d\x54\x24\x40")  # lea rdx, [rsp+0x40]
+        site = code.lea("rcx", STRING)
+        code.call(DECODER)
+        code.raw(b"\x48\x85\xc0")  # test rax, rax
+        code.raw(b"\x74\x0a")  # je +10 (to the second lea below)
+        code.raw(b"\x48\x8d\x44\x24\x40")  # lea rax, [rsp+0x40]
+        code.raw(b"\x48\x89\x44\x24\x28")  # mov [rsp+0x28], rax
+        code.raw(b"\xeb\x05")  # jmp +5 (over the other path's lea)
+        code.raw(b"\x48\x8d\x44\x24\x40")  # lea rax, [rsp+0x40]
+        code.raw(b"\x4c\x8b\x4c\x24\x28")  # mov r9, [rsp+0x28]
+        code.raw(b"\x33\xc9")  # xor ecx, ecx
+        code.call(CONSUMER)
+
+        loaded = _load(image, tmp_path)
+        answer = call_sites.passed_to(loaded, _site(loaded, site))
+
+        assert answer is not None
+        assert answer["callee"] == {"function": hex(DECODER)}
+        then = answer["output_passed_to"]
+        assert then["callee"] == {"function": hex(CONSUMER)}
+        assert (then["argument"], then["register"]) == (4, "r9")
+        assert then["followed"] == (
+            "the frame slot [rsp+0x40] the call was given as argument 2, on the path where "
+            "every conditional jump falls through"
+        )
+        said = call_sites.passed_to_words(answer)
+        assert "that call's output (the frame slot [rsp+0x40]" in said
+        assert f"is argument 4 of the call at {then['call_at']} to the function at" in said
+
+    def test_the_return_value_moved_into_an_argument_register(self, tmp_path: Path) -> None:
+        image, code = self._image()
+        slots = image.imports_at(0x100, {"KERNEL32.dll": ["OutputDebugStringA"]})
+        site = code.lea("rcx", STRING)
+        code.call(DECODER)
+        code.raw(b"\x48\x8b\xc8")  # mov rcx, rax
+        code.call_slot(slots["OutputDebugStringA"])
+
+        loaded = _load(image, tmp_path)
+        answer = call_sites.passed_to(loaded, _site(loaded, site))
+
+        assert answer is not None
+        then = answer["output_passed_to"]
+        assert then["callee"]["import"] == "KERNEL32.dll!OutputDebugStringA"
+        assert (then["argument"], then["followed"]) == (1, "the call's return value in rax")
+
+    def test_a_return_before_any_call_states_no_consumer(self, tmp_path: Path) -> None:
+        image, code = self._image()
+        site = code.lea("rcx", STRING)
+        code.call(DECODER)
+        code.raw(b"\xc3")  # ret
+
+        loaded = _load(image, tmp_path)
+        answer = call_sites.passed_to(loaded, _site(loaded, site))
+
+        assert answer is not None and "output_passed_to" not in answer
+
+    def test_a_return_value_another_call_clobbers_states_no_consumer(self, tmp_path: Path) -> None:
+        image, code = self._image()
+        site = code.lea("rcx", STRING)
+        code.call(DECODER)
+        code.raw(b"\x33\xc9")  # xor ecx, ecx
+        code.call(CONSUMER)  # receives nothing of it: rax is not an argument
+        code.raw(b"\x48\x8b\xc8")  # mov rcx, rax (the second call's value now)
+        code.call(CONSUMER)
+
+        loaded = _load(image, tmp_path)
+        answer = call_sites.passed_to(loaded, _site(loaded, site))
+
+        assert answer is not None and "output_passed_to" not in answer
+
+    def test_the_frame_slot_overwritten_before_the_load_states_no_consumer(
+        self, tmp_path: Path
+    ) -> None:
+        image, code = self._image()
+        code.raw(b"\x48\x8d\x54\x24\x40")  # lea rdx, [rsp+0x40]
+        site = code.lea("rcx", STRING)
+        code.call(DECODER)
+        code.raw(b"\x48\x8d\x44\x24\x40")  # lea rax, [rsp+0x40]
+        code.raw(b"\x48\x89\x44\x24\x28")  # mov [rsp+0x28], rax
+        code.raw(b"\x48\x89\x5c\x24\x28")  # mov [rsp+0x28], rbx (overwritten)
+        code.raw(b"\x4c\x8b\x4c\x24\x28")  # mov r9, [rsp+0x28]
+        code.call(CONSUMER)
+        code.raw(b"\xc3")
+
+        loaded = _load(image, tmp_path)
+        answer = call_sites.passed_to(loaded, _site(loaded, site))
+
+        assert answer is not None and "output_passed_to" not in answer

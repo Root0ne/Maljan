@@ -19,13 +19,17 @@ change landed on `main`.
   (`MalwareReport.claims_not_discussed`), counted
   (`run_summary.claims_not_discussed`) and printed under §13.1 "Claims whose
   code locations or API names the body does not name".
-- **A decoded string loaded as a call argument is joined to that call.**
-  `decode_string_blobs` states `passed_to` beside a reference: the callee (an
-  import, a function address, or the slot a runtime pointer is read from) and
-  the argument position, read statically by `tools.call_sites` from an x64
-  `lea` into an argument register or an x86 push or stack store, to the first
-  call in the same function; absent wherever the code does not show it. The
-  triage pack's decoded-string line and the IOC provenance say it.
+- **An encoded string is joined to the call its bytes go to, and that call's
+  output to its consumer.** `decode_string_blobs` states `passed_to` beside a
+  reference: the call the address of the encoded bytes is passed to (usually
+  the program's decoder) with its callee (an import, a function address, or
+  the slot a runtime pointer is read from) and argument position, read
+  statically by `tools.call_sites` from an x64 `lea` into an argument register
+  or an x86 push or stack store; and on x64 `output_passed_to`, the next call
+  in the function that receives that call's output (an out-buffer frame slot,
+  else the return value), with how it was followed. Absent wherever the code
+  does not show it. The triage pack's decoded-string line and the IOC
+  provenance say both.
   `pe_image` reads the import table.
 
 - **The platform resolves API hashes and decodes encoded strings, by address.**

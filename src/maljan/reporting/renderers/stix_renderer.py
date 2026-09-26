@@ -2573,7 +2573,7 @@ def _recovery_words(how: RecoveredValue) -> str:
         if how.sites:
             where.append("used at " + ", ".join(how.sites))
         if how.passed_to:
-            where.append("passed as " + "; ".join(how.passed_to))
+            where.extend(how.passed_to)
     return f"{head} ({', '.join(where)})" if where else head
 
 

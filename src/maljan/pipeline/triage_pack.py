@@ -2006,11 +2006,11 @@ def _around(place: dict[str, Any]) -> str:
 
 
 def _passed_to(place: dict[str, Any]) -> str:
-    """`` as argument 4 of the call at 0x1210 to …`` where the tool joined the two, or ``""``."""
+    """`` (the address of its encoded bytes is argument 1 of the call at …)`` or ``""``."""
     from maljan.tools.call_sites import passed_to_words
 
     said = passed_to_words(place.get("passed_to"))
-    return f" as {said}" if said else ""
+    return f" ({said})" if said else ""
 
 
 def _hash_place(place: dict[str, Any]) -> str:
