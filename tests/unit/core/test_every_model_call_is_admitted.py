@@ -60,7 +60,17 @@ def _own_nodes(function: Function) -> list[ast.AST]:
     return found
 
 
-_LOOPS = (ast.For, ast.AsyncFor, ast.While)
+# A comprehension or a generator expression runs its element once per item,
+# as a loop runs its body.
+_LOOPS = (
+    ast.For,
+    ast.AsyncFor,
+    ast.While,
+    ast.ListComp,
+    ast.SetComp,
+    ast.DictComp,
+    ast.GeneratorExp,
+)
 
 
 def _position(node: ast.AST) -> tuple[int, int]:
@@ -258,6 +268,20 @@ class TestTheGuard:
         )
         assert unadmitted_in(outside)
         assert unadmitted_in(inside) == []
+
+    def test_a_call_in_a_comprehension_needs_its_admission_in_it(self) -> None:
+        outside = (
+            "async def f(self, batch):\n"
+            "    self._spend_admits('x', batch)\n"
+            "    return await gather(*(self.llm.ainvoke(m) for m in batch))\n"
+        )
+        listed = (
+            "async def f(self, batch):\n"
+            "    self._spend_admits('x', batch)\n"
+            "    return [await self.llm.ainvoke(m) for m in batch]\n"
+        )
+        assert unadmitted_in(outside)
+        assert unadmitted_in(listed)
 
     def test_two_branches_of_one_choice_share_their_admission(self) -> None:
         source = (
