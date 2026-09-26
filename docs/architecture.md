@@ -2807,8 +2807,11 @@ is assembled from what the run gathered rather than recomputed beside it:
   rule. Replayed on the benchmark's stored runs when FLOSS strings were read
   whole only, the two C2 names the sample decrypted published on both models'
   runs (the static sweep's complete listing does not hold them), and nothing
-  new published on the benign control; that replay was not repeated after
-  the one reader and the static decoder were added.
+  new published on the benign control. Replayed again after the one reader
+  was added (23 stored runs, under each run's own verdict and with the
+  verdict forced to malicious), no published row was added or dropped. No
+  stored run holds a `decode_string_blobs` entry, so the decoder half is not
+  measured by that replay.
 * **Draft detection rules match only what the run publishes.** The YARA,
   Sigma and Suricata drafts (`reporting.detection_signatures`) are generated
   after the export. A YARA string or a Suricata alert matches on the IOC

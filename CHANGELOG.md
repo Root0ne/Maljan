@@ -2289,9 +2289,13 @@ change landed on `main`.
   `host:port`, a `Host:` line or a URL inside a sentence recovered by FLOSS
   was missed and now gets the standing the same text from the static decoder
   gets, so such a value named by a model may now publish where it did not.
-  The benchmark replay behind the earlier "nothing new publishes on the
-  benign control" was measured with FLOSS strings read whole and was not
-  repeated.
+  Replayed offline on the benchmark's 23 stored runs (their evidence and
+  report, under each run's own verdict and again with the verdict forced to
+  malicious), the one reader added and dropped no published row: on the
+  benign control it finds only a value already kept whole, and on the other
+  runs the hosts it finds were already published through their URLs. No
+  stored run holds a `decode_string_blobs` entry, so the decoder half is not
+  measured by that replay.
 - **Every claim an analyst begins is read, or the run says it was not.** The
   base analyst's reader split an answer only on `---` lines and kept the first
   `CLAIM:` of each block, so claims separated by blank lines were read as one:
