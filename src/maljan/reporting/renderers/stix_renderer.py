@@ -2028,6 +2028,11 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
             if _field(row, "sample_process_tree") is False
             else UNATTRIBUTED_FLOW
         )
+        # The process the report says made the flows, by name: the reason a
+        # reader can check against the process table.
+        made_by = [str(p) for p in (_field(row, "outside_processes") or []) if str(p)]
+        if made_by and _field(row, "sample_process_tree") is False:
+            why += f" ({', '.join(made_by)})"
         if _field(row, "public_resolver"):
             why += "; it is a public DNS resolver"
         if _field(row, "asn"):

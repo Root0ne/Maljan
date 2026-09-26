@@ -394,6 +394,10 @@ class NetworkIP(BaseModel):
     # process, ``None`` when the report does not say. A platform fact read
     # from the sandbox report's own process records, right or absent.
     sample_process_tree: bool | None = None
+    # The processes outside the sample's tree that the report says made flows
+    # to it, as ``<image> (procid N)``: what the publish rule names when it
+    # refuses the row. Empty when the report names none.
+    outside_processes: list[str] = Field(default_factory=list)
     # Whether the address is a public DNS resolver's, which a sandbox guest
     # reaches whatever the sample does.
     public_resolver: bool = False

@@ -401,6 +401,9 @@ def _split_host_port(value: str) -> tuple[str, int | None]:
 # report names that process and it is neither, and absent when the report does
 # not say. A platform fact, so it is right or it is not there.
 SAMPLE_TREE_KEY = "sample_process_tree"
+# The image of the process outside the sample's tree that made a flow, on
+# the flow's row: which process reached the address, as the report names it.
+FLOW_PROCESS_KEY = "process"
 
 
 def _basename(path: str) -> str:
@@ -442,22 +445,35 @@ def _is_the_sample(proc: dict[str, Any], sample: dict[str, Any]) -> bool:
 
 def _sample_process_tree(
     task: dict[str, Any], sample: dict[str, Any]
-) -> tuple[frozenset[Any], frozenset[Any]]:
-    """The ``procid``s of the sample's process tree in one task, and every ``procid`` listed.
+) -> tuple[frozenset[Any], dict[Any, str]]:
+    """The ``procid``s of the sample's process tree in one task, and every listed process's image.
 
     The tree is the sample's own processes and every process whose parent
     chain (``procid_parent``) reaches one. Empty when no process is the sample,
     which leaves every flow of the task unattributed rather than attributed to
     nothing.
+
+    The sample's own processes are read from two facts: Triage's ``orig``
+    mark, and a file the process runs named as the submission or by its
+    digest (:func:`_is_the_sample`). Where both name processes, the sample is
+    the processes both name. A guest's desktop process that ran none of the
+    sample's files and descended from none of its processes was read as the
+    sample on the mark alone, and the address it reached was published as the
+    sample's. Where the two name
+    disjoint processes, Triage's mark is the answer — a guest process can
+    carry the submitted name — and where only one fact names any, it is.
     """
     processes = [p for p in task.get("processes") or [] if isinstance(p, dict)]
     parent = {p.get("procid"): p.get("procid_parent") for p in processes if p.get("procid")}
-    # Triage's own mark, when it gave one, is the answer and the only one; the
-    # file names are read only for a report that marks nothing.
-    marked = {p.get("procid") for p in processes if p.get("procid") and p.get("orig") is True}
-    roots = marked or {
-        p.get("procid") for p in processes if p.get("procid") and _is_the_sample(p, sample)
+    # As the report writes them, for a reader: the case is the file's own.
+    images = {
+        p.get("procid"): re.split(r"[\\/]", str(p.get("image") or p.get("name") or "").strip())[-1]
+        for p in processes
+        if p.get("procid")
     }
+    marked = {p.get("procid") for p in processes if p.get("procid") and p.get("orig") is True}
+    named = {p.get("procid") for p in processes if p.get("procid") and _is_the_sample(p, sample)}
+    roots = (marked & named) or marked or named
     tree: set[Any] = set()
     for procid in parent:
         seen: set[Any] = set()
@@ -468,17 +484,19 @@ def _sample_process_tree(
                 break
             seen.add(current)
             current = parent.get(current)
-    return frozenset(tree), frozenset(parent)
+    return frozenset(tree), images
 
 
 def _flow_attribution(
-    flow: dict[str, Any], in_tree: frozenset[Any], listed: frozenset[Any]
+    flow: dict[str, Any], in_tree: frozenset[Any], listed: dict[Any, str]
 ) -> dict[str, Any]:
     """What one Triage flow says about the process that made it, and its network facts.
 
     ``procid`` and ``pid`` as the flow gives them; ``sample_process_tree`` only
-    where the report settles it (see ``SAMPLE_TREE_KEY``); the destination's AS
-    number, AS organisation and country where Triage recorded them.
+    where the report settles it (see ``SAMPLE_TREE_KEY``); the image of a
+    listed process outside the tree (``FLOW_PROCESS_KEY``), which is what the
+    publish rule names when it refuses the row; the destination's AS number,
+    AS organisation and country where Triage recorded them.
     """
     out: dict[str, Any] = {}
     procid = flow.get("procid")
@@ -488,6 +506,8 @@ def _flow_attribution(
             out[SAMPLE_TREE_KEY] = True
         elif in_tree and procid in listed:
             out[SAMPLE_TREE_KEY] = False
+            if listed.get(procid):
+                out[FLOW_PROCESS_KEY] = listed[procid]
     if flow.get("pid") not in (None, ""):
         out["pid"] = flow.get("pid")
     for key in ("as_num", "as_org", "country"):
