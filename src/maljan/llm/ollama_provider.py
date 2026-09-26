@@ -60,7 +60,12 @@ class OllamaProvider:
         # timeout above bounds only the silence between two pieces.
         from maljan.llm.generation_rate import with_sized_request_timeout
 
-        return with_sized_request_timeout(ChatOllama)(  # type: ignore[no-any-return]
+        # No request sends a tool call without a ``tool`` message after it,
+        # whatever the history it was built from (``maljan.llm.tool_replies``).
+        from maljan.llm.tool_replies import with_answered_tool_calls
+
+        chat_class = with_answered_tool_calls(with_sized_request_timeout(ChatOllama), "ollama")
+        return chat_class(  # type: ignore[no-any-return]
             model=model,
             client_kwargs=client_kwargs,
             base_url=base_url,

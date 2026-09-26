@@ -42,7 +42,14 @@ class AnthropicProvider:
 
         kwargs.setdefault("timeout", float(PROVIDER_REQUEST_TIMEOUT_SECONDS))
 
-        return with_sized_request_timeout(ChatAnthropic)(  # type: ignore[no-any-return]
+        # No request sends a ``tool_use`` without its ``tool_result``, whatever
+        # the history it was built from (``maljan.llm.tool_replies``).
+        from maljan.llm.tool_replies import with_answered_tool_calls
+
+        chat_class = with_answered_tool_calls(
+            with_sized_request_timeout(ChatAnthropic), "anthropic"
+        )
+        return chat_class(  # type: ignore[no-any-return]
             model_name=model,
             api_key=api_key,
             temperature=temperature,
