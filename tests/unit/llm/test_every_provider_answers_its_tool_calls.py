@@ -269,16 +269,34 @@ def _with_unparsed() -> list[Any]:
 
 
 def _away() -> list[Any]:
-    """A turn whose second call's reply was recorded, but not right after the turn."""
+    """A turn whose second call's reply was recorded after a platform message only."""
     return [
         SystemMessage(content="sys"),
         HumanMessage(content="task"),
         AIMessage(content="", tool_calls=[_call("one", "lookup", "a"), _call("two", "fetch", "b")]),
         ToolMessage(content="a's answer", tool_call_id="one"),
         HumanMessage(content="Go on."),
-        AIMessage(content="noted"),
         ToolMessage(content="b's answer", tool_call_id="two"),
         HumanMessage(content="Write your report now."),
+    ]
+
+
+def _across_a_model_turn() -> list[Any]:
+    """A call whose reply was recorded only after the model had spoken again."""
+    return [
+        HumanMessage(content="task"),
+        AIMessage(content="", tool_calls=[_call("a", "lookup", "x")]),
+        HumanMessage(content="nudge"),
+        AIMessage(content="I got nothing from lookup."),
+        ToolMessage(content="a's answer", tool_call_id="a"),
+    ]
+
+
+def _ending_on_calls() -> list[Any]:
+    """A history that ends on the model's turn of calls."""
+    return [
+        HumanMessage(content="task"),
+        AIMessage(content="", tool_calls=[_call("a", "lookup", "x")]),
     ]
 
 
@@ -380,15 +398,21 @@ def test_an_anthropic_tool_use_block_whose_input_was_cut_is_said_not_run() -> No
             }
         ],
     )
-    sent = _anthropic_history(_anthropic(), [HumanMessage(content="task"), turn])
+    sent = _anthropic_history(
+        _anthropic(),
+        [HumanMessage(content="task"), turn, HumanMessage(content="Write your report now.")],
+    )
 
-    # The turn stays as the model wrote it; a user turn holding the reply follows.
+    # The turn stays as the model wrote it; the reply leads the user turn after it.
     assert sent[1]["content"] == [
         {"type": "tool_use", "id": "toolu_cut", "name": "lookup", "input": {}}
     ]
     assert sent[2] == {
         "role": "user",
-        "content": [{"type": "tool_result", "tool_use_id": "toolu_cut", "content": NOT_RUN_REPLY}],
+        "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_cut", "content": NOT_RUN_REPLY},
+            {"type": "text", "text": "Write your report now."},
+        ],
     }
 
 
@@ -476,56 +500,113 @@ class TestTheCompletersOnTheirOwn:
         assert with_answered_tool_calls(_Plain, "ollama") is _Plain
 
 
-@pytest.mark.parametrize(("build", "history", "unanswered"), PROVIDERS)
-def test_a_reply_recorded_away_from_its_turn_is_sent_not_said_missing(
-    build: Any, history: Any, unanswered: Any
+def _last_role(history: list[Any]) -> Any:
+    last = history[-1]
+    if isinstance(last, dict):
+        return last.get("role") or last.get("type")
+    return last.role
+
+
+def test_a_platform_only_gap_is_closed_on_the_chat_serializers() -> None:
+    for build, history in ((_openai, _openai_history), (_ollama, _ollama_history)):
+        sent = history(build(), _away())
+
+        assert _openai_unanswered(sent) == []
+        # Both replies were recorded; neither is said missing.
+        assert NO_REPLY_RECORDED not in repr(sent)
+        assert [m["role"] for m in sent] == [
+            "system",
+            "user",
+            "assistant",
+            "tool",
+            "tool",
+            "user",
+            "user",
+        ]
+        assert _openai_replies(sent) == {"one": "a's answer", "two": "b's answer"}
+
+
+@pytest.mark.parametrize(
+    ("build", "history"),
+    [
+        pytest.param(_anthropic, _anthropic_history, id="anthropic"),
+        pytest.param(_gemini, _gemini_history, id="gemini"),
+        pytest.param(_codex, _responses_history, id="openai-responses"),
+    ],
+)
+def test_a_platform_only_gap_the_client_already_closes_is_sent_as_it_builds_it(
+    build: Any, history: Any
 ) -> None:
-    sent = history(build(), _away())
+    # Anthropic's client joins the replies and the nudge into one user turn;
+    # Gemini's and the Responses API pair by id wherever the reply stands.
+    model = build()
 
-    assert unanswered(sent) == []
-    # Both replies were recorded; neither is said missing.
+    sent = history(model, _away())
+
+    assert sent == history(model, _away(), base=True)
     assert NO_REPLY_RECORDED not in repr(sent)
-    assert "b's answer" in repr(sent)
 
 
-def test_a_gemini_reply_recorded_away_from_its_turn_is_sent_as_the_client_builds_it() -> None:
-    model = _gemini()
+@pytest.mark.parametrize(("build", "history", "unanswered"), PROVIDERS)
+def test_a_reply_recorded_after_a_later_model_turn_is_neither_moved_nor_said_missing(
+    build: Any, history: Any, unanswered: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    model = build()
 
-    sent = _gemini_history(model, _away())
+    with caplog.at_level("WARNING"):
+        sent = history(model, _across_a_model_turn())
 
-    # The client finds a reply anywhere in the conversation by its id, so the
-    # request it builds alone is already right and is sent unchanged.
-    assert sent == _gemini_history(model, _away(), base=True)
-    assert _gemini_replies(sent) == [("lookup", "a's answer"), ("fetch", "b's answer")]
-
-
-def test_a_chat_reply_recorded_away_from_its_turn_is_moved_to_its_call() -> None:
-    sent = _openai_history(_openai(), _away())
-
-    assert [m["role"] for m in sent] == [
-        "system",
-        "user",
-        "assistant",
-        "tool",
-        "tool",
-        "user",
-        "assistant",
-        "user",
-    ]
-    assert _openai_replies(sent) == {"one": "a's answer", "two": "b's answer"}
+    assert sent == history(model, _across_a_model_turn(), base=True)
+    assert NO_REPLY_RECORDED not in repr(sent)
 
 
-def test_an_anthropic_result_recorded_away_from_its_turn_is_moved_to_its_call() -> None:
-    sent = _anthropic_history(_anthropic(), _away())
+@pytest.mark.parametrize(
+    ("build", "history"),
+    [
+        pytest.param(_openai, _openai_history, id="openai"),
+        pytest.param(_anthropic, _anthropic_history, id="anthropic"),
+        pytest.param(_ollama, _ollama_history, id="ollama"),
+    ],
+)
+def test_the_call_left_across_a_model_turn_is_named_in_a_warning(
+    build: Any, history: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level("WARNING"):
+        sent = history(build(), _across_a_model_turn())
 
-    assert [m["role"] for m in sent] == ["user", "assistant", "user", "assistant", "user"]
-    assert [b.get("tool_use_id", b.get("text")) for b in sent[2]["content"]] == [
-        "one",
-        "two",
-        "Go on.",
-    ]
-    # The user turn it came from keeps what else it says.
-    assert sent[4]["content"] == [{"type": "text", "text": "Write your report now."}]
+    # The model's words stay after the call and before the reply, as recorded.
+    assert _last_role(sent) != "assistant"
+    assert any(
+        "tool call a stands after a later model turn" in r.getMessage() for r in caplog.records
+    )
+
+
+HISTORIES = [_dangling, _with_unparsed, _answered, _away, _across_a_model_turn, _ending_on_calls]
+
+
+@pytest.mark.parametrize(("build", "history", "unanswered"), PROVIDERS)
+@pytest.mark.parametrize("conversation", HISTORIES, ids=lambda f: f.__name__.strip("_"))
+def test_the_last_speaker_of_the_request_is_the_clients(
+    build: Any, history: Any, unanswered: Any, conversation: Any
+) -> None:
+    model = build()
+
+    assert _last_role(history(model, conversation())) == _last_role(
+        history(model, conversation(), base=True)
+    )
+
+
+@pytest.mark.parametrize(("build", "history", "unanswered"), PROVIDERS)
+def test_a_history_ending_on_calls_is_sent_as_the_client_builds_it(
+    build: Any, history: Any, unanswered: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    model = build()
+
+    with caplog.at_level("WARNING"):
+        sent = history(model, _ending_on_calls())
+
+    assert sent == history(model, _ending_on_calls(), base=True)
+    assert NO_REPLY_RECORDED not in repr(sent)
 
 
 def test_gemini_pairs_two_calls_of_one_name_by_position() -> None:
@@ -553,21 +634,32 @@ def test_the_replies_on_the_responses_api_serializer() -> None:
     assert sent[-1]["role"] == "user"
 
 
-def test_the_completion_counts_what_it_wrote() -> None:
-    from maljan.llm.tool_replies import MOVED, NOT_RUN, WRITTEN, answered_tool_calls
+def test_the_completion_counts_what_it_did() -> None:
+    from maljan.llm.tool_replies import MOVED, NOT_RUN, STRANDED, WRITTEN, answered_tool_calls
 
-    record: list[str] = []
+    record: list[tuple[str, str]] = []
     messages = [
-        {"role": "assistant", "content": None, "tool_calls": [{"id": "a"}, {"id": "b"}]},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "e"}],
+        },
+        {"role": "tool", "tool_call_id": "zz", "content": "stray"},
         {"role": "user", "content": NOT_RUN_REPLY},
-        {"role": "assistant", "content": "x"},
         {"role": "tool", "tool_call_id": "c", "content": "late"},
+        {"role": "assistant", "content": "x"},
+        {"role": "tool", "tool_call_id": "e", "content": "after the model spoke"},
         {"role": "assistant", "content": None, "tool_calls": [{"id": "d"}]},
+        {"role": "user", "content": "next"},
     ]
-    messages.insert(1, {"role": "tool", "tool_call_id": "zz", "content": "stray"})
-    messages[0]["tool_calls"].append({"id": "c"})
 
     answered_tool_calls(messages, frozenset({"b"}), record=record)
 
     # A user message that happens to hold the not-run sentence is not counted.
-    assert record == [WRITTEN, NOT_RUN, MOVED, WRITTEN]
+    assert record == [
+        (WRITTEN, "a"),
+        (NOT_RUN, "b"),
+        (MOVED, "c"),
+        (STRANDED, "e"),
+        (WRITTEN, "d"),
+    ]
