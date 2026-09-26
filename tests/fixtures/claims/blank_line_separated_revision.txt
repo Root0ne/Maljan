@@ -19,7 +19,7 @@ EVIDENCE: hash table [ev_0397]; decoder [ev_0416]; helper bytes [ev_0421]; capa 
 CONFIDENCE: 0.9
 TECHNIQUE: T1027.005
 
-CLAIM: The decoder model is falsified by two independent byte-level decodes. Blob `0x1360bc10250`: seed `0x33629D40`, length `0x9D40^0x9D5F = 31`, data decoded with keystream `0x41,0x42,…` yields exactly `https://titnovacrion.top/live/` + NUL — matching FLOSS's independently recovered string at call site `0x69b3` [ev_0019]. Blob `0x1360bc0fd30`: length `6`, yields `123456` — **this revises my own round-0 claim 12: the beacon's RC4 key is the 6-byte `"123456"`, not `"12345"`** (FLOSS's `"12345"@0xb69a` is a different artifact/site). (T1140)
+CLAIM: The decoder model is falsified by two independent byte-level decodes. Blob `0x1360bc10250`: seed `0x33629D40`, length `0x9D40^0x9D5F = 31`, data decoded with keystream `0x41,0x42,…` yields exactly `https://c2-one.example/live/` + NUL — matching FLOSS's independently recovered string at call site `0x69b3` [ev_0019]. Blob `0x1360bc0fd30`: length `6`, yields `741852` — **this revises my own round-0 claim 12: the beacon's RC4 key is the 6-byte `"741852"`, not `"74185"`** (FLOSS's `"74185"@0xb69a` is a different artifact/site). (T1140)
 EVIDENCE: URL blob bytes + decode [ev_0423]; key blob bytes + decode [ev_0420]; decoder [ev_0416]; helper [ev_0421]; FLOSS [ev_0019].
 CONFIDENCE: 0.85
 TECHNIQUE: T1140
@@ -81,4 +81,4 @@ DISPUTES:
 
 5. **Static_r2 Claim 12 — "`:wtfbbq`@0x3a99 (used together with the imported `CreateMutexW`)". DISPUTED (minor).** The mutex name is the decoded wide blob `0x1360bc0fa00` = `runnung` [ev_0391]; no evidence ties `:wtfbbq` to the mutex. Its actual use (call site `0x3a99`) was not established this round and should not be presented as the mutex/instance marker.
 
-6. **Consensus-side correction (all peers): the beacon key string.** The key the beacon uses is `"123456"` (blob `0x1360bc0fd30`, length field 6, byte-exact decode [ev_0420]) — any statement that the protocol key is `"12345"` should be corrected; `"12345"@0xb69a` [ev_0019] is a different decoded artifact.
+6. **Consensus-side correction (all peers): the beacon key string.** The key the beacon uses is `"741852"` (blob `0x1360bc0fd30`, length field 6, byte-exact decode [ev_0420]) — any statement that the protocol key is `"74185"` should be corrected; `"74185"@0xb69a` [ev_0019] is a different decoded artifact.

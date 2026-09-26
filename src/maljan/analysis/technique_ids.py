@@ -127,6 +127,9 @@ def api_capability_hits(payload: Mapping[str, Any] | None) -> list[dict[str, Any
     """
     if not isinstance(payload, Mapping):
         return []
+    # The names the caller said it resolved at runtime rather than read in the
+    # import table: a row whose matched names include them says which.
+    resolved = {str(n) for n in (payload.get("resolved_at_runtime_from_hashes") or [])}
     corpus = ""
     corpora = payload.get("corpora")
     if isinstance(corpora, Mapping):
@@ -161,6 +164,9 @@ def api_capability_hits(payload: Mapping[str, Any] | None) -> list[dict[str, Any
         }
         if rate:
             row_out["benign_rate"] = rate
+        runtime = [api for api in apis if api in resolved]
+        if runtime:
+            row_out["resolved_apis"] = runtime
         out.append(row_out)
     return out
 

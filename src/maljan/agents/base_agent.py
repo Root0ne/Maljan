@@ -1439,10 +1439,24 @@ _EVIDENCE_ENDS_AT_LINE_START_RE = re.compile(
     r"\n" + LINE_PREFIX + r"(?:CONFIDENCE|(?i:TECHNIQUE)):"
 )
 _EVIDENCE_ENDS_INLINE_RE = re.compile(r"\s+" + LINE_PREFIX + r"(?:CONFIDENCE|TECHNIQUE):")
-_LINE_CONFIDENCE_RE = re.compile(
-    r"^" + LINE_PREFIX + r"CONFIDENCE:\s*(?:\*\*)?\s*([\d.]+)", re.MULTILINE
+# The CONFIDENCE value as written: what follows the label on its line, read
+# by ``_stated_confidence``. A label present with nothing readable after it is
+# a confidence the reader could not read, not one the analyst left out.
+_LINE_CONFIDENCE_RE = re.compile(r"^" + LINE_PREFIX + r"CONFIDENCE:[ \t]*(.*)$", re.MULTILINE)
+_BLOCK_CONFIDENCE_RE = re.compile(_INLINE + r"CONFIDENCE:[ \t]*(.*)$", re.MULTILINE)
+# The number that opens the value: digits with at most one decimal point, and
+# a percent sign after it where one is written. What follows the number (a
+# full stop, a comma, a bracketed note, words) is the sentence around it, and
+# a number that runs on into more digits ("0.9.5") is no number read here, nor
+# one a comma or a dash joins to more digits: a decimal comma ("0,85") or a
+# range ("0.8-0.9") is a value this reader would have to guess at.
+_CONFIDENCE_NUMBER_RE = re.compile(
+    r"(\d+(?:\.\d+)?|\.\d+)(?![\d.]*\d)(?!\s*[,\-\u2013\u2014]\s*\d)\s*(%)?"
 )
-_BLOCK_CONFIDENCE_RE = re.compile(_INLINE + r"CONFIDENCE:\s*(?:\*\*)?\s*([\d.]+)", re.MULTILINE)
+# Marks a model writes around a value: emphasis, code quotes and a bracket.
+_CONFIDENCE_MARKS = "*_`([ \t"
+# What the reader states a CONFIDENCE value as, when it reads none.
+UNREADABLE_CONFIDENCE_MARK = "(empty)"
 # The whole TECHNIQUE value as written: one id is a claimed technique, and
 # anything more (a qualifier, a negation, a second id) is the analyst's line,
 # kept and asked about rather than read for the first id in it. It ends at the
@@ -1647,6 +1661,11 @@ class ClaimRead:
     analyst about it. Whatever else the model began and the reader did not
     read is ``unread``, which the caller records rather than lets pass.
 
+    ``confidence_unreadable`` is the CONFIDENCE values the reader found and
+    could not read as a number from 0 to 1 or a percentage, one per block, as
+    written. Those blocks are unread, not blocks without a confidence: the
+    analyst stated one, and the sentence saying they are unread quotes it.
+
     ``after_disputes`` is the claim headings written under the DISPUTES
     section, which are not the analyst's own and are not read. They count as
     unread only when none of the answer's own claims was read: then they may
@@ -1657,11 +1676,16 @@ class ClaimRead:
     without_confidence: int
     begun: int
     after_disputes: int = 0
+    confidence_unreadable: tuple[str, ...] = ()
 
     @property
     def unread(self) -> int:
         """Claims begun that are neither read nor counted as stating no confidence."""
-        own = max(0, self.begun - len(self.claims) - self.without_confidence)
+        own = max(
+            len(self.confidence_unreadable),
+            self.begun - len(self.claims) - self.without_confidence,
+            0,
+        )
         return own + (self.after_disputes if not self.claims else 0)
 
 
@@ -1684,6 +1708,7 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
     """
     claims: list[ClaimEvidence] = []
     without_confidence = 0
+    unreadable: list[str] = []
     # Stripped per field rather than over the whole text: removing a block
     # that sat between ``CLAIM:`` and ``EVIDENCE:`` would leave the claim
     # marker with nothing after it, and the next line would slide up into the
@@ -1712,9 +1737,13 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
         )
         if require_evidence and not evidence_text:
             continue
-        confidence = _stated_confidence(_field(tail, _LINE_CONFIDENCE_RE, _BLOCK_CONFIDENCE_RE))
-        if confidence is None:
+        stated = _field(tail, _LINE_CONFIDENCE_RE, _BLOCK_CONFIDENCE_RE)
+        if stated is None:
             without_confidence += 1
+            continue
+        confidence = _stated_confidence(stated)
+        if confidence is None:
+            unreadable.append(_confidence_as_written(stated))
             continue
 
         # One id is kept as written. Whether it is real, retired or a
@@ -1742,6 +1771,7 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
         without_confidence=without_confidence,
         begun=count_claims_begun(text or ""),
         after_disputes=count_claims_after_disputes(text or ""),
+        confidence_unreadable=tuple(unreadable),
     )
 
 
@@ -1756,10 +1786,25 @@ def claims_unread_sentence(agent: str, read: ClaimRead, revision_round: int = 0)
         if read.after_disputes and not read.claims
         else ""
     )
+    unreadable = (
+        f" {confidence_unreadable_sentence(read.confidence_unreadable)}"
+        if read.confidence_unreadable
+        else ""
+    )
     return (
         f"The {agent} analyst's answer{stage} began {read.begun} claim(s){quoted}, and "
         f"{len(read.claims)} were read{declined}; {read.unread} could not be read as a "
-        "claim and are not in its findings."
+        f"claim and are not in its findings.{unreadable}"
+    )
+
+
+def confidence_unreadable_sentence(values: Sequence[str]) -> str:
+    """What the reader says of the CONFIDENCE values it could not read, each distinct one quoted."""
+    written = list(dict.fromkeys(str(v) for v in values))
+    quoted = ", ".join(repr(v) for v in written)
+    return (
+        f"{len(values)} of them wrote a CONFIDENCE that reads as neither a number from 0.0 "
+        f"to 1.0 nor a percentage ({quoted})."
     )
 
 
@@ -1773,17 +1818,41 @@ def claims_under_disputes_sentence(agent: str, count: int, revision_round: int =
 
 
 def _stated_confidence(match: re.Match[str] | None) -> float | None:
-    """The confidence a ``CONFIDENCE:`` line states, or ``None`` when it states none.
+    """The confidence a ``CONFIDENCE:`` line states, or ``None`` when it cannot be read.
 
-    A number above one or below zero is still the analyst's number, held to
-    the range the schema carries; a line that is not a number states nothing.
+    The number that opens the value, whatever follows it: "0.9." and "0.9,"
+    and "0.85 (one part lower)" all state 0.9 or 0.85. A number from 0 to 1 is
+    read as written, as the prompts ask, and a percentage written with its
+    sign is read as its share ("85%" is 0.85). Anything else — a word, a
+    number above one written without a percent sign, a negative number, a
+    number that runs on into more digits, a decimal comma, a range — is not
+    read: the claim
+    is unread and the sentence recording it quotes the value, and nothing
+    here decides what a number outside the scale meant.
     """
     if match is None:
         return None
+    value = str(match.group(1) or "").strip().lstrip(_CONFIDENCE_MARKS)
+    number = _CONFIDENCE_NUMBER_RE.match(value)
+    if number is None:
+        return None
     try:
-        return max(0.0, min(1.0, float(match.group(1))))
+        stated = float(number.group(1))
     except ValueError:
         return None
+    if number.group(2):
+        return stated / 100.0 if 0.0 <= stated <= 100.0 else None
+    return stated if 0.0 <= stated <= 1.0 else None
+
+
+def _confidence_as_written(match: re.Match[str]) -> str:
+    """A CONFIDENCE value the reader could not read, as the line wrote it."""
+    written = _LABEL_AFTER_VALUE_RE.split(str(match.group(1) or ""), maxsplit=1)[0].strip()
+    return written or UNREADABLE_CONFIDENCE_MARK
+
+
+# A field label written after the value on the same line, where the value ends.
+_LABEL_AFTER_VALUE_RE = re.compile(r"\s+(?:TECHNIQUE|EVIDENCE):")
 
 
 def _extract_technique_ids(text: str) -> list[str]:
@@ -6279,19 +6348,33 @@ class BaseAnalyst(BudgetMeter, ABC):
         mediator_feedback: str,
         revision_round: int = 1,
     ) -> tuple[str, AgentISR]:
-        """Wrapper around revise_isr() with error handling.
+        """Wrapper around revise_isr() with error handling, checked like a first answer.
 
         Under this agent's delegation lock, for the reason ``safe_analyze_isr``
         takes it: a revision round is this agent's own loop.
+
+        A revision's answer passes the checks a first answer passes: the
+        consistency gate and the validation turn, with the claim-count and
+        confidence questions among them. The revision's own call decides what
+        the turn reads: the round-0 loop's deadline and whether its answer was
+        nudged are not this answer's, so they are cleared before it is made.
         """
         self.current_round = int(revision_round)
         with lock_for(self):
             try:
                 truncated = self._truncate_input(original_data)
+                self._last_loop_deadline = None
+                self._answer_unstructured = False
                 text, isr = self.revise_isr(
                     truncated, own_report, peer_reports, mediator_feedback, revision_round
                 )
-                return text, self._drain_findings(isr)
+                isr = self._drain_findings(isr)
+                if not isr.answer_text:
+                    isr.note_answer_text(strip_tool_call_scaffolding(str(text or "")))
+                checked = self._validate_isr(
+                    self._apply_consistency_gate(isr, truncated), truncated
+                )
+                return text, self._drain_findings(checked)
             except AnalystError:
                 raise
             except Exception as e:
@@ -6466,7 +6549,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             dissent_items=[],
             revision_round=revision_round,
         )
-        isr.note_parse(blocks_without_confidence=parse_structured_claims_counted(content)[1])
+        read = read_claim_blocks(content)
+        isr.note_parse(
+            blocks_without_confidence=read.without_confidence,
+            confidence_unreadable=read.confidence_unreadable,
+        )
         return self._with_claims_read(isr)
 
     def _text_to_isr(self, text: str, revision_round: int) -> AgentISR:
@@ -6529,11 +6616,13 @@ class BaseAnalyst(BudgetMeter, ABC):
         # prompt asks for it.
         structured: list[ClaimEvidence] = []
         without_confidence = 0
+        unreadable: tuple[str, ...] = ()
         shortfall = ""
         under_disputes = 0
         if "CLAIM:" in text or count_claims_begun(text) or count_claims_after_disputes(text):
             read = read_claim_blocks(text)
             structured, without_confidence = read.claims, read.without_confidence
+            unreadable = read.confidence_unreadable
             shortfall = self._claims_shortfall(read, revision_round)
             under_disputes = read.after_disputes if read.claims else 0
         if structured:
@@ -6544,7 +6633,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                 dissent_items=[],
                 revision_round=revision_round,
             )
-            isr.note_parse(blocks_without_confidence=without_confidence)
+            isr.note_parse(
+                blocks_without_confidence=without_confidence, confidence_unreadable=unreadable
+            )
             isr.note_claims_unread(shortfall)
             isr.note_claims_under_disputes(under_disputes)
             return isr
@@ -6562,7 +6653,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             dissent_items=[],
             revision_round=revision_round,
         )
-        isr.note_parse(unparsed_answer=text.strip(), blocks_without_confidence=without_confidence)
+        isr.note_parse(
+            unparsed_answer=text.strip(),
+            blocks_without_confidence=without_confidence,
+            confidence_unreadable=unreadable,
+        )
         isr.note_claims_unread(shortfall)
         isr.status = NO_STRUCTURED_REPORT_STATUS
         isr.status_reason = UNPARSED_ANSWER_REASON

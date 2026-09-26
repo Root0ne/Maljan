@@ -51,6 +51,7 @@ from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
     JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
+    judge_and_findings_note,
     judge_dropped_reason,
     judge_kept_note,
 )
@@ -184,9 +185,14 @@ def build_capability_matrix(
             # when asked. Published all the same: the analyst decided.
             notes.append(ABSENCE_TECHNIQUE_MARKER)
         elif info.get("judge_named") and not info.get("analyst_claimed") and not not_published:
-            # The judge named it and no analyst claimed it: published by the
-            # rule for a technique the judge states, and the row says so.
-            notes.append(JUDGE_ONLY_TECHNIQUE_MARKER)
+            # The judge named it and no analyst claim carries it: published by
+            # the rule for a technique the judge states, and the row says so —
+            # naming the analysts that named it on a finding, where any did,
+            # since the run's corroboration record lists them as its sources.
+            on_findings = info.get("finding_named_by") or []
+            notes.append(
+                judge_and_findings_note(on_findings) if on_findings else JUDGE_ONLY_TECHNIQUE_MARKER
+            )
         if decided is not None and decided.decision == "keep":
             notes.append(judge_kept_note(decided.reason))
         elif asked and decided is None and not not_published:
@@ -207,6 +213,9 @@ def build_capability_matrix(
                 domain=domain,
                 not_published=not_published,
                 note="; ".join(notes),
+                # Each analyst statement naming it, verbatim, by analyst: what
+                # the analysts said is theirs to weigh, never classified here.
+                statements=[f"{who}: {text}" for who, text in info.get("statements") or [] if text],
             )
         )
         if not_published:
@@ -243,6 +252,8 @@ def build_capability_matrix(
 # analysts rather than the sample, so counting it would turn one analyst's
 # claim into two agreeing sources.
 _JUDGE_SOURCE = "judge"
+# The layer name the judge contributes under, for renderers that count analyst layers.
+JUDGE_SOURCE = _JUDGE_SOURCE
 
 # Why an id that reached the report on a finding alone is not published. A
 # claim is questioned in its analyst's own loop — its technique id is asked
@@ -452,6 +463,7 @@ def _collect_techniques(
                 quote = getattr(claim, "claim", None) or getattr(claim, "evidence_ref", None) or ""
                 if quote and quote not in row["evidence"]:
                     row["evidence"].append(str(quote))
+                row.setdefault("statements", []).append((str(layer), str(quote)))
             # 3. The findings' own technique ids. An ISR carries ids in two
             # places, and this was the one no check ever saw: the report's
             # Findings table and the corroboration metric are both built from
@@ -479,8 +491,12 @@ def _collect_techniques(
                         row["stated_by"].append(f"the {layer} analyst, on a finding")
                     if layer and str(layer) not in row["layers"]:
                         row["layers"].append(str(layer))
+                    named_by = str(getattr(isr, "agent_id", "") or agent_name or "")
+                    if named_by and named_by not in row.setdefault("finding_named_by", []):
+                        row["finding_named_by"].append(named_by)
                     if title and title not in row["evidence"]:
                         row["evidence"].append(title)
+                    row.setdefault("statements", []).append((str(layer), title))
 
     # The catalogue question, asked of every id still standing. A claim was
     # asked it in the analyst's own loop and carries the answer; an id that

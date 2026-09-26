@@ -471,10 +471,11 @@ def _bundle_text(
         lines.append("")
     claims = bundle.get("claims") or []
     if claims:
-        lines.append("ANALYST CLAIMS (claim — evidence):")
+        lines.append(ANALYST_CLAIMS_HEADING)
         for c in claims:
             claim = f"{c.get('claim', '')} — {c.get('evidence_ref', '')}"
-            lines.append(f"- {_within(claim, item_chars)}" + _where_quoted(claim, entries))
+            label = f"[{c['label']}] " if c.get("label") else ""
+            lines.append(f"- {label}{_within(claim, item_chars)}" + _where_quoted(claim, entries))
         lines.append("")
     tools = bundle.get("tool_outputs") or []
     if tools:
@@ -486,6 +487,10 @@ def _bundle_text(
         lines.append("")
     return "\n".join(lines)
 
+
+# The heading of a section's analyst claims, each shown under its label: the
+# analyst and the claim's number in its answer in force.
+ANALYST_CLAIMS_HEADING = "ANALYST CLAIMS ([analyst claim number] claim — evidence):"
 
 # What a section is shown in place of a claim or a tool answer its window has
 # no room for.

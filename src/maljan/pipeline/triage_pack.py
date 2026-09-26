@@ -84,6 +84,7 @@ from maljan.tools import (
     strings,
 )
 from maljan.tools.errors import error_parts, normalise_error
+from maljan.tools.knowledge import RESOLVED_AT_RUNTIME
 from maljan.utils.written_forms import pack_escaped
 
 __all__ = [
@@ -654,7 +655,7 @@ class _Pack:
             self._reputation()
             self._function_matches()
             self._decoded_strings(routed)
-            self._resolved_values(routed)
+            self._resolved_values(routed, format_facts)
         finally:
             if self._floss_pool is not None:
                 self._floss_pool.shutdown(wait=False)
@@ -995,13 +996,16 @@ class _Pack:
             self.result.floss_schedule = "in turn"
         self.record("floss", args, self._floss_call())
 
-    def _resolved_values(self, routed: str) -> None:
+    def _resolved_values(self, routed: str, format_facts: dict[str, Any] | None = None) -> None:
         """A PE's hash values named and its encoded strings decoded, by the platform.
 
         Both read the file's bytes and nothing else, in seconds. After FLOSS,
         so the decoder can say which of its texts FLOSS recovered too, and
         last, so every id issued before them is the id it was before they
-        existed.
+        existed. Then, where the resolution named functions the import table
+        lacks, the capability lookup is asked about those names as resolved at
+        runtime (``resolved_names``), under the same platform the import-set
+        lookup was asked under, and recorded last for the same reason.
         """
         if routed != "pe":
             return
@@ -1012,7 +1016,7 @@ class _Pack:
         args: dict[str, Any] = {"path": path}
         if starts:
             args["function_starts"] = f"capa's {len(starts)} function starts"
-        self.record(
+        resolved = self.record(
             "resolve_api_hashes",
             args,
             lambda: api_hashes.resolve_api_hashes(path, function_starts=starts),
@@ -1022,6 +1026,14 @@ class _Pack:
             args,
             lambda: string_blobs.decode_string_blobs(path, function_starts=starts),
         )
+        platform = _BEHAVIOUR_PLATFORM_BY_FORMAT.get(routed)
+        names = _resolved_not_imported(resolved, _imported_names(format_facts))
+        if names and platform is not None:
+            self.record(
+                "api_capability",
+                {"api_names": [], "resolved_names": names, "platform": platform},
+                lambda: knowledge.api_capability([], platform=platform, resolved_names=names),
+            )
 
 
 def run_pack(
@@ -1070,6 +1082,33 @@ def _carries_signature(signing: dict[str, Any] | None) -> bool:
         if isinstance(block, dict) and block.get("present"):
             return True
     return False
+
+
+def _resolved_not_imported(resolved: dict[str, Any] | None, imported: list[str]) -> list[str]:
+    """The function names a ``resolve_api_hashes`` answer read that the import table lacks.
+
+    Readings from the export-name set only (a module name is not a function),
+    once each, in the answer's order; a value read two ways gives both names.
+    """
+    if not isinstance(resolved, dict):
+        return []
+    from maljan.analysis.api_capability_db import canonical_name
+
+    held = {canonical_name(name) for name in imported}
+    names: list[str] = []
+    seen: set[str] = set()
+    for hit in resolved.get("hits") or []:
+        if not isinstance(hit, dict):
+            continue
+        for reading in hit.get("readings") or []:
+            if not isinstance(reading, dict) or str(reading.get("set") or "exports") != "exports":
+                continue
+            name = str(reading.get("name") or "").strip()
+            key = canonical_name(name)
+            if name and key not in held and key not in seen:
+                seen.add(key)
+                names.append(name)
+    return names
 
 
 def _imported_names(format_facts: dict[str, Any] | None) -> list[str]:
@@ -1693,6 +1732,8 @@ def _api_capability(data: dict[str, Any]) -> str:
         f"API catalogue associations (reference): {len(catalogued)} of {len(rows)} APIs "
         "in the catalogue"
     )
+    if data.get("resolved_at_runtime_from_hashes") and all(r.get("obtained") for r in rows):
+        text += f" (names {RESOLVED_AT_RUNTIME}, not imports)"
     if behaviours:
         text += f", behaviours {_names(behaviours)}"
     if techniques:
@@ -1964,6 +2005,14 @@ def _around(place: dict[str, Any]) -> str:
     return ""
 
 
+def _passed_to(place: dict[str, Any]) -> str:
+    """`` (the address of its encoded bytes is argument 1 of the call at …)`` or ``""``."""
+    from maljan.tools.call_sites import passed_to_words
+
+    said = passed_to_words(place.get("passed_to"))
+    return f" ({said})" if said else ""
+
+
 def _hash_place(place: dict[str, Any]) -> str:
     where = str(place.get("rva") or f"file {place.get('offset')}")
     return f"{where}{_around(place)}"
@@ -2102,7 +2151,7 @@ def _blob_item(row: dict[str, Any]) -> str:
     places = [p for p in row.get("references") or [] if isinstance(p, dict)]
     head = _detail().list_head
     shown = places if head is None else places[:head]
-    refs = " ".join(f"{p.get('at')}{_around(p)}" for p in shown)
+    refs = " ".join(f"{p.get('at')}{_around(p)}{_passed_to(p)}" for p in shown)
     if len(shown) < len(places):
         refs += f" (+{len(places) - len(shown)} more)"
     where = row.get("rva") or f"file {row.get('offset')}"

@@ -23,6 +23,7 @@ from maljan.agents.base_agent import (
     BaseAnalyst,
     parse_structured_claims,
     parse_structured_claims_counted,
+    read_claim_blocks,
 )
 from maljan.agents.static_analyst import StaticAnalyst, _parse_claim_blocks
 from maljan.pipeline.validation import (
@@ -98,10 +99,13 @@ class TestABlockWithNoConfidenceIsNotAClaim:
         assert without == 1
         assert parse_structured_claims(text) == claims
 
-    def test_a_confidence_that_is_not_a_number_states_none(self) -> None:
+    def test_a_confidence_that_is_not_a_number_is_unread_and_quoted(self) -> None:
+        # The analyst wrote a confidence; the reader could not read it. That is
+        # an unread claim with its value quoted, not a block that stated none.
         text = GOOD_ANSWER.replace("CONFIDENCE: 0.8", "CONFIDENCE: 0.8.1")
 
-        assert parse_structured_claims_counted(text) == ([], 1)
+        assert parse_structured_claims_counted(text) == ([], 0)
+        assert read_claim_blocks(text).confidence_unreadable == ("0.8.1",)
         assert _parse_claim_blocks(text) == []
 
     def test_every_block_without_one_leaves_the_answer_prose(self) -> None:

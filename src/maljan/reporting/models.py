@@ -250,6 +250,12 @@ class StaticAnalysis(BaseModel):
     # from, so the profile line in the report points at rows a reader can open.
     api_capabilities: dict[str, int] = Field(default_factory=dict)
     api_capabilities_evidence_ids: list[str] = Field(default_factory=list)
+    # The same profile over the names the run resolved at runtime from stored
+    # values rather than read in the import table (``resolve_api_hashes``),
+    # counted apart so a function the program looks up at runtime is never
+    # printed as an import; empty on a report stored before the field existed.
+    api_capabilities_resolved: dict[str, int] = Field(default_factory=dict)
+    api_capabilities_resolved_evidence_ids: list[str] = Field(default_factory=list)
     # {behaviour_category: share of a named benign corpus the category appears
     # on}, recorded from the same answer. A count of imports in a category is
     # not a fact about the sample until a reader knows that ``execution`` is on
@@ -553,6 +559,10 @@ class CapabilityCell(BaseModel):
     # technique when asked (``isr_models.ABSENCE_TECHNIQUE_MARKER``). It
     # changes nothing about the row's publication.
     note: str = ""
+    # Each analyst statement naming the technique, verbatim, labelled by the
+    # analyst's layer ("static: …"): printed where a rule matched only names
+    # resolved at runtime, so a reader weighs what the analysts said.
+    statements: list[str] = Field(default_factory=list)
 
 
 class TTPMapping(BaseModel):
@@ -912,6 +922,12 @@ class RecoveredValue(BaseModel):
     offset: str = ""
     functions: list[str] = Field(default_factory=list)
     sites: list[str] = Field(default_factory=list)
+    # The calls the decoder joined a use of the text to, each in the words of
+    # ``call_sites.passed_to_words`` ("the address of its encoded bytes is
+    # argument 1 of the call at …; the frame slot …, given to that call as
+    # argument 2, is then argument 2 of the call at …; it is not followed past
+    # that call"); empty where it joined none, or on a record stored before it.
+    passed_to: list[str] = Field(default_factory=list)
 
 
 class EmulatedStrings(BaseModel):
@@ -933,6 +949,28 @@ class EmulatedStrings(BaseModel):
     plain: dict[str, str] = Field(default_factory=dict)
     partial: str = ""
     recovered_by: dict[str, list[RecoveredValue]] = Field(default_factory=dict)
+
+
+class ClaimNotDiscussed(BaseModel):
+    """An analyst claim in force whose code locations or API names the body does not name.
+
+    Listed by ``reporting.claim_coverage`` after the body is composed, with
+    the claim as the analyst wrote it and what the check found: ``missing``,
+    the names the body never names, as the claim wrote them; or, for a claim
+    that names none, how many of its words the body carries.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    agent: str
+    claim_number: int
+    claim: str
+    evidence_ref: str = ""
+    confidence: float | None = None
+    missing: list[str] = Field(default_factory=list)
+    carried: int = 0
+    named: int = 0
+    counted: str = "names"
 
 
 class FlaggedStatement(BaseModel):
@@ -1191,6 +1229,10 @@ class MalwareReport(BaseModel):
     # about and the retry left standing, marked in place by the renderers;
     # empty on a report stored before the field existed.
     flagged_statements: list[FlaggedStatement] = Field(default_factory=list)
+    # The analyst claims in force the body neither cites nor discusses, listed
+    # after the body is composed (``reporting.claim_coverage``) and printed in
+    # a section of their own; empty on a report stored before the field existed.
+    claims_not_discussed: list[ClaimNotDiscussed] = Field(default_factory=list)
     # For each technique a YARA rule of this run asserted, the rules and how
     # many of each rule's own strings matched (``{"rule", "strings"}``), as the
     # scan answered. Read by the ATT&CK table's "rule match only" note and by

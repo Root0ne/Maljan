@@ -310,7 +310,11 @@ class TestTheClaimsShareTheWindow:
         sent = _compose(isrs, window_tokens=4000, output_cap=1000)
 
         prompt = sent["introduction"]
-        shown = [line for line in prompt.splitlines() if line.startswith("- The sample writes")]
+        shown = [
+            line
+            for line in prompt.splitlines()
+            if line.startswith("- [static claim ") and "The sample writes" in line
+        ]
         assert len(shown) == 40
         assert all(line.endswith(CUT_MARK) for line in shown)
         assert len(prompt) <= (4000 - 1000) * CHARS_PER_TOKEN

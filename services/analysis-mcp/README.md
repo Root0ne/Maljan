@@ -192,7 +192,35 @@ RIP-relative displacements in x64 code and absolute virtual addresses anywhere
 that land on the blob or its text — or that FLOSS recovered too in this
 process (`floss`, with FLOSS's routine and call site; FLOSS's kept result is
 read, never run); the rest are counted under `unreferenced` and listed with
-`include_unreferenced`. Measured on 54 benign PEs on this project's host
+`include_unreferenced`. Where a reference loads the address of the text's
+encoded bytes as a call argument, the reference carries `passed_to` (and
+`address_of`: `blob` or, past a header, `text`): the call's address, the argument
+position (and, on x64, the register) and the callee — the import the file's
+import table puts in the slot the call or a jump thunk goes through, the
+function at a direct call's target, or the slot a runtime pointer is read from.
+It is read statically and generically: an x64 `lea` into `rcx`, `rdx`, `r8` or
+`r9`, or an x86 `push` of the address or a store to `[esp+n]`, confirmed as an
+instruction by decoding its function from the start, then decoded instruction
+by instruction to the first call in the same function. A jump or return
+before the call, an undecodable byte, the function's end, a write to the
+argument register, another stack move for a pushed argument, a call through a
+register, or no function table around the reference leave it absent. That
+call is usually the program's own decoding routine, and it receives the
+encoded bytes. After that call, the walk follows to the next call in the same function that
+receives one of two things (`output_passed_to`, x64): the one frame slot whose
+address the call was given as another argument, else its return value in `rax`.
+It is said as a fact about the slot or the register ("the frame slot [rsp+0xa0],
+given to that call as argument 2, is then argument 2 of the call at …"; "that
+call's return value in rax is then …"), never as what the first call does with
+it, and nothing is followed past that later call. The walk tracks registers and
+frame slots, ends tracking of a slot any store overlaps (sized by the store's
+width, SSE and VEX stores included; within 16 bytes where the width cannot be
+read), follows unconditional jumps and falls through conditional ones (said),
+and is absent at a return, an undecodable byte, a jump back, the function's end
+or a stack or frame pointer write.
+On the two x64 launchers vendored with this project's
+Python environment every function in the function table decodes exactly to its
+end, and every join checked against `objdump -d` agrees. Measured on 54 benign PEs on this project's host
 (launcher and runtime binaries, DirectX and Wine-built system DLLs, the five
 above): 6 results in all, none written by the program as encoded text.
 

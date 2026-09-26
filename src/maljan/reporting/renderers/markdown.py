@@ -1098,6 +1098,18 @@ class MarkdownRenderer:
                         ]
                     )
                 lines.append("")
+        if static.api_capabilities_resolved:
+            from maljan.tools.knowledge import RESOLVED_AT_RUNTIME
+
+            ordered = sorted(static.api_capabilities_resolved.items(), key=lambda kv: -kv[1])
+            cited = _ids(static.api_capabilities_resolved_evidence_ids)
+            lines.append(
+                f"**Capability profile of the names {RESOLVED_AT_RUNTIME}** (not imports"
+                + (f"; {cited}" if cited else "")
+                + "): "
+                + ", ".join(f"{_one_line(cat)} ×{count}" for cat, count in ordered)
+            )
+            lines.append("")
 
         if static.export_rows or static.exports:
             lines.extend([_plain_heading("Exports"), ""])
@@ -1262,7 +1274,7 @@ class MarkdownRenderer:
                     ", ".join(mapping.contributing_layers) or "-",
                     _stated(mapping.confidence, ""),
                     "published"
-                    + (", corroborated" if mapping.is_corroborated else "")
+                    + _corroborated_words(mapping, folded)
                     + (f"; {ctx.rule_only[tid]}" if tid in ctx.rule_only else ""),
                     ", ".join(
                         dict.fromkeys(
@@ -1277,6 +1289,7 @@ class MarkdownRenderer:
             if tid in seen:
                 continue
             lines.append(_rule_only_row(tid, folded, mappings, capa_ids))
+        lines.extend(_resolved_only_lines(sorted(cells, key=_tactic_key), rules_by_tid, ctx))
         if hits:
             lines.extend(
                 [
@@ -1741,6 +1754,7 @@ class MarkdownRenderer:
             "returned them. Assessed sections are the models' conclusions, reported as "
             "they wrote them; the checks above are the platform's comments on them."
         )
+        lines.extend(_claims_not_discussed_lines(report, ctx))
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
@@ -1820,6 +1834,8 @@ class MarkdownRenderer:
                     lines.append(_item(f"Final confidence: {float(final_conf):.3f}"))
                 except (TypeError, ValueError):
                     pass
+            for sentence in negotiation.get("revision_replacements") or []:
+                lines.append(_item(str(sentence)))
         for line in generation_lines(run_summary.get("generation")):
             lines.append(_item(line))
         ungrounded = run_summary.get("sections_without_evidence")
@@ -2484,6 +2500,32 @@ def _title_heading(title: str) -> str:
     return f"# {_one_line(title)}"
 
 
+def _claims_not_discussed_lines(report: MalwareReport, ctx: _Context) -> list[str]:
+    """The claims in force whose code the body does not name, each whole, with what it lacks."""
+    from maljan.reporting.claim_coverage import COVERAGE_RULE, carried_sentence, claim_label
+
+    rows = list(getattr(report, "claims_not_discussed", None) or [])
+    if not rows:
+        return []
+    lines = ["", _subheading("13.1", CLAIMS_NOT_DISCUSSED_TITLE, MEASURED), "", COVERAGE_RULE, ""]
+    for row in rows:
+        stated = (
+            f"confidence {row.confidence:.2f}; " if isinstance(row.confidence, int | float) else ""
+        )
+        evidence = f" Evidence: {row.evidence_ref}" if row.evidence_ref.strip() else ""
+        lines.append(
+            _item(
+                f"**{claim_label(row.agent, row.claim_number)}** ({stated}"
+                f"{carried_sentence(row)}): {ctx.plain(row.claim)}{ctx.plain(evidence)}"
+            )
+        )
+    return lines
+
+
+# The heading of the list of claims in force the body does not discuss.
+CLAIMS_NOT_DISCUSSED_TITLE = "Claims whose code locations or API names the body does not name"
+
+
 def _heading(number: int, title: str, voice: str) -> str:
     """An H2 with its section number and its voice tag."""
     return f"## {number}. {_one_line(title)} · _{voice}_"
@@ -2985,7 +3027,17 @@ def _attack_row(
     # Every producer that named the technique, each once: the rules that
     # asserted it, the analysts that claimed it, and the matrix's own layers —
     # the judge's verdict among them — which the corroboration does not count.
-    named = [f"{source} (rule match)" for source in dict.fromkeys(asserted + rule_sources)]
+    # A rule that matched only names resolved at runtime says so in its label.
+    runtime_only = {
+        str(hit.get("source") or "rule")
+        for hit in rules
+        if _resolved_only(hit)
+        and all(_resolved_only(h) for h in rules if h.get("source") == hit.get("source"))
+    }
+    named = [
+        f"{source} ({RESOLVED_ONLY_RULE_LABEL if source in runtime_only else 'rule match'})"
+        for source in dict.fromkeys(asserted + rule_sources)
+    ]
     named += [
         str(x) for x in [*claimed, *cell.contributing_layers] if x not in asserted + rule_sources
     ]
@@ -3007,9 +3059,7 @@ def _attack_row(
     elif cell.not_published:
         status = f"claimed, not published: {_truncate(cell.not_published, 200)}"
     else:
-        status = "published" + (
-            ", corroborated" if mapping is not None and mapping.is_corroborated else ""
-        )
+        status = "published" + _corroborated_words(mapping, rules)
         rule_only = ctx.rule_only.get(cell.technique_id)
         if rule_only:
             status += f"; {rule_only}"
@@ -3048,10 +3098,98 @@ def _rule_words(hit: dict[str, Any]) -> str:
     matched = ", ".join(f"`{a}`" for a in (hit.get("matched_apis") or [])[:6]) or "-"
     rule = str(hit.get("rule") or hit.get("name") or "").strip()
     # capa names the namespace a rule lives in; the knowledge table names the
-    # imports its rule matched.
-    where = f"namespace {matched}" if hit.get("source") == "capa" else f"imports {matched}"
+    # imports its rule matched, and the names it matched that the run resolved
+    # at runtime from stored values apart from them: those are not imports.
+    where = f"namespace {matched}" if hit.get("source") == "capa" else _matched_names(hit)
     said = (f"rule {rule} ({hit.get('source') or 'rule'}), " if rule else "") + where
     return said + f"; base rate {hit.get('benign_rate') or 'not measured'}"
+
+
+# How a rule that matched only names resolved at runtime is named as a source:
+# a platform fact about the match, and no corroboration of the technique.
+RESOLVED_ONLY_RULE_LABEL = (
+    "rule match on names resolved at runtime from hashes only, no import; not counted as "
+    "corroboration"
+)
+
+
+def _resolved_only(hit: dict[str, Any]) -> bool:
+    """Whether a knowledge-table rule matched only names resolved at runtime."""
+    matched = [str(a) for a in (hit.get("matched_apis") or [])]
+    resolved = {str(a) for a in (hit.get("resolved_apis") or [])}
+    return bool(matched) and all(name in resolved for name in matched)
+
+
+def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
+    """``, corroborated`` for a row two analyst layers named, or ``""``.
+
+    A technique a rule matched only on runtime-resolved names has its analysts'
+    statements listed under the table; its row points there, so a reader of the
+    row alone does not take the word for more than a count of layers.
+    """
+    if mapping is None or not mapping.is_corroborated:
+        return ""
+    if rules and all(_resolved_only(hit) for hit in rules):
+        from maljan.extractors.capability_matrix import JUDGE_SOURCE
+
+        layers = len([lyr for lyr in mapping.contributing_layers if lyr != JUDGE_SOURCE])
+        return (
+            f", corroborated (named by {layers} analyst layers; their statements are listed "
+            "below the table)"
+        )
+    return ", corroborated"
+
+
+def _resolved_only_lines(
+    cells: list[Any], rules_by_tid: dict[str, list[dict[str, Any]]], ctx: Any
+) -> list[str]:
+    """For each technique a rule matched only on runtime-resolved names, the analysts' words.
+
+    The statements naming the technique, verbatim and by analyst, so a reader
+    weighs whether any says the sample does it; nothing here reads them.
+    """
+    lines: list[str] = []
+    for cell in cells:
+        hits = rules_by_tid.get(cell.technique_id) or []
+        if not hits or not all(_resolved_only(hit) for hit in hits):
+            continue
+        said = list(getattr(cell, "statements", None) or [])
+        if not lines:
+            lines.extend(
+                [
+                    "",
+                    "**Techniques a rule matched only on names resolved at runtime from hashes** "
+                    "(the match is not counted as corroboration; each analyst statement naming "
+                    "the technique follows, verbatim):",
+                    "",
+                ]
+            )
+        lines.append(_item(f"{cell.technique_id} {cell.technique_name}:"))
+        lines.extend(f"  - {ctx.line(text)}" for text in said)
+        if not said:
+            lines.append("  - no analyst statement names it")
+    return lines
+
+
+def _matched_names(hit: dict[str, Any]) -> str:
+    """What a knowledge-table rule matched: its imports, and its names resolved at runtime."""
+    from maljan.tools.knowledge import RESOLVED_AT_RUNTIME
+
+    matched = [str(a) for a in (hit.get("matched_apis") or [])]
+    at_runtime = [a for a in matched if a in {str(r) for r in (hit.get("resolved_apis") or [])}]
+    imported = [a for a in matched if a not in at_runtime]
+    if not at_runtime:
+        return f"imports {_quoted_names(imported)}"
+    if not imported:
+        return f"matched only names {RESOLVED_AT_RUNTIME}, no import: {_quoted_names(at_runtime)}"
+    return (
+        f"imports {_quoted_names(imported)}; names {RESOLVED_AT_RUNTIME} "
+        f"{_quoted_names(at_runtime)}"
+    )
+
+
+def _quoted_names(names: list[str]) -> str:
+    return ", ".join(f"`{a}`" for a in names[:6]) or "-"
 
 
 def _with_rules(procedure: str, rules: list[dict[str, Any]]) -> str:

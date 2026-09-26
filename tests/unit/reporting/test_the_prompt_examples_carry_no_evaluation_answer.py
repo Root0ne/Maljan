@@ -99,6 +99,7 @@ from maljan.pipeline.validation import (
     claim_does_not_describe_violation,
     claims_kept_under_disputes_finding,
     claims_under_disputes_violation,
+    confidence_violation,
     gate_removed_note,
     misstated_entry_contents,
     repeated_item_violations,
@@ -120,13 +121,19 @@ from maljan.reporting.composer import (
     _INSTRUCTIONS,
     _PROSE_SECTIONS,
     _SYSTEM,
+    ANALYST_CLAIMS_HEADING,
     PUBLISHED_TECHNIQUES_HEADING,
     RULE_ONLY_NOTE,
     SECTION_SCHEMAS,
     WHERE_QUOTED_LEAD,
     section_contract,
 )
-from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXAMPLE_OBJECT, EXPECTED_OBJECT
+from maljan.reporting.narrative_agent import (
+    _SYSTEM_PROMPT,
+    CLAIMS_IN_FORCE_HEADING,
+    EXAMPLE_OBJECT,
+    EXPECTED_OBJECT,
+)
 from maljan.reporting.renderers.stix_renderer import (
     BENIGN_NAME_IN_A_URL,
     BENIGN_NAME_RESOLVED,
@@ -140,6 +147,7 @@ from maljan.schemas.isr_models import (
     JUDGE_ONLY_TECHNIQUE_MARKER,
     JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
     ClaimEvidence,
+    judge_and_findings_note,
     judge_dropped_reason,
     judge_kept_note,
 )
@@ -390,6 +398,16 @@ PROMPTS: dict[str, str] = {
     ),
     "rule-match-only note": RULE_ONLY_NOTE,
     "judge-only technique note": JUDGE_ONLY_TECHNIQUE_MARKER,
+    "judge-named technique named on findings note": judge_and_findings_note(["a", "b"]),
+    "the runtime-name wording and the capability lookup's description": " ".join(
+        [
+            knowledge.RESOLVED_AT_RUNTIME,
+            str(knowledge.api_capability.__doc__ or ""),
+        ]
+    ),
+    "the claims headings of a composer section and the narrative round": (
+        f"{ANALYST_CLAIMS_HEADING} {CLAIMS_IN_FORCE_HEADING}"
+    ),
     "analyst retry closing line": ANALYST_FEEDBACK_CLOSING,
     "judge technique question": " ".join(
         [
@@ -454,7 +472,53 @@ PROMPTS: dict[str, str] = {
                             "rva": "0x1",
                             "scheme": "s",
                             "parameters": {"key": "0x1"},
-                            "references": [{"at": "0x2", "function": "0x0"}],
+                            "references": [
+                                {"at": "0x2", "function": "0x0"},
+                                {
+                                    "at": "0x3",
+                                    "function": "0x0",
+                                    "passed_to": {
+                                        "call_at": "0x9",
+                                        "callee": {"slot": "0x10"},
+                                        "argument": 2,
+                                    },
+                                },
+                                {
+                                    "at": "0x4",
+                                    "passed_to": {
+                                        "call_at": "0xa",
+                                        "callee": {"function": "0x20"},
+                                        "argument": 1,
+                                        "address_of": "text",
+                                        "output_passed_to": {
+                                            "call_at": "0xc",
+                                            "callee": {"import": "D.dll!F"},
+                                            "argument": 3,
+                                            "followed": (
+                                                "the frame slot [rsp+0x40], given to that "
+                                                "call as argument 2,"
+                                            ),
+                                            "fall_through": True,
+                                        },
+                                    },
+                                },
+                                {
+                                    "at": "0x5",
+                                    "passed_to": {
+                                        "call_at": "0xd",
+                                        "callee": {"function": "0x20"},
+                                        "argument": 1,
+                                        "address_of": "blob",
+                                        "output_passed_to": {
+                                            "call_at": "0xe",
+                                            "callee": {"slot": "0x18"},
+                                            "argument": 1,
+                                            "followed": "that call's return value in rax",
+                                            "fall_through": False,
+                                        },
+                                    },
+                                },
+                            ],
                             "floss": {"function_rva": "0x0", "called_at_rva": "0x2"},
                         }
                     ],
@@ -465,6 +529,14 @@ PROMPTS: dict[str, str] = {
             ),
             triage_pack._decoded_blobs({"results": [], "total": 0}),
         ]
+    ),
+    "the pack's capability line for names resolved at runtime": triage_pack._api_capability(
+        {
+            "capabilities": [
+                {"api": "N", "category": "c", "obtained": knowledge.RESOLVED_AT_RUNTIME}
+            ],
+            "resolved_at_runtime_from_hashes": ["N"],
+        }
     ),
     "the stated candidate scan and readability test": (
         f"{api_hashes.SCAN_HEURISTIC} {string_blobs.READABLE_TEST}"
@@ -637,6 +709,18 @@ PROMPTS: dict[str, str] = {
     ),
     "the degradation reason for claims begun and not read": claims_unread_sentence(
         "reverser", ClaimRead(claims=[], without_confidence=1, begun=4, after_disputes=2), 2
+    ),
+    "the unread reason and the question for a confidence the reader could not read": " ".join(
+        [
+            claims_unread_sentence(
+                "reverser",
+                ClaimRead(
+                    claims=[], without_confidence=0, begun=2, confidence_unreadable=("x", "y")
+                ),
+                1,
+            ),
+            confidence_violation(1, ["x"]).message,
+        ]
     ),
     "failure of a capture the platform filled in": " ".join(
         [UNREADABLE_FILLED_CAPTURE, UNREADABLE_FILLED_CAPTURE_REMEDIATION]

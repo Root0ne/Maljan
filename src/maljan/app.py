@@ -466,6 +466,7 @@ class MaljanApp:
             "validation_findings": {},
             "validation_retries": 0,
             "validation_fed_back": {},
+            "revision_replacements": [],
             "validation_not_run": [],
             "triage_facts": {},
             "nudge_retry_modes": {},

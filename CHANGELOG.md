@@ -8,6 +8,31 @@ change landed on `main`.
 
 ### Added
 
+- **Every analyst claim in force reaches the report: cited, named, or
+  listed.** Each composer section and, new, the narrative round show every
+  claim in force under its label (`static claim 15`: the analyst and the
+  claim's number in its answer in force); the narrative round is handed every
+  claim whole. After the body is composed, `reporting.claim_coverage` lists
+  every claim not cited by its label whose code locations (function names) or
+  API-style names the body does not all name, with the names it lacks (a
+  claim naming none is read by its words). It is stored
+  (`MalwareReport.claims_not_discussed`), counted
+  (`run_summary.claims_not_discussed`) and printed under §13.1 "Claims whose
+  code locations or API names the body does not name".
+- **An encoded string is joined to the call its bytes go to, and to the next
+  call that receives that call's frame slot or return value.**
+  `decode_string_blobs` states `passed_to` beside a reference: the call the address of the encoded bytes is passed to (usually
+  the program's decoder) with its callee (an import, a function address, or
+  the slot a runtime pointer is read from) and argument position, read
+  statically by `tools.call_sites` from an x64 `lea` into an argument register
+  or an x86 push or stack store; and on x64 `output_passed_to`, the next call
+  in the function that receives the frame slot that call was given as another
+  argument, else its return value, said as a fact about the slot or the
+  register, with nothing followed past it. Absent wherever the code does not
+  show it. The triage pack's decoded-string line and the IOC
+  provenance say both.
+  `pe_image` reads the import table.
+
 - **The platform resolves API hashes and decodes encoded strings, by address.**
   Two analysis-server tools, run by the triage pack on every PE as its last two
   steps and shown in the pack every agent reads. `resolve_api_hashes` names the
@@ -2299,6 +2324,30 @@ change landed on `main`.
 
 ### Fixed
 
+- **A confidence is read through the punctuation after it.** A CONFIDENCE
+  value is the number that opens it, from 0 to 1, or a percentage: `0.9.` read
+  as no number, and one analyst's 18-claim revision reached the run as 3
+  claims with nothing unread. A label with anything else after it is an unread
+  claim whose value the unread reason quotes and the validation turn asks
+  about; a bare number above one is no longer held to 1.0.
+- **A revision is checked like a first answer, and one with fewer claims is
+  stated.** A revision round's answer now passes the consistency gate and the
+  validation turn (claim count, confidence, technique lines). A revision the
+  model made with fewer claims still replaces the answer in force, and
+  `run_summary.negotiation.revision_replacements` states it.
+- **Names resolved at runtime from hashes are not imports.** `api_capability`
+  takes `resolved_names` and marks them; the triage pack records one more
+  lookup after `resolve_api_hashes` with the resolved names the import table
+  lacks; the report's projection also reads
+  the ledger's `resolve_api_hashes` answers and counts such names apart
+  (`static.api_capabilities_resolved`, `resolved_apis` on a rule row). The
+  ATT&CK table no longer prints them as "imports". A rule that matched only
+  such names is named as a source "rule match on names resolved at runtime from
+  hashes only, no import; not counted as corroboration", and each analyst
+  statement naming its technique is printed verbatim beside it.
+- **An ATT&CK row no longer says "claimed by no analyst" of a technique
+  analysts named on a finding.** The row names those analysts, the sources the
+  run's corroboration record lists.
 - **One refused call no longer ends the job.** A refusal used to latch the
   spend as exhausted: in a 2.00 USD DeepSeek run one mediation turn refused at
   its whole cap stopped every revision after it with 0.12 USD still

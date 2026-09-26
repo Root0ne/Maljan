@@ -111,7 +111,7 @@ from typing import Any
 
 import numpy as np
 
-from maljan.tools import emulated_strings, pe_image
+from maljan.tools import call_sites, emulated_strings, pe_image
 
 TOOL = "decode_string_blobs"
 
@@ -795,10 +795,23 @@ def decode_string_blobs(
         text_rva = image.rva_of_offset(item.text_offset)
         section = image.section_at_offset(item.blob_offset)
         sites: list[int] = []
+        # Which address each reference takes: the blob's start, or the text's
+        # inside it where a header stands before the text.
+        takes: dict[int, str] = {}
         for rva in (blob_rva, text_rva):
             if rva is not None:
-                sites.extend(references.get(rva, []))
-        places = [image.where(at) for at in sorted(set(sites))]
+                for at in references.get(rva, []):
+                    sites.append(at)
+                    takes.setdefault(at, "text" if rva != blob_rva else "blob")
+        ordered = sorted(set(sites))
+        places = [image.where(at) for at in ordered]
+        # Where the reference loads the address as a call's argument, which
+        # call and which argument (``call_sites.passed_to``), said as the
+        # address of the encoded bytes it is; absent otherwise.
+        calls = [call_sites.passed_to(image, at) for at in ordered]
+        for at, call in zip(ordered, calls, strict=True):
+            if call is not None:
+                call["address_of"] = takes.get(at, "blob")
         row: dict[str, Any] = {
             "offset": hex(item.blob_offset),
             "rva": hex(blob_rva) if blob_rva is not None else None,
@@ -818,8 +831,9 @@ def decode_string_blobs(
                         for key in ("after_function_start", "function_source")
                         if key in place
                     },
+                    **({"passed_to": call} if call else {}),
                 }
-                for place in places
+                for place, call in zip(places, calls, strict=True)
             ],
         }
         if item.layers:

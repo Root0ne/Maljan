@@ -319,3 +319,9 @@ class AnalysisState(TypedDict):
     # leftovers alone reported ``{}`` beside a non-zero retry count. Counts
     # add across the analysts that ran in parallel.
     validation_fed_back: Annotated[dict[str, int], _merge_counts]
+
+    # A revision that stood with fewer claims than the answer it replaced, one
+    # sentence each (``nodes.revision_replacement_sentence``). Append-only:
+    # every round adds its own; the judge reads them into
+    # ``run_summary.negotiation.revision_replacements``.
+    revision_replacements: Annotated[list[str], operator.add]
