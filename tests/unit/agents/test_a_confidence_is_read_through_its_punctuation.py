@@ -53,6 +53,7 @@ def test_the_strict_reading_reads_them_too() -> None:
         ("CONFIDENCE: 0.9.", 0.9),
         ("CONFIDENCE: 0.9,", 0.9),
         ("CONFIDENCE: 0.9;", 0.9),
+        ("CONFIDENCE: 0.9, high", 0.9),
         ("CONFIDENCE: 0.9)", 0.9),
         ("CONFIDENCE: **0.9**.", 0.9),
         ("CONFIDENCE: `0.7`", 0.7),
@@ -82,6 +83,9 @@ def test_a_number_is_read_whatever_follows_it(line: str, expected: float) -> Non
         ("CONFIDENCE: -0.2", "-0.2"),
         ("CONFIDENCE: 0.9.5", "0.9.5"),
         ("CONFIDENCE: 150%", "150%"),
+        ("CONFIDENCE: 0,85", "0,85"),
+        ("CONFIDENCE: 0.8-0.9", "0.8-0.9"),
+        ("CONFIDENCE: 0.8 \u2013 0.9", "0.8 \u2013 0.9"),
         ("CONFIDENCE:", "(empty)"),
     ],
 )

@@ -1447,8 +1447,12 @@ _BLOCK_CONFIDENCE_RE = re.compile(_INLINE + r"CONFIDENCE:[ \t]*(.*)$", re.MULTIL
 # The number that opens the value: digits with at most one decimal point, and
 # a percent sign after it where one is written. What follows the number (a
 # full stop, a comma, a bracketed note, words) is the sentence around it, and
-# a number that runs on into more digits ("0.9.5") is no number read here.
-_CONFIDENCE_NUMBER_RE = re.compile(r"(\d+(?:\.\d+)?|\.\d+)(?![\d.]*\d)\s*(%)?")
+# a number that runs on into more digits ("0.9.5") is no number read here, nor
+# one a comma or a dash joins to more digits: a decimal comma ("0,85") or a
+# range ("0.8-0.9") is a value this reader would have to guess at.
+_CONFIDENCE_NUMBER_RE = re.compile(
+    r"(\d+(?:\.\d+)?|\.\d+)(?![\d.]*\d)(?!\s*[,\-\u2013\u2014]\s*\d)\s*(%)?"
+)
 # Marks a model writes around a value: emphasis, code quotes and a bracket.
 _CONFIDENCE_MARKS = "*_`([ \t"
 # What the reader states a CONFIDENCE value as, when it reads none.
@@ -1818,10 +1822,11 @@ def _stated_confidence(match: re.Match[str] | None) -> float | None:
 
     The number that opens the value, whatever follows it: "0.9." and "0.9,"
     and "0.85 (one part lower)" all state 0.9 or 0.85. A number from 0 to 1 is
-    read as written, and a percentage from 0 to 100 as its share ("85%" is
-    0.85), which are the two forms the claim format allows. Anything else —
-    a word, a number above one written without a percent sign, a negative
-    number, a number that runs on into more digits — is not read: the claim
+    read as written, as the prompts ask, and a percentage written with its
+    sign is read as its share ("85%" is 0.85). Anything else — a word, a
+    number above one written without a percent sign, a negative number, a
+    number that runs on into more digits, a decimal comma, a range — is not
+    read: the claim
     is unread and the sentence recording it quotes the value, and nothing
     here decides what a number outside the scale meant.
     """
