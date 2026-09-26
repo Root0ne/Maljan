@@ -120,12 +120,21 @@ def upgrade() -> None:
             if stage.get("mode") == "sequential":
                 stage.pop("mode", None)
                 touched = True
+                # Said per stage, because an operator who had chosen
+                # ``sequential`` has to know what to pin again.
+                logger.warning(
+                    "runtime_settings: team %r stage %r no longer says 'sequential'; it now "
+                    "follows the job's analyst mode (llm.parallel_analysts). Pick "
+                    "'sequential' on the stage card to pin it.",
+                    str(name),
+                    str(stage.get("key") or ""),
+                )
         if touched:
             changed.append(str(name))
     if not changed:
         return
     _store_profiles(conn, profiles)
-    logger.info(
+    logger.warning(
         "runtime_settings: the analysis stages of %s follow the job's analyst mode",
         ", ".join(sorted(changed)),
     )

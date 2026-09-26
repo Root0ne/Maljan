@@ -294,8 +294,12 @@ class TestANodeRunsOnceAfterEveryStageItDependsOn:
         runs = _run(settings, monkeypatch, parallel=parallel)
         _assert_once_each(runs, settings, parallel)
         runs = _run(settings, monkeypatch, loops=1, parallel=parallel)
-        if REVISION_NODE in runs:
-            assert runs[REVISION_NODE] == 1
+        debates = [s for s in container.active_profile().stages if s.kind == "debate"]
+        revisions = {name: n for name, n in runs.items() if name.endswith(REVISION_NODE)}
+        # One revision round per debate, each taken once; a team with no
+        # debate (the lead's) has none.
+        assert len(revisions) == len(debates)
+        assert set(revisions.values()) <= {1}
         assert runs[JUDGE_NODE] == 1
         assert runs[REPORT_NODE] == 1
 

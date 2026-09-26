@@ -342,9 +342,14 @@ class ServiceContainer:
         samples_dir: str = "data/samples",
         event_sink: EventSink | None = None,
         job_id: str = "",
+        resolved_mode: Any = None,
     ) -> None:
         self.config = config
         self.mock = mock
+        # The job's analyst mode as the caller resolved it off its event loop
+        # (``pipeline.analyst_mode.resolve_for``), or ``None`` to resolve it
+        # here on first use.
+        self._job_mode: Any = resolved_mode
         # The identity of the job this container serves, as the caller that
         # queued it knows it. Empty for the CLI and for tests, which run one
         # analysis per process and have no such id to give.
@@ -419,8 +424,11 @@ class ServiceContainer:
         self._function_summarizer_cache: FunctionSummarizer | None = None
         self._narrative_agent_cache: Any | None = None
         # The analyst run mode this job resolved (``pipeline.analyst_mode``),
-        # once; ``None`` until the first read.
+        # with what every stage runs in, once; ``None`` until the first read.
         self._analyst_mode: Any = None
+        # The active profile with its unset stage modes resolved, once per
+        # job, keyed by the stored profile it was resolved from.
+        self._resolved_profile: tuple[Any, Any] | None = None
         self._report_composer_cache: Any | None = None
         self._samples_dir = str(resolve_data(samples_dir))
 
@@ -1040,29 +1048,49 @@ class ServiceContainer:
         profile = active_profile(self.config)
         if not any(s.kind == "analysis" and s.mode is None for s in profile.stages):
             return profile
-        return with_resolved_modes(profile, self.analyst_mode())
+        held = self._resolved_profile
+        if held is not None and held[0] is profile:
+            return held[1]
+        resolved = with_resolved_modes(profile, self.analyst_mode())
+        with self._lock:
+            self._resolved_profile = (profile, resolved)
+        return resolved
 
     def analyst_mode(self) -> Any:
         """Whether this job's analysts run in parallel, and why (``pipeline.analyst_mode``).
 
-        Resolved once per job and logged. A mock job asks nothing of any
-        server; with ``llm.parallel_analysts`` on ``auto`` it runs its
+        Resolved once per job — handed in by the worker, which resolves it on
+        a thread, or resolved here — and logged with what every analysis
+        stage and every revision round runs in. A mock job asks nothing of
+        any server; with ``llm.parallel_analysts`` on ``auto`` it runs its
         analysts one after another.
         """
         held = self._analyst_mode
         if held is not None:
             return held
-        from maljan.agents.composition import analyst_keys
-        from maljan.pipeline.analyst_mode import mock_mode, resolve_analyst_mode
+        from dataclasses import replace
 
-        if self.mock:
-            resolved = mock_mode(self.config)
-        else:
-            resolved = resolve_analyst_mode(self.config, analyst_keys(self.config), probe=True)
+        from maljan.agents.composition import active_profile
+        from maljan.pipeline.analyst_mode import (
+            AnalystMode,
+            resolve_for,
+            stage_modes,
+            stage_sentences,
+            with_resolved_modes,
+        )
+
+        job = self._job_mode
+        if not isinstance(job, AnalystMode):
+            job = resolve_for(self.config, mock=self.mock)
+        stored = active_profile(self.config)
+        rows = stage_modes(stored, with_resolved_modes(stored, job), job)
+        resolved = replace(job, stages=rows)
         with self._lock:
             if self._analyst_mode is None:
                 self._analyst_mode = resolved
                 logger.info("%s", resolved.sentence())
+                for line in stage_sentences(rows):
+                    logger.info("%s", line)
             return self._analyst_mode
 
     def analyst_keys(self) -> list[str]:

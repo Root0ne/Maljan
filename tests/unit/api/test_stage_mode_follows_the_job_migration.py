@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -111,11 +112,15 @@ def test_the_revision_follows_the_report_one():
     assert mod.down_revision == "20261001000000"
 
 
-def test_a_sequential_the_old_default_wrote_becomes_unset():
+def test_a_sequential_the_old_default_wrote_becomes_unset(caplog):
     conn = _engine({"core.agents.profiles": json.dumps(STORED)})
-    with conn:
+    with conn, caplog.at_level(logging.WARNING):
         _run(conn, "upgrade")
         profiles = _profiles(conn)
+    # Each rewritten stage is named, at WARNING, so a chosen one can be pinned again.
+    said = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("team 'written' stage 'analysis'" in line for line in said)
+    assert not any("'fanned'" in line or "'derived'" in line for line in said)
     assert "mode" not in _analysis(profiles, "written")
     assert _analysis(profiles, "fanned")["mode"] == "parallel"
     assert _analysis(profiles, "derived")["mode"] == "sequential"

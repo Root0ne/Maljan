@@ -3323,15 +3323,22 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         # state and every step re-processes its prompt (see
         # LLMConfig.parallel_analysts). The initial pass is serialised by the
         # graph edges, but this revision node fans out itself, so it follows
-        # the job's resolved analyst mode (``pipeline.analyst_mode``). When
-        # sequential, await each revise in turn (exclusive slot use); when
-        # parallel, keep the concurrent gather for hosted multi-slot APIs.
-        # Both branches tolerate a per-analyst failure (mirrors
-        # gather(return_exceptions=True)) so one bad revise never aborts the
-        # round.
+        # the mode of the stages it revises (``pipeline.analyst_mode``), the
+        # job's where none is found. When sequential, await each revise in
+        # turn (exclusive slot use); when parallel, keep the concurrent gather
+        # for hosted multi-slot APIs. Both branches tolerate a per-analyst
+        # failure (mirrors gather(return_exceptions=True)) so one bad revise
+        # never aborts the round.
         from maljan.pipeline.analyst_mode import analyst_mode_of
+        from maljan.pipeline.analyst_mode import revision_mode as mode_of_revision
 
-        parallel = analyst_mode_of(container).parallel
+        job_mode = analyst_mode_of(container)
+        parallel = job_mode.parallel
+        if stage is not None:
+            try:
+                parallel, _source = mode_of_revision(container.active_profile(), stage, job_mode)
+            except Exception as exc:  # noqa: BLE001 — a stand-in profile keeps the job's mode
+                logger.debug("revision: the revised stages' mode was not read (%s)", exc)
 
         results: list[Any] = []
         if parallel:

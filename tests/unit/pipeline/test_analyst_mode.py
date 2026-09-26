@@ -1,10 +1,13 @@
 """``llm.parallel_analysts`` is auto, true or false, and a stage's own mode wins.
 
-``auto`` decides per job from the models the analysts call: a hosted API runs
-them in parallel; Ollama, or an OpenAI-compatible server at a local address,
-runs them one after another unless its ``/props`` reported more than one slot.
-Nothing here puts a request on the network: the slot count is noted the way
-the window probe notes it, and every resolution is made with ``probe=False``.
+``auto`` decides per job from the models the analysts call: a host that
+resolves only to public addresses runs them in parallel; Ollama, or an
+OpenAI-compatible server whose host is local (a literal, a name only a local
+resolver answers, or a name that resolves to a local address), runs them one
+after another unless its ``/props`` reported more than one slot; a host that
+does not resolve runs them one after another. Nothing here puts a request on
+the network: names resolve from a table, the slot count is noted the way the
+window probe notes it, and every resolution is made with ``probe=False``.
 """
 
 from __future__ import annotations
@@ -15,20 +18,33 @@ import pytest
 
 from maljan.core.config import Settings
 from maljan.llm import context_window
+from maljan.pipeline import analyst_mode as analyst_mode_module
 from maljan.pipeline.analyst_mode import (
     AnalystMode,
     analyst_mode_of,
     mock_mode,
     resolve_analyst_mode,
+    revision_mode,
+    stage_modes,
+    stage_sentences,
     with_resolved_modes,
 )
 
 LOCAL = "http://127.0.0.1:8080/v1"
+DOCKER_HOST = "http://host.docker.internal:8080/v1"
+COMPOSE = "http://llama:8080/v1"
+HOSTED = "https://api.deepseek.com"
+UNRESOLVABLE = "http://nowhere-known:8080/v1"
+
+# What the names here resolve to: a compose service on a bridge network, and a
+# vendor API. Anything else does not resolve.
+RESOLVES = {"llama": ["172.18.0.5"], "api.deepseek.com": ["104.18.26.90", "2606:4700::6812:1a5a"]}
 
 
 @pytest.fixture(autouse=True)
-def _nothing_learned() -> Any:
+def _nothing_learned(monkeypatch: pytest.MonkeyPatch) -> Any:
     context_window.forget_learned_windows()
+    monkeypatch.setattr(analyst_mode_module, "_addresses", lambda host: RESOLVES.get(host, []))
     yield
     context_window.forget_learned_windows()
 
@@ -73,15 +89,59 @@ class TestTheResolution:
         assert mode.parallel is False
         assert mode.setting == "false"
 
-    def test_auto_on_a_hosted_api_is_parallel(self) -> None:
+    def test_auto_on_a_host_that_resolves_to_public_addresses_is_parallel(self) -> None:
         mode = resolve_analyst_mode(
-            _settings(openai={"base_url": "https://api.deepseek.com", "model": "deepseek-flash"}),
+            _settings(openai={"base_url": HOSTED, "model": "deepseek-flash"}),
             ["static", "dynamic", "network"],
             probe=False,
         )
         assert mode.parallel is True
         assert mode.setting == "auto"
-        assert "hosted API at https://api.deepseek.com" in mode.reason
+        assert "a hosted API (api.deepseek.com resolves only to public addresses)" in mode.reason
+
+    def test_auto_on_the_docker_host_name_is_sequential(self) -> None:
+        mode = resolve_analyst_mode(
+            _settings(openai={"base_url": DOCKER_HOST}), ["static"], probe=False
+        )
+        assert mode.parallel is False
+        assert "host.docker.internal is a name only a local resolver answers" in mode.reason
+        assert "reported no slot count" in mode.reason
+
+    def test_auto_on_the_docker_host_name_with_one_slot_is_sequential(self) -> None:
+        _slots(DOCKER_HOST, 1)
+        mode = resolve_analyst_mode(
+            _settings(openai={"base_url": DOCKER_HOST}), ["static"], probe=False
+        )
+        assert mode.parallel is False
+        assert "whose /props reports one slot" in mode.reason
+
+    def test_auto_on_a_compose_name_that_resolves_to_a_private_address_is_sequential(
+        self,
+    ) -> None:
+        mode = resolve_analyst_mode(
+            _settings(openai={"base_url": COMPOSE}), ["static"], probe=False
+        )
+        assert mode.parallel is False
+        assert "llama resolves to 172.18.0.5" in mode.reason
+
+    def test_auto_on_a_multi_slot_compose_server_is_parallel(self) -> None:
+        _slots(COMPOSE, 4)
+        mode = resolve_analyst_mode(
+            _settings(openai={"base_url": COMPOSE}), ["static"], probe=False
+        )
+        assert mode.parallel is True
+        assert "whose /props reports 4 slots" in mode.reason
+
+    def test_auto_on_a_name_that_does_not_resolve_is_sequential(self) -> None:
+        mode = resolve_analyst_mode(
+            _settings(openai={"base_url": UNRESOLVABLE}), ["static"], probe=False
+        )
+        assert mode.parallel is False
+        assert "could not be told whether it is hosted" in mode.reason
+
+    def test_a_shared_range_address_is_local(self) -> None:
+        kind, fact = analyst_mode_module.locality("http://100.101.2.3:8080/v1")
+        assert kind == "local" and "shared-range" in fact
 
     def test_auto_on_ollama_is_sequential(self) -> None:
         mode = resolve_analyst_mode(_settings(provider="ollama"), ["static"], probe=False)
@@ -107,7 +167,7 @@ class TestTheResolution:
 
     def test_one_single_slot_model_makes_the_whole_job_sequential(self) -> None:
         settings = _settings(
-            openai={"base_url": "https://api.deepseek.com"},
+            openai={"base_url": HOSTED},
             agents={"network": {"provider": "openai", "model": "qwen", "base_url": LOCAL}},
         )
         mode = resolve_analyst_mode(settings, ["static", "network"], probe=False)
@@ -190,6 +250,59 @@ class TestTheStageOverride:
         resolved = with_resolved_modes(profile, PARALLEL)
         assert resolved.stage("first").mode == "parallel"
         assert resolved.stage("after").mode == "sequential"
+        rows = {(r["stage"], r["round"]): r for r in stage_modes(profile, resolved, PARALLEL)}
+        assert rows[("first", "analysis")] == {
+            "stage": "first",
+            "round": "analysis",
+            "mode": "parallel",
+            "from": "job",
+        }
+        assert rows[("after", "analysis")]["from"] == "debate handover"
+        assert rows[("after", "analysis")]["mode"] == "sequential"
+
+
+class TestWhatEachStageRan:
+    STAGES = [
+        {
+            "key": "pinned",
+            "kind": "analysis",
+            "agents": ["static", "dynamic"],
+            "mode": "sequential",
+        },
+        {"key": "argue", "kind": "debate", "depends_on": ["pinned"]},
+        {"key": "verdict", "kind": "verdict", "agents": ["judge"], "depends_on": ["argue"]},
+        {"key": "report", "kind": "report", "agents": ["reporter"], "depends_on": ["verdict"]},
+    ]
+
+    def test_a_pinned_stage_and_its_revision_round_are_recorded_as_they_ran(self) -> None:
+        profile = _profile(self.STAGES)
+        resolved = with_resolved_modes(profile, PARALLEL)
+        rows = stage_modes(profile, resolved, PARALLEL)
+        assert rows == (
+            {"stage": "pinned", "round": "analysis", "mode": "sequential", "from": "stage"},
+            {
+                "stage": "argue",
+                "round": "revision",
+                "mode": "sequential",
+                "from": "the stages it revises",
+            },
+        )
+        assert stage_sentences(rows)[0] == (
+            "Stage 'pinned' runs its agents one after another (set on the stage)."
+        )
+
+    def test_the_revision_round_follows_the_stages_it_revises(self) -> None:
+        profile = _profile(self.STAGES)
+        resolved = with_resolved_modes(profile, PARALLEL)
+        assert revision_mode(resolved, resolved.stage("argue"), PARALLEL) == (
+            False,
+            "the stages it revises",
+        )
+        fanned = _profile([{**self.STAGES[0], "mode": None}, *self.STAGES[1:]])
+        fanned = with_resolved_modes(fanned, PARALLEL)
+        assert revision_mode(fanned, fanned.stage("argue"), PARALLEL)[0] is True
+        # With no stage to read, the job's mode.
+        assert revision_mode(fanned, None, SEQUENTIAL) == (False, "job")
 
 
 class TestTheContainer:
@@ -214,6 +327,15 @@ class TestTheContainer:
         first = container.analyst_mode()
         assert first is container.analyst_mode()
         assert first.parallel is False
+        record = first.to_dict()
+        assert record["stages"][0] == {
+            "stage": "analysis",
+            "round": "analysis",
+            "mode": "sequential",
+            "from": "job",
+        }
+        # The resolved profile is worked out once per job.
+        assert container.active_profile() is container.active_profile()
         assert {s.mode for s in container.active_profile().stages if s.kind == "analysis"} == {
             "sequential"
         }
