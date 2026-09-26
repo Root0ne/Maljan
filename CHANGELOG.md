@@ -2258,7 +2258,8 @@ change landed on `main`.
   request of a revision loop with 400 ("An assistant message with 'tool_calls'
   must be followed by tool messages …") and the analyst was lost for the
   round. Every request on the `openai` provider now completes such a call with
-  a tool reply saying it was not run, in the turn's call order, after
+  a tool reply saying no reply was recorded, and that it was not run when its
+  arguments did not parse, in the turn's call order, after
   DeepSeek's reasoning passback. The call stays in the turn as the model wrote
   it.
 - **A guest's desktop process is not the sample.** Where Triage's `orig` mark

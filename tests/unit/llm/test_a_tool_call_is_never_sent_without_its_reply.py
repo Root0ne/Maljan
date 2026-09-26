@@ -29,6 +29,7 @@ from maljan.agents.base_agent import BaseAnalyst
 from maljan.core.config import Settings
 from maljan.llm.openai_provider import (
     NO_REPLY_RECORDED,
+    NOT_RUN_REPLY,
     OpenAIProvider,
     answered_tool_calls,
     forget_standard_only,
@@ -176,7 +177,8 @@ def test_a_loop_whose_turn_holds_a_cut_call_sends_a_well_formed_history(
     assert [c["id"] for c in turn["tool_calls"]] == ["call_whole", "call_cut"]
     replies = [m for m in last if m["role"] == "tool"]
     assert [r["tool_call_id"] for r in replies] == ["call_whole", "call_cut"]
-    assert replies[1]["content"] == NO_REPLY_RECORDED
+    # Its arguments were cut, so the reply says it was not run.
+    assert replies[1]["content"] == NOT_RUN_REPLY
     if compat == "deepseek":
         assert turn["reasoning_content"] == "thinking"
 
@@ -207,6 +209,7 @@ def test_a_history_with_a_dangling_call_is_completed_on_the_deepseek_serializer(
     assert unanswered_ids(sent) == []
     assert [m["role"] for m in sent] == ["system", "user", "assistant", "tool", "tool", "user"]
     assert sent[2]["reasoning_content"] == "earlier"
+    # Nothing says why it has no reply, so the reply says only that.
     assert sent[4] == {"role": "tool", "tool_call_id": "two", "content": NO_REPLY_RECORDED}
 
 

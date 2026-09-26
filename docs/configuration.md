@@ -233,7 +233,8 @@ run and the OpenAI client still writes into the turn's `tool_calls`), and an
 OpenAI-compatible server refuses such a history: DeepSeek answers 400. Each
 request is completed as it is sent: the tool replies after a turn are put in
 the order of its calls, a call with none gets a reply saying no reply was
-recorded because it was not run, and a warning says how many. The call stays in
+recorded (and, for a call whose arguments did not parse, that it was not run),
+and a warning says how many. The call stays in
 the turn as the model wrote it, after DeepSeek's reasoning passback, and the
 loop's own conversation is not changed.
 

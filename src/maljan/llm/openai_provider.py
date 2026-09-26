@@ -483,20 +483,28 @@ def with_reasoning_passback(chat_class: Any) -> Any:
 # a revision loop's turn with 400, "An assistant message with 'tool_calls' must
 # be followed by tool messages responding to each 'tool_call_id'" — and the
 # analyst was lost for the round. The call stays in the turn, as the model
-# wrote it, and the reply says it was not run.
-NO_REPLY_RECORDED = "No reply was recorded for this call: it was not run, so it returned nothing."
+# wrote it, and the reply says what is known: that no reply was recorded, and,
+# for a call whose arguments did not parse, that it was not run.
+NO_REPLY_RECORDED = "No reply was recorded for this call."
+NOT_RUN_REPLY = (
+    "No reply was recorded for this call: its arguments did not parse, so it was not run."
+)
 
 # One subclass per chat class seen, as for ``_TIMED_CLASSES``.
 _ANSWERED_CLASSES: dict[type, type] = {}
 
 
-def answered_tool_calls(messages: list[Any]) -> tuple[list[Any], int]:
+def answered_tool_calls(
+    messages: list[Any], not_run: frozenset[str] | set[str] = frozenset()
+) -> tuple[list[Any], int]:
     """The request's messages with every tool call answered, in its call order.
 
     OpenAI's chat format wants each assistant turn's ``tool_calls`` followed by
     one ``tool`` message per call id. The tool messages that follow a turn are
     put in the order of its calls, and a call with none gets
-    ``NO_REPLY_RECORDED``. A tool message that answers none of the turn's
+    ``NO_REPLY_RECORDED``, or ``NOT_RUN_REPLY`` when its id is one of
+    ``not_run`` (the turn's calls whose arguments did not parse). A tool
+    message that answers none of the turn's
     calls stays where it was, after them: dropping it would remove something
     the conversation holds. Returns the messages and how many replies were
     written. A history that is already well formed comes back as it was.
@@ -526,10 +534,25 @@ def answered_tool_calls(messages: list[Any]) -> tuple[list[Any], int]:
                 replies.remove(match)
                 out.append(match)
                 continue
-            out.append({"role": "tool", "tool_call_id": call_id, "content": NO_REPLY_RECORDED})
+            reply = NOT_RUN_REPLY if call_id in not_run else NO_REPLY_RECORDED
+            out.append({"role": "tool", "tool_call_id": call_id, "content": reply})
             written += 1
         out.extend(replies)
     return out, written
+
+
+def _unparsed_call_ids(model: Any, input_: Any) -> frozenset[str]:
+    """The ids of the calls in ``input_``'s turns whose arguments did not parse, or none."""
+    try:
+        messages = model._convert_input(input_).to_messages()
+    except Exception:  # noqa: BLE001 — without them every missing reply says only what is known
+        return frozenset()
+    return frozenset(
+        str(call.get("id") or "")
+        for message in messages
+        for call in getattr(message, "invalid_tool_calls", None) or []
+        if isinstance(call, dict) and call.get("id")
+    )
 
 
 def with_answered_tool_calls(chat_class: Any) -> Any:
@@ -554,7 +577,7 @@ def with_answered_tool_calls(chat_class: Any) -> Any:
         sent = payload.get("messages") if isinstance(payload, dict) else None
         if not isinstance(sent, list):
             return payload
-        answered, written = answered_tool_calls(sent)
+        answered, written = answered_tool_calls(sent, _unparsed_call_ids(self, input_))
         if written:
             logger.warning(
                 "openai provider: %d tool call(s) in the history had no reply; each is sent "

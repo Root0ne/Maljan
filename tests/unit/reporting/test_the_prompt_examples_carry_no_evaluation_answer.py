@@ -80,7 +80,7 @@ from maljan.agents.tool_pinning import (
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
 from maljan.analysis.pcap_summary import CaptureRead
 from maljan.extractors.capability_matrix import NOT_ASKED_UNKNOWN_ID, TechniqueQuestion
-from maljan.llm.openai_provider import NO_REPLY_RECORDED
+from maljan.llm.openai_provider import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.pipeline import triage_pack
 from maljan.pipeline.nodes import (
     NO_SANDBOX_DATA_REASON,
@@ -514,7 +514,9 @@ PROMPTS: dict[str, str] = {
             disputed_flow_reason(["SearchHost.exe (procid 104)"], ["cmd.exe (procid 7)"]),
         ]
     ),
-    "the reply a tool call that was not run is sent with": NO_REPLY_RECORDED,
+    "the replies a tool call with no recorded reply is sent with": (
+        f"{NO_REPLY_RECORDED} {NOT_RUN_REPLY}"
+    ),
     "analyst question for technique lines no single id was read from": technique_line_violation(
         ["T1000 (candidate)", "T1001, T1002"]
     ).message,
