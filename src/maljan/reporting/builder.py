@@ -743,7 +743,14 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 ip.transport or "",
                 f"AS {ip.asn}" if ip.asn else "",
                 "public DNS resolver" if ip.public_resolver else "",
-                _process_tree_words(ip.sample_process_tree) if ip.source == "sandbox" else "",
+                _process_tree_words(
+                    ip.sample_process_tree,
+                    ip.outside_processes,
+                    ip.marked_only_processes,
+                    ip.file_only_processes,
+                )
+                if ip.source == "sandbox"
+                else "",
             ]
             _add(
                 "IPv6" if ":" in ip.address else "IPv4",
@@ -939,12 +946,22 @@ def _spawned(roots: list[Any]) -> list[Any]:
     return out
 
 
-def _process_tree_words(attributed: bool | None) -> str:
+def _process_tree_words(
+    attributed: bool | None,
+    outside: list[str] | None = None,
+    marked_only: list[str] | None = None,
+    file_only: list[str] | None = None,
+) -> str:
     """What the sandbox report says about which process reached an address."""
     if attributed is True:
         return "reached by the sample's process tree"
     if attributed is False:
-        return "reached by a process outside the sample's process tree"
+        named = f" ({', '.join(outside)})" if outside else ""
+        return f"reached by a process outside the sample's process tree{named}"
+    if marked_only or file_only:
+        from maljan.reporting.renderers.stix_renderer import disputed_flow_reason
+
+        return disputed_flow_reason(list(marked_only or []), list(file_only or []))
     return "the sandbox report does not say which process reached it"
 
 

@@ -1225,6 +1225,52 @@ and the run's degradation reasons naming it ("analyst answers kept as prose,
 …"). A CLAIM block that states no confidence, or one that is not a number, is
 not a claim either: it is counted and asked about
 (`isr.claim_without_confidence`), where the parsers used to write 0.5.
+Every path that reads claims reads them through one reader,
+`base_agent.read_claim_blocks`: it splits an answer at every claim heading
+(`CLAIM:`, `CLAIM 3:`, `**CLAIM 4 (REVISED):**`, `CLAIM 5 -`; the rule is
+`agents/claim_headings.py`) where a block can begin, and at the model's own
+`---` lines, so claims written one after another with blank lines between them
+are each read. The static, dynamic and network analysts read it with an
+EVIDENCE line required; the base analyst's path records a block without one as
+unsourced. Each read counts the claim headings the answer began before its
+DISPUTES section against the claims it read and the blocks that stated no
+confidence; what is left is claims begun and not read, which is logged and
+kept on the answer it was read from (`AgentISR.claims_unread_reason`),
+naming the analyst, the round and both numbers. The judge node carries it as a
+degradation reason only from the answers in force, so an answer a retry or a
+later round replaced leaves it in the log. Every heading opens a block, so no
+claim is read with another's CONFIDENCE, TECHNIQUE or EVIDENCE, and a heading
+behind a list marker (`- CLAIM:`, `1. CLAIM:`) counts. A block's fields are
+read in its tail, which begins at the first EVIDENCE, CONFIDENCE or TECHNIQUE
+label that starts a line; inside the tail a label also counts after
+whitespace, so fields written on one line are all read, while a label inside
+the claim sentence above the tail never is. EVIDENCE runs to the next
+CONFIDENCE or TECHNIQUE label that starts a line when one follows it, so words
+inside the evidence ("maps to MITRE technique: T1055") never cut it and every
+id after them stays cited; only when no such line follows does it end at a
+capitalised label later on its own line. The DISPUTES section opens at its label,
+case-sensitive, with its colon (`DISPUTES:`) or as a Markdown heading; a label
+that says there is none on its own line (`DISPUTES: NONE`, `N/A`, a dash)
+opens no section, and prose beginning "Disputes …" is prose. Claims under the
+section are not read as the analyst's own; they are counted apart. When none
+of the answer's own claims was read they are recorded as unread. When some
+were, the analyst is asked once in its validation turn
+(`isr.claims_under_disputes`) to write its own claims above DISPUTES and
+leave a peer's it disputes under it. Asked and kept there, the headings are
+the analyst's answer: the validation record holds it ("Asked, the analyst kept
+N CLAIM heading(s) under its DISPUTES section; they are not read as its own
+claims"), logged at info, and the run is not marked degraded for it. The row
+carries `"answered": "true"`: the report lists it marked "(answered)" and
+leaves it out of the count of findings left unresolved, and the console draws
+it muted. An answer
+in force the question was never put to (a nudged answer, a validation turn not
+asked for want of time, a path with no validation turn) is stated as a
+degradation reason apart from `claims_unread_reason` ("wrote N claim
+heading(s) under its DISPUTES section, which are not read as its own"). The
+code does not read the label's words to decide which they are. A TECHNIQUE line is one
+id, or `NONE` or a dash for none; any other line (a qualifier, a negation,
+several ids) claims no id, is kept on the claim as `technique_line`, and the
+validation turn asks once for one id per claim (`isr.technique_line_unread`).
 Every validation turn after a loop gets what that loop left of its time, not
 a fresh budget, and is not asked when that cannot hold one answer at the pace
 the loop measured (its final-answer reserve); what it would have asked is then
@@ -2598,11 +2644,22 @@ is assembled from what the run gathered rather than recomputed beside it:
   The Triage mapping carries each flow's `procid`, `pid` and AS facts into its
   tcp/udp row and states `sample_process_tree`: true when the flow's process
   is the sample or a descendant of it through `procid_parent`, false when the
-  report names another process, absent when it does not say. The sample is the
-  process Triage marks `orig` and only that one; a report that marks none
-  names it by a file the process runs whose name equals the submitted name, or
-  is the sample's digest with an extension — equal, never contained, so a
-  guest's `MicrosoftEdgeUpdate.exe` is not a sample submitted as `update.exe`.
+  report names another process, absent when it does not say. The sample's
+  processes are read from two facts: the processes Triage marks `orig`, and
+  the processes that run a file whose name equals the submitted name or is the
+  sample's digest with an extension — equal, never contained, so a guest's
+  `MicrosoftEdgeUpdate.exe` is not a sample submitted as `update.exe`. Each
+  fact gives a tree through `procid_parent`. Where both name processes, a
+  process in both trees is the sample's (`true`), a listed process in neither
+  is not (`false`), and one in exactly one tree is disputed: the facts
+  disagree, so its attribution is absent and the row says which fact alone
+  named it (`lineage_disputed`: `orig` or `file`). Where only one fact names
+  any process, its tree is the answer. A flow outside the tree or disputed
+  carries the image of the process that made it (`process`); the address's
+  row states those processes (`outside_processes`, `marked_only_processes`,
+  `file_only_processes`, as `<image> (procid N)`), and the publish rule's
+  `no:` and the IOC table's context name them with both facts. A disputed
+  row, like any unattributed one, is published only when a model keeps it.
   **CAPE, REST and mock reports carry no process on a flow**, so every address
   they record is unattributed and is published only when a model keeps it. The
   network block is projected from the job's whole report, never from a paged

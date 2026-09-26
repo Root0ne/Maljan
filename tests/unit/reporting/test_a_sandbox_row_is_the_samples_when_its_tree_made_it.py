@@ -75,21 +75,34 @@ class TestTheNormalisedFlowSaysWhichProcessMadeIt:
 
         assert "sample_process_tree" not in report.network.tcp[0]
 
-    def test_triage_s_own_mark_is_the_only_answer_when_it_gave_one(self) -> None:
+    def test_a_mark_and_a_file_name_that_disagree_state_nothing(self) -> None:
         processes = [
             {"procid": 5, "procid_parent": 0, "image": "x.exe", "orig": True},
             # Named like the submission, and not the process Triage marked.
             {"procid": 6, "procid_parent": 0, "image": "invoice.exe", "cmd": "invoice.exe"},
+            {"procid": 7, "procid_parent": 0, "image": "svchost.exe", "cmd": "svchost.exe"},
         ]
         report = _triage(
             processes,
             [
                 {"proto": "tcp", "dst": f"{DOC}:443", "procid": 5},
                 {"proto": "tcp", "dst": f"{DOC}:444", "procid": 6},
+                {"proto": "tcp", "dst": f"{DOC}:445", "procid": 7},
             ],
         )
 
-        assert [row["sample_process_tree"] for row in report.network.tcp] == [True, False]
+        rows = report.network.tcp
+        assert [row.get("sample_process_tree") for row in rows] == [None, None, False]
+        assert [row.get("lineage_disputed") for row in rows] == ["orig", "file", None]
+
+    def test_a_mark_and_a_file_name_that_agree_are_the_sample(self) -> None:
+        processes = [
+            {"procid": 5, "procid_parent": 0, "image": "invoice.exe", "orig": True},
+            {"procid": 6, "procid_parent": 5, "image": "cmd.exe", "cmd": "cmd.exe /c ver"},
+        ]
+        report = _triage(processes, [{"proto": "tcp", "dst": f"{DOC}:443", "procid": 6}])
+
+        assert report.network.tcp[0]["sample_process_tree"] is True
 
     def test_a_name_that_only_contains_the_submitted_name_is_not_the_sample(self) -> None:
         processes = [

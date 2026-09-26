@@ -251,7 +251,6 @@ class TruncationLedger:
         # (``BaseAnalyst._truncate_input``): one sentence per shortening, read by
         # the judge node into the run's degradation reasons.
         self.input_shortened: list[str] = []
-
         # ReAct loop step ceiling (agents/base_agent, LangGraph recursion_limit).
         self.react_invocations = 0
         self.react_step_cap_hits = 0

@@ -226,6 +226,18 @@ text stays with the turn in the loop's conversation and is not published. The
 cap goes out as `max_tokens` on each request, so a cap bound for one call
 reaches DeepSeek as the model's own does.
 
+Under every `compat` value, no request sends a tool call without its reply.
+A turn can hold a call no tool ran (its arguments were cut inside a string,
+so the call stays in `invalid_tool_calls`, which the loop's tool node does not
+run and the OpenAI client still writes into the turn's `tool_calls`), and an
+OpenAI-compatible server refuses such a history: DeepSeek answers 400. Each
+request is completed as it is sent: the tool replies after a turn are put in
+the order of its calls, a call with none gets a reply saying no reply was
+recorded (and, for a call whose arguments did not parse, that it was not run),
+and a warning says how many. The call stays in
+the turn as the model wrote it, after DeepSeek's reasoning passback, and the
+loop's own conversation is not changed.
+
 `llm.openai.compat`, like every `llm.openai` setting, is global: it applies to
 every model built on the `openai` provider, per-agent entries and fallbacks at
 their own endpoints included. Under `deepseek`, an `openai` entry pointing at a

@@ -29,6 +29,7 @@ from typing import Any, get_args, get_origin
 
 from pydantic import ValidationError
 
+from maljan.agents.claim_headings import count_claims_begun
 from maljan.agents.run_evidence_corpus import CorpusState, both_searched
 
 # The row helpers live with the shape (``analysis.corroboration``) and are
@@ -132,6 +133,12 @@ class Violation:
     # found where no turn was left to ask on. A row that says the producer
     # "kept" something when asked is only true of a row that was asked.
     asked: bool = True
+    # A question the producer was asked and answered as the question allows,
+    # recorded as what it answered rather than as something it left unfixed:
+    # an analyst that keeps a peer's claim under its DISPUTES section when
+    # asked has done what the question told it. Carried as ``"answered":
+    # "true"`` like ``advisory``, and left out of a report's unresolved count.
+    answered: bool = False
     # What the finding is about, by a fact that survives the retry: the
     # technique a credit names, the malware object's name. Two answers of one
     # judge number their objects afresh, and an answer to a credit question
@@ -156,6 +163,7 @@ class Violation:
             "sentence": self.sentence,
             "route": ROUTE_SEPARATOR.join(self.route),
             **({} if self.asked else {"asked": "false"}),
+            **({"answered": "true"} if self.answered else {}),
             **({"subject": self.subject} if self.subject else {}),
         }
 
@@ -207,6 +215,7 @@ class ValidationTally:
                 "message": v.message,
                 **({"advisory": "true"} if v.advisory else {}),
                 **({} if asked and v.asked else {"asked": "false"}),
+                **({"answered": "true"} if v.answered else {}),
                 **({"subject": v.subject} if v.subject else {}),
             }
             for v in violations
@@ -269,6 +278,58 @@ UNGROUNDED_TECHNIQUE_CODE = "isr.ungrounded_technique"
 # is still unread after it is recorded.
 UNPARSED_ANSWER_CODE = "isr.unparsed_answer"
 CLAIM_WITHOUT_CONFIDENCE_CODE = "isr.claim_without_confidence"
+# A claim whose TECHNIQUE line is more than one id or NONE. No id is read
+# from it, and the analyst is asked once for one id per claim.
+TECHNIQUE_LINE_UNREAD_CODE = "isr.technique_line_unread"
+# Claim headings under the DISPUTES section, beside the analyst's own claims.
+# Not read as its own: they may be a peer's claims it quotes, or its own
+# written below the label. The analyst is asked once which; the code does not
+# read the label's words to decide.
+CLAIMS_UNDER_DISPUTES_CODE = "isr.claims_under_disputes"
+
+
+def claims_under_disputes_violation(count: int) -> Violation:
+    """What an analyst is asked about claim headings under its DISPUTES section."""
+    return Violation(
+        code=CLAIMS_UNDER_DISPUTES_CODE,
+        message=(
+            f"{int(count)} CLAIM heading(s) stand under your DISPUTES section and are not read "
+            "as your own claims. If they are yours, write them above DISPUTES; a peer's claim "
+            "you dispute stays under it."
+        ),
+    )
+
+
+def claims_kept_under_disputes_finding(count: int) -> Violation:
+    """The analyst's answer to the question about claim headings under its DISPUTES section.
+
+    Recorded when the analyst was asked and kept them there: the question told
+    it a peer's claim it disputes stays under the section, so keeping them is
+    an answer, not a loss, and the row says what the answer was.
+    """
+    return Violation(
+        code=CLAIMS_UNDER_DISPUTES_CODE,
+        message=(
+            f"Asked, the analyst kept {int(count)} CLAIM heading(s) under its DISPUTES section; "
+            "they are not read as its own claims."
+        ),
+        answered=True,
+    )
+
+
+def technique_line_violation(lines: list[str]) -> Violation:
+    """What an analyst is asked about TECHNIQUE lines no single id could be read from."""
+    shown = "; ".join(f'"{safe_finding_value(line)}"' for line in lines)
+    return Violation(
+        code=TECHNIQUE_LINE_UNREAD_CODE,
+        message=(
+            f"{len(lines)} claim(s) have a TECHNIQUE line that is not one technique id or "
+            f"NONE, so no technique is read from them: {shown}. Give each claim one "
+            "technique id, or NONE when it claims none; a claim that holds several "
+            "techniques is written as one claim per technique."
+        ),
+    )
+
 
 _UNPARSED_ANSWER_MESSAGE = (
     "Your answer has no CLAIM block that can be read, so it carries no claim and "
@@ -299,6 +360,19 @@ def parse_violations(isr: Any) -> list[Violation]:
         declined = int(getattr(isr, "blocks_without_confidence", 0) or 0)
     except (TypeError, ValueError):
         declined = 0
+    lines = [
+        str(getattr(claim, "technique_line", "") or "")
+        for claim in getattr(isr, "claims", None) or []
+        if getattr(claim, "technique_line", None)
+    ]
+    if lines:
+        found.append(technique_line_violation(lines))
+    try:
+        under = int(getattr(isr, "claims_under_disputes", 0) or 0)
+    except (TypeError, ValueError):
+        under = 0
+    if under:
+        found.append(claims_under_disputes_violation(under))
     if declined:
         found.append(
             Violation(
@@ -2587,9 +2661,6 @@ SECTION_CUT_CODE = "composer.cut_at_output_cap"
 # the retry's whole cap again, and returned no claim at all.
 ANALYST_CUT_CODE = "isr.cut_at_output_cap"
 
-# A claim begun in an analyst's answer: the label every claim block opens with.
-_CLAIM_BEGUN_RE = re.compile(r"^\s*CLAIM:", re.MULTILINE)
-
 
 def analyst_cut_violation(cap: int, text: str = "") -> Violation:
     """What an analyst the cap cut is told: the cap, what was begun, and the bound.
@@ -2601,7 +2672,7 @@ def analyst_cut_violation(cap: int, text: str = "") -> Violation:
     than the evidence holds, and the cap it names is the one in force: nothing
     here raises it.
     """
-    begun = len(_CLAIM_BEGUN_RE.findall(text))
+    begun = count_claims_begun(text)
     size = (
         f" It ran to {len(text):,} characters"
         + (f" and began {begun} CLAIM block(s)" if begun else "")
@@ -5708,6 +5779,9 @@ def validation_metrics(
                 # And whether the producer was ever shown it: a finding the
                 # answer to the last retry raised first was never a question.
                 **({} if violation.asked else {"asked": "false"}),
+                # And whether it was answered as the question allows, which is
+                # not a finding left unfixed.
+                **({"answered": "true"} if violation.answered else {}),
                 **({"subject": violation.subject} if violation.subject else {}),
             }
         )

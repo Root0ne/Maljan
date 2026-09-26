@@ -1,0 +1,542 @@
+"""Every claim an analyst begins is read, or the run records that it was not.
+
+Two analysts wrote their claims one after another, separated by blank lines,
+with one ``---`` line before the first claim and one before DISPUTES. The
+reader the base analyst used split only on ``---`` and kept the first
+``CLAIM:`` of a block, so a revision of thirteen claims became one and an
+answer of twenty-one became one, and nothing said so. The fixtures are those
+two answers as the models wrote them.
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+import pytest
+
+from maljan.agents.base_agent import (
+    ClaimRead,
+    claims_unread_sentence,
+    parse_structured_claims_counted,
+    read_claim_blocks,
+)
+from maljan.agents.claim_headings import count_claims_begun
+from maljan.agents.static_analyst import StaticAnalyst, _parse_claim_blocks
+from maljan.core.truncation_ledger import TruncationLedger
+from maljan.pipeline.validation import analyst_cut_violation
+
+FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "claims"
+REVISION = (FIXTURES / "blank_line_separated_revision.txt").read_text(encoding="utf-8")
+FINAL_ISR = (FIXTURES / "blank_line_separated_final_isr.txt").read_text(encoding="utf-8")
+
+# The second claim is written where the first has no CONFIDENCE line yet.
+UNCLOSED = (
+    "CLAIM 1: The loader resolves its imports by hash.\n"
+    "EVIDENCE: [ev_0002]\n"
+    "\n"
+    "CLAIM 2: The beacon sleeps 180 seconds before its first request.\n"
+    "EVIDENCE: [ev_0003]\n"
+    "CONFIDENCE: 0.8\n"
+    "TECHNIQUE: NONE\n"
+)
+
+
+def _analyst() -> StaticAnalyst:
+    analyst = StaticAnalyst.__new__(StaticAnalyst)
+    analyst.name = "reverser"
+    analyst.logger = logging.getLogger("test.claims")
+    analyst.truncation_ledger = TruncationLedger()
+    return analyst
+
+
+@pytest.mark.parametrize(("text", "count"), [(REVISION, 13), (FINAL_ISR, 21)])
+def test_blank_line_separated_claims_are_all_read_by_both_readings(text: str, count: int) -> None:
+    lenient = read_claim_blocks(text)
+    assert lenient.begun == count
+    assert len(lenient.claims) == count
+    assert lenient.unread == 0
+    assert len(_parse_claim_blocks(text)) == count
+    assert len(parse_structured_claims_counted(text)[0]) == count
+
+
+def test_the_revision_keeps_the_techniques_of_its_later_claims() -> None:
+    claims = read_claim_blocks(REVISION).claims
+    techniques = [c.technique_id for c in claims]
+    assert techniques[:3] == ["T1218.011", "T1027.007", "T1027.005"]
+    assert "T1070" in techniques and "T1620" in techniques
+    # "TECHNIQUE: T1055, T1106" claims two: neither is read, the line is kept whole.
+    (both,) = [c for c in claims if c.technique_line]
+    assert (both.technique_id, both.technique_line) == (None, "T1055, T1106")
+    # The DISPUTES section after the last claim is not read as a claim.
+    assert not any("DISPUTED" in c.claim for c in read_claim_blocks(REVISION).claims)
+
+
+def test_the_base_analyst_path_reads_every_claim_and_records_nothing() -> None:
+    analyst = _analyst()
+    isr = analyst._text_to_isr(REVISION, revision_round=2)
+    assert len(isr.claims) == 13
+    assert isr.claims_unread_reason == ""
+
+
+# A block whose heading was written and whose claim was not: an answer cut there.
+MALFORMED = (
+    "CLAIM 1: The loader resolves its imports by hash.\n"
+    "EVIDENCE: [ev_0002]\n"
+    "CONFIDENCE: 0.7\n"
+    "TECHNIQUE: NONE\n"
+    "\n"
+    "**CLAIM 2:**\n"
+)
+
+
+def test_a_claim_never_carries_the_next_claim_s_fields() -> None:
+    read = read_claim_blocks(UNCLOSED)
+    (claim,) = read.claims
+    assert claim.claim == "The beacon sleeps 180 seconds before its first request."
+    assert (claim.confidence, claim.evidence_ref) == (0.8, "[ev_0003]")
+    # The first stated no confidence: counted and asked about, not given the next one's.
+    assert (read.begun, read.without_confidence, read.unread) == (2, 1, 0)
+
+
+def test_a_malformed_block_is_a_recorded_shortfall(caplog: pytest.LogCaptureFixture) -> None:
+    read = read_claim_blocks(MALFORMED)
+    assert (read.begun, len(read.claims), read.unread) == (2, 1, 1)
+    assert read.claims[0].confidence == 0.7
+
+    analyst = _analyst()
+    with caplog.at_level(logging.WARNING, logger="test.claims"):
+        isr = analyst._text_to_isr(MALFORMED, revision_round=1)
+    assert len(isr.claims) == 1
+    sentence = isr.claims_unread_reason
+    assert "reverser" in sentence and "round 1" in sentence
+    assert "began 2 claim(s)" in sentence and "1 were read" in sentence
+    assert sentence in caplog.text
+
+
+def test_the_stricter_reading_records_a_claim_it_turns_away() -> None:
+    text = (
+        "CLAIM: cited\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.9\n---\n"
+        "CLAIM: not cited\nCONFIDENCE: 0.7\n---\n"
+    )
+    analyst = _analyst()
+    claims = analyst._read_claims(text)
+    assert [c.claim for c in claims] == ["cited"]
+    isr = analyst._parsed_isr(claims, text, "static")
+    assert "began 2 claim(s), and 1 were read" in isr.claims_unread_reason
+    # Taken once: the next ISR built from another read does not inherit it.
+    assert analyst._parsed_isr([], "", "static").claims_unread_reason == ""
+
+
+def test_a_stricter_reading_that_reads_nothing_leaves_the_record_to_the_fallback() -> None:
+    analyst = _analyst()
+    assert analyst._read_claims("CLAIM: not cited\nCONFIDENCE: 0.7\n") == []
+    assert analyst._pending_claims_unread == ""
+
+
+def test_blocks_without_confidence_are_asked_about_not_recorded_as_unread() -> None:
+    text = "CLAIM: one\nEVIDENCE: e\nCONFIDENCE: 0.5\n---\nCLAIM: two\nEVIDENCE: e\n"
+    read = read_claim_blocks(text)
+    assert (read.begun, len(read.claims), read.without_confidence, read.unread) == (2, 1, 1, 0)
+
+
+def test_the_sentence_names_the_agent_and_both_numbers() -> None:
+    read = ClaimRead(claims=[], without_confidence=1, begun=5)
+    sentence = claims_unread_sentence("triage", read, 2)
+    assert sentence == (
+        "The triage analyst's answer (round 2) began 5 claim(s), and 0 were read, "
+        "1 stated no confidence; 4 could not be read as a claim and are not in its findings."
+    )
+
+
+def test_the_cut_answer_question_counts_claims_by_the_same_heading_rule() -> None:
+    text = "CLAIM 1: a\nEVIDENCE: e\nCONFIDENCE: 0.5\n\n**CLAIM 2 —** b\nEVIDENCE: e"
+    assert count_claims_begun(text) == 2
+    assert "began 2 CLAIM block(s)" in analyst_cut_violation(100, text).message
+
+
+def test_a_claim_quoted_under_disputes_is_not_counted() -> None:
+    text = "CLAIM: own\nEVIDENCE: e\nCONFIDENCE: 0.9\n\nDISPUTES:\nCLAIM 3: a peer's\n"
+    assert count_claims_begun(text) == 1
+
+
+def test_a_claim_after_disputes_and_a_separator_is_not_read_as_the_analyst_s() -> None:
+    text = (
+        "CLAIM: own\nEVIDENCE: e\nCONFIDENCE: 0.9\n\nDISPUTES:\n---\n"
+        "CLAIM: the peer says x\nEVIDENCE: e\nCONFIDENCE: 0.8\n"
+    )
+    read = read_claim_blocks(text)
+    assert [c.claim for c in read.claims] == ["own"]
+    assert read.begun == 1
+
+
+@pytest.mark.parametrize("marker", ["- ", "+ ", "1. ", "2) ", "* "])
+def test_list_marker_headings_are_read_and_counted(marker: str) -> None:
+    text = "".join(
+        f"{marker}CLAIM: finding {n}\n{marker}EVIDENCE: [ev_000{n}]\n{marker}CONFIDENCE: 0.6\n\n"
+        for n in (1, 2)
+    )
+    read = read_claim_blocks(text)
+    assert [c.claim for c in read.claims] == ["finding 1", "finding 2"]
+    assert [c.evidence_ref for c in read.claims] == ["[ev_0001]", "[ev_0002]"]
+    assert (read.begun, read.unread) == (2, 0)
+    assert len(_parse_claim_blocks(text)) == 2
+
+
+def test_a_numbered_only_answer_is_a_report() -> None:
+    from maljan.agents.base_agent import answer_is_isr
+
+    text = "CLAIM 1: one\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.5\n\n**CLAIM 2 (REVISED):** two"
+    assert "CLAIM:" not in text
+    assert answer_is_isr(text)
+
+
+def test_a_technique_the_analyst_rejects_is_not_read_as_claimed() -> None:
+    claims = read_claim_blocks(FINAL_ISR).claims
+    packing = claims[2]
+    assert packing.claim.startswith("Producer/build")
+    assert packing.technique_id is None
+    assert packing.technique_line == "T1027.002 not supported"
+    # Every other qualified or several-id line is kept as written, none cut to its first id.
+    lines = [c.technique_line for c in claims if c.technique_line]
+    assert "T1027.005 (rule-asserted); T1140" in lines
+    assert all(c.technique_id is None for c in claims if c.technique_line)
+
+
+@pytest.mark.parametrize(
+    ("line", "technique", "kept"),
+    [
+        ("T1055", "T1055", None),
+        ("t1055.012", "T1055.012", None),
+        ("**T1105**", "T1105", None),
+        ("NONE", None, None),
+        ("—", None, None),
+        ("-", None, None),
+        ("T1027.002 not supported", None, "T1027.002 not supported"),
+        ("T1055 (unproven)", None, "T1055 (unproven)"),
+        ("T1055, T1106", None, "T1055, T1106"),
+        ("T1105; T1620 (candidate)", None, "T1105; T1620 (candidate)"),
+    ],
+)
+def test_a_technique_line_is_one_id_none_or_kept_whole(
+    line: str, technique: str | None, kept: str | None
+) -> None:
+    (claim,) = read_claim_blocks(
+        f"CLAIM: x\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.5\nTECHNIQUE: {line}\n"
+    ).claims
+    assert (claim.technique_id, claim.technique_line) == (technique, kept)
+
+
+def test_a_kept_technique_line_is_asked_about_once() -> None:
+    from maljan.pipeline.validation import TECHNIQUE_LINE_UNREAD_CODE, parse_violations
+
+    isr = _analyst()._text_to_isr(
+        "CLAIM: x\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.5\nTECHNIQUE: T1055, T1106\n", 0
+    )
+    (question,) = [v for v in parse_violations(isr) if v.code == TECHNIQUE_LINE_UNREAD_CODE]
+    assert '"T1055, T1106"' in question.message
+    assert "one claim per technique" in question.message
+
+
+def test_only_the_answers_in_force_carry_their_unread_claims_reason() -> None:
+    from maljan.pipeline.nodes import claims_unread_in_force
+
+    analyst = _analyst()
+    short = analyst._text_to_isr(MALFORMED, revision_round=0)
+    assert short.claims_unread_reason
+    # A later round's fully read answer replaced it: nothing is carried.
+    replaced = analyst._text_to_isr(REVISION, revision_round=2)
+    assert claims_unread_in_force({"reverser": replaced}) == []
+    # A same-round retry that was kept and read fully carries nothing either.
+    retry = analyst._text_to_isr(REVISION, revision_round=0)
+    assert claims_unread_in_force({"reverser": retry}) == []
+    # The short answer, kept in force, carries its own.
+    assert claims_unread_in_force({"reverser": short}) == [short.claims_unread_reason]
+    # A copy of it (the consistency gate's) keeps it.
+    copied = short.model_copy(update={"claims": []})
+    assert claims_unread_in_force({"reverser": copied}) == [short.claims_unread_reason]
+
+
+def test_a_merged_chunked_answer_carries_each_chunk_s_reason() -> None:
+    from maljan.analysis.chunk_merger import merge_chunk_isrs
+
+    analyst = _analyst()
+    short = analyst._text_to_isr(MALFORMED, revision_round=0)
+    whole = analyst._text_to_isr(REVISION, revision_round=0)
+    merged = merge_chunk_isrs([short, whole])
+    assert merged.claims_unread_reason == short.claims_unread_reason
+
+
+BODY_SAYS_DISPUTES = (
+    "CLAIM 1: a\nEVIDENCE: [ev_1]\nCONFIDENCE: 0.7\n\n"
+    "CLAIM 2: b\nEVIDENCE: [ev_1]\nDisputes the static analyst reading of 0x40.\n"
+    "CONFIDENCE: 0.8\n\n"
+    "CLAIM 3: c\nEVIDENCE: [ev_2]\nCONFIDENCE: 0.6\n"
+)
+
+
+def test_a_body_line_beginning_disputes_is_prose() -> None:
+    read = read_claim_blocks(BODY_SAYS_DISPUTES)
+    assert [c.claim for c in read.claims] == ["a", "b", "c"]
+    assert (read.begun, read.unread, read.after_disputes) == (3, 0, 0)
+
+
+@pytest.mark.parametrize(
+    "label", ["DISPUTES: NONE", "DISPUTES: none", "**DISPUTES:** N/A", "DISPUTES: -"]
+)
+def test_a_one_line_no_dispute_before_the_claims_opens_no_section(label: str) -> None:
+    text = f"{label}\n\n" + BODY_SAYS_DISPUTES
+    read = read_claim_blocks(text)
+    assert len(read.claims) == 3 and read.begun == 3 and read.unread == 0
+
+
+QUOTED_PEER = (
+    "CLAIM 1: own\nEVIDENCE: [ev_1]\nCONFIDENCE: 0.9\n\n"
+    "DISPUTES:\n- CLAIM 3: the peer's claim\n  EVIDENCE: [ev_9]\n  CONFIDENCE: 0.7\n"
+)
+
+
+def test_a_peer_s_claim_quoted_under_disputes_is_asked_about_and_then_described(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from maljan.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE, parse_violations
+
+    read = read_claim_blocks(QUOTED_PEER)
+    assert [c.claim for c in read.claims] == ["own"]
+    assert (read.begun, read.after_disputes, read.unread) == (1, 1, 0)
+    from maljan.pipeline.nodes import claims_under_disputes_unasked
+
+    analyst = _analyst()
+    with caplog.at_level(logging.INFO, logger="test.claims"):
+        isr = analyst._text_to_isr(QUOTED_PEER, revision_round=1)
+    (question,) = [v for v in parse_violations(isr) if v.code == CLAIMS_UNDER_DISPUTES_CODE]
+    assert question.message.startswith("1 CLAIM heading(s) stand under your DISPUTES section")
+    # Nothing was lost, so no unread reason; before the question is put, the
+    # headings' status is unknown, and that is what an unasked answer states.
+    assert isr.claims_unread_reason == ""
+    described = (
+        "The reverser analyst's answer (round 1) wrote 1 claim heading(s) under its "
+        "DISPUTES section, which are not read as its own."
+    )
+    assert claims_under_disputes_unasked({"reverser": isr}) == [described]
+    (record,) = [r for r in caplog.records if described in r.getMessage()]
+    assert record.levelno == logging.INFO
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "DISPUTES: No disputes.",
+        "DISPUTES: none identified",
+        "DISPUTES: NONE — all peers agree",
+        "DISPUTES:",
+        "## DISPUTES",
+    ],
+)
+def test_an_own_claim_below_a_label_that_opens_the_section_is_asked_about(label: str) -> None:
+    from maljan.pipeline.nodes import claims_under_disputes_unasked, claims_unread_in_force
+    from maljan.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE, parse_violations
+
+    text = (
+        "CLAIM 1: The file is a DLL.\nEVIDENCE: [ev_1]\nCONFIDENCE: 0.7\n\n"
+        f"{label}\n\n"
+        "CLAIM 2: It creates a mutex.\nEVIDENCE: [ev_2]\nCONFIDENCE: 0.6\n"
+    )
+    analyst = _analyst()
+    isr = analyst._text_to_isr(text, revision_round=0)
+    assert [c.claim for c in isr.claims] == ["The file is a DLL."]
+    assert isr.claims_under_disputes == 1
+    assert [v.code for v in parse_violations(isr)] == [CLAIMS_UNDER_DISPUTES_CODE]
+    # The analyst moves its claim above the label: the answer kept reads both
+    # and carries nothing.
+    moved = analyst._text_to_isr(
+        "CLAIM 1: The file is a DLL.\nEVIDENCE: [ev_1]\nCONFIDENCE: 0.7\n\n"
+        "CLAIM 2: It creates a mutex.\nEVIDENCE: [ev_2]\nCONFIDENCE: 0.6\n\n"
+        f"{label}\n",
+        revision_round=0,
+    )
+    assert [c.claim for c in moved.claims] == ["The file is a DLL.", "It creates a mutex."]
+    assert parse_violations(moved) == []
+    assert claims_unread_in_force({"reverser": moved}) == []
+    assert claims_under_disputes_unasked({"reverser": moved}) == []
+    # Kept where it was and never asked about, the first answer says it.
+    assert claims_unread_in_force({"reverser": isr}) == []
+    assert len(claims_under_disputes_unasked({"reverser": isr})) == 1
+
+
+def test_the_stricter_reading_carries_the_count_to_its_isr() -> None:
+    analyst = _analyst()
+    text = "CLAIM: a\nEVIDENCE: [ev_1]\nCONFIDENCE: 0.7\n\nDISPUTES:\nCLAIM: b\n"
+    isr = analyst._parsed_isr(analyst._read_claims(text), text, "static")
+    assert isr.claims_under_disputes == 1
+    assert isr.claims_unread_reason == ""
+
+
+def test_claims_only_under_a_disputes_heading_are_a_recorded_shortfall() -> None:
+    text = "## DISPUTES\n\nCLAIM 1: x\nEVIDENCE: [ev_1]\nCONFIDENCE: 0.5\n"
+    read = read_claim_blocks(text)
+    assert (read.begun, len(read.claims), read.after_disputes, read.unread) == (0, 0, 1, 1)
+    isr = _analyst()._text_to_isr(text, revision_round=0)
+    assert "wrote 1 more under its DISPUTES section" in isr.claims_unread_reason
+
+
+def test_a_field_word_inside_the_claim_text_is_not_its_field() -> None:
+    (claim,) = read_claim_blocks(
+        "CLAIM: The sample sets TECHNIQUE: flags and CONFIDENCE: 0.1 in its config.\n"
+        "EVIDENCE: [ev_0001]\nCONFIDENCE: 0.6\nTECHNIQUE: T1055\n"
+    ).claims
+    assert (claim.technique_id, claim.technique_line, claim.confidence) == ("T1055", None, 0.6)
+
+
+def test_words_inside_the_evidence_never_cut_it_when_its_field_lines_follow() -> None:
+    (claim,) = read_claim_blocks(
+        "CLAIM: The loader injects into a remote process.\n"
+        "EVIDENCE: [ev_1] maps to MITRE technique: T1055 per rule [ev_2]\n"
+        "CONFIDENCE: 0.7\n"
+        "TECHNIQUE: T1055\n"
+    ).claims
+    assert claim.evidence_ref == "[ev_1] maps to MITRE technique: T1055 per rule [ev_2]"
+    assert (claim.confidence, claim.technique_id) == (0.7, "T1055")
+
+
+def test_a_label_quoted_inside_the_evidence_is_not_its_end_when_its_line_follows() -> None:
+    (claim,) = read_claim_blocks(
+        "CLAIM: The scanner rated the rule weakly.\n"
+        "EVIDENCE: [ev_1] tool said CONFIDENCE: 0.2 for this [ev_3]\n"
+        "CONFIDENCE: 0.7\n"
+    ).claims
+    assert claim.evidence_ref == "[ev_1] tool said CONFIDENCE: 0.2 for this [ev_3]"
+    assert claim.confidence == 0.7
+
+
+def test_fields_on_the_evidence_line_end_it_when_no_field_line_follows() -> None:
+    (claim,) = read_claim_blocks(
+        "CLAIM: The beacon posts to its server.\n"
+        "EVIDENCE: [ev_0309] (HTTP POST). CONFIDENCE: 0.65 TECHNIQUE: T1071.001\n"
+    ).claims
+    assert claim.evidence_ref == "[ev_0309] (HTTP POST)."
+    assert (claim.confidence, claim.technique_id) == (0.65, "T1071.001")
+
+
+class _Answers:
+    """A model that answers each call from a queue and records what it was sent."""
+
+    def __init__(self, answers: list[str]) -> None:
+        self.answers = list(answers)
+        self.sent: list[list[object]] = []
+
+    def invoke(self, messages: list[object], *args: object, **kwargs: object) -> object:
+        from langchain_core.messages import AIMessage
+
+        self.sent.append(list(messages))
+        return AIMessage(content=self.answers.pop(0))
+
+    async def ainvoke(self, messages: list[object], *args: object, **kwargs: object) -> object:
+        return self.invoke(messages)
+
+
+def _validated(answers: list[str]) -> tuple[object, _Answers]:
+    from maljan.agents.base_agent import BaseAnalyst
+
+    class _Validated(BaseAnalyst):
+        def analyze(self, data: str) -> str:  # pragma: no cover - unused
+            return ""
+
+        def revise(self, *args: object, **kwargs: object) -> str:  # pragma: no cover - unused
+            return ""
+
+    llm = _Answers(answers)
+    return _Validated(llm=llm, name="reverser"), llm  # type: ignore[arg-type]
+
+
+def _validate(analyst: object, isr: object) -> object:
+    from unittest.mock import patch
+
+    with patch("maljan.agents.base_agent.validity_check_available", return_value=True):
+        return analyst._validate_isr(isr, "evidence text")  # type: ignore[attr-defined]
+
+
+def test_headings_kept_under_disputes_when_asked_are_the_analyst_s_answer(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from maljan.pipeline.nodes import claims_under_disputes_unasked
+    from maljan.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE
+
+    analyst, llm = _validated([QUOTED_PEER])
+    first = analyst._text_to_isr(QUOTED_PEER, revision_round=1)  # type: ignore[attr-defined]
+    with caplog.at_level(logging.INFO):
+        kept = _validate(analyst, first)
+    assert len(llm.sent) == 1
+    assert kept.claims_under_disputes == 1 and kept.claims_under_disputes_asked
+    assert kept.claims_unread_reason == ""
+    # No degradation reason: the question told the analyst a peer's claim it
+    # disputes stays under the section, and it kept it there.
+    assert claims_under_disputes_unasked({"reverser": kept}) == []
+    (answered,) = [
+        v
+        for v in analyst.validation_findings  # type: ignore[attr-defined]
+        if v.code == CLAIMS_UNDER_DISPUTES_CODE
+    ]
+    assert answered.message == (
+        "Asked, the analyst kept 1 CLAIM heading(s) under its DISPUTES section; "
+        "they are not read as its own claims."
+    )
+    (record,) = [r for r in caplog.records if answered.message in r.getMessage()]
+    assert record.levelno == logging.INFO
+
+
+def test_headings_moved_above_disputes_when_asked_are_read_and_state_nothing() -> None:
+    from maljan.pipeline.nodes import claims_under_disputes_unasked
+    from maljan.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE
+
+    moved = (
+        "CLAIM 1: own\nEVIDENCE: [ev_1]\nCONFIDENCE: 0.9\n\n"
+        "CLAIM 2: the second\nEVIDENCE: [ev_9]\nCONFIDENCE: 0.7\n\nDISPUTES: NONE\n"
+    )
+    analyst, _llm = _validated([moved])
+    kept = _validate(analyst, analyst._text_to_isr(QUOTED_PEER, revision_round=1))  # type: ignore[attr-defined]
+    assert [c.claim for c in kept.claims] == ["own", "the second"]
+    assert claims_under_disputes_unasked({"reverser": kept}) == []
+    assert CLAIMS_UNDER_DISPUTES_CODE not in {
+        v.code
+        for v in analyst.validation_findings  # type: ignore[attr-defined]
+    }
+
+
+def test_headings_under_disputes_in_a_nudged_answer_are_a_degradation_reason() -> None:
+    from maljan.pipeline.nodes import claims_under_disputes_unasked
+
+    analyst, llm = _validated([])
+    analyst._answer_unstructured = True  # type: ignore[attr-defined]
+    kept = _validate(analyst, analyst._text_to_isr(QUOTED_PEER, revision_round=1))  # type: ignore[attr-defined]
+    assert llm.sent == []
+    assert not kept.claims_under_disputes_asked
+    assert claims_under_disputes_unasked({"reverser": kept}) == [
+        "The reverser analyst's answer (round 1) wrote 1 claim heading(s) under its "
+        "DISPUTES section, which are not read as its own."
+    ]
+
+
+def test_headings_under_disputes_not_asked_for_want_of_time_are_a_degradation_reason() -> None:
+    import time
+
+    from maljan.agents.base_agent import TurnPace
+    from maljan.pipeline.nodes import claims_under_disputes_unasked
+    from maljan.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE
+
+    analyst, llm = _validated([])
+    pace = TurnPace()
+    pace.current = "qwen"
+    pace.turns["qwen"] = [140.0]
+    analyst._last_pace = pace  # type: ignore[attr-defined]
+    analyst._note_budget({"stage": "analysis", "cap": "time"})  # type: ignore[attr-defined]
+    analyst._last_loop_deadline = time.monotonic() + 100.0  # type: ignore[attr-defined]
+    kept = _validate(analyst, analyst._text_to_isr(QUOTED_PEER, revision_round=1))  # type: ignore[attr-defined]
+    assert llm.sent == []
+    assert len(claims_under_disputes_unasked({"reverser": kept})) == 1
+    (row,) = [
+        v
+        for v in analyst.validation_findings  # type: ignore[attr-defined]
+        if v.code == CLAIMS_UNDER_DISPUTES_CODE
+    ]
+    assert row.asked is False and "Not asked: " in row.message

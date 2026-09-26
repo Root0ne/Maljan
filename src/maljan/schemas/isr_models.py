@@ -77,6 +77,15 @@ class ClaimEvidence(BaseModel):
         description="MITRE ATT&CK technique ID if applicable, e.g. 'T1055.001'.",
         pattern=r"^T\d{4}(\.\d{3})?$",
     )
+    # The claim's TECHNIQUE line as written, when it is more than one id or
+    # NONE: a qualifier, a negation, several ids. No id is read from it —
+    # "T1027.002 not supported" is not a claim of T1027.002 — and the
+    # validation turn asks the analyst for one id per claim
+    # (``pipeline.validation.TECHNIQUE_LINE_UNREAD_CODE``).
+    technique_line: str | None = Field(
+        default=None,
+        description="The claim's TECHNIQUE line as written, when no single id could be read.",
+    )
     # Whether that id survived validation. ``pipeline.validation`` sets this
     # ``False`` when the analyst kept an id the ATT&CK catalogue does not have,
     # after being told so and given another turn. The id itself stays exactly
@@ -235,6 +244,21 @@ class AgentISR(BaseModel):
     # the answer is shown back whole, and the question says which of its
     # claims no longer stand.
     _gate_removed: list[str] = PrivateAttr(default_factory=list)
+    # Why claims this answer began are not in its findings, as the reader
+    # found it (``BaseAnalyst._claims_shortfall``), or ``""``. Kept with the
+    # answer rather than the run, so the judge node states it only for an
+    # answer in force: a retry or a later round that replaced this answer
+    # carries its own.
+    _claims_unread_reason: str = PrivateAttr(default="")
+    # The claim headings this answer wrote under its DISPUTES section beside
+    # its own claims read: a peer's claims quoted, or its own written in the
+    # wrong place. The validation turn asks once which.
+    _claims_under_disputes: int = PrivateAttr(default=0)
+    # Whether this answer is the one the validation turn kept after asking
+    # about those headings. Asked and kept, they are the analyst's answer; a
+    # question never put leaves their status unknown, and the judge node
+    # states them as a degradation reason (``nodes.claims_under_disputes_unasked``).
+    _claims_under_disputes_asked: bool = PrivateAttr(default=False)
 
     @property
     def unparsed_answer(self) -> str:
@@ -258,6 +282,33 @@ class AgentISR(BaseModel):
     def note_gate_removed(self, claims: list[str]) -> None:
         """Record the claims of the written answer the consistency gate set aside."""
         self._gate_removed = [str(c) for c in claims]
+
+    @property
+    def claims_unread_reason(self) -> str:
+        """Why claims this answer began are not in its findings, or ``""``."""
+        return self._claims_unread_reason
+
+    def note_claims_unread(self, reason: str) -> None:
+        """Record why claims this answer began are not in its findings."""
+        self._claims_unread_reason = str(reason or "")
+
+    @property
+    def claims_under_disputes(self) -> int:
+        """How many claim headings stand under this answer's DISPUTES section, beside its own."""
+        return self._claims_under_disputes
+
+    def note_claims_under_disputes(self, count: int) -> None:
+        """Record the claim headings under the DISPUTES section, beside the answer's own."""
+        self._claims_under_disputes = max(0, int(count or 0))
+
+    @property
+    def claims_under_disputes_asked(self) -> bool:
+        """Whether the analyst was asked about those headings and this answer kept them."""
+        return self._claims_under_disputes_asked
+
+    def note_claims_under_disputes_asked(self) -> None:
+        """Record that the analyst was asked about those headings and kept them there."""
+        self._claims_under_disputes_asked = True
 
     @property
     def blocks_without_confidence(self) -> int:

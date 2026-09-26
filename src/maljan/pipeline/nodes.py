@@ -20,7 +20,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from maljan.agents.base_agent import NO_STRUCTURED_REPORT_STATUS
+from maljan.agents.base_agent import NO_STRUCTURED_REPORT_STATUS, claims_under_disputes_sentence
 from maljan.agents.delegation import REFUSAL_PREFIX
 from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.agents.judge_agent import (
@@ -478,6 +478,9 @@ def _violations_from_rows(rows: Any) -> list[Violation]:
                     # anything may act on it; rebuilt without the flag, an
                     # advisory absence would come back as a reason to drop.
                     advisory=bool(row.get("advisory")),
+                    # And an answered question stays one, rather than coming
+                    # back as a finding left unfixed.
+                    answered=bool(row.get("answered")),
                 )
             )
     return out
@@ -1866,6 +1869,46 @@ def stage_key_of(stage: Any, default: str) -> str:
 ROOM_SPEAKER = "pipeline"
 
 
+def claims_unread_in_force(isr_reports: Mapping[str, Any]) -> list[str]:
+    """The unread-claims reasons of the analysts' answers in force, in the reports' order.
+
+    Each answer carries its own (``AgentISR.claims_unread_reason``): an
+    answer a retry or a later round replaced is not in force, and what its
+    read lost is in the log, not in the run's degradation reasons.
+    """
+    out: list[str] = []
+    for isr in isr_reports.values():
+        reason = str(getattr(isr, "claims_unread_reason", "") or "")
+        if reason and reason not in out:
+            out.append(reason)
+    return out
+
+
+def claims_under_disputes_unasked(isr_reports: Mapping[str, Any]) -> list[str]:
+    """What the answers in force wrote under their DISPUTES sections unasked, in the reports' order.
+
+    Claim headings under the section, beside an analyst's own claims read,
+    are asked about once in its validation turn. Asked and kept, they are the
+    analyst's answer and the validation record says so. An answer the question
+    was never put to (a nudged answer, a validation turn not asked for want of
+    time, a path with no validation turn) leaves their status unknown, and
+    that is what the sentence states.
+    """
+    out: list[str] = []
+    for key, isr in isr_reports.items():
+        count = int(getattr(isr, "claims_under_disputes", 0) or 0)
+        if not count or bool(getattr(isr, "claims_under_disputes_asked", False)):
+            continue
+        sentence = claims_under_disputes_sentence(
+            str(getattr(isr, "agent_id", "") or key),
+            count,
+            int(getattr(isr, "revision_round", 0) or 0),
+        )
+        if sentence not in out:
+            out.append(sentence)
+    return out
+
+
 def label_of(container: ServiceContainer, key: str) -> str:
     """The label an operator gave this agent, or its key. Never raises."""
     try:
@@ -1874,6 +1917,22 @@ def label_of(container: ServiceContainer, key: str) -> str:
         return display_name(container.config, key)
     except Exception:  # noqa: BLE001 — a name is never worth a node
         return str(key)
+
+
+def _stage_place(container: ServiceContainer, key: str, stage: Any) -> tuple[str, int, int] | None:
+    """``(stage key, place, count)`` for an agent named by its stage, or ``None`` for a label.
+
+    ``None`` when the agent has a label, a key short enough to publish, or no
+    stage to be named by; a place of 0 when it is the stage's only agent.
+    """
+    label = label_of(container, key)
+    stage_key = str(getattr(stage, "key", "") or "")
+    if label != key or len(key) < 24 or not stage_key:
+        return None
+    agents = list(getattr(stage, "agents", None) or ())
+    if len(agents) > 1 and key in agents:
+        return stage_key, agents.index(key) + 1, len(agents)
+    return stage_key, 0, 1
 
 
 def spoken_name(container: ServiceContainer, key: str, stage: Any) -> str:
@@ -1886,14 +1945,27 @@ def spoken_name(container: ServiceContainer, key: str, stage: Any) -> str:
     more than one, so two such agents are never named alike. The line's
     identity fields keep the key either way.
     """
-    label = label_of(container, key)
-    stage_key = str(getattr(stage, "key", "") or "")
-    if label != key or len(key) < 24 or not stage_key:
-        return label
-    agents = list(getattr(stage, "agents", None) or ())
-    if len(agents) > 1 and key in agents:
-        return f"{stage_key} analyst {agents.index(key) + 1} of {len(agents)}"
-    return f"{stage_key} analyst"
+    place = _stage_place(container, key, stage)
+    if place is None:
+        return label_of(container, key)
+    stage_key, index, count = place
+    return f"{stage_key} analyst {index} of {count}" if index else f"{stage_key} analyst"
+
+
+def claims_source(container: ServiceContainer, key: str, stage: Any) -> str:
+    """Where a debate line says an agent's claims come from, as a whole phrase.
+
+    "the <label> layer" for a named agent; for one named by its stage, the
+    stage said as a place: "analyst 2 of 3 in the analysis stage", or "the
+    analyst in the reversing stage" for a stage's only agent.
+    """
+    place = _stage_place(container, key, stage)
+    if place is None:
+        return f"the {label_of(container, key)} layer"
+    stage_key, index, count = place
+    if index:
+        return f"analyst {index} of {count} in the {stage_key} stage"
+    return f"the analyst in the {stage_key} stage"
 
 
 def announce_started(container: ServiceContainer, stage: Any) -> None:
@@ -2412,6 +2484,7 @@ def make_stage_agent_node(
                 text=summarize_claims(
                     isr.claims,
                     speaker=spoken_name(container, agent_name, stage),
+                    source=claims_source(container, agent_name, stage),
                 ),
                 round_index=0,
                 status=isr_status(isr),
@@ -3298,6 +3371,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             revised_isrs[name] = kept
             label = label_of(container, name)
             spoken = spoken_name(container, name, _home_stage(container, name))
+            source = claims_source(container, name, _home_stage(container, name))
             logger.warning(
                 "%s: the round-%d revision was not made (%s); its answer in force stands with "
                 "%d claim(s).",
@@ -3311,7 +3385,8 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 speaker=name,
                 role="reviser",
                 text=(
-                    f"{summarize_claims(kept.claims, speaker=spoken)} The revision was not made "
+                    f"{summarize_claims(kept.claims, speaker=spoken, source=source)} "
+                    "The revision was not made "
                     f"({why}); this answer stands."
                 ),
                 round_index=iteration,
@@ -3385,6 +3460,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     text=summarize_claims(
                         isr.claims,
                         speaker=spoken_name(container, name, _home_stage(container, name)),
+                        source=claims_source(container, name, _home_stage(container, name)),
                     ),
                     round_index=iteration,
                     status=isr_status(isr),
@@ -3824,6 +3900,25 @@ def make_judge_node(
                     str(reason)
                     for reason in container.get_truncation_ledger().input_shortened
                     if str(reason) not in _degradation_reasons
+                )
+            # An analyst answer whose claims were begun and not all read: the
+            # findings the run carries are fewer than the analyst wrote. Only
+            # for the answer in force; a round a later answer replaced is in
+            # the log.
+            with suppress(Exception):
+                _degradation_reasons.extend(
+                    reason
+                    for reason in claims_unread_in_force(isr_reports)
+                    if reason not in _degradation_reasons
+                )
+            # Claim headings under an answer's DISPUTES section, when the
+            # analyst was never asked whether they are its own. Asked and kept,
+            # they are its answer and are in the validation record instead.
+            with suppress(Exception):
+                _degradation_reasons.extend(
+                    reason
+                    for reason in claims_under_disputes_unasked(isr_reports)
+                    if reason not in _degradation_reasons
                 )
             if _failed_analysts:
                 _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")

@@ -22,7 +22,7 @@ import { formatStageDuration, stageTiming } from "@/components/analysis/stageTim
 import { getErrorMessage } from "@/lib/errors";
 import { ENRICH_BUTTON_LABEL, ENRICH_STATUS_MESSAGE } from "@/lib/enrichment";
 import { degradedBannerText } from "@/lib/degradedBanner";
-import { validationRowText } from "@/lib/validationRows";
+import { validationRowClass, validationRowText } from "@/lib/validationRows";
 import EvidenceChips from "@/components/analysis/EvidenceChips";
 import TechnicalAnalysisPanel from "@/components/analysis/TechnicalAnalysisPanel";
 import {
@@ -661,7 +661,7 @@ function RunRecord({
             {partialGrounding && <li className="text-text-muted">{partialGrounding}</li>}
             {corpusHeld && <li className="text-text-muted">{corpusHeld}</li>}
             {(validation?.unresolved ?? []).map((item, i) => (
-              <li key={i} className="text-status-orange">
+              <li key={i} className={validationRowClass(item)}>
                 {validationRowText(item)}
               </li>
             ))}

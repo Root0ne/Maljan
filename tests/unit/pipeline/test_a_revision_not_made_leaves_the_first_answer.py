@@ -171,8 +171,7 @@ class TestAnUnlabelledLongKey:
         texts = {message["speaker"]: message["text"] for message in recorder.said()}
         headline = texts[LONG_KEY].split(" Leading:")[0]
         assert LONG_KEY not in headline
-        assert headline.startswith("23 evidence-backed claims from the ")
-        assert headline == "23 evidence-backed claims from the analysis analyst 2 of 3 layer."
+        assert headline == "23 evidence-backed claims from analyst 2 of 3 in the analysis stage."
         # A short key is still the name.
         assert texts["static"].startswith("9 evidence-backed claims from the static layer")
 
@@ -191,6 +190,24 @@ class TestTwoUnlabelledLongKeysInOneStage:
         assert names == {"reversing analyst 1 of 2", "reversing analyst 2 of 2"}
         alone = SimpleNamespace(key="reversing", agents=[first])
         assert spoken_name(container, first, alone) == "reversing analyst"
+
+    def test_the_debate_line_says_the_stage_as_a_place(self) -> None:
+        from types import SimpleNamespace
+
+        from maljan.pipeline.events import summarize_claims
+        from maljan.pipeline.nodes import claims_source
+
+        key = "all_tools_reverser_ghidra"
+        container = MagicMock()
+        container.config.agents.definitions = {}
+        alone = SimpleNamespace(key="reversing", agents=[key])
+        claims = [ClaimEvidence(claim="one", evidence_ref="[ev_0001]", confidence=0.5)]
+        line = summarize_claims(
+            claims, speaker="reversing analyst", source=claims_source(container, key, alone)
+        )
+        assert (
+            line == "1 evidence-backed claim from the analyst in the reversing stage. Leading: one"
+        )
 
 
 class TestARevisionThatWasMade:

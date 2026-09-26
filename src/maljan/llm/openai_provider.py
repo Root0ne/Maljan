@@ -475,6 +475,131 @@ def with_reasoning_passback(chat_class: Any) -> Any:
     return kept
 
 
+# What a request says in place of the reply a tool call never got. A turn can
+# carry a call no tool ran: one whose arguments never parsed sits in
+# ``invalid_tool_calls``, which langgraph's tool node does not run and
+# langchain-openai still writes into the turn's ``tool_calls``. An
+# OpenAI-compatible server refuses such a history outright — DeepSeek answered
+# a revision loop's turn with 400, "An assistant message with 'tool_calls' must
+# be followed by tool messages responding to each 'tool_call_id'" — and the
+# analyst was lost for the round. The call stays in the turn, as the model
+# wrote it, and the reply says what is known: that no reply was recorded, and,
+# for a call whose arguments did not parse, that it was not run.
+NO_REPLY_RECORDED = "No reply was recorded for this call."
+NOT_RUN_REPLY = (
+    "No reply was recorded for this call: its arguments did not parse, so it was not run."
+)
+
+# One subclass per chat class seen, as for ``_TIMED_CLASSES``.
+_ANSWERED_CLASSES: dict[type, type] = {}
+
+
+def answered_tool_calls(
+    messages: list[Any], not_run: frozenset[str] | set[str] = frozenset()
+) -> tuple[list[Any], int]:
+    """The request's messages with every tool call answered, in its call order.
+
+    OpenAI's chat format wants each assistant turn's ``tool_calls`` followed by
+    one ``tool`` message per call id. The tool messages that follow a turn are
+    put in the order of its calls, and a call with none gets
+    ``NO_REPLY_RECORDED``, or ``NOT_RUN_REPLY`` when its id is one of
+    ``not_run`` (the turn's calls whose arguments did not parse). A tool
+    message that answers none of the turn's
+    calls stays where it was, after them: dropping it would remove something
+    the conversation holds. Returns the messages and how many replies were
+    written. A history that is already well formed comes back as it was.
+    """
+    out: list[Any] = []
+    written = 0
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        out.append(message)
+        index += 1
+        calls = message.get("tool_calls") if isinstance(message, dict) else None
+        if not (isinstance(message, dict) and message.get("role") == "assistant" and calls):
+            continue
+        replies: list[Any] = []
+        while (
+            index < len(messages)
+            and isinstance(messages[index], dict)
+            and messages[index].get("role") == "tool"
+        ):
+            replies.append(messages[index])
+            index += 1
+        for call in calls:
+            call_id = str(call.get("id") or "") if isinstance(call, dict) else ""
+            match = next((r for r in replies if str(r.get("tool_call_id") or "") == call_id), None)
+            if match is not None:
+                replies.remove(match)
+                out.append(match)
+                continue
+            reply = NOT_RUN_REPLY if call_id in not_run else NO_REPLY_RECORDED
+            out.append({"role": "tool", "tool_call_id": call_id, "content": reply})
+            written += 1
+        out.extend(replies)
+    return out, written
+
+
+def _unparsed_call_ids(model: Any, input_: Any) -> frozenset[str]:
+    """The ids of the calls in ``input_``'s turns whose arguments did not parse, or none."""
+    try:
+        messages = model._convert_input(input_).to_messages()
+    except Exception:  # noqa: BLE001 — without them every missing reply says only what is known
+        return frozenset()
+    return frozenset(
+        str(call.get("id") or "")
+        for message in messages
+        for call in getattr(message, "invalid_tool_calls", None) or []
+        if isinstance(call, dict) and call.get("id")
+    )
+
+
+def with_answered_tool_calls(chat_class: Any) -> Any:
+    """``chat_class`` never sending a tool call without its reply.
+
+    Applied last, over every dialect's own request changes: DeepSeek's
+    reasoning passback matches the request's messages to the conversation's
+    one for one, and the replies written here come after it. Each request's
+    history is completed as it is sent (``answered_tool_calls``), so the
+    conversation the loop keeps is the model's own and a turn sent twice is
+    the same turn.
+    """
+    if not isinstance(chat_class, type) or not hasattr(chat_class, "_get_request_payload"):
+        return chat_class
+    cached = _ANSWERED_CLASSES.get(chat_class)
+    if cached is not None:
+        return cached
+    base: Any = chat_class
+
+    def _get_request_payload(self: Any, input_: Any, *, stop: Any = None, **kwargs: Any) -> Any:
+        payload = base._get_request_payload(self, input_, stop=stop, **kwargs)
+        sent = payload.get("messages") if isinstance(payload, dict) else None
+        if not isinstance(sent, list):
+            return payload
+        answered, written = answered_tool_calls(sent, _unparsed_call_ids(self, input_))
+        if written:
+            logger.warning(
+                "openai provider: %d tool call(s) in the history had no reply; each is sent "
+                "with a reply saying so (%d of them with arguments that did not parse, said "
+                "not run).",
+                written,
+                sum(
+                    1 for m in answered if isinstance(m, dict) and m.get("content") == NOT_RUN_REPLY
+                ),
+            )
+            payload["messages"] = answered
+        return payload
+
+    answered_class = type(
+        chat_class.__name__, (chat_class,), {"_get_request_payload": _get_request_payload}
+    )
+    answered_class.__module__ = __name__
+    answered_class.__qualname__ = chat_class.__qualname__
+    _ANSWERED_CLASSES[chat_class] = answered_class
+    return answered_class
+
+
 @register_provider("openai")
 class OpenAIProvider:
     """Builds LangChain ChatOpenAI instances."""
@@ -579,6 +704,9 @@ class OpenAIProvider:
             # llama.cpp reads its cap from the extras; a cap bound for one call
             # reaches them the way the model's own does.
             chat_class = with_per_request_llama_cap(chat_class)
+        # Last, over the dialect's own changes: no request sends a tool call
+        # without its reply, whatever the history it was built from.
+        chat_class = with_answered_tool_calls(chat_class)
         built: BaseChatModel = chat_class(**build_kwargs)
         if not local:
             return built

@@ -31,6 +31,9 @@ from maljan.agents.base_agent import (
     FINAL_ANSWER_NUDGE,
     INPUT_SHORTENED_NOTICE,
     SPEND_CEILING_QUESTION,
+    ClaimRead,
+    claims_under_disputes_sentence,
+    claims_unread_sentence,
 )
 from maljan.agents.delegation import (
     SPEND_CEILING_REFUSAL,
@@ -78,6 +81,7 @@ from maljan.agents.tool_pinning import (
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
 from maljan.analysis.pcap_summary import CaptureRead
 from maljan.extractors.capability_matrix import NOT_ASKED_UNKNOWN_ID, TechniqueQuestion
+from maljan.llm.openai_provider import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.pipeline import triage_pack
 from maljan.pipeline.nodes import (
     NO_SANDBOX_DATA_REASON,
@@ -93,10 +97,13 @@ from maljan.pipeline.validation import (
     absence_claim_violation,
     analyst_cut_violation,
     claim_does_not_describe_violation,
+    claims_kept_under_disputes_finding,
+    claims_under_disputes_violation,
     gate_removed_note,
     misstated_entry_contents,
     repeated_item_violations,
     section_cut_violation,
+    technique_line_violation,
     ungrounded_capabilities,
     validate_verdict_bundle,
 )
@@ -125,6 +132,7 @@ from maljan.reporting.renderers.stix_renderer import (
     BENIGN_NAME_RESOLVED,
     FLOW_OUTSIDE_THE_TREE,
     UNATTRIBUTED_FLOW,
+    disputed_flow_reason,
     not_kept_reason,
 )
 from maljan.schemas.isr_models import (
@@ -502,7 +510,28 @@ PROMPTS: dict[str, str] = {
             BENIGN_NAME_RESOLVED,
             BENIGN_NAME_IN_A_URL,
             not_kept_reason("x", "a claim by the network analyst"),
+            not_kept_reason(
+                f"{FLOW_OUTSIDE_THE_TREE} (SearchHost.exe (procid 104))",
+                "a claim by the dynamic analyst",
+            ),
+            disputed_flow_reason(["SearchHost.exe (procid 104)"], ["cmd.exe (procid 7)"]),
         ]
+    ),
+    "the replies a tool call with no recorded reply is sent with": (
+        f"{NO_REPLY_RECORDED} {NOT_RUN_REPLY}"
+    ),
+    "analyst question for technique lines no single id was read from": technique_line_violation(
+        ["T1000 (candidate)", "T1001, T1002"]
+    ).message,
+    "the question and the reason for claim headings under DISPUTES": (
+        f"{claims_under_disputes_violation(2).message} "
+        f"{claims_under_disputes_sentence('reverser', 2, 1)}"
+    ),
+    "the recorded answer when claim headings are kept under DISPUTES": (
+        claims_kept_under_disputes_finding(2).message
+    ),
+    "the degradation reason for claims begun and not read": claims_unread_sentence(
+        "reverser", ClaimRead(claims=[], without_confidence=1, begun=4, after_disputes=2), 2
     ),
     "failure of a capture the platform filled in": " ".join(
         [UNREADABLE_FILLED_CAPTURE, UNREADABLE_FILLED_CAPTURE_REMEDIATION]

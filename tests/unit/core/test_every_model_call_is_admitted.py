@@ -4,8 +4,11 @@ The mediator's fast path, the judge's reasoning salvage, the structured
 mediation extraction and the function summariser went out without being
 admitted: nothing held them, nothing reserved them, and one of them could take
 the job past its ceiling. The guard below reads the source for every
-``invoke``/``ainvoke`` call and fails for one that is not preceded, in its own
-function or a function around it, by a call that admits it. The only calls it
+``invoke``/``ainvoke`` call and pairs it with an admission of its own: the
+nearest one before it, in its function or a function around it, that no
+earlier call took. One admission does not cover a second call after it, and a
+call inside a loop is paired only with an admission in the same loop's body,
+since one made before the loop admits its first pass alone. The only calls it
 leaves alone are the tool calls listed by name. The tests after it drive the
 judge's paths through a meter.
 """
@@ -57,10 +60,106 @@ def _own_nodes(function: Function) -> list[ast.AST]:
     return found
 
 
+# A comprehension or a generator expression runs its element once per item,
+# as a loop runs its body.
+_LOOPS = (
+    ast.For,
+    ast.AsyncFor,
+    ast.While,
+    ast.ListComp,
+    ast.SetComp,
+    ast.DictComp,
+    ast.GeneratorExp,
+)
+
+
+def _position(node: ast.AST) -> tuple[int, int]:
+    return (getattr(node, "lineno", 0), getattr(node, "col_offset", 0))
+
+
 def unadmitted_in(source: str, where: str = "<source>") -> list[str]:
-    """The model calls in ``source`` no admission precedes in their function or one around it."""
+    """The model calls in ``source`` that no admission of their own precedes.
+
+    Each call takes the nearest admission before it that no earlier call took,
+    looking in its own function first and then in each function around it,
+    innermost first; two calls in the two branches of one ``if`` or conditional
+    expression are one call, and may share one. A call inside a loop takes
+    only an admission inside the innermost loop around it, in the same function.
+    """
     tree = ast.parse(source)
+    parents: dict[ast.AST, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
     found: list[str] = []
+    # Each function's admissions in source order, and the calls each one admitted.
+    admissions: dict[ast.AST, list[ast.Call]] = {}
+    users: dict[ast.Call, list[ast.Call]] = {}
+
+    def own_admissions(function: Function) -> list[ast.Call]:
+        if function not in admissions:
+            admissions[function] = sorted(
+                (
+                    seen
+                    for seen in _own_nodes(function)
+                    if isinstance(seen, ast.Call) and _called_name(seen) in ADMISSION
+                ),
+                key=_position,
+            )
+        return admissions[function]
+
+    def innermost_loop(call: ast.Call, function: Function) -> ast.AST | None:
+        node = parents.get(call)
+        while node is not None and node is not function:
+            if isinstance(node, _LOOPS):
+                return node
+            node = parents.get(node)
+        return None
+
+    def inside(node: ast.AST, ancestor: ast.AST) -> bool:
+        while node is not None:
+            if node is ancestor:
+                return True
+            node = parents.get(node)  # type: ignore[assignment]
+        return False
+
+    def exclusive(one: ast.AST, other: ast.AST) -> bool:
+        """Whether the two sit in the two branches of one ``if`` or conditional expression."""
+        for branch in (ast.If, ast.IfExp):
+            node = parents.get(one)
+            while node is not None:
+                if isinstance(node, branch) and inside(other, node):
+                    first = node.body if isinstance(node.body, list) else [node.body]
+                    rest = node.orelse if isinstance(node.orelse, list) else [node.orelse]
+                    in_first = any(inside(one, part) for part in first)
+                    in_rest = any(inside(one, part) for part in rest)
+                    other_first = any(inside(other, part) for part in first)
+                    other_rest = any(inside(other, part) for part in rest)
+                    return (in_first and other_rest) or (in_rest and other_first)
+                node = parents.get(node)
+        return False
+
+    def free_for(admission: ast.Call, call: ast.Call) -> bool:
+        return all(exclusive(call, earlier) for earlier in users.get(admission, []))
+
+    def take(call: ast.Call, around: list[Function]) -> bool:
+        for depth, function in enumerate(reversed(around)):
+            loop = innermost_loop(call, function) if depth == 0 else None
+            candidates = [
+                admission
+                for admission in own_admissions(function)
+                if _position(admission) < _position(call)
+                and (loop is None or inside(admission, loop))
+                and free_for(admission, call)
+            ]
+            if candidates:
+                users.setdefault(candidates[-1], []).append(call)
+                return True
+            if loop is not None:
+                return False
+        return False
+
+    calls: list[tuple[ast.Call, list[Function]]] = []
 
     def visit(node: ast.AST, around: list[Function]) -> None:
         for child in ast.iter_child_nodes(node):
@@ -72,19 +171,16 @@ def unadmitted_in(source: str, where: str = "<source>") -> list[str]:
                 and isinstance(child.func, ast.Attribute)
                 and child.func.attr in ("invoke", "ainvoke")
             ):
-                receiver = ast.unparse(child.func.value)
-                if (where, receiver) not in TOOL_CALLS and not any(
-                    isinstance(seen, ast.Call)
-                    and _called_name(seen) in ADMISSION
-                    and seen.lineno < child.lineno
-                    for function in around
-                    for seen in _own_nodes(function)
-                ):
-                    name = around[-1].name if around else "<module>"
-                    found.append(f"{where}:{child.lineno} {name}: {receiver}")
+                calls.append((child, around))
             visit(child, around)
 
     visit(tree, [])
+    for call, around in sorted(calls, key=lambda pair: _position(pair[0])):
+        receiver = ast.unparse(call.func.value)  # type: ignore[attr-defined]
+        if (where, receiver) in TOOL_CALLS or take(call, around):
+            continue
+        name = around[-1].name if around else "<module>"
+        found.append(f"{where}:{call.lineno} {name}: {receiver}")
     return found
 
 
@@ -136,6 +232,81 @@ class TestTheGuard:
             "    return await llm.ainvoke(m)\n"
         )
         assert unadmitted_in(source)
+
+    def test_one_admission_does_not_cover_a_second_call_after_it(self) -> None:
+        source = (
+            "async def f(self, a, b):\n"
+            "    self._spend_admits('x', a)\n"
+            "    first = await self.llm.ainvoke(a)\n"
+            "    return first, await self.llm.ainvoke(b)\n"
+        )
+        (found,) = unadmitted_in(source)
+        assert ":4 f: self.llm" in found
+
+    def test_each_call_with_its_own_admission_passes(self) -> None:
+        source = (
+            "async def f(self, a, b):\n"
+            "    self._spend_admits('x', a)\n"
+            "    first = await self.llm.ainvoke(a)\n"
+            "    self._spend_admits('y', b)\n"
+            "    return first, await self.llm.ainvoke(b)\n"
+        )
+        assert unadmitted_in(source) == []
+
+    def test_a_call_in_a_loop_needs_its_admission_in_the_loop(self) -> None:
+        outside = (
+            "async def f(self, turns):\n"
+            "    self._spend_admits('x', turns)\n"
+            "    for turn in turns:\n"
+            "        await self.llm.ainvoke(turn)\n"
+        )
+        inside = (
+            "async def f(self, turns):\n"
+            "    for turn in turns:\n"
+            "        with admitted(self.ledger, kind='x'):\n"
+            "            await self.llm.ainvoke(turn)\n"
+        )
+        assert unadmitted_in(outside)
+        assert unadmitted_in(inside) == []
+
+    def test_a_call_in_a_comprehension_needs_its_admission_in_it(self) -> None:
+        outside = (
+            "async def f(self, batch):\n"
+            "    self._spend_admits('x', batch)\n"
+            "    return await gather(*(self.llm.ainvoke(m) for m in batch))\n"
+        )
+        listed = (
+            "async def f(self, batch):\n"
+            "    self._spend_admits('x', batch)\n"
+            "    return [await self.llm.ainvoke(m) for m in batch]\n"
+        )
+        assert unadmitted_in(outside)
+        assert unadmitted_in(listed)
+
+    def test_two_branches_of_one_choice_share_their_admission(self) -> None:
+        source = (
+            "async def f(self, m, bound):\n"
+            "    self._call_limit(m)\n"
+            "    ask = (lambda: self.llm.ainvoke(m, cap=bound)) if bound else (\n"
+            "        lambda: self.llm.ainvoke(m))\n"
+            "    if bound:\n"
+            "        return await ask()\n"
+            "    return await ask()\n"
+        )
+        assert unadmitted_in(source) == []
+
+    def test_a_fallback_after_a_refused_call_needs_its_own(self) -> None:
+        source = (
+            "async def f(self, m):\n"
+            "    self._spend_admits('x', m)\n"
+            "    try:\n"
+            "        return await self.structured.ainvoke(m)\n"
+            "    except ValueError:\n"
+            "        pass\n"
+            "    return await self.llm.ainvoke(m)\n"
+        )
+        (found,) = unadmitted_in(source)
+        assert ":7 f: self.llm" in found
 
     def test_passes_an_admitted_call_in_a_closure(self) -> None:
         source = (

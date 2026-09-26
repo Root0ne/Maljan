@@ -1997,6 +1997,25 @@ FLOW_OUTSIDE_THE_TREE = (
     "the sandbox report attributes its flows to a process outside the sample's process tree"
 )
 BENIGN_NAME_RESOLVED = "a well-known benign name the sandbox's guest resolved"
+# What the rule says of a process the two lineage facts disagree about.
+MARKED_ONLY_PROCESS = (
+    "which Triage marks as the sample's but which runs none of the submitted file's names "
+    "and descends from none of its processes"
+)
+FILE_ONLY_PROCESS = (
+    "which runs the submitted file or descends from a process that does, but which Triage "
+    "does not mark as the sample's"
+)
+
+
+def disputed_flow_reason(marked_only: list[str], file_only: list[str]) -> str:
+    """Why a row the lineage facts disagree about is not the sample's, both facts said."""
+    parts = []
+    if marked_only:
+        parts.append(f"{', '.join(marked_only)}, {MARKED_ONLY_PROCESS}")
+    if file_only:
+        parts.append(f"{', '.join(file_only)}, {FILE_ONLY_PROCESS}")
+    return "the sandbox report attributes its flows to " + "; and to ".join(parts)
 
 
 def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
@@ -2028,6 +2047,15 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
             if _field(row, "sample_process_tree") is False
             else UNATTRIBUTED_FLOW
         )
+        # The process the report says made the flows, by name: the reason a
+        # reader can check against the process table.
+        made_by = [str(p) for p in (_field(row, "outside_processes") or []) if str(p)]
+        if made_by and _field(row, "sample_process_tree") is False:
+            why += f" ({', '.join(made_by)})"
+        marked_only = [str(p) for p in (_field(row, "marked_only_processes") or []) if str(p)]
+        file_only = [str(p) for p in (_field(row, "file_only_processes") or []) if str(p)]
+        if _field(row, "sample_process_tree") is None and (marked_only or file_only):
+            why = disputed_flow_reason(marked_only, file_only)
         if _field(row, "public_resolver"):
             why += "; it is a public DNS resolver"
         if _field(row, "asn"):

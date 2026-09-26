@@ -1,0 +1,84 @@
+All verification paths are complete. Here is my round-1 report.
+
+**Tool-status note (stated once):** the Ghidra decompiler, memory reads and function analysis work normally in this environment. Two emulation helpers do **not**: `emulate_hash_batch` is provably broken (with `target_hash=0x0` it "matched" every candidate and reported `computed_hash:"0x0"` for all of them, [ev_0415]), and `emulate_function` ignores memory-payload injection (a write/payload probe at a freshly zeroed address returned 0; reads reflected pre-existing `.data` bytes, [ev_0414]). Consequently every API *name* behind the sample's hash tables is **UNRESOLVED for that tool reason** — I hold the complete hash list but cannot invert it here. All other claims below are read from code or bytes.
+
+---
+
+CLAIM: The four-export/one-body structure is confirmed at function level and the execution vehicle is exactly as found. Exports `extra`/`follower`/`run`/`scub` (ordinals 1–4) all alias `0x1360bc03ce4`; the body is `FUN_1360bc03cb4()` → `FUN_1360bc03868()` (init); **on init success (0) the host thread parks forever in `FUN_1360bc0c934(1000)`, on init failure it returns to the host** (polarity checked: `if (iVar1 != 0) return 0;` then sleep loop). `DllMain` is `entry` @ `0x1360bc03c7c`. (T1218.011)
+EVIDENCE: exports [ev_0376][ev_0375]; stub [ev_0377]; loader loop [ev_0394]; init returns/abort paths [ev_0391]; prior [ev_0011][ev_0012].
+CONFIDENCE: 0.95
+TECHNIQUE: T1218.011
+
+CLAIM: capa "PEB access @0x8690" and "resolve function by parsing PE exports @0x869c" are confirmed at byte level, and the resolution layer is now fully mapped. `0x1360bc08690` = `65 48 8B 04 25 60 00 00 00 C3` (`mov rax, gs:[0x60]; ret`). `FUN_1360bc0869c` walks the export directory (`e_lfanew`→export RVA at +0x88; NumberOfNames +0x18, AddressOfNames +0x20, AddressOfFunctions +0x1c, NameOrdinals +0x24) and matches `FUN_1360bc06aa4(name, strlen)` (CRC32). `FUN_1360bc08378` resolves *modules* by walking `PEB->Ldr->InLoadOrderModuleList`, lowercasing each `BaseDllName` (`FUN_1360bc0beb0` — A–Z→a–z, [ev_0387]) and hashing `2*chars` bytes ([ev_0383][ev_0386]). `FUN_1360bc09484` builds a **90-entry** stack table of `{hash, module-slot, target-slot}` triples and fills each slot via the resolver; `FUN_1360bc0904c` adds 24, `FUN_1360bc0ac50` adds 3 with forwarder resolution. (T1027.007)
+EVIDENCE: bytes [ev_0374]; resolver [ev_0380]; module walk [ev_0383]; string helpers [ev_0386][ev_0387][ev_0389]; tables [ev_0397]; capa offsets [ev_0008]; import list (5) [ev_0004][ev_0043/0143 prior].
+CONFIDENCE: 0.9
+TECHNIQUE: T1027.007
+
+CLAIM: capa's "contain obfuscated stackstrings **@0x9484**" is **refuted as the string-obfuscation locus**: `0x1360bc09484` is the API-hash table builder above (the "stackstrings" the rule saw are hash constants and slot addresses). The actual stored-text obfuscation is the counter-XOR decoder `FUN_1360bc0ae78`: length = `(u16)seed ^ *(u16*)(blob+4)`, byte *i* = `data[i] ^ (u8)(seed+i+1)`, keystream helper `0x1360bc09040` = `89 4C 24 08 8B 44 24 08 FF C0 C3` (`mov[eax+8]…; inc eax; ret`, [ev_0421]). (T1027.005, T1140)
+EVIDENCE: hash table [ev_0397]; decoder [ev_0416]; helper bytes [ev_0421]; capa offset [ev_0008]; FLOSS set [ev_0019].
+CONFIDENCE: 0.9
+TECHNIQUE: T1027.005
+
+CLAIM: The decoder model is falsified by two independent byte-level decodes. Blob `0x1360bc10250`: seed `0x33629D40`, length `0x9D40^0x9D5F = 31`, data decoded with keystream `0x41,0x42,…` yields exactly `https://titnovacrion.top/live/` + NUL — matching FLOSS's independently recovered string at call site `0x69b3` [ev_0019]. Blob `0x1360bc0fd30`: length `6`, yields `123456` — **this revises my own round-0 claim 12: the beacon's RC4 key is the 6-byte `"123456"`, not `"12345"`** (FLOSS's `"12345"@0xb69a` is a different artifact/site). (T1140)
+EVIDENCE: URL blob bytes + decode [ev_0423]; key blob bytes + decode [ev_0420]; decoder [ev_0416]; helper [ev_0421]; FLOSS [ev_0019].
+CONFIDENCE: 0.85
+TECHNIQUE: T1140
+
+CLAIM: **Command dispatch, both levels, confirmed.** (1) `FUN_1360bc0541c` (entered from the beacon on the decrypted reply, [ev_0416]) splits the response on the delimiter blobs at `0x1360bc0fce0/fce4/fce8/fcec`, then compares the first token against three decoded verbs: blob `0xfcf0` → `FUN_1360bc0ce20()` (clear URL list); blob `0xfd00` → `FUN_1360bc0ccbc(url, atoi(token), token2)` (push operator URL); blob `0xfd10` → `FUN_1360bc03cf4(url, atoi(token), &token0)` (COMMAND); blob `0xfd20` → fourth branch, result unused. (2) `FUN_1360bc03cf4` branches on the id: 0x2→`FUN_1360bc01a08`→slot `0x10560`; 0x3→`FUN_1360bc01c38`→`0x10558`; 0x4→`FUN_1360bc02118` (discovery thread, output→`0x10550`); 0xc→`FUN_1360bc06e04(url,1)`; 0xd→`FUN_1360bc06c2c(url,1)`; 0xe→`FUN_1360bc07170(url,1)`; 0xf→uninstall chain + `(*0x10b68)(0)` (process exit); 0x11→exit; 0x12→`FUN_1360bc04110`; 0x13→slow-beacon flag; 0x14→counter reset; 0x15→`FUN_1360bc072c8`. For ids {0x12,0xe,0xc,0xd,0xf,4,0x15} it first synthesises a URL from the C2 base + 7-byte blob `0x1360bc0fb00` (`files/`) + the parameter at `param3+0x10` when that parameter begins `https` (5-byte compare against blob `0x1360bc0faf0`) — matching my round-0 claim 6. (T1059.003)
+EVIDENCE: tokenizer [ev_0425]; dispatcher [ev_0416]; beacon call-chain [ev_0416]; sandbox "Task Scheduler COM"/run corroboration [ev_0014].
+CONFIDENCE: 0.9
+TECHNIQUE: T1059.003
+
+CLAIM: **Environment checks** (in init order `FUN_1360bc03868`): (a) `FUN_1360bc06328` — chained resolution init; (b) `FUN_1360bc03074`→`FUN_1360bc0309c` reads PEB+2 (`BeingDebugged`), non-zero → abort (-1); (c) process-count vs OS-id gate: abort if `(count<0x4B && os>5)` or `(count<0x32 && os<6)`; (d) `FUN_1360bc068e8` — **new finding**: two-call buffer query returning `0x6F` (ERROR_BUFFER_OVERFLOW, the `GetAdaptersInfo` signature), then walking the `Next`-linked list and aborting when `*(uint*)(node+0x194) > 6` — `IP_ADAPTER_INFO.AddressLength > 6`, i.e. an adapter/MAC sanity check; (e) `runnung` mutex gate: `CreateMutexW`-shaped slot `0x10c60` with decoded wide blob `0x1360bc0fa00`; `GetLastError()`-shaped slot `0x10cf0` == `0xB7` → abort. Failure handling everywhere = return -1 ⇒ beacon never starts. (T1497.001, T1622)
+EVIDENCE: init [ev_0391]; adapter check [ev_0396]; prior PEB/anti-debug evidence [ev_0268/ev_0256 ledger; ev_0179–0181].
+CONFIDENCE: 0.85
+TECHNIQUE: T1497.001
+
+CLAIM: **Persistence and re-launch, end to end.** Init checks `FUN_1360bc0378c` — opens the staged path with `0x80000000` (GENERIC_READ) via `FUN_1360bc077b0`; if the staged copy is absent it sets state 2 and runs `FUN_1360bc033ac`: resolve Shell-Folders path (`FUN_1360bc030d0`), ensure the directory, **copy its own module** (`0x10448` path → `FUN_1360bc07504`), build the launcher command from decoded blobs (the `0xf9b8/0xf9d8` set uses the two strings `0x10490/0x10498` extracted by `FUN_1360bc0463c`), call **`FUN_1360bc03728`** (Task Scheduler registration; trigger built by `FUN_1360bc0c2c4` via vtable `CreateTrigger(type 9 = TASK_TRIGGER_LOGON)` and named from blob `0x1360bc10030` = `LogonTrigger`; completion by `FUN_1360bc0c42c` per prior evidence), launch the staged copy (`FUN_1360bc0b400(cmd,1)`), then `ExitProcess(0)`. If the staged copy is present → state 1 and beaconing proceeds. (T1053.005)
+EVIDENCE: install flow [ev_0419]; staged-check [ev_0419]; trigger COM [ev_0417]; sandbox "Uses Task Scheduler COM API" [ev_0014]; prior [ev_0186/ev_0189/ev_0207].
+CONFIDENCE: 0.85
+TECHNIQUE: T1053.005
+
+CLAIM: **Cleanup/anti-forensics primitive, new relative to all upstream reports.** `FUN_1360bc03a24` opens its own module path with `0x10000` (DELETE) via slot `0x10bc8`, builds a `FILE_RENAME_INFO`-shaped structure (memset, length at +0x10 = `2*wide_len`, wide name copied at +0x14, name from decoded blob `0x1360bc0fa18`), invokes the `SetFileInformationByHandle`-shaped slot `0x10d50` (class 3), then reopens and sets a 1-byte value (class 4) — i.e. **rename self + delete-on-close**, used both from the install routine (delete the original dropped DLL after staging) and from the uninstall command 0xf. `FUN_1360bc03808` removes the staged second location; `FUN_1360bc03c2c` releases the mutex (`0x10c58`=ReleaseMutex) and closes handles (`0x10b28`). (T1070.004-adjacent cleanup)
+EVIDENCE: self-delete [ev_0422]; install call-site [ev_0419]; uninstall chain [ev_0416][ev_0422]; handle release [ev_0419].
+CONFIDENCE: 0.75
+TECHNIQUE: T1070
+
+CLAIM: **Contact logic, with cadence — this is the strongest correction to the run-side/AI-capture readings.** The beacon thread `FUN_1360bc05750` (spawned by `FUN_1360bc06250` → start `FUN_1360bc05750` via the `CreateThread`-shaped slot `0x10bc0`) sleeps **180 s** before first contact (`0x708`×100 ms), then loops: pick URL from the array `0x10568` (built from the two `/live/` blobs) or the operator-pushed list `0x109a8`, build the request (`FUN_1360bc0ae78` blob `0x1360bc0fd40` type 2 / `0xfdb0` type 1), attach pending outputs (`0x10550`→type 3, `0x10558`→4, `0x10560`→5, `0x10570`→0x15), encrypt with KSA `FUN_1360bc0cbe0` (key = decoded `0xfd30`) + crypt `FUN_1360bc0c964`, base64 via `FUN_1360bc06634`, POST via `FUN_1360bc04d20`, then base64-decode (`FUN_1360bc06370`) + RC4-decrypt + dispatch (`FUN_1360bc0541c`). Inter-beacon interval = `((rand()%150)+450)*1000 ms` → **450–600 s**, or `((rand()%600)+1500)*1000` → **1500–2100 s** when command 0x13 sets the slow flag; each wait-loop polls tracked threads' exit codes (`0x103`=STILL_ACTIVE) every 100 ms. Transport `FUN_1360bc04d20` = parse URL (`FUN_1360bc052c4`) → open session from decoded blob (`0x1360bc0fc60`/`0xfbe0`) → send with body → read reply. Fetching `FUN_1360bc06f48` = `FUN_1360bc08d90` GET → optional file write (`FUN_1360bc07acc`) or return buffer. (T1071.001)
+EVIDENCE: beacon loop [ev_0416]; transport [ev_0417]; fetch [ev_0419]; download-run helper [ev_0424]; prior protocol strings [ev_0019].
+CONFIDENCE: 0.85
+TECHNIQUE: T1071.001
+
+CLAIM: **In-memory execution (command 0x15) confirmed with detail.** `FUN_1360bc072c8` builds the URL, downloads **to memory** (`FUN_1360bc06f48` with null filename), copies the buffer, and `CreateThread`s `FUN_1360bc0b670` with context `{buffer, size, &0x1360bc10570}`. The thread: `CreateFileMapping`-shaped slot `0x10dd0` with name decoded from blob `0x1360bc0fff8`; `MapViewOfFile`-shaped slot `0x10c78` (access `0xF001F`); **`(*(code*)*param_1)()` — control transfer into the retrieved buffer**; then reads the mapped view, prefixes the decoded `&stiller=` blob `0x1360bc10008`, stores the combined string into the exfil slot, and frees (`VirtualFree`-shaped `0x10af8` with 0x8000, `UnmapViewOfFile`, `CloseHandle`). (T1620)
+EVIDENCE: handler [ev_0422]; exec thread [ev_0417]; dispatcher 0x15 branch [ev_0416]; prior [ev_0220/ev_0224].
+CONFIDENCE: 0.8
+TECHNIQUE: T1620
+
+CLAIM: **T1055 remains unresolved, and the allocator evidence points away from it.** Every allocation goes through `FUN_1360bc0ad34` = `NtAllocateVirtualMemory(0xffffffffffffffff /* NtCurrentProcess */, …, 0x3000, 0x40 /* PAGE_EXECUTE_READWRITE */)` — the process handle is a hardcoded constant, so this allocator cannot target another process. Combined with the in-process call-through above, the observed code is in-process RWX code loading. The 117-slot hash table could hide a cross-process primitive but **cannot be inverted with the attached tools** ([ev_0415] proves the batch tool computes 0 for every candidate; [ev_0414] shows payload injection is broken) ⇒ **UNRESOLVED (tool-blocked), neither confirmed nor refuted**. (T1055, T1106)
+EVIDENCE: allocator [ev_0416]; exec chain [ev_0417]; tool falsifications [ev_0414][ev_0415]; prior [ev_0222/ev_0224].
+CONFIDENCE: 0.7 (for the current-process reading); 0.6 (for the "no injection anywhere" reading — capped by the unresolved table)
+TECHNIQUE: T1055, T1106
+
+CLAIM: **Honest unsupported set.** No code evidence exists for the sandbox's "Suspicious use of WriteProcessMemory / SetWindowsHookEx / SendNotifyMessage / FindShellTrayWindow / AdjustPrivilegeToken / Volume Shadow Copy" items; the only token-adjacent construct I see is the install path (no `AdjustTokenPrivileges`-shaped call was observed). The `FUN_1360bc0463c(file/module-identity helper, called with mask 0xb, [ev_0395])` reads/parses a file and extracts the two strings used in the task-launch command, but its exact file target stayed unclear. Marked **UNRESOLVED** rather than denied. (T1134, T1055)
+EVIDENCE: decompiled set this round [ev_0391][ev_0395][ev_0396][ev_0397][ev_0416][ev_0417][ev_0419][ev_0422][ev_0424][ev_0425]; sandbox signatures [ev_0014].
+CONFIDENCE: 0.6
+
+CLAIM: Reputation stands as upstream: 52/75 engines malicious, label clusters Latrodectus/IcedId/Ulise; my code findings (decoder, hash-resolved API layer, task persistence, download/exec, in-memory execution) establish loader behaviour, not the family name. Not re-queried this round (result already in-ledger [ev_0018][ev_0232]).
+EVIDENCE: [ev_0018]; [ev_0232]; sandbox "Family: Latrodectus loader" [ev_0014]; local YARA 0/31 [ev_0007].
+CONFIDENCE: 0.85
+
+---
+
+DISPUTES:
+
+1. **Triage Claim 1 / Static Claim 4 / Static_r2 Claim 2 — capa "contain obfuscated stackstrings @0x9484" is cited as the text-obfuscation mechanism. DISPUTED.** `0x1360bc09484` is `FUN_1360bc09484`, the 90-triple API-hash-resolution table; its "stackstrings" are CRC32 hash constants and slot addresses [ev_0397]. The text obfuscation locus is `FUN_1360bc0ae78` [ev_0416][ev_0423]. The conclusion (strings obfuscated) survives; the evidence attribution does not.
+
+2. **Network Claim 4 ("No beaconing… `beacons: []` across 580.6 s") and Network Claim 2 / Dynamic Claims 6–7 (absence of the C2 endpoints on the wire). DISPUTED as an evidentiary reading.** The code predicts exactly that outcome: on first run the sample installs and calls `ExitProcess(0)` [ev_0419], and the beacon, when alive, waits **180 s** before its first request and then **450–600 s** (or 1500–2100 s) between requests [ev_0416]. A 580.6 s capture can contain at most one attempt and "no regular interval" is the *designed* signature. The capture cannot distinguish "never contacted" from "contacted once/not yet", and the network tables must not be read as weakening the C2 finding.
+
+3. **Triage Claim 15 (retained T1055 at 0.60 from "Suspicious use of WriteProcessMemory"). DISPUTED.** The decompiled paths use a current-process-only allocator (`NtAllocateVirtualMemory(-1, …, 0x40)`) [ev_0416] and an in-process call-through [ev_0417]; no cross-process primitive appears. Conversely, I equally reject any "no injection" closure: the 117-entry hash table cannot be resolved with the attached tools (proved [ev_0415][ev_0414]), so the correct status is **unresolved**, not refuted — and any peer (or judge) reading this round's tooling as having settled it is over-claiming.
+
+4. **Triage Claim 12 ("Boot or Logon Autostart Execution: Active Setup", kept at 0.70 as observed registry-based autostart). DISPUTED.** My decompiled install path shows the autostart mechanism to be (i) self-copy into a Shell-Folders-resolved location and (ii) a logon-triggered scheduled task via Task Scheduler COM (`FUN_1360bc033ac` → `FUN_1360bc03728`, trigger type 9) [ev_0419][ev_0417]; no Active Setup / "Installed Components" path or string appears in the decoded set [ev_0019] or the code I read. The signature is platform-asserted, not reproduced.
+
+5. **Static_r2 Claim 12 — "`:wtfbbq`@0x3a99 (used together with the imported `CreateMutexW`)". DISPUTED (minor).** The mutex name is the decoded wide blob `0x1360bc0fa00` = `runnung` [ev_0391]; no evidence ties `:wtfbbq` to the mutex. Its actual use (call site `0x3a99`) was not established this round and should not be presented as the mutex/instance marker.
+
+6. **Consensus-side correction (all peers): the beacon key string.** The key the beacon uses is `"123456"` (blob `0x1360bc0fd30`, length field 6, byte-exact decode [ev_0420]) — any statement that the protocol key is `"12345"` should be corrected; `"12345"@0xb69a` [ev_0019] is a different decoded artifact.

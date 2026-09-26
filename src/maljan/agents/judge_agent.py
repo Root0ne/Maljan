@@ -2814,6 +2814,11 @@ class JudgeAgent(BudgetMeter):
                     # An answer in no shape the ledger reads is still a call.
                     self._record_usage(result, call=TECHNIQUE_QUESTION_CALL)
                     return result, result
+                # The schema was refused, and the question in text is a second
+                # call: admitted on its own, under the same reservation.
+                self._spend_admits(
+                    "technique question", messages, slot=question_slot, holdable=False
+                )
             answer = await retry_on_connection_error(
                 lambda: self.llm.ainvoke(messages),
                 what="Judge technique question",
@@ -2838,6 +2843,9 @@ class JudgeAgent(BudgetMeter):
                 "JudgeAgent technique question timed out after %s.", limit_text(timeout, "s")
             )
             return _unanswered(f"the question timed out after {limit_text(timeout, 's')}")
+        except SpendCeilingStop as stop:
+            # The text question after a refused schema, not admitted.
+            return _unanswered(f"not asked: {stop}")
         except Exception as exc:  # noqa: BLE001 — an unanswered question withholds nothing
             self.logger.error("JudgeAgent technique question failed (%s).", type(exc).__name__)
             return _unanswered(f"the question failed ({type(exc).__name__})")

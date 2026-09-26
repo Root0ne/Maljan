@@ -1,0 +1,124 @@
+TRIAGE ANALYST — FINAL ISR
+Sample: sha256 6091f2589fef42e0ab3d7975806cd8a0da012b519637c03b73f702f7586b21ef (60,928 B, PE Windows, submitted as `…b21ef.exe`) — run state: triage_pack, triage, static, reversing, dynamic, network, debate all ran; several calls failed (noted per claim). All technique ids below validated this round (17/17 valid) [ev_0358].
+
+---
+
+CLAIM: The sample is a 64-bit Windows PE32+ **DLL** (AMD64, machine 34404, IMAGE_FILE_DLL, GUI subsystem), 60,928 bytes, unsigned (no Authenticode), sha256 6091f258…b21ef / md5 71d29d71641017e51b3685ce2f417796 / imphash db7aeb75528663639689f852fd366243. A server static pass labels it "Windows Executable" — the coarser read; the export table plus the observed ordinal load make DLL the correct classification.
+EVIDENCE: [ev_0001][ev_0002][ev_0003][ev_0004][ev_0125][ev_0131]; ordinal load [ev_0281]
+CONFIDENCE: 0.95
+TECHNIQUE: —
+
+CLAIM: Format-relevant artefact inventory — 5 sections (.text/.rdata/.data/.pdata/.reloc), entry point RVA 0x3c7c, export module name `UpdaterTag.dll`, **4 exports `extra`/`follower`/`run`/`scub` all aliased to the single RVA 0x3ce4** (one function), **5 named imports only** (KERNEL32 `PeekNamedPipe`, `GetLastError`, `CreateMutexW`; USER32 `MessageBeep`, `MessageBoxA`), no delay imports, no resources, no overlay, no PDB path, Rich header present. Shape: a module meant to be loaded by a foreign host that calls one exported routine; nearly all API use must be resolved at runtime.
+EVIDENCE: [ev_0004][ev_0020][ev_0059][ev_0081][ev_0125]; module/export detail also [ev_0148][ev_0149]
+CONFIDENCE: 0.95
+TECHNIQUE: —
+
+CLAIM: Producer/build — MSVC toolchain (linker 14.0, Rich header, standard MSVC section set); PE timestamp field 2024-03-25 15:54:25 UTC; not packed (no packer signatures; max section entropy 6.482 in .data). I reject the server's `packed: true` boolean: its only trigger is the Rich-header heuristic and the same run's string scan found nothing.
+EVIDENCE: [ev_0004][ev_0059][ev_0126][ev_0131][ev_0132][ev_0125]
+CONFIDENCE: 0.90
+TECHNIQUE: T1027.002 not supported
+
+CLAIM: Containment — nothing is embedded: 0 carved payloads (two independent carvers), empty overlay, empty resource directory, all four qu1cksc0pe embedded-PE methods negative (their scope caveat noted: no icon/manifest enumeration). Any second stage must arrive at runtime.
+EVIDENCE: [ev_0023][ev_0066][ev_0129][ev_0135][ev_0059]
+CONFIDENCE: 0.90
+TECHNIQUE: —
+
+CLAIM: Obfuscation — all operational text is hidden from static extraction and recovered only by running the sample's own decoder: a header-length counter-XOR loop at routine 0xae78 (byte i = enc[i] ^ (seed + i + 1), 29 call sites), recovering 81 strings by emulation (20 routines emulated for decoding), including both C2 URLs; plain-string passes find 0 of 218 strings matching "http"/"rundll32"/"nltest"; capa independently flags "contain obfuscated stackstrings" @0x9484. The byte-level blob decode reproduces four known strings, so the mechanism is confirmed in code, not inferred.
+EVIDENCE: [ev_0019][ev_0061][ev_0037][ev_0060][ev_0082][ev_0008][ev_0152][ev_0156][ev_0160][ev_0169][ev_0172]
+CONFIDENCE: 0.90
+TECHNIQUE: T1027.005 (rule-asserted); T1140
+
+CLAIM: Execution chain is now **observed**, not just intended: signed Windows `rundll32.exe` loaded the DLL and called export ordinal #1 (`rundll32.exe C:\Users\Admin\AppData\Local\Temp\…6091f….dll,#1`, two instances), matching the four aliased exports; Sigma "DLL Call by Ordinal Via Rundll32.EXE" and the LOLBin table (rundll32 → T1218.011) corroborate.
+EVIDENCE: [ev_0281][ev_0298][ev_0012][ev_0011][ev_0009][ev_0020]
+CONFIDENCE: 0.90
+TECHNIQUE: T1218.011
+
+CLAIM: C2 configuration — two hardcoded HTTPS endpoints, present only after decoding: `https://skinnyjeanso.com/live/` and `https://titnovacrion.top/live/` (byte-level blob decode confirms both; the beacon round-robins the list). Both vendor-flagged: domains 19/91 and 16/91 malicious, URLs 21/91 and 18/91. A reputation label is one source, not a verdict.
+EVIDENCE: [ev_0019][ev_0165][ev_0172][ev_0176][ev_0067][ev_0069][ev_0083][ev_0084][ev_0026][ev_0027]
+CONFIDENCE: 0.90
+TECHNIQUE: T1071.001
+
+CLAIM: C2 protocol — operator-driven HTTP beacon: POST with `Content-Type: application/x-www-form-urlencoded`, custom User-Agent "Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; Tob 1.1)", beacon body `counter=%d&type=%d&guid=%s&os=%d&arch=%d&username=%s&group=%lu&ver=%d.%d&up=%d&direction=%s` plus host profiling (`&systeminfo=`, `&ipconfig=`, `&proclist=[`, `&desklinks=[`, `&domain_trusts_all=`…), server verbs `URLS`/`COMMAND`/`CLEARURL`/`ERROR`, and an operator-replaceable URL list (command `URLS` appends).
+EVIDENCE: [ev_0019][ev_0176][ev_0177][ev_0168]
+CONFIDENCE: 0.90
+TECHNIQUE: T1071.001
+
+CLAIM: Data protection — RC4 (KSA/PRGA confirmed) with symmetric key `12345` for the beacon body; the local encrypted URL-list file is encrypted under a generated GUID key; base64 encode/decode with a stored alphabet; CRC32 (reflected IEEE 0xedb88320) and FNV-1a 32 for hashing (API-name hashing and the `group=` field). This is a symmetric layer inside the HTTPS transport.
+EVIDENCE: [ev_0200][ev_0202][ev_0203][ev_0204][ev_0216][ev_0192][ev_0225][ev_0177][ev_0008]
+CONFIDENCE: 0.85
+TECHNIQUE: T1573.001 (candidate), T1140
+
+CLAIM: Command toolkit — code-level and prepared, **not observed executing**: 11 `cmd.exe /c …` discovery commands (systeminfo, ipconfig /all, net config workstation, net view /all [/domain], nltest /domain_trusts [/all_trusts], net group "Domain Admins" /domain, whoami /groups, SecurityCenter2 AV query via wmic), run through a CreatePipe/PeekNamedPipe/ReadFile child-output harness that runs when an operator command-id (0x4) is received; a command-id switch also routes other ids (0x2, 0x3, 0xc–0x15) to other handlers. Run-side, no cmd/wmic process and no executed command was captured — capability only.
+EVIDENCE: [ev_0228][ev_0230][ev_0229][ev_0168][ev_0178][ev_0213][ev_0019]; run-side empty [ev_0281][ev_0298]
+CONFIDENCE: 0.80
+TECHNIQUE: T1059.003 (capability), T1082/T1482/T1518.001/T1069.002 (embedded commands)
+
+CLAIM: Download / stage / execute — operator command 0x12 downloads a tool from `<C2 base>/files/<name>` (decoded `files/bp.dat`, `/files/`, `%d.dat`, `%s%d.dll`, `%s\%d.dll`, `%s%d.exe`, `\update_data.dat`) and launches it via `rundll32 <dropped dll>,init -="<dat>"`; command 0x15 retrieves a buffer and executes it in-process (RWX allocation, direct call-through, shared-memory output handoff) — a candidate T1620 (single-source mechanism; ranking mixed, second at 0.6796) and the reason T1055 should not be substituted for it.
+EVIDENCE: [ev_0193][ev_0212][ev_0221][ev_0019][ev_0219][ev_0220][ev_0224]; T1620 [ev_0359]; ranking [ev_0362]
+CONFIDENCE: 0.80 (download/stage templates); 0.50 (in-process execution)
+TECHNIQUE: T1105; T1620 (candidate)
+
+CLAIM: Persistence — code-level capability of a logon-triggered scheduled task: decoded `LogonTrigger` (TASK_TRIGGER_LOGON), COM sequence completed by a RegisterTaskDefinition-shaped call with flags 6 (TASK_CREATE_OR_UPDATE) and a Shell Folders/`Custom_update` install path; no task object was captured in the run, so this is capability, not confirmed execution.
+EVIDENCE: [ev_0186][ev_0189][ev_0207][ev_0226][ev_0211][ev_0278][ev_0014]
+CONFIDENCE: 0.75 (code); 0.40 (executed)
+TECHNIQUE: T1053.005
+
+CLAIM: REVISED — Active Setup (T1547.014): I withdraw my round-0 framing of the sandbox signature "Boot or Logon Autostart Execution: Active Setup" as observed registry autostart. No Active Setup code path exists in the decompiled set and no registry artifact was captured; it is a platform assertion only.
+EVIDENCE: [ev_0014][ev_0292][ev_0279][ev_0296]
+CONFIDENCE: 0.25
+TECHNIQUE: T1547.014 (unreproduced)
+
+CLAIM: Anti-analysis gates exist in code: a PEB `BeingDebugged` read that aborts initialisation (debugger evasion) and a process-count / OS-version gate ("too few processes for this OS ⇒ bail"), plus the single-instance check. These are the strongest file-side candidates for why no C2/command stage was reached in the observed run.
+EVIDENCE: [ev_0179][ev_0175][ev_0166][ev_0180][ev_0181][ev_0292]; ids [ev_0358][ev_0360]
+CONFIDENCE: 0.65
+TECHNIQUE: T1622, T1497.001
+
+CLAIM: Instance control — the mutex is the wide blob decoding to `runnung` (sic), created before the beacon starts, aborting on GetLastError() == 0xB7 (ERROR_ALREADY_EXISTS) — a single-instance guard, not persistence. The "persistence" association on CreateMutexW in the API catalogue is reference-only and should carry no weight.
+EVIDENCE: [ev_0166][ev_0169][ev_0198][ev_0063][ev_0019][ev_0281]
+CONFIDENCE: 0.80
+TECHNIQUE: —
+
+CLAIM: REVISED — process manipulation: T1055 down to 0.20 ("unproven, not refuted"). No cross-process write/map primitive appears in any decompiled path; allocation is NtAllocateVirtualMemory RWX in the current process with an in-process call-through of the retrieved buffer. The ~90-entry API-hash table could not be batch-resolved (emulator tool failed), so a hidden primitive is unresolved, not refuted.
+EVIDENCE: [ev_0224][ev_0220][ev_0222][ev_0014][ev_0308]; ranking mixed [ev_0362]
+CONFIDENCE: 0.20
+TECHNIQUE: T1055 (unproven)
+
+CLAIM: REVISED — network: no endpoint is attributable to the sample. I withdraw my round-0 "unconfirmed lead" wording for the sandbox's sample-process-tree row `20.67.186.184:443` (0/91 engines; absent from the pcap inventory; maps by timestamp/record to a shell process) — it carries no attribution weight now. The capture contains no C2 attempt at all: no DNS query, Host header or SNI for either decoded domain, no beaconing (beacons: []), no POST/exfil, only OS/update/OCSP traffic, and all 15 non-DNS external IPs swept clean (13×0/91, two single-engine flags). The two decoded `/live/` URLs remain the only C2 indicators.
+EVIDENCE: [ev_0017][ev_0309][ev_0310][ev_0311][ev_0283][ev_0314][ev_0013][ev_0016][ev_0324][ev_0313]
+CONFIDENCE: 0.85
+TECHNIQUE: T1071.001 (indicators only; no observed session)
+
+CLAIM: REVISED — dropped items: I affirm no attribution to the sample for any of the 8 entries, including the two ~600-byte `.dat` files (written from a Windows package-cache path via a shell-process record ≈422 s, undetected, but association absent). Undetected is not clean, and no drop is clean either.
+EVIDENCE: [ev_0015][ev_0297][ev_0281][ev_0055][ev_0056]
+CONFIDENCE: 0.75
+TECHNIQUE: —
+
+CLAIM: Attribution/reputation — external sources are strongly hostile but do not settle a family: VirusTotal 52/75 engines malicious (47 distinct labels; Latrodectus names most numerous, IcedId and Ulise clusters, outliers incl. coinminer/keylogger); sandbox CTI says latrodectus; sandbox signatures include "Detect larodectus Loader variant 2" / "Family: Latrodectus loader". Nothing local establishes the family: YARA corpus 0/31, family fingerprint lookup ≤0.67 (unrelated families), similar-case retrieval weak. "Latrodectus" is an external assertion carried for pivoting only.
+EVIDENCE: [ev_0018][ev_0025][ev_0301][ev_0014][ev_0007][ev_0077][ev_0305]
+CONFIDENCE: 0.85
+TECHNIQUE: —
+
+CLAIM: Distinctive markers/pivots, corrected: `:wtfbbq`, `Littlehw`, `runnung` (sic), `front`, `12345`, `PT0S`, User-Agent tail "Tob 1.1", export module name `UpdaterTag.dll`. Corrected pairings: `runnung` = mutex name; `12345` = beacon RC4 key; `:wtfbbq` = unexplained marker, not demonstrated as a named object.
+EVIDENCE: [ev_0019][ev_0081][ev_0177][ev_0166][ev_0169]
+CONFIDENCE: 0.60
+TECHNIQUE: —
+
+CLAIM: Cannot be established from the file alone (needs controlled execution + correlation): which endpoint is contacted and at what cadence; whether the discovery commands or any operator command ever executes; whether the task/Active Setup/Startup persistence is actually installed; the API set behind the ~90-entry hash table; activation parameters beyond "export ordinal #1"; identity/content of the 8 dropped entries and any fetched stage; meaning of marker strings; whether the init gates abort on a given host.
+EVIDENCE: [ev_0019][ev_0017][ev_0222][ev_0015][ev_0281][ev_0296]
+CONFIDENCE: 0.85
+TECHNIQUE: —
+
+NOTES ON EVIDENCE PROVENANCE: (a) The round-0 statement "no VTAI-registered submission exists" is corrected — `get_submission` **failed** this run, so no submission data was obtained and absence is not established. (b) The reversing stage's report is present and cited; several of its tool calls failed (`create_function`, `decompile_function`, `get_xrefs_to`, `read_memory`, `emulate_hash_batch`), so its deepest code readings (command-id dispatch, in-process execution, gates) are single-source with cross-corroboration where noted. (c) Technique validation performed this round: all 17 ids valid [ev_0358].
+
+---
+DISPUTES:
+
+- **Selective crediting of run-side signatures (consensus claim my data does not support).** Static (Claim 10), static_r2 (Claim 8) and dynamic (Claim 4) treat the sandbox's "Uses Task Scheduler COM API" signature as run-side support that the persistence path executed, while the same platform, same run, same signature set dismisses the co-located severity-8 "Active Setup", the VSS WMI/COM pair, the hook/WriteProcessMemory items and "Checks SCSI registry key(s)" as unproven. My raw data supports neither side of that split: no task, mutex or registry artifact was captured, no cmd/wmic child process appears, and — decisively — no C2 attempt exists anywhere on the wire, while the file carries init gates that abort before the beacon starts [ev_0166]. I therefore reject crediting the task-COM signature as executed behaviour: T1053.005 stands on the decompiled code alone (capability, execution unconfirmed), and Active Setup/VSS/hooks must be treated as equally unproven rather than as a lower tier. Evidence: [ev_0014][ev_0277][ev_0278][ev_0279][ev_0281][ev_0309][ev_0310][ev_0166].
+
+- **`:wtfbbq` as the mutex/named object.** As delivered to me, static_r2's Claim 12 still couples `:wtfbbq`@0x3a99 with the imported `CreateMutexW` (my own round-0 Claim 37 also listed it as a candidate). I reject that coupling: the code passes the wide blob 0x1360bc0fa00 → `runnung` to the CreateMutexW slot with the 0xB7 abort; `:wtfbbq` has no demonstrated named-object use. (The mediator reports this superseded; it is recorded so downstream never writes `:wtfbbq` as the mutex name.) Evidence: [ev_0166][ev_0169][ev_0198][ev_0019].
+
+- **Association of the two ~600-byte `.dat` writes (and the dropped set) with the sample.** I reject any association — including dynamic's residual "consistent with the sample's staging templates" phrasing — because the provenance record gives a Windows package-cache path (StartMenuExperienceHost TempState), a shell-process record and ≈422 s timing, with no attribution to the sample shown anywhere; the sample's own templates do not connect to it. (Converges with static_r2's and network's rejection.) Evidence: [ev_0015][ev_0297][ev_0281][ev_0019].
+
+- **Exclusion of the reversing stage's input.** The mediator states all_tools_reverser_ghidra "failed with an AnalystError and is therefore excluded"; my run state says the reversing stage ran, and its report with decompiled routines is in front of me and cited above [ev_0143]–[ev_0243]. I dispute the exclusion: the stage's input should be carried as degraded-but-available (individual tool calls failed, not the contribution), with the single-source caveats noted per claim — dropping it would discard the only code-level evidence for the decoder, the dispatch tree, the gates and the in-process execution path. Evidence: [ev_0143][ev_0152][ev_0166][ev_0168][ev_0179][ev_0186][ev_0132][ev_0222].
+
+DISPUTES recorded as above (4). No further disagreements: file-type label, packer boolean, YARA-corpus difference, language label, empty ATT&CK map and inventory-scope differences are resolved as different-scope measurements; I concur with the settled core (decoder mechanism, two `/live/` endpoints and protocol, the rundll32 ordinal-#1 load, no embedded second stage, and family held only as an external claim).

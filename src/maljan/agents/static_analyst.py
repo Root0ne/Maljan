@@ -16,8 +16,8 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from maljan.agents.base_agent import (
     BaseAnalyst,
-    evidence_ref_text,
     prompt_to_messages,
+    read_claim_blocks,
     strip_tool_call_scaffolding,
 )
 from maljan.agents.prompt_fragments import (
@@ -658,7 +658,7 @@ class StaticAnalyst(BaseAnalyst):
         ]
 
         content = self.execute_tool_loop(prompt_messages)
-        parsed = _parse_claim_blocks(content)
+        parsed = self._read_claims(content)
         # A defeatist "could not be performed / missing binary data"
         # claim parses as a well-formed block but is not a real finding — drop it
         # so static collapses to a zero-claim (degraded) ISR rather than a fake
@@ -745,7 +745,7 @@ class StaticAnalyst(BaseAnalyst):
             self.ask_the_model(self.frame_messages(messages), what="revision")
         )
 
-        parsed = _parse_claim_blocks(content)
+        parsed = self._read_claims(content, revision_round)
         # Drop defeatist meta-claims ("could not be performed / missing
         # binary data") that parse as well-formed blocks; a no-real-finding
         # revision must collapse to a zero-claim ISR so the run is honestly
@@ -776,6 +776,7 @@ class StaticAnalyst(BaseAnalyst):
             dissent_items=dissent,
             revision_round=revision_round,
         )
+        self._with_claims_read(isr)
         return content, isr
 
 
@@ -921,13 +922,6 @@ def _extract_sample_hash(data: str) -> str | None:
     return None
 
 
-# CRLF-tolerant separator that requires the dashes to occupy their own line.
-_BLOCK_SPLIT_RE = re.compile(r"(?:^|\r?\n)\s*-{3,}\s*(?:\r?\n|$)", flags=re.MULTILINE)
-_CLAIM_RE = re.compile(r"CLAIM:\s*(.+?)(?=\s*\n\s*EVIDENCE:|\Z)", flags=re.DOTALL)
-_EVIDENCE_RE = re.compile(r"EVIDENCE:\s*(.+?)(?=\s*\n\s*CONFIDENCE:|\Z)", flags=re.DOTALL)
-_CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*([\d.]+)")
-_TECHNIQUE_RE = re.compile(r"TECHNIQUE:\s*(T\d{4}(?:\.\d{3})?|NONE)", flags=re.IGNORECASE)
-
 # DISPUTES section runs until end-of-string OR the next ALL-CAPS markdown-style
 # header (e.g. ``\nSUMMARY:`` or ``\nFINAL VERDICT:``). The previous greedy
 # pattern silently absorbed whatever followed.
@@ -937,104 +931,15 @@ _DISPUTES_RE = re.compile(
 )
 
 
-# A claim's heading at the start of a line, as models number and mark it:
-# ``CLAIM:``, ``CLAIM 3:``, ``CLAIM 3 —``, ``**CLAIM 4 (REVISED):**``. Each one
-# opens a block of its own, so claims written one after another with no
-# ``---`` between them are read as the claims they are, not as the first one.
-_CLAIM_HEAD_RE = re.compile(
-    r"^[ \t>*_#]*CLAIM(?:[ \t]*#?\d+)?(?:[ \t]*\([^)\n]*\))?[ \t]*(?:\*\*)?[ \t]*"
-    r"(?::|—|–|-(?=\s))[ \t]*(?:\*\*)?[ \t]*"
-)
-_CONFIDENCE_LINE_RE = re.compile(r"^[ \t>*_#]*CONFIDENCE:")
-_DISPUTES_LINE_RE = re.compile(r"^[ \t>*_#]*DISPUTES\b", flags=re.IGNORECASE)
-
-
-def _claims_headed(text: str) -> str:
-    """``text`` with each claim heading turned into a ``---``-separated ``CLAIM:`` block.
-
-    A heading opens a new block only where one can begin: the first one, or
-    one after the open block has its CONFIDENCE line. A line inside a block's
-    EVIDENCE that happens to start with "CLAIM 2 -" is part of that block, and
-    nothing under the DISPUTES section — a peer's claim quoted there — is
-    read as this analyst's claim.
-    """
-    out: list[str] = []
-    open_block = False
-    confident = False
-    disputes = False
-    for line in text.splitlines():
-        if _DISPUTES_LINE_RE.match(line):
-            disputes = True
-        heading = None if disputes else _CLAIM_HEAD_RE.match(line)
-        if heading is not None and (not open_block or confident):
-            out.extend(["---", "CLAIM: " + line[heading.end() :]])
-            open_block, confident = True, False
-            continue
-        if _CONFIDENCE_LINE_RE.match(line):
-            confident = True
-        elif line.strip() and not line.strip().strip("-"):
-            # The model's own separator line closes the block.
-            open_block = False
-        out.append(line)
-    return "\n".join(out)
-
-
 def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
-    """Parse structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE blocks from LLM output.
+    """The claims the static, dynamic and network analysts read out of ``text``.
 
-    Tolerates CRLF line endings and varying amounts of whitespace, a numbered
-    or marked claim heading, and claims with no separator line between them.
+    The one claim reader (``base_agent.read_claim_blocks``) in its stricter
+    reading, which wants an EVIDENCE line on every claim. The caller that
+    turns these into an ISR goes through ``BaseAnalyst._read_claims``, which
+    records any claim the answer began and the reader did not read.
     """
-    claims: list[ClaimEvidence] = []
-    blocks = _BLOCK_SPLIT_RE.split(_claims_headed(text))
-    for block in blocks:
-        block = block.strip()
-        if not block or "CLAIM:" not in block:
-            continue
-        claim_match = _CLAIM_RE.search(block)
-        evidence_match = _EVIDENCE_RE.search(block)
-        confidence_match = _CONFIDENCE_RE.search(block)
-        technique_match = _TECHNIQUE_RE.search(block)
-
-        if not (claim_match and evidence_match and confidence_match):
-            continue
-        claim_text = strip_tool_call_scaffolding(claim_match.group(1)).strip()
-        if not claim_text:
-            # The whole claim was model tool-call
-            # scaffolding, which a live static_r2 run showed to an operator as
-            # a finding. An empty finding is worse than none: it reaches the
-            # Pipeline tab as a blank row.
-            continue
-        # The citation gets the same cleaning as the claim, and this parser
-        # already refuses a block with no EVIDENCE at all -- a citation that
-        # was nothing but a tool call leaves the claim unsourced, which is the
-        # same state, so it fails the same requirement.
-        evidence_text = strip_tool_call_scaffolding(evidence_match.group(1)).strip()
-        if not evidence_text:
-            continue
-
-        try:
-            confidence = max(0.0, min(1.0, float(confidence_match.group(1))))
-        except ValueError:
-            # A CONFIDENCE line that is not a number states no confidence, and
-            # a claim carries only the one its analyst stated. The block is
-            # counted by ``BaseAnalyst._parsed_isr`` and asked about.
-            continue
-
-        technique_raw = technique_match.group(1).upper() if technique_match else "NONE"
-        technique_id = None if technique_raw == "NONE" else technique_raw
-
-        claims.append(
-            ClaimEvidence(
-                # Whole, as written: a claim stored at a fixed width was
-                # checked, retried and published as the cut text.
-                claim=claim_text,
-                evidence_ref=evidence_ref_text(evidence_text),
-                confidence=confidence,
-                technique_id=technique_id,
-            )
-        )
-    return claims
+    return read_claim_blocks(text, require_evidence=True).claims
 
 
 def _parse_disputes(text: str) -> list[str]:

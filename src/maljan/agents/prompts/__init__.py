@@ -110,6 +110,11 @@ looked and found none:
 
 - Command dispatch: a routine that takes an instruction from outside and
   branches on it, the table or the branches it uses, and what each branch does.
+  When you find one, a switch or a table over command or message ids, go to
+  every branch: decompile each branch's handler, or list the branch as not
+  reached and say why (the tool failed on it, its target is computed at run
+  time, your turns ran out). Write one line per id with the handler's address,
+  so a reader sees which branches you read and which you did not.
 - Environment checks: what the code inspects about the machine it runs on
   before it goes on, and what it does when a check fails.
 - Persistence and cleanup: how it arranges to run again, and what it removes,

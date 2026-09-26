@@ -948,6 +948,11 @@ change landed on `main`.
 
 ### Changed
 
+- **The reverser reaches every branch of a dispatcher it finds.** The seeded
+  reverser prompt, and the example team's reverser, ask of a switch or a table
+  over command or message ids that each branch's handler be decompiled or
+  listed as not reached with the reason, one line per id with the handler's
+  address.
 - **The spend ceiling counts what a call was charged and is a hard bound**
   against the platform's prompt estimate (characters over three). A call is
   settled at the cost its provider reported with the answer, else at the rates
@@ -2233,6 +2238,72 @@ change landed on `main`.
   `MALJAN_FLOSS_PATH` to a missing file unless a test names a build.
 
 ### Fixed
+
+- **Every claim an analyst begins is read, or the run says it was not.** The
+  base analyst's reader split an answer only on `---` lines and kept the first
+  `CLAIM:` of each block, so claims separated by blank lines were read as one:
+  a revision of 13 claims and an answer of 21 each became one, silently. Every
+  path now reads claims through one reader (`base_agent.read_claim_blocks`),
+  which splits at every claim heading, plain, numbered or marked
+  (`agents/claim_headings.py`), and counts the headings the model began
+  against the claims read. Claims begun and not read (a block the reader could
+  not split, one the static, dynamic and network analysts' stricter reading
+  turns away for want of an EVIDENCE line) are logged and recorded as a
+  degradation reason naming the analyst and both numbers, for the answer in
+  force; a block that stated no confidence is counted apart and asked about,
+  as before. Every heading opens a block, so a claim is never read with the
+  next claim's CONFIDENCE, TECHNIQUE or EVIDENCE; list-marker headings count;
+  fields are read in the block's tail, from the first line-start field label,
+  where a label also counts after whitespace (EVIDENCE, CONFIDENCE and
+  TECHNIQUE on one line are all read), and never from the claim sentence.
+  EVIDENCE runs to the next field label that starts a line when one follows,
+  so a label word inside the evidence never cuts it or drops an id after it. The DISPUTES section opens at
+  its case-sensitive label or heading, a one-line `DISPUTES: NONE` opens none,
+  and claims under it are recorded when none of the answer's own was read;
+  beside the answer's own claims, the analyst is asked once whether they are
+  its own (`isr.claims_under_disputes`). Kept there when asked, they are the
+  analyst's answer, recorded in the validation findings as answered (listed
+  "(answered)", not counted as left unresolved, drawn muted in the console)
+  and not a degradation; an answer the question was never put to says so as a
+  degradation reason. The reason is kept on the answer and carried only for
+  the answers in force.
+- **A technique line is one id, or it is kept whole and asked about.**
+  `TECHNIQUE: T1027.002 not supported` was read as a claim of T1027.002, and
+  `T1055, T1106` as T1055 alone. A line that is more than one id or `NONE`
+  now claims no id, is kept on the claim as `technique_line`, and the
+  analyst is asked once for one id per claim (`isr.technique_line_unread`).
+- **No OpenAI-compatible request sends a tool call without its reply.** A turn
+  whose call had arguments cut mid-string kept that call in
+  `invalid_tool_calls`, which the tool node does not run and the OpenAI client
+  still writes into the turn's `tool_calls`; DeepSeek answered the next
+  request of a revision loop with 400 ("An assistant message with 'tool_calls'
+  must be followed by tool messages …") and the analyst was lost for the
+  round. Every request on the `openai` provider now completes such a call with
+  a tool reply saying no reply was recorded, and that it was not run when its
+  arguments did not parse, in the turn's call order, after
+  DeepSeek's reasoning passback. The call stays in the turn as the model wrote
+  it.
+- **A guest's desktop process is not the sample.** Where Triage's `orig` mark
+  and the submitted file's own process tree (its name or digest) disagree
+  about a process, the flow's attribution is absent rather than `true`; where
+  they agree it is `true`, and a listed process neither names is `false`. A
+  desktop process that ran none of the sample's files and descends from none
+  of its processes had been read as the sample on the mark alone. Such a flow
+  is refused by the one publish rule unless a model keeps the address, and the
+  `no:` and the IOC table's context name the process and both facts
+  (`… StartMenuExperienceHost.exe (procid 105), which Triage marks as the
+  sample's but which runs none of the submitted file's names …`); STIX,
+  `/iocs`, YARA, Suricata and Sigma read that one answer. A mark that names a
+  process the file's tree does not is no longer the answer on its own.
+- **Each model call is paired with its own admission.** The guard over model
+  calls counted any admission before a call, so one covered any number of
+  calls after it. It now pairs calls one to one in source order (two branches
+  of one choice are one call; a call in a loop needs an admission in the same
+  loop's body), and the judge's technique question in text, asked after a
+  refused schema, is admitted on its own.
+- **A stage-named analyst's debate line reads as a place:** "from analyst 2 of
+  3 in the analysis stage", where it read "from the analysis analyst 2 of 3
+  layer".
 
 - **A revision that is not made leaves the analyst's answer in force.** A
   revision that failed (a refusal by the spend ceiling among them), wrote no

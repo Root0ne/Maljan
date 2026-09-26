@@ -50,7 +50,11 @@ from maljan.reporting.models import (
     StringIOC,
 )
 from maljan.schemas.evidence import build_entry, format_entry_id
-from maljan.schemas.sandbox_report import SAMPLE_TREE_KEY
+from maljan.schemas.sandbox_report import (
+    FLOW_PROCESS_KEY,
+    LINEAGE_DISPUTED_KEY,
+    SAMPLE_TREE_KEY,
+)
 
 if TYPE_CHECKING:
     from maljan.schemas.evidence import LedgerEntry
@@ -791,6 +795,10 @@ def network_from_ledger(
     # flow to it came from the sample's process tree, from another process, or
     # from a process the report does not name.
     attributed: dict[str, list[bool | None]] = {}
+    # Which processes outside the tree the report says made flows to each address.
+    outside: dict[str, list[str]] = {}
+    # And the processes the two lineage facts disagree about, by which fact names them.
+    disputed: dict[str, dict[str, list[str]]] = {}
     host_facts: dict[str, dict[str, Any]] = {}
 
     for data, whole in _sandbox_views(ledger, sandbox_report):
@@ -819,6 +827,17 @@ def network_from_ledger(
                     attributed.setdefault(address, []).append(
                         stated if whole or stated is True else None
                     )
+                    image = str(row.get(FLOW_PROCESS_KEY) or "").strip()
+                    if stated is False and image:
+                        named = f"{image} (procid {row.get('procid')})"
+                        if named not in outside.setdefault(address, []):
+                            outside[address].append(named)
+                    which = str(row.get(LINEAGE_DISPUTED_KEY) or "")
+                    if which in ("orig", "file") and image:
+                        named = f"{image} (procid {row.get('procid')})"
+                        facts = disputed.setdefault(address, {}).setdefault(which, [])
+                        if named not in facts:
+                            facts.append(named)
         for row in data.get("http") or []:
             host = _first_str(row, "host", "hostname")
             _add("domain", host, "sandbox")
@@ -844,7 +863,7 @@ def network_from_ledger(
             if by not in kept.setdefault(kept_key, []):
                 kept[kept_key].append(by)
 
-    _state_sandbox_facts(network, attributed, host_facts)
+    _state_sandbox_facts(network, attributed, host_facts, outside, disputed)
     _state_who_kept(network, kept, isrs)
     return network if (network.domains or network.ips or network.urls) else None
 
@@ -1176,12 +1195,16 @@ def _state_sandbox_facts(
     network: NetworkIOCs,
     attributed: dict[str, list[bool | None]],
     host_facts: dict[str, dict[str, Any]],
+    outside: dict[str, list[str]] | None = None,
+    disputed: dict[str, dict[str, list[str]]] | None = None,
 ) -> None:
     """Each address's process attribution, resolver fact and AS, as the sandbox recorded them.
 
     Attributed to the sample's tree when any flow to it came from the tree; to
-    another process when every flow the report attributes did; unattributed
-    when the report attributes none. A fact the report does not state stays
+    another process when every flow the report attributes did, and then the
+    processes the report names for those flows are stated; unattributed when
+    the report attributes none, and then the processes the two lineage
+    facts disagree about are stated. A fact the report does not state stays
     ``None``.
     """
     from maljan.extractors.network_extractor import is_public_resolver
@@ -1192,6 +1215,11 @@ def _state_sandbox_facts(
             ip.sample_process_tree = True
         elif answers and all(answer is False for answer in answers):
             ip.sample_process_tree = False
+            ip.outside_processes = list((outside or {}).get(ip.address) or [])
+        if ip.sample_process_tree is not True:
+            facts = (disputed or {}).get(ip.address) or {}
+            ip.marked_only_processes = list(facts.get("orig") or [])
+            ip.file_only_processes = list(facts.get("file") or [])
         ip.public_resolver = is_public_resolver(ip.address)
         facts = host_facts.get(ip.address, {})
         if facts.get("asn") and not ip.asn:
