@@ -586,6 +586,40 @@ def _validation_update(agent: Any, agent_name: str) -> dict[str, Any]:
     return update
 
 
+def _merge_validation_update(into: dict[str, Any], update: dict[str, Any]) -> None:
+    """Fold one analyst's validation update into a node's, as the state's reducers would."""
+    for key, value in update.items():
+        if key == "validation_findings":
+            into.setdefault(key, {}).update(value)
+        elif key == "validation_retries":
+            into[key] = int(into.get(key, 0)) + int(value)
+        elif key == "validation_fed_back":
+            counts = into.setdefault(key, {})
+            for code, count in dict(value).items():
+                counts[code] = counts.get(code, 0) + int(count)
+        elif key == "validation_not_run":
+            into.setdefault(key, []).extend(value)
+
+
+def revision_replacement_sentence(
+    name: str, revision_round: int, in_force: Any, revision: Any
+) -> str:
+    """The sentence for a revision that replaced an answer with fewer claims, or ``""``.
+
+    The revision the model made stands: the model decides what its answer is.
+    What the platform states is the replacement and both counts, so a reader
+    of the run can tell a revision that dropped claims from one that kept them.
+    """
+    before = len(list(getattr(in_force, "claims", None) or []))
+    after = len(list(getattr(revision, "claims", None) or []))
+    if after >= before:
+        return ""
+    return (
+        f"The {name} analyst's round-{int(revision_round)} revision replaced {before} "
+        f"claim(s) with {after}."
+    )
+
+
 def mean_claim_confidence(isrs: Any) -> float | None:
     """The mean confidence of the analysts that produced claims, or ``None``.
 
@@ -3372,6 +3406,12 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         revision_ledger: list[dict[str, Any]] = []
         revision_nudge_modes: dict[str, str] = {}
         revision_budget: dict[str, list[dict[str, Any]]] = {}
+        # What each revision's validation turn found, as the analysis node
+        # records it for a first answer: a revision is checked the same way.
+        revision_validation: dict[str, Any] = {}
+        # A revision that stands with fewer claims than the answer it replaces,
+        # said: the model decided, and the run summary states the replacement.
+        revision_replacements: list[str] = []
 
         # The answer each analyst has in force before this round: its last
         # revision that stood, or its first answer.
@@ -3453,6 +3493,9 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     _budget_update(container.get_agent(name), name).get("budget_records") or {}
                 ).items():
                     revision_budget.setdefault(agent_key, []).extend(rows)
+                _merge_validation_update(
+                    revision_validation, _validation_update(container.get_agent(name), name)
+                )
                 if not str(revised_text or "").strip():
                     # No answer at all: the loop was not started (the spend
                     # ceiling), or the call was refused before it was made.
@@ -3471,6 +3514,10 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     continue
                 revised[name] = revised_text
                 revised_isrs[name] = isr
+                replaced = revision_replacement_sentence(name, iteration, kept_isrs.get(name), isr)
+                if replaced:
+                    logger.warning("%s", replaced)
+                    revision_replacements.append(replaced)
                 emit_agent_message(
                     container.event_sink,
                     speaker=name,
@@ -3500,6 +3547,9 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             out["nudge_retry_modes"] = revision_nudge_modes
         if revision_budget:
             out["budget_records"] = revision_budget
+        out.update(revision_validation)
+        if revision_replacements:
+            out["revision_replacements"] = revision_replacements
         return out
 
     node_fn.__name__ = "revision_node"

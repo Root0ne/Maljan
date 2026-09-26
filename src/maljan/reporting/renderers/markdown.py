@@ -1820,6 +1820,8 @@ class MarkdownRenderer:
                     lines.append(_item(f"Final confidence: {float(final_conf):.3f}"))
                 except (TypeError, ValueError):
                     pass
+            for sentence in negotiation.get("revision_replacements") or []:
+                lines.append(_item(str(sentence)))
         for line in generation_lines(run_summary.get("generation")):
             lines.append(_item(line))
         ungrounded = run_summary.get("sections_without_evidence")

@@ -80,6 +80,9 @@ class NegotiationMetrics:
     sycophancy_events: int
     confidence_history: list[float]
     final_confidence: float | None
+    # One sentence per revision that stood with fewer claims than the answer
+    # it replaced (``nodes.revision_replacement_sentence``).
+    revision_replacements: list[str] = field(default_factory=list)
 
     @property
     def consensus_applicable(self) -> bool:
@@ -938,6 +941,10 @@ class RunSummary:
             history_str = " → ".join(f"{c:.2f}" for c in n.confidence_history)
             lines.append(f"**Confidence history**: {history_str}")
             lines.append("")
+        if n.revision_replacements:
+            lines += ["**Revisions that replaced an answer with fewer claims:**", ""]
+            lines += [f"- {sentence}" for sentence in n.revision_replacements]
+            lines.append("")
 
         # Agent ISR statistics
         lines += ["## Agent ISR Statistics", ""]
@@ -1204,6 +1211,11 @@ class RunSummary:
                         "converged_early": n.converged_early,
                     }
                     if n.consensus_applicable and n.final_confidence is not None
+                    else {}
+                ),
+                **(
+                    {"revision_replacements": list(n.revision_replacements)}
+                    if n.revision_replacements
                     else {}
                 ),
             },
@@ -1747,6 +1759,9 @@ class RunSummaryBuilder:
             final_confidence=(
                 confidence_history[-1] if applicable and confidence_history else None
             ),
+            revision_replacements=[
+                str(sentence) for sentence in (state.get("revision_replacements") or [])
+            ],
         )
         return self
 

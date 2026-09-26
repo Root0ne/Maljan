@@ -6343,19 +6343,33 @@ class BaseAnalyst(BudgetMeter, ABC):
         mediator_feedback: str,
         revision_round: int = 1,
     ) -> tuple[str, AgentISR]:
-        """Wrapper around revise_isr() with error handling.
+        """Wrapper around revise_isr() with error handling, checked like a first answer.
 
         Under this agent's delegation lock, for the reason ``safe_analyze_isr``
         takes it: a revision round is this agent's own loop.
+
+        A revision's answer passes the checks a first answer passes: the
+        consistency gate and the validation turn, with the claim-count and
+        confidence questions among them. The revision's own call decides what
+        the turn reads: the round-0 loop's deadline and whether its answer was
+        nudged are not this answer's, so they are cleared before it is made.
         """
         self.current_round = int(revision_round)
         with lock_for(self):
             try:
                 truncated = self._truncate_input(original_data)
+                self._last_loop_deadline = None
+                self._answer_unstructured = False
                 text, isr = self.revise_isr(
                     truncated, own_report, peer_reports, mediator_feedback, revision_round
                 )
-                return text, self._drain_findings(isr)
+                isr = self._drain_findings(isr)
+                if not isr.answer_text:
+                    isr.note_answer_text(strip_tool_call_scaffolding(str(text or "")))
+                checked = self._validate_isr(
+                    self._apply_consistency_gate(isr, truncated), truncated
+                )
+                return text, self._drain_findings(checked)
             except AnalystError:
                 raise
             except Exception as e:
