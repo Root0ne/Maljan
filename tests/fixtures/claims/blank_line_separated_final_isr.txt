@@ -33,7 +33,7 @@ EVIDENCE: [ev_0281][ev_0298][ev_0012][ev_0011][ev_0009][ev_0020]
 CONFIDENCE: 0.90
 TECHNIQUE: T1218.011
 
-CLAIM: C2 configuration — two hardcoded HTTPS endpoints, present only after decoding: `https://skinnyjeanso.com/live/` and `https://titnovacrion.top/live/` (byte-level blob decode confirms both; the beacon round-robins the list). Both vendor-flagged: domains 19/91 and 16/91 malicious, URLs 21/91 and 18/91. A reputation label is one source, not a verdict.
+CLAIM: C2 configuration — two hardcoded HTTPS endpoints, present only after decoding: `https://c2-two.example/live/` and `https://c2-one.example/live/` (byte-level blob decode confirms both; the beacon round-robins the list). Both vendor-flagged: domains 19/91 and 16/91 malicious, URLs 21/91 and 18/91. A reputation label is one source, not a verdict.
 EVIDENCE: [ev_0019][ev_0165][ev_0172][ev_0176][ev_0067][ev_0069][ev_0083][ev_0084][ev_0026][ev_0027]
 CONFIDENCE: 0.90
 TECHNIQUE: T1071.001
@@ -43,7 +43,7 @@ EVIDENCE: [ev_0019][ev_0176][ev_0177][ev_0168]
 CONFIDENCE: 0.90
 TECHNIQUE: T1071.001
 
-CLAIM: Data protection — RC4 (KSA/PRGA confirmed) with symmetric key `12345` for the beacon body; the local encrypted URL-list file is encrypted under a generated GUID key; base64 encode/decode with a stored alphabet; CRC32 (reflected IEEE 0xedb88320) and FNV-1a 32 for hashing (API-name hashing and the `group=` field). This is a symmetric layer inside the HTTPS transport.
+CLAIM: Data protection — RC4 (KSA/PRGA confirmed) with symmetric key `74185` for the beacon body; the local encrypted URL-list file is encrypted under a generated GUID key; base64 encode/decode with a stored alphabet; CRC32 (reflected IEEE 0xedb88320) and FNV-1a 32 for hashing (API-name hashing and the `group=` field). This is a symmetric layer inside the HTTPS transport.
 EVIDENCE: [ev_0200][ev_0202][ev_0203][ev_0204][ev_0216][ev_0192][ev_0225][ev_0177][ev_0008]
 CONFIDENCE: 0.85
 TECHNIQUE: T1573.001 (candidate), T1140
@@ -83,7 +83,7 @@ EVIDENCE: [ev_0224][ev_0220][ev_0222][ev_0014][ev_0308]; ranking mixed [ev_0362]
 CONFIDENCE: 0.20
 TECHNIQUE: T1055 (unproven)
 
-CLAIM: REVISED — network: no endpoint is attributable to the sample. I withdraw my round-0 "unconfirmed lead" wording for the sandbox's sample-process-tree row `20.67.186.184:443` (0/91 engines; absent from the pcap inventory; maps by timestamp/record to a shell process) — it carries no attribution weight now. The capture contains no C2 attempt at all: no DNS query, Host header or SNI for either decoded domain, no beaconing (beacons: []), no POST/exfil, only OS/update/OCSP traffic, and all 15 non-DNS external IPs swept clean (13×0/91, two single-engine flags). The two decoded `/live/` URLs remain the only C2 indicators.
+CLAIM: REVISED — network: no endpoint is attributable to the sample. I withdraw my round-0 "unconfirmed lead" wording for the sandbox's sample-process-tree row `192.0.2.11:443` (0/91 engines; absent from the pcap inventory; maps by timestamp/record to a shell process) — it carries no attribution weight now. The capture contains no C2 attempt at all: no DNS query, Host header or SNI for either decoded domain, no beaconing (beacons: []), no POST/exfil, only OS/update/OCSP traffic, and all 15 non-DNS external IPs swept clean (13×0/91, two single-engine flags). The two decoded `/live/` URLs remain the only C2 indicators.
 EVIDENCE: [ev_0017][ev_0309][ev_0310][ev_0311][ev_0283][ev_0314][ev_0013][ev_0016][ev_0324][ev_0313]
 CONFIDENCE: 0.85
 TECHNIQUE: T1071.001 (indicators only; no observed session)
@@ -98,7 +98,7 @@ EVIDENCE: [ev_0018][ev_0025][ev_0301][ev_0014][ev_0007][ev_0077][ev_0305]
 CONFIDENCE: 0.85
 TECHNIQUE: —
 
-CLAIM: Distinctive markers/pivots, corrected: `:wtfbbq`, `Littlehw`, `runnung` (sic), `front`, `12345`, `PT0S`, User-Agent tail "Tob 1.1", export module name `UpdaterTag.dll`. Corrected pairings: `runnung` = mutex name; `12345` = beacon RC4 key; `:wtfbbq` = unexplained marker, not demonstrated as a named object.
+CLAIM: Distinctive markers/pivots, corrected: `:wtfbbq`, `Quietbay`, `runnung` (sic), `front`, `74185`, `PT0S`, User-Agent tail "Tob 1.1", export module name `UpdaterTag.dll`. Corrected pairings: `runnung` = mutex name; `74185` = beacon RC4 key; `:wtfbbq` = unexplained marker, not demonstrated as a named object.
 EVIDENCE: [ev_0019][ev_0081][ev_0177][ev_0166][ev_0169]
 CONFIDENCE: 0.60
 TECHNIQUE: —

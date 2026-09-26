@@ -549,10 +549,10 @@ class TestTheNewSectionsAreCheckedAndKept:
         from maljan.pipeline.validation import configuration_citation_violations
 
         uncited = json.dumps(
-            {"items": [{"key": "RC4 key", "value": "12345", "how_obtained": "decrypted"}]}
+            {"items": [{"key": "RC4 key", "value": "74185", "how_obtained": "decrypted"}]}
         )
         inferred = json.dumps(
-            {"items": [{"key": "RC4 key", "value": "12345", "how_obtained": "inferred"}]}
+            {"items": [{"key": "RC4 key", "value": "74185", "how_obtained": "inferred"}]}
         )
         result, comp, llm = self._invoke(
             "_ConfigOut",
