@@ -61,6 +61,8 @@ READS_A_FILE = frozenset(
         "yara_scan",
         "capa",
         "floss",
+        "resolve_api_hashes",
+        "decode_string_blobs",
     }
 )
 CARVED = "carved_path"
