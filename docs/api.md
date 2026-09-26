@@ -150,6 +150,10 @@ Every row carries `kind`, `value`, `is_suspicious`, `notes`, **`source`** —
 for something an agent put in an artefact, `strings` for a run of bytes in the
 file that has the shape of one, `identity` for the sample's own hashes,
 `judge` for a value the judge's own indicators name — and **`published`**.
+A domain, address or URL the sample hid also carries **`recovered_by`**: the
+tool that recovered it (`floss` by emulation, `decode_string_blobs` from the
+file's bytes), its ledger entry and where in the file, as the report's IOC
+table states it; every other row omits it (`null`).
 A judge value is asked the same publish rule as every other row, with the
 judge not counting as a second source; the exported bundle carries it only
 when the rule publishes it, and this feed says the same. A name only the sample's own byte image knows is not an

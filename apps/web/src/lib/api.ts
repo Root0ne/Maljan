@@ -317,7 +317,10 @@ const _JOB_SCHEMA: Record<string, ExpectedShape> = {
  *  the platform's publish rule would offer it to a consumer that blocks on it.
  *  The API declared neither, so `response_model` dropped the source the
  *  service had attached and a name only the sample's bytes knew shipped
- *  looking exactly like one the sandbox watched. */
+ *  looking exactly like one the sandbox watched. `recovered_by`, on a
+ *  domain, address or URL the sample hid, names the tool that recovered it
+ *  (`floss` by emulation, `decode_string_blobs` from the file's bytes), its
+ *  ledger entry and where in the file, as the report's IOC table does. */
 export interface IOCRow {
   kind: string;
   value: string;
@@ -325,6 +328,7 @@ export interface IOCRow {
   notes?: string | null;
   source?: string | null;
   published?: boolean;
+  recovered_by?: string | null;
 }
 
 export interface IOCListResponse {
@@ -339,6 +343,7 @@ const _IOC_ROW_SCHEMA: Record<string, ExpectedShape> = {
   notes: "string?",
   source: "string?",
   published: "boolean?",
+  recovered_by: "string?",
 };
 
 const _SYSTEM_STATUS_SCHEMA: Record<string, ExpectedShape> = {
@@ -908,7 +913,8 @@ class ApiClient {
    *  operator exporting the IOCs is reading them rather than feeding them to
    *  something that blocks, and a download that silently dropped the withheld
    *  rows would hide the very distinction the `source` column exists to show.
-   *  Each row carries its `source` and its `published` flag. */
+   *  Each row carries its `source` and its `published` flag, and a hidden
+   *  network value the tool that recovered it (`recovered_by`). */
   async getReportIOCs(
     reportId: string,
     include: "published" | "unpublished" | "all" = "all"

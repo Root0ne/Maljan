@@ -272,3 +272,50 @@ class TestAPublishedURLCarriesItsHost:
                 "published": True,
             }
         ]
+
+
+class TestARecoveredValueNamesItsTool:
+    """A hidden network value carries the tool that recovered it, as the report's table does."""
+
+    @staticmethod
+    def _client(record: dict[str, Any]) -> TestClient:
+        from app.database import get_db
+        from app.deps import get_current_user, require_active_user
+
+        report = MagicMock()
+        report.id = REPORT_ID
+        report.malware_report = {**_malware_report(), "emulated_strings": record}
+        service = module.ReportService(db=AsyncMock())
+        service.get_report = AsyncMock(return_value=report)  # type: ignore[method-assign]
+        app = FastAPI()
+        app.include_router(module.router, prefix="/api/v1")
+        user = MagicMock(id=uuid.uuid4(), email="op@example.com")
+        app.dependency_overrides[get_db] = lambda: AsyncMock()
+        app.dependency_overrides[get_current_user] = lambda: user
+        app.dependency_overrides[require_active_user] = lambda: user
+        app.dependency_overrides[module._get_service] = lambda: service
+        return TestClient(app)
+
+    def test_both_tools_reach_the_client(self) -> None:
+        record = {
+            "values": {"c2.example.com": "ev_0012"},
+            "recovered_by": {
+                "c2.example.com": [
+                    {"tool": "floss", "entry": "ev_0012", "scheme": "decoded"},
+                    {
+                        "tool": "decode_string_blobs",
+                        "entry": "ev_0020",
+                        "scheme": "xor8",
+                        "offset": "0xfd30",
+                    },
+                ]
+            },
+        }
+        rows = _rows(self._client(record), "?include=all&kind=domain")
+        by_value = {row["value"]: row.get("recovered_by") for row in rows}
+
+        assert by_value["c2.example.com"] == (
+            "floss, ev_0012 (decoded string); "
+            "decode_string_blobs, ev_0020 (xor8, at file offset 0xfd30)"
+        )
+        assert by_value["rosoft.com"] is None
