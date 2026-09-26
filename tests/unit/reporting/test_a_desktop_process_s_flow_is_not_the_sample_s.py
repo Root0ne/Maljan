@@ -7,10 +7,14 @@ no process of the sample, and which runs none of its files — reached one
 address on 443. The mapping put that flow in the sample's process tree, on
 Triage's ``orig`` mark alone, so the address went out as the sample's C2 in
 STIX, ``/iocs``, the YARA draft and a Suricata rule, while the report's own
-text tied it to that process and called it no indicator. The sample is now the
-processes both facts name when both name some; the flow is outside the tree,
-the row names the process that made it, and it is published only when a model
-keeps it. Every surface reads that one answer.
+text tied it to that process and called it no indicator. Where Triage's mark
+and the submitted file's own process tree disagree about a process, its
+attribution is now not stated; the row names the process and both facts, and
+it is published only when a model keeps it. The run's artefacts do not keep
+Triage's marks, so every shape that could have produced the run is tested:
+only the desktop process marked, the sample and the desktop process marked,
+every listed process marked, and nothing marked. Every surface reads that one
+answer.
 
 The process table and the flows are the run's own rows.
 """
@@ -28,6 +32,7 @@ from maljan.reporting.ledger_projection import network_from_ledger
 from maljan.reporting.models import MalwareReport
 from maljan.reporting.renderers.stix_renderer import (
     FLOW_OUTSIDE_THE_TREE,
+    MARKED_ONLY_PROCESS,
     ExtendedSTIXRenderer,
     emulation_kwargs,
     publish_answer,
@@ -80,9 +85,9 @@ FLOWS = [
 ]
 
 
-def _sandbox(marked: set[int]) -> Any:
+def _sandbox(marked: set[int], flows: list[dict[str, Any]] | None = None) -> Any:
     overview = {"sample": {"id": "s", "target": f"{SHA256}.exe", "sha256": SHA256}}
-    task = {"processes": _processes(marked), "network": {"flows": FLOWS}}
+    task = {"processes": _processes(marked), "network": {"flows": flows or FLOWS}}
     return triage_overview_to_sandbox_report(overview, task_reports={"behavioral1": task})
 
 
@@ -91,27 +96,27 @@ def _desktop_flow(marked: set[int]) -> dict[str, Any]:
     return next(row for row in report.network.tcp if row["dst"] == DESKTOP_ADDRESS)
 
 
-@pytest.mark.parametrize(
-    "marked",
-    [
-        pytest.param({84, 87, 96, 100, 102, 104, 105}, id="every-listed-process-marked"),
-        pytest.param({84, 87, 105}, id="the-sample-and-the-desktop-process-marked"),
-        pytest.param(set(), id="nothing-marked"),
-    ],
-)
-def test_the_desktop_process_flow_is_outside_the_tree_and_names_its_process(
+MARKED_SHAPES = [
+    pytest.param({105}, id="only-the-desktop-process-marked"),
+    pytest.param({84, 87, 105}, id="the-sample-and-the-desktop-process-marked"),
+    pytest.param({84, 87, 96, 100, 102, 104, 105}, id="every-listed-process-marked"),
+]
+
+
+@pytest.mark.parametrize("marked", MARKED_SHAPES)
+def test_a_marked_desktop_process_the_file_does_not_name_states_no_attribution(
     marked: set[int],
 ) -> None:
     flow = _desktop_flow(marked)
-    assert flow["sample_process_tree"] is False
+    assert "sample_process_tree" not in flow
+    assert flow["lineage_disputed"] == "orig"
     assert flow["process"] == "StartMenuExperienceHost.exe"
 
 
-def test_a_mark_disjoint_from_every_named_process_is_still_the_answer() -> None:
-    # Only the desktop process is marked and none of the sample's: the mark
-    # is the report's own statement, and it stands (a guest process can carry
-    # the submitted name).
-    assert _desktop_flow({105})["sample_process_tree"] is True
+def test_with_nothing_marked_the_desktop_process_is_outside_the_tree() -> None:
+    flow = _desktop_flow(set())
+    assert flow["sample_process_tree"] is False
+    assert flow["process"] == "StartMenuExperienceHost.exe"
 
 
 def _mentions() -> dict[str, AgentISR]:
@@ -129,8 +134,8 @@ def _mentions() -> dict[str, AgentISR]:
     }
 
 
-def _report(marked: set[int]) -> MalwareReport:
-    sandbox = _sandbox(marked)
+def _report(marked: set[int], flows: list[dict[str, Any]] | None = None) -> MalwareReport:
+    sandbox = _sandbox(marked, flows)
     ledger = [
         build_entry(
             entry_id="ev_0001",
@@ -167,39 +172,63 @@ def _report(marked: set[int]) -> MalwareReport:
     return report
 
 
-def test_every_surface_reads_one_no_that_names_the_process() -> None:
-    report = _report({84, 87, 105})
-    (row,) = [ip for ip in report.network.ips if ip.address == DESKTOP_ADDRESS]
-    assert row.sample_process_tree is False
-    assert row.outside_processes == ["StartMenuExperienceHost.exe (procid 105)"]
-    assert row.kept_by == []
+MENTIONED = (
+    "(a claim by the static analyst, a claim by the dynamic analyst, a claim by the "
+    "network analyst mentions it and does not keep it)"
+)
 
-    answer = publish_answer(
-        "ip", DESKTOP_ADDRESS, "sandbox", None, **emulation_kwargs(report, "ip", DESKTOP_ADDRESS)
-    )
-    assert answer.startswith(
-        f"no: {FLOW_OUTSIDE_THE_TREE} (StartMenuExperienceHost.exe (procid 105))"
-    )
-    # Three analysts named it while saying it is no indicator: that keeps nothing.
-    assert answer.endswith(
-        "(a claim by the static analyst, a claim by the dynamic analyst, a claim by the "
-        "network analyst mentions it and does not keep it)"
-    )
 
-    (table_row,) = [i for i in report.consolidated_iocs if i.value == DESKTOP_ADDRESS]
-    assert table_row.published == answer
-    assert "StartMenuExperienceHost.exe (procid 105)" in table_row.context
-
-    bundle = ExtendedSTIXRenderer().render(report)
-    patterns = [str(getattr(o, "pattern", "")) for o in bundle.objects]
+def _on_no_surface(report: MalwareReport) -> None:
+    patterns = [
+        str(getattr(o, "pattern", "")) for o in ExtendedSTIXRenderer().render(report).objects
+    ]
     assert not any(DESKTOP_ADDRESS in p for p in patterns)
     for rule in build_detection_rules(report):
         assert DESKTOP_ADDRESS not in rule.body, rule.kind
 
 
-def test_the_same_row_attributed_to_the_tree_reaches_every_surface() -> None:
+def _answer(report: MalwareReport) -> str:
+    return publish_answer(
+        "ip", DESKTOP_ADDRESS, "sandbox", None, **emulation_kwargs(report, "ip", DESKTOP_ADDRESS)
+    )
+
+
+@pytest.mark.parametrize("marked", MARKED_SHAPES)
+def test_a_disputed_row_is_on_no_surface_and_its_no_states_both_facts(marked: set[int]) -> None:
+    report = _report(marked)
+    (row,) = [ip for ip in report.network.ips if ip.address == DESKTOP_ADDRESS]
+    assert row.sample_process_tree is None
+    assert row.marked_only_processes == ["StartMenuExperienceHost.exe (procid 105)"]
+    assert row.kept_by == []
+
+    answer = _answer(report)
+    assert answer.startswith(
+        "no: the sandbox report attributes its flows to StartMenuExperienceHost.exe "
+        f"(procid 105), {MARKED_ONLY_PROCESS}"
+    )
+    # Three analysts named it while saying it is no indicator: that keeps nothing.
+    assert answer.endswith(MENTIONED)
+
+    (table_row,) = [i for i in report.consolidated_iocs if i.value == DESKTOP_ADDRESS]
+    assert table_row.published == answer
+    assert MARKED_ONLY_PROCESS in table_row.context
+    _on_no_surface(report)
+
+
+def test_with_nothing_marked_the_no_names_the_process_outside_the_tree() -> None:
+    report = _report(set())
+    answer = _answer(report)
+    assert answer.startswith(
+        f"no: {FLOW_OUTSIDE_THE_TREE} (StartMenuExperienceHost.exe (procid 105))"
+    )
+    assert answer.endswith(MENTIONED)
+    _on_no_surface(report)
+
+
+def test_a_flow_both_facts_give_the_sample_reaches_every_surface() -> None:
     # The surfaces above are empty of it for the rule's answer, not for want of a path.
-    report = _report({105})
+    flows = [{"proto": "tcp", "dst": f"{DESKTOP_ADDRESS}:443", "procid": 84, "pid": 1}]
+    report = _report({84, 87, 105}, flows)
     (table_row,) = [i for i in report.consolidated_iocs if i.value == DESKTOP_ADDRESS]
     assert table_row.published == "yes"
     patterns = [

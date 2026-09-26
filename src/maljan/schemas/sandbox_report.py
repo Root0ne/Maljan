@@ -443,25 +443,61 @@ def _is_the_sample(proc: dict[str, Any], sample: dict[str, Any]) -> bool:
     return False
 
 
-def _sample_process_tree(
-    task: dict[str, Any], sample: dict[str, Any]
-) -> tuple[frozenset[Any], dict[Any, str]]:
-    """The ``procid``s of the sample's process tree in one task, and every listed process's image.
+# Which of the two facts alone names a flow's process as the sample's, on a
+# row whose attribution is therefore not stated: ``"orig"`` when Triage marks
+# it and it runs none of the submitted file's names and descends from none of
+# its processes, ``"file"`` when it runs the submitted file (or descends from a
+# process that does) and Triage marks it not.
+LINEAGE_DISPUTED_KEY = "lineage_disputed"
 
-    The tree is the sample's own processes and every process whose parent
-    chain (``procid_parent``) reaches one. Empty when no process is the sample,
-    which leaves every flow of the task unattributed rather than attributed to
-    nothing.
 
-    The sample's own processes are read from two facts: Triage's ``orig``
-    mark, and a file the process runs named as the submission or by its
-    digest (:func:`_is_the_sample`). Where both name processes, the sample is
-    the processes both name. A guest's desktop process that ran none of the
-    sample's files and descended from none of its processes was read as the
-    sample on the mark alone, and the address it reached was published as the
-    sample's. Where the two name
-    disjoint processes, Triage's mark is the answer — a guest process can
-    carry the submitted name — and where only one fact names any, it is.
+def _reach(parent: dict[Any, Any], roots: set[Any]) -> set[Any]:
+    """Every listed process whose parent chain reaches one of ``roots``, the roots included."""
+    tree: set[Any] = set()
+    for procid in parent:
+        seen: set[Any] = set()
+        current = procid
+        while current and current not in seen:
+            if current in roots:
+                tree.add(procid)
+                break
+            seen.add(current)
+            current = parent.get(current)
+    return tree
+
+
+class _Lineage:
+    """What one task's process records say about the sample's process tree."""
+
+    def __init__(
+        self,
+        tree: set[Any],
+        disputed: dict[Any, str],
+        images: dict[Any, str],
+        stated: bool,
+    ) -> None:
+        self.tree = frozenset(tree)
+        self.disputed = dict(disputed)
+        self.images = dict(images)
+        # Whether either fact names any process, which is what lets a listed
+        # process outside every tree be stated as outside it.
+        self.stated = stated
+
+
+def _sample_process_tree(task: dict[str, Any], sample: dict[str, Any]) -> _Lineage:
+    """The sample's process tree in one task, read from the two facts the report holds.
+
+    The two facts: the processes Triage marks ``orig``, and the processes that
+    run the submitted file (:func:`_is_the_sample`: its name or the digest's,
+    equal and never contained). Each gives a tree, the processes whose parent
+    chain (``procid_parent``) reaches one it names. Where both name processes,
+    a process in both trees is the sample's, a listed process in neither is
+    not, and one in exactly one tree is disputed: the facts disagree, so its
+    attribution is not stated. A desktop process Triage marked, which runs
+    none of the submitted file's names and descends from none of its
+    processes, was read as the sample on the mark alone and the address it
+    reached published as the sample's. Where only one fact names any process,
+    its tree is the answer; where neither does, nothing is stated.
     """
     processes = [p for p in task.get("processes") or [] if isinstance(p, dict)]
     parent = {p.get("procid"): p.get("procid_parent") for p in processes if p.get("procid")}
@@ -473,41 +509,38 @@ def _sample_process_tree(
     }
     marked = {p.get("procid") for p in processes if p.get("procid") and p.get("orig") is True}
     named = {p.get("procid") for p in processes if p.get("procid") and _is_the_sample(p, sample)}
-    roots = (marked & named) or marked or named
-    tree: set[Any] = set()
-    for procid in parent:
-        seen: set[Any] = set()
-        current = procid
-        while current and current not in seen:
-            if current in roots:
-                tree.add(procid)
-                break
-            seen.add(current)
-            current = parent.get(current)
-    return frozenset(tree), images
+    by_mark, by_file = _reach(parent, marked), _reach(parent, named)
+    if marked and named:
+        disputed = {procid: "orig" for procid in by_mark - by_file}
+        disputed.update({procid: "file" for procid in by_file - by_mark})
+        return _Lineage(by_mark & by_file, disputed, images, True)
+    return _Lineage(by_mark or by_file, {}, images, bool(marked or named))
 
 
-def _flow_attribution(
-    flow: dict[str, Any], in_tree: frozenset[Any], listed: dict[Any, str]
-) -> dict[str, Any]:
+def _flow_attribution(flow: dict[str, Any], lineage: _Lineage) -> dict[str, Any]:
     """What one Triage flow says about the process that made it, and its network facts.
 
     ``procid`` and ``pid`` as the flow gives them; ``sample_process_tree`` only
-    where the report settles it (see ``SAMPLE_TREE_KEY``); the image of a
-    listed process outside the tree (``FLOW_PROCESS_KEY``), which is what the
-    publish rule names when it refuses the row; the destination's AS number,
-    AS organisation and country where Triage recorded them.
+    where the report settles it (see ``SAMPLE_TREE_KEY``); for a listed
+    process outside the tree, or one the two facts disagree about
+    (``LINEAGE_DISPUTED_KEY``), its image (``FLOW_PROCESS_KEY``), which is
+    what the publish rule names when it refuses the row; the destination's AS
+    number, AS organisation and country where Triage recorded them.
     """
     out: dict[str, Any] = {}
     procid = flow.get("procid")
     if procid not in (None, ""):
         out["procid"] = procid
-        if in_tree and procid in in_tree:
+        if procid in lineage.tree:
             out[SAMPLE_TREE_KEY] = True
-        elif in_tree and procid in listed:
+        elif procid in lineage.disputed:
+            out[LINEAGE_DISPUTED_KEY] = lineage.disputed[procid]
+            if lineage.images.get(procid):
+                out[FLOW_PROCESS_KEY] = lineage.images[procid]
+        elif lineage.stated and procid in lineage.images:
             out[SAMPLE_TREE_KEY] = False
-            if listed.get(procid):
-                out[FLOW_PROCESS_KEY] = listed[procid]
+            if lineage.images.get(procid):
+                out[FLOW_PROCESS_KEY] = lineage.images[procid]
     if flow.get("pid") not in (None, ""):
         out["pid"] = flow.get("pid")
     for key in ("as_num", "as_org", "country"):
@@ -562,7 +595,7 @@ def triage_overview_to_sandbox_report(
     network = SandboxNetwork()
     hosts_by_ip: dict[str, dict[str, Any]] = {}
     for task in (task_reports or {}).values():
-        in_tree, listed = _sample_process_tree(task, sample)
+        lineage = _sample_process_tree(task, sample)
         for proc in task.get("processes") or []:
             if not isinstance(proc, dict):
                 continue
@@ -588,7 +621,7 @@ def triage_overview_to_sandbox_report(
             if not dst_host:
                 continue
             row: dict[str, Any] = {"dst": dst_host, "dport": dst_port}
-            row.update(_flow_attribution(flow, in_tree, listed))
+            row.update(_flow_attribution(flow, lineage))
             if proto == "tcp":
                 network.tcp.append(row)
             elif proto == "udp":

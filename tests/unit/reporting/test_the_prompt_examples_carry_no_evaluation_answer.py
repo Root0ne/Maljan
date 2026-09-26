@@ -128,6 +128,7 @@ from maljan.reporting.renderers.stix_renderer import (
     BENIGN_NAME_RESOLVED,
     FLOW_OUTSIDE_THE_TREE,
     UNATTRIBUTED_FLOW,
+    disputed_flow_reason,
     not_kept_reason,
 )
 from maljan.schemas.isr_models import (
@@ -509,6 +510,7 @@ PROMPTS: dict[str, str] = {
                 f"{FLOW_OUTSIDE_THE_TREE} (SearchHost.exe (procid 104))",
                 "a claim by the dynamic analyst",
             ),
+            disputed_flow_reason(["SearchHost.exe (procid 104)"], ["cmd.exe (procid 7)"]),
         ]
     ),
     "the reply a tool call that was not run is sent with": NO_REPLY_RECORDED,

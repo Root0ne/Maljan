@@ -2262,15 +2262,17 @@ change landed on `main`.
   DeepSeek's reasoning passback. The call stays in the turn as the model wrote
   it.
 - **A guest's desktop process is not the sample.** Where Triage's `orig` mark
-  and the submitted file's name (or digest) both name processes, the sample is
-  the processes both name; a process only the mark named (a desktop process
-  that ran none of the sample's files and descends from none of its
-  processes) is outside the tree. Its flows are refused by the one publish
-  rule unless a model keeps the address, and the `no:` names the process that
-  made them (`… outside the sample's process tree (StartMenuExperienceHost.exe
-  (procid 105))`), as does the IOC table's context; STIX, `/iocs`, YARA,
-  Suricata and Sigma read that one answer. A mark disjoint from every named
-  process still stands.
+  and the submitted file's own process tree (its name or digest) disagree
+  about a process, the flow's attribution is absent rather than `true`; where
+  they agree it is `true`, and a listed process neither names is `false`. A
+  desktop process that ran none of the sample's files and descends from none
+  of its processes had been read as the sample on the mark alone. Such a flow
+  is refused by the one publish rule unless a model keeps the address, and the
+  `no:` and the IOC table's context name the process and both facts
+  (`… StartMenuExperienceHost.exe (procid 105), which Triage marks as the
+  sample's but which runs none of the submitted file's names …`); STIX,
+  `/iocs`, YARA, Suricata and Sigma read that one answer. A mark that names a
+  process the file's tree does not is no longer the answer on its own.
 - **Each model call is paired with its own admission.** The guard over model
   calls counted any admission before a call, so one covered any number of
   calls after it. It now pairs calls one to one in source order (two branches

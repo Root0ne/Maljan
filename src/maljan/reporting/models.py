@@ -398,6 +398,12 @@ class NetworkIP(BaseModel):
     # to it, as ``<image> (procid N)``: what the publish rule names when it
     # refuses the row. Empty when the report names none.
     outside_processes: list[str] = Field(default_factory=list)
+    # The processes the two lineage facts disagree about that made flows to
+    # it, as ``<image> (procid N)``: the ones only Triage's ``orig`` mark names
+    # as the sample's, and the ones only the submitted file's own process tree
+    # does. Their flows state no attribution, and the publish rule says why.
+    marked_only_processes: list[str] = Field(default_factory=list)
+    file_only_processes: list[str] = Field(default_factory=list)
     # Whether the address is a public DNS resolver's, which a sandbox guest
     # reaches whatever the sample does.
     public_resolver: bool = False

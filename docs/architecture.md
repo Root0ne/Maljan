@@ -2614,14 +2614,18 @@ is assembled from what the run gathered rather than recomputed beside it:
   processes are read from two facts: the processes Triage marks `orig`, and
   the processes that run a file whose name equals the submitted name or is the
   sample's digest with an extension — equal, never contained, so a guest's
-  `MicrosoftEdgeUpdate.exe` is not a sample submitted as `update.exe`. Where
-  both name processes, the sample is the processes both name, so a guest
-  desktop process the mark alone names is outside the tree; where the two are
-  disjoint the mark stands (a guest process can carry the submitted name), and
-  where only one names any, it does. A flow outside the tree carries the image
-  of the process that made it (`process`), the address's row states those
-  processes (`outside_processes`, as `<image> (procid N)`), and the publish
-  rule's `no:` and the IOC table's context name them.
+  `MicrosoftEdgeUpdate.exe` is not a sample submitted as `update.exe`. Each
+  fact gives a tree through `procid_parent`. Where both name processes, a
+  process in both trees is the sample's (`true`), a listed process in neither
+  is not (`false`), and one in exactly one tree is disputed: the facts
+  disagree, so its attribution is absent and the row says which fact alone
+  named it (`lineage_disputed`: `orig` or `file`). Where only one fact names
+  any process, its tree is the answer. A flow outside the tree or disputed
+  carries the image of the process that made it (`process`); the address's
+  row states those processes (`outside_processes`, `marked_only_processes`,
+  `file_only_processes`, as `<image> (procid N)`), and the publish rule's
+  `no:` and the IOC table's context name them with both facts. A disputed
+  row, like any unattributed one, is published only when a model keeps it.
   **CAPE, REST and mock reports carry no process on a flow**, so every address
   they record is unattributed and is published only when a model keeps it. The
   network block is projected from the job's whole report, never from a paged
