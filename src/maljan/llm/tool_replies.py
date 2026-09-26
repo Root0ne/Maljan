@@ -5,17 +5,17 @@ A turn can carry a call no tool ran: one whose arguments never parsed sits in
 can end on a turn whose calls were never answered at all. Every provider's API
 pairs a call with its reply and refuses a history where one is missing:
 
-* OpenAI-compatible servers want each assistant turn's ``tool_calls`` followed
-  by one ``tool`` message per call id — DeepSeek answered a revision loop's
-  turn with 400, "An assistant message with 'tool_calls' must be followed by
-  tool messages responding to each 'tool_call_id'", and the analyst was lost
-  for the round;
+* OpenAI-compatible chat completions want each assistant turn's
+  ``tool_calls`` followed by one ``tool`` message per call id — DeepSeek
+  answered a revision loop's turn with 400, "An assistant message with
+  'tool_calls' must be followed by tool messages responding to each
+  'tool_call_id'", and the analyst was lost for the round;
 * Anthropic wants every ``tool_use`` block answered by a ``tool_result`` block
   at the front of the next user turn;
 * Gemini wants a model turn's ``functionCall`` parts answered by as many
   ``functionResponse`` parts in the next user turn;
-* Ollama takes the OpenAI shape and pairs a turn's calls with the ``tool``
-  messages after it.
+* Ollama takes the OpenAI chat shape and pairs a turn's calls with the
+  ``tool`` messages after it.
 
 One rule for all of them, applied to the request each client builds, in that
 client's own message shape: a call with no reply is sent with a reply that
@@ -39,10 +39,22 @@ NOT_RUN_REPLY = (
     "No reply was recorded for this call: its arguments did not parse, so it was not run."
 )
 
+# What a completer notes of each change it makes, one entry per change: a
+# reply written (``WRITTEN``, or ``NOT_RUN`` when it says the call was not
+# run) or a recorded reply moved to its call (``MOVED``). The operator's counts
+# are taken from here, not from the text of the request.
+Record = list[str]
+WRITTEN = "written"
+NOT_RUN = "not_run"
+MOVED = "moved"
 
-def reply_text(call_id: str, not_run: frozenset[str] | set[str]) -> str:
-    """The known-only reply for one unanswered call."""
-    return NOT_RUN_REPLY if call_id and call_id in not_run else NO_REPLY_RECORDED
+
+def _reply(call_id: str, not_run: frozenset[str] | set[str], record: Record | None) -> str:
+    """The known-only reply for one unanswered call, noted in ``record``."""
+    unparsed = bool(call_id) and call_id in not_run
+    if record is not None:
+        record.append(NOT_RUN if unparsed else WRITTEN)
+    return NOT_RUN_REPLY if unparsed else NO_REPLY_RECORDED
 
 
 def unparsed_call_ids(messages: list[Any]) -> frozenset[str]:
@@ -68,46 +80,99 @@ def answered_tool_calls(
     messages: list[Any],
     not_run: frozenset[str] | set[str] = frozenset(),
     make_reply: Callable[[str, str], dict[str, Any]] = _openai_reply,
+    *,
+    record: Record | None = None,
 ) -> tuple[list[Any], int]:
-    """OpenAI-shaped messages with every tool call answered, in its call order.
+    """OpenAI chat-shaped messages with every tool call answered, in its call order.
 
-    The tool messages that follow an assistant turn are put in the order of
-    its calls, and a call with none gets ``NO_REPLY_RECORDED``, or
-    ``NOT_RUN_REPLY`` when its id is one of ``not_run`` (the turn's calls
-    whose arguments did not parse). A tool message that answers none of the
-    turn's calls stays where it was, after them: dropping it would remove
-    something the conversation holds. Returns the messages and how many
-    replies were written. A history that is already well formed comes back as
-    it was. Ollama's messages take the same shape (``make_reply``).
+    Chat completions pair a call with the ``tool`` messages right after its
+    turn. Those are put in the order of the turn's calls. A call with none
+    there takes the first ``tool`` message recorded for its id further on that
+    answers no call of the turn it follows: the reply was recorded, only in
+    the wrong place, and it is moved to its call rather than said missing. A
+    call with no reply anywhere gets ``NO_REPLY_RECORDED``, or
+    ``NOT_RUN_REPLY`` when its id is one of ``not_run`` (the calls whose
+    arguments did not parse). A tool message that answers none of the turn's
+    calls stays after them: dropping it would remove something the
+    conversation holds. Returns the messages and how many replies were
+    written; a history with nothing missing comes back as it was, the same
+    list. Ollama's messages take the same shape (``make_reply``).
     """
+
+    def is_turn(message: Any) -> bool:
+        return (
+            isinstance(message, dict)
+            and message.get("role") == "assistant"
+            and bool(message.get("tool_calls"))
+        )
+
+    def is_tool(message: Any) -> bool:
+        return isinstance(message, dict) and message.get("role") == "tool"
+
+    def ids_of(message: Any) -> list[str]:
+        return [
+            str(call.get("id") or "") if isinstance(call, dict) else ""
+            for call in message.get("tool_calls") or []
+        ]
+
+    # Tool messages that answer no call of the turn they follow, by position.
+    strays: list[int] = []
+    owner: set[str] = set()
+    for position, message in enumerate(messages):
+        if is_turn(message):
+            owner = set(ids_of(message))
+        elif is_tool(message):
+            if str(message.get("tool_call_id") or "") not in owner:
+                strays.append(position)
+        else:
+            owner = set()
+
     out: list[Any] = []
     written = 0
+    moved: set[int] = set()
     index = 0
     while index < len(messages):
+        if index in moved:
+            index += 1
+            continue
         message = messages[index]
         out.append(message)
+        turn = index
         index += 1
-        calls = message.get("tool_calls") if isinstance(message, dict) else None
-        if not (isinstance(message, dict) and message.get("role") == "assistant" and calls):
+        if not is_turn(message):
             continue
         replies: list[Any] = []
-        while (
-            index < len(messages)
-            and isinstance(messages[index], dict)
-            and messages[index].get("role") == "tool"
-        ):
-            replies.append(messages[index])
+        while index < len(messages) and is_tool(messages[index]):
+            if index not in moved:
+                replies.append(messages[index])
             index += 1
-        for call in calls:
-            call_id = str(call.get("id") or "") if isinstance(call, dict) else ""
+        for call_id in ids_of(message):
             match = next((r for r in replies if str(r.get("tool_call_id") or "") == call_id), None)
             if match is not None:
                 replies.remove(match)
                 out.append(match)
                 continue
-            out.append(make_reply(call_id, reply_text(call_id, not_run)))
+            later = next(
+                (
+                    p
+                    for p in strays
+                    if p > turn
+                    and p not in moved
+                    and str(messages[p].get("tool_call_id") or "") == call_id
+                ),
+                None,
+            )
+            if later is not None:
+                moved.add(later)
+                out.append(messages[later])
+                if record is not None:
+                    record.append(MOVED)
+                continue
+            out.append(make_reply(call_id, _reply(call_id, not_run, record)))
             written += 1
         out.extend(replies)
+    if not written and not moved:
+        return messages, 0
     return out, written
 
 
@@ -118,24 +183,85 @@ def _blocks(content: Any, kind: str) -> list[dict[str, Any]]:
 
 
 def answered_anthropic_messages(
-    messages: list[Any], not_run: frozenset[str] | set[str] = frozenset()
+    messages: list[Any],
+    not_run: frozenset[str] | set[str] = frozenset(),
+    *,
+    record: Record | None = None,
 ) -> tuple[list[Any], int]:
     """Anthropic-shaped messages with every ``tool_use`` block answered.
 
     Anthropic wants each ``tool_use`` id of an assistant turn answered by a
-    ``tool_result`` block at the front of the next user turn. A missing one is
-    written there, after the results the turn already has and before anything
-    else the user turn says; a turn with no user turn after it gets one that
-    holds only the replies. A user turn that is plain text keeps its text,
-    after the replies. Returns the messages and how many replies were written.
+    ``tool_result`` block at the front of the next user turn. A call with no
+    result there takes the first ``tool_result`` recorded for its id further
+    on that answers no call of the turn before it: the reply was recorded,
+    only in the wrong place, and it is moved to its call (a user turn it
+    leaves empty is left out; the API joins the turns around it). A call with
+    no result anywhere gets the known-only reply. Either goes after the
+    results the user turn already has and before anything else it says; a
+    turn with no user turn after it gets one that holds only the replies. A
+    user turn that is plain text keeps its text, after the replies. Returns the
+    messages and how many replies were written; a history with nothing
+    missing comes back as it was, the same list.
     """
+
+    def is_result(block: Any) -> bool:
+        return isinstance(block, dict) and block.get("type") == "tool_result"
+
+    # ``tool_result`` blocks that answer no call of the assistant turn right
+    # before their user turn, as (message position, block position).
+    strays: list[tuple[int, int]] = []
+    owner: set[str] = set()
+    for position, message in enumerate(messages):
+        if not isinstance(message, dict):
+            owner = set()
+            continue
+        content = message.get("content")
+        if message.get("role") == "assistant":
+            owner = {str(b.get("id") or "") for b in _blocks(content, "tool_use")}
+            continue
+        if message.get("role") == "user" and isinstance(content, list):
+            strays += [
+                (position, b)
+                for b, block in enumerate(content)
+                if is_result(block) and str(block.get("tool_use_id") or "") not in owner
+            ]
+        owner = set()
+
+    taken: set[tuple[int, int]] = set()
+
+    def content_at(position: int) -> Any:
+        """The content of a message, without the blocks moved out of it."""
+        content = messages[position].get("content")
+        if not isinstance(content, list) or not any(p == position for p, _ in taken):
+            return content
+        return [b for i, b in enumerate(content) if (position, i) not in taken]
+
+    def take(call_id: str, after: int) -> Any:
+        """The first stray result for ``call_id`` after ``after``, moved out, or ``None``."""
+        for position, b in strays:
+            if position > after and (position, b) not in taken:
+                block = messages[position]["content"][b]
+                if str(block.get("tool_use_id") or "") == call_id:
+                    taken.add((position, b))
+                    if record is not None:
+                        record.append(MOVED)
+                    return block
+        return None
+
     out: list[Any] = []
     written = 0
     index = 0
     while index < len(messages):
         message = messages[index]
-        out.append(message)
+        position = index
         index += 1
+        if isinstance(message, dict) and message.get("role") == "user" and taken:
+            content = content_at(position)
+            if isinstance(content, list) and not content:
+                continue
+            if content is not message.get("content"):
+                message = {**message, "content": content}
+        out.append(message)
         if not (isinstance(message, dict) and message.get("role") == "assistant"):
             continue
         ids = [str(b.get("id") or "") for b in _blocks(message.get("content"), "tool_use")]
@@ -143,26 +269,30 @@ def answered_anthropic_messages(
             continue
         following = messages[index] if index < len(messages) else None
         has_user = isinstance(following, dict) and following.get("role") == "user"
-        content: Any = following.get("content") if has_user else None  # type: ignore[union-attr]
+        # Without the results already moved out of it to an earlier call.
+        content = content_at(index) if has_user else None
         answered = {str(b.get("tool_use_id") or "") for b in _blocks(content, "tool_result")}
-        missing = [
-            {"type": "tool_result", "tool_use_id": call_id, "content": reply_text(call_id, not_run)}
-            for call_id in ids
-            if call_id not in answered
-        ]
+        missing: list[Any] = []
+        for call_id in ids:
+            if call_id in answered:
+                continue
+            block = take(call_id, index if has_user else position)
+            if block is None:
+                block = {
+                    "type": "tool_result",
+                    "tool_use_id": call_id,
+                    "content": _reply(call_id, not_run, record),
+                }
+                written += 1
+            missing.append(block)
         if not missing:
             continue
-        written += len(missing)
         if not has_user:
             out.append({"role": "user", "content": missing})
             continue
         if isinstance(content, list):
             lead = 0
-            while (
-                lead < len(content)
-                and isinstance(content[lead], dict)
-                and content[lead].get("type") == "tool_result"
-            ):
+            while lead < len(content) and is_result(content[lead]):
                 lead += 1
             new_content = [*content[:lead], *missing, *content[lead:]]
         elif isinstance(content, str) and content:
@@ -171,72 +301,80 @@ def answered_anthropic_messages(
             new_content = missing
         out.append({**following, "content": new_content})  # type: ignore[dict-item]
         index += 1
+    if not written and not taken:
+        return messages, 0
     return out, written
 
 
 def answered_messages(
-    messages: list[Any], not_run: frozenset[str] | set[str] = frozenset()
+    messages: list[Any],
+    not_run: frozenset[str] | set[str] = frozenset(),
+    *,
+    record: Record | None = None,
 ) -> tuple[list[Any], int]:
-    """LangChain messages with every parsed tool call answered, in its call order.
+    """LangChain messages with every parsed tool call answered, for Gemini.
 
-    For a client that pairs a call with its reply by something other than an
-    id in the request it sends: Gemini's ``functionCall`` and
-    ``functionResponse`` parts carry no id, so they pair by name and order,
-    and ``ChatGoogleGenerativeAI`` writes a turn's responses in the order of
-    its ``ToolMessage``s. Answering the conversation before the client
-    serializes it lets the client's own serializer write the reply in its own
-    shape, matched to the right call. The ``ToolMessage``s after a turn are put
-    in the order of its calls; a call with none gets a ``ToolMessage`` with
-    the known-only reply; a ``ToolMessage`` that answers none of the turn's
-    calls stays after them. Only ``tool_calls`` are answered: a call whose
-    arguments did not parse is not written into such a request at all.
-    Returns the messages and how many replies were written.
+    Gemini's ``functionCall`` and ``functionResponse`` parts carry no id, so
+    they pair by name and order. ``ChatGoogleGenerativeAI`` builds a turn's
+    responses from every ``ToolMessage`` in the conversation whose
+    ``tool_call_id`` is one of the turn's calls, the first one per id, in the
+    order they stand. Answering the conversation before the client serializes
+    it lets the client's own serializer write the reply in its own shape.
+
+    The client's rule decides what is answered: a call is answered when any
+    ``ToolMessage`` in the conversation carries its id, wherever it stands. A
+    call no ``ToolMessage`` answers gets one with the known-only reply, placed
+    so the turn's responses come out in call order: before the first reply to
+    a later call of the turn, else after the last reply to an earlier one, else
+    right after the turn. Nothing else moves. Only ``tool_calls`` are
+    answered: a call whose arguments did not parse is not written into such a
+    request at all. Returns the messages and how many replies were written.
     """
     from langchain_core.messages import AIMessage, ToolMessage  # noqa: PLC0415
 
-    out: list[Any] = []
-    written = 0
-    index = 0
-    while index < len(messages):
-        message = messages[index]
-        out.append(message)
-        index += 1
+    first_reply: dict[str, int] = {}
+    for position, message in enumerate(messages):
+        if isinstance(message, ToolMessage):
+            first_reply.setdefault(str(message.tool_call_id or ""), position)
+
+    # (position to insert before, turn position, call index, message)
+    inserts: list[tuple[int, int, int, Any]] = []
+    for turn_position, message in enumerate(messages):
         calls = message.tool_calls if isinstance(message, AIMessage) else None
         if not calls:
             continue
-        replies: list[Any] = []
-        while index < len(messages) and isinstance(messages[index], ToolMessage):
-            replies.append(messages[index])
-            index += 1
-        for call in calls:
-            call_id = str(call.get("id") or "")
-            match = next((r for r in replies if str(r.tool_call_id or "") == call_id), None)
-            if match is not None:
-                replies.remove(match)
-                out.append(match)
+        ids = [str(call.get("id") or "") for call in calls]
+        replied = [(first_reply[i], k) for k, i in enumerate(ids) if i in first_reply]
+        for k, (call, call_id) in enumerate(zip(calls, ids, strict=True)):
+            if call_id in first_reply:
                 continue
-            out.append(
-                ToolMessage(
-                    content=reply_text(call_id, not_run),
-                    tool_call_id=call_id,
-                    name=call.get("name"),
-                )
+            later = [p for p, j in replied if j > k]
+            earlier = [p for p, j in replied if j < k]
+            if later:
+                position = min(later)
+            elif earlier:
+                position = max(earlier) + 1
+            else:
+                position = turn_position + 1
+            reply = ToolMessage(
+                content=_reply(call_id, not_run, record),
+                tool_call_id=call_id,
+                name=call.get("name"),
             )
-            written += 1
-        out.extend(replies)
-    return out, written
-
-
-def _not_run_in(value: Any) -> int:
-    """How many replies in a history say the call was not run, whatever its shape."""
-    if isinstance(value, str):
-        return int(value == NOT_RUN_REPLY)
-    if isinstance(value, dict):
-        return sum(_not_run_in(v) for v in value.values())
-    if isinstance(value, list):
-        return sum(_not_run_in(v) for v in value)
-    content = getattr(value, "content", None)
-    return _not_run_in(content) if content is not None else 0
+            inserts.append((position, turn_position, k, reply))
+    if not inserts:
+        return messages, 0
+    inserts.sort(key=lambda entry: entry[:3])
+    out: list[Any] = []
+    pending = iter(inserts)
+    upcoming = next(pending, None)
+    for position in range(len(messages) + 1):
+        while upcoming is not None and upcoming[0] == position:
+            out.append(upcoming[3])
+            upcoming = next(pending, None)
+        if position < len(messages):
+            out.append(messages[position])
+    return out, len(inserts)
 
 
 def _anthropic_ids(ids: frozenset[str]) -> frozenset[str]:
@@ -248,26 +386,38 @@ def _anthropic_ids(ids: frozenset[str]) -> frozenset[str]:
     return ids | frozenset(str(_normalize_tool_call_id(i) or "") for i in ids)
 
 
-Answer = Callable[[list[Any], frozenset[str]], tuple[list[Any], int]]
+def _complete_openai(payload: Any, not_run: frozenset[str], record: Record) -> None:
+    """Chat completions (``messages``)."""
+    if not isinstance(payload, dict):
+        return
+    if isinstance(payload.get("messages"), list):
+        answered, _ = answered_tool_calls(payload["messages"], not_run, record=record)
+        payload["messages"] = answered
 
 
-def _ollama_answer(sent: list[Any], not_run: frozenset[str]) -> tuple[list[Any], int]:
-    return answered_tool_calls(sent, not_run, _ollama_reply)
+def _complete_anthropic(payload: Any, not_run: frozenset[str], record: Record) -> None:
+    sent = payload.get("messages") if isinstance(payload, dict) else None
+    if isinstance(sent, list):
+        answered, _ = answered_anthropic_messages(sent, _anthropic_ids(not_run), record=record)
+        payload["messages"] = answered
 
 
-def _anthropic_answer(sent: list[Any], not_run: frozenset[str]) -> tuple[list[Any], int]:
-    return answered_anthropic_messages(sent, _anthropic_ids(not_run))
+def _complete_ollama(payload: Any, not_run: frozenset[str], record: Record) -> None:
+    sent = payload.get("messages") if isinstance(payload, dict) else None
+    if isinstance(sent, list):
+        answered, _ = answered_tool_calls(sent, not_run, _ollama_reply, record=record)
+        payload["messages"] = answered
 
 
 # Each provider's request hook — the method every request of that client
-# passes through, invoke and stream alike — and how its history is answered:
-# in the request the hook returns (``payload``, the history under the key
-# named), or in the conversation handed to the hook (``input``).
-DIALECTS: dict[str, tuple[str, str, str, Answer]] = {
-    "openai": ("_get_request_payload", "payload", "messages", answered_tool_calls),
-    "anthropic": ("_get_request_payload", "payload", "messages", _anthropic_answer),
-    "gemini": ("_prepare_request", "input", "", answered_messages),
-    "ollama": ("_chat_params", "payload", "messages", _ollama_answer),
+# passes through, invoke and stream alike — and where its history is answered:
+# in the request the hook returns (``payload``), or in the conversation handed
+# to the hook (``input``).
+DIALECTS: dict[str, tuple[str, str, Callable[..., Any]]] = {
+    "openai": ("_get_request_payload", "payload", _complete_openai),
+    "anthropic": ("_get_request_payload", "payload", _complete_anthropic),
+    "gemini": ("_prepare_request", "input", answered_messages),
+    "ollama": ("_chat_params", "payload", _complete_ollama),
 }
 
 # One subclass per (chat class, dialect) seen, so pydantic builds each schema once.
@@ -278,7 +428,7 @@ def _conversation(model: Any, input_: Any) -> list[Any] | None:
     """The conversation a request is built from, or ``None`` when it cannot be read."""
     try:
         return list(model._convert_input(input_).to_messages())
-    except Exception:  # noqa: BLE001 — without it every missing reply says only what is known
+    except Exception:  # noqa: BLE001 — see the two outcomes in ``with_answered_tool_calls``
         return None
 
 
@@ -292,8 +442,13 @@ def with_answered_tool_calls(chat_class: Any, dialect: str = "openai") -> Any:
     passback matches the request's messages to the conversation's one for
     one, and the replies written here come after it. A class without the hook
     is returned as it is.
+
+    Where the conversation cannot be read back from the hook's input, a
+    payload dialect still completes the request, and every reply it writes
+    says only that no reply was recorded; the ``input`` dialect (Gemini)
+    sends the request as the client built it.
     """
-    hook, where, key, answer = DIALECTS[dialect]
+    hook, where, complete = DIALECTS[dialect]
     if not isinstance(chat_class, type) or not hasattr(chat_class, hook):
         return chat_class
     cached = _ANSWERED_CLASSES.get((chat_class, dialect))
@@ -304,22 +459,17 @@ def with_answered_tool_calls(chat_class: Any, dialect: str = "openai") -> Any:
     def answered_hook(self: Any, input_: Any, *args: Any, **kwargs: Any) -> Any:
         conversation = _conversation(self, input_)
         not_run = unparsed_call_ids(conversation or [])
-        written = not_run_written = 0
+        record: Record = []
         if where == "input":
             if conversation is not None:
-                answered, written = answer(conversation, not_run)
+                answered, written = complete(conversation, not_run, record=record)
                 if written:
-                    not_run_written = _not_run_in(answered) - _not_run_in(conversation)
                     input_ = answered
             payload = base_hook(self, input_, *args, **kwargs)
         else:
             payload = base_hook(self, input_, *args, **kwargs)
-            sent = payload.get(key) if isinstance(payload, dict) else None
-            if isinstance(sent, list):
-                answered, written = answer(sent, not_run)
-                if written:
-                    not_run_written = _not_run_in(answered) - _not_run_in(sent)
-                    payload[key] = answered
+            complete(payload, not_run, record)
+        written = sum(1 for entry in record if entry != MOVED)
         if written:
             logger.warning(
                 "%s provider: %d tool call(s) in the history had no reply; each is sent "
@@ -327,7 +477,14 @@ def with_answered_tool_calls(chat_class: Any, dialect: str = "openai") -> Any:
                 "not run).",
                 dialect,
                 written,
-                not_run_written,
+                record.count(NOT_RUN),
+            )
+        if MOVED in record:
+            logger.warning(
+                "%s provider: %d recorded tool reply(ies) stood away from their call and "
+                "are sent right after it.",
+                dialect,
+                record.count(MOVED),
             )
         return payload
 

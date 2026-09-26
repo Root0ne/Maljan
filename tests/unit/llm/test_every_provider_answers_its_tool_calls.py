@@ -41,11 +41,11 @@ def _settings() -> Settings:
     return settings
 
 
-def _openai() -> Any:
+def _openai(model: str = "m", **kwargs: Any) -> Any:
     from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only
 
     forget_standard_only()
-    return OpenAIProvider(_settings()).build_model("m", 0.0, max_tokens=64)
+    return OpenAIProvider(_settings()).build_model(model, 0.0, max_tokens=64, **kwargs)
 
 
 def _anthropic() -> Any:
@@ -97,6 +97,17 @@ def _openai_unanswered(sent: list[dict[str, Any]]) -> list[str]:
                 break
             answered.add(str(later.get("tool_call_id")))
         missing += [str(c["id"]) for c in message["tool_calls"] if str(c["id"]) not in answered]
+    # And a tool message that answers no call of the turn it follows, which the
+    # server refuses too.
+    owner: set[str] = set()
+    for message in sent:
+        if message.get("role") == "assistant" and message.get("tool_calls"):
+            owner = {str(c["id"]) for c in message["tool_calls"]}
+        elif message.get("role") == "tool":
+            if str(message.get("tool_call_id")) not in owner:
+                missing.append(f"orphan {message.get('tool_call_id')}")
+        else:
+            owner = set()
     return missing
 
 
@@ -122,6 +133,22 @@ def _anthropic_unanswered(sent: list[dict[str, Any]]) -> list[str]:
                 break
             answered.add(block["tool_use_id"])
         missing += [i for i in ids if i not in answered]
+    # And a result that answers no call of the assistant turn before it.
+    owner: set[str] = set()
+    for message in sent:
+        content = message.get("content")
+        blocks = content if isinstance(content, list) else []
+        if message.get("role") == "assistant":
+            owner = {b["id"] for b in blocks if isinstance(b, dict) and b.get("type") == "tool_use"}
+            continue
+        missing += [
+            f"orphan {b['tool_use_id']}"
+            for b in blocks
+            if isinstance(b, dict)
+            and b.get("type") == "tool_result"
+            and b["tool_use_id"] not in owner
+        ]
+        owner = set()
     return missing
 
 
@@ -203,6 +230,20 @@ def _with_unparsed() -> list[Any]:
                 }
             ],
         ),
+        HumanMessage(content="Write your report now."),
+    ]
+
+
+def _away() -> list[Any]:
+    """A turn whose second call's reply was recorded, but not right after the turn."""
+    return [
+        SystemMessage(content="sys"),
+        HumanMessage(content="task"),
+        AIMessage(content="", tool_calls=[_call("one", "lookup", "a"), _call("two", "fetch", "b")]),
+        ToolMessage(content="a's answer", tool_call_id="one"),
+        HumanMessage(content="Go on."),
+        AIMessage(content="noted"),
+        ToolMessage(content="b's answer", tool_call_id="two"),
         HumanMessage(content="Write your report now."),
     ]
 
@@ -399,3 +440,90 @@ class TestTheCompletersOnTheirOwn:
             pass
 
         assert with_answered_tool_calls(_Plain, "ollama") is _Plain
+
+
+@pytest.mark.parametrize(("build", "history", "unanswered"), PROVIDERS)
+def test_a_reply_recorded_away_from_its_turn_is_sent_not_said_missing(
+    build: Any, history: Any, unanswered: Any
+) -> None:
+    sent = history(build(), _away())
+
+    assert unanswered(sent) == []
+    # Both replies were recorded; neither is said missing.
+    assert NO_REPLY_RECORDED not in repr(sent)
+    assert "b's answer" in repr(sent)
+
+
+def test_a_gemini_reply_recorded_away_from_its_turn_is_sent_as_the_client_builds_it() -> None:
+    model = _gemini()
+
+    sent = _gemini_history(model, _away())
+
+    # The client finds a reply anywhere in the conversation by its id, so the
+    # request it builds alone is already right and is sent unchanged.
+    assert sent == _gemini_history(model, _away(), base=True)
+    assert _gemini_replies(sent) == [("lookup", "a's answer"), ("fetch", "b's answer")]
+
+
+def test_a_chat_reply_recorded_away_from_its_turn_is_moved_to_its_call() -> None:
+    sent = _openai_history(_openai(), _away())
+
+    assert [m["role"] for m in sent] == [
+        "system",
+        "user",
+        "assistant",
+        "tool",
+        "tool",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert _openai_replies(sent) == {"one": "a's answer", "two": "b's answer"}
+
+
+def test_an_anthropic_result_recorded_away_from_its_turn_is_moved_to_its_call() -> None:
+    sent = _anthropic_history(_anthropic(), _away())
+
+    assert [m["role"] for m in sent] == ["user", "assistant", "user", "assistant", "user"]
+    assert [b.get("tool_use_id", b.get("text")) for b in sent[2]["content"]] == [
+        "one",
+        "two",
+        "Go on.",
+    ]
+    # The user turn it came from keeps what else it says.
+    assert sent[4]["content"] == [{"type": "text", "text": "Write your report now."}]
+
+
+def test_gemini_pairs_two_calls_of_one_name_by_position() -> None:
+    history = [
+        HumanMessage(content="task"),
+        AIMessage(
+            content="", tool_calls=[_call("one", "lookup", "a"), _call("two", "lookup", "b")]
+        ),
+        ToolMessage(content="b's answer", tool_call_id="two"),
+        HumanMessage(content="Write your report now."),
+    ]
+
+    sent = _gemini_history(_gemini(), history)
+
+    assert _gemini_replies(sent) == [("lookup", NO_REPLY_RECORDED), ("lookup", "b's answer")]
+
+
+def test_the_completion_counts_what_it_wrote() -> None:
+    from maljan.llm.tool_replies import MOVED, NOT_RUN, WRITTEN, answered_tool_calls
+
+    record: list[str] = []
+    messages = [
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "a"}, {"id": "b"}]},
+        {"role": "user", "content": NOT_RUN_REPLY},
+        {"role": "assistant", "content": "x"},
+        {"role": "tool", "tool_call_id": "c", "content": "late"},
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "d"}]},
+    ]
+    messages.insert(1, {"role": "tool", "tool_call_id": "zz", "content": "stray"})
+    messages[0]["tool_calls"].append({"id": "c"})
+
+    answered_tool_calls(messages, frozenset({"b"}), record=record)
+
+    # A user message that happens to hold the not-run sentence is not counted.
+    assert record == [WRITTEN, NOT_RUN, MOVED, WRITTEN]
