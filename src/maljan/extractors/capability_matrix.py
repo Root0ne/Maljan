@@ -40,7 +40,6 @@ read.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -52,7 +51,6 @@ from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
     JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
-    NEVER_CALLED_TECHNIQUE_MARKER,
     judge_and_findings_note,
     judge_dropped_reason,
     judge_kept_note,
@@ -195,11 +193,6 @@ def build_capability_matrix(
             notes.append(
                 judge_and_findings_note(on_findings) if on_findings else JUDGE_ONLY_TECHNIQUE_MARKER
             )
-        # The analysts whose statements naming it say what the sample does, as
-        # opposed to saying it is never called: only those corroborate it.
-        corroborating = _corroborating_layers(info.get("statements") or [])
-        if info.get("statements") and not corroborating and not not_published:
-            notes.append(NEVER_CALLED_TECHNIQUE_MARKER)
         if decided is not None and decided.decision == "keep":
             notes.append(judge_kept_note(decided.reason))
         elif asked and decided is None and not not_published:
@@ -220,6 +213,9 @@ def build_capability_matrix(
                 domain=domain,
                 not_published=not_published,
                 note="; ".join(notes),
+                # Each analyst statement naming it, verbatim, by analyst: what
+                # the analysts said is theirs to weigh, never classified here.
+                statements=[f"{who}: {text}" for who, text in info.get("statements") or [] if text],
             )
         )
         if not_published:
@@ -239,7 +235,7 @@ def build_capability_matrix(
                 evidence_quotes=list(evidence),
                 confidence=confidence,
                 contributing_layers=layers,
-                is_corroborated=len(corroborating) >= 2,
+                is_corroborated=len([lyr for lyr in layers if lyr != _JUDGE_SOURCE]) >= 2,
                 technique_id_valid=valid,
             )
         )
@@ -248,36 +244,6 @@ def build_capability_matrix(
     mappings.sort(key=lambda m: -1.0 if m.confidence is None else m.confidence, reverse=True)
     logger.info("capability_matrix: %d cells, %d ttp mappings", len(cells), len(mappings))
     return cells, mappings
-
-
-# A statement that the code it names is never run: "resolved but never
-# invoked", "is not called", "zero call cross-references". Generic words of
-# the reading, never a sample's values.
-_NEVER_CALLED_RE = re.compile(
-    r"\b(?:never|not|no\s+longer)\s+(?:been\s+|being\s+|actually\s+|once\s+)?"
-    r"(?:invoked|called|used|executed|exercised|reached)\b"
-    r"|\b(?:zero|no)\s+(?:code\s+)?(?:call\s+)?(?:cross[-\s]?references|xrefs|call\s+sites)\b",
-    re.IGNORECASE,
-)
-
-
-def says_never_called(text: str) -> bool:
-    """Whether a statement naming a technique says the code behind it is never run."""
-    return bool(_NEVER_CALLED_RE.search(str(text or "")))
-
-
-def _corroborating_layers(statements: list[tuple[str, str]]) -> list[str]:
-    """The analyst layers whose statements naming a technique do not say it is never run.
-
-    A statement that the functions behind a technique are resolved and never
-    called names the technique to say the sample does not do it, and is no
-    corroboration of it; nor is a rule that matched the names alone. The
-    reading errs toward not counting a statement: a technique it leaves
-    uncorroborated is printed without the word, never with a wrong one.
-    """
-    return list(
-        dict.fromkeys(layer for layer, text in statements if layer and not says_never_called(text))
-    )
 
 
 # What the judge is called in ``contributing_layers``. It is listed, because a

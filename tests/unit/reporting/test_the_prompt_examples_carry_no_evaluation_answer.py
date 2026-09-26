@@ -146,7 +146,6 @@ from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
     JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
-    NEVER_CALLED_TECHNIQUE_MARKER,
     ClaimEvidence,
     judge_and_findings_note,
     judge_dropped_reason,
@@ -400,9 +399,8 @@ PROMPTS: dict[str, str] = {
     "rule-match-only note": RULE_ONLY_NOTE,
     "judge-only technique note": JUDGE_ONLY_TECHNIQUE_MARKER,
     "judge-named technique named on findings note": judge_and_findings_note(["a", "b"]),
-    "the never-called note and the capability lookup's description": " ".join(
+    "the runtime-name wording and the capability lookup's description": " ".join(
         [
-            NEVER_CALLED_TECHNIQUE_MARKER,
             knowledge.RESOLVED_AT_RUNTIME,
             str(knowledge.api_capability.__doc__ or ""),
         ]

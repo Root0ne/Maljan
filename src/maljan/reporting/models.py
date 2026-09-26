@@ -559,6 +559,10 @@ class CapabilityCell(BaseModel):
     # technique when asked (``isr_models.ABSENCE_TECHNIQUE_MARKER``). It
     # changes nothing about the row's publication.
     note: str = ""
+    # Each analyst statement naming the technique, verbatim, labelled by the
+    # analyst's layer ("static: …"): printed where a rule matched only names
+    # resolved at runtime, so a reader weighs what the analysts said.
+    statements: list[str] = Field(default_factory=list)
 
 
 class TTPMapping(BaseModel):

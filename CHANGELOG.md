@@ -2334,9 +2334,10 @@ change landed on `main`.
   takes `resolved_names` and marks them; the report's projection also reads
   the ledger's `resolve_api_hashes` answers and counts such names apart
   (`static.api_capabilities_resolved`, `resolved_apis` on a rule row). The
-  ATT&CK table no longer prints them as "imports", and a technique whose every
-  analyst statement says the code behind it is never called is not stated as
-  corroborated.
+  ATT&CK table no longer prints them as "imports". A rule that matched only
+  such names is named as a source "rule match on names resolved at runtime from
+  hashes only, no import; not counted as corroboration", and each analyst
+  statement naming its technique is printed verbatim beside it.
 - **An ATT&CK row no longer says "claimed by no analyst" of a technique
   analysts named on a finding.** The row names those analysts, the sources the
   run's corroboration record lists.

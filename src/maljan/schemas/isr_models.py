@@ -55,13 +55,6 @@ def judge_and_findings_note(agents: list[str]) -> str:
 # no answer for: it is published, or not, as it would have been without the
 # question, and the row says the judge did not confirm it.
 JUDGE_UNCONFIRMED_TECHNIQUE_MARKER = "not confirmed by the judge"
-# The note on a technique every analyst statement naming it says is never
-# run ("resolved but never invoked"): no analyst corroborates it, and a rule
-# that matched the function names behind it does not either.
-NEVER_CALLED_TECHNIQUE_MARKER = (
-    "every analyst statement naming it says the code behind it is never called, so no "
-    "analyst corroborates it"
-)
 
 
 def judge_dropped_reason(reason: str) -> str:

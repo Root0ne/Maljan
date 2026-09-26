@@ -2486,10 +2486,13 @@ is assembled from what the run gathered rather than recomputed beside it:
   rule it is published by and not as a gap. When analysts named it on a
   finding and no claim carries it, the row names them instead ("stated by the
   judge; named on a finding, not on a claim, by …"), since the run's
-  corroboration record lists them as its sources. A technique whose every
-  analyst statement says the code behind it is never called ("resolved but
-  never invoked", "zero call cross-references") is not stated as corroborated,
-  and its row says so. The ELF run
+  corroboration record lists them as its sources. A knowledge-table rule
+  that matched only names resolved at runtime (every matched name in its
+  `resolved_apis`) is named as a source "rule match on names resolved at
+  runtime from hashes only, no import; not counted as corroboration", and
+  under the table each analyst statement naming its technique is printed
+  verbatim, by analyst (`CapabilityCell.statements`); the platform classifies
+  none of them. The ELF run
   credited `STATIC ANALYST` with T1490 and T1048.001, which no source named. A
   bundle the pipeline built from the analysts' claims because the judge's
   answer was not one credits those analysts, not the judge. A technique id is

@@ -1289,6 +1289,7 @@ class MarkdownRenderer:
             if tid in seen:
                 continue
             lines.append(_rule_only_row(tid, folded, mappings, capa_ids))
+        lines.extend(_resolved_only_lines(sorted(cells, key=_tactic_key), rules_by_tid, ctx))
         if hits:
             lines.extend(
                 [
@@ -3026,7 +3027,17 @@ def _attack_row(
     # Every producer that named the technique, each once: the rules that
     # asserted it, the analysts that claimed it, and the matrix's own layers —
     # the judge's verdict among them — which the corroboration does not count.
-    named = [f"{source} (rule match)" for source in dict.fromkeys(asserted + rule_sources)]
+    # A rule that matched only names resolved at runtime says so in its label.
+    runtime_only = {
+        str(hit.get("source") or "rule")
+        for hit in rules
+        if _resolved_only(hit)
+        and all(_resolved_only(h) for h in rules if h.get("source") == hit.get("source"))
+    }
+    named = [
+        f"{source} ({RESOLVED_ONLY_RULE_LABEL if source in runtime_only else 'rule match'})"
+        for source in dict.fromkeys(asserted + rule_sources)
+    ]
     named += [
         str(x) for x in [*claimed, *cell.contributing_layers] if x not in asserted + rule_sources
     ]
@@ -3094,6 +3105,52 @@ def _rule_words(hit: dict[str, Any]) -> str:
     where = f"namespace {matched}" if hit.get("source") == "capa" else _matched_names(hit)
     said = (f"rule {rule} ({hit.get('source') or 'rule'}), " if rule else "") + where
     return said + f"; base rate {hit.get('benign_rate') or 'not measured'}"
+
+
+# How a rule that matched only names resolved at runtime is named as a source:
+# a platform fact about the match, and no corroboration of the technique.
+RESOLVED_ONLY_RULE_LABEL = (
+    "rule match on names resolved at runtime from hashes only, no import; not counted as "
+    "corroboration"
+)
+
+
+def _resolved_only(hit: dict[str, Any]) -> bool:
+    """Whether a knowledge-table rule matched only names resolved at runtime."""
+    matched = [str(a) for a in (hit.get("matched_apis") or [])]
+    resolved = {str(a) for a in (hit.get("resolved_apis") or [])}
+    return bool(matched) and all(name in resolved for name in matched)
+
+
+def _resolved_only_lines(
+    cells: list[Any], rules_by_tid: dict[str, list[dict[str, Any]]], ctx: Any
+) -> list[str]:
+    """For each technique a rule matched only on runtime-resolved names, the analysts' words.
+
+    The statements naming the technique, verbatim and by analyst, so a reader
+    weighs whether any says the sample does it; nothing here reads them.
+    """
+    lines: list[str] = []
+    for cell in cells:
+        hits = rules_by_tid.get(cell.technique_id) or []
+        if not hits or not all(_resolved_only(hit) for hit in hits):
+            continue
+        said = list(getattr(cell, "statements", None) or [])
+        if not lines:
+            lines.extend(
+                [
+                    "",
+                    "**Techniques a rule matched only on names resolved at runtime from hashes** "
+                    "(the match is not counted as corroboration; each analyst statement naming "
+                    "the technique follows, verbatim):",
+                    "",
+                ]
+            )
+        lines.append(_item(f"{cell.technique_id} {cell.technique_name}:"))
+        lines.extend(f"  - {ctx.line(text)}" for text in said)
+        if not said:
+            lines.append("  - no analyst statement names it")
+    return lines
 
 
 def _matched_names(hit: dict[str, Any]) -> str:

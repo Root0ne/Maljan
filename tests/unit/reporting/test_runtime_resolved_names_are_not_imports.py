@@ -10,9 +10,10 @@ were resolved and never invoked.
 
 Now the names are told apart wherever they are printed: the lookup can be
 told which names were resolved, the report's projection reads the ledger's
-own resolutions, a rule that matched only such names says so, and a
-technique every analyst statement says is never called is not stated as
-corroborated.
+own resolutions, and a rule that matched only such names says so and is not
+counted as corroboration, with each analyst statement naming the technique
+printed verbatim beside it for the reader to weigh; the platform reads none of
+those statements.
 """
 
 from __future__ import annotations
@@ -20,11 +21,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from maljan.extractors.capability_matrix import build_capability_matrix, says_never_called
+from maljan.extractors.capability_matrix import build_capability_matrix
 from maljan.reporting.ledger_projection import static_from_ledger
 from maljan.reporting.renderers.markdown import _rule_words
 from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import NEVER_CALLED_TECHNIQUE_MARKER
 from maljan.tools import knowledge
 
 INJECTION = ["CreateRemoteThread", "QueueUserAPC", "VirtualAllocEx", "WriteProcessMemory"]
@@ -129,41 +129,75 @@ def _finding_isr(agent: str, domain: str, title: str) -> Any:
     return SimpleNamespace(agent_id=agent, domain=domain, claims=[], findings=[finding])
 
 
-class TestATechniqueTheAnalystsSayIsNeverCalledIsNotCorroborated:
-    def test_the_injection_case(self) -> None:
-        isrs = {
-            "static": _finding_isr(
-                "static", "static", "Injection primitives resolved but never invoked"
-            ),
-            "dynamic": _finding_isr(
-                "dynamic", "dynamic", "Process-injection primitives resolved but never invoked"
-            ),
-        }
+# Statements an analyst may write about one technique, some saying the sample
+# does it: the platform reads none of them, it prints them.
+STATEMENTS = [
+    "WriteProcessMemory is not called directly; it is invoked through the resolved slot",
+    "CreateRemoteThread is not used, but NtCreateThreadEx is",
+    "has no call sites other than the command dispatcher, which runs it for one id",
+    "VirtualAllocEx is never invoked with a remote handle; the local path injects code",
+]
 
-        cells, mappings = build_capability_matrix(
-            stix_output=_judge_bundle("T1055"), isr_reports=isrs
+
+def _report_with(hit: dict[str, Any], isrs: dict[str, Any]) -> Any:
+    from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity, StaticAnalysis
+
+    cells, mappings = build_capability_matrix(stix_output=_judge_bundle("T1055"), isr_reports=isrs)
+    return MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+        static=StaticAnalysis(api_technique_hits=[hit]),
+        capability_matrix=cells,
+        ttp_mappings=mappings,
+    )
+
+
+_RESOLVED_ONLY_HIT = {
+    "technique_id": "T1055",
+    "name": "Process Injection",
+    "rule": "writes into another process",
+    "source": "api_capability",
+    "evidence_id": "ev_0003",
+    "matched_apis": INJECTION,
+    "resolved_apis": INJECTION,
+}
+
+
+class TestARuleMatchOnRuntimeNamesIsStatedAndNotCounted:
+    def test_the_source_says_the_match_is_on_runtime_names_and_not_corroboration(self) -> None:
+        from maljan.reporting.renderers.markdown import (
+            RESOLVED_ONLY_RULE_LABEL,
+            MarkdownRenderer,
         )
 
-        (mapping,) = [m for m in mappings if m.technique_id == "T1055"]
-        (cell,) = [c for c in cells if c.technique_id == "T1055"]
-        assert mapping.is_corroborated is False
-        assert NEVER_CALLED_TECHNIQUE_MARKER in cell.note
+        isrs = {"static": _finding_isr("static", "static", STATEMENTS[0])}
+        markdown = MarkdownRenderer().render(_report_with(_RESOLVED_ONLY_HIT, isrs))
 
-    def test_two_analysts_that_say_the_sample_does_it_still_corroborate_it(self) -> None:
+        assert f"api_capability ({RESOLVED_ONLY_RULE_LABEL})" in markdown
+
+    def test_the_analysts_statements_are_printed_verbatim_not_classified(self) -> None:
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
         isrs = {
-            "static": _finding_isr("static", "static", "Writes into a remote process"),
-            "dynamic": _finding_isr("dynamic", "dynamic", "Remote thread started in a child"),
+            f"a{index}": _finding_isr(f"a{index}", "static" if index % 2 else "dynamic", text)
+            for index, text in enumerate(STATEMENTS)
         }
+        report = _report_with(_RESOLVED_ONLY_HIT, isrs)
+        markdown = MarkdownRenderer().render(report)
 
-        _cells, mappings = build_capability_matrix(
-            stix_output=_judge_bundle("T1055"), isr_reports=isrs
-        )
-
-        (mapping,) = [m for m in mappings if m.technique_id == "T1055"]
+        (mapping,) = [m for m in report.ttp_mappings if m.technique_id == "T1055"]
+        # Two analyst layers named it: corroborated, whatever their words say.
         assert mapping.is_corroborated is True
+        assert "Techniques a rule matched only on names resolved at runtime" in markdown
+        for text in STATEMENTS:
+            assert text in markdown
+        assert "never called" not in (report.capability_matrix[0].note or "")
 
-    def test_the_reading(self) -> None:
-        assert says_never_called("resolved but never invoked")
-        assert says_never_called("the slots have zero call cross-references")
-        assert says_never_called("OpenProcess is not called")
-        assert not says_never_called("WriteProcessMemory is called at 0x4010")
+    def test_a_rule_that_matched_an_import_is_a_plain_rule_match(self) -> None:
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+        hit = {**_RESOLVED_ONLY_HIT, "resolved_apis": INJECTION[:2]}
+        isrs = {"static": _finding_isr("static", "static", STATEMENTS[0])}
+        markdown = MarkdownRenderer().render(_report_with(hit, isrs))
+
+        assert "api_capability (rule match)" in markdown
+        assert "Techniques a rule matched only on names resolved at runtime" not in markdown
