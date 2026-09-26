@@ -60,12 +60,12 @@ class TestTheData:
         document = json.loads((ROOT / DEFAULT_ALGORITHMS).read_text(encoding="utf-8"))
         identifiers = {entry["id"] for entry in document["algorithms"]}
         assert {
-            "crc32_ascii",
-            "crc32_utf16le",
+            "poly_edb88320_ascii",
+            "poly_edb88320_utf16le",
             "ror13",
             "ror13_module_add",
             "djb2",
-            "fnv1a32",
+            "prime_01000193",
         } <= identifiers
         assert {entry["primitive"] for entry in document["algorithms"]} <= set(
             api_hashes.PRIMITIVES
@@ -75,11 +75,13 @@ class TestTheData:
 class TestTheAlgorithms:
     def test_each_matches_an_independent_computation(self) -> None:
         name = "GetProcAddress"
-        assert api_hashes.hash_name(_algorithm("crc32_ascii"), name) == zlib.crc32(name.encode())
-        assert api_hashes.hash_name(_algorithm("crc32_utf16le"), name) == zlib.crc32(
+        assert api_hashes.hash_name(_algorithm("poly_edb88320_ascii"), name) == zlib.crc32(
+            name.encode()
+        )
+        assert api_hashes.hash_name(_algorithm("poly_edb88320_utf16le"), name) == zlib.crc32(
             name.encode("utf-16-le")
         )
-        assert api_hashes.hash_name(_algorithm("crc32_ascii_lower"), name) == zlib.crc32(
+        assert api_hashes.hash_name(_algorithm("poly_edb88320_ascii_lower"), name) == zlib.crc32(
             name.lower().encode()
         )
         assert api_hashes.hash_name(_algorithm("ror13"), name) == _ror13(name.encode())
@@ -89,7 +91,7 @@ class TestTheAlgorithms:
             djb2 = (djb2 * 33 + byte) & 0xFFFFFFFF
             fnv = ((fnv ^ byte) * 0x01000193) & 0xFFFFFFFF
         assert api_hashes.hash_name(_algorithm("djb2"), name) == djb2
-        assert api_hashes.hash_name(_algorithm("fnv1a32"), name) == fnv
+        assert api_hashes.hash_name(_algorithm("prime_01000193"), name) == fnv
 
     def test_the_rotate_forms_give_the_values_the_references_print(self) -> None:
         assert api_hashes.hash_name(_algorithm("ror13"), "LoadLibraryA") == 0xEC0E4E8E
@@ -119,7 +121,7 @@ class TestAScan:
         assert set(hits) == {f"{value:#010x}" for value in values.values()}
 
         virtual_alloc = hits[f"{values['VirtualAlloc']:#010x}"]
-        crc = [r for r in virtual_alloc["readings"] if r["algorithm"] == "crc32_ascii"]
+        crc = [r for r in virtual_alloc["readings"] if r["algorithm"] == "poly_edb88320_ascii"]
         assert crc and crc[0]["name"] == "VirtualAlloc"
         assert "kernel32.dll" in crc[0]["dlls"]
         (place,) = virtual_alloc["occurrences"]
@@ -195,7 +197,7 @@ class TestModuleNames:
         rows = {row["value"]: row for row in answer["hits"]}
         user32 = rows[f"{wide:#010x}"]["readings"]
         assert {
-            "algorithm": "crc32_utf16le",
+            "algorithm": "poly_edb88320_utf16le",
             "set": "modules",
             "name": "user32.dll",
             "dlls": [],
@@ -203,7 +205,7 @@ class TestModuleNames:
         assert any(
             r["set"] == "modules"
             and r["name"] == "ADVAPI32.DLL"
-            and r["algorithm"] == "crc32_utf16le"
+            and r["algorithm"] == "poly_edb88320_utf16le"
             for r in rows[f"{upper:#010x}"]["readings"]
         )
         assert rows[f"{wide:#010x}"]["occurrences"][0]["function"] == hex(TEXT_RVA)
@@ -240,7 +242,7 @@ class TestValuesTheCallerGives:
         answer = resolve_api_hashes(_write(tmp_path, image), hashes=[value])
         (row,) = answer["hits"]
         algorithms = {r["algorithm"] for r in row["readings"] if r["name"] == "strlen"}
-        assert {"crc32_ascii", "crc32_ascii_lower"} <= algorithms
+        assert {"poly_edb88320_ascii", "poly_edb88320_ascii_lower"} <= algorithms
         assert row["occurrences"][0]["rva"] == hex(DATA_RVA + 0x40)
 
     def test_the_algorithms_can_be_narrowed_and_an_unknown_one_is_refused(
@@ -248,7 +250,9 @@ class TestValuesTheCallerGives:
     ) -> None:
         image, values = _image_with_hashes()
         path = _write(tmp_path, image)
-        answer = resolve_api_hashes(path, hashes=[values["Sleep"]], algorithms=["crc32_ascii"])
+        answer = resolve_api_hashes(
+            path, hashes=[values["Sleep"]], algorithms=["poly_edb88320_ascii"]
+        )
         assert answer["hits"] == []
         assert "error" in resolve_api_hashes(path, algorithms=["no_such_algorithm"])
 

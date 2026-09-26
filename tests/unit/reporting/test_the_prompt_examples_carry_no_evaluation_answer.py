@@ -469,6 +469,21 @@ PROMPTS: dict[str, str] = {
     "the stated candidate scan and readability test": (
         f"{api_hashes.SCAN_HEURISTIC} {string_blobs.READABLE_TEST}"
     ),
+    "the decoded-blobs provenance, recall price and the lone-hits room sentence": " ".join(
+        [
+            triage_pack.DECODED_BLOBS_PROVENANCE,
+            triage_pack.DECODED_BLOBS_RECALL,
+            triage_pack.LONE_HITS_ROOM_SENTENCE,
+        ]
+    ),
+    "the name data's source, license and module set, and the algorithm ids": " ".join(
+        [
+            str(api_hashes.load_export_names().get("source") or ""),
+            str(api_hashes.load_export_names().get("license") or ""),
+            str((api_hashes.load_export_names().get("modules") or {}).get("source") or ""),
+            *(str(entry["id"]) for entry in api_hashes.load_algorithms()),
+        ]
+    ),
     "the two resolving tools' descriptions": _analysis_tool_descriptions(
         "resolve_api_hashes", "decode_string_blobs"
     ),

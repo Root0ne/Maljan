@@ -100,7 +100,7 @@ class TestTheLines:
     def test_each_value_is_named_where_it_stands(self, tmp_path: Path) -> None:
         hashes, _ = _lines(tmp_path)
         value = f"{zlib.crc32(b'VirtualAlloc'):#010x}"
-        assert f"{value} = kernel32.dll/kernelbase.dll!VirtualAlloc [crc32_ascii]" in hashes
+        assert f"{value} = kernel32.dll/kernelbase.dll!VirtualAlloc [poly_edb88320_ascii]" in hashes
         assert f"@ {hex(TEXT_RVA + 0x41)} (in {hex(TEXT_RVA)})" in hashes
         assert "all 2 shown" in hashes
 
@@ -108,7 +108,9 @@ class TestTheLines:
         _, blobs = _lines(tmp_path)
         assert f'"open the settings file"@{hex(DATA_RVA + 0x80)} [xor8 key 0x9c]' in blobs
         assert f"referred to at {hex(TEXT_RVA + 0x123)} (in {hex(FUNCTION)})" in blobs
-        assert triage_pack.DECODED_STRINGS_PROVENANCE in blobs
+        assert triage_pack.DECODED_BLOBS_PROVENANCE in blobs
+        assert triage_pack.DECODED_BLOBS_RECALL in blobs
+        assert "not the platform's findings" not in blobs, "these are the platform's decodings"
 
     def test_a_pack_out_of_room_says_how_many_it_shows_and_where_the_rest_are(self) -> None:
         hits = [
@@ -141,6 +143,34 @@ class TestTheLines:
         cut = triage_pack._decoded_blobs(payload, max_chars=len(whole) // 2)
         assert "one decode_string_blobs call away at offset" in cut
         assert "3 more decodings no code refers to" in cut
+
+    def test_lone_hits_become_a_count_before_any_hit_is_cut(self) -> None:
+        def row(index: int) -> dict[str, Any]:
+            return {
+                "value": f"{index:#010x}",
+                "readings": [{"algorithm": "a", "name": f"Name{index}", "dlls": ["x.dll"]}],
+                "occurrences": [{"rva": hex(0x1000 + index), "function": None}],
+            }
+
+        payload = {
+            "hits": [row(1), row(2)],
+            "lone_hits": [row(100 + index) for index in range(300)],
+            "total": 2,
+            "candidates": {"scanned": 9},
+            "algorithms": ["a"],
+        }
+        whole = triage_pack._resolved_hashes(payload)
+        room = len(whole) // 10
+        cut = triage_pack._resolved_hashes(payload, max_chars=room)
+        assert cut, "the line is not dropped for its lone hits"
+        assert "all 2 shown" in cut and "Name1" in cut and "Name2" in cut
+        assert "300 more resolve" in cut
+        assert triage_pack.LONE_HITS_ROOM_SENTENCE in cut
+        assert triage_pack._resolved_hashes({**payload, "hits": [], "total": 0}, max_chars=room)
+
+    def test_nothing_decoded_still_says_what_the_schemes_cannot_see(self) -> None:
+        line = triage_pack._decoded_blobs({"results": [], "total": 0})
+        assert triage_pack.DECODED_BLOBS_RECALL in line
 
     def test_a_module_name_reads_as_one(self) -> None:
         row = {
@@ -178,7 +208,7 @@ class TestTheReverser:
         agent = _Agent()
         state = {"evidence_ledger": [entry.model_dump(mode="json") for entry in result.entries]}
         brief_agent(agent, state, _Container())  # type: ignore[arg-type]
-        assert "!VirtualAlloc [crc32_ascii]" in agent.facts_block
+        assert "!VirtualAlloc [poly_edb88320_ascii]" in agent.facts_block
         assert '"open the settings file"@' in agent.facts_block
 
     def test_it_is_told_to_name_the_function_and_the_text(self) -> None:

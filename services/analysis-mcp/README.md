@@ -121,6 +121,10 @@ module hash to a function hash. The algorithms are
 name, each also lower-cased; ror13; ror13 of the name with its NUL added to
 ror13 of the upper-cased UTF-16LE module name with its NUL (the form common
 position-independent code uses); djb2 and FNV-1a 32, each also lower-cased.
+The ids an answer carries name an algorithm by its defining constant where its
+common name is one of the terms model-facing text is held free of
+(`poly_edb88320_*` is CRC-32, `prime_01000193*` is FNV-1a); each entry's
+`description` in the data file names it plainly.
 With `hashes` the caller's values are resolved, and the answer adds
 `unresolved` and `unreadable`. Without, the candidates are the 32-bit
 immediates of every byte pattern encoding `push imm32`, `mov r32, imm32`,
