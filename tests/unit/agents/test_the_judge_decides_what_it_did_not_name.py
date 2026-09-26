@@ -619,3 +619,43 @@ class TestTheStructuredPathsEdges:
         asyncio.run(judge.decide_techniques(_bundle(), _isrs()))
 
         assert judge.token_ledger.snapshot()["llm_calls"] == 1
+
+    def test_the_text_question_after_a_refused_schema_has_its_own_admission(
+        self, monkeypatch
+    ) -> None:
+        class _Refused:
+            async def ainvoke(self, messages: list[Any]) -> Any:
+                raise ValueError("400: response_format is not supported")
+
+        judge, asked = self._judge(monkeypatch, _Refused(), plain=f"{LEFT_OUT}: keep: shown")
+        admissions: list[str] = []
+
+        def _admits(kind: str, *_a: Any, **_k: Any) -> None:
+            admissions.append(kind)
+
+        monkeypatch.setattr(judge, "_spend_admits", _admits)
+        asyncio.run(judge.decide_techniques(_bundle(), _isrs()))
+
+        assert asked == ["text"]
+        assert admissions == ["technique question", "technique question"]
+
+    def test_a_text_question_the_ceiling_refuses_is_not_asked(self, monkeypatch) -> None:
+        from maljan.core.spend import SpendCeilingStop
+
+        class _Refused:
+            async def ainvoke(self, messages: list[Any]) -> Any:
+                raise ValueError("400: response_format is not supported")
+
+        judge, asked = self._judge(monkeypatch, _Refused(), plain=f"{LEFT_OUT}: keep: shown")
+        admissions: list[str] = []
+
+        def _admits(kind: str, *_a: Any, **_k: Any) -> None:
+            admissions.append(kind)
+            if len(admissions) > 1:
+                raise SpendCeilingStop("the ceiling is reached")
+
+        monkeypatch.setattr(judge, "_spend_admits", _admits)
+        review = asyncio.run(judge.decide_techniques(_bundle(), _isrs()))
+
+        assert asked == []
+        assert review is not None and review.unanswered == "not asked: the ceiling is reached"
