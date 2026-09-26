@@ -389,7 +389,17 @@ vendored set of published algorithms, each with every reading and every place
 the value stands; and `decode_string_blobs` (`tools.string_blobs`), the text
 its data sections keep encoded under a stated set of generic key schemes, each
 with the code that refers to it and, when FLOSS recovered the same text, FLOSS's
-routine. Both state addresses as offsets from the image base and the function
+routine. Where a reference loads the text's address as a call argument, the
+decoder states that call beside it (`passed_to`: the callee and the argument
+position, `tools.call_sites`): an x64 `lea` into `rcx`, `rdx`, `r8` or `r9`, or
+an x86 `push` of the address or a store to `[esp+n]`, confirmed as an
+instruction by decoding its function from the start, then decoded instruction
+by instruction to the first call in the same function. The callee is the import
+the file's import table puts in the slot a call or a jump thunk goes through,
+the function at a direct call's target, or the slot a runtime pointer is read
+from. A jump or return before the call, a byte the decoder cannot read, the
+function's end, a write to the argument register, another stack move for a
+pushed one, or a call through a register leave it absent. Both state addresses as offsets from the image base and the function
 around each from the file's own function table (`tools.pe_image`), and neither
 guesses one. The decoder runs after FLOSS so it can read FLOSS's kept result;
 both run after every other step so no earlier id moves. The analysis server
@@ -678,6 +688,35 @@ Two producers use it:
   share, a procedure quote in the ATT&CK table, a claim in the live transcript
   — ends in `…` (`utils.marked_cut`), so a cut is never read, or copied, as a
   finished sentence.
+
+  Every claim in force reaches the report. Each composer section's claims and
+  the narrative round's prompt show every claim under its label, the analyst
+  and the claim's number in its answer in force (`static claim 15`); the
+  narrative round is handed every claim whole. After the body is composed a
+  deterministic check (`reporting.claim_coverage`) reads it claim by claim: a
+  claim is covered when the body names its label or carries more than half of
+  the identifiers it names (addresses and function names by their hexadecimal
+  digits, so `FUN_1400068e8` and `0x68e8` are one place; quoted values;
+  API-style names; numbers of three digits or more; for a claim that names
+  none, its words of five letters or more). The body is what the report models
+  wrote (summary, key findings, recommendations, background, technical
+  analysis, C2 channels); the ATT&CK table quotes claims and is not a
+  discussion of them. Every claim neither cited nor discussed is stored
+  (`MalwareReport.claims_not_discussed`), counted
+  (`run_summary.claims_not_discussed`) and printed under §13.1 "Claims not
+  discussed in the body" with the rule and how many of its identifiers the
+  body carries. Nothing is decided about a listed claim.
+
+  A function name the run resolved at runtime from a stored value is not an
+  import. `api_capability` takes such names as `resolved_names` and marks them
+  in its answer (`obtained`, `resolved_at_runtime_from_hashes`); the report's
+  projection also reads the ledger's `resolve_api_hashes` answers, and a name
+  one resolved that the import table lacks is counted apart
+  (`static.api_capabilities_resolved`). A knowledge-table rule row names which
+  of its matched names were resolved (`resolved_apis`), and the ATT&CK table,
+  the static properties, the narrative prompt and the string-resolution
+  bundle say "resolved at runtime from hashes" for them; a rule that matched
+  only such names says it matched no import.
 
 * **A judge that did not answer with a bundle** — the pipeline builds one from
   whatever text there was, and that bundle states its verdict in
@@ -1275,7 +1314,21 @@ the claim sentence above the tail never is. EVIDENCE runs to the next
 CONFIDENCE or TECHNIQUE label that starts a line when one follows it, so words
 inside the evidence ("maps to MITRE technique: T1055") never cut it and every
 id after them stays cited; only when no such line follows does it end at a
-capitalised label later on its own line. The DISPUTES section opens at its label,
+capitalised label later on its own line. A CONFIDENCE value is the number that
+opens it, from 0 to 1, or a percentage (`85%` is 0.85); what follows the
+number is not part of it, so `0.9.`, `0.9,` and `0.85 (one part lower)` are
+read. A CONFIDENCE label with anything else after it (a word, a bare number
+above one, a number that runs on into more digits) is a confidence the analyst
+stated and the reader could not read: the claim is unread, the unread reason
+quotes each such value (`ClaimRead.confidence_unreadable`), and the validation
+turn's confidence question (`isr.claim_without_confidence`) asks about it with
+the value quoted. A block with no CONFIDENCE label is counted apart as before.
+A revision round's answer passes the same consistency gate and validation turn
+a first answer passes, with the first answer's loop deadline and nudge flag
+cleared before it is made; a revision the model made with fewer claims still
+replaces the answer in force, and `run_summary.negotiation.revision_replacements`
+states each such replacement ("The X analyst's round-N revision replaced N
+claim(s) with M."). The DISPUTES section opens at its label,
 case-sensitive, with its colon (`DISPUTES:`) or as a Markdown heading; a label
 that says there is none on its own line (`DISPUTES: NONE`, `N/A`, a dash)
 opens no section, and prose beginning "Disputes …" is prose. Claims under the
@@ -2424,7 +2477,13 @@ is assembled from what the run gathered rather than recomputed beside it:
   judge as its source and the judge's own number. Its ATT&CK row says so ("stated
   by the judge and claimed by no analyst; a technique the judge states is
   published as its own claim"), so a row with no analyst beside it reads as the
-  rule it is published by and not as a gap. The ELF run
+  rule it is published by and not as a gap. When analysts named it on a
+  finding and no claim carries it, the row names them instead ("stated by the
+  judge; named on a finding, not on a claim, by …"), since the run's
+  corroboration record lists them as its sources. A technique whose every
+  analyst statement says the code behind it is never called ("resolved but
+  never invoked", "zero call cross-references") is not stated as corroborated,
+  and its row says so. The ELF run
   credited `STATIC ANALYST` with T1490 and T1048.001, which no source named. A
   bundle the pipeline built from the analysts' claims because the judge's
   answer was not one credits those analysts, not the judge. A technique id is

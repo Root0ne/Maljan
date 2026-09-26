@@ -192,7 +192,20 @@ RIP-relative displacements in x64 code and absolute virtual addresses anywhere
 that land on the blob or its text — or that FLOSS recovered too in this
 process (`floss`, with FLOSS's routine and call site; FLOSS's kept result is
 read, never run); the rest are counted under `unreferenced` and listed with
-`include_unreferenced`. Measured on 54 benign PEs on this project's host
+`include_unreferenced`. Where a reference loads the text's address as a call
+argument, the reference carries `passed_to`: the call's address, the argument
+position (and, on x64, the register) and the callee — the import the file's
+import table puts in the slot the call or a jump thunk goes through, the
+function at a direct call's target, or the slot a runtime pointer is read from.
+It is read statically and generically: an x64 `lea` into `rcx`, `rdx`, `r8` or
+`r9`, or an x86 `push` of the address or a store to `[esp+n]`, confirmed as an
+instruction by decoding its function from the start, then decoded instruction
+by instruction to the first call in the same function. A jump or return
+before the call, an undecodable byte, the function's end, a write to the
+argument register, another stack move for a pushed argument, a call through a
+register, or no function table around the reference leave it absent. On the
+two x64 launchers vendored with this project's Python environment every
+function in the function table decodes exactly to its end. Measured on 54 benign PEs on this project's host
 (launcher and runtime binaries, DirectX and Wine-built system DLLs, the five
 above): 6 results in all, none written by the program as encoded text.
 

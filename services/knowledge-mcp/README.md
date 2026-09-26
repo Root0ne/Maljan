@@ -17,7 +17,7 @@ definitions, so the definition's tool list is the only binding.
 | `resolve_technique` | `text`, `k=5`, `domain=""` |
 | `attck_lookup` | `technique_id` |
 | `attck_validate` | `ids` |
-| `api_capability` | `api_names` |
+| `api_capability` | `api_names`, `platform="windows"`, `resolved_names=null` |
 | `lolbin_lookup` | `command_lines` |
 | `family_lookup` | `query`, `k=5` |
 | `similar_cases` | `text`, `k=5` |

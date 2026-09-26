@@ -8,6 +8,27 @@ change landed on `main`.
 
 ### Added
 
+- **Every analyst claim in force reaches the report: cited, discussed, or
+  listed.** Each composer section and, new, the narrative round show every
+  claim in force under its label (`static claim 15`: the analyst and the
+  claim's number in its answer in force); the narrative round is handed every
+  claim whole. After the body is composed, `reporting.claim_coverage` reads it
+  claim by claim: a claim is covered when the body names its label or carries
+  more than half of the identifiers it names (addresses and function names by
+  their hexadecimal digits, quoted values, API-style names, numbers of three
+  digits or more; a claim that names none, by its words). Every claim neither
+  cited nor discussed is stored (`MalwareReport.claims_not_discussed`),
+  counted (`run_summary.claims_not_discussed`) and printed under §13.1
+  "Claims not discussed in the body" with the rule and the count found.
+- **A decoded string loaded as a call argument is joined to that call.**
+  `decode_string_blobs` states `passed_to` beside a reference: the callee (an
+  import, a function address, or the slot a runtime pointer is read from) and
+  the argument position, read statically by `tools.call_sites` from an x64
+  `lea` into an argument register or an x86 push or stack store, to the first
+  call in the same function; absent wherever the code does not show it. The
+  triage pack's decoded-string line and the IOC provenance say it.
+  `pe_image` reads the import table.
+
 - **The platform resolves API hashes and decodes encoded strings, by address.**
   Two analysis-server tools, run by the triage pack on every PE as its last two
   steps and shown in the pack every agent reads. `resolve_api_hashes` names the
@@ -2299,6 +2320,27 @@ change landed on `main`.
 
 ### Fixed
 
+- **A confidence is read through the punctuation after it.** A CONFIDENCE
+  value is the number that opens it, from 0 to 1, or a percentage: `0.9.` read
+  as no number, and one analyst's 18-claim revision reached the run as 3
+  claims with nothing unread. A label with anything else after it is an unread
+  claim whose value the unread reason quotes and the validation turn asks
+  about; a bare number above one is no longer held to 1.0.
+- **A revision is checked like a first answer, and one with fewer claims is
+  stated.** A revision round's answer now passes the consistency gate and the
+  validation turn (claim count, confidence, technique lines). A revision the
+  model made with fewer claims still replaces the answer in force, and
+  `run_summary.negotiation.revision_replacements` states it.
+- **Names resolved at runtime from hashes are not imports.** `api_capability`
+  takes `resolved_names` and marks them; the report's projection also reads
+  the ledger's `resolve_api_hashes` answers and counts such names apart
+  (`static.api_capabilities_resolved`, `resolved_apis` on a rule row). The
+  ATT&CK table no longer prints them as "imports", and a technique whose every
+  analyst statement says the code behind it is never called is not stated as
+  corroborated.
+- **An ATT&CK row no longer says "claimed by no analyst" of a technique
+  analysts named on a finding.** The row names those analysts, the sources the
+  run's corroboration record lists.
 - **One refused call no longer ends the job.** A refusal used to latch the
   spend as exhausted: in a 2.00 USD DeepSeek run one mediation turn refused at
   its whole cap stopped every revision after it with 0.12 USD still
