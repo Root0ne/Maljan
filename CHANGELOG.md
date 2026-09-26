@@ -2273,10 +2273,25 @@ change landed on `main`.
   static string sweep also read stays the sweep's, and a decoded text holding
   no indicator is no candidate. The record keeps every tool that recovered a
   network value (`recovered_by`: tool, entry, scheme, file offset, functions
-  and the addresses of the code that uses the text), and the IOC table states
-  it on the row (`ConsolidatedIOC.recovered_by`, printed in the report's
-  Context cell). The refusal for a value the sweep also read now ends "so not
-  a value the sample hid", since it answers for both tools.
+  and the addresses of the code that uses the text, each tool with its own
+  facts only; a FLOSS decoded string reads "routine X, called at Y"), and the
+  IOC table states it on the row (`ConsolidatedIOC.recovered_by`, printed in
+  the report's Context cell); `/iocs` carries the same words as an optional
+  `recovered_by`, which the web `IOCRow` type declares. The refusal for a
+  value the sweep also read now ends "so not a value the sample hid", since
+  it answers for both tools. A recovered value still only gives standing to a
+  row the sandbox, the sweep, an analyst or the judge recorded; it creates no
+  row.
+- **FLOSS strings are read by the same indicator reader.** A FLOSS decoded,
+  stack or tight string is still kept whole in the record, and each domain,
+  address or URL the reader finds inside it is now recorded too (in the
+  ledger record and in the kept-rows reading of an older report). A
+  `host:port`, a `Host:` line or a URL inside a sentence recovered by FLOSS
+  was missed and now gets the standing the same text from the static decoder
+  gets, so such a value named by a model may now publish where it did not.
+  The benchmark replay behind the earlier "nothing new publishes on the
+  benign control" was measured with FLOSS strings read whole and was not
+  repeated.
 - **Every claim an analyst begins is read, or the run says it was not.** The
   base analyst's reader split an answer only on `---` lines and kept the first
   `CLAIM:` of each block, so claims separated by blank lines were read as one:
