@@ -690,6 +690,16 @@ def spend_lines(spend: Any) -> list[str]:
         )
     if spend.get("note"):
         lines.append(f"Not counted: {spend['note']}")
+    refused = int(spend.get("refused_calls") or 0)
+    if refused:
+        lines.append(
+            f"Refused under the ceiling: {refused} call(s)"
+            + (
+                ""
+                if spend.get("exhausted")
+                else "; smaller calls still fitted what was left, so the job went on"
+            )
+        )
     for said in spend.get("held_calls") or []:
         lines.append(f"Before the call: {said}")
     return lines

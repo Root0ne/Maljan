@@ -3,14 +3,16 @@
 The first reserve priced the largest prompt the job had sent — a tool-loop
 turn of 200,000 tokens — as uncached input for every one of the eighteen
 planned calls, and at peak it kept 1.64 of a 2.00 USD ceiling from the tool
-phases. The reserve is now the next planned call's worst case (what its
-admission will demand) plus the expected charge of the others: each at its own
-kind's prompt (the window accounting's allowance, or the prompt actually sent),
-the first of a kind uncached and the ones after it at the cache-hit share
-measured over calls that were not the first of their conversation — the cached
-rate of their shared prefix until one is measured — and the answer measured of
-single-shot calls. A planned call spends only above the share of the planned
-calls after it.
+phases. The next one priced a report call's prompt at the window's whole
+allowance and its answer at the largest single-shot answer measured, which
+kept 0.90 USD of a 2.00 USD ceiling for a tail that cost about 0.3. The reserve
+is now what each planned call's admission demands — its prompt as uncached
+input and its planned answer — at the prompt it will be sent (the largest of
+its kind, else the largest single-shot prompt, else the largest opening
+prompt of a conversation, bounded by the window's allowance) and the answer
+this job measured (the verdict's largest single-shot answer, a report call's
+mean). Each row also states its expected charge at the cache-hit share. A
+planned call spends only above the share of the planned calls after it.
 """
 
 from __future__ import annotations
@@ -101,11 +103,12 @@ class TestALongPaidRun:
 
     def test_its_derivation_is_stated(self) -> None:
         rows = {row["kind"]: row for row in _a_long_paid_run(FRIDAY_OFF_PEAK).snapshot()["reserve"]}
-        assert rows["report"]["prompt_tokens"] == ALLOWED
-        assert "window accounting allows" in rows["report"]["prompt_from"]
+        # The prompt a report call will be sent, not the window's allowance.
+        assert rows["report"]["prompt_tokens"] == 46_000
+        assert "largest single-shot prompt sent" in rows["report"]["prompt_from"]
         assert rows["verdict"]["prompt_tokens"] == 46_000
         assert rows["report"]["answer_tokens"] == 9_000
-        assert "single-shot" in rows["report"]["answer_from"]
+        assert "mean of the 1 single-shot answer(s)" in rows["report"]["answer_from"]
         # The loop's first turn, which read nothing from the cache, is left out.
         assert rows["report"]["cache_hit_share"] == pytest.approx(0.85, abs=0.001)
 
@@ -169,13 +172,16 @@ class TestTheVerdictsRowCoversItsAdmission:
             FLASH,
             LOOP_TURN_CALL,
         )
-        # What the verdict's admission demands — its prompt and its whole cap,
-        # no single-shot answer being measured — is what was kept: it is made.
+        # What the verdict's admission demands — the prompt planned for it (the
+        # opening prompt measured) and its whole cap, no single-shot answer
+        # being measured — is what was kept: it is made.
+        row = {r["kind"]: r for r in meter.snapshot()["reserve"]}["verdict"]
+        assert row["prompt_tokens"] == 1_000
         assert (
             meter.admit(
                 kind="verdict",
                 model=FLASH,
-                prompt_chars=ALLOWED * CHARS_PER_TOKEN,
+                prompt_chars=1_000 * CHARS_PER_TOKEN,
                 cap_tokens=CAP,
             )
             is None

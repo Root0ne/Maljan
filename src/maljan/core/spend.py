@@ -30,29 +30,45 @@ price, after its prompt priced as uncached input, both at the highest rate in
 force between now and the call's deadline (a call sent across a window's edge
 is never settled above what it reserved). It is refused only when that does
 not pay for the smallest answer the call can give: for a tool-loop turn the
-largest turn this job has measured of the model, for any other call the
-largest single-shot or verdict/report answer measured of it, and with nothing
-measured the call's own configured output cap. A call whose model takes no
-cap of its own per call is admitted only at its whole configured cap. Every
-admitted call reserves its worst case — its prompt and its held cap — until it
-returns and its cost is on the ledger, so calls running at the same time never
-spend the same remainder twice.
+largest turn this job has measured of the model, for a report call the answer
+planned for it (below), for any other call the largest single-shot or
+verdict/report answer measured of it, and with nothing measured the call's own
+configured output cap. A call whose model takes no cap of its own per call is
+admitted only at its whole configured cap. Every admitted call reserves its
+worst case — its prompt and its held cap — until it returns and its cost is on
+the ledger, so calls running at the same time never spend the same remainder
+twice.
+
+**One refusal is not the end of the job.** A refused call is recorded and its
+caller takes its salvage path; the spend is exhausted only when no further
+call of any kind this job makes — each at the smallest prompt it has sent and
+with its own cap — would still be admitted, or when the ceiling is reached.
 
 **The reserve for the verdict and the report.** A job plans its verdict call
-and its report calls (:meth:`SpendMeter.plan_tail`), each with the prompt the
-window accounting allows it (what its model's window leaves after its output
-budget). The reserve is the worst case of the next planned call — its prompt
-uncached and the answer planned for it — plus the expected charge of every
-other planned call: its prompt at this job's measured cache-hit share for the
-model (uncached until one is measured) and the planned answer. A planned call's
-prompt is the largest prompt of its own kind once one was sent; the verdict's
-is the largest single-shot prompt before that (a revision's prompt carries the
-same reports), and a report call's is its window allowance; a tool loop's
-conversation is never used. The planned answer is the largest single-shot or
-verdict/report answer measured of the model, else the largest tool-loop turn
-of it; with no answer measured the reserve is not sized. Calls that are not
-the verdict or the report spend only above the whole reserve; a verdict or
-report call spends above the reserve of the other planned calls.
+and its report calls (:meth:`SpendMeter.plan_tail`) and keeps aside, for each
+of them, what its admission will demand: its prompt as uncached input and the
+answer planned for it, at the rates in force. That is never below what the
+tail needs to be made, and it is sized from this job's own calls rather than
+from the window:
+
+* a planned call's prompt is the largest prompt of its own kind once one was
+  sent; before that the largest single-shot prompt this job has sent (a
+  revision's prompt carries the same reports), else the largest opening prompt
+  of a conversation (a tool loop's first turn), bounded by what the window
+  accounting allows that kind of call; the window allowance alone only while no
+  prompt was sent at all; a tool loop's conversation is never used;
+* the verdict's answer is what its admission demands: the largest single-shot
+  answer measured of its model (its configured cap until one is);
+* a report call's answer is the mean answer of the report calls measured of
+  its model once one returned, and before that the mean answer of its other
+  single-shot calls (the verdict left out), else its largest tool-loop turn;
+  with no answer measured the reserve is not sized.
+
+Each row of the derivation also carries its expected charge: the first call of
+a kind with its prompt uncached and the ones after it at this job's measured
+cache-hit share for the model. Calls that are not the verdict or the report
+spend only above the whole reserve; a verdict or report call spends above the
+reserve of the other planned calls.
 
 A tool loop's turns reach the token ledger when the loop ends, so a running
 loop also reports the turns it has taken so far (:meth:`SpendMeter.note_loop`)
@@ -60,7 +76,7 @@ and the meter counts them until the ledger has them. A loop's turn keeps room
 for the loop's closing answer: it is admitted only when what is left after it
 still pays for the smallest answer.
 
-When the spend is exhausted — the first call refused, or the ceiling reached —
+When the spend is exhausted — nothing more fits, or the ceiling reached —
 every running tool loop ends its tool phase the way it does at its step cap:
 its agent writes its answer from what it gathered, and only the verdict and
 the report run after it, on the reserve kept for them.
@@ -103,6 +119,10 @@ LOOP_KINDS = frozenset({"loop turn", "mediation turn"})
 
 # What the token ledger names a tool-loop turn it records.
 LOOP_TURN_CALL = "tool loop turn"
+
+# What the token ledger names a verdict or report call, and the planned kind
+# each one is.
+TAIL_CALLS = {"verdict": "verdict", "report section": "report", "narrative": "report"}
 
 # What the run summary names a price the provider reported with its answer.
 PROVIDER_REPORTED = "provider-reported"
@@ -537,7 +557,14 @@ class SpendMeter:
         # The input and cached input tokens of each model's calls, for its
         # cache-hit share: settled, and each running loop's so far.
         self._largest_output: dict[str, dict[str, int]] = {"loop": {}, "single": {}}
+        # The answers of each model, summed and counted, for their mean: per
+        # group, ``single`` for every call that is not a tool-loop turn and
+        # ``tail:verdict`` / ``tail:report`` for the planned calls themselves.
+        self._answers: dict[str, dict[str, list[int]]] = {}
         self._largest_prompt: dict[str, int] = {}
+        # The smallest tool-loop turn the ledger recorded: a loop's first turn
+        # where no running loop has said which turn was its first.
+        self._smallest_loop_prompt = 0
         self._inputs: dict[str, list[int]] = {}
         self._loop_inputs: dict[Any, dict[str, list[int]]] = {}
         # The verdict and report calls still to come:
@@ -547,6 +574,12 @@ class SpendMeter:
         self._held: list[str] = []
         # When and why the spend was first exhausted, or ``None``.
         self._exhausted: dict[str, Any] | None = None
+        # Every kind of call admitted or refused so far, with the smallest
+        # prompt (tokens) it was sent with, its cap, whether it can be held
+        # and its deadline: what "would another call still fit" is asked of.
+        self._kinds: dict[str, dict[str, Any]] = {}
+        # How many calls the ceiling refused.
+        self._refused = 0
 
     @classmethod
     def from_settings(cls, cfg: Any) -> SpendMeter:
@@ -608,6 +641,21 @@ class SpendMeter:
         if out > largest.get(name, 0):
             largest[name] = out
 
+    def _count_answer_locked(self, usage: Mapping[str, Any], name: str, group: str) -> None:
+        out = int(usage.get("output_tokens") or 0)
+        if out <= 0:
+            return
+        sums = self._answers.setdefault(group, {}).setdefault(name, [0, 0])
+        sums[0] += out
+        sums[1] += 1
+
+    def _mean_answer_locked(self, name: str, group: str) -> tuple[int, int]:
+        """``(mean output tokens, calls)`` of ``name``'s answers in ``group``, or ``(0, 0)``."""
+        total, calls = self._answers.get(group, {}).get(name, [0, 0])
+        if calls <= 0:
+            return 0, 0
+        return -(-total // calls), calls
+
     def _note_unreported(self) -> None:
         """One call whose provider reported no usage: counted, and said once with a ceiling."""
         with self._lock:
@@ -644,6 +692,20 @@ class SpendMeter:
                 with self._lock:
                     group = "loop" if call == LOOP_TURN_CALL else "single"
                     self._measure_locked(usage, name, group)
+                    if group == "loop":
+                        sent = int(usage.get("input_tokens") or 0)
+                        least = self._smallest_loop_prompt
+                        if sent > 0 and (least == 0 or sent < least):
+                            self._smallest_loop_prompt = sent
+                    if group == "single":
+                        # The planned calls' own answers are counted apart, so
+                        # the verdict's answer does not move the plan of the
+                        # report calls after it.
+                        tail = TAIL_CALLS.get(call)
+                        if tail:
+                            self._count_answer_locked(usage, name, f"tail:{tail}")
+                        else:
+                            self._count_answer_locked(usage, name, "single")
             cost = self._cost(usage, model)
             if cost is not None:
                 with self._lock:
@@ -665,6 +727,7 @@ class SpendMeter:
             inputs: dict[str, list[int]] = {}
             measured: list[tuple[Mapping[str, Any], str]] = []
             answered = 0
+            opening = 0
             for turn in turns:
                 if getattr(turn, "type", "") != "ai":
                     continue
@@ -679,6 +742,8 @@ class SpendMeter:
                 name = _clean(answered_by)
                 if name:
                     measured.append((usage, name))
+                if answered == 1:
+                    opening = max(opening, int(usage.get("input_tokens") or 0))
                 if name and answered > 1:
                     # The share a conversation reads from the cache is measured
                     # after its first call, which has nothing cached to read.
@@ -693,6 +758,8 @@ class SpendMeter:
             with self._lock:
                 for turn_used, name in measured:
                     self._measure_locked(turn_used, name, "loop")
+                if opening > self._largest_prompt.get("opening", 0):
+                    self._largest_prompt["opening"] = opening
                 self._in_flight[key] = total
                 self._loop_inputs[key] = inputs
                 self._reserved.pop(key, None)
@@ -767,37 +834,65 @@ class SpendMeter:
         return cached / total if total > 0 else None
 
     def _tail_prompt_locked(self, kind: str, allowed: int) -> tuple[int, str]:
+        """The prompt a planned call of ``kind`` will be sent with, as this job has measured it."""
         own = self._largest_prompt.get(f"tail:{kind}", 0)
         if own:
             return own, f"the largest {kind} prompt sent"
+        found, said = 0, ""
         single = self._largest_prompt.get("single", 0)
-        if kind == "verdict" and single:
-            if allowed and allowed < single:
-                return allowed, "what the window accounting allows the verdict's prompt"
-            return single, "the largest single-shot prompt sent (a revision carries the reports)"
-        if allowed:
-            return allowed, f"what the window accounting allows a {kind} call's prompt"
+        opening = self._largest_prompt.get("opening", 0) or self._smallest_loop_prompt
         if single:
-            return single, "the largest single-shot prompt sent (no window known)"
+            found = single
+            said = "the largest single-shot prompt sent (a revision carries the reports)"
+        elif opening:
+            found = opening
+            said = (
+                "the largest opening prompt of a conversation sent (no single-shot prompt sent yet)"
+            )
+        if found:
+            if allowed and allowed < found:
+                return allowed, f"what the window accounting allows a {kind} call's prompt"
+            return found, said
+        if allowed:
+            return allowed, (
+                f"what the window accounting allows a {kind} call's prompt (no prompt sent yet)"
+            )
         return 0, ""
 
-    def _planned_answer_locked(self, name: str) -> tuple[int, str]:
-        for group, said in (
-            ("single", "single-shot or verdict/report answer"),
-            ("loop", "tool-loop turn"),
-        ):
-            largest = self._largest_output[group]
-            if largest.get(name):
-                return largest[name], f"the largest {said} measured of {name}"
-        for group, said in (
-            ("single", "single-shot or verdict/report answer"),
-            ("loop", "tool-loop turn"),
-        ):
-            largest = self._largest_output[group]
-            if largest:
-                other, tokens = max(largest.items(), key=lambda row: row[1])
-                return tokens, f"the largest {said} measured of {other}"
-        return 0, ""
+    def _planned_answer_locked(self, kind: str, name: str, cap: int = 0) -> tuple[int, str]:
+        """The answer a planned call of ``kind`` is planned at, and where the figure came from.
+
+        The verdict at what its admission demands; a report call at the mean
+        answer this job has measured of its kind, else of the model's other
+        single-shot calls, else at the model's largest tool-loop turn, else
+        the largest answer measured of any model. Bounded by ``cap`` where one
+        is known.
+        """
+        if kind == "verdict":
+            return self._minimum_locked(kind, name, cap)
+        tokens, said = 0, ""
+        for group, what in ((f"tail:{kind}", f"{kind}"), ("single", "single-shot")):
+            mean, calls = self._mean_answer_locked(name, group)
+            if mean:
+                tokens = mean
+                said = f"the mean of the {calls} {what} answer(s) measured of {name}"
+                break
+        if not tokens:
+            for group, what in (
+                ("loop", "tool-loop turn"),
+                ("single", "single-shot or verdict/report answer"),
+            ):
+                largest = self._largest_output[group]
+                if largest.get(name):
+                    tokens, said = largest[name], f"the largest {what} measured of {name}"
+                    break
+                if largest:
+                    other, found = max(largest.items(), key=lambda row: row[1])
+                    tokens, said = found, f"the largest {what} measured of {other}"
+                    break
+        if tokens and cap and tokens > cap:
+            return cap, f"{said}, bounded by its cap of {cap:,}"
+        return tokens, said
 
     def _reserve_locked(
         self, now: datetime, taking: str = ""
@@ -807,13 +902,13 @@ class SpendMeter:
         ``taking`` is the kind of a planned call being admitted now: its own
         planned share is not in the reserve it is admitted against.
 
-        The first call of each kind is priced with its prompt uncached; the
-        ones after it — which share the first one's prefix — at the cache-hit
-        share measured over calls that were not the first of their conversation,
-        and at the cached rate of that prefix while none is measured. The
-        verdict is planned at the answer its admission will demand (its
-        configured cap until a single-shot answer is measured); a report call at
-        the planned answer.
+        Each planned call is kept at what its admission will demand — its
+        prompt as uncached input and its planned answer — so the reserve is
+        never below what the tail needs to be made. The row's expected charge
+        prices the first call of a kind with its prompt uncached and the ones
+        after it, which share its prefix, at the cache-hit share measured over
+        calls that were not the first of their conversation (at the cached rate
+        of that prefix while none is measured).
         """
         total = 0.0
         rows: list[dict[str, Any]] = []
@@ -831,35 +926,33 @@ class SpendMeter:
             price = row_price.at(now)
             name = _clean(model)
             prompt, prompt_said = self._tail_prompt_locked(kind, int(allowed))
-            answer, answer_said = self._planned_answer_locked(name)
+            answer, answer_said = self._planned_answer_locked(kind, name, int(cap))
+            if not answer:
+                continue
             share = self._cache_share_locked(name)
             later_rate = (
                 price.cached
                 if share is None
                 else (share * price.cached + (1 - share) * price.input)
             )
-            calls: list[float] = []
-            # The verdict is planned at what its admission will demand, so the
-            # reserve kept for it is what it needs to be made.
-            size = answer
-            if kind == "verdict":
-                demanded, _said = self._minimum_locked(kind, name, int(cap))
-                size = demanded or answer
-            for index in range(count):
-                if not size:
-                    continue
-                rate = price.input if index == 0 else later_rate
-                calls.append((prompt * rate + size * price.output) / MILLION)
-            if not calls:
-                continue
-            usd = sum(calls)
+            demand = (prompt * price.input + answer * price.output) / MILLION
+            usd = demand * count
+            first_sent = bool(self._largest_prompt.get(f"tail:{kind}", 0)) or kind == taking
+            expected = sum(
+                (
+                    prompt * (price.input if index == 0 and not first_sent else later_rate)
+                    + answer * price.output
+                )
+                / MILLION
+                for index in range(count)
+            )
             total += usd
             rows.append(
                 {
                     "kind": kind,
                     "model": name,
                     "calls": count,
-                    "priced_calls": len(calls),
+                    "priced_calls": count,
                     "prompt_tokens": prompt,
                     "prompt_from": prompt_said,
                     "answer_tokens": answer,
@@ -871,6 +964,7 @@ class SpendMeter:
                         else "calls after the first of their conversation"
                     ),
                     "usd": round(usd, 6),
+                    "expected_usd": round(expected, 6),
                 }
             )
         return total, rows
@@ -878,6 +972,12 @@ class SpendMeter:
     # ── Before a call ─────────────────────────────────────────────────────
 
     def _minimum_locked(self, kind: str, name: str, cap: int) -> tuple[int, str]:
+        if kind == "report":
+            # A report call demands the answer the reserve kept for it, so
+            # what was kept is what makes it.
+            planned, said = self._planned_answer_locked(kind, name, cap)
+            if planned:
+                return planned, said
         groups = ("loop", "single") if kind in LOOP_KINDS else ("single",)
         for group in groups:
             measured = self._largest_output[group].get(name, 0)
@@ -1044,6 +1144,7 @@ class SpendMeter:
         # reached is read against the latch.
         self.reached()
         with self._lock:
+            self._note_kind_locked(kind, model, prompt_tokens, cap, holdable, deadline_s)
             decision = self._decide_locked(
                 kind=kind,
                 name=name,
@@ -1064,8 +1165,10 @@ class SpendMeter:
                     self._reserved[slot] = decision.reservation
         if decision.refused:
             said = f"a {kind} call of {name} was not made: {decision.refused}"
-            self._exhaust("a refusal", said)
+            with self._lock:
+                self._refused += 1
             self._note_held(said)
+            self._exhaust_if_nothing_fits(said, now)
             raise SpendCeilingStop(said)
         if decision.bound is not None:
             self._note_held(
@@ -1110,8 +1213,73 @@ class SpendMeter:
         finally:
             self.release(slot)
 
+    def _note_kind_locked(
+        self,
+        kind: str,
+        model: str,
+        prompt_tokens: int,
+        cap: int,
+        holdable: bool,
+        deadline_s: float | None,
+    ) -> None:
+        """Remember a kind of call this job makes, at the smallest prompt it was sent with."""
+        row = self._kinds.get(kind)
+        if row is None:
+            self._kinds[kind] = {
+                "model": model,
+                "prompt": prompt_tokens,
+                "cap": cap,
+                "holdable": holdable,
+                "deadline": deadline_s,
+            }
+            return
+        if prompt_tokens < row["prompt"]:
+            row["prompt"] = prompt_tokens
+        row["model"], row["cap"], row["deadline"] = model, cap, deadline_s
+        row["holdable"] = bool(row["holdable"] or holdable)
+
+    def _another_fits_locked(self, now: datetime) -> bool:
+        """Whether a call of any kind this job makes would still be admitted.
+
+        Each kind is asked at the smallest prompt it was sent with, its cap and
+        its own holdability, against what is left after the reserve. The
+        verdict, the report and a loop's closing answer are left out: they are
+        made after exhaustion too.
+        """
+        for kind, row in self._kinds.items():
+            if kind in AFTER_EXHAUSTION_KINDS:
+                continue
+            price = self._admission_price(str(row["model"]), now, row["deadline"])
+            decision = self._decide_locked(
+                kind=kind,
+                name=_clean(str(row["model"])) or "the model",
+                price=price,
+                prompt_tokens=int(row["prompt"]),
+                cap=int(row["cap"]),
+                slot=object(),
+                holdable=bool(row["holdable"]),
+                now=now,
+            )
+            if not decision.refused:
+                return True
+        return False
+
+    def _exhaust_if_nothing_fits(self, said: str, now: datetime) -> None:
+        """After a refusal: latch the exhaustion only when no further call of any kind fits."""
+        with self._lock:
+            if self._exhausted is not None:
+                return
+            fits = self._another_fits_locked(now)
+        if fits:
+            logger.info(
+                "spend ceiling: that call was refused, and smaller calls of this job still fit "
+                "what is left; the job goes on."
+            )
+            return
+        self._exhaust("a refusal", said)
+
     def exhausted(self) -> bool:
-        """Whether the spend is exhausted: the ceiling reached, or a call refused for it.
+        """Whether the spend is exhausted: the ceiling reached, or no further call fits.
 
         Every gate reads this — a new tool loop, a chunk, an ask, a negotiation
         round — and so does the degradation reason. Latched.
@@ -1178,7 +1346,8 @@ class SpendMeter:
         how = (
             "was reached"
             if latch["why"] == "reached"
-            else "was exhausted: what was left no longer paid for a call's smallest answer"
+            else "was exhausted: what was left no longer paid for the smallest answer of any "
+            "call this job makes"
         )
         return (
             f"The spend ceiling of {self.ceiling_usd:.4f} USD {how} ({spent}). The tool phases "
@@ -1212,6 +1381,8 @@ class SpendMeter:
                 out["exhausted_by"] = self._exhausted["why"]
             if self._held:
                 out["held_calls"] = list(self._held)
+            if self._refused:
+                out["refused_calls"] = self._refused
             if self._unreported:
                 out["unreported_calls"] = self._unreported
                 out["spent_is_at_least"] = True

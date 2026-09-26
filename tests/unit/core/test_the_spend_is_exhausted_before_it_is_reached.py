@@ -6,9 +6,9 @@ and every such call used to be refused: the job stopped with a quarter of its
 ceiling unused and every revision skipped. A call is now made with its output
 cap held to what the spend it may use pays for, and refused only when that is
 below the smallest answer it can give — the largest answer this job has
-measured of its model, or, with none measured, its own configured cap. The
-first refusal latches the spend as exhausted; the gates and the reason read
-the latch.
+measured of its model, or, with none measured, its own configured cap. A
+refusal after which no call of any kind the job makes still fits latches the
+spend as exhausted; the gates and the reason read the latch.
 """
 
 from __future__ import annotations
@@ -72,7 +72,7 @@ class TestTheReviewsCase:
         snapshot = meter.snapshot()
         assert snapshot["exhausted_by"] == "a refusal"
         assert "exhausted at 1.99" in spend_lines(snapshot)[0]
-        assert "no longer paid for a call's smallest answer" in meter.reason()
+        assert "no longer paid for the smallest answer of any call" in meter.reason()
 
     def test_with_nothing_measured_the_smallest_answer_is_the_configured_cap(self) -> None:
         meter = SpendMeter(0.40, clock=lambda: PEAK)
