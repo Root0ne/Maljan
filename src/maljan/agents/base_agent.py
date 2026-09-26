@@ -1714,6 +1714,15 @@ def claims_unread_sentence(agent: str, read: ClaimRead, revision_round: int = 0)
     )
 
 
+def claims_under_disputes_sentence(agent: str, count: int, revision_round: int = 0) -> str:
+    """What a run records of an answer that kept claim headings under its DISPUTES section."""
+    stage = f" (round {int(revision_round)})" if int(revision_round) else ""
+    return (
+        f"The {agent} analyst's answer{stage} wrote {int(count)} claim heading(s) under its "
+        "DISPUTES section, which are not read as its own."
+    )
+
+
 def _stated_confidence(match: re.Match[str] | None) -> float | None:
     """The confidence a ``CONFIDENCE:`` line states, or ``None`` when it states none.
 
@@ -6320,34 +6329,40 @@ class BaseAnalyst(BudgetMeter, ABC):
         self._pending_claims_unread = (
             self._claims_shortfall(read, revision_round) if read.claims else ""
         )
+        self._pending_under_disputes = read.after_disputes if read.claims else 0
         return read.claims
 
-    # The shortfall of the last strict read, until an ISR takes it.
+    # The shortfall of the last strict read, and the claim headings it found
+    # under the DISPUTES section, until an ISR takes them.
     _pending_claims_unread: str = ""
+    _pending_under_disputes: int = 0
 
     def _claims_shortfall(self, read: ClaimRead, revision_round: int) -> str:
         """The sentence for an answer whose claims were begun and not all read, logged; or ``""``.
 
-        Claim headings written under the DISPUTES section are a peer's claims
-        quoted; when the analyst's own were read beside them, that is said at
-        info and nothing more.
+        Claim headings written under the DISPUTES section, beside the
+        analyst's own claims read, are not read as its own: the analyst is
+        asked once in its validation turn whether they are
+        (``isr.claims_under_disputes``), and the answer kept that still has
+        them says so (:func:`claims_under_disputes_sentence`).
         """
+        said: list[str] = []
         if read.after_disputes and read.claims:
-            self.logger.info(
-                "%s: %d claim heading(s) under the DISPUTES section were not read as its own.",
-                self.name,
-                read.after_disputes,
+            said.append(
+                claims_under_disputes_sentence(self.name, read.after_disputes, revision_round)
             )
-        if not read.unread:
-            return ""
-        sentence = claims_unread_sentence(self.name, read, revision_round)
-        self.logger.warning("%s: %s", self.name, sentence)
-        return sentence
+        if read.unread:
+            said.insert(0, claims_unread_sentence(self.name, read, revision_round))
+        for sentence in said:
+            self.logger.warning("%s: %s", self.name, sentence)
+        return " ".join(said)
 
     def _with_claims_read(self, isr: AgentISR) -> AgentISR:
         """``isr`` with the shortfall of the strict read its claims came from, taken once."""
         isr.note_claims_unread(self._pending_claims_unread)
+        isr.note_claims_under_disputes(self._pending_under_disputes)
         self._pending_claims_unread = ""
+        self._pending_under_disputes = 0
         return isr
 
     def _parsed_isr(
@@ -6431,10 +6446,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         structured: list[ClaimEvidence] = []
         without_confidence = 0
         shortfall = ""
+        under_disputes = 0
         if "CLAIM:" in text or count_claims_begun(text) or count_claims_after_disputes(text):
             read = read_claim_blocks(text)
             structured, without_confidence = read.claims, read.without_confidence
             shortfall = self._claims_shortfall(read, revision_round)
+            under_disputes = read.after_disputes if read.claims else 0
         if structured:
             isr = AgentISR(
                 agent_id=self.name,
@@ -6445,6 +6462,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             isr.note_parse(blocks_without_confidence=without_confidence)
             isr.note_claims_unread(shortfall)
+            isr.note_claims_under_disputes(under_disputes)
             return isr
 
         # An answer with no claim this parser can read is prose, and prose is

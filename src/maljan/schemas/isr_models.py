@@ -250,6 +250,10 @@ class AgentISR(BaseModel):
     # answer in force: a retry or a later round that replaced this answer
     # carries its own.
     _claims_unread_reason: str = PrivateAttr(default="")
+    # The claim headings this answer wrote under its DISPUTES section beside
+    # its own claims read: a peer's claims quoted, or its own written in the
+    # wrong place. The validation turn asks once which.
+    _claims_under_disputes: int = PrivateAttr(default=0)
 
     @property
     def unparsed_answer(self) -> str:
@@ -282,6 +286,15 @@ class AgentISR(BaseModel):
     def note_claims_unread(self, reason: str) -> None:
         """Record why claims this answer began are not in its findings."""
         self._claims_unread_reason = str(reason or "")
+
+    @property
+    def claims_under_disputes(self) -> int:
+        """How many claim headings stand under this answer's DISPUTES section, beside its own."""
+        return self._claims_under_disputes
+
+    def note_claims_under_disputes(self, count: int) -> None:
+        """Record the claim headings under the DISPUTES section, beside the answer's own."""
+        self._claims_under_disputes = max(0, int(count or 0))
 
     @property
     def blocks_without_confidence(self) -> int:

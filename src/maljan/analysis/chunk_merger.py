@@ -155,6 +155,9 @@ def merge_chunk_isrs(chunk_isrs: list[AgentISR]) -> AgentISR:
             if reason
         )
     )
+    merged.note_claims_under_disputes(
+        sum(int(getattr(isr, "claims_under_disputes", 0) or 0) for isr in chunk_isrs)
+    )
 
     keyed_kept = sum(1 for c in all_claims if c.technique_id)
     unkeyed_kept = len(all_claims) - keyed_kept

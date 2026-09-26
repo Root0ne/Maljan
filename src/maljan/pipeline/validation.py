@@ -273,6 +273,23 @@ CLAIM_WITHOUT_CONFIDENCE_CODE = "isr.claim_without_confidence"
 # A claim whose TECHNIQUE line is more than one id or NONE. No id is read
 # from it, and the analyst is asked once for one id per claim.
 TECHNIQUE_LINE_UNREAD_CODE = "isr.technique_line_unread"
+# Claim headings under the DISPUTES section, beside the analyst's own claims.
+# Not read as its own: they may be a peer's claims it quotes, or its own
+# written below the label. The analyst is asked once which; the code does not
+# read the label's words to decide.
+CLAIMS_UNDER_DISPUTES_CODE = "isr.claims_under_disputes"
+
+
+def claims_under_disputes_violation(count: int) -> Violation:
+    """What an analyst is asked about claim headings under its DISPUTES section."""
+    return Violation(
+        code=CLAIMS_UNDER_DISPUTES_CODE,
+        message=(
+            f"{int(count)} CLAIM heading(s) stand under your DISPUTES section and are not read "
+            "as your own claims. If they are yours, write them above DISPUTES; a peer's claim "
+            "you dispute stays under it."
+        ),
+    )
 
 
 def technique_line_violation(lines: list[str]) -> Violation:
@@ -325,6 +342,12 @@ def parse_violations(isr: Any) -> list[Violation]:
     ]
     if lines:
         found.append(technique_line_violation(lines))
+    try:
+        under = int(getattr(isr, "claims_under_disputes", 0) or 0)
+    except (TypeError, ValueError):
+        under = 0
+    if under:
+        found.append(claims_under_disputes_violation(under))
     if declined:
         found.append(
             Violation(

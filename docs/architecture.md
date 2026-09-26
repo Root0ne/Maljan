@@ -1248,9 +1248,14 @@ the claim sentence above the tail never is. The DISPUTES section opens at its la
 case-sensitive, with its colon (`DISPUTES:`) or as a Markdown heading; a label
 that says there is none on its own line (`DISPUTES: NONE`, `N/A`, a dash)
 opens no section, and prose beginning "Disputes …" is prose. Claims under the
-section are a peer's quoted and are not read; they are counted apart, and when
-none of the answer's own claims was read they are recorded as unread, else
-logged. A TECHNIQUE line is one
+section are not read as the analyst's own; they are counted apart. When none
+of the answer's own claims was read they are recorded as unread. When some
+were, the analyst is asked once in its validation turn
+(`isr.claims_under_disputes`) to write its own claims above DISPUTES and
+leave a peer's it disputes under it; the answer kept that still has headings
+there says so on its `claims_unread_reason` ("wrote N claim heading(s) under
+its DISPUTES section, which are not read as its own"). The code does not read
+the label's words to decide which they are. A TECHNIQUE line is one
 id, or `NONE` or a dash for none; any other line (a qualifier, a negation,
 several ids) claims no id, is kept on the claim as `technique_line`, and the
 validation turn asks once for one id per claim (`isr.technique_line_unread`).

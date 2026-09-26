@@ -32,6 +32,7 @@ from maljan.agents.base_agent import (
     INPUT_SHORTENED_NOTICE,
     SPEND_CEILING_QUESTION,
     ClaimRead,
+    claims_under_disputes_sentence,
     claims_unread_sentence,
 )
 from maljan.agents.delegation import (
@@ -96,6 +97,7 @@ from maljan.pipeline.validation import (
     absence_claim_violation,
     analyst_cut_violation,
     claim_does_not_describe_violation,
+    claims_under_disputes_violation,
     gate_removed_note,
     misstated_entry_contents,
     repeated_item_violations,
@@ -520,6 +522,10 @@ PROMPTS: dict[str, str] = {
     "analyst question for technique lines no single id was read from": technique_line_violation(
         ["T1000 (candidate)", "T1001, T1002"]
     ).message,
+    "the question and the reason for claim headings under DISPUTES": (
+        f"{claims_under_disputes_violation(2).message} "
+        f"{claims_under_disputes_sentence('reverser', 2, 1)}"
+    ),
     "the degradation reason for claims begun and not read": claims_unread_sentence(
         "reverser", ClaimRead(claims=[], without_confidence=1, begun=4, after_disputes=2), 2
     ),

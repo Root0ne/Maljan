@@ -296,17 +296,72 @@ QUOTED_PEER = (
 )
 
 
-def test_a_peer_s_claim_quoted_under_disputes_is_neither_read_nor_unread(
+def test_a_peer_s_claim_quoted_under_disputes_is_asked_about_and_then_described(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    from maljan.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE, parse_violations
+
     read = read_claim_blocks(QUOTED_PEER)
     assert [c.claim for c in read.claims] == ["own"]
     assert (read.begun, read.after_disputes, read.unread) == (1, 1, 0)
     analyst = _analyst()
-    with caplog.at_level(logging.INFO, logger="test.claims"):
+    with caplog.at_level(logging.WARNING, logger="test.claims"):
         isr = analyst._text_to_isr(QUOTED_PEER, revision_round=1)
-    assert isr.claims_unread_reason == ""
-    assert "under the DISPUTES section were not read as its own" in caplog.text
+    (question,) = [v for v in parse_violations(isr) if v.code == CLAIMS_UNDER_DISPUTES_CODE]
+    assert question.message.startswith("1 CLAIM heading(s) stand under your DISPUTES section")
+    # Kept as it is, the answer says what was not read, and nothing more.
+    assert isr.claims_unread_reason == (
+        "The reverser analyst's answer (round 1) wrote 1 claim heading(s) under its "
+        "DISPUTES section, which are not read as its own."
+    )
+    assert isr.claims_unread_reason in caplog.text
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "DISPUTES: No disputes.",
+        "DISPUTES: none identified",
+        "DISPUTES: NONE — all peers agree",
+        "DISPUTES:",
+        "## DISPUTES",
+    ],
+)
+def test_an_own_claim_below_a_label_that_opens_the_section_is_asked_about(label: str) -> None:
+    from maljan.pipeline.nodes import claims_unread_in_force
+    from maljan.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE, parse_violations
+
+    text = (
+        "CLAIM 1: The file is a DLL.\nEVIDENCE: [ev_1]\nCONFIDENCE: 0.7\n\n"
+        f"{label}\n\n"
+        "CLAIM 2: It creates a mutex.\nEVIDENCE: [ev_2]\nCONFIDENCE: 0.6\n"
+    )
+    analyst = _analyst()
+    isr = analyst._text_to_isr(text, revision_round=0)
+    assert [c.claim for c in isr.claims] == ["The file is a DLL."]
+    assert isr.claims_under_disputes == 1
+    assert [v.code for v in parse_violations(isr)] == [CLAIMS_UNDER_DISPUTES_CODE]
+    # The analyst moves its claim above the label: the answer kept reads both
+    # and carries nothing.
+    moved = analyst._text_to_isr(
+        "CLAIM 1: The file is a DLL.\nEVIDENCE: [ev_1]\nCONFIDENCE: 0.7\n\n"
+        "CLAIM 2: It creates a mutex.\nEVIDENCE: [ev_2]\nCONFIDENCE: 0.6\n\n"
+        f"{label}\n",
+        revision_round=0,
+    )
+    assert [c.claim for c in moved.claims] == ["The file is a DLL.", "It creates a mutex."]
+    assert parse_violations(moved) == []
+    assert claims_unread_in_force({"reverser": moved}) == []
+    # Kept where it was, the first answer says it.
+    assert claims_unread_in_force({"reverser": isr}) == [isr.claims_unread_reason]
+
+
+def test_the_stricter_reading_carries_the_count_to_its_isr() -> None:
+    analyst = _analyst()
+    text = "CLAIM: a\nEVIDENCE: [ev_1]\nCONFIDENCE: 0.7\n\nDISPUTES:\nCLAIM: b\n"
+    isr = analyst._parsed_isr(analyst._read_claims(text), text, "static")
+    assert isr.claims_under_disputes == 1
+    assert "under its DISPUTES section" in isr.claims_unread_reason
 
 
 def test_claims_only_under_a_disputes_heading_are_a_recorded_shortfall() -> None:

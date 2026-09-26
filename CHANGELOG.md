@@ -2257,8 +2257,10 @@ change landed on `main`.
   where a label also counts after whitespace (EVIDENCE, CONFIDENCE and
   TECHNIQUE on one line are all read), and never from the claim sentence. The DISPUTES section opens at
   its case-sensitive label or heading, a one-line `DISPUTES: NONE` opens none,
-  and claims quoted under it are recorded when none of the answer's own was
-  read. The reason is kept on the answer and carried only for the answers in
+  and claims under it are recorded when none of the answer's own was read;
+  beside the answer's own claims, the analyst is asked once whether they are
+  its own (`isr.claims_under_disputes`), and an answer kept with them there
+  says so. The reason is kept on the answer and carried only for the answers in
   force.
 - **A technique line is one id, or it is kept whole and asked about.**
   `TECHNIQUE: T1027.002 not supported` was read as a claim of T1027.002, and
