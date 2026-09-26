@@ -88,6 +88,76 @@ call it when a PE's strings look encrypted or are missing, for the rest of the
 answer (`offset`) or to search it (`pattern`). The pack's run is the worker's
 own, so a call here emulates the file once more for this server's kept result.
 
+### Resolved hashes and decoded blobs
+
+| tool | arguments |
+| --- | --- |
+| `resolve_api_hashes` | `path`, `carved_path=""`, `hashes=null`, `algorithms=null`, `offset=0`, `limit=null` |
+| `decode_string_blobs` | `path`, `carved_path=""`, `min_len=6`, `schemes=null`, `offset=0`, `limit=null`, `include_unreferenced=false` |
+
+Both read a PE's bytes and nothing else; nothing is run or emulated, and both
+answer in seconds. Their addresses are offsets from the image base, and "the
+function around" an address is the one the file's own function table (the x64
+exception directory, `.pdata`) lists; an x86 image has no such table, and its
+addresses are stated alone. No start is guessed. Neither limits its answer by
+default: `limit` pages it only when the caller asks.
+
+`resolve_api_hashes` names the 32-bit values a PE holds that are hashes of
+Windows function names — the values a program compares with the hash of each
+name in a loaded module's export table instead of importing the function. The
+names are `data/windows_export_names_v1.json`: the named exports of 27 common
+DLLs (kernel32, kernelbase, ntdll, user32, advapi32, ws2_32, wininet, winhttp,
+shell32, ole32, crypt32, iphlpapi, msvcrt and others), generated from the Wine
+project's DLL spec files at release tag `wine-9.0` by
+`scripts/knowledge/build_windows_export_names.py`, which records each spec's
+URL and sha256; no DLL binary is read or shipped. The algorithms are
+`data/api_hash_algorithms_v1.json`: CRC-32 of the ASCII and of the UTF-16LE
+name, each also lower-cased; ror13; ror13 of the name with its NUL added to
+ror13 of the upper-cased UTF-16LE module name with its NUL (the form common
+position-independent code uses); djb2 and FNV-1a 32, each also lower-cased.
+With `hashes` the caller's values are resolved, and the answer adds
+`unresolved` and `unreadable`. Without, the candidates are the 32-bit
+immediates of every byte pattern encoding `push imm32`, `mov r32, imm32`,
+`mov r/m32, imm32`, `cmp eax, imm32` or `cmp r/m32, imm32` in executable
+sections, and every four-byte-aligned value of the other sections, leaving out
+values below 0x10000 and virtual addresses inside the image. Every reading of a
+value is reported (algorithm, name, the DLLs exporting it); a value two names
+or two algorithms give carries both. Every place the value is stored is listed
+with its RVA, section and function. With about ten thousand names and ten
+algorithms an arbitrary value matches one by chance about once in forty
+thousand, so in a scan a value whose algorithm resolves no other value in the
+file is reported under `lone_hits` rather than `hits`. Measured on five benign
+PEs (two to thirteen thousand candidates each): no hits, at most two lone hits.
+
+`decode_string_blobs` tries a stated set of generic static encodings over every
+non-executable section that is not discardable: `xor8` (one key byte),
+`xor8_rolling` (a key byte rising by one per byte), `xor_keyed_header` (a
+repeating key of up to 32 bytes in front of the text: key length, key, text to
+a decoded NUL; or key length, key, a two- or four-byte text length, text),
+`xor8_rolling_header` (a 32-bit seed, a 16-bit length stored plain or XOR the
+seed's low half, the rising key starting at the seed's low byte or one past
+it) and `base64`, alone among the plain strings or as a layer on top of any of
+them (`layers`). A decoding is reported only when it passes the test the answer
+states in `readable_test`: printable throughout (UTF-16LE where a header gives
+the length); at least `min_len` characters when only the bytes around the text
+bound it, four when a header does; half letters or digits; few changes of
+character class; no evenly spaced run; and encoded bytes that hold no zero byte
+and do not already read as text. The last rule has a price, stated in the
+answer: a key below 0x40 over letters leaves them printable, plain text under
+such a key "decodes" just as readily, and nothing in the bytes says which is the
+writing, so a string whose encoded bytes are printable is not decoded here.
+A span one scheme reads under two keys is dropped (`ambiguous_spans`), and of
+two decodings of overlapping bytes the one a header placed, else the longer, is
+kept. `results` holds the decodings some code or data refers to — a scan for
+RIP-relative displacements in x64 code and absolute virtual addresses anywhere
+that land on the blob or its text — or that FLOSS recovered too in this
+process (`floss`, with FLOSS's routine and call site; FLOSS's kept result is
+read, never run); the rest are counted under `unreferenced` and listed with
+`include_unreferenced`. Measured on the same five benign PEs: no results.
+
+The triage pack runs both on every PE as its last two steps, and every agent
+reads their lines in the pack.
+
 ### Sample delivery
 
 | tool | arguments |
