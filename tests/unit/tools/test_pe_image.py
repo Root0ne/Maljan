@@ -50,13 +50,20 @@ class TestAChainedFragment:
 
 
 class TestAnImageWithoutATable:
-    def test_takes_capa_s_function_starts_and_says_what_they_are(self) -> None:
+    def test_takes_capa_s_function_starts_as_starts_never_as_containment(self) -> None:
         image = SyntheticPE(is64=False, image_base=0x400000)
         parsed = pe_image.parse(image.build())
-        assert parsed.function_at(TEXT_RVA + 0x141) is None
+        assert parsed.start_before(TEXT_RVA + 0x141) is None
         pe_image.take_function_starts(parsed, ["0x1000", "0x1100", "not a number"], "capa")
-        assert parsed.function_at(TEXT_RVA + 0x141) == TEXT_RVA + 0x100
-        assert parsed.function_at(TEXT_RVA + 0x20) == TEXT_RVA
+        assert parsed.start_before(TEXT_RVA + 0x141) == TEXT_RVA + 0x100
+        assert parsed.start_before(TEXT_RVA + 0x20) == TEXT_RVA
+        assert parsed.function_at(TEXT_RVA + 0x141) is None, "a start is not a range"
+        offset = parsed.offset_of_rva(TEXT_RVA + 0x141)
+        assert offset is not None
+        place = parsed.where(offset)
+        assert place["function"] is None
+        assert place["after_function_start"] == hex(TEXT_RVA + 0x100)
+        assert place["function_source"] == "capa"
         assert parsed.function_table.startswith("capa, 2 function starts")
         assert "not where they end" in parsed.function_table
 
@@ -65,6 +72,7 @@ class TestAnImageWithoutATable:
         parsed = pe_image.parse(image.build())
         pe_image.take_function_starts(parsed, ["0x1100"], "capa")
         assert parsed.function_at(TEXT_RVA + 0x141) is None
+        assert parsed.start_before(TEXT_RVA + 0x141) is None
         assert parsed.function_table.startswith("exception directory")
 
     def test_capa_s_feature_counts_give_the_starts(self) -> None:

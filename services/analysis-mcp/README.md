@@ -101,10 +101,12 @@ function around" an address is the one the file's own function table (the x64
 exception directory, `.pdata`) lists; an entry whose unwind data chains to
 another is a fragment, stated with the start of the function the chain leads to
 or with none when it cannot be followed. An x86 image has no such table: the
-triage pack hands both tools capa's function starts when capa ran, and the
-function stated is then the nearest start at or before the address in the same
-section, which `function_table` says; otherwise, and on a direct call, an x86
-address is stated alone. No start is guessed. The exception directory's bytes
+triage pack hands both tools capa's function starts when capa ran, and each
+place then carries the nearest start at or before it in the same section under
+`after_function_start` (with `function_source`), never under `function`: capa
+lists where functions start and not where they end, so the pack writes it as
+"(after capa's function start 0x…)", not as containment. Otherwise, and on a
+direct call, an x86 address is stated alone. No start is guessed. The exception directory's bytes
 are not read as program data. Neither limits its answer by default: `limit`
 pages it only when the caller asks.
 

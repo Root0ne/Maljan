@@ -1949,10 +1949,24 @@ RESOLVED_HASHES_ROOM_SENTENCE = (
 )
 
 
+def _around(place: dict[str, Any]) -> str:
+    """`` (in 0x1180)`` for a stated range, `` (after capa's function start 0x1180)`` for a start.
+
+    A start from a list of starts says what precedes the place, not what holds
+    it, and is never written as containment.
+    """
+    function = place.get("function")
+    if function:
+        return f" (in {function})"
+    before = place.get("after_function_start")
+    if before:
+        return f" (after {place.get('function_source') or 'a listed'}'s function start {before})"
+    return ""
+
+
 def _hash_place(place: dict[str, Any]) -> str:
     where = str(place.get("rva") or f"file {place.get('offset')}")
-    function = place.get("function")
-    return f"{where} (in {function})" if function else where
+    return f"{where}{_around(place)}"
 
 
 def _hash_reading(reading: dict[str, Any]) -> str:
@@ -2032,7 +2046,8 @@ def _resolved_hashes(data: dict[str, Any], max_chars: int | None = None) -> str:
             f"function names of {_n(names.get('dlls'))} DLLs and {_n(names.get('modules'))} "
             f"module names){_lone(listed)}; each as value = DLL!name [algorithm] or module name "
             "[algorithm] @ the offsets from the image base where the value stands (in the "
-            "function the file's table puts around it)"
+            "function the file's table puts around it, or after the nearest function start "
+            "another tool listed)"
         )
 
     def _line(shown: int, listed: bool) -> str:
@@ -2087,10 +2102,7 @@ def _blob_item(row: dict[str, Any]) -> str:
     places = [p for p in row.get("references") or [] if isinstance(p, dict)]
     head = _detail().list_head
     shown = places if head is None else places[:head]
-    refs = " ".join(
-        f"{p.get('at')}" + (f" (in {p.get('function')})" if p.get("function") else "")
-        for p in shown
-    )
+    refs = " ".join(f"{p.get('at')}{_around(p)}" for p in shown)
     if len(shown) < len(places):
         refs += f" (+{len(places) - len(shown)} more)"
     where = row.get("rva") or f"file {row.get('offset')}"
@@ -2144,7 +2156,8 @@ def _decoded_blobs(data: dict[str, Any], max_chars: int | None = None) -> str:
         f"{_n(total)} texts decoded from the data sections by the platform's static schemes, "
         f"nothing run ({counts}); {DECODED_BLOBS_RECALL}; {DECODED_BLOBS_PROVENANCE}; each as "
         '"text"@offset from the image base [scheme and key], then the offsets that refer '
-        "to it (in the function the file's table puts around each)"
+        "to it (in the function the file's table puts around each, or after the nearest "
+        "function start another tool listed)"
     )
 
     def _line(shown: int) -> str:

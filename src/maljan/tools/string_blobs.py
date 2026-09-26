@@ -809,7 +809,16 @@ def decode_string_blobs(
             "text": text,
             "encoding": item.encoding,
             "references": [
-                {"at": place["rva"], "section": place["section"], "function": place["function"]}
+                {
+                    "at": place["rva"],
+                    "section": place["section"],
+                    "function": place["function"],
+                    **{
+                        key: place[key]
+                        for key in ("after_function_start", "function_source")
+                        if key in place
+                    },
+                }
                 for place in places
             ],
         }

@@ -97,7 +97,11 @@ class TestAnImageWithoutAFunctionTable:
         assert hashes.args["function_starts"] == "capa's 1 function starts"
         assert hashes.structured["function_table"].startswith("capa, 1 function starts")
         places = [p for row in hashes.structured["hits"] for p in row["occurrences"]]
-        assert {p["function"] for p in places} == {hex(TEXT_RVA + 0x100)}
+        assert {p["function"] for p in places} == {None}, "a start is never containment"
+        assert {p["after_function_start"] for p in places} == {hex(TEXT_RVA + 0x100)}
+        line = triage_pack._resolved_hashes(hashes.structured)
+        assert f"(after capa's function start {hex(TEXT_RVA + 0x100)})" in line
+        assert f"(in {hex(TEXT_RVA + 0x100)})" not in line
 
 
 def _entry(tool: str, payload: dict[str, Any], seq: int) -> Any:

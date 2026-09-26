@@ -17,11 +17,13 @@ What it states and where it stops:
   part moved away from it), and its addresses are stated with the start of the
   function the chain leads to — or with none when the chain cannot be followed.
   An x86 image has no such table: when the caller has capa's function starts
-  for the file, the start stated is the nearest of them at or before the
-  address in the same section, and the answer says that this is what it is
-  (capa lists where functions start, not where they end); otherwise an address
-  is stated alone. An address outside every listed function has no function
-  stated: a start is never guessed at.
+  for the file, the nearest of them at or before the address in the same
+  section is stated under a field of its own, ``after_function_start`` with
+  its ``function_source`` — never as ``function``, because capa lists where
+  functions start and not where they end, so it says what precedes the
+  address, not what holds it; otherwise an address is stated alone. An
+  address outside every listed function has no function stated: a start is
+  never guessed at.
 * **The exception directory is not program data.** The tools that read the
   data sections read them with its bytes set to zero, so a table of function
   addresses is not searched for text or hash values.
@@ -166,12 +168,16 @@ class Image:
     # -- functions ----------------------------------------------------------
 
     def function_at(self, rva: int) -> int | None:
-        """The start of the function whose range holds ``rva``, or ``None``."""
-        if self.function_starts:
-            index = bisect_right(self.function_starts, rva) - 1
-            if index < 0 or rva >= self.function_ends[index]:
-                return None
-            return self.function_owners[index]
+        """The start of the function whose stated range holds ``rva``, or ``None``."""
+        if not self.function_starts:
+            return None
+        index = bisect_right(self.function_starts, rva) - 1
+        if index < 0 or rva >= self.function_ends[index]:
+            return None
+        return self.function_owners[index]
+
+    def start_before(self, rva: int) -> int | None:
+        """The nearest start handed in from elsewhere at or before ``rva``, same section."""
         if self.outside_starts:
             index = bisect_right(self.outside_starts, rva) - 1
             if index < 0:
@@ -209,8 +215,8 @@ class Image:
         if self.outside_starts:
             return (
                 f"{self.outside_source}, {len(self.outside_starts)} function starts (they list "
-                "where functions start, not where they end: the function stated is the nearest "
-                "start at or before the address in the same section)"
+                "where functions start, not where they end: each place states the nearest start "
+                "at or before it in the same section as after_function_start, and no function)"
             )
         return "none (the image lists no functions; addresses are stated without one)"
 
@@ -225,11 +231,14 @@ class Image:
             "rva": hex(rva) if rva is not None else None,
             "section": section.name if section else None,
         }
+        place["function"] = None
         if rva is not None and section is not None and section.executable:
             start = self.function_at(rva)
             place["function"] = hex(start) if start is not None else None
-        else:
-            place["function"] = None
+            before = self.start_before(rva)
+            if before is not None:
+                place["after_function_start"] = hex(before)
+                place["function_source"] = self.outside_source
         return place
 
     def occurrences(self, value: int, width: int = 4) -> list[int]:
