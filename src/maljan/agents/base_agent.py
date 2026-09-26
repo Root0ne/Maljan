@@ -738,6 +738,36 @@ def _model_label(llm: Any) -> str:
     return model_name_of(llm)
 
 
+def model_held_per_turn(llm: Any, tools: list) -> tuple[Any, Any | None]:
+    """``(loop model, binding)``: ``llm`` bound to ``tools`` here, and where a turn's cap is set.
+
+    A ReAct executor handed a bare model binds the tools itself, and a binding
+    made inside it cannot be reached, so its turns cannot be held to what the
+    spend ceiling leaves: they are made at their whole cap or not at all.
+    Bound here, the executor keeps the binding it was handed (it binds only a
+    model that is not bound to these tools yet) and each turn's held cap is set
+    on it (:func:`_hold_the_turn`). ``(llm, None)`` when the model cannot be
+    bound this way or takes no per-call cap.
+    """
+    from langchain_core.runnables import RunnableBinding
+
+    binder = getattr(llm, "bind_tools", None)
+    if not callable(binder):
+        return llm, None
+    names = [str(getattr(tool, "name", "")) for tool in tools]
+    if len(set(names)) != len(names):
+        return llm, None
+    try:
+        bound = binder(tools)
+    except Exception as exc:  # noqa: BLE001 — the executor binds them the ordinary way
+        logger.debug("a loop's model was not bound ahead of its executor (%s).", exc)
+        return llm, None
+    if not isinstance(bound, RunnableBinding):
+        return llm, None
+    binding = _loop_binding(bound, llm)
+    return (bound, binding) if binding is not None else (llm, None)
+
+
 def _model_that_closes_off_truncated_calls(llm: Any, tools: list, repair: Any) -> Any:
     """``llm`` with the repair appended, or ``llm`` when it cannot be appended to.
 
@@ -3918,6 +3948,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # counts this loop's turns while it runs, under a key of its own,
         # until the ledger records them.
         spend_capped = False
+        # The refusal that ended it, when the ceiling refused this loop's next
+        # turn while the job's spend was not yet exhausted.
+        spend_refusal = ""
         # Whether one model call's whole-call deadline ended the tool phase.
         call_deadline_hit = False
         spend_meter = self._spend_meter()
@@ -3986,7 +4019,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 one llama-server slot a run that is still alive is not free.
                 """
                 nonlocal time_capped, time_detail, final_reserve, spend_capped
-                nonlocal call_deadline_hit
+                nonlocal call_deadline_hit, spend_refusal
                 stream: Any = agent_executor.astream(
                     {"messages": messages},
                     {"recursion_limit": recursion_limit(max_steps)},
@@ -4083,8 +4116,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                             self.name,
                             time_detail,
                         )
-                    except SpendCeilingStop:
+                    except SpendCeilingStop as stop:
                         spend_capped = True
+                        spend_refusal = str(stop)
                         self.logger.warning(
                             "%s ReAct loop ended: the next turn does not fit the job's spend "
                             "ceiling; synthesising from what it gathered.",
@@ -4388,7 +4422,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         elif time_capped:
             cap, why = "time", time_detail
         elif spend_capped:
-            cap, why = SPEND_CAP, self._spend_reason()
+            cap, why = SPEND_CAP, self._spend_reason() or spend_refusal
         elif call_deadline_hit:
             cap, why = "time", time_detail
         elif hit_step_cap:
