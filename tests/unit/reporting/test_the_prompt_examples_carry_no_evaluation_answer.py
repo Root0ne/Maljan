@@ -99,6 +99,7 @@ from maljan.pipeline.validation import (
     claim_does_not_describe_violation,
     claims_kept_under_disputes_finding,
     claims_under_disputes_violation,
+    confidence_violation,
     gate_removed_note,
     misstated_entry_contents,
     repeated_item_violations,
@@ -637,6 +638,18 @@ PROMPTS: dict[str, str] = {
     ),
     "the degradation reason for claims begun and not read": claims_unread_sentence(
         "reverser", ClaimRead(claims=[], without_confidence=1, begun=4, after_disputes=2), 2
+    ),
+    "the unread reason and the question for a confidence the reader could not read": " ".join(
+        [
+            claims_unread_sentence(
+                "reverser",
+                ClaimRead(
+                    claims=[], without_confidence=0, begun=2, confidence_unreadable=("x", "y")
+                ),
+                1,
+            ),
+            confidence_violation(1, ["x"]).message,
+        ]
     ),
     "failure of a capture the platform filled in": " ".join(
         [UNREADABLE_FILLED_CAPTURE, UNREADABLE_FILLED_CAPTURE_REMEDIATION]

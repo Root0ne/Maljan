@@ -234,6 +234,10 @@ class AgentISR(BaseModel):
     # nobody stated is not put on one.
     _unparsed_answer: str = PrivateAttr(default="")
     _blocks_without_confidence: int = PrivateAttr(default=0)
+    # The CONFIDENCE values the parse found and could not read, one per block,
+    # as written: those blocks stated a confidence, so they are asked about
+    # with the value quoted rather than as blocks that stated none.
+    _confidence_unreadable: list[str] = PrivateAttr(default_factory=list)
     # The answer this ISR was parsed from, as the model wrote it: its CLAIM
     # blocks and its findings block included. What the validation turn shows
     # the analyst as its own previous answer; a rendering of the parsed claims
@@ -315,10 +319,22 @@ class AgentISR(BaseModel):
         """How many CLAIM blocks of the parsed answer stated no confidence."""
         return self._blocks_without_confidence
 
-    def note_parse(self, *, unparsed_answer: str = "", blocks_without_confidence: int = 0) -> None:
+    @property
+    def confidence_unreadable(self) -> list[str]:
+        """The CONFIDENCE values of the parsed answer that could not be read, as written."""
+        return list(self._confidence_unreadable)
+
+    def note_parse(
+        self,
+        *,
+        unparsed_answer: str = "",
+        blocks_without_confidence: int = 0,
+        confidence_unreadable: Any = (),
+    ) -> None:
         """Record what the parse of this ISR's answer could not read."""
         self._unparsed_answer = str(unparsed_answer or "")
         self._blocks_without_confidence = max(0, int(blocks_without_confidence or 0))
+        self._confidence_unreadable = [str(v) for v in (confidence_unreadable or ())]
 
     @property
     def mean_confidence(self) -> float:

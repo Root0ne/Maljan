@@ -374,18 +374,35 @@ def parse_violations(isr: Any) -> list[Violation]:
         under = 0
     if under:
         found.append(claims_under_disputes_violation(under))
-    if declined:
-        found.append(
-            Violation(
-                code=CLAIM_WITHOUT_CONFIDENCE_CODE,
-                message=(
-                    f"{declined} CLAIM block(s) state no CONFIDENCE that reads as a number "
-                    "between 0.0 and 1.0, so they are not claims. Give each the confidence "
-                    "you hold it at, or leave it out."
-                ),
-            )
-        )
+    unreadable = [str(v) for v in (getattr(isr, "confidence_unreadable", None) or [])]
+    if declined or unreadable:
+        found.append(confidence_violation(declined, unreadable))
     return found
+
+
+def confidence_violation(declined: int, unreadable: Sequence[str]) -> Violation:
+    """The one question for the CLAIM blocks whose confidence was not read.
+
+    Blocks that state no CONFIDENCE, and blocks whose CONFIDENCE value reads
+    as neither a number from 0.0 to 1.0 nor a percentage, each value quoted
+    as written: neither is a claim until the analyst gives the number.
+    """
+    parts: list[str] = []
+    if declined:
+        parts.append(f"{int(declined)} CLAIM block(s) state no CONFIDENCE")
+    if unreadable:
+        quoted = ", ".join(repr(safe_finding_value(v)) for v in dict.fromkeys(unreadable))
+        parts.append(
+            f"{len(unreadable)} CLAIM block(s) write a CONFIDENCE that reads as neither a "
+            f"number from 0.0 to 1.0 nor a percentage ({quoted})"
+        )
+    return Violation(
+        code=CLAIM_WITHOUT_CONFIDENCE_CODE,
+        message=(
+            f"{'; '.join(parts)}, so they are not claims. Give each the confidence you hold "
+            "it at, as a number from 0.0 to 1.0, or leave it out."
+        ),
+    )
 
 
 def _techniques_cited_by_findings(isr: Any, citable: set[str]) -> set[str]:

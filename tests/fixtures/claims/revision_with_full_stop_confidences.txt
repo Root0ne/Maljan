@@ -1,0 +1,93 @@
+# FINAL ISR — sample 6091f2589fef42e0ab3d7975806cd8a0da012b519637c03b73f702f7586b21ef.exe
+64-bit Windows DLL (IMAGE_FILE_DLL, image base 0x1360bc00000, 146 functions, 60,928 bytes), entry DllMain 0x1360bc03c7c, exports `extra`/`follower`/`run`/`scub` all aliasing RVA 0x3ce4.
+
+**TOOLING NOTE (stated once).** A decompiler was attached and used for every claim below. Cross-reference, caller, and call-graph services returned empty or invalid results for this program — ev_0265, ev_0266, ev_0267, ev_0273, ev_0276–ev_0281, ev_0287, ev_0288 ("No call relationships found"), ev_0291, ev_0295/ev_0296 and ev_0299 (only `.pdata` data refs) — and script execution is disabled (ev_0284). Caller attribution below therefore comes only from decompiled caller bodies; findings that would need full caller enumeration are marked with that limit. `get_current_program_info` and `list_imports` failed in the earlier pass but succeeded on retry this session (ev_0258, ev_0261); the pack's `yara_scan` failed twice outright.
+
+---
+
+**CLAIM 1 — Stored-content decoding confirmed at byte level; peer string discrepancy resolved (T1140/T1027).**
+`FUN_1360bc0ae78` reads each `.data` blob as: 4-byte seed 0x33629d40, 2-byte length XOR 0x9d40, then byte *i* XOR keystream `(0x40+i+1)&0xFF` (UTF-16LE when flagged). I re-decoded blobs byte-for-byte this session: `init -zzzz="%s\%s"`@.data+0xfac0 (all 38 bytes — the emulated "`init -=`" reading dropped four chars; the header-validated reading is correct), `"12345"`@0xfd30, `"&mac="`@0x100e8, `"%02x"`@0x100f8, `":%02x"`@0x10108, `"PT0S"`@0x10118, `"runnung"`@0xfa00, `"Updater"`@0xf988, `""`@0xf9b0, `"rundll32.exe"`@0xf9b8, `"%s", %s %s`@0xf9d8, `"files/bp.dat"`@0xfa58, `"\Registry\Machine\"`@0x10220, `\??\`/`\`@0x10200/0x1020c.
+EVIDENCE: ev_0259, ev_0260, ev_0271, ev_0272, ev_0278, ev_0289, ev_0292, ev_0301; corroborated ev_0019, ev_0021. CONFIDENCE: 0.95.
+
+**CLAIM 2 — The cleartext negatives are scope-limited, and the pack's "0 hits of 31" YARA result must not be propagated (T1027).**
+Meaningful strings exist only after the XOR layer (CLAIM 1); `.data` entropy 6.48; total 101 blobs decode statically and 81 by emulation. The pack's `yara_scan` failed twice (run state); the successful run found `CRC32_poly_Constant` and `win_mutex` (ev_0144), and I confirmed the CRC32 polynomial bytes `20 83 B8 ED` (0xEDB88320) at VA 0x1360bc06b0c = file offset 0x5f0c (ev_0264).
+EVIDENCE: ev_0259, ev_0264, ev_0286, ev_0019, ev_0021, ev_0006, ev_0144. CONFIDENCE: 0.9.
+
+**CLAIM 3 — CRC32 is the hasher of the obfuscated names, falsified by emulation (T1027.007).**
+`FUN_1360bc06aa4(ptr,len)` builds the 256-entry table at 0x10f18 with reflected polynomial 0xEDB88320, init 0xFFFFFFFF, returns `~crc` — standard CRC-32. Emulating the file's own routine against known inputs reproduced three known values in one harness run: `"123456789"` → 0xcbf43926 (canonical check value), `"MessageBoxA"` → 0x572d5d8e, wide `"kernel32.dll"` → 0x2eca438c — the latter two are the file-embedded values catalogued at .data+0x9057 and +0x84ec. One discordant single-shot emulation returned rax=0xe60914ae (ev_0305) — its memory injection evidently did not land; the batch harness, which matched the canonical vector and two file-embedded values, governs.
+EVIDENCE: ev_0286, ev_0264, ev_0304, ev_0306, ev_0307, ev_0020, ev_0144. CONFIDENCE: 0.9.
+
+**CLAIM 4 — Sparse import table + name-hash resolution is a real obfuscation mechanism, not the ordinary LoadLibrary/GetProcAddress idiom (T1027.007).**
+`list_imports` confirms exactly 5 imports (PeekNamedPipe, GetLastError, CreateMutexW, MessageBeep, MessageBoxA) from KERNEL32/USER32; the code uses ~150 APIs resolved at run time. `FUN_1360bc0869c(moduleBase, crc32, 0)` walks IMAGE_EXPORT_DIRECTORY, calls strlen + the CRC32 routine on each export name, and returns `AddressOfFunctions[AddressOfNameOrdinals[i]]`; `param_3 != 0` forwards the name to GetProcAddress (slot 0x10ca8). Evidence of obfuscation is the hashing loop over API names plus a hand-written PE-export parser plus the sparse IAT — not any library-loading idiom.
+EVIDENCE: ev_0261, ev_0269, ev_0286, ev_0020, ev_0004, ev_0264. CONFIDENCE: 0.9.
+
+**CLAIM 5 — Direct native-API use is prepared (T1106).**
+The ntdll hash block (0xa59c: NtAllocateVirtualMemory, NtWriteVirtualMemory, NtProtectVirtualMemory, NtCreateThread, NtSetContextThread, NtOpenProcess/NtOpenThread, NtMapViewOfSection, NtCreateSection, LdrLoadDll, NtQuerySystemInformation, NtDelayExecution, RtlGetVersion…) is resolved alongside the Win32 set; allocation goes through the NtAllocateVirtualMemory wrapper (`FUN_1360bc0ad34`) and the command-line read uses NtQueryInformationProcess + ReadProcessMemory. Not re-executed this session; code-level only.
+EVIDENCE: ev_0020, ev_0204, ev_0198, ev_0008. CONFIDENCE: 0.8.
+
+**CLAIM 6 — Environment/debugger gates; failure returns −1 and the sample goes inert (T1497.001/T1622).**
+`FUN_1360bc03868` (worker reached from export 0x3ce4 → 0x3cb4) in order: API resolution (`FUN_1360bc06328`; fail → −1) → anti-debug `FUN_1360bc03074` (PEB BeingDebugged; nonzero → −1) → process-count/OS-id gate: abort when OS-id > 5 and count < 75, or OS-id < 6 and count < 50 (`FUN_1360bc08560`/`FUN_1360bc08820`) → current-PID check → adapter-length check `FUN_1360bc068e8` → `CreateMutexW(0,0,"runnung")`, abort if handle 0 or `GetLastError()==0xB7` → decode C2 URLs (0x6988) → base64 init (0x6864) → config load (0xcf14) → install-or-beacon branch (via `FUN_1360bc0378c`) → start beacon thread `FUN_1360bc06250`. On any failure it returns −1 without side effects — consistent with the observed run (4 processes < 50/75 gate; 0 files/tasks/network).
+EVIDENCE: ev_0286, ev_0293, ev_0301, ev_0290, round-0 ev_0169/ev_0174/ev_0181; dynamic ev_0214, ev_0212, ev_0221, ev_0225. CONFIDENCE: 0.9.
+
+**CLAIM 7 — First-run install: copy, scheduled task, self-delete, relaunch via rundll32 (T1053.005/T1070.004/T1036.008/T1218.011).**
+`FUN_1360bc0378c` tests whether the computed install file exists; if not, `FUN_1360bc033ac` (called from 0x3868) builds `%APPDATA%\Custom_update` (`FUN_1360bc030d0` = `FUN_1360bc07b98(0)` + `Custom_update`@0xf940) and `Update_<hex>.(dll|exe)` (`FUN_1360bc03194` wsprintf `Update_%x`; `FUN_1360bc03250` picks the extension opposite to the running module), copies the running image (path 0x10448), registers a Task Scheduler task with `LogonTrigger` via `FUN_1360bc03728` → `FUN_1360bc0b344` → `FUN_1360bc0c42c` (TASK_CREATE_OR_UPDATE), then `FUN_1360bc03c2c` (mutex/event cleanup), `FUN_1360bc03a24` (rename to `:wtfbbq`@0xfa18, then delete-on-close), spawns the installed copy using the decoded `rundll32.exe` + `"%s", %s %s` templates (`FUN_1360bc0b400` = CreateProcessW slot 0x10b38), and `ExitProcess(0)`. Uninstall command 0xf mirrors the cleanup. Not observed in the run (0 files, 0 tasks).
+EVIDENCE: ev_0285, ev_0286, ev_0289, ev_0293, ev_0310-type strings via ev_0021; dynamic ev_0213, ev_0225, ev_0223. CONFIDENCE: 0.85.
+
+**CLAIM 8 — Command dispatch: `FUN_1360bc03cf4(url, cmd_id, token)` switch (T1071.001/T1105).**
+id 2 → `FUN_1360bc01a08` (SHGetFolderPath CSIDL 0x10 + FindFirst/NextFile, builds `&desklinks=[…]`); id 3 → `FUN_1360bc01c38` (`&proclist=[` with `"proc"`/`"subproc"`); id 4 → `FUN_1360bc02118` (cmd.exe/discovery sub-dispatch); id 0xc → download `%s%d.exe` to SHGetFolderPath(0x1c) then CreateProcessW; id 0xd → tokenize on `,` (separator blob@0xfee4), download `%s%d.dll`, run `rundll32 <dll>,<arg>` via `FUN_1360bc0b4cc`; id 0xe → download to memory, `VirtualAlloc(0,n,0x1000,0x40)` RWX, CreateThread `FUN_1360bc0b398`; id 0xf → uninstall chain ending ExitProcess(0); id 0x11 → ExitProcess(0); id 0x12 → `FUN_1360bc04110`; id 0x13/0x14 → set flags 0x1058c/0x10590; id 0x15 → download to memory, thread `FUN_1360bc0b670` (plugin whose output is wrapped with `&stiller=`). Commands with a `front` token rebuild the fetch URL: copy to `//`, append `/files/`@0xfb00, append token from offset 8.
+EVIDENCE: ev_0270, ev_0275, ev_0283, ev_0285, ev_0021, ev_0019. CONFIDENCE: 0.9.
+
+**CLAIM 9 — Command 0x15 = in-memory plugin execution with `&stiller=` exfil field (T1620).**
+`FUN_1360bc072c8` → thread `FUN_1360bc0b670`: allocates, calls the downloaded code, prefixes its output with the decoded `&stiller=` field (blob@0x10008), stores it to the beacon payload area (`FUN_1360bc0bae0`), keeps the thread handle at 0x10580. Command 0xe's thread executes the mapped buffer and then zeroes and frees it (`VirtualFree(...,0x8000)`).
+EVIDENCE: ev_0283, ev_0275, ev_0260, ev_0021. CONFIDENCE: 0.85.
+
+**CLAIM 10 — C2 channel logic (T1071.001).**
+`FUN_1360bc06988` decodes `https://titnovacrion.top/live/`@0x10250 and `https://skinnyjeanso.com/live/`@0x10278 into the candidate array at 0x10568; `FUN_1360bc05030`/`FUN_1360bc04d20` issue requests (`POST`/`GET`, `Content-Type: application/x-www-form-urlencoded`@0xfb68, UAs MSIE "Tob 1.1" and `curl/7.88.1`) and read replies with InternetReadFile. Request body `counter=%d&type=%d&guid=%s&os=%d&arch=%d&username=%s&group=%lu&ver=%d.%d&up=%d&direction=%s`; task vocabulary `URLS`, `URLS|%d|%s`, `COMMAND`, `CLEARURL`, `ERROR` parsed by `FUN_1360bc0541c` (tokenize on CRLF then `|`). `guid` is volume-derived (see CLAIM 12). TLS weakening via `InternetSetOptionA(h,0x1f,&0x4380,4)` stands at 0.70 — single decompiler locus, no second evidence.
+EVIDENCE: ev_0021, ev_0019, ev_0090, ev_0129, ev_0136, ev_0137, ev_0175, ev_0203, ev_0307. CONFIDENCE: 0.85 (TLS sub-claim 0.7).
+
+**CLAIM 11 — Payload crypto: RC4 KSA/PRGA identified, no independent emulation ran, so capped (T1573.001/T1132.001).**
+`FUN_1360bc0cbe0` initialises state+0x100 = keylen, S; `FUN_1360bc0ca08` is the KSA (`j += S[i] + key[i % keylen]`, swap); `FUN_1360bc0caac` is the PRGA (`i++`, `j += S[i]`, swap, `out = S[(S[i]+S[j])&0xFF] ^ in`); key is the runtime-decoded `"12345"` (5 bytes). The standard base64 alphabet `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/`@0x10160 is decoded and installed by `FUN_1360bc06864`; encode `FUN_1360bc06634`, decode `FUN_1360bc06370`. Per verification discipline the RC4 algorithm name stays capped: the dataflow provider errored (ev_0298) and script/emulation of the state machine was unavailable.
+EVIDENCE: ev_0294, ev_0260, ev_0193, ev_0185, ev_0021, ev_0008. CONFIDENCE: 0.7 RC4 / 0.75 base64.
+
+**CLAIM 12 — `guid` is derived from volume information, not from the registry (T1082).**
+`FUN_1360bc07b80` → `FUN_1360bc089d4` (FindFirstVolumeW/GetVolumeInformationW trio, output block 0x10594) → `FUN_1360bc08bbc` → `FUN_1360bc08b3c` (repack 16-byte identity struct) → `FUN_1360bc08c4c` (`%04X%04X%04X%04X%08X%04X`@0x101e0). `FUN_1360bc03194` turns the same block into `Update_%x`.
+EVIDENCE: ev_0283, ev_0286, ev_0290, ev_0285. CONFIDENCE: 0.8.
+
+**CLAIM 13 — Registry access is Shell-Folders path resolution, not machine identity (T1012 residual).**
+`FUN_1360bc07b98(i)` decodes `AppData/Desktop/Startup/Personal/Local AppData` and `…\Shell Folders`; `FUN_1360bc0b154(0, key, name, &out)` → `FUN_1360bc088f8(0)` builds the per-user NT key prefix via `RtlFormatCurrentUserKeyPath` (slot 0x10ae0), or with param 1 the literal `\Registry\Machine\` prefix; `FUN_1360bc0b1d4` opens (0x20019) and queries (REG_SZ). The only observed consumer of the resolver is `FUN_1360bc030d0` calling index 0 (AppData) for the install directory. No registry value feeding `guid=` was observed.
+EVIDENCE: ev_0270, ev_0274, ev_0283, ev_0285. CONFIDENCE: 0.85 (scope-limited on caller enumeration — see tooling note).
+
+**CLAIM 14 — Staged discovery/exfil (T1082/T1482/T1069.002/T1518.001/T1057/T1083/T1033/T1016).**
+cmd.exe `/c ipconfig /all`, `/c systeminfo`, `/c net config workstation`, `/c net view /all(/domain)`, `/c nltest /domain_trusts( /all_trusts)`, `/c net group "Domain Admins" /domain`, `/c whoami /groups`, wmic AntiVirusProduct + findstr fallback, with matching upload keys (`&ipconfig=`, `&systeminfo=`, `&net_config_ws=`, `&net_view_all=`, `&net_view_all_domain=`, `&domain_trusts=`, `&domain_trusts_all=`, `&net_group=`, `&whoami_group=`, `&net_wmic_av=`), plus `&proclist=[`, `&desklinks=[`, `&mac=`, `&computername=%s`, `&domain=%s`, user via GetUserNameA, `group=%lu` = FNV of decoded `"Littlehw"`. Output capture in `FUN_1360bc01030` (CreatePipe + CreateProcessW + PeekNamedPipe/ReadFile). Execution was not observed (no cmd.exe/wmic in the run); this is staged intent plus the capture implementation.
+EVIDENCE: ev_0259-method decodes via ev_0021, ev_0019; ev_0285, ev_0131, ev_0109; dynamic ev_0214, ev_0211. CONFIDENCE: 0.8.
+
+**CLAIM 15 — No contact to the decoded endpoints was observed; the gates explain it (T1071.001 negative).**
+No DNS lookup, no HTTP request to `/live/`, no flow to either domain across 9,087 packets / 587 s; sandbox flows carry other pids; run length (600 s) exceeds the 180 s pre-beacon delay, so non-contact is not a timing artifact. Every capture flow (incl. 104.18.19.203:443) is ambient host traffic by DNS/HTTP context and pid attribution.
+EVIDENCE: ev_0234, ev_0235, ev_0236, ev_0209, ev_0214, ev_0227, ev_0293+ev_0286 (gates). CONFIDENCE: 0.85.
+
+**CLAIM 16 — Injection primitives are capability only (T1055).**
+No cross-process injection observed: no target process exists in the run; `OpenProcess` (slot 0x10b00) is called once with mask 0x410 on the sample's own PID (self-read, `FUN_1360bc0463c`@0x479d); capa fired no injection rule. Zero call-xrefs for VirtualAllocEx/WriteProcessMemory/CreateRemoteThread/QueueUserAPC/VirtualProtect was established in the prior round (ev_0104–ev_0128) but could not be re-verified this session because the xref tooling is non-functional — that sub-point is unresolved for tooling reasons, the negative observation stands on dynamic evidence.
+EVIDENCE: ev_0104, ev_0110, ev_0105/ev_0106/ev_0108/ev_0124/ev_0128, ev_0212, ev_0214, ev_0008; tooling limit ev_0288. CONFIDENCE: 0.75.
+
+**CLAIM 17 — No known packer (revises the pack boolean).**
+Entry point is ordinary DllMain; code is MSVC (linker 14.0, Rich header only); the `.data` entropy fits the encrypted string layer. qu1cksc0pe's `"packed": true` has no packer evidence behind it (their own output flags the discrepancy; the only match is the Rich-header marker).
+EVIDENCE: ev_0263, ev_0264, ev_0286, ev_0145, ev_0004. CONFIDENCE: 0.85.
+
+**CLAIM 18 — Reputation (single source, not a verdict).**
+My own VirusTotal lookup: 52/75 engines malicious, type Win32 DLL, 47 distinct labels clustering Latrodectus (`Trojan.Win32.Latrodectus.m!c`, `dll.trojan.latrodectus`, `Win64/Latrodectus.A trojan`, `Backdoor:Win/Lactrodectus.Z9OKG`), IcedId/Banker, and Ulise (`Gen:Variant.Ulise.482338` ×4). The sandbox adds family signature "Detect larodectus Loader variant 2". The file itself establishes a loader-shaped DLL with the behaviour above; family names are carried attribution only.
+EVIDENCE: ev_0282, ev_0018, ev_0014, ev_0002, ev_0003. CONFIDENCE: 0.85.
+
+---
+
+## DISPUTES
+
+1. **STATIC claim 18 (T1547.001 "Startup-folder autostart path is prepared") — rejected as unsupported.** `Startup` is one of five value-names resolved *read-only* by `FUN_1360bc07b98` from the Shell Folders key (ev_0270, ev_0274); the only observed consumer is index 0 (AppData) for the install directory (ev_0285), install writes go to `%APPDATA%\Custom_update`, downloads go to SHGetFolderPath(0x1c) temp/LocalAppData (ev_0275), and persistence is the Task Scheduler `LogonTrigger` chain (CLAIM 7). Scope limit: full caller enumeration of 0x7b98 was not possible (xref services empty, ev_0287/ev_0295), so "no Startup consumer exists anywhere" is not proven — but the autostart technique should not ship on this string alone.
+2. **STATIC claim 19 (T1012: `\Registry\Machine\x5c` as machine-identity query tied to `guid=%s`) — rejected.** The registry literal is the HKLM branch of the key-prefix builder `FUN_1360bc088f8`, whose demonstrated use is the per-user branch reading `…\Shell Folders` folder paths (ev_0270, ev_0274, ev_0283); `guid` comes from the volume-information block (CLAIM 12: ev_0283, ev_0286). No registry value observed feeding `guid`; the residual T1012 mapping has low weight.
+3. **TRIAGE claim 3 / STATIC-R2 claim 7 ("the second rundll32, pid 83→89, is the sample's own relaunch", up to 0.90) — downgraded to unproven.** The sample's spawn paths use *downloaded* DLLs (`FUN_1360bc0b4cc` invoked from `FUN_1360bc04110` and `FUN_1360bc06c2c`, ev_0275) or the *installed copy after copy+task+self-delete* (ev_0286); none can yield `rundll32.exe <Temp path>,#1` without install side effects, and the run shows none (0 files ev_0225, 0 tasks ev_0213, 0 registry writes ev_0213). The init gates aborted on the process-count check (4 processes, ev_0286 + ev_0214) before any spawn. I side with DYNAMIC claim 2's withholding.
+4. **Propagating [ev_0007] "YARA 0 hits of 31" — rejected as a data point (against TRIAGE claims 1–2, STATIC claims 2/24, and my own earlier claim 2).** The pack's `yara_scan` failed twice; the successful run found 2 matches (ev_0144), one confirmed at byte level (ev_0264). The cleartext-negatives-are-not-exculpatory conclusion still stands, on the XOR layer + hashed API surface instead.
+5. **qu1cksc0pe's packer boolean `"packed": true` (ev_0139/ev_0145) — rejected; "no known packer" stands** (their own output concedes the only match is the Rich-header marker). Their ATT&CK-mapping zero (ev_0138) is a coverage artifact, as they resolved — no dispute. Their 3-import display is resolved: the full table is 5 imports (ev_0261), a filtered display as they suspected.
+6. **104.18.19.203:443 — no basis to associate it with the sample.** No code path, no sample pid, no DNS/HTTP context ties it to the DLL, and the sample never reached beacon stage (CLAIM 6); I side with NETWORK's ambient classification rather than "unattributed, worth follow-up."
+
+**Resolved without dispute:** the `init -zzzz=` vs `init -=` string conflict (CONFIRMED as `-zzzz`, ev_0259); the import-count discrepancy (5 imports, ev_0261); the packer label difference (no known packer both ways).
+
+**Unresolved:** (a) any registry machine-identity value — not observed anywhere; (b) complete caller sets for `FUN_1360bc07b98` and `FUN_1360bc0b4cc` — xref/call-graph services empty and scripts disabled; (c) contents/behaviour of the downloaded next stages and plugin (`%s%d.exe`/`%s%d.dll`/`&stiller=`) — never fetched in any run; (d) whether the C2 endpoints are reachable in the wild — no contact observed and gates suppress execution in the sandbox; (e) the single-shot CRC32 emulation discrepancy (ev_0305: rax=0xe60914ae) — logged as an emulator artifact, superseded by ev_0304/ev_0306/ev_0307.
