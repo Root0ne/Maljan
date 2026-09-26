@@ -15,6 +15,7 @@ import asyncio
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -23,6 +24,7 @@ from pydantic import BaseModel
 
 from maljan.agents.base_agent import model_held_per_turn
 from maljan.agents.judge_agent import JudgeAgent, judge_output_cap
+from maljan.core.cancellation import JobCancelled
 from maljan.core.config import Settings
 from maljan.core.spend import SpendMeter
 from maljan.core.token_ledger import TokenLedger
@@ -122,3 +124,34 @@ def test_a_model_that_cannot_be_bound_ahead_is_admitted_at_its_whole_cap() -> No
     model = _Unbindable(caps=[])
     loop_model, binding = model_held_per_turn(model, [_lookup()])
     assert loop_model is model and binding is None
+
+
+def test_a_cancelled_mediation_releases_its_loop_s_reservation() -> None:
+    """Cancelled after its second turn was admitted and reserved, before it was sent."""
+    model = _Judge(caps=[])
+    meter = SpendMeter(
+        10.0,
+        {model_name_of(model): {"input_usd_per_mtok": 0.0, "output_usd_per_mtok": 10.0}},
+        table={},
+    )
+    meter.settle({"input_tokens": 0, "output_tokens": 100}, model_name_of(model))
+    turns = {"seen": 0}
+
+    def _cancel_on_the_second_turn(self: Any, conversation: Any, asked: Any) -> None:
+        turns["seen"] += 1
+        if turns["seen"] == 2:
+            assert meter._reserved, "the second turn is reserved"
+            raise JobCancelled("the operator cancelled the job; stopped before a model call")
+
+    with (
+        patch.object(JudgeAgent, "_publish_questions", _cancel_on_the_second_turn),
+        pytest.raises(JobCancelled),
+    ):
+        _run(model, TokenLedger(spend=meter))
+
+    # The turn reserved when the job was cancelled is released, and the loop's
+    # running count goes to the ledger with the turn that was answered.
+    assert turns["seen"] == 2
+    assert meter._reserved == {}
+    assert meter._in_flight == {}
+    assert meter.committed() == meter.spent()

@@ -472,6 +472,11 @@ class ServiceContainer:
         # nodes, every model call and every call in flight on the agent loop
         # answer to it (``core.cancellation``).
         self.cancellation = Cancellation()
+        # A cancelled job wakes every call waiting in the spend meter for
+        # another call's reservation, and it gives up.
+        _meter = getattr(self._token_ledger, "spend", None)
+        if _meter is not None and hasattr(_meter, "close"):
+            self.cancellation.track(_meter.close)
 
         # Per-run truncation ledger (pitfall P6). Same lifecycle as the token
         # ledger: written to at every bound, snapshotted by the judge node.

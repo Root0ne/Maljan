@@ -131,6 +131,14 @@ LOOP_KINDS = frozenset({"loop turn", "mediation turn"})
 # What the token ledger names a tool-loop turn it records.
 LOOP_TURN_CALL = "tool loop turn"
 
+# The kinds of call a stage is known to make, by the stage's kind, beyond the
+# ones that are made after exhaustion too: counted as planned from the stage's
+# start (:meth:`SpendMeter.begin_stage`).
+STAGE_CALL_KINDS: dict[str, tuple[str, ...]] = {
+    "analysis": ("loop turn",),
+    "debate": ("revision", "mediation turn"),
+}
+
 # What the token ledger names a verdict or report call, and the planned kind
 # each one is.
 TAIL_CALLS = {"verdict": "verdict", "report section": "report", "narrative": "report"}
@@ -620,6 +628,8 @@ class SpendMeter:
         self._generation = 0
         # First calls and validation retries admitted, per kind of call.
         self._calls_made: dict[str, list[int]] = {}
+        # Set when the job is cancelled (:meth:`close`): no call waits any more.
+        self._closed = False
 
     @classmethod
     def from_settings(cls, cfg: Any) -> SpendMeter:
@@ -830,10 +840,30 @@ class SpendMeter:
             self._drained.notify_all()
         self._after_drain()
 
-    def begin_stage(self) -> None:
-        """A stage of the job has started: the kinds of call made before it are not planned now."""
+    def close(self) -> None:
+        """The job is cancelled: every call waiting on another's reservation gives up now."""
+        with self._lock:
+            self._closed = True
+            self._drained.notify_all()
+
+    def begin_stage(self, kinds: tuple[str, ...] = ()) -> None:
+        """A stage of the job has started: the kinds of call made before it are not planned now.
+
+        ``kinds`` are the kinds of call the stage is known to make
+        (:data:`STAGE_CALL_KINDS`). They count as planned from its start, so a
+        refused first call of another kind cannot exhaust the spend before they
+        were asked about. One this job has made before keeps what it measured
+        of it; one it has not is asked about at this job's largest single-shot
+        prompt and answer, holdable.
+        """
         with self._lock:
             self._generation += 1
+            for kind in kinds:
+                row = self._kinds.get(kind)
+                if row is None:
+                    self._kinds[kind] = {"seeded": True, "generation": self._generation}
+                else:
+                    row["generation"] = self._generation
 
     def _after_drain(self) -> None:
         """A refusal made while calls were in flight is looked at again once none is."""
@@ -1210,6 +1240,7 @@ class SpendMeter:
         slot: Any = None,
         holdable: bool = True,
         deadline_s: float | None = None,
+        wait_s: float | None = None,
     ) -> int | None:
         """Whether a call may be made, before it is: ``None`` as it is, a number as a held cap.
 
@@ -1228,11 +1259,23 @@ class SpendMeter:
         under it until :meth:`release` (or, for a loop's turn,
         :meth:`note_loop`) is called with it. Every held or refused call is
         logged with its numbers and recorded.
+
+        A call that does not fit only because other calls in flight hold their
+        worst case waits for them to settle: at most until ``deadline_s``, or
+        ``wait_s`` when the caller's own clock (a tool loop's) ends sooner, and
+        never past the job's cancellation (:meth:`close`), which wakes it. The
+        wait blocks the calling thread. The calls that can run beside another —
+        analyst nodes, revisions, tool loops — each run on a thread of their
+        own; the verdict and report calls, which admit from a coroutine, run
+        alone, so nothing in flight holds a reservation that would make them
+        wait.
         """
         if self.ceiling_usd is None:
             return None
+        from maljan.core import cancellation
         from maljan.llm.context_window import CHARS_PER_TOKEN
 
+        job = cancellation.current()
         prompt_tokens = -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
         cap = max(0, int(cap_tokens or 0))
         name = _clean(model) or "the model"
@@ -1240,7 +1283,11 @@ class SpendMeter:
         # A call that does not fit only because other calls in flight hold
         # their worst case waits for them to settle — most settle far below
         # it — for as long as its own deadline allows.
-        waits_until = time.monotonic() + (_default_deadline() if deadline_s is None else deadline_s)
+        bound_s = _default_deadline() if deadline_s is None else float(deadline_s)
+        if wait_s is not None:
+            bound_s = min(bound_s, max(0.0, float(wait_s)))
+        waits_until = time.monotonic() + bound_s
+        gave_up = ""
         noted = False
         while True:
             now = self._clock()
@@ -1278,7 +1325,10 @@ class SpendMeter:
                         retrying=retrying,
                     )
                     left = waits_until - time.monotonic()
-                    if not unreserved.refused and left > 0:
+                    cancelled = self._closed or bool(job is not None and job.is_cancelled)
+                    if not unreserved.refused and cancelled:
+                        gave_up = "the job was cancelled while it waited for calls in flight"
+                    elif not unreserved.refused and left > 0:
                         self._drained.wait(timeout=min(left, _WAIT_SLICE_SECONDS))
                         continue
                 if not decision.refused:
@@ -1298,6 +1348,9 @@ class SpendMeter:
                         self._reserved[slot] = decision.reservation
             break
         if decision.refused:
+            if gave_up:
+                # Not the spend's refusal: the job is ending.
+                raise SpendCeilingStop(f"a {kind} call of {name} was not made: {gave_up}")
             said = f"a {kind} call of {name} was not made: {decision.refused}"
             with self._lock:
                 self._refused += 1
@@ -1358,7 +1411,7 @@ class SpendMeter:
     ) -> None:
         """Remember a kind of call this job makes, at the smallest prompt it was sent with."""
         row = self._kinds.get(kind)
-        if row is None:
+        if row is None or row.get("seeded"):
             self._kinds[kind] = {
                 "model": model,
                 "prompt": prompt_tokens,
@@ -1382,9 +1435,34 @@ class SpendMeter:
         against what is left after the reserve. The verdict, the report and a
         loop's closing answer are left out: they are made after exhaustion too.
         """
+        made = [row for row in self._kinds.values() if not row.get("seeded")]
         for kind, row in self._kinds.items():
             if kind in AFTER_EXHAUSTION_KINDS or row.get("generation") != self._generation:
                 continue
+            if row.get("seeded"):
+                # Planned for this stage and not made yet: asked about on the
+                # model of the latest kind this job made, at its largest
+                # single-shot prompt and answer; with nothing to ask it on, it
+                # is taken to fit rather than latch the job on a guess.
+                if not made:
+                    return True
+                model = str(made[-1]["model"])
+                name = _clean(model) or "the model"
+                prompt = int(
+                    self._largest_prompt.get("single", 0)
+                    or self._largest_prompt.get("opening", 0)
+                    or self._smallest_loop_prompt
+                )
+                answer = self._largest_output["single"].get(name, 0) or self._largest_output[
+                    "loop"
+                ].get(name, 0)
+                row = {
+                    "model": model,
+                    "prompt": prompt,
+                    "cap": max(1, answer),
+                    "holdable": True,
+                    "deadline": made[-1]["deadline"],
+                }
             price = self._admission_price(str(row["model"]), now, row["deadline"])
             decision = self._decide_locked(
                 kind=kind,

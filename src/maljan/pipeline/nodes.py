@@ -1977,7 +1977,9 @@ def announce_started(container: ServiceContainer, stage: Any) -> None:
     meter = _spend_meter(container)
     if meter is not None:
         try:
-            meter.begin_stage()
+            from maljan.core.spend import STAGE_CALL_KINDS
+
+            meter.begin_stage(STAGE_CALL_KINDS.get(str(getattr(stage, "kind", "")), ()))
         except Exception as exc:  # noqa: BLE001 — telemetry never costs a stage
             logger.debug("the spend meter did not hear the stage start (%s).", exc)
     emit(

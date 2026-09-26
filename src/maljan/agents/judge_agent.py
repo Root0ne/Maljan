@@ -1288,6 +1288,7 @@ class JudgeAgent(BudgetMeter):
         slot: Any = None,
         holdable: bool | None = None,
         deadline_s: float | None = None,
+        wait_s: float | None = None,
     ) -> int | None:
         """The spend ceiling's word on one judge call before it is made (``SpendMeter.admit``).
 
@@ -1320,6 +1321,7 @@ class JudgeAgent(BudgetMeter):
                 deadline_s=(
                     call_deadline_of(self.llm, messages) if deadline_s is None else deadline_s
                 ),
+                wait_s=wait_s,
             ),
         )
 
@@ -1664,6 +1666,7 @@ class JudgeAgent(BudgetMeter):
                 conversation,
                 slot=spend_key,
                 holdable=held_binding is not None,
+                wait_s=budget.seconds_left(),
             )
             _hold_the_turn(held_binding, self.llm, held)
             self._publish_questions(conversation, asked)
@@ -1835,6 +1838,11 @@ class JudgeAgent(BudgetMeter):
             _record_the_turns()
             raise
         finally:
+            # A loop a cancellation ended (``JobCancelled``, ``CancelledError``:
+            # not ``Exception``s) made the calls it made too, and its loop's
+            # reservation with the spend meter goes with them. Once only.
+            with contextlib.suppress(Exception):
+                _record_the_turns()
             # In a ``finally`` for the reason the analysts' loop uses one: a
             # mediation that timed out still made the calls it made.
             self._evidence_entries.extend(recorder.entries)

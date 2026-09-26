@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 import pytest
 
 from maljan.analysis.run_summary import spend_lines
-from maljan.core.spend import LOOP_TURN_CALL, SpendCeilingStop, SpendMeter
+from maljan.core.spend import LOOP_TURN_CALL, STAGE_CALL_KINDS, SpendCeilingStop, SpendMeter
 from maljan.llm.context_window import CHARS_PER_TOKEN
 
 FLASH = "deepseek-flash"
@@ -229,4 +229,113 @@ class TestTheKindsStillPlanned:
                 prompt_chars=20_000 * CHARS_PER_TOKEN,
                 cap_tokens=CAP,
             )
+        assert meter.exhausted() is True
+
+
+class TestAWaitEnds:
+    """A call waiting for another's reservation gives up with its job and its loop."""
+
+    def _waiting(self, meter: SpendMeter, **kwargs: object) -> tuple[threading.Thread, dict]:
+        outcome: dict[str, object] = {}
+
+        def second() -> None:
+            started = time.monotonic()
+            try:
+                meter.admit(
+                    kind="loop turn",
+                    model=FLASH,
+                    prompt_chars=20_000 * CHARS_PER_TOKEN,
+                    cap_tokens=CAP,
+                    slot=object(),
+                    **kwargs,  # type: ignore[arg-type]
+                )
+            except SpendCeilingStop as stop:
+                outcome["refused"] = str(stop)
+            outcome["waited"] = time.monotonic() - started
+
+        waiting = threading.Thread(target=second)
+        waiting.start()
+        return waiting, outcome
+
+    def test_it_gives_up_when_the_job_is_cancelled(self) -> None:
+        meter, _first = TestParallelCalls()._two_turns()
+        waiting, outcome = self._waiting(meter, deadline_s=60)
+        time.sleep(0.2)
+        assert waiting.is_alive()
+        meter.close()
+        waiting.join(5)
+        assert not waiting.is_alive()
+        assert "the job was cancelled while it waited" in str(outcome["refused"])
+        assert float(outcome["waited"]) < 5  # type: ignore[arg-type]
+        # Not the spend's refusal: nothing is counted or latched.
+        assert meter.exhausted() is False
+        assert "refused_calls" not in (meter.snapshot() or {})
+
+    def test_it_gives_up_at_its_loop_s_own_clock(self) -> None:
+        meter, _first = TestParallelCalls()._two_turns()
+        waiting, outcome = self._waiting(meter, deadline_s=60, wait_s=0.3)
+        waiting.join(5)
+        assert not waiting.is_alive()
+        assert "refused" in outcome
+        assert float(outcome["waited"]) < 2  # type: ignore[arg-type]
+        assert meter.exhausted() is False
+
+    def test_the_job_s_cancellation_closes_its_meter(self) -> None:
+        from maljan.core.config import Settings
+        from maljan.core.container import ServiceContainer
+
+        container = ServiceContainer(
+            Settings(_env_file=None, llm={"max_spend_usd_per_job": 2.0}), mock=True
+        )
+        meter = container.get_token_ledger().spend
+        assert meter._closed is False
+        container.cancellation.cancel("the operator cancelled the job")
+        assert meter._closed is True
+
+
+class TestAStageSKnownKinds:
+    """A debate stage's first call, refused at its whole cap, does not latch before revisions."""
+
+    def _at_the_debate(self) -> SpendMeter:
+        meter = SpendMeter(2.00, clock=lambda: OFF_PEAK)
+        meter.admit(
+            kind="loop turn", model=FLASH, prompt_chars=20_000 * CHARS_PER_TOKEN, cap_tokens=CAP
+        )
+        meter.settle({"input_tokens": 56_000, "output_tokens": 20_000}, FLASH, "chunk")
+        meter.settle(
+            {"input_tokens": int((1.88 - meter.spent()) / 0.15 * 1e6), "output_tokens": 0},
+            FLASH,
+            LOOP_TURN_CALL,
+        )
+        meter._largest_prompt["single"] = 56_000
+        meter.begin_stage(STAGE_CALL_KINDS["debate"])
+        return meter
+
+    def _refuse_an_unholdable_question(self, meter: SpendMeter) -> None:
+        with pytest.raises(SpendCeilingStop, match="whole 393,216-token cap"):
+            meter.admit(
+                kind="technique question",
+                model=FLASH,
+                prompt_chars=40_000 * CHARS_PER_TOKEN,
+                cap_tokens=CAP,
+                holdable=False,
+            )
+
+    def test_the_revisions_it_will_make_keep_the_job_going(self) -> None:
+        meter = self._at_the_debate()
+        self._refuse_an_unholdable_question(meter)
+        assert meter.exhausted() is False
+
+    def test_without_the_stage_s_kinds_the_same_refusal_latches(self) -> None:
+        meter = self._at_the_debate()
+        meter.begin_stage()
+        self._refuse_an_unholdable_question(meter)
+        assert meter.exhausted() is True
+
+    def test_when_not_even_a_revision_fits_it_latches(self) -> None:
+        meter = self._at_the_debate()
+        meter.settle(
+            {"input_tokens": int(0.118 / 0.15 * 1e6), "output_tokens": 0}, FLASH, LOOP_TURN_CALL
+        )
+        self._refuse_an_unholdable_question(meter)
         assert meter.exhausted() is True

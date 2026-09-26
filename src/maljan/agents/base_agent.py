@@ -3710,7 +3710,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             # what the spend it may use pays for, or not sent, and then the
             # loop's salvage writes the answer from what was gathered.
             held = self._spend_admits(
-                "loop turn", sent, slot=spend_slot, holdable=held_binding is not None
+                "loop turn",
+                sent,
+                slot=spend_slot,
+                holdable=held_binding is not None,
+                wait_s=ledger.seconds_left(),
             )
             if held_binding is not None:
                 _hold_the_turn(held_binding, self.llm, held)
@@ -4521,6 +4525,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         holdable: bool | None = None,
         model: Any = None,
         deadline_s: float | None = None,
+        wait_s: float | None = None,
     ) -> int | None:
         """The spend ceiling's word on one call before it is made (``SpendMeter.admit``).
 
@@ -4549,6 +4554,8 @@ class BaseAnalyst(BudgetMeter, ABC):
                 # The call's own deadline where the caller has one, else the
                 # whole-call deadline its request is sent with.
                 deadline_s=call_deadline_of(target, messages) if deadline_s is None else deadline_s,
+                # How long it may wait for calls in flight: its loop's own time.
+                wait_s=wait_s,
             ),
         )
 
