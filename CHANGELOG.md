@@ -8,6 +8,30 @@ change landed on `main`.
 
 ### Added
 
+- **The platform resolves API hashes and decodes encoded strings, by address.**
+  Two analysis-server tools, run by the triage pack on every PE as its last two
+  steps and shown in the pack every agent reads. `resolve_api_hashes` names the
+  32-bit values a PE holds that are hashes of Windows function names: the
+  named exports of 27 common DLLs are vendored
+  (`data/windows_export_names_v1.json`, generated from the Wine project's DLL
+  spec files by `scripts/knowledge/build_windows_export_names.py`, which
+  records the tag and each spec's sha256), and the algorithms are data
+  (`data/api_hash_algorithms_v1.json`: CRC-32 of the ASCII and UTF-16LE name,
+  ror13 with and without the module-name addition, djb2, FNV-1a, case-folded
+  variants), over function names and a module-name set (each DLL's file name
+  with and without `.dll`, lower and upper case); each reading names its set.
+  Values the caller gives, or the push/mov/cmp immediates in code
+  and the aligned values in data; every reading of a value and every place it
+  stands, with the start of the function the x64 function table puts around
+  it; a value whose algorithm resolves nothing else is a `lone_hits` row.
+  `decode_string_blobs` undoes one key byte, a rising key byte, a repeating
+  key stored in front of the text, a seed-and-length header before a rising
+  key and base64 on top or alone, over the non-executable sections; only text
+  passing a stated readability test is reported, and the results are the
+  decodings some code refers to by address or FLOSS recovered too, each with
+  the function around each reference. The reverser is told to name the
+  function and the text in its findings. Nothing is run or emulated.
+
 - **The operator sets how long the Triage VM runs the sample.**
   `sandbox.triage.analysis_seconds` (empty by default: nothing is sent and
   Triage's own default applies) is sent as the submission's

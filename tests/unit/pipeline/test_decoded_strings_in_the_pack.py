@@ -178,11 +178,16 @@ class TestTheStep:
     def test_a_pe_s_pack_ends_with_the_decoded_strings(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Last, so every id the pack issued before it is the id it always was."""
+        """After every other tool, so every id the pack issued before it is the id it
+        always was; only the platform's own readings of the bytes follow it."""
         _installed(monkeypatch, _answer(ROWS))
         result = _pack(tmp_path)
-        assert result.entries[-1].tool == "floss"
-        assert result.entries[-2].tool == "sandbox_status"
+        assert [entry.tool for entry in result.entries[-4:]] == [
+            "sandbox_status",
+            "floss",
+            "resolve_api_hashes",
+            "decode_string_blobs",
+        ]
         entry = _floss_entry(result)
         assert entry.ok is True
         assert entry.structured["counts"] == {"decoded": 4, "stack": 1, "tight": 0}
@@ -389,7 +394,7 @@ class TestTheNode:
             assert call["environ"][emulated_strings.FLOSS_PATH_ENV] == "/opt/floss/floss"
             job_dir = tmp_path / "staging" / staging.job_directory_name(container.job_key())
             assert Path(call["scratch"]) == job_dir / "floss"
-            assert update["evidence_ledger"][-1]["tool"] == "floss"
+            assert update["evidence_ledger"][-3]["tool"] == "floss"
         finally:
             staging.remove_job_staging(container.job_key())
 

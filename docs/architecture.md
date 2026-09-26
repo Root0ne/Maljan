@@ -369,10 +369,24 @@ an allocation meets first. Otherwise — the first capa run of a worker, which
 has nothing measured yet, a host with a local model loaded beside the worker, a
 container with its 8 GB limit — the two run in turn, and
 `run_summary.triage.floss` says which and why ("beside capa", or "in turn: …").
-Its entry is written last either way, with its own clock, and a run it began
+Its entry is written in its place either way, with its own clock, and a run it began
 within the pack's budget is recorded whatever the clock says by then. Measured
 on PuTTY: 312 s in turn, 183 s beside capa; the pack's process tree peaked at
 1.6 GB and 2.3 GB resident.
+
+After FLOSS, for a PE, the platform's own two readings of the file's bytes, in
+seconds and with nothing run: `resolve_api_hashes` (`tools.api_hashes`), the
+32-bit values the file holds that are hashes of Windows function names under a
+vendored set of published algorithms, each with every reading and every place
+the value stands; and `decode_string_blobs` (`tools.string_blobs`), the text
+its data sections keep encoded under a stated set of generic key schemes, each
+with the code that refers to it and, when FLOSS recovered the same text, FLOSS's
+routine. Both state addresses as offsets from the image base and the function
+around each from the file's own function table (`tools.pe_image`), and neither
+guesses one. The decoder runs after FLOSS so it can read FLOSS's kept result;
+both run after every other step so no earlier id moves. The analysis server
+serves the same two functions (see its README for the algorithms, the schemes
+and the readability test).
 
 The pack states facts and draws no conclusion, and it never fails a job: a
 tool that raises or answers with an error is an entry with `ok=False` and a
@@ -390,6 +404,8 @@ baseline has no triage stage at all.
 line each — `[ev_0001] identity: pe windows, 4,486,656 bytes, …`,
 `[ev_0003] signature: none`, `[ev_0007] yara: 2 hits of 30 rules (…)`,
 `[ev_0008] capa: 6 capabilities (parse PE header @ 0x1a20 0x2b40, …), ATT&CK T1027, T1055 (rule-asserted)`,
+`[ev_0014] resolved hashes: 2 values the file holds name Windows functions or modules (…); all 2 shown: 0x09ce0d4a = kernel32.dll/kernelbase.dll!VirtualAlloc [crc32_ascii] @ 0x1041 (in 0x1000); …`,
+`[ev_0015] decoded blobs: 1 texts decoded from the data sections by the platform's static schemes, nothing run (…); all 1 shown: "open the settings file"@0x3080 [xor8 key 0x9c] referred to at 0x1123 (in 0x1100)`,
 `[ev_0017] reputation: VirusTotal: 31 of 75 engines flag it as malicious, labels Filisto` — cut at
 `reporting.upstream_findings_max_chars` (derived from the served window at
 its default of 0, like a tool answer's cap) with a last line saying how many

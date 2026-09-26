@@ -144,7 +144,7 @@ from maljan.schemas.isr_models import (
     judge_kept_note,
 )
 from maljan.schemas.stix_models import Bundle
-from maljan.tools import knowledge
+from maljan.tools import api_hashes, knowledge, string_blobs
 from maljan.tools.errors import CAPTURES_REMEDIATION, NO_CAPTURE_REMEDIATION
 
 # The distinctive terms of the evaluation key: how the scored sample resolves its
@@ -306,6 +306,20 @@ _TEAM_DOCUMENT_PROMPTS = " ".join(
 )
 
 
+def _analysis_tool_descriptions(*names: str) -> str:
+    """The descriptions the analysis server gives these tools, as every bound agent reads them."""
+    import importlib.util
+    import sys
+
+    path = Path(__file__).resolve().parents[3] / "services" / "analysis-mcp" / "server.py"
+    spec = importlib.util.spec_from_file_location("analysis_mcp_leak_scan", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return " ".join(str(getattr(module, name).__doc__ or "") for name in names)
+
+
 # Everything else a report model is shown on every run, as plain text.
 PROMPTS: dict[str, str] = {
     "example team document prompts": _TEAM_DOCUMENT_PROMPTS,
@@ -406,6 +420,97 @@ PROMPTS: dict[str, str] = {
     "an ask refused for a mutual wait": WAITING_ON_EACH_OTHER_REFUSAL.format(callee="'helper'"),
     "the pack's decoded strings in part": triage_pack.DECODED_STRINGS_ROOM_SENTENCE.format(
         shown=10, total=90, offset=10
+    ),
+    "the pack's resolved hashes and decoded blobs in part": " ".join(
+        [
+            triage_pack.RESOLVED_HASHES_ROOM_SENTENCE.format(shown=10, total=90, offset=10),
+            triage_pack.DECODED_BLOBS_ROOM_SENTENCE.format(shown=10, total=90, offset=10),
+        ]
+    ),
+    "the pack's resolved hashes and decoded blobs lines": " ".join(
+        [
+            triage_pack._resolved_hashes(
+                {
+                    "hits": [
+                        {
+                            "value": "0x00000001",
+                            "readings": [{"algorithm": "a", "name": "N", "dlls": ["d"]}],
+                            "occurrences": [{"rva": "0x1", "function": "0x0"}],
+                        }
+                    ],
+                    "lone_hits": [{"value": "0x00000002", "readings": [], "occurrences": []}],
+                    "total": 1,
+                    "candidates": {"scanned": 3},
+                    "algorithms": ["a"],
+                    "names": {"names": 1, "dlls": 1},
+                }
+            ),
+            triage_pack._resolved_hashes({"hits": [], "total": 0, "candidates": {"given": 1}}),
+            triage_pack._decoded_blobs(
+                {
+                    "results": [
+                        {
+                            "text": "t",
+                            "rva": "0x1",
+                            "scheme": "s",
+                            "parameters": {"key": "0x1"},
+                            "references": [{"at": "0x2", "function": "0x0"}],
+                            "floss": {"function_rva": "0x0", "called_at_rva": "0x2"},
+                        }
+                    ],
+                    "total": 1,
+                    "unreferenced": 1,
+                    "also_recovered_by_floss": 1,
+                }
+            ),
+            triage_pack._decoded_blobs({"results": [], "total": 0}),
+        ]
+    ),
+    "the stated candidate scan and readability test": (
+        f"{api_hashes.SCAN_HEURISTIC} {string_blobs.READABLE_TEST}"
+    ),
+    "the decoded-blobs provenance, recall price and the lone-hits room sentence": " ".join(
+        [
+            triage_pack.DECODED_BLOBS_PROVENANCE,
+            triage_pack.DECODED_BLOBS_RECALL,
+            triage_pack.LONE_HITS_ROOM_SENTENCE,
+        ]
+    ),
+    "the name data's source, license and module set": " ".join(
+        [
+            str(api_hashes.load_export_names().get("source") or ""),
+            str(api_hashes.load_export_names().get("license") or ""),
+            str((api_hashes.load_export_names().get("modules") or {}).get("source") or ""),
+        ]
+    ),
+    "pack lines around real catalogue ids": " ".join(
+        [
+            triage_pack._hash_item(
+                {
+                    "value": "0x00000001",
+                    "readings": [
+                        {"algorithm": entry["id"], "set": "exports", "name": "N", "dlls": ["d"]}
+                        for entry in api_hashes.load_algorithms()
+                    ],
+                    "occurrences": [{"rva": "0x1", "function": "0x0"}],
+                }
+            ),
+            *(
+                triage_pack._blob_item(
+                    {
+                        "text": "t",
+                        "rva": "0x1",
+                        "scheme": scheme,
+                        "parameters": {},
+                        "references": [],
+                    }
+                )
+                for scheme in string_blobs.SCHEMES
+            ),
+        ]
+    ),
+    "the two resolving tools' descriptions": _analysis_tool_descriptions(
+        "resolve_api_hashes", "decode_string_blobs"
     ),
     "a term's example ids and how many more": _term_ids_said(["T1000", "T1001", "T1002"]),
     "run-state budget line of a loop with no limit": budget_line(NO_LIMIT, NO_LIMIT),
@@ -633,9 +738,119 @@ def test_no_example_carries_a_term_the_key_scores(name: str) -> None:
     assert not shared, f"the {name} example carries {shared}"
 
 
+# The tools' own catalogue identifiers. A resolved hash is rendered with the id
+# of the algorithm it resolves under, and a decoded text with the id of its
+# scheme. The catalogues list every algorithm and scheme side by side, all
+# tried alike, so an id says nothing about which one a sample uses: that
+# pairing only ever comes from arithmetic on the sample's bytes. Built from the
+# two vendored catalogues and nothing else
+# (``test_the_catalogue_allowance_is_the_two_catalogues_and_nothing_else``).
+TOOL_CATALOGUE_IDENTIFIERS: frozenset[str] = frozenset(
+    [str(entry["id"]) for entry in api_hashes.load_algorithms()] + list(string_blobs.SCHEMES)
+)
+_CATALOGUE_TOKEN = re.compile(r"[a-z0-9_]+")
+
+# The entries that render tool output, and the one place in them a renderer
+# writes a catalogue id: right after an opening bracket, as the bracketed
+# algorithm of a hash reading (``!Name [crc32_ascii]``) or the leading scheme
+# token of a decoded blob (``"text"@0x3010 [xor8 key 0x9c]``). The allowance
+# applies there and nowhere else; every other entry, and every other word of
+# these, is scanned as it stands, so a catalogue id written as a word in any
+# instruction or sentence is still a scored term.
+RENDERED_TOOL_OUTPUT: frozenset[str] = frozenset(
+    {
+        "the pack's resolved hashes and decoded blobs lines",
+        "pack lines around real catalogue ids",
+    }
+)
+_RENDERED_ID = re.compile(r"\[([a-z0-9_]+)(?=[\] ,])")
+
+
+def _without_rendered_identifiers(text: str) -> str:
+    """``text`` with each catalogue id a renderer put after an opening bracket taken out."""
+    return _RENDERED_ID.sub(
+        lambda match: "[" if match.group(1) in TOOL_CATALOGUE_IDENTIFIERS else match.group(0),
+        text,
+    )
+
+
+def _scanned(name: str) -> str:
+    """The text of one ``PROMPTS`` entry as the scan reads it."""
+    text = PROMPTS[name].lower()
+    return _without_rendered_identifiers(text) if name in RENDERED_TOOL_OUTPUT else text
+
+
+def test_the_catalogue_allowance_is_the_two_catalogues_and_nothing_else() -> None:
+    algorithm_ids = {str(entry["id"]) for entry in api_hashes.load_algorithms()}
+    assert TOOL_CATALOGUE_IDENTIFIERS == algorithm_ids | set(string_blobs.SCHEMES)
+    assert all(_CATALOGUE_TOKEN.fullmatch(identifier) for identifier in TOOL_CATALOGUE_IDENTIFIERS)
+    assert RENDERED_TOOL_OUTPUT <= set(PROMPTS)
+
+
+def test_an_id_is_allowed_only_where_a_renderer_puts_one() -> None:
+    blob = triage_pack._blob_item(
+        {"text": "t", "rva": "0x1", "scheme": "base64", "parameters": {}, "references": []}
+    ).lower()
+    reading = triage_pack._hash_item(
+        {
+            "value": "0x00000001",
+            "readings": [{"algorithm": "crc32_ascii", "set": "exports", "name": "n", "dlls": []}],
+            "occurrences": [],
+        }
+    ).lower()
+    assert "base64" not in _without_rendered_identifiers(blob)
+    assert "crc32" not in _without_rendered_identifiers(reading)
+    # The same ids written as words are not renderer output.
+    sentence = "the replies are base64 encoded, then read with crc32_ascii"
+    assert "base64" in _without_rendered_identifiers(sentence)
+    assert "crc32" in _without_rendered_identifiers(sentence)
+    assert "crc32" in _without_rendered_identifiers("[crc32 over the names]")
+
+
+def test_a_bare_id_in_an_instruction_entry_is_flagged(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(PROMPTS, "an instruction naming a scheme", "Decode each reply as base64.")
+    with pytest.raises(AssertionError, match="base64"):
+        test_no_contract_prompt_or_instruction_carries_a_term_the_key_scores(
+            "an instruction naming a scheme"
+        )
+
+
+def test_no_catalogue_description_reaches_a_model(tmp_path: Path) -> None:
+    """The algorithms' descriptions are developer-facing data and are not scanned.
+
+    That holds only while no model reads them: not in a tool's answer, not in a
+    server's tool descriptions, not in a pack line. If one ever does, this
+    fails, and the description is then scanned as prose like any other.
+    """
+    import struct
+    import zlib
+
+    from tests.unit.tools.synthetic_pe import SyntheticPE
+
+    image = SyntheticPE()
+    for offset, name in ((0x10, b"VirtualAlloc"), (0x20, b"CreateFileW")):
+        image.put("data", offset, struct.pack("<I", zlib.crc32(name)))
+    target = tmp_path / "s.exe"
+    target.write_bytes(image.build())
+    answer = api_hashes.resolve_api_hashes(str(target))
+    assert answer["hits"], "the answer the check reads resolves something"
+    seen = " ".join(
+        [
+            json.dumps(answer),
+            json.dumps(string_blobs.decode_string_blobs(str(target))),
+            triage_pack._resolved_hashes(answer),
+            _analysis_tool_descriptions(
+                "resolve_api_hashes", "decode_string_blobs", "capabilities"
+            ),
+        ]
+    ).lower()
+    for entry in api_hashes.load_algorithms():
+        assert str(entry["description"]).lower() not in seen, entry["id"]
+
+
 @pytest.mark.parametrize("name", sorted(PROMPTS))
 def test_no_contract_prompt_or_instruction_carries_a_term_the_key_scores(name: str) -> None:
-    text = PROMPTS[name].lower()
+    text = _scanned(name)
     shared = [term for term in KEY_TERMS if term in text]
     assert not shared, f"the {name} carries {shared}"
 
