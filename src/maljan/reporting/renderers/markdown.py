@@ -1098,6 +1098,18 @@ class MarkdownRenderer:
                         ]
                     )
                 lines.append("")
+        if static.api_capabilities_resolved:
+            from maljan.tools.knowledge import RESOLVED_AT_RUNTIME
+
+            ordered = sorted(static.api_capabilities_resolved.items(), key=lambda kv: -kv[1])
+            cited = _ids(static.api_capabilities_resolved_evidence_ids)
+            lines.append(
+                f"**Capability profile of the names {RESOLVED_AT_RUNTIME}** (not imports"
+                + (f"; {cited}" if cited else "")
+                + "): "
+                + ", ".join(f"{_one_line(cat)} ×{count}" for cat, count in ordered)
+            )
+            lines.append("")
 
         if static.export_rows or static.exports:
             lines.extend([_plain_heading("Exports"), ""])
@@ -3077,10 +3089,32 @@ def _rule_words(hit: dict[str, Any]) -> str:
     matched = ", ".join(f"`{a}`" for a in (hit.get("matched_apis") or [])[:6]) or "-"
     rule = str(hit.get("rule") or hit.get("name") or "").strip()
     # capa names the namespace a rule lives in; the knowledge table names the
-    # imports its rule matched.
-    where = f"namespace {matched}" if hit.get("source") == "capa" else f"imports {matched}"
+    # imports its rule matched, and the names it matched that the run resolved
+    # at runtime from stored values apart from them: those are not imports.
+    where = f"namespace {matched}" if hit.get("source") == "capa" else _matched_names(hit)
     said = (f"rule {rule} ({hit.get('source') or 'rule'}), " if rule else "") + where
     return said + f"; base rate {hit.get('benign_rate') or 'not measured'}"
+
+
+def _matched_names(hit: dict[str, Any]) -> str:
+    """What a knowledge-table rule matched: its imports, and its names resolved at runtime."""
+    from maljan.tools.knowledge import RESOLVED_AT_RUNTIME
+
+    matched = [str(a) for a in (hit.get("matched_apis") or [])]
+    at_runtime = [a for a in matched if a in {str(r) for r in (hit.get("resolved_apis") or [])}]
+    imported = [a for a in matched if a not in at_runtime]
+    if not at_runtime:
+        return f"imports {_quoted_names(imported)}"
+    if not imported:
+        return f"matched only names {RESOLVED_AT_RUNTIME}, no import: {_quoted_names(at_runtime)}"
+    return (
+        f"imports {_quoted_names(imported)}; names {RESOLVED_AT_RUNTIME} "
+        f"{_quoted_names(at_runtime)}"
+    )
+
+
+def _quoted_names(names: list[str]) -> str:
+    return ", ".join(f"`{a}`" for a in names[:6]) or "-"
 
 
 def _with_rules(procedure: str, rules: list[dict[str, Any]]) -> str:

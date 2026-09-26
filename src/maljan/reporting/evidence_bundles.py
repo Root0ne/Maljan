@@ -568,11 +568,18 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     if section == "cli_flags":
         return {"capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1]))}
     if section == "string_resolution":
-        return {
+        resolution: dict[str, Any] = {
             "static_import_count": len(static.imports),
             "interesting_string_count": len(static.interesting_strings),
             "capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1])),
         }
+        if static.api_capabilities_resolved:
+            # The names the run resolved at runtime, apart from the imports:
+            # the section is about how the sample finds them.
+            resolution["capability_profile_of_names_resolved_at_runtime_not_imports"] = dict(
+                sorted(static.api_capabilities_resolved.items(), key=lambda kv: -kv[1])
+            )
+        return resolution
     return {"capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1]))}
 
 

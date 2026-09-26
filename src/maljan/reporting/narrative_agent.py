@@ -389,8 +389,24 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
         rule_hits = [
             h for h in report.static.api_technique_hits if h.get("source") == "api_capability"
         ]
+        from maljan.tools.knowledge import RESOLVED_AT_RUNTIME
+
+        if report.static.api_capabilities_resolved:
+            ordered_resolved = sorted(
+                report.static.api_capabilities_resolved.items(), key=lambda kv: -kv[1]
+            )
+            cited_resolved = ", ".join(report.static.api_capabilities_resolved_evidence_ids)
+            lines.append(
+                f"  Names {RESOLVED_AT_RUNTIME}, not imports: "
+                + ", ".join(f"{cat} x{count}" for cat, count in ordered_resolved)
+                + (f" [{cited_resolved}]" if cited_resolved else "")
+            )
         for hit in rule_hits:
-            apis = ", ".join(str(a) for a in (hit.get("matched_apis") or []))
+            at_runtime = [str(a) for a in (hit.get("resolved_apis") or [])]
+            apis = ", ".join(
+                f"{a} ({RESOLVED_AT_RUNTIME})" if str(a) in at_runtime else str(a)
+                for a in (hit.get("matched_apis") or [])
+            )
             cite = f" [{hit['evidence_id']}]" if hit.get("evidence_id") else ""
             # The rule's own label, because a row is a rule: two rules for one
             # technique carry the catalogue's name twice and rendered as two

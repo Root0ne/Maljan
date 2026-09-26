@@ -413,32 +413,6 @@ def static_from_ledger(
                     }
                 )
 
-    # The capability profile is what the knowledge table said about the import
-    # set when the pack asked (``tools.knowledge.api_capability``): a category
-    # per API and the technique rules that list it. Counted here and cited by
-    # the entry's id. Which rules fired is ``api_capability_hits``' answer, the
-    # same one corroboration reads.
-    for entry, data in _payloads(ledger, "api_capability"):
-        rows = [row for row in data.get("capabilities") or [] if isinstance(row, dict)]
-        for row in rows:
-            category = str(row.get("category") or "").strip()
-            if category:
-                static.api_capabilities[category] = static.api_capabilities.get(category, 0) + 1
-        for category, rate in (data.get("behaviour_rates") or {}).items():
-            share = (rate or {}).get("seen_on_benign_percent") if isinstance(rate, dict) else None
-            if isinstance(share, int | float) and not isinstance(share, bool):
-                static.api_capability_rates[str(category)] = float(share)
-        corpus = (data.get("corpora") or {}).get("benign")
-        if isinstance(corpus, str) and corpus and not static.api_capability_corpus:
-            static.api_capability_corpus = corpus
-        for hit in api_capability_hits(data):
-            static.api_technique_hits.append(
-                {**hit, "source": "api_capability", "evidence_id": entry.id}
-            )
-        if rows:
-            seen = True
-            static.api_capabilities_evidence_ids.append(entry.id)
-
     for artifact in _artifacts(isrs, "imports"):
         for row in _rows_of(artifact):
             if len(row) >= 2:
@@ -451,6 +425,59 @@ def static_from_ledger(
                 static.interesting_strings.append(
                     StringIOC(value=row[1], kind=_string_kind(row[0]))  # type: ignore[arg-type]
                 )
+
+    # The capability profile is what the knowledge table said about the names
+    # it was asked about (``tools.knowledge.api_capability``): a category per
+    # API and the technique rules that list it. Counted here and cited by the
+    # entry's id. Which rules fired is ``api_capability_hits``' answer, the
+    # same one corroboration reads. Read after the import table is, because a
+    # name is counted as an import only when the import table holds it: a name
+    # the run resolved at runtime from a stored value is counted apart
+    # (``_names_resolved_at_runtime``) and every rule row says which it matched.
+    resolved_keys = {_canonical(name) for name in _names_resolved_at_runtime(ledger, static)}
+    imported_keys = {_canonical(row.function) for row in static.imports if row.function}
+    for entry, data in _payloads(ledger, "api_capability"):
+        rows = [row for row in data.get("capabilities") or [] if isinstance(row, dict)]
+        # The names the caller said it resolved, and the ones the ledger's own
+        # resolutions name; an import-table name is an import either way.
+        said = {_canonical(n) for n in (data.get("resolved_at_runtime_from_hashes") or [])}
+        runtime = (said | resolved_keys) - imported_keys
+        imported_rows = False
+        resolved_rows = False
+        for row in rows:
+            name = str(row.get("api") or "")
+            at_runtime = _canonical(name) in runtime
+            if at_runtime:
+                row_counts = static.api_capabilities_resolved
+                resolved_rows = True
+            else:
+                row_counts = static.api_capabilities
+                imported_rows = True
+            category = str(row.get("category") or "").strip()
+            if category:
+                row_counts[category] = row_counts.get(category, 0) + 1
+        for category, rate in (data.get("behaviour_rates") or {}).items():
+            share = (rate or {}).get("seen_on_benign_percent") if isinstance(rate, dict) else None
+            if isinstance(share, int | float) and not isinstance(share, bool):
+                static.api_capability_rates[str(category)] = float(share)
+        corpus = (data.get("corpora") or {}).get("benign")
+        if isinstance(corpus, str) and corpus and not static.api_capability_corpus:
+            static.api_capability_corpus = corpus
+        for hit in api_capability_hits(data):
+            matched = [str(a) for a in hit.get("matched_apis") or []]
+            matched_at_runtime = [a for a in matched if _canonical(a) in runtime]
+            row_hit = {**hit, "source": "api_capability", "evidence_id": entry.id}
+            if matched_at_runtime:
+                row_hit["resolved_apis"] = matched_at_runtime
+            else:
+                row_hit.pop("resolved_apis", None)
+            static.api_technique_hits.append(row_hit)
+        if rows:
+            seen = True
+            if imported_rows:
+                static.api_capabilities_evidence_ids.append(entry.id)
+            if resolved_rows:
+                static.api_capabilities_resolved_evidence_ids.append(entry.id)
 
     if not seen:
         return None
@@ -473,6 +500,39 @@ def static_from_ledger(
         ),
     )
     return static
+
+
+def _canonical(name: str) -> str:
+    """A function name compared the way an import table and a resolver both spell it."""
+    from maljan.analysis.api_capability_db import canonical_name
+
+    return canonical_name(str(name or ""))
+
+
+def _names_resolved_at_runtime(ledger: list[LedgerEntry], static: StaticAnalysis) -> set[str]:
+    """The function names the run resolved from stored values and the import table lacks.
+
+    Read from every ``resolve_api_hashes`` answer in the ledger: each reading
+    of a value from the export-name set is a function name the program can
+    look up at runtime by that value. A name the import table also holds is an
+    import, and stays one. With no import table recorded, every such name is
+    counted as resolved, which is what the ledger says of it.
+    """
+    imported = {_canonical(row.function) for row in static.imports if row.function}
+    found: set[str] = set()
+    for _entry, data in _payloads(ledger, "resolve_api_hashes"):
+        for hit in data.get("hits") or []:
+            if not isinstance(hit, dict):
+                continue
+            for reading in hit.get("readings") or []:
+                if not isinstance(reading, dict):
+                    continue
+                if str(reading.get("set") or "exports") != "exports":
+                    continue
+                name = str(reading.get("name") or "").strip()
+                if name and _canonical(name) not in imported:
+                    found.add(name)
+    return found
 
 
 def _once[T](rows: list[T], key: Any) -> list[T]:

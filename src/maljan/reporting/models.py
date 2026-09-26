@@ -250,6 +250,12 @@ class StaticAnalysis(BaseModel):
     # from, so the profile line in the report points at rows a reader can open.
     api_capabilities: dict[str, int] = Field(default_factory=dict)
     api_capabilities_evidence_ids: list[str] = Field(default_factory=list)
+    # The same profile over the names the run resolved at runtime from stored
+    # values rather than read in the import table (``resolve_api_hashes``),
+    # counted apart so a function the program looks up at runtime is never
+    # printed as an import; empty on a report stored before the field existed.
+    api_capabilities_resolved: dict[str, int] = Field(default_factory=dict)
+    api_capabilities_resolved_evidence_ids: list[str] = Field(default_factory=list)
     # {behaviour_category: share of a named benign corpus the category appears
     # on}, recorded from the same answer. A count of imports in a category is
     # not a fact about the sample until a reader knows that ``execution`` is on
