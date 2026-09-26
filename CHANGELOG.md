@@ -26,9 +26,10 @@ change landed on `main`.
   the slot a runtime pointer is read from) and argument position, read
   statically by `tools.call_sites` from an x64 `lea` into an argument register
   or an x86 push or stack store; and on x64 `output_passed_to`, the next call
-  in the function that receives that call's output (an out-buffer frame slot,
-  else the return value), with how it was followed. Absent wherever the code
-  does not show it. The triage pack's decoded-string line and the IOC
+  in the function that receives the frame slot that call was given as another
+  argument, else its return value, said as a fact about the slot or the
+  register, with nothing followed past it. Absent wherever the code does not
+  show it. The triage pack's decoded-string line and the IOC
   provenance say both.
   `pe_image` reads the import table.
 

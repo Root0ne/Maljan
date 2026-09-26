@@ -187,6 +187,10 @@ class TestARuleMatchOnRuntimeNamesIsStatedAndNotCounted:
         (mapping,) = [m for m in report.ttp_mappings if m.technique_id == "T1055"]
         # Two analyst layers named it: corroborated, whatever their words say.
         assert mapping.is_corroborated is True
+        assert (
+            "published, corroborated (named by 2 analyst layers; their statements are listed "
+            "below the table)"
+        ) in markdown
         assert "Techniques a rule matched only on names resolved at runtime" in markdown
         for text in STATEMENTS:
             assert text in markdown

@@ -195,7 +195,13 @@ def coverage_of(claim: ClaimInForce, body: _Body) -> ClaimNotDiscussed | None:
         missing = [written for key, written in names.items() if not body.names(key)]
         if not missing:
             return None
-        return _row(claim, missing=missing, named=len(names), counted="names")
+        return _row(
+            claim,
+            missing=missing,
+            carried=len(names) - len(missing),
+            named=len(names),
+            counted="names",
+        )
     words = {word.lower() for word in _WORD_RE.findall(claim.claim)}
     carried = sum(1 for word in words if word in body.lowered)
     if words and carried * 2 > len(words):

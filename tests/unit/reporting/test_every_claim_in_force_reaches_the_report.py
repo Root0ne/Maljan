@@ -95,6 +95,8 @@ class TestTheRunsClaimsAgainstItsBody:
         gating = by_label["static claim 15"]
         assert "FUN_0x68e8" in gating.missing
         assert gating.counted == "names"
+        # The names it names that the body does name, counted.
+        assert gating.carried == gating.named - len(gating.missing) > 0
 
     def test_the_report_prints_them_in_their_own_section(self) -> None:
         report = _run_report()

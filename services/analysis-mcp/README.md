@@ -206,13 +206,19 @@ before the call, an undecodable byte, the function's end, a write to the
 argument register, another stack move for a pushed argument, a call through a
 register, or no function table around the reference leave it absent. That
 call is usually the program's own decoding routine, and it receives the
-encoded bytes. After that call, the output is followed to the next call in the same function
-that receives it (`output_passed_to`, x64): the one frame slot whose address
-the call was given as another argument, else its return value in `rax`,
-tracked through registers and frame slots, through unconditional jumps and
-along the fall-through of conditional ones (said), with the consumer, the
-argument position and how it was followed; absent at a return, an undecodable
-byte, a jump back, the function's end or a stack or frame pointer write. On the two x64 launchers vendored with this project's
+encoded bytes. After that call, the walk follows to the next call in the same function that
+receives one of two things (`output_passed_to`, x64): the one frame slot whose
+address the call was given as another argument, else its return value in `rax`.
+It is said as a fact about the slot or the register ("the frame slot [rsp+0xa0],
+given to that call as argument 2, is then argument 2 of the call at …"; "that
+call's return value in rax is then …"), never as what the first call does with
+it, and nothing is followed past that later call. The walk tracks registers and
+frame slots, ends tracking of a slot any store overlaps (sized by the store's
+width, SSE and VEX stores included; within 16 bytes where the width cannot be
+read), follows unconditional jumps and falls through conditional ones (said),
+and is absent at a return, an undecodable byte, a jump back, the function's end
+or a stack or frame pointer write.
+On the two x64 launchers vendored with this project's
 Python environment every function in the function table decodes exactly to its
 end, and every join checked against `objdump -d` agrees. Measured on 54 benign PEs on this project's host
 (launcher and runtime binaries, DirectX and Wine-built system DLLs, the five

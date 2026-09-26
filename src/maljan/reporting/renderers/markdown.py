@@ -1274,7 +1274,7 @@ class MarkdownRenderer:
                     ", ".join(mapping.contributing_layers) or "-",
                     _stated(mapping.confidence, ""),
                     "published"
-                    + (", corroborated" if mapping.is_corroborated else "")
+                    + _corroborated_words(mapping, folded)
                     + (f"; {ctx.rule_only[tid]}" if tid in ctx.rule_only else ""),
                     ", ".join(
                         dict.fromkeys(
@@ -3059,9 +3059,7 @@ def _attack_row(
     elif cell.not_published:
         status = f"claimed, not published: {_truncate(cell.not_published, 200)}"
     else:
-        status = "published" + (
-            ", corroborated" if mapping is not None and mapping.is_corroborated else ""
-        )
+        status = "published" + _corroborated_words(mapping, rules)
         rule_only = ctx.rule_only.get(cell.technique_id)
         if rule_only:
             status += f"; {rule_only}"
@@ -3120,6 +3118,24 @@ def _resolved_only(hit: dict[str, Any]) -> bool:
     matched = [str(a) for a in (hit.get("matched_apis") or [])]
     resolved = {str(a) for a in (hit.get("resolved_apis") or [])}
     return bool(matched) and all(name in resolved for name in matched)
+
+
+def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
+    """``, corroborated`` for a row two analyst layers named, or ``""``.
+
+    A technique a rule matched only on runtime-resolved names has its analysts'
+    statements listed under the table; its row points there, so a reader of the
+    row alone does not take the word for more than a count of layers.
+    """
+    if mapping is None or not mapping.is_corroborated:
+        return ""
+    if rules and all(_resolved_only(hit) for hit in rules):
+        layers = len([lyr for lyr in mapping.contributing_layers if lyr != "judge"])
+        return (
+            f", corroborated (named by {layers} analyst layers; their statements are listed "
+            "below the table)"
+        )
+    return ", corroborated"
 
 
 def _resolved_only_lines(

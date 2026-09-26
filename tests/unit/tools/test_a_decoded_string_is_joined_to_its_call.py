@@ -358,13 +358,15 @@ class TestTheDecodersOutputIsFollowedToItsConsumer:
         then = answer["output_passed_to"]
         assert then["callee"] == {"function": hex(CONSUMER)}
         assert (then["argument"], then["register"]) == (4, "r9")
-        assert then["followed"] == (
-            "the frame slot [rsp+0x40] the call was given as argument 2, on the path where "
-            "every conditional jump falls through"
-        )
+        assert then["followed"] == "the frame slot [rsp+0x40], given to that call as argument 2,"
+        assert then["fall_through"] is True
         said = call_sites.passed_to_words(answer)
-        assert "that call's output (the frame slot [rsp+0x40]" in said
-        assert f"is argument 4 of the call at {then['call_at']} to the function at" in said
+        assert (
+            "; the frame slot [rsp+0x40], given to that call as argument 2, is then argument 4 "
+            f"of the call at {then['call_at']} to the function at {hex(CONSUMER)}, on the path "
+            "where every conditional jump falls through; it is not followed past that call"
+        ) in said
+        assert "output" not in said
 
     def test_the_return_value_moved_into_an_argument_register(self, tmp_path: Path) -> None:
         image, code = self._image()
@@ -380,7 +382,13 @@ class TestTheDecodersOutputIsFollowedToItsConsumer:
         assert answer is not None
         then = answer["output_passed_to"]
         assert then["callee"]["import"] == "KERNEL32.dll!OutputDebugStringA"
-        assert (then["argument"], then["followed"]) == (1, "the call's return value in rax")
+        assert (then["argument"], then["followed"]) == (1, "that call's return value in rax")
+        said = call_sites.passed_to_words(answer)
+        assert (
+            "; that call's return value in rax is then argument 1 of the call at "
+            f"{then['call_at']} to KERNEL32.dll!OutputDebugStringA; it is not followed past "
+            "that call"
+        ) in said
 
     def test_a_return_before_any_call_states_no_consumer(self, tmp_path: Path) -> None:
         image, code = self._image()
@@ -406,6 +414,49 @@ class TestTheDecodersOutputIsFollowedToItsConsumer:
         answer = call_sites.passed_to(loaded, _site(loaded, site))
 
         assert answer is not None and "output_passed_to" not in answer
+
+    def _slot_then(self, tmp_path: Path, overwrite: bytes) -> dict | None:
+        """The slot stored, ``overwrite`` run, the slot loaded into r9 and a call."""
+        image, code = self._image()
+        code.raw(b"\x48\x8d\x54\x24\x40")  # lea rdx, [rsp+0x40]
+        site = code.lea("rcx", STRING)
+        code.call(DECODER)
+        code.raw(b"\x48\x8d\x44\x24\x40")  # lea rax, [rsp+0x40]
+        code.raw(b"\x48\x89\x44\x24\x28")  # mov [rsp+0x28], rax
+        code.raw(overwrite)
+        code.raw(b"\x4c\x8b\x4c\x24\x28")  # mov r9, [rsp+0x28]
+        code.call(CONSUMER)
+        code.raw(b"\xc3")
+        loaded = _load(image, tmp_path)
+        answer = call_sites.passed_to(loaded, _site(loaded, site))
+        assert answer is not None
+        return answer.get("output_passed_to")
+
+    def test_a_store_beside_the_slot_leaves_it_tracked(self, tmp_path: Path) -> None:
+        # mov [rsp+0x30], rbx: the next eight bytes, not the slot's.
+        then = self._slot_then(tmp_path, b"\x48\x89\x5c\x24\x30")
+        assert then is not None and then["argument"] == 4
+
+    def test_an_sse_store_over_the_slot_ends_its_tracking(self, tmp_path: Path) -> None:
+        # movups [rsp+0x20], xmm0: sixteen bytes over the slot at +0x28.
+        assert self._slot_then(tmp_path, b"\x0f\x11\x44\x24\x20") is None
+
+    def test_a_vex_store_over_the_slot_ends_its_tracking(self, tmp_path: Path) -> None:
+        # vmovdqu [rsp+0x28], xmm0.
+        assert self._slot_then(tmp_path, b"\xc5\xfa\x7f\x44\x24\x28") is None
+
+    def test_a_narrower_store_inside_the_slot_ends_its_tracking(self, tmp_path: Path) -> None:
+        # mov dword [rsp+0x2c], eax: the slot's upper half.
+        assert self._slot_then(tmp_path, b"\x89\x44\x24\x2c") is None
+
+    def test_a_byte_store_inside_the_slot_ends_its_tracking(self, tmp_path: Path) -> None:
+        # mov byte [rsp+0x29], 0.
+        assert self._slot_then(tmp_path, b"\xc6\x44\x24\x29\x00") is None
+
+    def test_a_load_from_the_slot_does_not_end_its_tracking(self, tmp_path: Path) -> None:
+        # mov rbx, [rsp+0x28]: read only.
+        then = self._slot_then(tmp_path, b"\x48\x8b\x5c\x24\x28")
+        assert then is not None and then["argument"] == 4
 
     def test_the_frame_slot_overwritten_before_the_load_states_no_consumer(
         self, tmp_path: Path

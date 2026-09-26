@@ -924,8 +924,9 @@ class RecoveredValue(BaseModel):
     sites: list[str] = Field(default_factory=list)
     # The calls the decoder joined a use of the text to, each in the words of
     # ``call_sites.passed_to_words`` ("the address of its encoded bytes is
-    # argument 1 of the call at … ; that call's output (…) is argument 2 of the
-    # call at …"); empty where it joined none, or on a record stored before it.
+    # argument 1 of the call at …; the frame slot …, given to that call as
+    # argument 2, is then argument 2 of the call at …; it is not followed past
+    # that call"); empty where it joined none, or on a record stored before it.
     passed_to: list[str] = Field(default_factory=list)
 
 

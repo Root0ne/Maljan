@@ -489,6 +489,33 @@ PROMPTS: dict[str, str] = {
                                         "call_at": "0xa",
                                         "callee": {"function": "0x20"},
                                         "argument": 1,
+                                        "address_of": "text",
+                                        "output_passed_to": {
+                                            "call_at": "0xc",
+                                            "callee": {"import": "D.dll!F"},
+                                            "argument": 3,
+                                            "followed": (
+                                                "the frame slot [rsp+0x40], given to that "
+                                                "call as argument 2,"
+                                            ),
+                                            "fall_through": True,
+                                        },
+                                    },
+                                },
+                                {
+                                    "at": "0x5",
+                                    "passed_to": {
+                                        "call_at": "0xd",
+                                        "callee": {"function": "0x20"},
+                                        "argument": 1,
+                                        "address_of": "blob",
+                                        "output_passed_to": {
+                                            "call_at": "0xe",
+                                            "callee": {"slot": "0x18"},
+                                            "argument": 1,
+                                            "followed": "that call's return value in rax",
+                                            "fall_through": False,
+                                        },
                                     },
                                 },
                             ],
@@ -502,6 +529,14 @@ PROMPTS: dict[str, str] = {
             ),
             triage_pack._decoded_blobs({"results": [], "total": 0}),
         ]
+    ),
+    "the pack's capability line for names resolved at runtime": triage_pack._api_capability(
+        {
+            "capabilities": [
+                {"api": "N", "category": "c", "obtained": knowledge.RESOLVED_AT_RUNTIME}
+            ],
+            "resolved_at_runtime_from_hashes": ["N"],
+        }
     ),
     "the stated candidate scan and readability test": (
         f"{api_hashes.SCAN_HEURISTIC} {string_blobs.READABLE_TEST}"

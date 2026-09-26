@@ -33,16 +33,20 @@ What counts, and nothing else:
   the slot's address when the table has none there (a pointer the program
   fills at runtime). A call through a register, or through any other operand,
   has no callee this reading can state, and nothing is stated.
-* **The output, followed (x64).** After that call, its output is followed to
-  the next call in the same function that receives it (``output_passed_to``):
-  the one frame slot whose address the call was given as another argument
+* **The next call, followed (x64).** After that call, the walk follows to the
+  next call in the same function that receives it (``output_passed_to``): the
+  one frame slot whose address the call was given as another argument
   (``lea r, [rsp+d]`` or ``[rbp+d]`` in the straight run of code before the
-  call), else its return value in ``rax``. The walk tracks the registers and
-  frame slots holding the output's address or value, follows unconditional
-  jumps and falls through conditional ones (and says so), and stops with
-  nothing stated at a return, an undecodable byte, a jump back, the
-  function's end, or a write to the stack or frame pointer. The answer names
-  the consumer, the argument position and how the output was followed.
+  call), else its return value in ``rax``. What is stated is a fact about the
+  slot or the register ("the frame slot [rsp+0xa0], given to that call as
+  argument 2, is then argument 2 of the call at …"), never what the first call
+  does with it, and nothing is followed past that later call. The walk tracks
+  the registers and frame slots holding the slot's address or the value, ends
+  tracking of a frame slot any store overlaps (by the store's width; within 16
+  bytes where the width cannot be read), follows unconditional jumps and falls
+  through conditional ones (and says so), and stops with nothing stated at a
+  return, an undecodable byte, a jump back, the function's end, or a write to
+  the stack or frame pointer.
 
 A pointer passed on the x64 stack, a consumer in another function, or a second
 hop (the output of the consumer) are not read: the answer is absent rather
@@ -479,8 +483,10 @@ def passed_to_words(joined: Any) -> str:
 
     What is stated is what the code shows: the address a reference loads is the
     address of the text's encoded bytes, and the call it is passed to is named
-    as such; where the output of that call was followed to a later call, that
-    call, and how it was followed.
+    as such; where a frame slot that call was given, or its return value, was
+    followed to a later call, that call and what was followed, said as a fact
+    about the slot or the register and never as what the first call does with
+    it; and that nothing is followed past that later call.
     """
     said = _call_words(joined)
     if not said:
@@ -494,7 +500,14 @@ def passed_to_words(joined: Any) -> str:
     then = joined.get("output_passed_to")
     then_said = _call_words(then)
     if then_said and isinstance(then, dict):
-        out += f"; that call's output ({then.get('followed')}) is {then_said}"
+        path = (
+            ", on the path where every conditional jump falls through"
+            if then.get("fall_through")
+            else ""
+        )
+        out += (
+            f"; {then.get('followed')} is then {then_said}{path}; it is not followed past that call"
+        )
     return out
 
 
@@ -653,9 +666,130 @@ def _frame_ref(code: bytes, at: int) -> tuple[int, int, int, int, int] | None:
     return rex, op, reg, base, displacement
 
 
-# One-byte opcodes that read a memory operand and write nothing there: compare
-# and test forms.
-_READS_ONLY = frozenset({0x38, 0x39, 0x3A, 0x3B, 0x84, 0x85})
+# One-byte opcodes whose memory operand is only read: compares and tests, loads,
+# the register-destination forms of the arithmetic, lea.
+_ONE_BYTE_READS = frozenset(
+    {op for base in range(0, 0x40, 8) for op in (base + 2, base + 3)}
+    | {0x38, 0x39, 0x63, 0x69, 0x6B, 0x84, 0x85, 0x8A, 0x8B, 0x8D}
+)
+# Two-byte opcodes whose memory operand is only read: SSE loads and arithmetic
+# into a register, conditional moves, zero and sign extension, bit tests.
+_TWO_BYTE_READS = (
+    frozenset({0x10, 0x12, 0x14, 0x15, 0x16, 0x28, 0x2A, 0x2C, 0x2D, 0x2E, 0x2F})
+    | frozenset(range(0x40, 0x70))
+    | frozenset({0x70, 0x74, 0x75, 0x76, 0xA3, 0xAF, 0xB6, 0xB7, 0xB8, 0xBC, 0xBD, 0xBE, 0xBF})
+    | frozenset({0xC2, 0xC4, 0xC5, 0xC6})
+    | (frozenset(range(0xD0, 0xFF)) - {0xD6, 0xE7})
+)
+# VEX-encoded stores, by opcode map: the rest of a VEX instruction's memory
+# operand is a source.
+_VEX_STORES = {
+    1: frozenset({0x11, 0x13, 0x17, 0x29, 0x2B, 0x7E, 0x7F, 0xD6, 0xE7}),
+    2: frozenset({0x2E, 0x2F, 0x8E}),
+    3: frozenset({0x14, 0x15, 0x16, 0x17, 0x19, 0x1D, 0x39}),
+}
+# The span treated as written when a store's width cannot be read.
+_UNREAD_WIDTH_REACH = 16
+
+
+def _frame_store(code: bytes, at: int) -> tuple[int, int, int | None] | None:
+    """``(base, displacement, width)`` of a store to ``[rsp+d]`` or ``[rbp+d]``, or ``None``.
+
+    Any encoding: legacy prefixes, REX, the one-byte, 0F, 0F38 and 0F3A maps
+    and VEX. An instruction whose memory operand is only read is no store. The
+    width is ``None`` where the operand's width is not read here.
+    """
+    i, prefixes = at, set()
+    while i < len(code) and code[i] in _LEGACY_PREFIXES:
+        prefixes.add(code[i])
+        i += 1
+    rex = 0
+    if i < len(code) and 0x40 <= code[i] <= 0x4F:
+        rex = code[i]
+        i += 1
+    if i >= len(code):
+        return None
+    first = code[i]
+    width: int | None
+    if first in (0xC4, 0xC5):
+        if i + 3 >= len(code):
+            return None
+        table = 1 if first == 0xC5 else code[i + 1] & 0x1F
+        wide = bool((code[i + 1] if first == 0xC5 else code[i + 2]) & 0x04)
+        i += 2 if first == 0xC5 else 3
+        op = code[i]
+        if op not in _VEX_STORES.get(table, frozenset()):
+            return None
+        width = 32 if wide else 16
+        i += 1
+    elif first == 0x0F:
+        if i + 2 >= len(code):
+            return None
+        op = code[i + 1]
+        i += 2
+        if op in (0x38, 0x3A):
+            return _frame_operand(code, i + 1, rex, None) if i < len(code) else None
+        if op in _TWO_BYTE_PLAIN or 0x80 <= op <= 0x8F:
+            return None
+        if op in _TWO_BYTE_READS or (op == 0x7E and 0xF3 in prefixes):
+            return None
+        width = 1 if 0x90 <= op <= 0x9F else (16 if op < 0x80 or op >= 0xD0 else None)
+    else:
+        op = first
+        i += 1
+        if op not in _ONE_BYTE_MODRM or op in _ONE_BYTE_READS:
+            return None
+        reg = (code[i] >> 3) & 7 if i < len(code) else 0
+        if op in (0x80, 0x81, 0x82, 0x83) and reg == 7:
+            return None
+        if op in (0xF6, 0xF7) and reg != 2 and reg != 3:
+            return None
+        if op == 0xFF and reg in (2, 3, 4, 5, 6):
+            return None
+        if op in (0x88, 0x80, 0x82, 0x86, 0xC0, 0xC6, 0xD0, 0xD2, 0xF6, 0xFE):
+            width = 1
+        elif 0xD8 <= op <= 0xDF:
+            width = None
+        else:
+            width = 8 if rex & 8 else 2 if 0x66 in prefixes else 4
+    return _frame_operand(code, i, rex, width)
+
+
+def _frame_operand(
+    code: bytes, i: int, rex: int, width: int | None
+) -> tuple[int, int, int | None] | None:
+    """The ``[rsp+d]``/``[rbp+d]`` memory operand whose ModRM byte is at ``i``, with ``width``."""
+    if i >= len(code) or rex & 1:
+        return None
+    modrm = code[i]
+    mod, rm = modrm >> 6, modrm & 7
+    if mod == 3:
+        return None
+    i += 1
+    if rm == 4:
+        if i >= len(code) or code[i] != 0x24 or rex & 2:
+            return None
+        base = 4
+        i += 1
+    elif rm == 5 and mod != 0:
+        base = 5
+    else:
+        return None
+    size = {0: 0, 1: 1, 2: 4}[mod]
+    if i + size > len(code):
+        return None
+    displacement = int.from_bytes(code[i : i + size], "little", signed=True) if size else 0
+    return base, displacement, width
+
+
+def _overlaps(slot: tuple[int, int], store: tuple[int, int, int | None]) -> bool:
+    """Whether a store may write any byte of an eight-byte frame slot."""
+    base, displacement, width = store
+    if slot[0] != base:
+        return False
+    if width is None:
+        return abs(slot[1] - displacement) < _UNREAD_WIDTH_REACH
+    return slot[1] < displacement + width and displacement < slot[1] + 8
 
 
 def output_passed_to(image: Image, call_rva: int, skip: int) -> dict[str, Any] | None:
@@ -697,12 +831,12 @@ def output_passed_to(image: Image, call_rva: int, skip: int) -> dict[str, Any] |
     if buffer is not None:
         register, base, displacement = buffer
         followed = (
-            f"the frame slot [{_REGISTER_NAMES[base]}{displacement:+#x}] the call was given "
-            f"as argument {_X64_ARGUMENTS[register]}"
+            f"the frame slot [{_REGISTER_NAMES[base]}{displacement:+#x}], given to that call "
+            f"as argument {_X64_ARGUMENTS[register]},"
         )
         answer = _follow(code, section.rva, bounds, after, set(), (base, displacement))
     if answer is None:
-        followed = "the call's return value in rax"
+        followed = "that call's return value in rax"
         answer = _follow(code, section.rva, bounds, after, {0}, None)
     if answer is None:
         return None
@@ -710,14 +844,13 @@ def output_passed_to(image: Image, call_rva: int, skip: int) -> dict[str, Any] |
     callee = _callee(image, callee_rva, instruction)
     if callee is None:
         return None
-    if branched:
-        followed += ", on the path where every conditional jump falls through"
     return {
         "call_at": hex(callee_rva),
         "callee": callee,
         "argument": _X64_ARGUMENTS[register],
         "register": _X64_REGISTER_NAMES[register],
         "followed": followed,
+        "fall_through": branched,
     }
 
 
@@ -766,6 +899,10 @@ def _follow(
             return None
         before = set(held)
         held -= set(instruction.writes)
+        # Any store that may write a byte of a tracked slot ends its tracking.
+        store = _frame_store(code, at)
+        if store is not None:
+            slots = {slot for slot in slots if not _overlaps(slot, store)}
         ref = _frame_ref(code, at)
         moved = _register_move(code, at)
         if ref is not None:
@@ -774,19 +911,10 @@ def _follow(
             wide = bool(rex & 8)
             if op == 0x8D and wide and place == buffer:
                 held.add(reg)
-            elif op == 0x89 and wide:
-                if reg in before:
-                    slots.add(place)
-                else:
-                    slots.discard(place)
+            elif op == 0x89 and wide and reg in before:
+                slots.add(place)
             elif op == 0x8B and wide and place in slots:
                 held.add(reg)
-            elif (
-                place in slots
-                and op not in _READS_ONLY
-                and not (op in (0x80, 0x81, 0x83) and (reg & 7) == 7)
-            ):
-                slots.discard(place)
         elif moved is not None and moved[1] in before:
             held.add(moved[0])
         if not held and not slots and buffer is None:
