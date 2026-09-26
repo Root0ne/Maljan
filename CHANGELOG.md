@@ -2314,8 +2314,11 @@ change landed on `main`.
   Responses API, as a `tool_result` block on `anthropic`, as a tool reply the
   Gemini client pairs with the right call, and as a `tool` message on
   `ollama`. A reply that was recorded is never said missing: where a chat
-  shape needs it right after its turn and it stands further on, it is moved
-  to its call. The call stays in the turn as the model wrote it, and a
+  shape needs it right after its turn and it stands further on with only
+  platform messages between, it is moved to its call; after a later model
+  turn it is neither moved nor replaced, and a warning names the call. The
+  completion never changes who speaks last in the request. The call stays in
+  the turn as the model wrote it, and a
   well-formed history is sent as it was. The evaluation harness's frontier
   comparison arm, built outside the providers, is not completed.
 - **A guest's desktop process is not the sample.** Where Triage's `orig` mark

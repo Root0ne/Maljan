@@ -247,14 +247,25 @@ how many.
 | `openai`, chat completions (every `compat`) | a `tool` message after the turn; the turn's tool messages are put in the order of its calls, after DeepSeek's reasoning passback |
 | `openai`, Responses API (a model the client sends there: a `codex` or `pro` model, or `reasoning`, `include`, `text`, `truncation` or `context_management` set) | a `function_call_output` item right after the run of call and output items the call stands in, in call order; a call counts as answered wherever its output stands |
 | `ollama` | the same `tool` message as chat completions, in the shape the Ollama client writes its own |
-| `anthropic` | a `tool_result` block at the front of the next user turn, after the results it already has and before its text; a turn with no user turn after it gets one holding only the replies |
+| `anthropic` | a `tool_result` block at the front of the next user turn, after the results it already has and before its text; a turn followed by another assistant turn gets a user turn holding only the replies |
 | `gemini` | a tool reply in the conversation before the client serializes it, placed so the turn's `functionResponse` parts come out in call order: Gemini's parts carry no id and pair by name and order. A call counts as answered when any tool reply in the conversation carries its id, the client's own rule, so a request the client already builds right is sent unchanged |
 
 A reply that was recorded is never said missing. Chat completions, Ollama and
-Anthropic pair a call only with the replies right after its turn, so a reply
-recorded further on, where it answers no call of the turn it follows, is moved
-to its call (an Anthropic user turn it leaves empty is left out; the API joins
-the turns around it), and the warning says how many were moved.
+Anthropic pair a call only with the replies right after its turn. A reply
+recorded further on, where it answers no call of the turn it follows, is
+moved to its call when only platform messages (a nudge, a user turn) stand
+between them, and a warning names the calls moved. When a model turn stands
+between them, the reply is not moved: that would put the model's later words
+after a result it had not seen when it wrote them. Nothing is written for that
+call either; it is sent as the client built it, the provider may refuse the
+request, and a warning names the call. Anthropic's client joins every reply
+and user message between two assistant turns into one user turn, so there a
+reply standing elsewhere is always after a model turn and is never moved.
+
+The completion never changes who speaks last in a request: a history that ends
+on the model's turn of calls would end on their replies once completed, so it
+is sent as the client built it, and a warning names the calls left without a
+reply.
 
 The Anthropic, Gemini and Ollama clients do not write a call whose arguments
 did not parse into the request at all, so there it needs no reply; a
