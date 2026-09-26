@@ -2253,7 +2253,9 @@ change landed on `main`.
   force; a block that stated no confidence is counted apart and asked about,
   as before. Every heading opens a block, so a claim is never read with the
   next claim's CONFIDENCE, TECHNIQUE or EVIDENCE; list-marker headings count;
-  field lines are read only at a line's start. The DISPUTES section opens at
+  fields are read in the block's tail, from the first line-start field label,
+  where a label also counts after whitespace (EVIDENCE, CONFIDENCE and
+  TECHNIQUE on one line are all read), and never from the claim sentence. The DISPUTES section opens at
   its case-sensitive label or heading, a one-line `DISPUTES: NONE` opens none,
   and claims quoted under it are recorded when none of the answer's own was
   read. The reason is kept on the answer and carried only for the answers in

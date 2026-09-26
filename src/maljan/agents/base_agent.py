@@ -1386,23 +1386,50 @@ _BLOCK_CLAIM_RE = re.compile(
     r"CLAIM:\s*(.+?)(?=\s*\n" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|TECHNIQUE):|\Z)",
     re.DOTALL,
 )
-# The field lines are read where a line begins, so a claim whose own text
-# says "TECHNIQUE:" or "CONFIDENCE:" mid-sentence does not lend it a field.
+# The fields are read in a block's tail: from the first field label that
+# begins a line to the block's end. The claim sentence above the tail never
+# lends a field, so a claim that says "TECHNIQUE: flags" mid-sentence keeps
+# its real line. Inside the tail a label also counts after whitespace, since
+# models write a claim's fields on one line as well as on three
+# ("EVIDENCE: [ev_0309]. CONFIDENCE: 0.65 TECHNIQUE: T1071.001").
+_TAIL_START_RE = re.compile(
+    r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|(?i:TECHNIQUE)):", re.MULTILINE
+)
+_INLINE = r"(?:^|(?<=[\s*_>#]))"
 _BLOCK_EVIDENCE_RE = re.compile(
-    r"^"
-    + LINE_PREFIX
-    + r"EVIDENCE:\s*(.+?)(?=\s*\n"
-    + LINE_PREFIX
-    + r"(?:CONFIDENCE|TECHNIQUE):|\Z)",
+    _INLINE + r"EVIDENCE:\s*(.+?)(?=\s+" + LINE_PREFIX + r"(?:CONFIDENCE|(?i:TECHNIQUE)):|\Z)",
     re.DOTALL | re.MULTILINE,
 )
-_BLOCK_CONFIDENCE_RE = re.compile(r"^" + LINE_PREFIX + r"CONFIDENCE:\s*([\d.]+)", re.MULTILINE)
-# The whole TECHNIQUE line as written: one id is a claimed technique, and
-# anything more (a qualifier, a negation, a second id) is the analyst's line,
-# kept and asked about rather than read for the first id in it.
-_BLOCK_TECHNIQUE_LINE_RE = re.compile(
-    r"^" + LINE_PREFIX + r"TECHNIQUE:[ \t]*([^\n]*)", re.IGNORECASE | re.MULTILINE
+_LINE_CONFIDENCE_RE = re.compile(
+    r"^" + LINE_PREFIX + r"CONFIDENCE:\s*(?:\*\*)?\s*([\d.]+)", re.MULTILINE
 )
+_BLOCK_CONFIDENCE_RE = re.compile(_INLINE + r"CONFIDENCE:\s*(?:\*\*)?\s*([\d.]+)", re.MULTILINE)
+# The whole TECHNIQUE value as written: one id is a claimed technique, and
+# anything more (a qualifier, a negation, a second id) is the analyst's line,
+# kept and asked about rather than read for the first id in it. It ends at the
+# line's end or at a CONFIDENCE or EVIDENCE label written after it.
+_LINE_TECHNIQUE_RE = re.compile(
+    r"^" + LINE_PREFIX + r"(?i:TECHNIQUE):[ \t]*(.*?)(?=[ \t]+(?:CONFIDENCE|EVIDENCE):|$)",
+    re.MULTILINE,
+)
+_BLOCK_TECHNIQUE_LINE_RE = re.compile(
+    _INLINE + r"TECHNIQUE:[ \t]*(.*?)(?=[ \t]+(?:CONFIDENCE|EVIDENCE):|$)", re.MULTILINE
+)
+
+
+def _field_tail(block: str) -> str:
+    """The part of a block its fields are read from: from the first line-start label on."""
+    start = _TAIL_START_RE.search(block)
+    return block[start.start() :] if start else ""
+
+
+def _field(
+    tail: str, at_line_start: re.Pattern[str], anywhere: re.Pattern[str]
+) -> re.Match[str] | None:
+    """A field in the tail: its label at a line start first, else after whitespace."""
+    return at_line_start.search(tail) or anywhere.search(tail)
+
+
 _ONE_TECHNIQUE_RE = re.compile(r"T\d{4}(?:\.\d{3})?", re.IGNORECASE)
 # What a TECHNIQUE line says to claim none.
 _NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
@@ -1629,13 +1656,14 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
         # call while it is naming an artifact puts the block here rather than
         # in the claim. Cleaned to nothing it means what a missing EVIDENCE
         # line means.
-        evidence_match = _BLOCK_EVIDENCE_RE.search(block)
+        tail = _field_tail(block)
+        evidence_match = _BLOCK_EVIDENCE_RE.search(tail)
         evidence_text = (
             strip_tool_call_scaffolding(evidence_match.group(1)).strip() if evidence_match else ""
         )
         if require_evidence and not evidence_text:
             continue
-        confidence = _stated_confidence(_BLOCK_CONFIDENCE_RE.search(block))
+        confidence = _stated_confidence(_field(tail, _LINE_CONFIDENCE_RE, _BLOCK_CONFIDENCE_RE))
         if confidence is None:
             without_confidence += 1
             continue
@@ -1644,7 +1672,7 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
         # placeholder is ``attck.unknown_id``'s question, asked with feedback
         # and recorded; a line that is more than one id is kept whole and
         # asked about, never cut to its first id.
-        technique_match = _BLOCK_TECHNIQUE_LINE_RE.search(block)
+        technique_match = _field(tail, _LINE_TECHNIQUE_RE, _BLOCK_TECHNIQUE_LINE_RE)
         technique_id, technique_line = read_technique_line(
             technique_match.group(1) if technique_match else ""
         )

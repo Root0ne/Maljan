@@ -1240,8 +1240,11 @@ naming the analyst, the round and both numbers. The judge node carries it as a
 degradation reason only from the answers in force, so an answer a retry or a
 later round replaced leaves it in the log. Every heading opens a block, so no
 claim is read with another's CONFIDENCE, TECHNIQUE or EVIDENCE, and a heading
-behind a list marker (`- CLAIM:`, `1. CLAIM:`) counts; the field lines are read
-only where a line begins. The DISPUTES section opens at its label,
+behind a list marker (`- CLAIM:`, `1. CLAIM:`) counts. A block's fields are
+read in its tail, which begins at the first EVIDENCE, CONFIDENCE or TECHNIQUE
+label that starts a line; inside the tail a label also counts after
+whitespace, so fields written on one line are all read, while a label inside
+the claim sentence above the tail never is. The DISPUTES section opens at its label,
 case-sensitive, with its colon (`DISPUTES:`) or as a Markdown heading; a label
 that says there is none on its own line (`DISPUTES: NONE`, `N/A`, a dash)
 opens no section, and prose beginning "Disputes …" is prose. Claims under the
