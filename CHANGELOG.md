@@ -2324,6 +2324,44 @@ change landed on `main`.
 
 ### Fixed
 
+- **An analyst's table never enters a measured block.** An analyst artifact of
+  imports, IOCs, processes or persistence was merged into the import table,
+  the string table, the process tree and the persistence mechanisms, so one
+  run's §5.2 printed "_Measured:_ 23 static imports" against the tool's 5,
+  §7 listed names resolved from hashes as `KERNEL32.dll` imports with an
+  import capability profile, and §8 said "imports `CreateRemoteThread`" and
+  counted the match as corroboration. The projections now read tool output
+  only; the analyst's table stays in Appendix A under a line naming who
+  listed it and saying no measured table, count, rule match or capability
+  profile reads it. **Upgrading:** `static_from_ledger`,
+  `dynamic_from_ledger` and `persistence_from_ledger` take no analyst
+  reports; a persistence row only an analyst listed is no longer a §5.4 row,
+  an IOC table row or a Sigma selection.
+- **A model's list never overrides what the sandbox says about a value.** An
+  analyst's endpoints or IOC artifact published every sandbox conversation
+  the sample's process tree did not make, a public resolver included, and a value
+  only an artifact listed published as `analyst` with nothing else asked. A
+  sandbox row the tree did not make now publishes only when the judge keeps
+  it, and the reason names the analysts that listed it; a public DNS resolver
+  is never published, whoever names it; a listing never lifts a row a tool
+  recorded; and a value only an analyst listed reads `no: named only by an
+  analyst` unless the judge named it. One rule, read by §9, STIX, `/iocs`
+  and the YARA, Suricata and Sigma drafts.
+- **A value the platform decoded is a candidate row.** A C2 URL FLOSS and
+  `decode_string_blobs` both recovered and no model named had no row in §9,
+  `/iocs`, STIX or Suricata, not even a `no:` one, and Appendix A printed it
+  live. Each domain, address and URL the recovery record holds is now a
+  network row of the string sweep's source, decided by the existing emulation
+  gate (refused under a Benign or unstated verdict and for a well-known
+  host) with its recovering tool and entry stated, and every recovered value
+  is defanged wherever the Markdown prints it.
+- **An observed step needs an observation of the sample.** The flow voice
+  check counted any non-empty flow table or capture as a sandbox observation,
+  so a C2 step citing a capture the sandbox did not attribute to the sample
+  passed as "observed in sandbox". A network entry now counts only when the
+  network block holds a sandbox row attributed to the sample's process tree;
+  process, file and registry entries keep their meaning.
+
 - **A program name given to a decompiler reaches it as written.** The path
   guard counted an argument named `program` as a file path and rewrote the
   sample's file name there into the path the server was handed. Ghidra's tools

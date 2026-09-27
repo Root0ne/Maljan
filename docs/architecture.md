@@ -2708,6 +2708,19 @@ is assembled from what the run gathered rather than recomputed beside it:
   a producer for it. The sample's reputation lookup is one
   measured sentence in §2 ("VirusTotal: 52 of 75 engines flag it as
   malicious"), from the engine counts `ledger_report` lifts into rows.
+* **A model's table is never a measured row.** The import table, the string
+  table, the process tree and the persistence mechanisms are projected from
+  tool output only (`ledger_projection.static_from_ledger`,
+  `dynamic_from_ledger`, `persistence_from_ledger` take no analyst reports);
+  §5.2's import count, §7's import table and capability profile, §8's rule
+  matches, the IOC table, the corroboration corpus and the detection drafts
+  read them. One run's analyst listed names it had resolved from hashes as
+  `KERNEL32.dll` imports, and the report counted 23 imports against the
+  tool's 5 and matched rules on them as imports. An analyst's table of
+  imports, IOCs, processes or persistence stays in Appendix A under its kind,
+  with a line naming the analysts who listed it
+  (`markdown.analyst_list_note`, from the section's `artifact:` source) and
+  saying no measured table, count, rule match or capability profile reads it.
 * **The proof sits beside the prose.** §5.1 and §5.2 print every capa rule the
   run recorded in the anti-analysis, obfuscation and encryption namespaces, and
   in the runtime-linking, PE-export, hashing and checksum namespaces (with the
@@ -2762,9 +2775,9 @@ is assembled from what the run gathered rather than recomputed beside it:
   row states those processes (`outside_processes`, `marked_only_processes`,
   `file_only_processes`, as `<image> (procid N)`), and the publish rule's
   `no:` and the IOC table's context name them with both facts. A disputed
-  row, like any unattributed one, is published only when a model keeps it.
+  row, like any unattributed one, is published only when the judge keeps it.
   **CAPE, REST and mock reports carry no process on a flow**, so every address
-  they record is unattributed and is published only when a model keeps it. The
+  they record is unattributed and is published only when the judge keeps it. The
   network block is projected from the job's whole report, never from a paged
   view; the in-process sandbox views answer every row and page on request, and
   their answers go through the MCP toolkit's own guardrail
@@ -2773,9 +2786,9 @@ is assembled from what the run gathered rather than recomputed beside it:
   `offset` and `limit`), and an address somebody watched is kept whatever its class and answered
   with `no:` when it cannot be published. The sandbox view marks public DNS
   resolvers, and the network block carries the attribution, the resolver fact,
-  `kept_by` and `mentioned_by` (an analyst's claim holding the value). A value
-  is kept by an analyst's artifact (`ledger_projection.kept_network_values`)
-  of a keeping kind only — `endpoints`, `network`, `iocs`, `c2` and their plain
+  `kept_by` (the analysts whose artifact lists the value) and `mentioned_by`
+  (an analyst's claim holding the value). A value is listed by an analyst's
+  artifact (`ledger_projection.kept_network_values`) of a keeping kind only — `endpoints`, `network`, `iocs`, `c2` and their plain
   spellings (`network_iocs`, `c2_endpoints`, `indicators`); a table of
   contacted hosts is an observation and keeps nothing. A row has one type
   cell: the column a heading names `type`, or else the first short cell (at
@@ -2799,17 +2812,35 @@ is assembled from what the run gathered rather than recomputed beside it:
   table, the export, `/iocs` and the judge's values alike) holds back a
   sandbox address the tree did not make, and a well-known benign name the
   guest resolved — Windows resolves through its DNS service, so a name is
-  judged by what it is — until a model keeps it as an indicator: an analyst's
-  artifact or the judge's indicator. A claim that mentions the value keeps
+  judged by what it is — until the judge's indicator keeps it. **A model's
+  list never overrides what the sandbox says about a value.** An analyst's
+  artifact listing the value is named in the reason and publishes nothing
+  (one run's endpoints artifact published every conversation the guest had,
+  the public resolver included), and a claim that mentions the value keeps
   nothing (one run's analysts named two background addresses in claims calling
-  them noise). Otherwise the row reads `no: <reason>, and no model kept it as
-  an indicator`, naming any claim that only mentioned it, with the resolver and
-  AS facts in the reason and the table's context. The drafts read the table's
+  them noise). The row reads `no: <reason>, and no model kept it as an
+  indicator`, or, when an artifact lists it, `no: <reason>; <artifact> lists
+  it, and a model's list publishes nothing the platform did not see, and the
+  judge did not keep it as an indicator`, naming any claim that only mentioned
+  it, with the AS fact in the reason and the table's context. **A public DNS
+  resolver is never published**, whoever lists or names it, the judge
+  included: the reason states the sandbox's fact, that it is a public resolver
+  and who listed it. **A value's standing comes from where the platform saw
+  it.** A row the sandbox view holds is decided by the sandbox rule above, a
+  row a tool read out of the file (the string sweep, a recovering tool) by
+  that source; a listing never lifts a row a tool recorded
+  (`ledger_projection._DOMAIN_SOURCE_RANK` ranks `analyst` below `strings`),
+  and a row an artifact created takes a tool's source as soon as a tool
+  records the value. A value only an analyst listed (source `analyst`) is
+  asked the string sweep's questions and otherwise reads `no: named only by
+  an analyst (<artifact>); no tool in this run saw it, and the judge did not
+  keep it as an indicator`; the judge naming it keeps the standing it had
+  before, so it is published. The drafts read the table's
   answer, the Sigma selection included. **A published URL carries its name.**
   The host of every URL the rule publishes — the network block's and the
   judge's — follows the URL's decision (`published_url_hosts`,
   `in_published_url`), except a well-known benign host, which is published
-  only when a model keeps the host itself; the table, the export and `/iocs`
+  only when the judge keeps the host itself; the table, the export and `/iocs`
   add it as a domain row and indicator when nothing else did. The export
   carries every row the table publishes, whatever their number. The rule's report-wide lookups
   are built once per table, export or feed (`one_reading`).
@@ -2858,10 +2889,19 @@ is assembled from what the run gathered rather than recomputed beside it:
   address classes, the reputation half, the URL host denylist) and is not a
   well-known benign host; the reason reads "recovered by emulation (decoded
   strings), ev_NNNN" or "decoded from the file's own bytes
-  (decode_string_blobs), ev_NNNN", the recovering entry's own id. It gives
-  standing to a row the sandbox, the sweep, an analyst or the judge recorded,
-  and creates no row of its own: a recovered indicator nobody named is not in
-  the table and is not published. Hiding a host behind encoding is a
+  (decode_string_blobs), ev_NNNN", the recovering entry's own id. **A
+  recovered value is a candidate row whether or not a model named it.** The
+  builder reads each domain, address and URL the record holds, as the
+  recovering tool spelled it (`stix_renderer.recovered_network_values`), into
+  the network block with the string sweep's source
+  (`network_from_ledger(recovered=)`), classified by the reader an analyst's
+  endpoint cell is read with; the rule above decides it like any other row, so
+  a value a model did not name is a `yes` or a `no:` row in the table, `/iocs`,
+  STIX and the drafts rather than absent. One live run's second decoded C2
+  URL, recovered by FLOSS and the decoder, had no row anywhere and was printed
+  live in Appendix A. The Markdown's defang index takes every value the
+  record holds, so a recovered value is defanged wherever it is printed, a
+  FLOSS or decoder table included. Hiding a host behind encoding is a
   deliberate act benign software rarely performs, while a plain string in a
   binary is routinely benign, so a value only the static string sweep read
   stays unpublished — and so does a value a tool recovered that the sweep
@@ -3043,8 +3083,13 @@ is assembled from what the run gathered rather than recomputed beside it:
   run recorded; §6 is then tagged Measured, and no "no persistence observed"
   line is printed. The execution-flow check reads the same thing: the sandbox
   entries an *observed* step may cite are those whose answer recorded
-  something (`evidence_bundles.sandbox_entry_ids`), so a step citing a mock's
-  empty answer is asked about and, if kept, printed with the
+  something (`evidence_bundles.sandbox_entry_ids`), and a network answer (the
+  flow table, the capture) only when the network block holds a sandbox row
+  the sandbox attributed to the sample's process tree: without one it holds
+  the guest's traffic, and one run marked a C2 step observed on an
+  unattributed capture. Process, file and registry answers keep their meaning.
+  So a step citing a mock's empty answer or an unattributed capture is asked
+  about and, if kept, printed with the
   `report.flow_voice` note; a run with no observation prints that note beside
   every step marked observed. The narrative and composer prompts say an empty sandbox
   answer is not an execution. What the model writes anyway is printed as
