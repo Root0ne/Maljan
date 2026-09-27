@@ -2450,14 +2450,18 @@ def _add_emulated(
     entry: str,
     provenance: dict[str, list[RecoveredValue]] | None = None,
     how: RecoveredValue | None = None,
+    spelled: dict[str, str] | None = None,
 ) -> None:
-    value = str(text or "").strip().lower()
+    written = str(text or "").strip()
+    value = written.lower()
     if not value:
         return
     keys = [value.rstrip(".")]
     host = url_host(value)
     if host:
         keys.append(host)
+    if spelled is not None:
+        spelled.setdefault(keys[0], written.rstrip("."))
     for key in keys:
         values.setdefault(key, entry)
         if provenance is not None and how is not None:
@@ -2554,6 +2558,7 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
     """
     values: dict[str, str] = {}
     provenance: dict[str, list[RecoveredValue]] = {}
+    spelled: dict[str, str] = {}
     plain_texts: list[tuple[str, str]] = []
     floss_whole = strings_whole = decoder_whole = False
     saw_floss = saw_strings = saw_decoder = False
@@ -2571,7 +2576,7 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
                     # The whole string, as before, and each indicator the one
                     # reader finds in it, as for the decoder's texts.
                     for value in [row.get("string"), *decoded_indicators(row.get("string"))]:
-                        _add_emulated(values, value, entry_id, provenance, how)
+                        _add_emulated(values, value, entry_id, provenance, how, spelled)
         elif tool == DECODER_TOOL:
             saw_decoder = True
             rows = _rows_of(structured, "results")
@@ -2587,7 +2592,7 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
                 ]
                 for text in texts:
                     for value in decoded_indicators(text):
-                        _add_emulated(values, value, entry_id, provenance, how)
+                        _add_emulated(values, value, entry_id, provenance, how, spelled)
         elif tool == "strings":
             saw_strings = True
             rows = _rows_of(structured, "strings")
@@ -2628,45 +2633,18 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
                 or key in decoded_indicators(key)
             )
         },
+        spelled={key: spelled[key] for key in kept if key in spelled},
     )
 
 
-def recovered_network_values(ledger: Iterable[Any] | None, record: EmulatedStrings) -> list[str]:
+def recovered_network_values(record: EmulatedStrings) -> list[str]:
     """Each domain, address and URL the record holds, as the recovering tool spelled it.
 
-    Read from the same FLOSS and static decoder entries, through the same
-    reader (:func:`decoded_indicators`), that :func:`emulation_from_ledger`
-    built ``record`` from; a value is returned when its folded key is one the
-    record's ``recovered_by`` holds, so a value the string sweep also read
-    (held out as plain) is not. The record folds case to match values; a URL's
-    path is case-sensitive, so the tool's own spelling is what a row carries.
+    Read from the record :func:`emulation_from_ledger` built: every value of
+    its ``recovered_by`` (a value the string sweep also read is held out as
+    plain and is not one), in the spelling the tool wrote (``spelled``).
     """
-    wanted = set(record.recovered_by)
-    out: list[str] = []
-    for entry in ledger or ():
-        tool = str(getattr(entry, "tool", "") or "").rsplit("__", 1)[-1]
-        structured = getattr(entry, "structured", None)
-        texts: list[Any] = []
-        if tool == "floss":
-            texts = [
-                row.get("string")
-                for row in _rows_of(structured, "strings")
-                if isinstance(row, dict) and str(row.get("kind") or "").lower() in _EMULATED_KINDS
-            ]
-        elif tool == DECODER_TOOL:
-            for row in _rows_of(structured, "results"):
-                if isinstance(row, dict):
-                    texts.append(row.get("text"))
-                    texts.extend(
-                        layer.get("text")
-                        for layer in row.get("layers") or []
-                        if isinstance(layer, dict)
-                    )
-        for text in texts:
-            for value in decoded_indicators(text):
-                if value.strip().lower().rstrip(".") in wanted and value not in out:
-                    out.append(value)
-    return out
+    return [record.spelled.get(key, key) for key in record.recovered_by]
 
 
 # Why a record read back from a stored report is partial: it holds only the

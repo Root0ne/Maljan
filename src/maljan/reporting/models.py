@@ -942,7 +942,10 @@ class EmulatedStrings(BaseModel):
     (value to the sweep's entry). ``recovered_by`` lists, for each value in
     ``values``, every tool that recovered it and where; a record stored before
     it existed has none, and its values are FLOSS's. ``partial`` says why the
-    record may not be the run's whole, or is empty.
+    record may not be the run's whole, or is empty. ``spelled`` maps each value
+    to the spelling the recovering tool wrote first: the keys are folded to
+    match values, and a URL's path is case-sensitive, so a row the builder
+    makes of a value carries the tool's spelling.
     """
 
     model_config = _STRICT_CONFIG
@@ -951,6 +954,7 @@ class EmulatedStrings(BaseModel):
     plain: dict[str, str] = Field(default_factory=dict)
     partial: str = ""
     recovered_by: dict[str, list[RecoveredValue]] = Field(default_factory=dict)
+    spelled: dict[str, str] = Field(default_factory=dict)
 
 
 class ClaimNotDiscussed(BaseModel):

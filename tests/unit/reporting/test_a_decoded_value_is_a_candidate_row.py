@@ -19,8 +19,12 @@ from typing import Any
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport
 from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.reporting.renderers.stix_renderer import emulation_kwargs, publish_answer
+from maljan.reporting.renderers.stix_renderer import (
+    emulation_from_ledger,
+    recovered_network_values,
+)
 from maljan.schemas.evidence import LedgerEntry
+from maljan.schemas.isr_models import AgentISR, Artifact
 
 C2 = "relay7.example.net"
 C2_URL = f"https://{C2}/Gate/Poll.php"
@@ -73,14 +77,28 @@ def _strings() -> LedgerEntry:
     )
 
 
-def _build(ledger: list[LedgerEntry], verdict: str = "Malware") -> MalwareReport:
+def _named(url: str) -> dict[str, Any]:
+    return {
+        "network": AgentISR(
+            agent_id="network",
+            domain="network",
+            artifacts=[
+                Artifact(kind="endpoints", rows=[["url", url]], evidence_ids=[], source="network")
+            ],
+        )
+    }
+
+
+def _build(
+    ledger: list[LedgerEntry], verdict: str = "Malware", isrs: dict[str, Any] | None = None
+) -> MalwareReport:
     return MalwareReportBuilder(
         file_hash="a" * 64,
         file_name="fixture.bin",
         sample_path=None,
         sandbox_report={},
         reports={},
-        isr_reports={},
+        isr_reports=isrs or {},
         stix_output={"objects": []},
         run_summary={},
         discussion_history=[],
@@ -110,13 +128,16 @@ class TestADecodedURLNoModelNamed:
         assert "decode_string_blobs, ev_0020" in row.recovered_by
         assert _row(report, C2).published == "yes"
 
-    def test_it_is_answered_exactly_as_a_floss_value_with_the_same_facts(self) -> None:
-        report = _build([_strings(), _floss(C2_URL)])
+    def test_it_is_answered_exactly_as_the_same_value_an_analyst_named(self) -> None:
+        """The path that gave a recovered value a row before: an analyst's endpoints table."""
+        ledger = [_strings(), _floss(C2_URL), _decoder(C2_URL)]
+        unnamed = _build(ledger)
+        named = _build(ledger, isrs=_named(C2_URL))
 
-        facts = emulation_kwargs(report, "url", C2_URL)
-        expected = publish_answer("url", C2_URL, "strings", **facts)
-        assert facts["recovered"].startswith("recovered by emulation (decoded strings), ev_0012")
-        assert _row(report, C2_URL).published == expected == "yes"
+        for value in (C2_URL, C2):
+            one, other = _row(unnamed, value), _row(named, value)
+            assert (one.published, one.recovered_by) == (other.published, other.recovered_by)
+        assert _row(unnamed, C2_URL).published == "yes"
 
     def test_under_a_benign_verdict_it_is_refused_with_the_reason(self) -> None:
         report = _build([_strings(), _floss(C2_URL)], verdict="Benign")
@@ -136,3 +157,11 @@ class TestADecodedURLNoModelNamed:
         appendix = markdown[markdown.index("## Appendix A") :]
         assert C2 not in appendix
         assert "relay7[.]example[.]net" in appendix
+
+
+class TestTheRecordKeepsTheToolsSpelling:
+    def test_a_recovered_url_keeps_the_case_its_tool_wrote(self) -> None:
+        record = emulation_from_ledger([_strings(), _floss(C2_URL)])
+
+        assert record.spelled[C2_URL.lower()] == C2_URL
+        assert C2_URL in recovered_network_values(record)

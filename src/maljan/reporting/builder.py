@@ -168,7 +168,7 @@ class MalwareReportBuilder:
             self.evidence_ledger,
             self.isr_reports,
             sandbox_report=self.sandbox_report,
-            recovered=recovered_network_values(self.evidence_ledger, emulated),
+            recovered=recovered_network_values(emulated),
             sightings=sightings,
         )
         persistence = persistence_from_ledger(self.evidence_ledger)
