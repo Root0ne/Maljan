@@ -671,3 +671,89 @@ class TestTheModelDecidesTheLength:
         for text in (_SYSTEM, *_INSTRUCTIONS.values()):
             assert "concise" not in text.lower()
             assert not re.search(r"\d+\s*(-|to)\s*\d+\s*sentence", text)
+
+
+class TestAnObservedStepNeedsAnObservationOfTheSample:
+    """A network entry shows a step observed only when the sample's tree made a flow.
+
+    A capture or a flow table the sandbox does not attribute to the sample's
+    process tree is the guest's traffic, and one live run marked a C2 step
+    "observed in sandbox" on such an entry. Process, file and registry entries
+    keep their meaning.
+    """
+
+    _TOOLS = ("sandbox_processes", "sandbox_network", "pcap_summary")
+
+    def _report(self, *, attributed: bool) -> MalwareReport:
+        from maljan.reporting.models import EvidenceIndexRow, EvidenceSection, NetworkIP
+
+        return _report(
+            evidence_index=[
+                EvidenceIndexRow(id=f"ev_000{n}", agent="dynamic", tool=tool, ok=True)
+                for n, tool in enumerate(self._TOOLS, start=1)
+            ],
+            sections=[
+                EvidenceSection(
+                    key=f"tool_{tool}",
+                    title=tool,
+                    kind="kv",
+                    rows=[["value", "198.51.100.7"]],
+                    evidence_ids=[f"ev_000{n}"],
+                )
+                for n, tool in enumerate(self._TOOLS, start=1)
+            ],
+            network=NetworkIOCs(
+                ips=[
+                    NetworkIP(
+                        address="198.51.100.7",
+                        source="sandbox",
+                        sample_process_tree=True if attributed else None,
+                    )
+                ]
+            ),
+        )
+
+    @staticmethod
+    def _step(*refs: str) -> dict[str, Any]:
+        return {
+            "steps": [
+                {
+                    "order": 1,
+                    "action": "Beacons to its server",
+                    "voice": "observed",
+                    "evidence_refs": list(refs),
+                }
+            ]
+        }
+
+    @staticmethod
+    def _unresolved(report: MalwareReport, step: dict[str, Any]) -> list[dict[str, Any]]:
+        llm = _FakeLLM({"_FlowOut": step})
+        comp = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=True
+        ):
+            asyncio.run(comp.compose(report, None))
+        return [
+            row for row in comp.validation_tally.unresolved if row["code"] == "report.flow_voice"
+        ]
+
+    def test_an_unattributed_network_entry_is_no_observation(self) -> None:
+        from maljan.reporting.evidence_bundles import sandbox_entry_ids
+
+        report = self._report(attributed=False)
+
+        assert sandbox_entry_ids(report) == ["ev_0001"]
+        (row,) = self._unresolved(report, self._step("ev_0002", "ev_0003"))
+        assert "ev_0001" in row["message"]
+
+    def test_an_attributed_network_entry_is_one(self) -> None:
+        from maljan.reporting.evidence_bundles import sandbox_entry_ids
+
+        report = self._report(attributed=True)
+
+        assert sandbox_entry_ids(report) == ["ev_0001", "ev_0002", "ev_0003"]
+        assert self._unresolved(report, self._step("ev_0002")) == []
+
+    def test_a_process_entry_keeps_its_meaning(self) -> None:
+        assert self._unresolved(self._report(attributed=False), self._step("ev_0001")) == []

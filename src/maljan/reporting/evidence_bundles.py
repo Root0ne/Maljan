@@ -46,6 +46,11 @@ SECTIONS = (
 # model marks ``observed`` has to cite one of their entries.
 SANDBOX_TOOL_PREFIXES = ("sandbox_", "pcap_summary")
 
+# The sandbox answers about the network: a flow table and a capture. Either
+# holds the guest's traffic as well as the sample's, so it shows a step was
+# observed only when the sandbox attributed a flow to the sample's own tree.
+_NETWORK_SANDBOX_TOOLS = frozenset({"sandbox_network", "pcap_summary"})
+
 # Tool names whose captured output is relevant to each technical section. Used
 # to filter ``technical_evidence`` so e.g. the encryption bundle never sees
 # network tool output.
@@ -415,13 +420,22 @@ def sandbox_entry_ids(report: MalwareReport) -> list[str]:
     section built from it holds a value: the section builders credit an entry
     only when it added a row, and the generic block's rows are read for a
     value that is not empty.
+
+    A network answer — the flow table, the capture — is an observation of the
+    sample only when the report's network block holds a sandbox row the
+    sandbox attributed to the sample's process tree: without one, what it
+    recorded is the guest's traffic, and a step citing it was not observed.
+    Process, file and registry answers are the sample's by what they record.
     """
+    sample_flow = _sample_tree_made_a_flow(report)
     # The pack's sandbox-status entry states what the sandbox report is; it
     # records no behaviour and is never an observation to cite.
     sandbox = {
         row.id
         for row in report.evidence_index
-        if str(row.tool or "").startswith(SANDBOX_TOOL_PREFIXES) and row.tool != "sandbox_status"
+        if str(row.tool or "").startswith(SANDBOX_TOOL_PREFIXES)
+        and row.tool != "sandbox_status"
+        and (sample_flow or row.tool not in _NETWORK_SANDBOX_TOOLS)
     }
     holding: set[str] = set()
     for section in report.sections:
@@ -429,6 +443,14 @@ def sandbox_entry_ids(report: MalwareReport) -> list[str]:
         if cited and section_holds_something(section):
             holding.update(cited)
     return [row.id for row in report.evidence_index if row.id in holding]
+
+
+def _sample_tree_made_a_flow(report: MalwareReport) -> bool:
+    """Whether the network block holds a sandbox row attributed to the sample's process tree."""
+    network = report.network
+    return network is not None and any(
+        ip.source == "sandbox" and ip.sample_process_tree is True for ip in network.ips
+    )
 
 
 _EMPTY_VALUES = frozenset({"", "[]", "{}", "0", "none", "null", "-", "false", "no"})
