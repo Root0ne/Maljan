@@ -2038,8 +2038,8 @@ def not_kept_reason(why: str, mentioned_by: str = "", listed_by: str = "") -> st
     """The ``no:`` a row waiting for the judge reads, naming who listed or mentioned it."""
     if listed_by:
         said = (
-            f"no: {why}; {listed_by} lists it, and a model's list publishes nothing "
-            "the platform did not see, and the judge did not keep it as an indicator"
+            f"no: {why}; {listed_by} lists it, and a listing does not change what the "
+            "sandbox recorded about it; the judge did not keep it as an indicator"
         )
     else:
         said = f"no: {why}, and no model kept it as an indicator"

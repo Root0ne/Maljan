@@ -247,9 +247,10 @@ class TestThePublishRule:
 
         answer = _answer(_report(network), "ip", CONTACT)
 
-        assert answer.startswith(
+        assert answer == (
             "no: the sandbox report does not say which process made the flows to it; "
-            "an artifact of the network analyst lists it"
+            "an artifact of the network analyst lists it, and a listing does not change what "
+            "the sandbox recorded about it; the judge did not keep it as an indicator"
         )
 
     def test_an_attributed_address_an_artifact_lists_stays_published(self) -> None:

@@ -73,8 +73,8 @@ class TestAWellKnownHostOfAPublishedURL:
 
         assert answer == (
             f"no: a well-known benign name carried by a published URL ({CDN_URL}); an "
-            "artifact of the network analyst lists it, and a model's list publishes nothing "
-            "the platform did not see, and the judge did not keep it as an indicator"
+            "artifact of the network analyst lists it, and a listing does not change what the "
+            "sandbox recorded about it; the judge did not keep it as an indicator"
         )
 
     def test_the_judge_keeping_the_host_itself_publishes_it(self) -> None:
