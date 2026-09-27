@@ -34,11 +34,13 @@ from maljan.pipeline.outcome import (
 )
 from maljan.reporting.dedupe import MergeTally
 from maljan.reporting.ledger_projection import (
+    analyst_listed_values,
     dynamic_from_ledger,
     identity_from_ledger,
     network_from_ledger,
     persistence_from_ledger,
     static_from_ledger,
+    tool_sightings,
 )
 from maljan.reporting.ledger_report import build_sections
 from maljan.reporting.models import (
@@ -158,11 +160,16 @@ class MalwareReportBuilder:
         # C2 URL FLOSS and the static decoder both recovered once had no row
         # anywhere, not even a refused one, while the record gave it standing.
         emulated = emulation_from_ledger(self.evidence_ledger)
+        # Where the run's tools saw each value an analyst listed: a listed
+        # value stands on the answer that holds it, and "no tool saw it" is
+        # said only when this search of the whole ledger found none.
+        sightings = tool_sightings(self.evidence_ledger, analyst_listed_values(self.isr_reports))
         network = network_from_ledger(
             self.evidence_ledger,
             self.isr_reports,
             sandbox_report=self.sandbox_report,
             recovered=recovered_network_values(self.evidence_ledger, emulated),
+            sightings=sightings,
         )
         persistence = persistence_from_ledger(self.evidence_ledger)
         cells, mappings = build_capability_matrix(
@@ -212,6 +219,7 @@ class MalwareReportBuilder:
             ],
             rule_match_strings=yara_rule_strings(self.evidence_ledger),
             emulated_strings=emulated,
+            tool_sightings=sightings,
             references=references,
         )
         # The sections the report is actually made of, and the index of the

@@ -1244,6 +1244,12 @@ class MalwareReport(BaseModel):
     # entries at build time; ``None`` on a report stored before it existed,
     # which is then read from its kept section rows and said to be partial.
     emulated_strings: EmulatedStrings | None = None
+    # For every value an analyst's artifact lists, lower-cased: the tool
+    # answers of the run that hold it whole, as ``(entry id, tool)``, and an
+    # empty list when the ledger search found none. Built at build time from
+    # the whole ledger; ``None`` on a report stored before it existed, whose
+    # kept tool sections are then searched instead.
+    tool_sightings: dict[str, list[tuple[str, str]]] | None = None
     misp_attributes: list[dict[str, Any]] | None = None
 
     # --- References ---

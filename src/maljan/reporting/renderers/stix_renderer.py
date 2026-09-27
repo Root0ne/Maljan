@@ -1821,6 +1821,8 @@ def indicator_publish_reason(
     mentioned_by: str = "",
     in_published_url: str = "",
     listed_by: str = "",
+    seen_in: str = "",
+    tool_search: str = "",
 ) -> str | None:
     """Why this run may publish one indicator of ``kind``, or ``None``.
 
@@ -2055,13 +2057,81 @@ def public_resolver_reason(
 NAMED_ONLY_BY_AN_ANALYST = "named only by an analyst"
 
 
-def named_only_reason(listed_by: str = "") -> str:
-    """The ``no:`` a value only an analyst listed reads."""
+# What the search for a listed value covered: the run's whole ledger, or only
+# the tool sections a stored report keeps.
+SEARCHED_THE_RUN = "run"
+SEARCHED_THE_REPORT = "report"
+
+
+def named_only_reason(listed_by: str = "", searched: str = SEARCHED_THE_RUN) -> str:
+    """The ``no:`` a value only an analyst listed reads, saying what the search for it covered.
+
+    "No tool in this run saw it" is said only after the whole ledger was
+    searched (:func:`ledger_projection.tool_sightings`); a stored report built
+    before that search says only that no tool answer it keeps holds the value.
+    """
     who = f" ({listed_by})" if listed_by else ""
-    return (
-        f"no: {NAMED_ONLY_BY_AN_ANALYST}{who}; no tool in this run saw it, and the judge "
-        "did not keep it as an indicator"
+    unseen = (
+        "no tool in this run saw it"
+        if searched == SEARCHED_THE_RUN
+        else "no tool answer this report keeps holds it"
     )
+    return (
+        f"no: {NAMED_ONLY_BY_AN_ANALYST}{who}; {unseen}, and the judge did not keep it "
+        "as an indicator"
+    )
+
+
+def seen_in_reason(seen_in: str, listed_by: str = "") -> str:
+    """The ``no:`` a listed value reads when only a tool's text, and no second source, holds it."""
+    said = f"no: seen only in the text of {seen_in}, and no second source in this run records it"
+    return f"{said}; {listed_by} lists it" if listed_by else said
+
+
+def listed_value_sightings(report: Any, kind: str, value: str) -> tuple[str, str]:
+    """Where the run's tools saw a listed value, as the rule names it, and what was searched.
+
+    ``(words, searched)``: the entries whose answer holds the value whole,
+    written ``ev_0002 (decompile_function)``, or ``""``; and whether the
+    search covered the run's whole ledger (the report's ``tool_sightings``,
+    built at build time) or only the tool sections a stored report keeps.
+    """
+    key = _value_key(kind, value)
+    stored = _field(report, "tool_sightings")
+    if isinstance(stored, dict) and key in stored:
+        seen = [(str(eid), str(tool)) for eid, tool in stored[key]]
+        return "; ".join(f"{eid} ({tool})" for eid, tool in seen), SEARCHED_THE_RUN
+    return _section_sightings(report, key), SEARCHED_THE_REPORT
+
+
+def _section_sightings(report: Any, key: str) -> str:
+    """The kept tool sections of a stored report that hold ``key`` whole, as the rule names them."""
+    found: list[str] = []
+    for section in _field(report, "sections") or []:
+        origin = str(_field(section, "source") or "")
+        if not origin.startswith("tool:") or not key:
+            continue
+        text = " ".join(
+            [
+                str(_field(section, "text") or ""),
+                *(str(cell) for row in _field(section, "rows") or [] for cell in row),
+            ]
+        ).lower()
+        if whole_value_in(key, text):
+            ids = ", ".join(str(i) for i in _field(section, "evidence_ids") or []) or "an entry"
+            found.append(f"{ids} ({origin.removeprefix('tool:')})")
+    return "; ".join(dict.fromkeys(found))
+
+
+def _listing_kwargs(report: Any, kind: str, key: str, row: Any) -> dict[str, str]:
+    """Who listed a row, whether the judge kept it, and where the run's tools saw it."""
+    said = kept_kwargs(report, kind, key, row)
+    seen, searched = listed_value_sightings(report, kind, key)
+    if seen:
+        said["seen_in"] = seen
+    else:
+        said["tool_search"] = searched
+    return said
 
 
 # What the rule says of a well-known benign name a published URL carries.
@@ -2117,7 +2187,11 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
     key = _value_key(kind, value)
     row = _network_index(report).get((kind, key))
     if row is not None and listed_only_by_an_analyst(kind, _field(row, "source")):
-        return kept_kwargs(report, kind, key, row)
+        return _listing_kwargs(report, kind, key, row)
+    if row is not None and _field(row, "source") == "strings" and _field(row, "kept_by"):
+        # A value a tool read and an analyst listed: the tool's source
+        # decides, and the reason names the answer that holds it.
+        return _listing_kwargs(report, kind, key, row)
     if kind == "url":
         return {}
     if kind == "ip":
@@ -2747,6 +2821,8 @@ def publish_answer(
     mentioned_by: str = "",
     in_published_url: str = "",
     listed_by: str = "",
+    seen_in: str = "",
+    tool_search: str = "",
 ) -> str:
     """The publish rule's answer for one row, as the report prints it.
 
@@ -2816,11 +2892,15 @@ def publish_answer(
     if recovered and is_well_known_benign_host(url_host(text) if kind == "url" else text):
         return f"no: {recovered}, but it is a well-known benign host"
     if listed_only_by_an_analyst(kind, source):
-        return named_only_reason(listed_by)
+        if seen_in:
+            return seen_in_reason(seen_in, listed_by)
+        return named_only_reason(listed_by, tool_search or SEARCHED_THE_RUN)
     if kind == "command":
         return "no: a command line is not an indicator this run publishes"
     if kind != "hash" and (kind not in STRING_IOC_KINDS or indicator_pattern(kind, text) is None):
         return "no: the export has no object for this kind"
+    if seen_in:
+        return seen_in_reason(seen_in, listed_by)
     return "no: seen only in the file's strings"
 
 

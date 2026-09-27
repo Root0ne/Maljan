@@ -139,11 +139,13 @@ from maljan.reporting.renderers.stix_renderer import (
     BENIGN_NAME_IN_A_URL,
     BENIGN_NAME_RESOLVED,
     FLOW_OUTSIDE_THE_TREE,
+    SEARCHED_THE_REPORT,
     UNATTRIBUTED_FLOW,
     disputed_flow_reason,
     named_only_reason,
     not_kept_reason,
     public_resolver_reason,
+    seen_in_reason,
 )
 from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
@@ -701,6 +703,8 @@ PROMPTS: dict[str, str] = {
             ),
             named_only_reason("an artifact of the network analyst"),
             named_only_reason(),
+            named_only_reason("an artifact of the network analyst", SEARCHED_THE_REPORT),
+            seen_in_reason("ev_0002 (decompile_function)", "an artifact of the network analyst"),
         ]
     ),
     "the line an analyst's table is printed under in Appendix A": analyst_list_note(
