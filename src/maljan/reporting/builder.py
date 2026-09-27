@@ -163,7 +163,9 @@ class MalwareReportBuilder:
         # Where the run's tools saw each value an analyst listed: a listed
         # value stands on the answer that holds it, and "no tool saw it" is
         # said only when this search of the whole ledger found none.
-        sightings = tool_sightings(self.evidence_ledger, analyst_listed_values(self.isr_reports))
+        sightings, queries = tool_sightings(
+            self.evidence_ledger, analyst_listed_values(self.isr_reports)
+        )
         network = network_from_ledger(
             self.evidence_ledger,
             self.isr_reports,
@@ -220,6 +222,7 @@ class MalwareReportBuilder:
             rule_match_strings=yara_rule_strings(self.evidence_ledger),
             emulated_strings=emulated,
             tool_sightings=sightings,
+            tool_queries=queries,
             references=references,
         )
         # The sections the report is actually made of, and the index of the
@@ -602,6 +605,7 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         listed_value_sightings,
         path_names_a_file,
         publish_answer,
+        query_answers,
         recovered_by_words,
     )
 
@@ -770,6 +774,7 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                         listed_by=listed,
                         seen_in=sighted,
                         tool_search=searched,
+                        asked_in="" if sighted else query_answers(report, ioc_kind, value),
                     ),
                 )
 

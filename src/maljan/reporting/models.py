@@ -1258,6 +1258,11 @@ class MalwareReport(BaseModel):
     # the whole ledger; ``None`` on a report stored before it existed, whose
     # kept tool sections are then searched instead.
     tool_sightings: dict[str, list[tuple[str, str]]] | None = None
+    # For the same values: the entries whose call arguments hold the value, so
+    # their answer holds it because it was asked about it — a lookup's echo, a
+    # search that returns its own query. Not sightings; stated in the reason
+    # so the report never says no tool saw a value an answer holds.
+    tool_queries: dict[str, list[tuple[str, str]]] | None = None
     misp_attributes: list[dict[str, Any]] | None = None
 
     # --- References ---

@@ -987,8 +987,13 @@ def _strings_in(value: Any) -> Iterator[str]:
 
 def tool_sightings(
     ledger: list[LedgerEntry], values: Iterable[tuple[str, str]]
-) -> dict[str, list[tuple[str, str]]]:
+) -> tuple[dict[str, list[tuple[str, str]]], dict[str, list[tuple[str, str]]]]:
     """For each ``(kind, value)``, keyed by :func:`value_key`: the entries whose answer holds it.
+
+    Two maps: the sightings, and the entries set apart because the value is
+    in their call arguments — the answer to a query for it, which holds it
+    because it was asked about it. The second is kept so the report never
+    says no tool saw a value some answer holds.
 
     Every successful entry is read — its structured answer's strings and its
     text — and a value is found only as a value of its own
@@ -1010,17 +1015,20 @@ def tool_sightings(
         for entry in ledger or []
         if entry.ok
     ]
-    out: dict[str, list[tuple[str, str]]] = {}
+    seen: dict[str, list[tuple[str, str]]] = {}
+    queried: dict[str, list[tuple[str, str]]] = {}
     for kind, value in values:
         key = value_key(kind, value)
-        if not key or key in out:
+        if not key or key in seen:
             continue
-        out[key] = [
-            (eid, tool)
+        holding = [
+            (eid, tool, whole_value_in(key, asked))
             for eid, tool, text, asked in texts
-            if whole_value_in(key, text) and not whole_value_in(key, asked)
+            if whole_value_in(key, text)
         ]
-    return out
+        seen[key] = [(eid, tool) for eid, tool, was_asked in holding if not was_asked]
+        queried[key] = [(eid, tool) for eid, tool, was_asked in holding if was_asked]
+    return seen, queried
 
 
 # The artifact kinds that list a network value as an indicator: the analyst's

@@ -705,6 +705,10 @@ PROMPTS: dict[str, str] = {
             named_only_reason("an artifact of the network analyst"),
             named_only_reason(),
             named_only_reason("an artifact of the network analyst", SEARCHED_THE_REPORT),
+            named_only_reason(
+                "an artifact of the network analyst",
+                asked_in="ev_0004 get_domain_report",
+            ),
             seen_in_reason("ev_0002 (decompile_function)", "an artifact of the network analyst"),
             seen_in_reason(
                 "ev_0006 (iocs_from_file), as the tool sections this stored report keeps show it"

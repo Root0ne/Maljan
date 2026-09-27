@@ -170,15 +170,35 @@ class TestACaptureOnlyName:
         assert _row(report, NAME).published == "yes"
 
 
-class TestALookupEchoIsNoSighting:
-    def test_an_answer_that_repeats_its_query_is_not_a_sighting(self) -> None:
+class TestAnAnswerToAQueryForTheValue:
+    """Not a sighting of it, and not nothing: the reason says only a query's answer holds it."""
+
+    def test_a_lookup_echo_is_named_as_the_answer_to_a_query(self) -> None:
         lookup = _entry(
             "ev_0004", "get_domain_report", {"domain": NAME, "detections": 0}, domain=NAME
         )
         report = _build([lookup], _listed(["domain", NAME]))
 
         assert report.tool_sightings == {NAME: []}
-        assert _row(report, NAME).published.startswith("no: named only by an analyst")
+        assert report.tool_queries == {NAME: [("ev_0004", "get_domain_report")]}
+        answer = _row(report, NAME).published
+        assert answer == (
+            "no: named only by an analyst (an artifact of the network analyst); only the "
+            "answer to a query for it holds it (ev_0004 get_domain_report), and the judge "
+            "did not keep it as an indicator"
+        )
+
+    def test_a_search_that_returns_the_match_from_the_file_is_named_too(self) -> None:
+        search = _entry(
+            "ev_0005",
+            "search_strings",
+            {"matches": [{"offset": "0x4010", "string": NAME}]},
+            query=NAME,
+        )
+        answer = _row(_build([search], _listed(["domain", NAME])), NAME).published
+
+        assert "only the answer to a query for it holds it (ev_0005 search_strings)" in answer
+        assert "no tool in this run saw it" not in answer
 
 
 class TestOneKeyOnBothSides:

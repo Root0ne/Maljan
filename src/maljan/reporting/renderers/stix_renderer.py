@@ -1824,6 +1824,7 @@ def indicator_publish_reason(
     listed_by: str = "",
     seen_in: str = "",
     tool_search: str = "",
+    asked_in: str = "",
 ) -> str | None:
     """Why this run may publish one indicator of ``kind``, or ``None``.
 
@@ -2076,7 +2077,9 @@ SEARCHED_THE_RUN = "run"
 SEARCHED_THE_REPORT = "report"
 
 
-def named_only_reason(listed_by: str = "", searched: str = SEARCHED_THE_RUN) -> str:
+def named_only_reason(
+    listed_by: str = "", searched: str = SEARCHED_THE_RUN, asked_in: str = ""
+) -> str:
     """The ``no:`` a value only an analyst listed reads, saying what the search for it covered.
 
     "No tool in this run saw it" is said only after the whole ledger was
@@ -2084,11 +2087,12 @@ def named_only_reason(listed_by: str = "", searched: str = SEARCHED_THE_RUN) -> 
     before that search says only that no tool answer it keeps holds the value.
     """
     who = f" ({listed_by})" if listed_by else ""
-    unseen = (
-        "no tool in this run saw it"
-        if searched == SEARCHED_THE_RUN
-        else "no tool answer this report keeps holds it"
-    )
+    if asked_in:
+        unseen = f"only the answer to a query for it holds it ({asked_in})"
+    elif searched == SEARCHED_THE_RUN:
+        unseen = "no tool in this run saw it"
+    else:
+        unseen = "no tool answer this report keeps holds it"
     return (
         f"no: {NAMED_ONLY_BY_AN_ANALYST}{who}; {unseen}, and the judge did not keep it "
         "as an indicator"
@@ -2177,7 +2181,18 @@ def _listing_kwargs(report: Any, kind: str, key: str, row: Any) -> dict[str, str
         said["seen_in"] = seen
     else:
         said["tool_search"] = searched
+        asked = query_answers(report, kind, key)
+        if asked:
+            said["asked_in"] = asked
     return said
+
+
+def query_answers(report: Any, kind: str, value: str) -> str:
+    """The entries whose answer holds a listed value only because a query asked about it."""
+    queried = _field(report, "tool_queries")
+    if not isinstance(queried, dict):
+        return ""
+    return "; ".join(f"{eid} {tool}" for eid, tool in queried.get(_value_key(kind, value)) or [])
 
 
 # What the rule says of a well-known benign name a published URL carries.
@@ -2861,6 +2876,7 @@ def publish_answer(
     listed_by: str = "",
     seen_in: str = "",
     tool_search: str = "",
+    asked_in: str = "",
 ) -> str:
     """The publish rule's answer for one row, as the report prints it.
 
@@ -2934,7 +2950,7 @@ def publish_answer(
     if listed_only_by_an_analyst(kind, source):
         if seen_in:
             return seen_in_reason(seen_in, listed_by)
-        return named_only_reason(listed_by, tool_search or SEARCHED_THE_RUN)
+        return named_only_reason(listed_by, tool_search or SEARCHED_THE_RUN, asked_in)
     if kind == "command":
         return "no: a command line is not an indicator this run publishes"
     if kind != "hash" and (kind not in STRING_IOC_KINDS or indicator_pattern(kind, text) is None):
