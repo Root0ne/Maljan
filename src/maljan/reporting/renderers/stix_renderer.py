@@ -1907,8 +1907,15 @@ def indicator_publish_reason(
             return admitted
         return _emulation_admits(value, recovered, verdict)
     if kind == "url":
-        admitted = url_corroboration_reason(value, source, reputation)
         host = url_host(value)
+        # A URL on an address answers as the address does: never on a public
+        # resolver, and on an address the sandbox did not attribute to the
+        # sample's tree only when the judge kept it.
+        if is_public_resolver(host.strip("[]")):
+            return None
+        if unattributed and host_is_public(host):
+            return _kept_by_a_model(kept_by)
+        admitted = url_corroboration_reason(value, source, reputation)
         if admitted or not host_is_public(host):
             return admitted
         if any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
@@ -2193,6 +2200,10 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
         # decides, and the reason names the answer that holds it.
         return _listing_kwargs(report, kind, key, row)
     if kind == "url":
+        # A sandbox URL whose host is an address takes that address's facts.
+        host = url_host(value).strip("[]")
+        if _field(row, "source") == "sandbox" and _parses_as_an_address(host):
+            return sandbox_row_kwargs(report, "ip", host)
         return {}
     if kind == "ip":
         if row is None or _field(row, "source") != "sandbox":
@@ -2224,6 +2235,14 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
             return {}
         why = BENIGN_NAME_RESOLVED
     return {"unattributed": why, **kept_kwargs(report, kind, key, row)}
+
+
+def _parses_as_an_address(text: str) -> bool:
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return False
+    return True
 
 
 def _value_key(kind: str, value: Any) -> str:
@@ -2856,6 +2875,8 @@ def publish_answer(
         return "yes"
     if kind == "ip" and is_public_resolver(text):
         return public_resolver_reason(unattributed, listed_by, mentioned_by)
+    if kind == "url" and is_public_resolver(url_host(text).strip("[]")):
+        return public_resolver_reason(unattributed, listed_by, mentioned_by)
     if kind == "domain" and not host_is_public(text):
         return "no: not a name that resolves outside the analysed network"
     if kind == "url" and not host_is_public(url_host(text)):
@@ -2866,7 +2887,7 @@ def publish_answer(
         return not_kept_reason(
             f"{BENIGN_NAME_IN_A_URL} ({in_published_url})", mentioned_by, listed_by
         )
-    if unattributed and kind in ("ip", "domain"):
+    if unattributed and kind in ("ip", "domain", "url"):
         return not_kept_reason(unattributed, mentioned_by, listed_by)
     if kind == "email" and not email_is_publishable(text):
         return "no: not a mailbox at a host that could exist"
