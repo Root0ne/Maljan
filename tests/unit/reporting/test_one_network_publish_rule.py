@@ -94,7 +94,7 @@ def _report(ledger: list[Any]) -> MalwareReport:
         evidence_ledger=ledger,
     ).build_deterministic()
     report.network = network_from_ledger(ledger)
-    report.static = static_from_ledger(ledger, {}) or StaticAnalysis()
+    report.static = static_from_ledger(ledger) or StaticAnalysis()
     return report
 
 

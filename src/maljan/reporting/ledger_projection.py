@@ -9,14 +9,18 @@ which is exactly the arrangement that made a report say things no agent had
 observed.
 
 So the blocks stay and their source changes: they are filled from what the
-tools returned and what the agents established, and from nothing else. A tool
-that was never called leaves its block empty, and every layer downstream of an
-empty block degrades to silence rather than inventing a substitute.
+tools returned, and from nothing else. An analyst's table is the analyst's: it
+is printed in Appendix A as that analyst's list and never becomes a row of a
+block the report prints as measured or observed, so nothing a model listed
+changes what the platform counts or matches. The network block reads which
+values the analysts listed, to say so beside each row. A tool that was never
+called leaves its block empty, and every layer downstream of an empty block
+degrades to silence rather than inventing a substitute.
 
-Nothing here parses a file or a report. It reads ``LedgerEntry.structured`` and
-``AgentISR.artifacts``, and the one thing it computes itself is the sample's
-own hashes — the routing minimum a report needs even when no agent thought to
-ask for them.
+Nothing here parses a file or a report. It reads ``LedgerEntry.structured`` and,
+for the network block, ``AgentISR.artifacts``, and the one thing it computes
+itself is the sample's own hashes — the routing minimum a report needs even
+when no agent thought to ask for them.
 """
 
 from __future__ import annotations
@@ -80,32 +84,6 @@ _STRING_KINDS = {
     "other",
 }
 
-# What an artifact's ``kind`` has to say to be read as persistence, and the
-# typed kind it becomes. Anything else an analyst calls persistence lands as
-# ``other``, which is a real answer rather than a dropped row.
-_PERSISTENCE_KINDS = {
-    "registry_run",
-    "scheduled_task",
-    "service",
-    "wmi_subscription",
-    "com_hijacking",
-    "startup_folder",
-    "dll_search_hijacking",
-    "driver",
-    "image_hijack",
-    "appinit_dll",
-    "lsa_provider",
-    "winlogon_helper",
-    "systemd_service",
-    "systemd_timer",
-    "cron_job",
-    "init_d",
-    "rc_local",
-    "ld_preload",
-    "xdg_autostart",
-    "other",
-}
-
 
 def _payloads(ledger: list[LedgerEntry], *tools: str) -> list[tuple[LedgerEntry, dict[str, Any]]]:
     """Every successful call of ``tools`` whose answer was a JSON object."""
@@ -116,17 +94,6 @@ def _payloads(ledger: list[LedgerEntry], *tools: str) -> list[tuple[LedgerEntry,
         data = entry.structured
         if isinstance(data, dict) and not data.get("error"):
             out.append((entry, data))
-    return out
-
-
-def _artifacts(isrs: dict[str, AgentISR] | None, *kinds: str) -> list[Any]:
-    """Every agent artifact whose ``kind`` is one of ``kinds``."""
-    wanted = {k.lower() for k in kinds}
-    out: list[Any] = []
-    for isr in (isrs or {}).values():
-        for artifact in getattr(isr, "artifacts", None) or []:
-            if str(getattr(artifact, "kind", "")).lower() in wanted:
-                out.append(artifact)
     return out
 
 
@@ -303,10 +270,8 @@ def _opt(value: Any) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def static_from_ledger(
-    ledger: list[LedgerEntry], isrs: dict[str, AgentISR] | None = None
-) -> StaticAnalysis | None:
-    """``StaticAnalysis`` from the format tools and the analysts' artifacts.
+def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
+    """``StaticAnalysis`` from the format, string, capa and knowledge tools.
 
     ``None`` when nothing static was gathered, which is the honest answer for a
     run whose analyst never opened the binary — and the signal the layers
@@ -413,18 +378,12 @@ def static_from_ledger(
                     }
                 )
 
-    for artifact in _artifacts(isrs, "imports"):
-        for row in _rows_of(artifact):
-            if len(row) >= 2:
-                seen = True
-                static.imports.append(ImportRow(dll=row[0], function=row[1]))
-    for artifact in _artifacts(isrs, "iocs", "indicators"):
-        for row in _rows_of(artifact):
-            if len(row) >= 2:
-                seen = True
-                static.interesting_strings.append(
-                    StringIOC(value=row[1], kind=_string_kind(row[0]))  # type: ignore[arg-type]
-                )
+    # An analyst's table of imports or IOCs is not read here. The import table
+    # and the string table are what the tools returned, printed as measured,
+    # and the import count, the capability profile and the rule matches are
+    # read from them: one live run's analyst listed names it had resolved from
+    # hashes under ``KERNEL32.dll``, and the report counted them as imports.
+    # The analyst's table stays in Appendix A as its own list.
 
     # The capability profile is what the knowledge table said about the names
     # it was asked about (``tools.knowledge.api_capability``): a category per
@@ -579,9 +538,7 @@ def _technique_id(value: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-def dynamic_from_ledger(
-    ledger: list[LedgerEntry], isrs: dict[str, AgentISR] | None = None
-) -> DynamicBehavior | None:
+def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
     """``DynamicBehavior`` from the sandbox tools the dynamic analyst called."""
     dynamic = DynamicBehavior()
     seen = False
@@ -668,14 +625,8 @@ def dynamic_from_ledger(
             seen = True
             dynamic.unavailable = [str(row) for row in rows]
 
-    for artifact in _artifacts(isrs, "processes"):
-        for row in _rows_of(artifact):
-            if row:
-                seen = True
-                dynamic.process_tree.append(
-                    ProcessNode(pid=_int(row[0]), name=row[1] if len(row) > 1 else "")
-                )
-
+    # An analyst's table of processes is not the process tree: the tree is
+    # what the sandbox recorded, and the analyst's list stays in Appendix A.
     return dynamic if seen else None
 
 
@@ -1471,14 +1422,16 @@ def _autostart_kind(key: str) -> str | None:
     return None
 
 
-def persistence_from_ledger(
-    ledger: list[LedgerEntry], isrs: dict[str, AgentISR] | None = None
-) -> list[PersistenceMechanism]:
-    """Persistence entries the agents named, plus the Sigma rules that fired.
+def persistence_from_ledger(ledger: list[LedgerEntry]) -> list[PersistenceMechanism]:
+    """Persistence the sandbox tools recorded, plus the Sigma rules that fired.
 
-    Nothing here re-scans a sandbox report for autostart paths: an agent that
-    saw a Run key writes it down as an artifact, and a Sigma rule that fired on
-    the sandbox events is evidence in its own right.
+    Nothing here re-scans a sandbox report for autostart paths: a Run key the
+    registry tool returned, a service or task the sandbox listed, and a Sigma
+    rule that fired on the sandbox events are each evidence in their own
+    right. An analyst's table of persistence is not: the report prints these
+    rows as observed and the IOC table, the corroboration corpus and the
+    detection rules read them, so a model's list stays in Appendix A as its
+    own and changes nothing the platform counts or matches.
     """
     out: list[PersistenceMechanism] = []
     seen: set[tuple[str, str]] = set()
@@ -1501,24 +1454,7 @@ def persistence_from_ledger(
             )
         )
 
-    for artifact in _artifacts(isrs, "persistence"):
-        ref = ", ".join(getattr(artifact, "evidence_ids", None) or []) or "agent artifact"
-        rows = _rows_of(artifact)
-        if rows:
-            for row in rows:
-                kind = row[0].strip().lower() if row else "other"
-                _add(
-                    kind if kind in _PERSISTENCE_KINDS else "other",
-                    row[1] if len(row) > 1 else (row[0] if row else ""),
-                    row[2] if len(row) > 2 else "",
-                    None,
-                    ref,
-                )
-        elif getattr(artifact, "value", None):
-            _add("other", str(artifact.value), "", None, ref)
-
-    # A Run key an agent read through ``sandbox_registry_ops`` is persistence
-    # whether or not the agent thought to write an artifact about it.
+    # A Run key an agent read through ``sandbox_registry_ops`` is persistence.
     for entry, data in _payloads(ledger, "sandbox_registry_ops"):
         for row in data.get("registry") or []:
             if not isinstance(row, dict):

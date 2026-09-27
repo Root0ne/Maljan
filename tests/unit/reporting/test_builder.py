@@ -117,9 +117,9 @@ class TestRansomwareFixture:
             "ttp_tags": ["T1486"],
         }
 
-    def test_persistence_comes_from_the_analyst_that_saw_it(self, sandbox: dict[str, Any]) -> None:
-        # An analyst that read the call and wrote it down as an artifact is
-        # one of the two routes; the other is the registry tool below.
+    def test_an_analysts_persistence_table_adds_no_mechanism(self, sandbox: dict[str, Any]) -> None:
+        # The mechanisms are what the sandbox tools recorded; an analyst's
+        # table is printed in Appendix A as its own list.
         from tests.unit._ledger_helpers import persistence_isr
 
         report = _build(
@@ -137,9 +137,8 @@ class TestRansomwareFixture:
                 )
             },
         )
-        assert len(report.persistence) >= 1
-        kinds = {p.kind for p in report.persistence}
-        assert "registry_run" in kinds
+        alone = _build(sandbox=sandbox, category="ransomware")
+        assert report.persistence == alone.persistence
 
     def test_the_registry_call_alone_is_enough_to_find_the_autorun(
         self, sandbox: dict[str, Any]

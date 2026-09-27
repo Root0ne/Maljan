@@ -205,3 +205,89 @@ class TestARuleMatchOnRuntimeNamesIsStatedAndNotCounted:
 
         assert "api_capability (rule match)" in markdown
         assert "Techniques a rule matched only on names resolved at runtime" not in markdown
+
+
+def _listed_imports() -> dict[str, Any]:
+    """A static analyst that wrote the resolved names down as a table of imports."""
+    from maljan.schemas.isr_models import AgentISR, Artifact
+
+    return {
+        "static_r2": AgentISR(
+            agent_id="static_r2",
+            domain="static",
+            artifacts=[
+                Artifact(
+                    kind="imports",
+                    label="Imports",
+                    columns=["Library", "Function"],
+                    rows=[["KERNEL32.dll", name] for name in INJECTION],
+                    evidence_ids=["ev_0002"],
+                    source="static_r2",
+                )
+            ],
+        )
+    }
+
+
+def _built(isrs: dict[str, Any]) -> Any:
+    from maljan.reporting.builder import MalwareReportBuilder
+
+    return MalwareReportBuilder(
+        file_hash="a" * 64,
+        file_name="fixture.bin",
+        sample_path=None,
+        sandbox_report={},
+        reports={},
+        isr_reports=isrs,
+        stix_output=_judge_bundle("T1055"),
+        run_summary={},
+        discussion_history=[],
+        final_decision="Malware",
+        overall_confidence=0.8,
+        sample_platform="windows",
+        sample_file_type="PE",
+        evidence_ledger=_ledger(knowledge.api_capability(INJECTION)),
+    ).build_deterministic()
+
+
+def _between(markdown: str, start: str, end: str) -> str:
+    head = markdown.index(start)
+    return markdown[head : markdown.index(end, head)]
+
+
+class TestAnAnalystsImportTableIsNotTheImportTable:
+    def test_the_import_table_is_the_tool_s(self) -> None:
+        static = _built(_listed_imports()).static
+
+        assert static is not None
+        assert [row.function for row in static.imports] == IMPORTS
+        hit = _injection_hit(static)
+        assert hit["resolved_apis"] == hit["matched_apis"]
+        assert static.api_capabilities == {}
+        assert static.api_capabilities_resolved
+
+    def test_the_report_counts_the_tool_s_imports_and_keeps_the_names_resolved(self) -> None:
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+        markdown = MarkdownRenderer().render(_built(_listed_imports()))
+
+        assert f"_Measured:_ {len(IMPORTS)} static imports from 1 library." in markdown
+        section_7 = _between(markdown, "\n## 7.", "\n## 8.")
+        section_8 = _between(markdown, "\n## 8.", "\n## 9.")
+        imports = _between(section_7, "### Imports", "**")
+        for name in INJECTION:
+            assert f"`{name}`" not in imports
+        assert "Capability profile of the names resolved at runtime" in section_7
+        assert "Import capability profile" not in section_7
+        assert "imports `" not in section_8
+        assert "matched only names resolved at runtime from hashes, no import" in section_8
+
+    def test_the_analyst_s_table_stays_visible_as_its_own(self) -> None:
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+        markdown = MarkdownRenderer().render(_built(_listed_imports()))
+
+        appendix = markdown[markdown.index("## Appendix A") :]
+        table = appendix[appendix.index("### Imports") :]
+        assert table.split("\n\n", 2)[1].startswith("_Listed by the static_r2 analyst")
+        assert "| KERNEL32.dll | VirtualAllocEx |" in table

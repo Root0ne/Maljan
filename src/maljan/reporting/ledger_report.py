@@ -998,7 +998,7 @@ def _artifact_sections(acc: _Sections, isrs: dict[str, Any]) -> None:
                     "table",
                     columns=columns or ["Value"],
                 )
-                section.source = f"artifact:{source}"
+                _listed_by(section, source)
                 for row in rows:
                     acc.add_row(section, [_text(cell) for cell in row])
             else:
@@ -1008,10 +1008,31 @@ def _artifact_sections(acc: _Sections, isrs: dict[str, Any]) -> None:
                     "table",
                     columns=["Label", "Value"],
                 )
-                section.source = f"artifact:{source}"
+                _listed_by(section, source)
                 acc.add_row(section, [_text(label), _text(getattr(artifact, "value", ""))])
             for entry_id in getattr(artifact, "evidence_ids", None) or []:
                 acc.cite(section, str(entry_id))
+
+
+# What an artifact section's ``source`` starts with; the analysts who listed
+# its rows follow, comma-separated.
+ARTIFACT_SOURCE = "artifact:"
+
+
+def _listed_by(section: Any, analyst: str) -> None:
+    """Name ``analyst`` among the analysts whose rows an artifact section holds."""
+    named = listed_by(section)
+    if analyst and analyst not in named:
+        named.append(analyst)
+    section.source = ARTIFACT_SOURCE + ", ".join(named)
+
+
+def listed_by(section: Any) -> list[str]:
+    """The analysts whose rows an artifact section holds, or nothing for any other section."""
+    source = str(getattr(section, "source", "") or "")
+    if not source.startswith(ARTIFACT_SOURCE):
+        return []
+    return [name for name in source.removeprefix(ARTIFACT_SOURCE).split(", ") if name]
 
 
 # What the Techniques column writes beside an id this run did not publish. The

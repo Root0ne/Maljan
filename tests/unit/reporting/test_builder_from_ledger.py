@@ -186,7 +186,9 @@ class TestTypedBlocks:
         assert report.network is None
         assert report.persistence == []
 
-    def test_persistence_comes_from_the_agents(self) -> None:
+    def test_an_analysts_persistence_table_is_no_mechanism(self) -> None:
+        # The mechanisms are what the sandbox tools recorded; the analyst's
+        # table is printed in Appendix A as its own list.
         isrs = {
             "dynamic": AgentISR(
                 agent_id="dynamic",
@@ -203,8 +205,8 @@ class TestTypedBlocks:
             )
         }
         report = _build([], isrs=isrs)
-        assert [p.kind for p in report.persistence] == ["registry_run"]
-        assert report.persistence[0].evidence_ref == "ev_0004"
+        assert report.persistence == []
+        assert any(section.key == "artifact_persistence" for section in report.sections)
 
 
 class TestConsolidatedIOCs:

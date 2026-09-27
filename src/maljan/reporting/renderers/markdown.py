@@ -50,6 +50,7 @@ from maljan.analysis.run_summary import (
 )
 from maljan.core.logger import logger
 from maljan.reporting.defang import ProseDefanger, defang
+from maljan.reporting.ledger_report import listed_by
 from maljan.reporting.models import (
     CapabilityCell,
     ConsolidatedIOC,
@@ -1790,6 +1791,11 @@ class MarkdownRenderer:
             lines.append("")
         for section in report.sections:
             lines.extend([_plain_heading(section.title), ""])
+            analysts = listed_by(section)
+            if analysts:
+                # A model's table, said as one before its rows: nothing in it
+                # was measured, and no count, match or profile reads it.
+                lines.extend([analyst_list_note(analysts), ""])
             lines.extend(_evidence_body(section, ctx.plain))
             if section.evidence_ids:
                 lines.extend(["", f"_Evidence: {_ids(section.evidence_ids)}_"])
@@ -2540,6 +2546,15 @@ def _subheading(number: str, title: str, voice: str) -> str:
     """An H3 with its subsection number and its voice tag."""
     label = f"{number} {title}" if number else title
     return f"### {_one_line(label)} · _{voice}_"
+
+
+def analyst_list_note(analysts: list[str]) -> str:
+    """The line an analyst's table is printed under in Appendix A."""
+    who = ", ".join(f"the {_one_line(name)} analyst" for name in analysts)
+    return (
+        f"_Listed by {who}: a model's table, not a tool's output. No measured table, "
+        "count, rule match or capability profile reads it._"
+    )
 
 
 def _plain_heading(title: Any) -> str:

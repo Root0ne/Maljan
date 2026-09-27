@@ -147,14 +147,15 @@ class MalwareReportBuilder:
             platform=self.sample_platform or "unknown",
         )
         # The typed blocks are projections, not a second analysis: each is
-        # filled from the tools that were actually called and the artifacts the
-        # analysts actually established, and each stays empty otherwise.
-        static = static_from_ledger(self.evidence_ledger, self.isr_reports)
-        dynamic = dynamic_from_ledger(self.evidence_ledger, self.isr_reports)
+        # filled from the tools that were actually called, and each stays
+        # empty otherwise. The network block also reads which values the
+        # analysts listed, which it states and never publishes on alone.
+        static = static_from_ledger(self.evidence_ledger)
+        dynamic = dynamic_from_ledger(self.evidence_ledger)
         network = network_from_ledger(
             self.evidence_ledger, self.isr_reports, sandbox_report=self.sandbox_report
         )
-        persistence = persistence_from_ledger(self.evidence_ledger, self.isr_reports)
+        persistence = persistence_from_ledger(self.evidence_ledger)
         cells, mappings = build_capability_matrix(
             stix_output=self.stix_output,
             isr_reports=self.isr_reports,
