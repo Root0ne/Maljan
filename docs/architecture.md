@@ -2724,6 +2724,20 @@ is assembled from what the run gathered rather than recomputed beside it:
   Appendix A is tagged *Source per subsection*: each of its sections carries
   its own voice, *Measured* for a tool's answer and *Assessed* for an
   analyst's table or findings, so no model's rows sit under a Measured tag.
+  A kind several analysts listed rows under is one table whose first column
+  (`Listed by`) says which analyst listed each row, and the note says where
+  else the table's rows are shown. **The body still shows them as the
+  analyst's.** §5.4 keeps the tools' table and adds an *Assessed* block of the
+  persistence the analysts listed (Kind, Target, Payload, Listed by, the
+  evidence the table cites), read from the analysts' Appendix A tables
+  (`ledger_report.analyst_persistence`), never from `persistence`; the
+  narrative is handed it as its own `persistence_assessed` fact. The IOC
+  table carries each mutex, path, registry key, scheduled task and service an
+  analyst listed (`ledger_projection.listed_non_network_values`) as an
+  `analyst` row, "listed by the <analyst> analyst", with the rule's refusal,
+  after every tool row, and not where the judge names the value (the judge's
+  row answers it). A row of any kind only an analyst listed is listed-only
+  to the rule, so it publishes nothing.
 * **The proof sits beside the prose.** §5.1 and §5.2 print every capa rule the
   run recorded in the anti-analysis, obfuscation and encryption namespaces, and
   in the runtime-linking, PE-export, hashing and checksum namespaces (with the
@@ -2823,22 +2837,37 @@ is assembled from what the run gathered rather than recomputed beside it:
   nothing (one run's analysts named two background addresses in claims calling
   them noise). The row reads `no: <reason>, and no model kept it as an
   indicator`, or, when an artifact lists it, `no: <reason>; <artifact> lists
-  it, and a model's list publishes nothing the platform did not see, and the
+  it, and a listing does not change what the sandbox recorded about it; the
   judge did not keep it as an indicator`, naming any claim that only mentioned
   it, with the AS fact in the reason and the table's context. **A public DNS
   resolver is never published**, whoever lists or names it, the judge
   included: the reason states the sandbox's fact, that it is a public resolver
-  and who listed it. **A value's standing comes from where the platform saw
-  it.** A row the sandbox view holds is decided by the sandbox rule above, a
-  row a tool read out of the file (the string sweep, a recovering tool) by
-  that source; a listing never lifts a row a tool recorded
-  (`ledger_projection._DOMAIN_SOURCE_RANK` ranks `analyst` below `strings`),
-  and a row an artifact created takes a tool's source as soon as a tool
-  records the value. A value only an analyst listed (source `analyst`) is
-  asked the string sweep's questions and otherwise reads `no: named only by
-  an analyst (<artifact>); no tool in this run saw it, and the judge did not
-  keep it as an indicator`; the judge naming it keeps the standing it had
-  before, so it is published. The drafts read the table's
+  and who listed it. A sandbox URL whose host is an address takes that
+  address's row facts: it waits for the judge when the address is
+  unattributed, and a resolver's URL is never published. **A value's standing
+  comes from where the platform saw it.** The capture (`pcap_summary`) is a
+  sandbox view like the flow table: its conversations' addresses and its TLS
+  names are sandbox rows, with no attribution. A row the sandbox view holds
+  is decided by the sandbox rule above, a row a tool read out of the file
+  (the string sweep, a recovering tool) by that source; a listing never lifts
+  a row a tool recorded (`ledger_projection._DOMAIN_SOURCE_RANK` ranks
+  `analyst` below `strings`). Every value an analyst lists is looked for,
+  whole, in every tool answer of the run at build time
+  (`ledger_projection.tool_sightings`, stored as `tool_sightings`): a row
+  only an artifact created takes the source of the answer that holds it
+  (`sandbox` for a sandbox tool's or the capture's, `strings` for any other
+  tool's), and a listed value a tool's text holds and no second source
+  records reads `no: seen only in the text of <entry> (<tool>), and no second
+  source in this run records it; <artifact> lists it`. A value no answer
+  holds (source `analyst`) is asked the string sweep's questions and
+  otherwise reads `no: named only by an analyst (<artifact>); no tool in this
+  run saw it, and the judge did not keep it as an indicator` — said only
+  after that search. A report stored before the search is searched in the
+  tool sections it keeps, answered as `strings` when one holds the value,
+  and otherwise says only that no tool answer it keeps holds it. The judge
+  naming such a value keeps the standing it had before, so it is published.
+  One run's sixteen capture addresses were told no tool saw them before the
+  capture was read. The drafts read the table's
   answer, the Sigma selection included. **A published URL carries its name.**
   The host of every URL the rule publishes — the network block's and the
   judge's — follows the URL's decision (`published_url_hosts`,
@@ -2895,7 +2924,8 @@ is assembled from what the run gathered rather than recomputed beside it:
   (decode_string_blobs), ev_NNNN", the recovering entry's own id. **A
   recovered value is a candidate row whether or not a model named it.** The
   builder reads each domain, address and URL the record holds, as the
-  recovering tool spelled it (`stix_renderer.recovered_network_values`), into
+  recovering tool spelled it (`EmulatedStrings.spelled`, read by
+  `stix_renderer.recovered_network_values`), into
   the network block with the string sweep's source
   (`network_from_ledger(recovered=)`), classified by the reader an analyst's
   endpoint cell is read with; the rule above decides it like any other row, so
@@ -3090,7 +3120,11 @@ is assembled from what the run gathered rather than recomputed beside it:
   flow table, the capture) only when the network block holds a sandbox row
   the sandbox attributed to the sample's process tree: without one it holds
   the guest's traffic, and one run marked a C2 step observed on an
-  unattributed capture. Process, file and registry answers keep their meaning.
+  unattributed capture. A `sandbox_report_section` answer is classified by
+  the section it filled: the network, DNS, HTTP, flow, host and capture
+  sections are network answers. Process, file and registry answers keep their
+  meaning. Any one attributed flow admits every network answer; a check that
+  the step's own address has an attributed row is not made.
   So a step citing a mock's empty answer or an unattributed capture is asked
   about and, if kept, printed with the
   `report.flow_voice` note; a run with no observation prints that note beside
