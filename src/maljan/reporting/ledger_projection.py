@@ -715,15 +715,18 @@ def network_from_ledger(
 
     ``sightings`` is, for each value an analyst listed, the tool answers of
     the run that hold it (:func:`tool_sightings`). A row only an artifact
-    created takes the source of the answer that holds it — ``sandbox`` for a
-    sandbox tool's or the capture's, ``strings`` for any other tool's, which
-    read the file or a record about it — so the rule of that source decides
-    it; a row no answer holds stays ``analyst``.
+    created and some answer's text holds takes the string sweep's standing
+    (``strings``), whichever tool printed the text: text inside an answer — a
+    signature's description, a command line, the sample's strings a sandbox
+    re-serves — is no observation of the sample. Only a structured network
+    record (a flow, a DNS query, an HTTP request, a capture conversation)
+    makes a sandbox row. A row no answer holds stays ``analyst``.
 
     The capture (``pcap_summary``) is a sandbox view like the flow table: its
     conversations' addresses and its TLS names are sandbox rows. It says
     nothing about which process made a conversation, so it states no
-    attribution.
+    attribution, and a name only its TLS list recorded is marked
+    ``capture_only``.
 
     ``sandbox_report`` is the job's whole report. When it holds an observation
     the sandbox rows are read from it, every row, rather than from the views a
@@ -834,10 +837,18 @@ def network_from_ledger(
     disputed: dict[str, dict[str, list[str]]] = {}
     host_facts: dict[str, dict[str, Any]] = {}
 
+    # The names a DNS or HTTP view named, and the names only the capture's TLS
+    # list recorded: a TLS name says nothing about which process made the
+    # connection, so a name the capture alone holds is stated as such.
+    resolved: set[str] = set()
+    tls_names: set[str] = set()
+
     for data, whole in _sandbox_views(ledger, sandbox_report):
         for key in ("dns", "domains"):
             for row in data.get(key) or []:
-                _add("domain", _first_str(row, "request", "hostname", "domain", "name"), "sandbox")
+                name = _first_str(row, "request", "hostname", "domain", "name")
+                _add("domain", name, "sandbox")
+                resolved.add(value_key("domain", name))
         # An address the sample really reached, labelled as one: the default
         # source is ``strings``, so every observed address was recorded as
         # though a string sweep had produced it, which is the weakest claim
@@ -874,6 +885,7 @@ def network_from_ledger(
         for row in data.get("http") or []:
             host = _first_str(row, "host", "hostname")
             _add("domain", host, "sandbox")
+            resolved.add(value_key("domain", host))
             # A request the sample made, and labelled as one: the default
             # source is ``strings``, so an observed URL used to be recorded as
             # though it had been read out of the file's bytes.
@@ -885,6 +897,7 @@ def network_from_ledger(
         sni = data.get("sni")
         for name in sni if isinstance(sni, dict | list) else []:
             _add("domain", str(name), "sandbox")
+            tls_names.add(value_key("domain", str(name)))
 
     for _entry, data in _payloads(ledger, "iocs_from_file", "iocs_from_text"):
         for row in data.get("iocs") or []:
@@ -916,11 +929,16 @@ def network_from_ledger(
         *network.urls,
     ]
     for row in rows:
-        if row.source != "analyst":
-            continue
-        seen = (sightings or {}).get(_listed_key(row))
-        if seen:
-            row.source = "sandbox" if any(is_sandbox_tool(tool) for _, tool in seen) else "strings"
+        if row.source == "analyst" and (sightings or {}).get(_listed_key(row)):
+            # Text inside a tool's answer — any tool's, a sandbox's included —
+            # is a string the tool printed, not an observation of the sample:
+            # only a structured network record (above) makes a sandbox row.
+            row.source = "strings"
+    for domain in network.domains:
+        key = value_key("domain", domain.fqdn)
+        domain.capture_only = (
+            domain.source == "sandbox" and key in tls_names and key not in resolved
+        )
 
     _state_sandbox_facts(network, attributed, host_facts, outside, disputed)
     _state_who_kept(network, kept, isrs)
@@ -930,19 +948,26 @@ def network_from_ledger(
 def _listed_key(row: NetworkIP | NetworkDomain | NetworkURL) -> str:
     """A network row's value as :func:`tool_sightings` keys it."""
     if isinstance(row, NetworkIP):
-        return row.address.lower()
+        return value_key("ip", row.address)
     if isinstance(row, NetworkDomain):
-        return row.fqdn.lower().rstrip(".")
-    return row.url.lower()
+        return value_key("domain", row.fqdn)
+    return value_key("url", row.url)
 
 
-# The tools whose answer is what a sandbox or its capture recorded.
-_SANDBOX_TOOL_PREFIXES = ("sandbox_", "pcap_summary")
+def value_key(kind: str, value: Any) -> str:
+    """One spelling of a value for every lookup: an address canonical, anything else folded.
 
-
-def is_sandbox_tool(tool: str) -> bool:
-    """Whether ``tool``'s answer is a sandbox's or its capture's record."""
-    return str(tool or "").rsplit("__", 1)[-1].startswith(_SANDBOX_TOOL_PREFIXES)
+    An address loses its brackets and is written in its compressed lower-case
+    form; any other value is lower-cased with a trailing dot taken off. The
+    sightings are keyed with it and looked up with it, so a spelling cannot
+    miss.
+    """
+    text = str(value or "").strip()
+    if kind == "ip":
+        canonical = address_key(text.strip("[]"))
+        if _parses_as_an_address(canonical):
+            return canonical
+    return text.lower().rstrip(".")
 
 
 def _strings_in(value: Any) -> Iterator[str]:
@@ -961,15 +986,17 @@ def _strings_in(value: Any) -> Iterator[str]:
 
 
 def tool_sightings(
-    ledger: list[LedgerEntry], values: Iterable[str]
+    ledger: list[LedgerEntry], values: Iterable[tuple[str, str]]
 ) -> dict[str, list[tuple[str, str]]]:
-    """For each value, lower-cased: the ledger entries whose answer holds it whole.
+    """For each ``(kind, value)``, keyed by :func:`value_key`: the entries whose answer holds it.
 
     Every successful entry is read — its structured answer's strings and its
     text — and a value is found only as a value of its own
     (``whole_value_in``), so a longer token that happens to contain it does
-    not count. A value no answer holds maps to an empty list: the search ran
-    and found nothing, which is what lets the report say no tool saw it.
+    not count. An entry whose call arguments hold the value is not a sighting
+    of it: a lookup's answer repeats the question it was asked. A value no
+    answer holds maps to an empty list: the search ran and found nothing,
+    which is what lets the report say no tool saw it.
     """
     from maljan.agents._indicator_denylists import whole_value_in
 
@@ -978,16 +1005,21 @@ def tool_sightings(
             entry.id,
             entry.tool,
             " ".join([*_strings_in(entry.structured), str(entry.output or "")]).lower(),
+            " ".join(_strings_in(entry.args)).lower(),
         )
         for entry in ledger or []
         if entry.ok
     ]
     out: dict[str, list[tuple[str, str]]] = {}
-    for value in values:
-        key = str(value or "").strip().lower().rstrip(".")
+    for kind, value in values:
+        key = value_key(kind, value)
         if not key or key in out:
             continue
-        out[key] = [(eid, tool) for eid, tool, text in texts if whole_value_in(key, text)]
+        out[key] = [
+            (eid, tool)
+            for eid, tool, text, asked in texts
+            if whole_value_in(key, text) and not whole_value_in(key, asked)
+        ]
     return out
 
 
@@ -1196,15 +1228,15 @@ def listing_kind(kind: Any) -> str:
     return "values" if kind in _KEEPING_KINDS or kind in _IOC_LIST_KINDS else ""
 
 
-def analyst_listed_values(isrs: dict[str, AgentISR] | None) -> list[str]:
-    """Every value an analyst's artifact lists, network or not, for :func:`tool_sightings`."""
-    values: list[str] = []
+def analyst_listed_values(isrs: dict[str, AgentISR] | None) -> list[tuple[str, str]]:
+    """Every ``(kind, value)`` an analyst's artifact lists, network or not, for the sightings."""
+    values: list[tuple[str, str]] = []
     for isr in (isrs or {}).values():
         for artifact in getattr(isr, "artifacts", None) or []:
-            values.extend(value for _kind, value in kept_network_values(artifact))
+            values.extend(kept_network_values(artifact))
             values.extend(
-                value
-                for _kind, value, _payload in listed_non_network_values(
+                (kind, value)
+                for kind, value, _payload in listed_non_network_values(
                     getattr(artifact, "kind", ""), _rows_of(artifact)
                 )
             )

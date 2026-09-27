@@ -375,6 +375,10 @@ class NetworkDomain(BaseModel):
     # Which analysts' claims mention the value without keeping it. Stated in
     # the reason a row is not published; it publishes nothing.
     mentioned_by: list[str] = Field(default_factory=list)
+    # Whether only the capture's TLS names recorded this name, with no DNS or
+    # HTTP view naming it: a TLS name says nothing about which process made
+    # the connection, so the row waits for the judge.
+    capture_only: bool = False
 
 
 class NetworkIP(BaseModel):

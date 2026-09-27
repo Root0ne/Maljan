@@ -138,6 +138,7 @@ from maljan.reporting.renderers.markdown import analyst_list_note
 from maljan.reporting.renderers.stix_renderer import (
     BENIGN_NAME_IN_A_URL,
     BENIGN_NAME_RESOLVED,
+    CAPTURE_TLS_NAME,
     FLOW_OUTSIDE_THE_TREE,
     SEARCHED_THE_REPORT,
     UNATTRIBUTED_FLOW,
@@ -705,6 +706,10 @@ PROMPTS: dict[str, str] = {
             named_only_reason(),
             named_only_reason("an artifact of the network analyst", SEARCHED_THE_REPORT),
             seen_in_reason("ev_0002 (decompile_function)", "an artifact of the network analyst"),
+            seen_in_reason(
+                "ev_0006 (iocs_from_file), as the tool sections this stored report keeps show it"
+            ),
+            not_kept_reason(CAPTURE_TLS_NAME),
         ]
     ),
     "the line an analyst's table is printed under in Appendix A": " ".join(

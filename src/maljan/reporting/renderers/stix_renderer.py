@@ -2114,12 +2114,16 @@ def listed_value_sightings(report: Any, kind: str, value: str) -> tuple[str, str
     if isinstance(stored, dict) and key in stored:
         seen = [(str(eid), str(tool)) for eid, tool in stored[key]]
         return "; ".join(f"{eid} ({tool})" for eid, tool in seen), SEARCHED_THE_RUN
-    return _section_sightings(report, key), SEARCHED_THE_REPORT
+    held = _section_sightings(report, key)
+    words = "; ".join(f"{ids} ({tool})" for ids, tool in held)
+    if words:
+        words += ", as the tool sections this stored report keeps show it"
+    return words, SEARCHED_THE_REPORT
 
 
-def _section_sightings(report: Any, key: str) -> str:
-    """The kept tool sections of a stored report that hold ``key`` whole, as the rule names them."""
-    found: list[str] = []
+def _section_sightings(report: Any, key: str) -> list[tuple[str, str]]:
+    """The kept tool sections of a stored report that hold ``key`` whole, as ``(ids, tool)``."""
+    found: list[tuple[str, str]] = []
     for section in _field(report, "sections") or []:
         origin = str(_field(section, "source") or "")
         if not origin.startswith("tool:") or not key:
@@ -2132,13 +2136,42 @@ def _section_sightings(report: Any, key: str) -> str:
         ).lower()
         if whole_value_in(key, text):
             ids = ", ".join(str(i) for i in _field(section, "evidence_ids") or []) or "an entry"
-            found.append(f"{ids} ({origin.removeprefix('tool:')})")
-    return "; ".join(dict.fromkeys(found))
+            held = (ids, origin.removeprefix("tool:"))
+            if held not in found:
+                found.append(held)
+    return found
+
+
+# The tools whose answer is a structured sandbox network record, and the reason
+# a row one of them holds is not the sample's until the judge keeps it.
+_NETWORK_RECORD_TOOLS = frozenset({"sandbox_network", "pcap_summary"})
+
+
+def _stored_network_record(report: Any, kind: str, key: str) -> str:
+    """The unattributed reason a stored report's network record gives a listed value, or ``""``.
+
+    A report stored before the build searched every answer answers such a
+    value the way a fresh build does: a capture conversation's or a flow
+    table's address is an unattributed sandbox row, and a name only the
+    capture's TLS list holds is a capture-only name.
+    """
+    if _field(report, "tool_sightings") is not None:
+        return ""
+    tools = {tool for _ids, tool in _section_sightings(report, key)}
+    if kind == "ip" and tools & _NETWORK_RECORD_TOOLS:
+        return UNATTRIBUTED_FLOW
+    if kind == "domain" and "pcap_summary" in tools:
+        return CAPTURE_TLS_NAME
+    return ""
 
 
 def _listing_kwargs(report: Any, kind: str, key: str, row: Any) -> dict[str, str]:
     """Who listed a row, whether the judge kept it, and where the run's tools saw it."""
     said = kept_kwargs(report, kind, key, row)
+    recorded = _stored_network_record(report, kind, key)
+    if recorded:
+        said["unattributed"] = recorded
+        return said
     seen, searched = listed_value_sightings(report, kind, key)
     if seen:
         said["seen_in"] = seen
@@ -2157,6 +2190,9 @@ FLOW_OUTSIDE_THE_TREE = (
     "the sandbox report attributes its flows to a process outside the sample's process tree"
 )
 BENIGN_NAME_RESOLVED = "a well-known benign name the sandbox's guest resolved"
+CAPTURE_TLS_NAME = (
+    "a TLS name only the capture recorded, which does not say which process made the connection"
+)
 # What the rule says of a process the two lineage facts disagree about.
 MARKED_ONLY_PROCESS = (
     "which Triage marks as the sample's but which runs none of the submitted file's names "
@@ -2237,9 +2273,12 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
     else:
         if row is None or _field(row, "source") != "sandbox":
             return {}
-        if not is_well_known_benign_host(key):
+        if _field(row, "capture_only"):
+            why = CAPTURE_TLS_NAME
+        elif is_well_known_benign_host(key):
+            why = BENIGN_NAME_RESOLVED
+        else:
             return {}
-        why = BENIGN_NAME_RESOLVED
     return {"unattributed": why, **kept_kwargs(report, kind, key, row)}
 
 
@@ -2252,14 +2291,10 @@ def _parses_as_an_address(text: str) -> bool:
 
 
 def _value_key(kind: str, value: Any) -> str:
-    """One spelling of a value for lookups: an address canonical, a name lower-cased."""
-    text = str(value or "").strip()
-    if kind == "ip":
-        try:
-            return str(ipaddress.ip_address(text.strip("[]")))
-        except ValueError:
-            return text.lower()
-    return text.lower().rstrip(".")
+    """One spelling of a value for lookups (``ledger_projection.value_key``)."""
+    from maljan.reporting.ledger_projection import value_key
+
+    return value_key(kind, value)
 
 
 def kept_kwargs(report: Any, kind: str, key: str, row: Any = None) -> dict[str, str]:
