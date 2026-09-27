@@ -450,19 +450,35 @@ def sandbox_entry_ids(report: MalwareReport) -> list[str]:
     sample_flow = _sample_tree_made_a_flow(report)
     # The pack's sandbox-status entry states what the sandbox report is; it
     # records no behaviour and is never an observation to cite.
-    sandbox = {
-        row.id
+    tools = {
+        row.id: str(row.tool or "")
         for row in report.evidence_index
-        if str(row.tool or "").startswith(SANDBOX_TOOL_PREFIXES)
-        and row.tool != "sandbox_status"
-        and (sample_flow or row.tool not in _NETWORK_SANDBOX_TOOLS)
+        if str(row.tool or "").startswith(SANDBOX_TOOL_PREFIXES) and row.tool != "sandbox_status"
     }
     holding: set[str] = set()
     for section in report.sections:
-        cited = sandbox.intersection(section.evidence_ids)
-        if cited and section_holds_something(section):
-            holding.update(cited)
+        cited = set(tools).intersection(section.evidence_ids)
+        if not cited or not section_holds_something(section):
+            continue
+        if not sample_flow:
+            cited = {eid for eid in cited if not _answers_about_the_network(tools[eid], section)}
+        holding.update(cited)
     return [row.id for row in report.evidence_index if row.id in holding]
+
+
+# The named sections of a sandbox report that record traffic, as the section
+# built from a ``sandbox_report_section`` answer is keyed (``sandbox_<name>``).
+_NETWORK_REPORT_SECTIONS = frozenset(
+    {"network", "dns", "http", "https", "tcp", "udp", "tls", "hosts", "domains", "pcap"}
+)
+
+
+def _answers_about_the_network(tool: str, section: Any) -> bool:
+    """Whether a sandbox answer records traffic: the flow table, the capture, a network section."""
+    if tool in _NETWORK_SANDBOX_TOOLS:
+        return True
+    name = str(getattr(section, "key", "") or "").removeprefix("sandbox_").lower()
+    return tool == "sandbox_report_section" and name in _NETWORK_REPORT_SECTIONS
 
 
 def _sample_tree_made_a_flow(report: MalwareReport) -> bool:

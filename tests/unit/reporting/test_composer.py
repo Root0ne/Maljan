@@ -757,3 +757,46 @@ class TestAnObservedStepNeedsAnObservationOfTheSample:
 
     def test_a_process_entry_keeps_its_meaning(self) -> None:
         assert self._unresolved(self._report(attributed=False), self._step("ev_0001")) == []
+
+    def test_a_report_section_answer_about_the_network_is_a_network_entry(self) -> None:
+        from maljan.reporting.evidence_bundles import sandbox_entry_ids
+        from maljan.reporting.models import EvidenceIndexRow, EvidenceSection
+
+        for attributed, expected in ((False, ["ev_0001"]), (True, ["ev_0001", "ev_0004"])):
+            report = self._report(attributed=attributed)
+            report.evidence_index.append(
+                EvidenceIndexRow(
+                    id="ev_0004", agent="dynamic", tool="sandbox_report_section", ok=True
+                )
+            )
+            report.sections.append(
+                EvidenceSection(
+                    key="sandbox_network",
+                    title="Sandbox: network",
+                    kind="kv",
+                    rows=[["hosts", "198.51.100.7"]],
+                    evidence_ids=["ev_0004"],
+                )
+            )
+            ids = [i for i in sandbox_entry_ids(report) if i in ("ev_0001", "ev_0004")]
+            assert ids == expected, attributed
+
+    def test_a_report_section_answer_about_the_processes_keeps_its_meaning(self) -> None:
+        from maljan.reporting.evidence_bundles import sandbox_entry_ids
+        from maljan.reporting.models import EvidenceIndexRow, EvidenceSection
+
+        report = self._report(attributed=False)
+        report.evidence_index.append(
+            EvidenceIndexRow(id="ev_0004", agent="dynamic", tool="sandbox_report_section", ok=True)
+        )
+        report.sections.append(
+            EvidenceSection(
+                key="sandbox_behavior",
+                title="Sandbox: behavior",
+                kind="kv",
+                rows=[["processes", "invoice.exe"]],
+                evidence_ids=["ev_0004"],
+            )
+        )
+
+        assert sandbox_entry_ids(report) == ["ev_0001", "ev_0004"]
