@@ -406,10 +406,10 @@ def _build_sigma(report: MalwareReport) -> DetectionRule | None:
     A Sigma selection is a value too, and it is held to the drafts' rule
     (:func:`sigma_admits`): a registry key or an image path is selected on only
     when the IOC table publishes it or a sandbox watched it, and the sandbox's
-    own signature names only when a sandbox recorded them. An analyst's
-    persistence target the table does not publish selects nothing: it is the
-    analyst's reading, not a value this run publishes. With no such source
-    there is no Sigma draft.
+    own signature names only when a sandbox recorded them. Persistence an
+    analyst listed selects nothing: it is printed in §5.4 as assessed and is an
+    ``analyst`` row the table refuses, the analyst's reading and not a value
+    this run publishes. With no such source there is no Sigma draft.
     """
     admitted = frozenset(_registry_form(item) for item in sigma_admits(report))
     registry_targets = _collect_registry_targets(report, admitted)
@@ -495,8 +495,8 @@ def sigma_admits(report: MalwareReport) -> frozenset[str]:
     publishes (``yes``) is the run's published indicator, and a row a sandbox
     recorded is the run's own observation of the sample, which is what a
     Sigma rule over process and registry events describes. Nothing else — a
-    string sweep's row, an analyst's persistence target the table did not
-    publish — reaches a selection.
+    string sweep's row, an ``analyst`` row the table refuses — reaches a
+    selection.
     """
     rows = list(getattr(report, "consolidated_iocs", None) or [])
     if not rows:
@@ -505,7 +505,7 @@ def sigma_admits(report: MalwareReport) -> frozenset[str]:
         rows = build_consolidated_iocs(report)
     # A network row the sandbox recorded is admitted on the table's own answer:
     # a flow the report does not attribute to the sample's process tree is the
-    # guest's traffic, not the sample's, until a model names it — and one live
+    # guest's traffic, not the sample's, until the judge keeps it — and one live
     # run drafted rules over a public resolver the guest asked.
     return frozenset(
         row.value.strip().lower()

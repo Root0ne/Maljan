@@ -593,10 +593,13 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
 
 def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     from maljan.extractors.network_extractor import url_host
+    from maljan.reporting.ledger_projection import listed_non_network_values
+    from maljan.reporting.ledger_report import artifact_sections, listed_rows
     from maljan.reporting.renderers.stix_renderer import (
         corroborating_values,
         emulation_kwargs,
         emulation_record,
+        listed_value_sightings,
         path_names_a_file,
         publish_answer,
         recovered_by_words,
@@ -604,6 +607,10 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
 
     rows: list[ConsolidatedIOC] = []
     seen: set[tuple[str, str]] = set()
+    judged = {
+        (str(item.kind or ""), str(item.value or "").strip().lower())
+        for item in report.judge_indicators or []
+    }
     corroborating = corroborating_values(report)
     # What the run's FLOSS entry recovered by emulation and the static decoder
     # read out of the file's bytes: a network value it holds is a source of
@@ -737,6 +744,35 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         if row.source == "strings" and row.kind in ("path", "registry", "mutex", "command"):
             row.published = _from_strings(row.kind, row.value)
 
+    # What the analysts listed that no tool recorded: each value its own row,
+    # in the analyst's name and with the rule's refusal, after every tool row
+    # so a value a tool recorded keeps the tool's row. A value the judge names
+    # is the judge's row.
+    for kind, section in artifact_sections(report.sections):
+        for analyst, cells in listed_rows(section):
+            for ioc_kind, value, _payload in listed_non_network_values(kind, [cells]):
+                if (ioc_kind, value.strip().lower()) in judged:
+                    continue
+                listed = f"an artifact of the {analyst} analyst" if analyst else ""
+                sighted, searched = listed_value_sightings(report, ioc_kind, value)
+                _add(
+                    _LISTED_LABELS.get(ioc_kind, ioc_kind)
+                    if ioc_kind != "path"
+                    else ("File path" if path_names_a_file(value) else "Directory"),
+                    ioc_kind,
+                    value,
+                    "analyst",
+                    f"listed by the {analyst} analyst" if analyst else "listed by an analyst",
+                    published=publish_answer(
+                        ioc_kind,
+                        value,
+                        "analyst",
+                        listed_by=listed,
+                        seen_in=sighted,
+                        tool_search=searched,
+                    ),
+                )
+
     net = report.network
     reputations: dict[str, Any] = {}
     if net:
@@ -838,6 +874,15 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         else row
         for row in table
     ]
+
+
+# The table's type for each non-network kind an analyst's table lists.
+_LISTED_LABELS = {
+    "mutex": "Mutex",
+    "registry": "Registry key",
+    "scheduled_task": "Scheduled task",
+    "service": "Service",
+}
 
 
 # The table's type for each kind a judge indicator can name.

@@ -707,8 +707,9 @@ PROMPTS: dict[str, str] = {
             seen_in_reason("ev_0002 (decompile_function)", "an artifact of the network analyst"),
         ]
     ),
-    "the line an analyst's table is printed under in Appendix A": analyst_list_note(
-        ["network", "static"]
+    "the line an analyst's table is printed under in Appendix A": " ".join(
+        analyst_list_note(["network", "static"], kind)
+        for kind in ("imports", "endpoints", "persistence")
     ),
     "the replies a tool call with no recorded reply is sent with": (
         f"{NO_REPLY_RECORDED} {NOT_RUN_REPLY}"

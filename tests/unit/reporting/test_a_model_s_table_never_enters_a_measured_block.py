@@ -6,6 +6,13 @@ report prints under "Measured" and "Observed" and which the IOC table, the
 corroboration corpus and the detection rules read. The rows stay visible in
 Appendix A, labelled as the analyst's list, and nothing the model listed
 changes what the platform counts or matches.
+
+The report body still shows them as the analyst's: §5.4 prints the persistence
+an analyst listed under an Assessed block of its own, the narrative is handed
+it as its own fact, and §9 carries an analyst's mutex, path, registry key, task
+and service with source ``analyst`` and the rule's refusal. A kind several
+analysts listed rows under is one table that says which analyst listed each
+row.
 """
 
 from __future__ import annotations
@@ -71,12 +78,23 @@ class TestAnIocList:
     def test_it_is_not_the_string_table(self) -> None:
         assert _build(self.ISRS()).static is None
 
-    def test_it_is_no_row_of_the_ioc_table_and_stays_the_analyst_s(self) -> None:
+    def test_its_mutex_is_the_analyst_s_row_of_the_ioc_table(self) -> None:
         report = _build(self.ISRS())
 
-        assert all(row.value != MUTEX for row in report.consolidated_iocs)
-        table = _appendix_table(MarkdownRenderer().render(report), "Iocs")
-        assert table.split("\n\n", 2)[1].startswith("_Listed by the dynamic analyst")
+        (row,) = [row for row in report.consolidated_iocs if row.value == MUTEX]
+        assert (row.kind, row.source) == ("mutex", "analyst")
+        assert row.context == "listed by the dynamic analyst"
+        assert str(row.published).startswith(
+            "no: named only by an analyst (an artifact of the dynamic analyst); "
+            "no tool in this run saw it"
+        )
+
+    def test_it_stays_the_analyst_s_in_appendix_a(self) -> None:
+        table = _appendix_table(MarkdownRenderer().render(_build(self.ISRS())), "Iocs")
+
+        note = table.split("\n\n", 2)[1]
+        assert note.startswith("_Listed by the dynamic analyst")
+        assert "§9" in note
 
 
 class TestAProcessList:
@@ -100,13 +118,75 @@ class TestAPersistenceList:
         )
     )
 
-    def test_it_matches_nothing_and_stays_the_analyst_s(self) -> None:
+    def test_it_matches_nothing(self) -> None:
         report = _build(self.ISRS())
 
         assert report.persistence == []
-        assert all(row.value != RUN_KEY for row in report.consolidated_iocs)
-        markdown = MarkdownRenderer().render(report)
+        assert not [rule for rule in report.detection_signatures if RUN_KEY in rule.body]
+
+    def test_section_5_4_prints_it_as_assessed(self) -> None:
+        markdown = MarkdownRenderer().render(_build(self.ISRS()))
+
         technical = markdown[markdown.index("### 5.4") : markdown.index("### 5.5")]
-        assert RUN_KEY not in technical
-        table = _appendix_table(markdown, "Persistence")
+        block = technical[technical.index("_Assessed:_ persistence the analysts listed") :]
+        assert "| Kind | Target | Payload | Listed by | Evidence |" in block
+        assert "the dynamic analyst" in block
+        assert "ev_0001" in block
+        assert "relay" in block
+
+    def test_the_narrative_is_handed_it_as_its_own_fact(self) -> None:
+        from maljan.reporting.evidence_bundles import bundle_for
+
+        facts = bundle_for("persistence_detail", _build(self.ISRS()))["facts"]
+
+        assert facts["persistence_mechanisms"] == []
+        (listed,) = facts["persistence_assessed"]
+        assert RUN_KEY in listed and "dynamic" in listed
+
+    def test_its_run_key_is_the_analyst_s_row_of_the_ioc_table(self) -> None:
+        (row,) = [r for r in _build(self.ISRS()).consolidated_iocs if r.value == RUN_KEY]
+
+        assert (row.kind, row.source) == ("registry", "analyst")
+        assert str(row.published).startswith("no: named only by an analyst")
+
+    def test_it_stays_the_analyst_s_in_appendix_a(self) -> None:
+        table = _appendix_table(MarkdownRenderer().render(_build(self.ISRS())), "Persistence")
+
         assert table.split("\n\n", 2)[1].startswith("_Listed by the dynamic analyst")
+
+
+class TestAKindTwoAnalystsListed:
+    @staticmethod
+    def _isrs() -> dict[str, Any]:
+        return {
+            name: AgentISR(
+                agent_id=name,
+                domain="static",
+                artifacts=[
+                    Artifact(
+                        kind="iocs",
+                        columns=["Type", "Value"],
+                        rows=[["mutex", f"{MUTEX}-{name}"]],
+                        evidence_ids=[],
+                        source=name,
+                    )
+                ],
+            )
+            for name in ("static", "reverser")
+        }
+
+    def test_the_table_says_which_analyst_listed_each_row(self) -> None:
+        report = _build(self._isrs())
+
+        (section,) = [s for s in report.sections if s.key == "artifact_iocs"]
+        assert section.columns == ["Listed by", "Type", "Value"]
+        assert section.rows == [
+            ["static", "mutex", f"{MUTEX}-static"],
+            ["reverser", "mutex", f"{MUTEX}-reverser"],
+        ]
+
+    def test_each_row_of_the_ioc_table_names_its_own_analyst(self) -> None:
+        rows = {r.value: r.context for r in _build(self._isrs()).consolidated_iocs}
+
+        assert rows[f"{MUTEX}-static"] == "listed by the static analyst"
+        assert rows[f"{MUTEX}-reverser"] == "listed by the reverser analyst"

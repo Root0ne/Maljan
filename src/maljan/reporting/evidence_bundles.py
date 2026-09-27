@@ -378,6 +378,7 @@ def bundle_for(
             "facts": {
                 "ttps": [f"{m.technique_id} {m.technique_name}" for m in report.ttp_mappings],
                 "persistence": [p.kind for p in report.persistence],
+                "persistence_assessed": _assessed_persistence(report),
                 "has_network": bool(
                     report.network and (report.network.domains or report.network.ips)
                 ),
@@ -409,6 +410,25 @@ def bundle_for(
         "binary": base,
         "facts": _technical_facts(section, report),
     }
+
+
+def _assessed_persistence(report: MalwareReport) -> list[str]:
+    """The persistence the analysts listed, one line each, apart from the tools' mechanisms."""
+    from maljan.reporting.ledger_report import analyst_persistence
+
+    return [
+        " ".join(
+            part
+            for part in (
+                row["kind"],
+                row["target"],
+                f"-> {row['payload']}" if row["payload"] else "",
+                f"(listed by the {row['listed_by']} analyst)" if row["listed_by"] else "",
+            )
+            if part
+        )
+        for row in analyst_persistence(report.sections)
+    ]
 
 
 def sandbox_entry_ids(report: MalwareReport) -> list[str]:
@@ -504,6 +524,16 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     """
     if section == "payloads":
         return _payload_facts(report)
+    if section == "persistence_detail":
+        # The tools' mechanisms and the analysts' listed rows, as two facts:
+        # a run whose static block is empty still has both to state.
+        profile = (report.static.api_capabilities or {}) if report.static else {}
+        return {
+            "persistence_mechanisms": [p.kind for p in report.persistence],
+            "persistence_assessed": _assessed_persistence(report),
+            "persistence_api_count": profile.get("persistence", 0),
+            "registry_api_count": profile.get("registry", 0),
+        }
     if section == "configuration":
         net = report.network
         return {
@@ -580,12 +610,6 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
             "anti_debug_api_count": caps.get("anti_debug", 0),
             "evasion_api_count": caps.get("evasion", 0),
             "evasion_techniques": [t for t in techniques if t in _EVASION_TECHNIQUES],
-        }
-    if section == "persistence_detail":
-        return {
-            "persistence_mechanisms": [p.kind for p in report.persistence],
-            "persistence_api_count": caps.get("persistence", 0),
-            "registry_api_count": caps.get("registry", 0),
         }
     if section == "cli_flags":
         return {"capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1]))}

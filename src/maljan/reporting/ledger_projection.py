@@ -1188,6 +1188,14 @@ def listed_non_network_values(kind: Any, rows: Iterable[Any]) -> list[tuple[str,
     return out
 
 
+def listing_kind(kind: Any) -> str:
+    """``persistence``, ``values`` (a table whose values reach the IOC table), or ``""``."""
+    kind = artifact_kind(kind)
+    if kind == "persistence":
+        return "persistence"
+    return "values" if kind in _KEEPING_KINDS or kind in _IOC_LIST_KINDS else ""
+
+
 def analyst_listed_values(isrs: dict[str, AgentISR] | None) -> list[str]:
     """Every value an analyst's artifact lists, network or not, for :func:`tool_sightings`."""
     values: list[str] = []

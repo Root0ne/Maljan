@@ -50,6 +50,7 @@ from maljan.extractors.network_extractor import (
     url_host,
 )
 from maljan.pipeline.events import safe_finding_value
+from maljan.reporting.ledger_report import ANALYST_SECTION_SOURCES
 from maljan.reporting.models import (
     EmulatedStrings,
     MalwareReport,
@@ -1872,9 +1873,10 @@ def indicator_publish_reason(
     sweep's entry when it did, and the value is then the sweep's) — is a
     source of its own (``recovered``: "recovered by emulation (decoded
     strings), ev_NNNN" or "decoded from the file's own bytes
-    (decode_string_blobs), ev_NNNN"). It gives standing to a row somebody
-    recorded and creates none. Hiding
-    a host behind encoding is a deliberate act benign software rarely performs,
+    (decode_string_blobs), ev_NNNN"). Each such value is a row of the string
+    sweep's source in the network block (the builder adds it through
+    ``recovered_network_values``), and this is the question that decides it.
+    Hiding a host behind encoding is a deliberate act benign software rarely performs,
     where a plain string in a binary is routinely benign. It admits a domain,
     an address or a URL that passes every other question here — the host
     question, the address classes, the reputation half — and is not a
@@ -1886,6 +1888,10 @@ def indicator_publish_reason(
     if kind == "ip" and is_public_resolver(value):
         return None
     if listed_only_by_an_analyst(kind, source):
+        if kind not in ("domain", "ip", "url"):
+            # A mutex, a path, a registry key only an analyst listed: a
+            # listing is no source, and the judge's own value is its own row.
+            return None
         if kept_by and _could_be_infrastructure(kind, value, source):
             return _kept_by_a_model(kept_by)
         source = "strings"
@@ -2017,8 +2023,8 @@ ANALYST_SOURCE = "analyst"
 
 
 def listed_only_by_an_analyst(kind: str, source: Any) -> bool:
-    """Whether a network row stands on nothing but an analyst's listing."""
-    return kind in ("domain", "ip", "url") and str(source or "").strip().lower() == ANALYST_SOURCE
+    """Whether a row, of any kind, stands on nothing but an analyst's listing."""
+    return str(source or "").strip().lower() == ANALYST_SOURCE
 
 
 def _could_be_infrastructure(kind: str, value: str, source: Any) -> bool:
@@ -3141,17 +3147,11 @@ def _publishable_domains(report: Any) -> frozenset[str]:
 
 
 # Where a second source for a string row is looked for. A section built from
-# an analyst's own artefact or finding is a claim that cites evidence; a
-# section built from a tool's output is the string sweep's own table arriving
-# under another heading, and reading those would let every string corroborate
-# itself.
-# Where a second source for a string row is looked for. A section built from
-# an analyst's own artefact or finding is a claim; the ledger entries it cites
-# are what the claim stands on, and only the entries of a tool that is not the
-# string sweep can hold a value up. A section built from the sweep's own output
-# is the thing being corroborated, and reading it would let every string
-# corroborate itself.
-_ANALYST_SECTION_SOURCES = ("artifact:", "finding", "agent")
+# an analyst's own artefact or finding (``ledger_report.ANALYST_SECTION_SOURCES``)
+# is a claim; the ledger entries it cites are what the claim stands on, and only
+# the entries of a tool that is not the string sweep can hold a value up. A
+# section built from the sweep's own output is the thing being corroborated,
+# and reading it would let every string corroborate itself.
 
 # The tools whose output *is* the string sweep. An analyst quoting one of these
 # in a finding has quoted the sweep's own table back, which is one source said
@@ -3211,7 +3211,7 @@ def _corroborating_values(report: Any, corpus: Any = None) -> str:
     drawn: set[str] = set()
     for section in sections:
         origin = str(getattr(section, "source", "") or "").strip().lower()
-        if origin.startswith(_ANALYST_SECTION_SOURCES):
+        if origin.startswith(ANALYST_SECTION_SOURCES):
             cited.update(str(eid) for eid in (getattr(section, "evidence_ids", None) or []))
     for section in sections:
         origin = str(getattr(section, "source", "") or "").strip().lower()
