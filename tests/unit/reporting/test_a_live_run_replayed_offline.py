@@ -222,7 +222,7 @@ class TestTheBackgroundAddresses:
 
         assert str(resolver.published).startswith("no: the sandbox report does not say")
         assert "public DNS resolver" in str(resolver.published)
-        assert "no model kept it as an indicator" in str(resolver.published)
+        assert "which this run never publishes, whoever names it" in str(resolver.published)
         # The two claims that called it noise are named, and keep nothing.
         assert "a claim by the network analyst" in str(resolver.published)
         assert "a claim by the static_qu1cksc0pe analyst" in str(resolver.published)

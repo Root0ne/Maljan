@@ -1,4 +1,4 @@
-"""A published URL's well-known host waits for a model, and a table reads the report once.
+"""A published URL's well-known host waits for the judge, and a table reads the report once.
 
 A URL's host follows the URL's decision, except a well-known benign host: a
 judge's URL on a CDN or a cloud API would otherwise publish the provider's
@@ -13,7 +13,13 @@ from __future__ import annotations
 from typing import Any
 
 from maljan.reporting import builder
-from maljan.reporting.models import MalwareReport, NetworkDomain, NetworkIOCs, NetworkURL
+from maljan.reporting.models import (
+    JudgeIndicator,
+    MalwareReport,
+    NetworkDomain,
+    NetworkIOCs,
+    NetworkURL,
+)
 from maljan.reporting.renderers import stix_renderer
 from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
 
@@ -47,8 +53,9 @@ class TestAWellKnownHostOfAPublishedURL:
             "model kept it as an indicator"
         )
 
-    def test_an_analyst_keeping_the_host_itself_publishes_it(self) -> None:
-        report = _report(
+    @staticmethod
+    def _listed() -> MalwareReport:
+        return _report(
             NetworkIOCs(
                 urls=[NetworkURL(url=CDN_URL, source="sandbox")],
                 domains=[
@@ -60,6 +67,19 @@ class TestAWellKnownHostOfAPublishedURL:
                 ],
             )
         )
+
+    def test_an_analyst_listing_the_host_itself_does_not_publish_it(self) -> None:
+        answer = _row(self._listed(), "www.googleapis.com").published
+
+        assert answer == (
+            f"no: a well-known benign name carried by a published URL ({CDN_URL}); an "
+            "artifact of the network analyst lists it, and a model's list publishes nothing "
+            "the platform did not see, and the judge did not keep it as an indicator"
+        )
+
+    def test_the_judge_keeping_the_host_itself_publishes_it(self) -> None:
+        report = self._listed()
+        report.judge_indicators = [JudgeIndicator(kind="domain", value="www.googleapis.com")]
 
         assert _row(report, "www.googleapis.com").published == "yes"
 

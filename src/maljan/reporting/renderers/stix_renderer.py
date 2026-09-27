@@ -44,6 +44,7 @@ from maljan.extractors.network_extractor import (
     corroboration_reason,
     host_is_public,
     ip_corroboration_reason,
+    is_public_resolver,
     is_well_known_benign_host,
     url_corroboration_reason,
     url_host,
@@ -1819,6 +1820,7 @@ def indicator_publish_reason(
     kept_by: str = "",
     mentioned_by: str = "",
     in_published_url: str = "",
+    listed_by: str = "",
 ) -> str | None:
     """Why this run may publish one indicator of ``kind``, or ``None``.
 
@@ -1831,11 +1833,21 @@ def indicator_publish_reason(
 
     ``unattributed`` is why a sandbox row is not the sample's own observation
     — a flow the report does not attribute to the sample's process tree, a
-    well-known benign name the guest resolved — and ``kept_by`` the models
-    that kept the value as an indicator (:func:`sandbox_row_kwargs`): an
-    analyst's artifact or the judge's indicator. Such a row is published only
-    when a model kept it; the observation alone is the guest's traffic, and a
-    claim that only mentions the value (``mentioned_by``) keeps nothing.
+    well-known benign name the guest resolved — and ``kept_by`` the judge's
+    indicator that names the value (:func:`sandbox_row_kwargs`). Such a row is
+    published only when the judge kept it; the observation alone is the
+    guest's traffic. An analyst's artifact listing the value (``listed_by``)
+    and a claim that only mentions it (``mentioned_by``) keep nothing: a
+    model's list never overrides what the sandbox says about a value.
+
+    A public DNS resolver is never published, whoever lists or names it.
+
+    A value's standing comes from where the platform saw it: the sandbox rule
+    above for a value the sandbox view holds, the source below for a value a
+    tool read out of the file or a recovering tool decoded. A value only an
+    analyst listed (``source`` ``analyst``) is asked the questions a string
+    sweep's value is asked, which a listing answers none of, and is otherwise
+    published only when the judge named it, as it was before this rule.
 
     One rule for every kind the platform mints, and every minting path asks it:
     the network block's own rows, the string rows that reach the bundle through
@@ -1869,6 +1881,12 @@ def indicator_publish_reason(
     a Benign run publishes no malicious indicator, and the refusal says so.
     A value only the string sweep read stays unpublished.
     """
+    if kind == "ip" and is_public_resolver(value):
+        return None
+    if listed_only_by_an_analyst(kind, source):
+        if kept_by and _could_be_infrastructure(kind, value, source):
+            return _kept_by_a_model(kept_by)
+        source = "strings"
     if kind == "domain":
         if not host_is_public(value):
             return None
@@ -1985,12 +2003,65 @@ def _kept_by_a_model(kept_by: str) -> str | None:
     return f"kept as an indicator by {kept_by}" if kept_by else None
 
 
-def not_kept_reason(why: str, mentioned_by: str = "") -> str:
-    """The ``no:`` a row waiting for a model reads, naming any claim that only mentioned it."""
-    said = f"no: {why}, and no model kept it as an indicator"
+# The source of a network row only an analyst's artifact created: no tool saw it.
+ANALYST_SOURCE = "analyst"
+
+
+def listed_only_by_an_analyst(kind: str, source: Any) -> bool:
+    """Whether a network row stands on nothing but an analyst's listing."""
+    return kind in ("domain", "ip", "url") and str(source or "").strip().lower() == ANALYST_SOURCE
+
+
+def _could_be_infrastructure(kind: str, value: str, source: Any) -> bool:
+    """The class questions an analyst's row answered before the judge's naming decided it."""
+    if kind == "ip":
+        return address_is_publishable(value, source)
+    return host_is_public(url_host(value) if kind == "url" else value)
+
+
+def not_kept_reason(why: str, mentioned_by: str = "", listed_by: str = "") -> str:
+    """The ``no:`` a row waiting for the judge reads, naming who listed or mentioned it."""
+    if listed_by:
+        said = (
+            f"no: {why}; {listed_by} lists it, and a model's list publishes nothing "
+            "the platform did not see, and the judge did not keep it as an indicator"
+        )
+    else:
+        said = f"no: {why}, and no model kept it as an indicator"
     if mentioned_by:
         said += f" ({mentioned_by} mentions it and does not keep it)"
     return said
+
+
+# What the rule says of a public DNS resolver, which it never publishes.
+PUBLIC_RESOLVER = "a public DNS resolver, which this run never publishes, whoever names it"
+
+
+def public_resolver_reason(
+    unattributed: str = "", listed_by: str = "", mentioned_by: str = ""
+) -> str:
+    """The ``no:`` a public DNS resolver reads: the sandbox's fact, the resolver, who named it."""
+    said = f"no: {PUBLIC_RESOLVER}"
+    if unattributed:
+        said = f"no: {unattributed}; it is {PUBLIC_RESOLVER}"
+    if listed_by:
+        said += f"; {listed_by} lists it"
+    if mentioned_by:
+        said += f" ({mentioned_by} mentions it and does not keep it)"
+    return said
+
+
+# What the rule says of a network value no tool in the run saw.
+NAMED_ONLY_BY_AN_ANALYST = "named only by an analyst"
+
+
+def named_only_reason(listed_by: str = "") -> str:
+    """The ``no:`` a value only an analyst listed reads."""
+    who = f" ({listed_by})" if listed_by else ""
+    return (
+        f"no: {NAMED_ONLY_BY_AN_ANALYST}{who}; no tool in this run saw it, and the judge "
+        "did not keep it as an indicator"
+    )
 
 
 # What the rule says of a well-known benign name a published URL carries.
@@ -2025,7 +2096,7 @@ def disputed_flow_reason(marked_only: list[str], file_only: list[str]) -> str:
 
 
 def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
-    """``unattributed``, ``kept_by`` and ``mentioned_by`` for one value's sandbox row, or nothing.
+    """``unattributed``, ``kept_by``, ``listed_by`` and ``mentioned_by`` for one value's row.
 
     Asked of the report's network block. An address the sandbox saw is the
     sample's own observation when a flow to it came from the sample's process
@@ -2033,21 +2104,29 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
     elsewhere, or says nothing about which process made them — is the guest's
     traffic, and so is a well-known benign name a DNS lookup asked for (Windows
     resolves through its DNS service, never through the sample's tree, so a
-    name is judged by what it is). Either is published only when a model kept
-    it as an indicator: an analyst's artifact, or the judge's indicator. The
-    public resolver and AS facts are stated in the reason. Rows are found
-    through one index per report, so a table of any size is read once.
+    name is judged by what it is). Either is published only when the judge's
+    indicator kept it; an analyst's artifact listing it is named in the
+    reason and publishes nothing. The AS fact is stated in the reason. A row
+    only an analyst's artifact created carries who listed it and whether the
+    judge kept it. Rows are found through one index per report, so a table of
+    any size is read once.
     """
     network = _field(report, "network")
-    if network is None or kind not in ("ip", "domain"):
+    if network is None or kind not in ("ip", "domain", "url"):
         return {}
     key = _value_key(kind, value)
     row = _network_index(report).get((kind, key))
+    if row is not None and listed_only_by_an_analyst(kind, _field(row, "source")):
+        return kept_kwargs(report, kind, key, row)
+    if kind == "url":
+        return {}
     if kind == "ip":
         if row is None or _field(row, "source") != "sandbox":
             return {}
         if _field(row, "sample_process_tree") is True:
-            return {}
+            # The sample's own observation: who listed it is stated, and the
+            # sandbox rule decides.
+            return kept_kwargs(report, kind, key, row)
         why = (
             FLOW_OUTSIDE_THE_TREE
             if _field(row, "sample_process_tree") is False
@@ -2062,8 +2141,6 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
         file_only = [str(p) for p in (_field(row, "file_only_processes") or []) if str(p)]
         if _field(row, "sample_process_tree") is None and (marked_only or file_only):
             why = disputed_flow_reason(marked_only, file_only)
-        if _field(row, "public_resolver"):
-            why += "; it is a public DNS resolver"
         if _field(row, "asn"):
             why += f"; AS {_field(row, 'asn')}"
     else:
@@ -2087,8 +2164,15 @@ def _value_key(kind: str, value: Any) -> str:
 
 
 def kept_kwargs(report: Any, kind: str, key: str, row: Any = None) -> dict[str, str]:
-    """``kept_by`` and ``mentioned_by`` for one value: who kept it, whose claim only mentions it."""
-    kept = [str(by) for by in (_field(row, "kept_by") or [])] if row is not None else []
+    """``kept_by``, ``listed_by`` and ``mentioned_by`` for one value.
+
+    ``kept_by`` is the judge's indicator naming the value, the one keeping the
+    rule reads; ``listed_by`` the analysts' artifacts that list it, and
+    ``mentioned_by`` the claims that only mention it, both stated and neither
+    read as keeping it.
+    """
+    listed = [str(by) for by in (_field(row, "kept_by") or [])] if row is not None else []
+    kept: list[str] = []
     if (kind, key) in _judge_index(report):
         kept.append("the judge's indicator")
     elif (kind, key) in _judge_url_hosts(report) and not is_well_known_benign_host(key):
@@ -2098,6 +2182,7 @@ def kept_kwargs(report: Any, kind: str, key: str, row: Any = None) -> dict[str, 
     mentioned = [str(by) for by in (_field(row, "mentioned_by") or [])] if row is not None else []
     return {
         "kept_by": ", ".join(dict.fromkeys(kept)),
+        "listed_by": ", ".join(dict.fromkeys(listed)),
         "mentioned_by": ", ".join(dict.fromkeys(mentioned)),
     }
 
@@ -2141,6 +2226,8 @@ def _network_index(report: Any) -> dict[tuple[str, str], Any]:
             out.setdefault(("ip", _value_key("ip", _field(row, "address"))), row)
         for row in _field(network, "domains") or []:
             out.setdefault(("domain", _value_key("domain", _field(row, "fqdn"))), row)
+        for row in _field(network, "urls") or []:
+            out.setdefault(("url", _value_key("url", _field(row, "url"))), row)
         return out
 
     return _memo(report, "network_index", _build)  # type: ignore[no-any-return]
@@ -2621,6 +2708,7 @@ def publish_answer(
     kept_by: str = "",
     mentioned_by: str = "",
     in_published_url: str = "",
+    listed_by: str = "",
 ) -> str:
     """The publish rule's answer for one row, as the report prints it.
 
@@ -2652,6 +2740,8 @@ def publish_answer(
         in_published_url=in_published_url,
     ):
         return "yes"
+    if kind == "ip" and is_public_resolver(text):
+        return public_resolver_reason(unattributed, listed_by, mentioned_by)
     if kind == "domain" and not host_is_public(text):
         return "no: not a name that resolves outside the analysed network"
     if kind == "url" and not host_is_public(url_host(text)):
@@ -2659,9 +2749,11 @@ def publish_answer(
     if kind == "ip" and not address_is_publishable(text, source):
         return "no: not an address this run may publish"
     if kind == "domain" and in_published_url and is_well_known_benign_host(text):
-        return not_kept_reason(f"{BENIGN_NAME_IN_A_URL} ({in_published_url})", mentioned_by)
+        return not_kept_reason(
+            f"{BENIGN_NAME_IN_A_URL} ({in_published_url})", mentioned_by, listed_by
+        )
     if unattributed and kind in ("ip", "domain"):
-        return not_kept_reason(unattributed, mentioned_by)
+        return not_kept_reason(unattributed, mentioned_by, listed_by)
     if kind == "email" and not email_is_publishable(text):
         return "no: not a mailbox at a host that could exist"
     if (
@@ -2685,6 +2777,8 @@ def publish_answer(
         )
     if recovered and is_well_known_benign_host(url_host(text) if kind == "url" else text):
         return f"no: {recovered}, but it is a well-known benign host"
+    if listed_only_by_an_analyst(kind, source):
+        return named_only_reason(listed_by)
     if kind == "command":
         return "no: a command line is not an indicator this run publishes"
     if kind != "hash" and (kind not in STRING_IOC_KINDS or indicator_pattern(kind, text) is None):

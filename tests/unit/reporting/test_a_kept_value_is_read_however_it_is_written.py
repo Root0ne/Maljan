@@ -1,11 +1,13 @@
-"""A value an analyst kept is kept however the analyst wrote it.
+"""A value an analyst listed is read as listed however the analyst wrote it.
 
-A sandbox address the sample's tree did not make is published when a model
-keeps it as an indicator. "Kept" used to be one exact row shape —
-``["ip", address]`` in an ``endpoints``, ``network`` or ``iocs`` artifact — so a
-C2 kept with its port, under ``ipv4``, in an ``Address | Port`` table, in a
-``c2`` artifact, or inside a URL stayed ``no:``. Each such shape now keeps it,
-and so does the host of a URL the judge kept.
+"Listed" used to be one exact row shape — ``["ip", address]`` in an
+``endpoints``, ``network`` or ``iocs`` artifact — so a C2 listed with its port,
+under ``ipv4``, in an ``Address | Port`` table, in a ``c2`` artifact, or inside a
+URL was not read at all. Each such shape is now read, and the publish rule's
+reason for a sandbox address the sample's tree did not make names the analyst
+that listed it. A listing publishes nothing: a sandbox address the tree did
+not make is published only when the judge keeps it, as the host of a URL the
+judge kept is.
 
 The tolerance is on the value, never on the kind: only an ``endpoints``,
 ``network``, ``iocs`` or ``c2`` artifact (and their plain spellings) keeps, a
@@ -94,14 +96,17 @@ def _answer(artifact: Artifact | None, address: str = CONTACT, **extra: Any) -> 
         "untyped-url-in-c2-endpoints",
     ],
 )
-def test_each_shape_keeps_the_address(artifact: Artifact) -> None:
-    assert _answer(artifact) == "yes"
+def test_each_shape_lists_the_address(artifact: Artifact) -> None:
+    answer = _answer(artifact)
+
+    assert answer.startswith("no: ")
+    assert "an analyst artifact lists it" in answer
 
 
-def test_an_ipv6_address_in_bracket_form_with_its_port_is_kept() -> None:
+def test_an_ipv6_address_in_bracket_form_with_its_port_is_listed() -> None:
     artifact = Artifact(kind="endpoints", rows=[["ipv6", "[2A00:1450:4001:82B::200E]:443"]])
 
-    assert _answer(artifact, CONTACT_V6) == "yes"
+    assert "an analyst artifact lists it" in _answer(artifact, CONTACT_V6)
 
 
 def test_the_host_of_a_url_the_judge_kept_is_kept() -> None:

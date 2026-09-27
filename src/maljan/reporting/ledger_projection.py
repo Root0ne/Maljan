@@ -690,9 +690,12 @@ def _as_tree(nodes: list[ProcessNode]) -> list[ProcessNode]:
 
 
 _DomainSource = Literal["sandbox", "analyst", "strings"]
-# What one source is worth against another. A name the sample resolved outranks
-# a name an analyst wrote down, which outranks a run of bytes in the file.
-_DOMAIN_SOURCE_RANK: dict[str, int] = {"strings": 0, "analyst": 1, "sandbox": 2}
+# Which source a value's row stands on when more than one recorded it: where the
+# platform saw it. A value the sample reached outranks a value a tool read out
+# of the file, which outranks a value only an analyst listed — a listing is not
+# a sighting, so it never lifts a row a tool recorded, and a row it created
+# takes the tool's source as soon as a tool records the value too.
+_DOMAIN_SOURCE_RANK: dict[str, int] = {"analyst": 0, "strings": 1, "sandbox": 2}
 
 
 def network_from_ledger(
@@ -748,8 +751,8 @@ def network_from_ledger(
                 return
             known = domains.get(value)
             if known is not None:
-                # The same name from a second source is the corroboration the
-                # indicator rule asks for, so the stronger origin wins.
+                # The same name from a second source: the row stands on the
+                # stronger one.
                 if _DOMAIN_SOURCE_RANK[source] > _DOMAIN_SOURCE_RANK[known.source or "strings"]:
                     known.source = source
                 return
@@ -793,8 +796,7 @@ def network_from_ledger(
             known_url = urls.get(value)
             if known_url is not None:
                 # The same endpoint from a second source, read the way a
-                # domain's is: the stronger origin wins, and that is the
-                # corroboration the indicator rule asks for.
+                # domain's is: the row stands on the stronger one.
                 if _DOMAIN_SOURCE_RANK[source] > _DOMAIN_SOURCE_RANK[known_url.source or "strings"]:
                     known_url.source = source
                 return
@@ -879,11 +881,12 @@ def network_from_ledger(
     return network if (network.domains or network.ips or network.urls) else None
 
 
-# The artifact kinds that keep a network value as an indicator: the analyst's
-# structured list of what it holds to be infrastructure. Nothing else keeps —
+# The artifact kinds that list a network value as an indicator: the analyst's
+# structured list of what it holds to be infrastructure. Nothing else lists —
 # a table of contacted hosts is a transcription of what the sandbox saw, and one
 # live run's analysts wrote exactly such observations down while calling them
-# noise. Tolerance is on the values, never on the kinds.
+# noise. Tolerance is on the values, never on the kinds. A listing is stated
+# beside the row and never publishes it (``_state_who_kept``).
 _KEEPING_KINDS = frozenset(
     {
         "endpoints",
@@ -1244,14 +1247,16 @@ def _state_who_kept(
     kept: dict[tuple[str, str], list[str]],
     isrs: dict[str, AgentISR] | None,
 ) -> None:
-    """Which model kept each address and name as an indicator, and which only mentioned it.
+    """Which analyst listed each address and name as an indicator, and which only mentioned it.
 
-    Kept is an analyst's artifact of endpoints, network values or IOCs: the
+    Listed is an analyst's artifact of endpoints, network values or IOCs: the
     structured place an analyst puts what it holds to be infrastructure. A
-    claim holding the value in its text mentions it and keeps nothing: one
-    live run's analysts wrote two background addresses into claims calling
-    them noise, and reading a mention as a keep published what they discarded.
-    The judge sees every claim and keeps what it keeps in its own indicators.
+    claim holding the value in its text only mentions it. Both are stated in
+    the publish rule's reason and neither publishes anything: a model's list
+    never overrides what the sandbox says about a value, and one live run's
+    artifact published every address the guest reached, a public resolver
+    included. The judge sees every claim and keeps what it keeps in its own
+    indicators.
     """
     from maljan.agents._indicator_denylists import whole_value_in
 

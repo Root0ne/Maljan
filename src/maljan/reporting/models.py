@@ -358,17 +358,19 @@ class NetworkDomain(BaseModel):
     is_punycode: bool = False
     homograph_target: str | None = None
     # Where the name came from. ``sandbox`` is a resolution or a request the
-    # sample actually made, ``analyst`` an agent's own artefact, ``strings`` a
-    # run of bytes in the file that has the shape of a hostname — which is a
-    # far weaker claim and was being published as though it were the same one.
-    # ``None`` for a producer that does not record it.
+    # sample actually made, ``strings`` a run of bytes in the file that has the
+    # shape of a hostname — which is a far weaker claim and was being published
+    # as though it were the same one — and ``analyst`` a name only an agent's
+    # own artefact lists, which no tool saw and which is published only when
+    # the judge names it. ``None`` for a producer that does not record it.
     source: Literal["sandbox", "analyst", "strings"] | None = None
     # Filled asynchronously by the threat-intel enrichment worker.
     reputation: dict[str, Any] | None = None
-    # Which analyst kept this value as an indicator (an artifact of endpoints,
-    # network values or IOCs), in the words the publish rule reports. A sandbox
-    # row the rule would not publish on the observation alone is published
-    # when a model keeps it (``stix_renderer.sandbox_row_kwargs``).
+    # Which analysts listed this value as an indicator (an artifact of
+    # endpoints, network values or IOCs), in the words the publish rule
+    # reports. Stated in the reason a row is not published; a listing
+    # publishes nothing — a sandbox row the rule would not publish on the
+    # observation alone waits for the judge (``stix_renderer.sandbox_row_kwargs``).
     kept_by: list[str] = Field(default_factory=list)
     # Which analysts' claims mention the value without keeping it. Stated in
     # the reason a row is not published; it publishes nothing.
@@ -413,7 +415,7 @@ class NetworkIP(BaseModel):
     # Whether the address is a public DNS resolver's, which a sandbox guest
     # reaches whatever the sample does.
     public_resolver: bool = False
-    # Who kept the value, and who only mentioned it; see ``NetworkDomain``.
+    # Who listed the value, and who only mentioned it; see ``NetworkDomain``.
     kept_by: list[str] = Field(default_factory=list)
     mentioned_by: list[str] = Field(default_factory=list)
 

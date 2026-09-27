@@ -30,6 +30,8 @@ from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
 DOC = "198.51.100.23"
 CONTACT = "185.199.108.153"
 RESOLVER = "9.9.9.9"
+# An address an analyst listed and no tool saw.
+LISTED = "185.199.109.153"
 
 
 def _triage(
@@ -186,7 +188,9 @@ def _network_analyst(claim: str = "", artifact_rows: list[list[str]] | None = No
             claims=[ClaimEvidence(claim=claim, evidence_ref="ev_0001", confidence=0.7)]
             if claim
             else [],
-            artifacts=[Artifact(kind="endpoints", rows=artifact_rows, evidence_ids=[])]
+            artifacts=[
+                Artifact(kind="endpoints", rows=artifact_rows, evidence_ids=[], source="network")
+            ]
             if artifact_rows
             else [],
         )
@@ -237,11 +241,87 @@ class TestThePublishRule:
             "(a claim by the network analyst mentions it and does not keep it)"
         )
 
-    def test_an_analyst_artifact_keeping_it_publishes_it(self) -> None:
+    def test_an_analyst_artifact_listing_it_does_not_publish_it(self) -> None:
         isrs = _network_analyst(artifact_rows=[["ip", CONTACT]])
         network = network_from_ledger(_ledger(tcp=[{"dst": CONTACT, "dport": 80}]), isrs)
 
+        answer = _answer(_report(network), "ip", CONTACT)
+
+        assert answer.startswith(
+            "no: the sandbox report does not say which process made the flows to it; "
+            "an artifact of the network analyst lists it"
+        )
+
+    def test_an_attributed_address_an_artifact_lists_stays_published(self) -> None:
+        isrs = _network_analyst(artifact_rows=[["ip", CONTACT]])
+        network = network_from_ledger(
+            _ledger(tcp=[{"dst": CONTACT, "dport": 80, "sample_process_tree": True}]), isrs
+        )
+
         assert _answer(_report(network), "ip", CONTACT) == "yes"
+
+    def test_a_resolver_an_artifact_lists_is_never_published(self) -> None:
+        isrs = _network_analyst(artifact_rows=[["ip", RESOLVER]])
+        network = network_from_ledger(
+            _ledger(udp=[{"dst": RESOLVER, "dport": 53, "sample_process_tree": True}]), isrs
+        )
+
+        answer = _answer(_report(network), "ip", RESOLVER)
+
+        assert answer.startswith("no: ")
+        assert "public DNS resolver" in answer
+        assert "an artifact of the network analyst lists it" in answer
+
+    def test_a_resolver_the_judge_names_is_never_published(self) -> None:
+        network = network_from_ledger(
+            _ledger(udp=[{"dst": RESOLVER, "dport": 53, "sample_process_tree": True}])
+        )
+        report = _report(network)
+        report.judge_indicators = [JudgeIndicator(kind="ip", value=RESOLVER)]
+
+        assert _answer(report, "ip", RESOLVER).startswith("no: ")
+
+    def test_an_address_only_an_analyst_listed_is_not_published(self) -> None:
+        isrs = _network_analyst(artifact_rows=[["ip", LISTED]])
+        network = network_from_ledger(_ledger(tcp=[{"dst": CONTACT, "dport": 80}]), isrs)
+        assert network is not None
+        (row,) = [ip for ip in network.ips if ip.address == LISTED]
+        assert row.source == "analyst"
+
+        answer = _answer(_report(network), "ip", LISTED, source="analyst")
+
+        assert answer.startswith("no: named only by an analyst")
+        assert "an artifact of the network analyst" in answer
+
+    def test_the_judge_s_named_address_publishes(self) -> None:
+        isrs = _network_analyst(artifact_rows=[["ip", LISTED]])
+        network = network_from_ledger(_ledger(tcp=[{"dst": CONTACT, "dport": 80}]), isrs)
+        report = _report(network)
+        report.judge_indicators = [JudgeIndicator(kind="ip", value=LISTED)]
+
+        assert _answer(report, "ip", LISTED, source="analyst") == "yes"
+
+    def test_a_value_a_tool_read_keeps_that_tool_s_standing_when_an_analyst_lists_it(
+        self,
+    ) -> None:
+        isrs = _network_analyst(artifact_rows=[["domain", "relay-alpha-7f3c.top"]])
+        sweep = build_entry(
+            entry_id="ev_0002",
+            seq=2,
+            agent="static",
+            tool="iocs_from_file",
+            args={},
+            server=None,
+            output=json.dumps({"iocs": [{"kind": "domain", "value": "relay-alpha-7f3c.top"}]}),
+        )
+        network = network_from_ledger([sweep], isrs)
+        assert network is not None
+        (row,) = network.domains
+        assert row.source == "strings"
+
+        answer = _answer(_report(network), "domain", row.fqdn, source=row.source)
+
+        assert answer == "no: seen only in the file's strings"
 
     def test_the_judge_s_indicator_keeping_it_publishes_it(self) -> None:
         network = network_from_ledger(_ledger(tcp=[{"dst": CONTACT, "dport": 80}]))
