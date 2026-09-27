@@ -289,5 +289,6 @@ class TestAnAnalystsImportTableIsNotTheImportTable:
 
         appendix = markdown[markdown.index("## Appendix A") :]
         table = appendix[appendix.index("### Imports") :]
+        assert table.startswith("### Imports · _Assessed_")
         assert table.split("\n\n", 2)[1].startswith("_Listed by the static_r2 analyst")
         assert "| KERNEL32.dll | VirtualAllocEx |" in table

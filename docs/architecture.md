@@ -2721,6 +2721,9 @@ is assembled from what the run gathered rather than recomputed beside it:
   with a line naming the analysts who listed it
   (`markdown.analyst_list_note`, from the section's `artifact:` source) and
   saying no measured table, count, rule match or capability profile reads it.
+  Appendix A is tagged *Source per subsection*: each of its sections carries
+  its own voice, *Measured* for a tool's answer and *Assessed* for an
+  analyst's table or findings, so no model's rows sit under a Measured tag.
 * **The proof sits beside the prose.** §5.1 and §5.2 print every capa rule the
   run recorded in the anti-analysis, obfuscation and encryption namespaces, and
   in the runtime-linking, PE-export, hashing and checksum namespaces (with the

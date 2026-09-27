@@ -2333,7 +2333,8 @@ change landed on `main`.
   counted the match as corroboration. The projections now read tool output
   only; the analyst's table stays in Appendix A under a line naming who
   listed it and saying no measured table, count, rule match or capability
-  profile reads it. **Upgrading:** `static_from_ledger`,
+  profile reads it. Appendix A is tagged per subsection: a tool's section is
+  *Measured*, an analyst's table or findings *Assessed*. **Upgrading:** `static_from_ledger`,
   `dynamic_from_ledger` and `persistence_from_ledger` take no analyst
   reports; a persistence row only an analyst listed is no longer a §5.4 row,
   an IOC table row or a Sigma selection.

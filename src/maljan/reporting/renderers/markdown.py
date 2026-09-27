@@ -1770,7 +1770,9 @@ class MarkdownRenderer:
         block, a list or a paragraph, and this renders that, so a tool server
         added tomorrow prints without a renderer change.
         """
-        lines = [_appendix_heading("A", "Evidence index", MEASURED), ""]
+        # Each section carries its own voice: a tool's answer is measured, and
+        # an analyst's table or finding is the analyst's, never under Measured.
+        lines = [_appendix_heading("A", "Evidence index", PER_SUBSECTION), ""]
         if not report.evidence_index and not report.sections:
             lines.append("No tool call is recorded in this report.")
             return "\n".join(lines)
@@ -1791,7 +1793,7 @@ class MarkdownRenderer:
                 )
             lines.append("")
         for section in report.sections:
-            lines.extend([_plain_heading(section.title), ""])
+            lines.extend([_evidence_heading(section), ""])
             analysts = listed_by(section)
             if analysts:
                 # A model's table, said as one before its rows: nothing in it
@@ -2552,6 +2554,17 @@ def _subheading(number: str, title: str, voice: str) -> str:
     """An H3 with its subsection number and its voice tag."""
     label = f"{number} {title}" if number else title
     return f"### {_one_line(label)} · _{voice}_"
+
+
+# The sources of an evidence section an analyst wrote: its tables, its findings.
+_ANALYST_SOURCES = ("artifact:", "finding", "agent")
+
+
+def _evidence_heading(section: Any) -> str:
+    """An Appendix A section's H3 with its voice: a tool's is Measured, an analyst's Assessed."""
+    source = str(getattr(section, "source", "") or "").strip().lower()
+    voice = ASSESSED if source.startswith(_ANALYST_SOURCES) else MEASURED
+    return f"{_plain_heading(section.title)} · _{voice}_"
 
 
 def analyst_list_note(analysts: list[str]) -> str:
