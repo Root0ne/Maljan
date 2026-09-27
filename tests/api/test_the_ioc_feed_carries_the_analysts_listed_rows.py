@@ -80,3 +80,28 @@ def test_the_whole_feed_carries_the_analyst_s_mutex_refused(client: TestClient) 
 
 def test_the_published_feed_does_not(client: TestClient) -> None:
     assert all(row["value"] != MUTEX for row in _rows(client))
+
+
+def test_the_feed_reads_the_stored_table_rather_than_rebuilding_it() -> None:
+    from app.services.report_service import _with_the_analysts_listed_rows
+    from maljan.reporting.models import ConsolidatedIOC, FileHashes, MalwareReport, SampleIdentity
+
+    stored = MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="f" * 64)),
+        verdict="Malware",
+        consolidated_iocs=[
+            ConsolidatedIOC(
+                type="Mutex",
+                kind="mutex",
+                value=f"{MUTEX}-stored",
+                source="analyst",
+                context="listed by the dynamic analyst",
+                published="no: named only by an analyst (an artifact of the dynamic analyst)",
+            )
+        ],
+    )
+    out: list[dict[str, Any]] = []
+
+    _with_the_analysts_listed_rows(out, stored, None)
+
+    assert [row["value"] for row in out] == [f"{MUTEX}-stored"]

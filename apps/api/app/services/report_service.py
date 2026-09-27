@@ -140,7 +140,8 @@ def _typed_report(mr: dict) -> Any:
 def _with_the_analysts_listed_rows(out: list[dict], typed: Any, kind: str | None) -> None:
     """The mutexes, paths, registry keys, tasks and services the analysts listed, as §9 shows them.
 
-    Read from the report's own IOC table (``build_consolidated_iocs``), so a
+    Read from the report's own IOC table — the stored one, rebuilt
+    (``build_consolidated_iocs``) only for a report stored without it — so a
     row is here exactly when the report prints it: an ``analyst`` row no tool
     recorded, carrying the rule's answer as its note. Such a row is never
     published, so only ``include=all`` and ``include=unpublished`` return it.
@@ -150,7 +151,7 @@ def _with_the_analysts_listed_rows(out: list[dict], typed: Any, kind: str | None
 
     if not isinstance(typed, MalwareReport):
         return
-    for row in build_consolidated_iocs(typed):
+    for row in typed.consolidated_iocs or build_consolidated_iocs(typed):
         if row.source != "analyst" or row.is_network or (kind and kind != row.kind):
             continue
         out.append(
