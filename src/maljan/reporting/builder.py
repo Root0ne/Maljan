@@ -749,7 +749,7 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     # so a value a tool recorded keeps the tool's row. A value the judge names
     # is the judge's row.
     for kind, section in artifact_sections(report.sections):
-        for analyst, cells in listed_rows(section):
+        for analyst, _cited, cells in listed_rows(section):
             for ioc_kind, value, _payload in listed_non_network_values(kind, [cells]):
                 if (ioc_kind, value.strip().lower()) in judged:
                     continue

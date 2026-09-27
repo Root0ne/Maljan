@@ -985,9 +985,10 @@ def _fallback(acc: _Sections, entry: LedgerEntry) -> None:
 def _artifact_sections(acc: _Sections, isrs: dict[str, Any]) -> None:
     """The tables the analysts established, grouped by the kind they named.
 
-    A kind more than one analyst listed rows under is one table with a first
-    column saying which analyst listed each row (``LISTED_BY_COLUMN``), so a
-    merged table never loses whose row is whose.
+    A kind more than one artifact listed rows under is one table whose first
+    columns say which analyst listed each row and the evidence that row's
+    artifact cites (``LISTED_BY_COLUMN``, ``EVIDENCE_COLUMN``), so a merged
+    table never loses whose row is whose or which ids stand behind it.
     """
     by_kind: dict[str, list[tuple[str, Any]]] = {}
     for agent, isr in (isrs or {}).items():
@@ -996,7 +997,7 @@ def _artifact_sections(acc: _Sections, isrs: dict[str, Any]) -> None:
             source = str(getattr(artifact, "source", "") or agent)
             by_kind.setdefault(kind, []).append((source, artifact))
     for kind, listed in by_kind.items():
-        merged = len({source for source, _artifact in listed}) > 1
+        merged = len(listed) > 1
         for source, artifact in listed:
             rows = list(getattr(artifact, "rows", None) or [])
             columns = list(getattr(artifact, "columns", None) or []) or ["Value"]
@@ -1008,36 +1009,42 @@ def _artifact_sections(acc: _Sections, isrs: dict[str, Any]) -> None:
                 f"artifact_{kind}",
                 kind.replace("_", " ").capitalize(),
                 "table",
-                columns=[LISTED_BY_COLUMN, *columns] if merged else columns,
+                columns=[LISTED_BY_COLUMN, EVIDENCE_COLUMN, *columns] if merged else columns,
             )
             _listed_by(section, source)
+            cited = ", ".join(str(i) for i in getattr(artifact, "evidence_ids", None) or [])
             for row in rows:
                 cells = [_text(cell) for cell in row]
-                acc.add_row(section, [_text(source), *cells] if merged else cells)
+                acc.add_row(section, [_text(source), cited, *cells] if merged else cells)
             for entry_id in getattr(artifact, "evidence_ids", None) or []:
                 acc.cite(section, str(entry_id))
 
 
-# The first column of an artifact table more than one analyst listed rows in.
+# The first two columns of an artifact table more than one artifact listed rows in.
 LISTED_BY_COLUMN = "Listed by"
+EVIDENCE_COLUMN = "Evidence"
 
 # The sources of an evidence section an analyst wrote: its tables, its findings.
 ANALYST_SECTION_SOURCES = ("artifact:", "finding", "agent")
 
 
-def listed_rows(section: Any) -> list[tuple[str, list[str]]]:
-    """Each row of an artifact section, with the analyst who listed it.
+def listed_rows(section: Any) -> list[tuple[str, str, list[str]]]:
+    """Each row of an artifact section, with the analyst who listed it and the ids it cites.
 
-    Read from the ``Listed by`` column of a merged table, or from the
-    section's one analyst otherwise.
+    Read from the ``Listed by`` and ``Evidence`` columns of a merged table, or
+    from the section's one analyst and its ids otherwise. A merged table a
+    report stored with only a ``Listed by`` column reads the section's ids.
     """
     analysts = listed_by(section)
     columns = [str(c) for c in getattr(section, "columns", None) or []]
     rows = [[str(cell) for cell in row] for row in getattr(section, "rows", None) or []]
+    cited = ", ".join(str(i) for i in getattr(section, "evidence_ids", None) or [])
+    if columns[:2] == [LISTED_BY_COLUMN, EVIDENCE_COLUMN]:
+        return [(row[0], row[1], row[2:]) for row in rows if len(row) > 1]
     if columns[:1] == [LISTED_BY_COLUMN]:
-        return [(row[0], row[1:]) for row in rows if row]
+        return [(row[0], cited, row[1:]) for row in rows if row]
     one = analysts[0] if analysts else ""
-    return [(one, row) for row in rows]
+    return [(one, cited, row) for row in rows]
 
 
 def artifact_sections(sections: Any) -> list[tuple[str, Any]]:
@@ -1054,7 +1061,7 @@ def analyst_persistence(sections: Any) -> list[dict[str, str]]:
 
     ``kind``, ``target`` and ``payload`` by position, as an analyst's
     persistence table is shaped, with the analyst that listed the row and the
-    ids the table cites. Never read from ``MalwareReport.persistence``, which
+    ids that row's artifact cites. Never read from ``MalwareReport.persistence``, which
     is the tools' and which the IOC table, the detection drafts, the
     corroboration corpus and the counts read; a stored report carries the same
     tables, so it reads the same rows.
@@ -1063,8 +1070,7 @@ def analyst_persistence(sections: Any) -> list[dict[str, str]]:
     for kind, section in artifact_sections(sections):
         if kind.strip().lower() != "persistence":
             continue
-        cited = ", ".join(str(i) for i in getattr(section, "evidence_ids", None) or [])
-        for analyst, row in listed_rows(section):
+        for analyst, cited, row in listed_rows(section):
             cells = [cell.strip() for cell in row]
             if not any(cells):
                 continue

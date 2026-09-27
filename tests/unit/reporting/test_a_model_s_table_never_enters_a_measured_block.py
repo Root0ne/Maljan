@@ -167,7 +167,7 @@ class TestAKindTwoAnalystsListed:
                         kind="iocs",
                         columns=["Type", "Value"],
                         rows=[["mutex", f"{MUTEX}-{name}"]],
-                        evidence_ids=[],
+                        evidence_ids=[f"ev_{name}"],
                         source=name,
                     )
                 ],
@@ -179,10 +179,10 @@ class TestAKindTwoAnalystsListed:
         report = _build(self._isrs())
 
         (section,) = [s for s in report.sections if s.key == "artifact_iocs"]
-        assert section.columns == ["Listed by", "Type", "Value"]
+        assert section.columns == ["Listed by", "Evidence", "Type", "Value"]
         assert section.rows == [
-            ["static", "mutex", f"{MUTEX}-static"],
-            ["reverser", "mutex", f"{MUTEX}-reverser"],
+            ["static", "ev_static", "mutex", f"{MUTEX}-static"],
+            ["reverser", "ev_reverser", "mutex", f"{MUTEX}-reverser"],
         ]
 
     def test_each_row_of_the_ioc_table_names_its_own_analyst(self) -> None:
@@ -190,3 +190,33 @@ class TestAKindTwoAnalystsListed:
 
         assert rows[f"{MUTEX}-static"] == "listed by the static analyst"
         assert rows[f"{MUTEX}-reverser"] == "listed by the reverser analyst"
+
+
+class TestEachListedPersistenceRowCitesItsOwnEvidence:
+    @staticmethod
+    def _isrs() -> dict[str, Any]:
+        return {
+            name: AgentISR(
+                agent_id=name,
+                domain="dynamic",
+                artifacts=[
+                    Artifact(
+                        kind="persistence",
+                        columns=["Kind", "Target", "Payload"],
+                        rows=[["registry_run", f"{RUN_KEY}-{name}", "x.exe"]],
+                        evidence_ids=[evidence],
+                        source=name,
+                    )
+                ],
+            )
+            for name, evidence in (("dynamic", "ev_0004"), ("reverser", "ev_0009"))
+        }
+
+    def test_the_assessed_block_cites_each_row_s_own_ids(self) -> None:
+        markdown = MarkdownRenderer().render(_build(self._isrs()))
+
+        technical = markdown[markdown.index("### 5.4") : markdown.index("### 5.5")]
+        (dynamic,) = [line for line in technical.splitlines() if f"{RUN_KEY}-dynamic" in line]
+        (reverser,) = [line for line in technical.splitlines() if f"{RUN_KEY}-reverser" in line]
+        assert "ev_0004" in dynamic and "ev_0009" not in dynamic
+        assert "ev_0009" in reverser and "ev_0004" not in reverser
