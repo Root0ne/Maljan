@@ -2383,6 +2383,15 @@ change landed on `main`.
   report's kept capture section is answered as a fresh build answers it;
   `/iocs?include=all` carries the analysts' listed rows; and each listed row
   cites its own artifact's evidence.
+- **A value only a query's answer holds says so, and a decoded value the capture
+  holds keeps its standing.** An answer that holds a listed value because it
+  was asked about it (a lookup's echo, a search returning its match) is
+  named in the reason ("only the answer to a query for it holds it") rather
+  than read as no tool seeing it. An address or name FLOSS or the static
+  decoder recovered that the capture also holds is admitted by the recovery
+  before the unattributed hold, under the recovery's existing refusals, with
+  both facts in the reason. `/iocs` reads the stored IOC table for the
+  analysts' rows.
 - **A sandbox URL on an address answers as the address does.** A URL whose
   host is an unattributed address waits for the judge, and a public
   resolver's URL is never published; both had published into STIX, `/iocs`

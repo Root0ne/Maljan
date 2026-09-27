@@ -2862,7 +2862,12 @@ is assembled from what the run gathered rather than recomputed beside it:
   (`ledger_projection.tool_sightings`, stored as `tool_sightings`, keyed on
   both sides with `ledger_projection.value_key`, so a bracketed or
   capitalised address is found). An entry whose call arguments hold the value
-  is no sighting of it: a lookup's answer repeats its question. A row only an
+  is no sighting of it: a lookup's answer repeats its question, and a search
+  returns the match it was asked for. Such entries are kept apart
+  (`tool_queries`), and a value only they hold reads `no: named only by an
+  analyst (<artifact>); only the answer to a query for it holds it (ev_NNNN
+  <tool>), ...`, so "no tool in this run saw it" is said only when no answer
+  holds the value at all. A row only an
   artifact created and some answer's text holds takes the string sweep's
   standing (`strings`), whichever tool printed the text — a sandbox
   signature's description, a command line and the sample's strings a sandbox
@@ -2939,7 +2944,14 @@ is assembled from what the run gathered rather than recomputed beside it:
   well-known benign host; the reason reads "recovered by emulation (decoded
   strings), ev_NNNN" or "decoded from the file's own bytes
   (decode_string_blobs), ev_NNNN", the recovering entry's own id. **A
-  recovered value is a candidate row whether or not a model named it.** The
+  recovered value keeps its standing when the capture also holds it.** An
+  address or name a recovering tool read that the capture holds a
+  conversation to, or has in its TLS list, is admitted by the recovery before
+  the unattributed hold (`_recovered_and_held`), under every refusal the
+  recovery has (a Benign or unstated verdict, a well-known host or public
+  resolver, a value also in the plain strings); the rule's reason states both
+  facts, and a refusal names the sandbox fact and the recovery's own reason.
+  **A recovered value is a candidate row whether or not a model named it.** The
   builder reads each domain, address and URL the record holds, as the
   recovering tool spelled it (`EmulatedStrings.spelled`, read by
   `stix_renderer.recovered_network_values`), into
