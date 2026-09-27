@@ -51,9 +51,12 @@ SERVER_METADATA_KEY = "maljan_server"
 # on its own would rewrite ``{"query": "<sha>.exe"}`` too, turning a model that
 # legitimately names the file in prose into one that passes a path. ``input``
 # was dropped from the exact set for the same reason — a lookup tool taking free
-# text as ``input`` is the one plausible false positive here.
+# text as ``input`` is the one plausible false positive here. ``program`` is not
+# in it either: a decompiler names a program in its project with it (Ghidra's
+# ``program`` is "Program name (default: current program)"), and rewriting the
+# name the model gave into the file path made every such call fail.
 _PATH_ARG_SUBSTRINGS = ("path", "file")
-_PATH_ARG_NAMES = frozenset({"binary", "sample", "target", "program"})
+_PATH_ARG_NAMES = frozenset({"binary", "sample", "target"})
 
 # The argument names that mean "the file under analysis" and nothing else.
 # These are the platform's to fill and are not advertised to the model at all:
@@ -80,7 +83,6 @@ SAMPLE_ARG_NAMES = frozenset(
         "sample",
         "sample_path",
         "target",
-        "program",
     }
 )
 

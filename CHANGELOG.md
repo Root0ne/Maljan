@@ -2324,6 +2324,16 @@ change landed on `main`.
 
 ### Fixed
 
+- **A program name given to a decompiler reaches it as written.** The path
+  guard counted an argument named `program` as a file path and rewrote the
+  sample's file name there into the path the server was handed. Ghidra's tools
+  take `program` as the name a program has in its project, so every call that
+  named the program (`get_current_program_info`, `switch_program`,
+  `detect_malware_behaviors`, `analyze_api_call_chains`, `list_imports`) failed
+  in milliseconds. `program` is no longer in `tool_pinning`'s path or sample
+  argument names; `load_program`, which takes the file as `file`, is pinned as
+  before.
+
 - **A confidence is read through the punctuation after it.** A CONFIDENCE
   value is the number that opens it, from 0 to 1, or a percentage: `0.9.` read
   as no number, and one analyst's 18-claim revision reached the run as 3
