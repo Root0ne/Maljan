@@ -50,6 +50,7 @@ from maljan.analysis.run_summary import (
 )
 from maljan.core.logger import logger
 from maljan.reporting.defang import ProseDefanger, defang
+from maljan.reporting.ledger_projection import cell_network_values
 from maljan.reporting.ledger_report import listed_by
 from maljan.reporting.models import (
     CapabilityCell,
@@ -2092,6 +2093,11 @@ class _Context:
             indicators += [(d.fqdn, "domain") for d in net.domains]
             indicators += [(ip.address, "ip") for ip in net.ips]
             indicators += [(u.url, "url") for u in net.urls]
+        # Every value a recovering tool decoded, row or not, so a decoded C2
+        # printed in a FLOSS or decoder table is never printed live.
+        recovered = report.emulated_strings
+        for key in recovered.recovered_by if recovered is not None else {}:
+            indicators += [(value, kind) for kind, value in cell_network_values(key, None)]
         self.indicators = indicators
         self._defang = ProseDefanger(indicators)
         self.reputations = _reputations(report)

@@ -2532,6 +2532,44 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
     )
 
 
+def recovered_network_values(ledger: Iterable[Any] | None, record: EmulatedStrings) -> list[str]:
+    """Each domain, address and URL the record holds, as the recovering tool spelled it.
+
+    Read from the same FLOSS and static decoder entries, through the same
+    reader (:func:`decoded_indicators`), that :func:`emulation_from_ledger`
+    built ``record`` from; a value is returned when its folded key is one the
+    record's ``recovered_by`` holds, so a value the string sweep also read
+    (held out as plain) is not. The record folds case to match values; a URL's
+    path is case-sensitive, so the tool's own spelling is what a row carries.
+    """
+    wanted = set(record.recovered_by)
+    out: list[str] = []
+    for entry in ledger or ():
+        tool = str(getattr(entry, "tool", "") or "").rsplit("__", 1)[-1]
+        structured = getattr(entry, "structured", None)
+        texts: list[Any] = []
+        if tool == "floss":
+            texts = [
+                row.get("string")
+                for row in _rows_of(structured, "strings")
+                if isinstance(row, dict) and str(row.get("kind") or "").lower() in _EMULATED_KINDS
+            ]
+        elif tool == DECODER_TOOL:
+            for row in _rows_of(structured, "results"):
+                if isinstance(row, dict):
+                    texts.append(row.get("text"))
+                    texts.extend(
+                        layer.get("text")
+                        for layer in row.get("layers") or []
+                        if isinstance(layer, dict)
+                    )
+        for text in texts:
+            for value in decoded_indicators(text):
+                if value.strip().lower().rstrip(".") in wanted and value not in out:
+                    out.append(value)
+    return out
+
+
 # Why a record read back from a stored report is partial: it holds only the
 # rows the report's sections kept.
 _FROM_KEPT_ROWS = "read from the kept rows of a report stored before the record existed"

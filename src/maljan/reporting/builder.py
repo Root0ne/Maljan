@@ -136,6 +136,7 @@ class MalwareReportBuilder:
         from maljan.reporting.renderers.stix_renderer import (
             emulation_from_ledger,
             exported_indicator_values,
+            recovered_network_values,
         )
 
         identity = identity_from_ledger(
@@ -152,8 +153,16 @@ class MalwareReportBuilder:
         # analysts listed, which it states and never publishes on alone.
         static = static_from_ledger(self.evidence_ledger)
         dynamic = dynamic_from_ledger(self.evidence_ledger)
+        # What only a recovering tool read. Each domain, address and URL in it
+        # is a candidate row of its own, whether or not a model named it: a
+        # C2 URL FLOSS and the static decoder both recovered once had no row
+        # anywhere, not even a refused one, while the record gave it standing.
+        emulated = emulation_from_ledger(self.evidence_ledger)
         network = network_from_ledger(
-            self.evidence_ledger, self.isr_reports, sandbox_report=self.sandbox_report
+            self.evidence_ledger,
+            self.isr_reports,
+            sandbox_report=self.sandbox_report,
+            recovered=recovered_network_values(self.evidence_ledger, emulated),
         )
         persistence = persistence_from_ledger(self.evidence_ledger)
         cells, mappings = build_capability_matrix(
@@ -202,7 +211,7 @@ class MalwareReportBuilder:
                 for value in exported_indicator_values(self.stix_output)
             ],
             rule_match_strings=yara_rule_strings(self.evidence_ledger),
-            emulated_strings=emulation_from_ledger(self.evidence_ledger),
+            emulated_strings=emulated,
             references=references,
         )
         # The sections the report is actually made of, and the index of the

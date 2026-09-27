@@ -61,6 +61,8 @@ from maljan.schemas.sandbox_report import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from maljan.schemas.evidence import LedgerEntry
     from maljan.schemas.isr_models import AgentISR
 
@@ -702,8 +704,13 @@ def network_from_ledger(
     ledger: list[LedgerEntry],
     isrs: dict[str, AgentISR] | None = None,
     sandbox_report: dict[str, Any] | None = None,
+    recovered: Iterable[str] = (),
 ) -> NetworkIOCs | None:
-    """``NetworkIOCs`` from the sandbox network tool and the IOC tools.
+    """``NetworkIOCs`` from the sandbox network tool, the IOC tools and the recovered values.
+
+    ``recovered`` is each domain, address and URL a recovering tool decoded
+    (``stix_renderer.recovered_network_values``): a row of the string
+    sweep's source each, whether or not a model named it.
 
     ``sandbox_report`` is the job's whole report. When it holds an observation
     the sandbox rows are read from it, every row, rather than from the views a
@@ -863,6 +870,13 @@ def network_from_ledger(
         for row in data.get("iocs") or []:
             if isinstance(row, dict):
                 _add(str(row.get("kind") or ""), str(row.get("value") or ""), "strings")
+
+    # What a recovering tool decoded out of the file — FLOSS, the static
+    # decoder — read from the file's bytes like the sweep's rows, and so of
+    # the sweep's source: the publish rule's emulation gate decides each one.
+    for text in recovered:
+        for kind, value in cell_network_values(text, None):
+            _add(kind, value, "strings")
 
     kept: dict[tuple[str, str], list[str]] = {}
     for artifact in (
