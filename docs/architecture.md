@@ -1740,9 +1740,12 @@ path. See the remote-delivery section of
 
 **The sample's path is not the model's to give.** On the three built-in
 sidecars, an argument whose name means the file under analysis — `path`,
-`file`, `file_path`, `binary`, `sample`, `target`, `program` and the rest of
+`file`, `file_path`, `binary`, `sample`, `target` and the rest of
 `tool_pinning.SAMPLE_ARG_NAMES` — is taken out of the schema the model binds to
-and filled by `pin_paths` with the path that server can open. The sidecar's own
+and filled by `pin_paths` with the path that server can open. `program` is not
+a path argument on any server: a decompiler names a program in its project with
+it (Ghidra: "Program name (default: current program)"), so the name the model
+gives reaches the server as it was written. The sidecar's own
 signature is unchanged; only the model-facing copy is narrowed, and the
 platform's own calls still pass the argument. A *qualified* path argument —
 `pcap_path` for a capture, a rule file, a member inside an archive or an APK —
