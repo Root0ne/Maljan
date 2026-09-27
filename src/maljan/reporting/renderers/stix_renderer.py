@@ -1837,10 +1837,12 @@ def indicator_publish_reason(
 
     ``unattributed`` is why a sandbox row is not the sample's own observation
     — a flow the report does not attribute to the sample's process tree, a
-    well-known benign name the guest resolved — and ``kept_by`` the judge's
-    indicator that names the value (:func:`sandbox_row_kwargs`). Such a row is
-    published only when the judge kept it; the observation alone is the
-    guest's traffic. An analyst's artifact listing the value (``listed_by``)
+    well-known benign name the guest resolved, a TLS name only the capture
+    recorded — and ``kept_by`` the judge's indicator that names the value
+    (:func:`sandbox_row_kwargs`). Such a row is published when the judge kept
+    it, or when a recovering tool also read the value and the recovery admits
+    it (``_recovered_and_held``); the observation alone is the guest's
+    traffic. An analyst's artifact listing the value (``listed_by``)
     and a claim that only mentions it (``mentioned_by``) keep nothing: a
     model's list never overrides what the sandbox says about a value.
 
@@ -1902,13 +1904,17 @@ def indicator_publish_reason(
         if in_published_url and not is_well_known_benign_host(value):
             return f"the host of {in_published_url}, which this run publishes"
         if in_published_url or unattributed:
-            return _kept_by_a_model(kept_by)
+            return _kept_by_a_model(kept_by) or _recovered_and_held(
+                value, recovered, verdict, unattributed
+            )
         return corroboration_reason(source, reputation, value) or _emulation_admits(
             value, recovered, verdict
         )
     if kind == "ip":
         if unattributed and address_is_publishable(value, source):
-            return _kept_by_a_model(kept_by)
+            return _kept_by_a_model(kept_by) or _recovered_and_held(
+                value, recovered, verdict, unattributed
+            )
         admitted = ip_corroboration_reason(value, source, reputation)
         if admitted or not address_is_publishable(value, source):
             return admitted
@@ -1921,7 +1927,9 @@ def indicator_publish_reason(
         if is_public_resolver(host.strip("[]")):
             return None
         if unattributed and host_is_public(host):
-            return _kept_by_a_model(kept_by)
+            return _kept_by_a_model(kept_by) or _recovered_and_held(
+                host, recovered, verdict, unattributed
+            )
         admitted = url_corroboration_reason(value, source, reputation)
         if admitted or not host_is_public(host):
             return admitted
@@ -2017,6 +2025,32 @@ def _published_url_hosts(report: Any) -> dict[str, tuple[str, str]]:
 
 def _kept_by_a_model(kept_by: str) -> str | None:
     return f"kept as an indicator by {kept_by}" if kept_by else None
+
+
+def _recovery_refusal(recovered: str, verdict: Any, host: str) -> str:
+    """Why a recovery does not admit a value, in the rule's words, or ``""`` when it would."""
+    if not recovered:
+        return ""
+    if _is_benign_verdict(verdict):
+        return f"{recovered}, but the verdict is Benign, which publishes no malicious indicator"
+    if verdict == UNSTATED_VERDICT:
+        return f"{recovered}, but the judge stated no verdict with a confidence"
+    if is_well_known_benign_host(host):
+        return f"{recovered}, but it is a well-known benign host"
+    return ""
+
+
+def _recovered_and_held(host: str, recovered: str, verdict: Any, unattributed: str) -> str | None:
+    """A sandbox row the sample's tree is not said to have made, that a recovering tool also read.
+
+    The sample hid the value and the guest reached it, which is more than
+    either says alone: the recovery admits the row as it would the value on
+    its own, under every refusal it has (a Benign or unstated verdict, a
+    well-known host or public resolver, a value also in the plain strings,
+    for which no recovery is passed), and the reason states both facts.
+    """
+    admitted = _emulation_admits(host, recovered, verdict)
+    return f"{admitted}; {unattributed}" if admitted else None
 
 
 # The source of a network row only an analyst's artifact created: no tool saw it.
@@ -2923,6 +2957,11 @@ def publish_answer(
             f"{BENIGN_NAME_IN_A_URL} ({in_published_url})", mentioned_by, listed_by
         )
     if unattributed and kind in ("ip", "domain", "url"):
+        refused = _recovery_refusal(recovered, verdict, url_host(text) if kind == "url" else text)
+        if refused:
+            # A recovering tool read the value too, and its own refusal
+            # stands: both facts are stated.
+            return not_kept_reason(f"{unattributed}; {refused}", mentioned_by, listed_by)
         return not_kept_reason(unattributed, mentioned_by, listed_by)
     if kind == "email" and not email_is_publishable(text):
         return "no: not a mailbox at a host that could exist"

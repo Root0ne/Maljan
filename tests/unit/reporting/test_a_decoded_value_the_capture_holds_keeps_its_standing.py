@@ -113,7 +113,12 @@ class TestADecodedAddressTheCaptureReached:
     def test_under_a_benign_verdict_it_is_refused(self) -> None:
         report = _build([_strings(), _floss(ADDRESS), _capture(ADDRESS)], verdict="Benign")
 
-        assert _published(report, ADDRESS).startswith("no: ")
+        answer = _published(report, ADDRESS)
+        assert answer.startswith(
+            "no: the sandbox report does not say which process made the flows to it; "
+            "recovered by emulation (decoded strings), ev_0012"
+        )
+        assert "but the verdict is Benign" in answer
 
 
 class TestADecodedNameInTheCapturesTLSList:
