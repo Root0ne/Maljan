@@ -44,11 +44,13 @@ from maljan.extractors.network_extractor import (
     corroboration_reason,
     host_is_public,
     ip_corroboration_reason,
+    is_public_resolver,
     is_well_known_benign_host,
     url_corroboration_reason,
     url_host,
 )
 from maljan.pipeline.events import safe_finding_value
+from maljan.reporting.ledger_report import ANALYST_SECTION_SOURCES
 from maljan.reporting.models import (
     EmulatedStrings,
     MalwareReport,
@@ -1819,6 +1821,10 @@ def indicator_publish_reason(
     kept_by: str = "",
     mentioned_by: str = "",
     in_published_url: str = "",
+    listed_by: str = "",
+    seen_in: str = "",
+    tool_search: str = "",
+    asked_in: str = "",
 ) -> str | None:
     """Why this run may publish one indicator of ``kind``, or ``None``.
 
@@ -1831,11 +1837,23 @@ def indicator_publish_reason(
 
     ``unattributed`` is why a sandbox row is not the sample's own observation
     — a flow the report does not attribute to the sample's process tree, a
-    well-known benign name the guest resolved — and ``kept_by`` the models
-    that kept the value as an indicator (:func:`sandbox_row_kwargs`): an
-    analyst's artifact or the judge's indicator. Such a row is published only
-    when a model kept it; the observation alone is the guest's traffic, and a
-    claim that only mentions the value (``mentioned_by``) keeps nothing.
+    well-known benign name the guest resolved, a TLS name only the capture
+    recorded — and ``kept_by`` the judge's indicator that names the value
+    (:func:`sandbox_row_kwargs`). Such a row is published when the judge kept
+    it, or when a recovering tool also read the value and the recovery admits
+    it (``_recovered_and_held``); the observation alone is the guest's
+    traffic. An analyst's artifact listing the value (``listed_by``)
+    and a claim that only mentions it (``mentioned_by``) keep nothing: a
+    model's list never overrides what the sandbox says about a value.
+
+    A public DNS resolver is never published, whoever lists or names it.
+
+    A value's standing comes from where the platform saw it: the sandbox rule
+    above for a value the sandbox view holds, the source below for a value a
+    tool read out of the file or a recovering tool decoded. A value only an
+    analyst listed (``source`` ``analyst``) is asked the questions a string
+    sweep's value is asked, which a listing answers none of, and is otherwise
+    published only when the judge named it, as it was before this rule.
 
     One rule for every kind the platform mints, and every minting path asks it:
     the network block's own rows, the string rows that reach the bundle through
@@ -1858,9 +1876,10 @@ def indicator_publish_reason(
     sweep's entry when it did, and the value is then the sweep's) — is a
     source of its own (``recovered``: "recovered by emulation (decoded
     strings), ev_NNNN" or "decoded from the file's own bytes
-    (decode_string_blobs), ev_NNNN"). It gives standing to a row somebody
-    recorded and creates none. Hiding
-    a host behind encoding is a deliberate act benign software rarely performs,
+    (decode_string_blobs), ev_NNNN"). Each such value is a row of the string
+    sweep's source in the network block (the builder adds it through
+    ``recovered_network_values``), and this is the question that decides it.
+    Hiding a host behind encoding is a deliberate act benign software rarely performs,
     where a plain string in a binary is routinely benign. It admits a domain,
     an address or a URL that passes every other question here — the host
     question, the address classes, the reputation half — and is not a
@@ -1869,26 +1888,49 @@ def indicator_publish_reason(
     a Benign run publishes no malicious indicator, and the refusal says so.
     A value only the string sweep read stays unpublished.
     """
+    if kind == "ip" and is_public_resolver(value):
+        return None
+    if listed_only_by_an_analyst(kind, source):
+        if kind not in ("domain", "ip", "url"):
+            # A mutex, a path, a registry key only an analyst listed: a
+            # listing is no source, and the judge's own value is its own row.
+            return None
+        if kept_by and _could_be_infrastructure(kind, value, source):
+            return _kept_by_a_model(kept_by)
+        source = "strings"
     if kind == "domain":
         if not host_is_public(value):
             return None
         if in_published_url and not is_well_known_benign_host(value):
             return f"the host of {in_published_url}, which this run publishes"
         if in_published_url or unattributed:
-            return _kept_by_a_model(kept_by)
+            return _kept_by_a_model(kept_by) or _recovered_and_held(
+                value, recovered, verdict, unattributed
+            )
         return corroboration_reason(source, reputation, value) or _emulation_admits(
             value, recovered, verdict
         )
     if kind == "ip":
         if unattributed and address_is_publishable(value, source):
-            return _kept_by_a_model(kept_by)
+            return _kept_by_a_model(kept_by) or _recovered_and_held(
+                value, recovered, verdict, unattributed
+            )
         admitted = ip_corroboration_reason(value, source, reputation)
         if admitted or not address_is_publishable(value, source):
             return admitted
         return _emulation_admits(value, recovered, verdict)
     if kind == "url":
-        admitted = url_corroboration_reason(value, source, reputation)
         host = url_host(value)
+        # A URL on an address answers as the address does: never on a public
+        # resolver, and on an address the sandbox did not attribute to the
+        # sample's tree only when the judge kept it.
+        if is_public_resolver(host.strip("[]")):
+            return None
+        if unattributed and host_is_public(host):
+            return _kept_by_a_model(kept_by) or _recovered_and_held(
+                host, recovered, verdict, unattributed
+            )
+        admitted = url_corroboration_reason(value, source, reputation)
         if admitted or not host_is_public(host):
             return admitted
         if any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
@@ -1985,12 +2027,206 @@ def _kept_by_a_model(kept_by: str) -> str | None:
     return f"kept as an indicator by {kept_by}" if kept_by else None
 
 
-def not_kept_reason(why: str, mentioned_by: str = "") -> str:
-    """The ``no:`` a row waiting for a model reads, naming any claim that only mentioned it."""
-    said = f"no: {why}, and no model kept it as an indicator"
+def _recovery_refusal(recovered: str, verdict: Any, host: str) -> str:
+    """Why a recovery does not admit a value, in the rule's words, or ``""`` when it would."""
+    if not recovered:
+        return ""
+    if _is_benign_verdict(verdict):
+        return f"{recovered}, but the verdict is Benign, which publishes no malicious indicator"
+    if verdict == UNSTATED_VERDICT:
+        return f"{recovered}, but the judge stated no verdict with a confidence"
+    if is_well_known_benign_host(host):
+        return f"{recovered}, but it is a well-known benign host"
+    return ""
+
+
+def _recovered_and_held(host: str, recovered: str, verdict: Any, unattributed: str) -> str | None:
+    """A sandbox row the sample's tree is not said to have made, that a recovering tool also read.
+
+    The sample hid the value and the guest reached it, which is more than
+    either says alone: the recovery admits the row as it would the value on
+    its own, under every refusal it has (a Benign or unstated verdict, a
+    well-known host or public resolver, a value also in the plain strings,
+    for which no recovery is passed), and the reason states both facts.
+    """
+    admitted = _emulation_admits(host, recovered, verdict)
+    return f"{admitted}; {unattributed}" if admitted else None
+
+
+# The source of a network row only an analyst's artifact created: no tool saw it.
+ANALYST_SOURCE = "analyst"
+
+
+def listed_only_by_an_analyst(kind: str, source: Any) -> bool:
+    """Whether a row, of any kind, stands on nothing but an analyst's listing."""
+    return str(source or "").strip().lower() == ANALYST_SOURCE
+
+
+def _could_be_infrastructure(kind: str, value: str, source: Any) -> bool:
+    """The class questions an analyst's row answered before the judge's naming decided it."""
+    if kind == "ip":
+        return address_is_publishable(value, source)
+    return host_is_public(url_host(value) if kind == "url" else value)
+
+
+def not_kept_reason(why: str, mentioned_by: str = "", listed_by: str = "") -> str:
+    """The ``no:`` a row waiting for the judge reads, naming who listed or mentioned it."""
+    if listed_by:
+        said = (
+            f"no: {why}; {listed_by} lists it, and a listing does not change what the "
+            "sandbox recorded about it; the judge did not keep it as an indicator"
+        )
+    else:
+        said = f"no: {why}, and no model kept it as an indicator"
     if mentioned_by:
         said += f" ({mentioned_by} mentions it and does not keep it)"
     return said
+
+
+# What the rule says of a public DNS resolver, which it never publishes.
+PUBLIC_RESOLVER = "a public DNS resolver, which this run never publishes, whoever names it"
+
+
+def public_resolver_reason(
+    unattributed: str = "", listed_by: str = "", mentioned_by: str = ""
+) -> str:
+    """The ``no:`` a public DNS resolver reads: the sandbox's fact, the resolver, who named it."""
+    said = f"no: {PUBLIC_RESOLVER}"
+    if unattributed:
+        said = f"no: {unattributed}; it is {PUBLIC_RESOLVER}"
+    if listed_by:
+        said += f"; {listed_by} lists it"
+    if mentioned_by:
+        said += f" ({mentioned_by} mentions it and does not keep it)"
+    return said
+
+
+# What the rule says of a network value no tool in the run saw.
+NAMED_ONLY_BY_AN_ANALYST = "named only by an analyst"
+
+
+# What the search for a listed value covered: the run's whole ledger, or only
+# the tool sections a stored report keeps.
+SEARCHED_THE_RUN = "run"
+SEARCHED_THE_REPORT = "report"
+
+
+def named_only_reason(
+    listed_by: str = "", searched: str = SEARCHED_THE_RUN, asked_in: str = ""
+) -> str:
+    """The ``no:`` a value only an analyst listed reads, saying what the search for it covered.
+
+    "No tool in this run saw it" is said only after the whole ledger was
+    searched (:func:`ledger_projection.tool_sightings`); a stored report built
+    before that search says only that no tool answer it keeps holds the value.
+    """
+    who = f" ({listed_by})" if listed_by else ""
+    if asked_in:
+        unseen = f"only the answer to a query for it holds it ({asked_in})"
+    elif searched == SEARCHED_THE_RUN:
+        unseen = "no tool in this run saw it"
+    else:
+        unseen = "no tool answer this report keeps holds it"
+    return (
+        f"no: {NAMED_ONLY_BY_AN_ANALYST}{who}; {unseen}, and the judge did not keep it "
+        "as an indicator"
+    )
+
+
+def seen_in_reason(seen_in: str, listed_by: str = "") -> str:
+    """The ``no:`` a listed value reads when only a tool's text, and no second source, holds it."""
+    said = f"no: seen only in the text of {seen_in}, and no second source in this run records it"
+    return f"{said}; {listed_by} lists it" if listed_by else said
+
+
+def listed_value_sightings(report: Any, kind: str, value: str) -> tuple[str, str]:
+    """Where the run's tools saw a listed value, as the rule names it, and what was searched.
+
+    ``(words, searched)``: the entries whose answer holds the value whole,
+    written ``ev_0002 (decompile_function)``, or ``""``; and whether the
+    search covered the run's whole ledger (the report's ``tool_sightings``,
+    built at build time) or only the tool sections a stored report keeps.
+    """
+    key = _value_key(kind, value)
+    stored = _field(report, "tool_sightings")
+    if isinstance(stored, dict) and key in stored:
+        seen = [(str(eid), str(tool)) for eid, tool in stored[key]]
+        return "; ".join(f"{eid} ({tool})" for eid, tool in seen), SEARCHED_THE_RUN
+    held = _section_sightings(report, key)
+    words = "; ".join(f"{ids} ({tool})" for ids, tool in held)
+    if words:
+        words += ", as the tool sections this stored report keeps show it"
+    return words, SEARCHED_THE_REPORT
+
+
+def _section_sightings(report: Any, key: str) -> list[tuple[str, str]]:
+    """The kept tool sections of a stored report that hold ``key`` whole, as ``(ids, tool)``."""
+    found: list[tuple[str, str]] = []
+    for section in _field(report, "sections") or []:
+        origin = str(_field(section, "source") or "")
+        if not origin.startswith("tool:") or not key:
+            continue
+        text = " ".join(
+            [
+                str(_field(section, "text") or ""),
+                *(str(cell) for row in _field(section, "rows") or [] for cell in row),
+            ]
+        ).lower()
+        if whole_value_in(key, text):
+            ids = ", ".join(str(i) for i in _field(section, "evidence_ids") or []) or "an entry"
+            held = (ids, origin.removeprefix("tool:"))
+            if held not in found:
+                found.append(held)
+    return found
+
+
+# The tools whose answer is a structured sandbox network record, and the reason
+# a row one of them holds is not the sample's until the judge keeps it.
+_NETWORK_RECORD_TOOLS = frozenset({"sandbox_network", "pcap_summary"})
+
+
+def _stored_network_record(report: Any, kind: str, key: str) -> str:
+    """The unattributed reason a stored report's network record gives a listed value, or ``""``.
+
+    A report stored before the build searched every answer answers such a
+    value the way a fresh build does: a capture conversation's or a flow
+    table's address is an unattributed sandbox row, and a name only the
+    capture's TLS list holds is a capture-only name.
+    """
+    if _field(report, "tool_sightings") is not None:
+        return ""
+    tools = {tool for _ids, tool in _section_sightings(report, key)}
+    if kind == "ip" and tools & _NETWORK_RECORD_TOOLS:
+        return UNATTRIBUTED_FLOW
+    if kind == "domain" and "pcap_summary" in tools:
+        return CAPTURE_TLS_NAME
+    return ""
+
+
+def _listing_kwargs(report: Any, kind: str, key: str, row: Any) -> dict[str, str]:
+    """Who listed a row, whether the judge kept it, and where the run's tools saw it."""
+    said = kept_kwargs(report, kind, key, row)
+    recorded = _stored_network_record(report, kind, key)
+    if recorded:
+        said["unattributed"] = recorded
+        return said
+    seen, searched = listed_value_sightings(report, kind, key)
+    if seen:
+        said["seen_in"] = seen
+    else:
+        said["tool_search"] = searched
+        asked = query_answers(report, kind, key)
+        if asked:
+            said["asked_in"] = asked
+    return said
+
+
+def query_answers(report: Any, kind: str, value: str) -> str:
+    """The entries whose answer holds a listed value only because a query asked about it."""
+    queried = _field(report, "tool_queries")
+    if not isinstance(queried, dict):
+        return ""
+    return "; ".join(f"{eid} {tool}" for eid, tool in queried.get(_value_key(kind, value)) or [])
 
 
 # What the rule says of a well-known benign name a published URL carries.
@@ -2003,6 +2239,9 @@ FLOW_OUTSIDE_THE_TREE = (
     "the sandbox report attributes its flows to a process outside the sample's process tree"
 )
 BENIGN_NAME_RESOLVED = "a well-known benign name the sandbox's guest resolved"
+CAPTURE_TLS_NAME = (
+    "a TLS name only the capture recorded, which does not say which process made the connection"
+)
 # What the rule says of a process the two lineage facts disagree about.
 MARKED_ONLY_PROCESS = (
     "which Triage marks as the sample's but which runs none of the submitted file's names "
@@ -2025,7 +2264,7 @@ def disputed_flow_reason(marked_only: list[str], file_only: list[str]) -> str:
 
 
 def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
-    """``unattributed``, ``kept_by`` and ``mentioned_by`` for one value's sandbox row, or nothing.
+    """``unattributed``, ``kept_by``, ``listed_by`` and ``mentioned_by`` for one value's row.
 
     Asked of the report's network block. An address the sandbox saw is the
     sample's own observation when a flow to it came from the sample's process
@@ -2033,21 +2272,37 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
     elsewhere, or says nothing about which process made them — is the guest's
     traffic, and so is a well-known benign name a DNS lookup asked for (Windows
     resolves through its DNS service, never through the sample's tree, so a
-    name is judged by what it is). Either is published only when a model kept
-    it as an indicator: an analyst's artifact, or the judge's indicator. The
-    public resolver and AS facts are stated in the reason. Rows are found
-    through one index per report, so a table of any size is read once.
+    name is judged by what it is). Either is published only when the judge's
+    indicator kept it; an analyst's artifact listing it is named in the
+    reason and publishes nothing. The AS fact is stated in the reason. A row
+    only an analyst's artifact created carries who listed it and whether the
+    judge kept it. Rows are found through one index per report, so a table of
+    any size is read once.
     """
     network = _field(report, "network")
-    if network is None or kind not in ("ip", "domain"):
+    if network is None or kind not in ("ip", "domain", "url"):
         return {}
     key = _value_key(kind, value)
     row = _network_index(report).get((kind, key))
+    if row is not None and listed_only_by_an_analyst(kind, _field(row, "source")):
+        return _listing_kwargs(report, kind, key, row)
+    if row is not None and _field(row, "source") == "strings" and _field(row, "kept_by"):
+        # A value a tool read and an analyst listed: the tool's source
+        # decides, and the reason names the answer that holds it.
+        return _listing_kwargs(report, kind, key, row)
+    if kind == "url":
+        # A sandbox URL whose host is an address takes that address's facts.
+        host = url_host(value).strip("[]")
+        if _field(row, "source") == "sandbox" and _parses_as_an_address(host):
+            return sandbox_row_kwargs(report, "ip", host)
+        return {}
     if kind == "ip":
         if row is None or _field(row, "source") != "sandbox":
             return {}
         if _field(row, "sample_process_tree") is True:
-            return {}
+            # The sample's own observation: who listed it is stated, and the
+            # sandbox rule decides.
+            return kept_kwargs(report, kind, key, row)
         why = (
             FLOW_OUTSIDE_THE_TREE
             if _field(row, "sample_process_tree") is False
@@ -2062,33 +2317,45 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
         file_only = [str(p) for p in (_field(row, "file_only_processes") or []) if str(p)]
         if _field(row, "sample_process_tree") is None and (marked_only or file_only):
             why = disputed_flow_reason(marked_only, file_only)
-        if _field(row, "public_resolver"):
-            why += "; it is a public DNS resolver"
         if _field(row, "asn"):
             why += f"; AS {_field(row, 'asn')}"
     else:
         if row is None or _field(row, "source") != "sandbox":
             return {}
-        if not is_well_known_benign_host(key):
+        if _field(row, "capture_only"):
+            why = CAPTURE_TLS_NAME
+        elif is_well_known_benign_host(key):
+            why = BENIGN_NAME_RESOLVED
+        else:
             return {}
-        why = BENIGN_NAME_RESOLVED
     return {"unattributed": why, **kept_kwargs(report, kind, key, row)}
 
 
+def _parses_as_an_address(text: str) -> bool:
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return False
+    return True
+
+
 def _value_key(kind: str, value: Any) -> str:
-    """One spelling of a value for lookups: an address canonical, a name lower-cased."""
-    text = str(value or "").strip()
-    if kind == "ip":
-        try:
-            return str(ipaddress.ip_address(text.strip("[]")))
-        except ValueError:
-            return text.lower()
-    return text.lower().rstrip(".")
+    """One spelling of a value for lookups (``ledger_projection.value_key``)."""
+    from maljan.reporting.ledger_projection import value_key
+
+    return value_key(kind, value)
 
 
 def kept_kwargs(report: Any, kind: str, key: str, row: Any = None) -> dict[str, str]:
-    """``kept_by`` and ``mentioned_by`` for one value: who kept it, whose claim only mentions it."""
-    kept = [str(by) for by in (_field(row, "kept_by") or [])] if row is not None else []
+    """``kept_by``, ``listed_by`` and ``mentioned_by`` for one value.
+
+    ``kept_by`` is the judge's indicator naming the value, the one keeping the
+    rule reads; ``listed_by`` the analysts' artifacts that list it, and
+    ``mentioned_by`` the claims that only mention it, both stated and neither
+    read as keeping it.
+    """
+    listed = [str(by) for by in (_field(row, "kept_by") or [])] if row is not None else []
+    kept: list[str] = []
     if (kind, key) in _judge_index(report):
         kept.append("the judge's indicator")
     elif (kind, key) in _judge_url_hosts(report) and not is_well_known_benign_host(key):
@@ -2098,6 +2365,7 @@ def kept_kwargs(report: Any, kind: str, key: str, row: Any = None) -> dict[str, 
     mentioned = [str(by) for by in (_field(row, "mentioned_by") or [])] if row is not None else []
     return {
         "kept_by": ", ".join(dict.fromkeys(kept)),
+        "listed_by": ", ".join(dict.fromkeys(listed)),
         "mentioned_by": ", ".join(dict.fromkeys(mentioned)),
     }
 
@@ -2141,6 +2409,8 @@ def _network_index(report: Any) -> dict[tuple[str, str], Any]:
             out.setdefault(("ip", _value_key("ip", _field(row, "address"))), row)
         for row in _field(network, "domains") or []:
             out.setdefault(("domain", _value_key("domain", _field(row, "fqdn"))), row)
+        for row in _field(network, "urls") or []:
+            out.setdefault(("url", _value_key("url", _field(row, "url"))), row)
         return out
 
     return _memo(report, "network_index", _build)  # type: ignore[no-any-return]
@@ -2264,14 +2534,18 @@ def _add_emulated(
     entry: str,
     provenance: dict[str, list[RecoveredValue]] | None = None,
     how: RecoveredValue | None = None,
+    spelled: dict[str, str] | None = None,
 ) -> None:
-    value = str(text or "").strip().lower()
+    written = str(text or "").strip()
+    value = written.lower()
     if not value:
         return
     keys = [value.rstrip(".")]
     host = url_host(value)
     if host:
         keys.append(host)
+    if spelled is not None:
+        spelled.setdefault(keys[0], written.rstrip("."))
     for key in keys:
         values.setdefault(key, entry)
         if provenance is not None and how is not None:
@@ -2368,6 +2642,7 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
     """
     values: dict[str, str] = {}
     provenance: dict[str, list[RecoveredValue]] = {}
+    spelled: dict[str, str] = {}
     plain_texts: list[tuple[str, str]] = []
     floss_whole = strings_whole = decoder_whole = False
     saw_floss = saw_strings = saw_decoder = False
@@ -2385,7 +2660,7 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
                     # The whole string, as before, and each indicator the one
                     # reader finds in it, as for the decoder's texts.
                     for value in [row.get("string"), *decoded_indicators(row.get("string"))]:
-                        _add_emulated(values, value, entry_id, provenance, how)
+                        _add_emulated(values, value, entry_id, provenance, how, spelled)
         elif tool == DECODER_TOOL:
             saw_decoder = True
             rows = _rows_of(structured, "results")
@@ -2401,7 +2676,7 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
                 ]
                 for text in texts:
                     for value in decoded_indicators(text):
-                        _add_emulated(values, value, entry_id, provenance, how)
+                        _add_emulated(values, value, entry_id, provenance, how, spelled)
         elif tool == "strings":
             saw_strings = True
             rows = _rows_of(structured, "strings")
@@ -2442,7 +2717,18 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
                 or key in decoded_indicators(key)
             )
         },
+        spelled={key: spelled[key] for key in kept if key in spelled},
     )
+
+
+def recovered_network_values(record: EmulatedStrings) -> list[str]:
+    """Each domain, address and URL the record holds, as the recovering tool spelled it.
+
+    Read from the record :func:`emulation_from_ledger` built: every value of
+    its ``recovered_by`` (a value the string sweep also read is held out as
+    plain and is not one), in the spelling the tool wrote (``spelled``).
+    """
+    return [record.spelled.get(key, key) for key in record.recovered_by]
 
 
 # Why a record read back from a stored report is partial: it holds only the
@@ -2621,6 +2907,10 @@ def publish_answer(
     kept_by: str = "",
     mentioned_by: str = "",
     in_published_url: str = "",
+    listed_by: str = "",
+    seen_in: str = "",
+    tool_search: str = "",
+    asked_in: str = "",
 ) -> str:
     """The publish rule's answer for one row, as the report prints it.
 
@@ -2652,6 +2942,10 @@ def publish_answer(
         in_published_url=in_published_url,
     ):
         return "yes"
+    if kind == "ip" and is_public_resolver(text):
+        return public_resolver_reason(unattributed, listed_by, mentioned_by)
+    if kind == "url" and is_public_resolver(url_host(text).strip("[]")):
+        return public_resolver_reason(unattributed, listed_by, mentioned_by)
     if kind == "domain" and not host_is_public(text):
         return "no: not a name that resolves outside the analysed network"
     if kind == "url" and not host_is_public(url_host(text)):
@@ -2659,9 +2953,16 @@ def publish_answer(
     if kind == "ip" and not address_is_publishable(text, source):
         return "no: not an address this run may publish"
     if kind == "domain" and in_published_url and is_well_known_benign_host(text):
-        return not_kept_reason(f"{BENIGN_NAME_IN_A_URL} ({in_published_url})", mentioned_by)
-    if unattributed and kind in ("ip", "domain"):
-        return not_kept_reason(unattributed, mentioned_by)
+        return not_kept_reason(
+            f"{BENIGN_NAME_IN_A_URL} ({in_published_url})", mentioned_by, listed_by
+        )
+    if unattributed and kind in ("ip", "domain", "url"):
+        refused = _recovery_refusal(recovered, verdict, url_host(text) if kind == "url" else text)
+        if refused:
+            # A recovering tool read the value too, and its own refusal
+            # stands: both facts are stated.
+            return not_kept_reason(f"{unattributed}; {refused}", mentioned_by, listed_by)
+        return not_kept_reason(unattributed, mentioned_by, listed_by)
     if kind == "email" and not email_is_publishable(text):
         return "no: not a mailbox at a host that could exist"
     if (
@@ -2685,10 +2986,16 @@ def publish_answer(
         )
     if recovered and is_well_known_benign_host(url_host(text) if kind == "url" else text):
         return f"no: {recovered}, but it is a well-known benign host"
+    if listed_only_by_an_analyst(kind, source):
+        if seen_in:
+            return seen_in_reason(seen_in, listed_by)
+        return named_only_reason(listed_by, tool_search or SEARCHED_THE_RUN, asked_in)
     if kind == "command":
         return "no: a command line is not an indicator this run publishes"
     if kind != "hash" and (kind not in STRING_IOC_KINDS or indicator_pattern(kind, text) is None):
         return "no: the export has no object for this kind"
+    if seen_in:
+        return seen_in_reason(seen_in, listed_by)
     return "no: seen only in the file's strings"
 
 
@@ -2908,17 +3215,11 @@ def _publishable_domains(report: Any) -> frozenset[str]:
 
 
 # Where a second source for a string row is looked for. A section built from
-# an analyst's own artefact or finding is a claim that cites evidence; a
-# section built from a tool's output is the string sweep's own table arriving
-# under another heading, and reading those would let every string corroborate
-# itself.
-# Where a second source for a string row is looked for. A section built from
-# an analyst's own artefact or finding is a claim; the ledger entries it cites
-# are what the claim stands on, and only the entries of a tool that is not the
-# string sweep can hold a value up. A section built from the sweep's own output
-# is the thing being corroborated, and reading it would let every string
-# corroborate itself.
-_ANALYST_SECTION_SOURCES = ("artifact:", "finding", "agent")
+# an analyst's own artefact or finding (``ledger_report.ANALYST_SECTION_SOURCES``)
+# is a claim; the ledger entries it cites are what the claim stands on, and only
+# the entries of a tool that is not the string sweep can hold a value up. A
+# section built from the sweep's own output is the thing being corroborated,
+# and reading it would let every string corroborate itself.
 
 # The tools whose output *is* the string sweep. An analyst quoting one of these
 # in a finding has quoted the sweep's own table back, which is one source said
@@ -2978,7 +3279,7 @@ def _corroborating_values(report: Any, corpus: Any = None) -> str:
     drawn: set[str] = set()
     for section in sections:
         origin = str(getattr(section, "source", "") or "").strip().lower()
-        if origin.startswith(_ANALYST_SECTION_SOURCES):
+        if origin.startswith(ANALYST_SECTION_SOURCES):
             cited.update(str(eid) for eid in (getattr(section, "evidence_ids", None) or []))
     for section in sections:
         origin = str(getattr(section, "source", "") or "").strip().lower()

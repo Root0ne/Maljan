@@ -46,6 +46,11 @@ SECTIONS = (
 # model marks ``observed`` has to cite one of their entries.
 SANDBOX_TOOL_PREFIXES = ("sandbox_", "pcap_summary")
 
+# The sandbox answers about the network: a flow table and a capture. Either
+# holds the guest's traffic as well as the sample's, so it shows a step was
+# observed only when the sandbox attributed a flow to the sample's own tree.
+_NETWORK_SANDBOX_TOOLS = frozenset({"sandbox_network", "pcap_summary"})
+
 # Tool names whose captured output is relevant to each technical section. Used
 # to filter ``technical_evidence`` so e.g. the encryption bundle never sees
 # network tool output.
@@ -373,6 +378,7 @@ def bundle_for(
             "facts": {
                 "ttps": [f"{m.technique_id} {m.technique_name}" for m in report.ttp_mappings],
                 "persistence": [p.kind for p in report.persistence],
+                "persistence_assessed": _assessed_persistence(report),
                 "has_network": bool(
                     report.network and (report.network.domains or report.network.ips)
                 ),
@@ -406,6 +412,25 @@ def bundle_for(
     }
 
 
+def _assessed_persistence(report: MalwareReport) -> list[str]:
+    """The persistence the analysts listed, one line each, apart from the tools' mechanisms."""
+    from maljan.reporting.ledger_report import analyst_persistence
+
+    return [
+        " ".join(
+            part
+            for part in (
+                row["kind"],
+                row["target"],
+                f"-> {row['payload']}" if row["payload"] else "",
+                f"(listed by the {row['listed_by']} analyst)" if row["listed_by"] else "",
+            )
+            if part
+        )
+        for row in analyst_persistence(report.sections)
+    ]
+
+
 def sandbox_entry_ids(report: MalwareReport) -> list[str]:
     """The ledger ids of the sandbox answers that recorded something, in issue order.
 
@@ -415,20 +440,53 @@ def sandbox_entry_ids(report: MalwareReport) -> list[str]:
     section built from it holds a value: the section builders credit an entry
     only when it added a row, and the generic block's rows are read for a
     value that is not empty.
+
+    A network answer — the flow table, the capture — is an observation of the
+    sample only when the report's network block holds a sandbox row the
+    sandbox attributed to the sample's process tree: without one, what it
+    recorded is the guest's traffic, and a step citing it was not observed.
+    Process, file and registry answers are the sample's by what they record.
     """
+    sample_flow = _sample_tree_made_a_flow(report)
     # The pack's sandbox-status entry states what the sandbox report is; it
     # records no behaviour and is never an observation to cite.
-    sandbox = {
-        row.id
+    tools = {
+        row.id: str(row.tool or "")
         for row in report.evidence_index
         if str(row.tool or "").startswith(SANDBOX_TOOL_PREFIXES) and row.tool != "sandbox_status"
     }
     holding: set[str] = set()
     for section in report.sections:
-        cited = sandbox.intersection(section.evidence_ids)
-        if cited and section_holds_something(section):
-            holding.update(cited)
+        cited = set(tools).intersection(section.evidence_ids)
+        if not cited or not section_holds_something(section):
+            continue
+        if not sample_flow:
+            cited = {eid for eid in cited if not _answers_about_the_network(tools[eid], section)}
+        holding.update(cited)
     return [row.id for row in report.evidence_index if row.id in holding]
+
+
+# The named sections of a sandbox report that record traffic, as the section
+# built from a ``sandbox_report_section`` answer is keyed (``sandbox_<name>``).
+_NETWORK_REPORT_SECTIONS = frozenset(
+    {"network", "dns", "http", "https", "tcp", "udp", "tls", "hosts", "domains", "pcap"}
+)
+
+
+def _answers_about_the_network(tool: str, section: Any) -> bool:
+    """Whether a sandbox answer records traffic: the flow table, the capture, a network section."""
+    if tool in _NETWORK_SANDBOX_TOOLS:
+        return True
+    name = str(getattr(section, "key", "") or "").removeprefix("sandbox_").lower()
+    return tool == "sandbox_report_section" and name in _NETWORK_REPORT_SECTIONS
+
+
+def _sample_tree_made_a_flow(report: MalwareReport) -> bool:
+    """Whether the network block holds a sandbox row attributed to the sample's process tree."""
+    network = report.network
+    return network is not None and any(
+        ip.source == "sandbox" and ip.sample_process_tree is True for ip in network.ips
+    )
 
 
 _EMPTY_VALUES = frozenset({"", "[]", "{}", "0", "none", "null", "-", "false", "no"})
@@ -482,6 +540,16 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     """
     if section == "payloads":
         return _payload_facts(report)
+    if section == "persistence_detail":
+        # The tools' mechanisms and the analysts' listed rows, as two facts:
+        # a run whose static block is empty still has both to state.
+        profile = (report.static.api_capabilities or {}) if report.static else {}
+        return {
+            "persistence_mechanisms": [p.kind for p in report.persistence],
+            "persistence_assessed": _assessed_persistence(report),
+            "persistence_api_count": profile.get("persistence", 0),
+            "registry_api_count": profile.get("registry", 0),
+        }
     if section == "configuration":
         net = report.network
         return {
@@ -558,12 +626,6 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
             "anti_debug_api_count": caps.get("anti_debug", 0),
             "evasion_api_count": caps.get("evasion", 0),
             "evasion_techniques": [t for t in techniques if t in _EVASION_TECHNIQUES],
-        }
-    if section == "persistence_detail":
-        return {
-            "persistence_mechanisms": [p.kind for p in report.persistence],
-            "persistence_api_count": caps.get("persistence", 0),
-            "registry_api_count": caps.get("registry", 0),
         }
     if section == "cli_flags":
         return {"capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1]))}

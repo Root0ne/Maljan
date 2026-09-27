@@ -134,13 +134,19 @@ from maljan.reporting.narrative_agent import (
     EXAMPLE_OBJECT,
     EXPECTED_OBJECT,
 )
+from maljan.reporting.renderers.markdown import analyst_list_note
 from maljan.reporting.renderers.stix_renderer import (
     BENIGN_NAME_IN_A_URL,
     BENIGN_NAME_RESOLVED,
+    CAPTURE_TLS_NAME,
     FLOW_OUTSIDE_THE_TREE,
+    SEARCHED_THE_REPORT,
     UNATTRIBUTED_FLOW,
     disputed_flow_reason,
+    named_only_reason,
     not_kept_reason,
+    public_resolver_reason,
+    seen_in_reason,
 )
 from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
@@ -692,7 +698,27 @@ PROMPTS: dict[str, str] = {
                 "a claim by the dynamic analyst",
             ),
             disputed_flow_reason(["SearchHost.exe (procid 104)"], ["cmd.exe (procid 7)"]),
+            not_kept_reason("x", "", "an artifact of the network analyst"),
+            public_resolver_reason(
+                UNATTRIBUTED_FLOW, "an artifact of the network analyst", "a claim by the x analyst"
+            ),
+            named_only_reason("an artifact of the network analyst"),
+            named_only_reason(),
+            named_only_reason("an artifact of the network analyst", SEARCHED_THE_REPORT),
+            named_only_reason(
+                "an artifact of the network analyst",
+                asked_in="ev_0004 get_domain_report",
+            ),
+            seen_in_reason("ev_0002 (decompile_function)", "an artifact of the network analyst"),
+            seen_in_reason(
+                "ev_0006 (iocs_from_file), as the tool sections this stored report keeps show it"
+            ),
+            not_kept_reason(CAPTURE_TLS_NAME),
         ]
+    ),
+    "the line an analyst's table is printed under in Appendix A": " ".join(
+        analyst_list_note(["network", "static"], kind)
+        for kind in ("imports", "endpoints", "persistence")
     ),
     "the replies a tool call with no recorded reply is sent with": (
         f"{NO_REPLY_RECORDED} {NOT_RUN_REPLY}"

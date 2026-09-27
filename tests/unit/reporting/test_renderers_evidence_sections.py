@@ -93,7 +93,7 @@ class TestASectionThatCarriesBothRowsAndASentence:
             )
         )
 
-        assert "### Strings\n\n| Offset | Text |" in plain
+        assert "### Strings · _Measured_\n\n| Offset | Text |" in plain
 
 
 class TestMarkdown:

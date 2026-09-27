@@ -9,14 +9,18 @@ which is exactly the arrangement that made a report say things no agent had
 observed.
 
 So the blocks stay and their source changes: they are filled from what the
-tools returned and what the agents established, and from nothing else. A tool
-that was never called leaves its block empty, and every layer downstream of an
-empty block degrades to silence rather than inventing a substitute.
+tools returned, and from nothing else. An analyst's table is the analyst's: it
+is printed in Appendix A as that analyst's list and never becomes a row of a
+block the report prints as measured or observed, so nothing a model listed
+changes what the platform counts or matches. The network block reads which
+values the analysts listed, to say so beside each row. A tool that was never
+called leaves its block empty, and every layer downstream of an empty block
+degrades to silence rather than inventing a substitute.
 
-Nothing here parses a file or a report. It reads ``LedgerEntry.structured`` and
-``AgentISR.artifacts``, and the one thing it computes itself is the sample's
-own hashes — the routing minimum a report needs even when no agent thought to
-ask for them.
+Nothing here parses a file or a report. It reads ``LedgerEntry.structured`` and,
+for the network block, ``AgentISR.artifacts``, and the one thing it computes
+itself is the sample's own hashes — the routing minimum a report needs even
+when no agent thought to ask for them.
 """
 
 from __future__ import annotations
@@ -57,6 +61,8 @@ from maljan.schemas.sandbox_report import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+
     from maljan.schemas.evidence import LedgerEntry
     from maljan.schemas.isr_models import AgentISR
 
@@ -80,32 +86,6 @@ _STRING_KINDS = {
     "other",
 }
 
-# What an artifact's ``kind`` has to say to be read as persistence, and the
-# typed kind it becomes. Anything else an analyst calls persistence lands as
-# ``other``, which is a real answer rather than a dropped row.
-_PERSISTENCE_KINDS = {
-    "registry_run",
-    "scheduled_task",
-    "service",
-    "wmi_subscription",
-    "com_hijacking",
-    "startup_folder",
-    "dll_search_hijacking",
-    "driver",
-    "image_hijack",
-    "appinit_dll",
-    "lsa_provider",
-    "winlogon_helper",
-    "systemd_service",
-    "systemd_timer",
-    "cron_job",
-    "init_d",
-    "rc_local",
-    "ld_preload",
-    "xdg_autostart",
-    "other",
-}
-
 
 def _payloads(ledger: list[LedgerEntry], *tools: str) -> list[tuple[LedgerEntry, dict[str, Any]]]:
     """Every successful call of ``tools`` whose answer was a JSON object."""
@@ -116,17 +96,6 @@ def _payloads(ledger: list[LedgerEntry], *tools: str) -> list[tuple[LedgerEntry,
         data = entry.structured
         if isinstance(data, dict) and not data.get("error"):
             out.append((entry, data))
-    return out
-
-
-def _artifacts(isrs: dict[str, AgentISR] | None, *kinds: str) -> list[Any]:
-    """Every agent artifact whose ``kind`` is one of ``kinds``."""
-    wanted = {k.lower() for k in kinds}
-    out: list[Any] = []
-    for isr in (isrs or {}).values():
-        for artifact in getattr(isr, "artifacts", None) or []:
-            if str(getattr(artifact, "kind", "")).lower() in wanted:
-                out.append(artifact)
     return out
 
 
@@ -303,10 +272,8 @@ def _opt(value: Any) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def static_from_ledger(
-    ledger: list[LedgerEntry], isrs: dict[str, AgentISR] | None = None
-) -> StaticAnalysis | None:
-    """``StaticAnalysis`` from the format tools and the analysts' artifacts.
+def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
+    """``StaticAnalysis`` from the format, string, capa and knowledge tools.
 
     ``None`` when nothing static was gathered, which is the honest answer for a
     run whose analyst never opened the binary — and the signal the layers
@@ -413,18 +380,12 @@ def static_from_ledger(
                     }
                 )
 
-    for artifact in _artifacts(isrs, "imports"):
-        for row in _rows_of(artifact):
-            if len(row) >= 2:
-                seen = True
-                static.imports.append(ImportRow(dll=row[0], function=row[1]))
-    for artifact in _artifacts(isrs, "iocs", "indicators"):
-        for row in _rows_of(artifact):
-            if len(row) >= 2:
-                seen = True
-                static.interesting_strings.append(
-                    StringIOC(value=row[1], kind=_string_kind(row[0]))  # type: ignore[arg-type]
-                )
+    # An analyst's table of imports or IOCs is not read here. The import table
+    # and the string table are what the tools returned, printed as measured,
+    # and the import count, the capability profile and the rule matches are
+    # read from them: one live run's analyst listed names it had resolved from
+    # hashes under ``KERNEL32.dll``, and the report counted them as imports.
+    # The analyst's table stays in Appendix A as its own list.
 
     # The capability profile is what the knowledge table said about the names
     # it was asked about (``tools.knowledge.api_capability``): a category per
@@ -579,9 +540,7 @@ def _technique_id(value: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-def dynamic_from_ledger(
-    ledger: list[LedgerEntry], isrs: dict[str, AgentISR] | None = None
-) -> DynamicBehavior | None:
+def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
     """``DynamicBehavior`` from the sandbox tools the dynamic analyst called."""
     dynamic = DynamicBehavior()
     seen = False
@@ -668,14 +627,8 @@ def dynamic_from_ledger(
             seen = True
             dynamic.unavailable = [str(row) for row in rows]
 
-    for artifact in _artifacts(isrs, "processes"):
-        for row in _rows_of(artifact):
-            if row:
-                seen = True
-                dynamic.process_tree.append(
-                    ProcessNode(pid=_int(row[0]), name=row[1] if len(row) > 1 else "")
-                )
-
+    # An analyst's table of processes is not the process tree: the tree is
+    # what the sandbox recorded, and the analyst's list stays in Appendix A.
     return dynamic if seen else None
 
 
@@ -739,17 +692,41 @@ def _as_tree(nodes: list[ProcessNode]) -> list[ProcessNode]:
 
 
 _DomainSource = Literal["sandbox", "analyst", "strings"]
-# What one source is worth against another. A name the sample resolved outranks
-# a name an analyst wrote down, which outranks a run of bytes in the file.
-_DOMAIN_SOURCE_RANK: dict[str, int] = {"strings": 0, "analyst": 1, "sandbox": 2}
+# Which source a value's row stands on when more than one recorded it: where the
+# platform saw it. A value the sample reached outranks a value a tool read out
+# of the file, which outranks a value only an analyst listed — a listing is not
+# a sighting, so it never lifts a row a tool recorded, and a row it created
+# takes the tool's source as soon as a tool records the value too.
+_DOMAIN_SOURCE_RANK: dict[str, int] = {"analyst": 0, "strings": 1, "sandbox": 2}
 
 
 def network_from_ledger(
     ledger: list[LedgerEntry],
     isrs: dict[str, AgentISR] | None = None,
     sandbox_report: dict[str, Any] | None = None,
+    recovered: Iterable[str] = (),
+    sightings: dict[str, list[tuple[str, str]]] | None = None,
 ) -> NetworkIOCs | None:
-    """``NetworkIOCs`` from the sandbox network tool and the IOC tools.
+    """``NetworkIOCs`` from the sandbox network tool, the IOC tools and the recovered values.
+
+    ``recovered`` is each domain, address and URL a recovering tool decoded
+    (``stix_renderer.recovered_network_values``): a row of the string
+    sweep's source each, whether or not a model named it.
+
+    ``sightings`` is, for each value an analyst listed, the tool answers of
+    the run that hold it (:func:`tool_sightings`). A row only an artifact
+    created and some answer's text holds takes the string sweep's standing
+    (``strings``), whichever tool printed the text: text inside an answer — a
+    signature's description, a command line, the sample's strings a sandbox
+    re-serves — is no observation of the sample. Only a structured network
+    record (a flow, a DNS query, an HTTP request, a capture conversation)
+    makes a sandbox row. A row no answer holds stays ``analyst``.
+
+    The capture (``pcap_summary``) is a sandbox view like the flow table: its
+    conversations' addresses and its TLS names are sandbox rows. It says
+    nothing about which process made a conversation, so it states no
+    attribution, and a name only its TLS list recorded is marked
+    ``capture_only``.
 
     ``sandbox_report`` is the job's whole report. When it holds an observation
     the sandbox rows are read from it, every row, rather than from the views a
@@ -797,8 +774,8 @@ def network_from_ledger(
                 return
             known = domains.get(value)
             if known is not None:
-                # The same name from a second source is the corroboration the
-                # indicator rule asks for, so the stronger origin wins.
+                # The same name from a second source: the row stands on the
+                # stronger one.
                 if _DOMAIN_SOURCE_RANK[source] > _DOMAIN_SOURCE_RANK[known.source or "strings"]:
                     known.source = source
                 return
@@ -842,8 +819,7 @@ def network_from_ledger(
             known_url = urls.get(value)
             if known_url is not None:
                 # The same endpoint from a second source, read the way a
-                # domain's is: the stronger origin wins, and that is the
-                # corroboration the indicator rule asks for.
+                # domain's is: the row stands on the stronger one.
                 if _DOMAIN_SOURCE_RANK[source] > _DOMAIN_SOURCE_RANK[known_url.source or "strings"]:
                     known_url.source = source
                 return
@@ -861,10 +837,18 @@ def network_from_ledger(
     disputed: dict[str, dict[str, list[str]]] = {}
     host_facts: dict[str, dict[str, Any]] = {}
 
+    # The names a DNS or HTTP view named, and the names only the capture's TLS
+    # list recorded: a TLS name says nothing about which process made the
+    # connection, so a name the capture alone holds is stated as such.
+    resolved: set[str] = set()
+    tls_names: set[str] = set()
+
     for data, whole in _sandbox_views(ledger, sandbox_report):
         for key in ("dns", "domains"):
             for row in data.get(key) or []:
-                _add("domain", _first_str(row, "request", "hostname", "domain", "name"), "sandbox")
+                name = _first_str(row, "request", "hostname", "domain", "name")
+                _add("domain", name, "sandbox")
+                resolved.add(value_key("domain", name))
         # An address the sample really reached, labelled as one: the default
         # source is ``strings``, so every observed address was recorded as
         # though a string sweep had produced it, which is the weakest claim
@@ -901,15 +885,31 @@ def network_from_ledger(
         for row in data.get("http") or []:
             host = _first_str(row, "host", "hostname")
             _add("domain", host, "sandbox")
+            resolved.add(value_key("domain", host))
             # A request the sample made, and labelled as one: the default
             # source is ``strings``, so an observed URL used to be recorded as
             # though it had been read out of the file's bytes.
             _add("url", _http_url(row, host), "sandbox")
 
+    for _entry, data in _payloads(ledger, "pcap_summary"):
+        for row in data.get("conversations") or []:
+            _add("ip", address_key(_first_str(row, "dst", "ip", "address")), "sandbox")
+        sni = data.get("sni")
+        for name in sni if isinstance(sni, dict | list) else []:
+            _add("domain", str(name), "sandbox")
+            tls_names.add(value_key("domain", str(name)))
+
     for _entry, data in _payloads(ledger, "iocs_from_file", "iocs_from_text"):
         for row in data.get("iocs") or []:
             if isinstance(row, dict):
                 _add(str(row.get("kind") or ""), str(row.get("value") or ""), "strings")
+
+    # What a recovering tool decoded out of the file — FLOSS, the static
+    # decoder — read from the file's bytes like the sweep's rows, and so of
+    # the sweep's source: the publish rule's emulation gate decides each one.
+    for text in recovered:
+        for kind, value in cell_network_values(text, None):
+            _add(kind, value, "strings")
 
     kept: dict[tuple[str, str], list[str]] = {}
     for artifact in (
@@ -923,16 +923,120 @@ def network_from_ledger(
             if by not in kept.setdefault(kept_key, []):
                 kept[kept_key].append(by)
 
+    rows: list[NetworkIP | NetworkDomain | NetworkURL] = [
+        *network.ips,
+        *network.domains,
+        *network.urls,
+    ]
+    for row in rows:
+        if row.source == "analyst" and (sightings or {}).get(_listed_key(row)):
+            # Text inside a tool's answer — any tool's, a sandbox's included —
+            # is a string the tool printed, not an observation of the sample:
+            # only a structured network record (above) makes a sandbox row.
+            row.source = "strings"
+    for domain in network.domains:
+        key = value_key("domain", domain.fqdn)
+        domain.capture_only = (
+            domain.source == "sandbox" and key in tls_names and key not in resolved
+        )
+
     _state_sandbox_facts(network, attributed, host_facts, outside, disputed)
     _state_who_kept(network, kept, isrs)
     return network if (network.domains or network.ips or network.urls) else None
 
 
-# The artifact kinds that keep a network value as an indicator: the analyst's
-# structured list of what it holds to be infrastructure. Nothing else keeps —
+def _listed_key(row: NetworkIP | NetworkDomain | NetworkURL) -> str:
+    """A network row's value as :func:`tool_sightings` keys it."""
+    if isinstance(row, NetworkIP):
+        return value_key("ip", row.address)
+    if isinstance(row, NetworkDomain):
+        return value_key("domain", row.fqdn)
+    return value_key("url", row.url)
+
+
+def value_key(kind: str, value: Any) -> str:
+    """One spelling of a value for every lookup: an address canonical, anything else folded.
+
+    An address loses its brackets and is written in its compressed lower-case
+    form; any other value is lower-cased with a trailing dot taken off. The
+    sightings are keyed with it and looked up with it, so a spelling cannot
+    miss.
+    """
+    text = str(value or "").strip()
+    if kind == "ip":
+        canonical = address_key(text.strip("[]"))
+        if _parses_as_an_address(canonical):
+            return canonical
+    return text.lower().rstrip(".")
+
+
+def _strings_in(value: Any) -> Iterator[str]:
+    """Every string a structured answer holds, its keys included."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield str(key)
+            yield from _strings_in(item)
+    elif isinstance(value, list | tuple):
+        for item in value:
+            yield from _strings_in(item)
+    elif value is not None and not isinstance(value, bool):
+        yield str(value)
+
+
+def tool_sightings(
+    ledger: list[LedgerEntry], values: Iterable[tuple[str, str]]
+) -> tuple[dict[str, list[tuple[str, str]]], dict[str, list[tuple[str, str]]]]:
+    """For each ``(kind, value)``, keyed by :func:`value_key`: the entries whose answer holds it.
+
+    Two maps: the sightings, and the entries set apart because the value is
+    in their call arguments — the answer to a query for it, which holds it
+    because it was asked about it. The second is kept so the report never
+    says no tool saw a value some answer holds.
+
+    Every successful entry is read — its structured answer's strings and its
+    text — and a value is found only as a value of its own
+    (``whole_value_in``), so a longer token that happens to contain it does
+    not count. An entry whose call arguments hold the value is not a sighting
+    of it: a lookup's answer repeats the question it was asked. A value no
+    answer holds maps to an empty list: the search ran and found nothing,
+    which is what lets the report say no tool saw it.
+    """
+    from maljan.agents._indicator_denylists import whole_value_in
+
+    texts = [
+        (
+            entry.id,
+            entry.tool,
+            " ".join([*_strings_in(entry.structured), str(entry.output or "")]).lower(),
+            " ".join(_strings_in(entry.args)).lower(),
+        )
+        for entry in ledger or []
+        if entry.ok
+    ]
+    seen: dict[str, list[tuple[str, str]]] = {}
+    queried: dict[str, list[tuple[str, str]]] = {}
+    for kind, value in values:
+        key = value_key(kind, value)
+        if not key or key in seen:
+            continue
+        holding = [
+            (eid, tool, whole_value_in(key, asked))
+            for eid, tool, text, asked in texts
+            if whole_value_in(key, text)
+        ]
+        seen[key] = [(eid, tool) for eid, tool, was_asked in holding if not was_asked]
+        queried[key] = [(eid, tool) for eid, tool, was_asked in holding if was_asked]
+    return seen, queried
+
+
+# The artifact kinds that list a network value as an indicator: the analyst's
+# structured list of what it holds to be infrastructure. Nothing else lists —
 # a table of contacted hosts is a transcription of what the sandbox saw, and one
 # live run's analysts wrote exactly such observations down while calling them
-# noise. Tolerance is on the values, never on the kinds.
+# noise. Tolerance is on the values, never on the kinds. A listing is stated
+# beside the row and never publishes it (``_state_who_kept``).
 _KEEPING_KINDS = frozenset(
     {
         "endpoints",
@@ -1078,7 +1182,73 @@ _HOST_PORT_RE = re.compile(r"^\[?([0-9a-fA-F:.]+?)\]?:(\d{1,5})$")
 
 
 def _kind_of(artifact: Any) -> str:
-    return re.sub(r"[\s-]+", "_", str(getattr(artifact, "kind", "") or "").strip().lower())
+    return artifact_kind(getattr(artifact, "kind", ""))
+
+
+def artifact_kind(kind: Any) -> str:
+    """An artifact's kind as one spelling: lower case, spaces and hyphens as underscores."""
+    return re.sub(r"[\s-]+", "_", str(kind or "").strip().lower())
+
+
+# The artifact kinds whose typed rows list IOCs of any kind, and the non-network
+# kinds read from them; a network value in them is ``kept_network_values``'.
+_IOC_LIST_KINDS = frozenset({"iocs", "ioc", "indicators"})
+_LISTED_IOC_KINDS = frozenset({"mutex", "path", "registry"})
+# The persistence kinds whose target is an indicator, as the IOC table types it.
+_LISTED_PERSISTENCE_KINDS = {
+    "registry_run": "registry",
+    "scheduled_task": "scheduled_task",
+    "service": "service",
+    "systemd_service": "service",
+}
+
+
+def listed_non_network_values(kind: Any, rows: Iterable[Any]) -> list[tuple[str, str, str]]:
+    """``(IOC kind, value, payload)`` for each non-network value an analyst's table lists.
+
+    An IOC list's row typed as a mutex, a path or a registry key, and a
+    persistence table's Run key, scheduled task or service target. Read the
+    same way from an artifact at build time and from its Appendix A section
+    of a stored report, so both answer alike.
+    """
+    kind = artifact_kind(kind)
+    out: list[tuple[str, str, str]] = []
+    for row in rows:
+        cells = [str(cell).strip() for cell in row] if isinstance(row, list | tuple) else []
+        if len(cells) < 2 or not cells[1]:
+            continue
+        if kind in _IOC_LIST_KINDS:
+            ioc = _string_kind(cells[0])
+            if ioc in _LISTED_IOC_KINDS:
+                out.append((ioc, cells[1], ""))
+        elif kind == "persistence":
+            ioc = _LISTED_PERSISTENCE_KINDS.get(cells[0].lower(), "")
+            if ioc:
+                out.append((ioc, cells[1], cells[2] if len(cells) > 2 else ""))
+    return out
+
+
+def listing_kind(kind: Any) -> str:
+    """``persistence``, ``values`` (a table whose values reach the IOC table), or ``""``."""
+    kind = artifact_kind(kind)
+    if kind == "persistence":
+        return "persistence"
+    return "values" if kind in _KEEPING_KINDS or kind in _IOC_LIST_KINDS else ""
+
+
+def analyst_listed_values(isrs: dict[str, AgentISR] | None) -> list[tuple[str, str]]:
+    """Every ``(kind, value)`` an analyst's artifact lists, network or not, for the sightings."""
+    values: list[tuple[str, str]] = []
+    for isr in (isrs or {}).values():
+        for artifact in getattr(isr, "artifacts", None) or []:
+            values.extend(kept_network_values(artifact))
+            values.extend(
+                (kind, value)
+                for kind, value, _payload in listed_non_network_values(
+                    getattr(artifact, "kind", ""), _rows_of(artifact)
+                )
+            )
+    return list(dict.fromkeys(values))
 
 
 # The headings that name a table's type column and its value column.
@@ -1293,14 +1463,16 @@ def _state_who_kept(
     kept: dict[tuple[str, str], list[str]],
     isrs: dict[str, AgentISR] | None,
 ) -> None:
-    """Which model kept each address and name as an indicator, and which only mentioned it.
+    """Which analyst listed each address and name as an indicator, and which only mentioned it.
 
-    Kept is an analyst's artifact of endpoints, network values or IOCs: the
+    Listed is an analyst's artifact of endpoints, network values or IOCs: the
     structured place an analyst puts what it holds to be infrastructure. A
-    claim holding the value in its text mentions it and keeps nothing: one
-    live run's analysts wrote two background addresses into claims calling
-    them noise, and reading a mention as a keep published what they discarded.
-    The judge sees every claim and keeps what it keeps in its own indicators.
+    claim holding the value in its text only mentions it. Both are stated in
+    the publish rule's reason and neither publishes anything: a model's list
+    never overrides what the sandbox says about a value, and one live run's
+    artifact published every address the guest reached, a public resolver
+    included. The judge sees every claim and keeps what it keeps in its own
+    indicators.
     """
     from maljan.agents._indicator_denylists import whole_value_in
 
@@ -1471,14 +1643,16 @@ def _autostart_kind(key: str) -> str | None:
     return None
 
 
-def persistence_from_ledger(
-    ledger: list[LedgerEntry], isrs: dict[str, AgentISR] | None = None
-) -> list[PersistenceMechanism]:
-    """Persistence entries the agents named, plus the Sigma rules that fired.
+def persistence_from_ledger(ledger: list[LedgerEntry]) -> list[PersistenceMechanism]:
+    """Persistence the sandbox tools recorded, plus the Sigma rules that fired.
 
-    Nothing here re-scans a sandbox report for autostart paths: an agent that
-    saw a Run key writes it down as an artifact, and a Sigma rule that fired on
-    the sandbox events is evidence in its own right.
+    Nothing here re-scans a sandbox report for autostart paths: a Run key the
+    registry tool returned, a service or task the sandbox listed, and a Sigma
+    rule that fired on the sandbox events are each evidence in their own
+    right. An analyst's table of persistence is not: the report prints these
+    rows as observed and the IOC table, the corroboration corpus and the
+    detection rules read them, so a model's list stays in Appendix A as its
+    own and changes nothing the platform counts or matches.
     """
     out: list[PersistenceMechanism] = []
     seen: set[tuple[str, str]] = set()
@@ -1501,24 +1675,7 @@ def persistence_from_ledger(
             )
         )
 
-    for artifact in _artifacts(isrs, "persistence"):
-        ref = ", ".join(getattr(artifact, "evidence_ids", None) or []) or "agent artifact"
-        rows = _rows_of(artifact)
-        if rows:
-            for row in rows:
-                kind = row[0].strip().lower() if row else "other"
-                _add(
-                    kind if kind in _PERSISTENCE_KINDS else "other",
-                    row[1] if len(row) > 1 else (row[0] if row else ""),
-                    row[2] if len(row) > 2 else "",
-                    None,
-                    ref,
-                )
-        elif getattr(artifact, "value", None):
-            _add("other", str(artifact.value), "", None, ref)
-
-    # A Run key an agent read through ``sandbox_registry_ops`` is persistence
-    # whether or not the agent thought to write an artifact about it.
+    # A Run key an agent read through ``sandbox_registry_ops`` is persistence.
     for entry, data in _payloads(ledger, "sandbox_registry_ops"):
         for row in data.get("registry") or []:
             if not isinstance(row, dict):

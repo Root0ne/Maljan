@@ -2324,6 +2324,84 @@ change landed on `main`.
 
 ### Fixed
 
+- **An analyst's table never enters a measured block.** An analyst artifact of
+  imports, IOCs, processes or persistence was merged into the import table,
+  the string table, the process tree and the persistence mechanisms, so one
+  run's §5.2 printed "_Measured:_ 23 static imports" against the tool's 5,
+  §7 listed names resolved from hashes as `KERNEL32.dll` imports with an
+  import capability profile, and §8 said "imports `CreateRemoteThread`" and
+  counted the match as corroboration. The projections now read tool output
+  only; the analyst's table stays in Appendix A under a line naming who
+  listed it and saying no measured table, count, rule match or capability
+  profile reads it. Appendix A is tagged per subsection: a tool's section is
+  *Measured*, an analyst's table or findings *Assessed*. **Upgrading:** `static_from_ledger`,
+  `dynamic_from_ledger` and `persistence_from_ledger` take no analyst
+  reports; a persistence row only an analyst listed is no longer a §5.4
+  mechanism, a published IOC row or a Sigma selection.
+- **A model's list never overrides what the sandbox says about a value.** An
+  analyst's endpoints or IOC artifact published every sandbox conversation
+  the sample's process tree did not make, a public resolver included, and a value
+  only an artifact listed published as `analyst` with nothing else asked. A
+  sandbox row the tree did not make now publishes only when the judge keeps
+  it, and the reason names the analysts that listed it; a public DNS resolver
+  is never published, whoever names it; a listing never lifts a row a tool
+  recorded; and a value only an analyst listed reads `no: named only by an
+  analyst` unless the judge named it. One rule, read by §9, STIX, `/iocs`
+  and the YARA, Suricata and Sigma drafts.
+- **A value the platform decoded is a candidate row.** A C2 URL FLOSS and
+  `decode_string_blobs` both recovered and no model named had no row in §9,
+  `/iocs`, STIX or Suricata, not even a `no:` one, and Appendix A printed it
+  live. Each domain, address and URL the recovery record holds is now a
+  network row of the string sweep's source, decided by the existing emulation
+  gate (refused under a Benign or unstated verdict and for a well-known
+  host) with its recovering tool and entry stated, and every recovered value
+  is defanged wherever the Markdown prints it.
+- **An observed step needs an observation of the sample.** The flow voice
+  check counted any non-empty flow table or capture as a sandbox observation,
+  so a C2 step citing a capture the sandbox did not attribute to the sample
+  passed as "observed in sandbox". A network entry now counts only when the
+  network block holds a sandbox row attributed to the sample's process tree;
+  process, file and registry entries keep their meaning. A
+  `sandbox_report_section` answer is classified by the section it filled.
+- **A listed value stands on the tool answer that holds it.** The capture's
+  conversations and TLS names are now sandbox rows with no attribution, and
+  every value an analyst lists is searched for, whole, in every tool answer
+  of the run (`MalwareReport.tool_sightings`). A row only an artifact created
+  takes that answer's source, a value a tool's text alone holds reads `no:
+  seen only in the text of <entry> (<tool>)`, and "no tool in this run saw
+  it" is said only after the search found nothing. One run's sixteen capture
+  addresses had been told no tool saw them. A report stored before the
+  search is searched in the tool sections it keeps.
+- **Text in a tool's answer is no sandbox observation.** A value an analyst
+  listed that a sandbox signature's description, a command line or the
+  sample's strings a sandbox re-serves held had been made a sandbox row, so a
+  listed domain published without the judge and a listed address read a
+  flow reason with no flow. A text sighting in any answer now gives string
+  standing, naming the entry. A name only the capture's TLS list recorded is
+  `capture_only` and waits for the judge; a lookup's answer echoing its
+  query is no sighting; sightings are keyed with one `value_key`; a stored
+  report's kept capture section is answered as a fresh build answers it;
+  `/iocs?include=all` carries the analysts' listed rows; and each listed row
+  cites its own artifact's evidence.
+- **A value only a query's answer holds says so, and a decoded value the capture
+  holds keeps its standing.** An answer that holds a listed value because it
+  was asked about it (a lookup's echo, a search returning its match) is
+  named in the reason ("only the answer to a query for it holds it") rather
+  than read as no tool seeing it. An address or name FLOSS or the static
+  decoder recovered that the capture also holds is admitted by the recovery
+  before the unattributed hold, under the recovery's existing refusals, with
+  both facts in the reason. `/iocs` reads the stored IOC table for the
+  analysts' rows.
+- **A sandbox URL on an address answers as the address does.** A URL whose
+  host is an unattributed address waits for the judge, and a public
+  resolver's URL is never published; both had published into STIX, `/iocs`
+  and the YARA and Suricata drafts while the address itself was refused.
+- **The analysts' listed rows are shown as theirs in the body.** §5.4 adds an
+  *Assessed* block of the persistence the analysts listed, the narrative is
+  handed it as its own fact, and the IOC table carries an analyst's mutex,
+  path, registry key, task and service as `analyst` rows with the rule's
+  refusal. A merged Appendix A table says which analyst listed each row.
+
 - **A program name given to a decompiler reaches it as written.** The path
   guard counted an argument named `program` as a file path and rewrote the
   sample's file name there into the path the server was handed. Ghidra's tools

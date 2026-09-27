@@ -50,6 +50,12 @@ from maljan.analysis.run_summary import (
 )
 from maljan.core.logger import logger
 from maljan.reporting.defang import ProseDefanger, defang
+from maljan.reporting.ledger_projection import cell_network_values, listing_kind
+from maljan.reporting.ledger_report import (
+    ANALYST_SECTION_SOURCES,
+    analyst_persistence,
+    listed_by,
+)
 from maljan.reporting.models import (
     CapabilityCell,
     ConsolidatedIOC,
@@ -704,6 +710,36 @@ class MarkdownRenderer:
             measured.extend(_left_out(len(report.persistence), 40, "persistence mechanisms"))
         elif ctx.sandbox_watched_persistence:
             measured.append(f"_{OBSERVED}:_ no persistence observed." + ctx.partial_sentence())
+        listed = analyst_persistence(report.sections)
+        if listed:
+            # What the analysts listed, in their voice and apart from the tools'
+            # rows: no count, rule match or detection draft reads it.
+            if measured:
+                measured.append("")
+            measured.extend(
+                [
+                    f"_{ASSESSED}:_ persistence the analysts listed (not observed; no count, "
+                    "rule match or detection draft reads it)",
+                    "",
+                    _row("Kind", "Target", "Payload", "Listed by", "Evidence"),
+                    _divider(5),
+                ]
+            )
+            for listed_row in listed[:40]:
+                measured.append(
+                    _row(
+                        listed_row["kind"] or "-",
+                        f"`{_truncate(listed_row['target'], _CELL_LIMIT)}`",
+                        f"`{_truncate(listed_row['payload'], _CELL_LIMIT)}`"
+                        if listed_row["payload"]
+                        else "-",
+                        f"the {listed_row['listed_by']} analyst"
+                        if listed_row["listed_by"]
+                        else "-",
+                        listed_row["evidence"] or "no evidence cited",
+                    )
+                )
+            measured.extend(_left_out(len(listed), 40, "listed persistence rows"))
         blocks.append(
             _subsection(
                 "5.4",
@@ -1768,7 +1804,9 @@ class MarkdownRenderer:
         block, a list or a paragraph, and this renders that, so a tool server
         added tomorrow prints without a renderer change.
         """
-        lines = [_appendix_heading("A", "Evidence index", MEASURED), ""]
+        # Each section carries its own voice: a tool's answer is measured, and
+        # an analyst's table or finding is the analyst's, never under Measured.
+        lines = [_appendix_heading("A", "Evidence index", PER_SUBSECTION), ""]
         if not report.evidence_index and not report.sections:
             lines.append("No tool call is recorded in this report.")
             return "\n".join(lines)
@@ -1789,7 +1827,13 @@ class MarkdownRenderer:
                 )
             lines.append("")
         for section in report.sections:
-            lines.extend([_plain_heading(section.title), ""])
+            lines.extend([_evidence_heading(section), ""])
+            analysts = listed_by(section)
+            if analysts:
+                # A model's table, said as one before its rows: nothing in it
+                # was measured, and no count, match or profile reads it.
+                kind = str(section.key or "").removeprefix("artifact_")
+                lines.extend([analyst_list_note(analysts, kind), ""])
             lines.extend(_evidence_body(section, ctx.plain))
             if section.evidence_ids:
                 lines.extend(["", f"_Evidence: {_ids(section.evidence_ids)}_"])
@@ -2086,6 +2130,11 @@ class _Context:
             indicators += [(d.fqdn, "domain") for d in net.domains]
             indicators += [(ip.address, "ip") for ip in net.ips]
             indicators += [(u.url, "url") for u in net.urls]
+        # Every value a recovering tool decoded, row or not, so a decoded C2
+        # printed in a FLOSS or decoder table is never printed live.
+        recovered = report.emulated_strings
+        for key in recovered.recovered_by if recovered is not None else {}:
+            indicators += [(value, kind) for kind, value in cell_network_values(key, None)]
         self.indicators = indicators
         self._defang = ProseDefanger(indicators)
         self.reputations = _reputations(report)
@@ -2540,6 +2589,29 @@ def _subheading(number: str, title: str, voice: str) -> str:
     """An H3 with its subsection number and its voice tag."""
     label = f"{number} {title}" if number else title
     return f"### {_one_line(label)} · _{voice}_"
+
+
+def _evidence_heading(section: Any) -> str:
+    """An Appendix A section's H3 with its voice: a tool's is Measured, an analyst's Assessed."""
+    source = str(getattr(section, "source", "") or "").strip().lower()
+    voice = ASSESSED if source.startswith(ANALYST_SECTION_SOURCES) else MEASURED
+    return f"{_plain_heading(section.title)} · _{voice}_"
+
+
+def analyst_list_note(analysts: list[str], kind: str = "") -> str:
+    """The line an analyst's table is printed under in Appendix A, saying where else it is shown."""
+    who = ", ".join(f"the {_one_line(name)} analyst" for name in analysts)
+    shown = {
+        "persistence": " Its rows are in §5.4 under Assessed, and its Run keys, tasks and "
+        "services in §9 as the analyst's, each with the publish rule's answer.",
+        "values": " Each value it types as an indicator is in §9 as the analyst's, with the "
+        "publish rule's answer.",
+    }
+    where = shown.get(listing_kind(kind), "")
+    return (
+        f"_Listed by {who}: a model's table, not a tool's output.{where} No measured table, "
+        "count, rule match or capability profile reads it._"
+    )
 
 
 def _plain_heading(title: Any) -> str:

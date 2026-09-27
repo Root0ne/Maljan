@@ -137,6 +137,34 @@ def _typed_report(mr: dict) -> Any:
         return mr
 
 
+def _with_the_analysts_listed_rows(out: list[dict], typed: Any, kind: str | None) -> None:
+    """The mutexes, paths, registry keys, tasks and services the analysts listed, as §9 shows them.
+
+    Read from the report's own IOC table — the stored one, rebuilt
+    (``build_consolidated_iocs``) only for a report stored without it — so a
+    row is here exactly when the report prints it: an ``analyst`` row no tool
+    recorded, carrying the rule's answer as its note. Such a row is never
+    published, so only ``include=all`` and ``include=unpublished`` return it.
+    """
+    from maljan.reporting.builder import build_consolidated_iocs
+    from maljan.reporting.models import MalwareReport
+
+    if not isinstance(typed, MalwareReport):
+        return
+    for row in typed.consolidated_iocs or build_consolidated_iocs(typed):
+        if row.source != "analyst" or row.is_network or (kind and kind != row.kind):
+            continue
+        out.append(
+            {
+                "kind": row.kind,
+                "value": row.value,
+                "source": "analyst",
+                "notes": row.published,
+                "published": row.published == "yes",
+            }
+        )
+
+
 def _with_the_hosts_of_published_urls(out: list[dict], typed: Any, kind: str | None) -> None:
     """Add a domain row for the host of each URL this report publishes, when it has none.
 
@@ -712,6 +740,7 @@ class ReportService:
                     out.append({"kind": row_kind, "value": value, "source": "sandbox"})
             _with_the_judge_s_values(out, mr, kind, typed)
             _with_the_hosts_of_published_urls(out, typed, kind)
+            _with_the_analysts_listed_rows(out, typed, kind)
             rows = [row for row in out if row.get("value")]
             # Which tool recovered each hidden network value, and where, as
             # the report's IOC table states it.

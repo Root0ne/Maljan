@@ -358,21 +358,27 @@ class NetworkDomain(BaseModel):
     is_punycode: bool = False
     homograph_target: str | None = None
     # Where the name came from. ``sandbox`` is a resolution or a request the
-    # sample actually made, ``analyst`` an agent's own artefact, ``strings`` a
-    # run of bytes in the file that has the shape of a hostname — which is a
-    # far weaker claim and was being published as though it were the same one.
-    # ``None`` for a producer that does not record it.
+    # sample actually made, ``strings`` a run of bytes in the file that has the
+    # shape of a hostname — which is a far weaker claim and was being published
+    # as though it were the same one — and ``analyst`` a name only an agent's
+    # own artefact lists, which no tool saw and which is published only when
+    # the judge names it. ``None`` for a producer that does not record it.
     source: Literal["sandbox", "analyst", "strings"] | None = None
     # Filled asynchronously by the threat-intel enrichment worker.
     reputation: dict[str, Any] | None = None
-    # Which analyst kept this value as an indicator (an artifact of endpoints,
-    # network values or IOCs), in the words the publish rule reports. A sandbox
-    # row the rule would not publish on the observation alone is published
-    # when a model keeps it (``stix_renderer.sandbox_row_kwargs``).
+    # Which analysts listed this value as an indicator (an artifact of
+    # endpoints, network values or IOCs), in the words the publish rule
+    # reports. Stated in the reason a row is not published; a listing
+    # publishes nothing — a sandbox row the rule would not publish on the
+    # observation alone waits for the judge (``stix_renderer.sandbox_row_kwargs``).
     kept_by: list[str] = Field(default_factory=list)
     # Which analysts' claims mention the value without keeping it. Stated in
     # the reason a row is not published; it publishes nothing.
     mentioned_by: list[str] = Field(default_factory=list)
+    # Whether only the capture's TLS names recorded this name, with no DNS or
+    # HTTP view naming it: a TLS name says nothing about which process made
+    # the connection, so the row waits for the judge.
+    capture_only: bool = False
 
 
 class NetworkIP(BaseModel):
@@ -413,7 +419,7 @@ class NetworkIP(BaseModel):
     # Whether the address is a public DNS resolver's, which a sandbox guest
     # reaches whatever the sample does.
     public_resolver: bool = False
-    # Who kept the value, and who only mentioned it; see ``NetworkDomain``.
+    # Who listed the value, and who only mentioned it; see ``NetworkDomain``.
     kept_by: list[str] = Field(default_factory=list)
     mentioned_by: list[str] = Field(default_factory=list)
 
@@ -940,7 +946,10 @@ class EmulatedStrings(BaseModel):
     (value to the sweep's entry). ``recovered_by`` lists, for each value in
     ``values``, every tool that recovered it and where; a record stored before
     it existed has none, and its values are FLOSS's. ``partial`` says why the
-    record may not be the run's whole, or is empty.
+    record may not be the run's whole, or is empty. ``spelled`` maps each value
+    to the spelling the recovering tool wrote first: the keys are folded to
+    match values, and a URL's path is case-sensitive, so a row the builder
+    makes of a value carries the tool's spelling.
     """
 
     model_config = _STRICT_CONFIG
@@ -949,6 +958,7 @@ class EmulatedStrings(BaseModel):
     plain: dict[str, str] = Field(default_factory=dict)
     partial: str = ""
     recovered_by: dict[str, list[RecoveredValue]] = Field(default_factory=dict)
+    spelled: dict[str, str] = Field(default_factory=dict)
 
 
 class ClaimNotDiscussed(BaseModel):
@@ -1242,6 +1252,17 @@ class MalwareReport(BaseModel):
     # entries at build time; ``None`` on a report stored before it existed,
     # which is then read from its kept section rows and said to be partial.
     emulated_strings: EmulatedStrings | None = None
+    # For every value an analyst's artifact lists, lower-cased: the tool
+    # answers of the run that hold it whole, as ``(entry id, tool)``, and an
+    # empty list when the ledger search found none. Built at build time from
+    # the whole ledger; ``None`` on a report stored before it existed, whose
+    # kept tool sections are then searched instead.
+    tool_sightings: dict[str, list[tuple[str, str]]] | None = None
+    # For the same values: the entries whose call arguments hold the value, so
+    # their answer holds it because it was asked about it — a lookup's echo, a
+    # search that returns its own query. Not sightings; stated in the reason
+    # so the report never says no tool saw a value an answer holds.
+    tool_queries: dict[str, list[tuple[str, str]]] | None = None
     misp_attributes: list[dict[str, Any]] | None = None
 
     # --- References ---
