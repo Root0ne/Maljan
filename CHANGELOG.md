@@ -2372,6 +2372,17 @@ change landed on `main`.
   it" is said only after the search found nothing. One run's sixteen capture
   addresses had been told no tool saw them. A report stored before the
   search is searched in the tool sections it keeps.
+- **Text in a tool's answer is no sandbox observation.** A value an analyst
+  listed that a sandbox signature's description, a command line or the
+  sample's strings a sandbox re-serves held had been made a sandbox row, so a
+  listed domain published without the judge and a listed address read a
+  flow reason with no flow. A text sighting in any answer now gives string
+  standing, naming the entry. A name only the capture's TLS list recorded is
+  `capture_only` and waits for the judge; a lookup's answer echoing its
+  query is no sighting; sightings are keyed with one `value_key`; a stored
+  report's kept capture section is answered as a fresh build answers it;
+  `/iocs?include=all` carries the analysts' listed rows; and each listed row
+  cites its own artifact's evidence.
 - **A sandbox URL on an address answers as the address does.** A URL whose
   host is an unattributed address waits for the judge, and a public
   resolver's URL is never published; both had published into STIX, `/iocs`

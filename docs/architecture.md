@@ -2724,9 +2724,10 @@ is assembled from what the run gathered rather than recomputed beside it:
   Appendix A is tagged *Source per subsection*: each of its sections carries
   its own voice, *Measured* for a tool's answer and *Assessed* for an
   analyst's table or findings, so no model's rows sit under a Measured tag.
-  A kind several analysts listed rows under is one table whose first column
-  (`Listed by`) says which analyst listed each row, and the note says where
-  else the table's rows are shown. **The body still shows them as the
+  A kind more than one artifact listed rows under is one table whose first
+  columns (`Listed by`, `Evidence`) say which analyst listed each row and the
+  ids that row's artifact cites, and the note says where else the table's
+  rows are shown; the §5.4 Assessed block cites each row's own ids. **The body still shows them as the
   analyst's.** §5.4 keeps the tools' table and adds an *Assessed* block of the
   persistence the analysts listed (Kind, Target, Payload, Listed by, the
   evidence the table cites), read from the analysts' Appendix A tables
@@ -2847,24 +2848,40 @@ is assembled from what the run gathered rather than recomputed beside it:
   unattributed, and a resolver's URL is never published. **A value's standing
   comes from where the platform saw it.** The capture (`pcap_summary`) is a
   sandbox view like the flow table: its conversations' addresses and its TLS
-  names are sandbox rows, with no attribution. A row the sandbox view holds
+  names are sandbox rows, with no attribution. A name only the capture's TLS
+  list recorded, which no DNS or HTTP view names, is `capture_only` and reads
+  `no: a TLS name only the capture recorded, which does not say which process
+  made the connection, and no model kept it as an indicator` until the judge
+  keeps it; a name a DNS or HTTP view also names keeps the name rule. A row
+  the sandbox view holds
   is decided by the sandbox rule above, a row a tool read out of the file
   (the string sweep, a recovering tool) by that source; a listing never lifts
   a row a tool recorded (`ledger_projection._DOMAIN_SOURCE_RANK` ranks
   `analyst` below `strings`). Every value an analyst lists is looked for,
   whole, in every tool answer of the run at build time
-  (`ledger_projection.tool_sightings`, stored as `tool_sightings`): a row
-  only an artifact created takes the source of the answer that holds it
-  (`sandbox` for a sandbox tool's or the capture's, `strings` for any other
-  tool's), and a listed value a tool's text holds and no second source
-  records reads `no: seen only in the text of <entry> (<tool>), and no second
-  source in this run records it; <artifact> lists it`. A value no answer
+  (`ledger_projection.tool_sightings`, stored as `tool_sightings`, keyed on
+  both sides with `ledger_projection.value_key`, so a bracketed or
+  capitalised address is found). An entry whose call arguments hold the value
+  is no sighting of it: a lookup's answer repeats its question. A row only an
+  artifact created and some answer's text holds takes the string sweep's
+  standing (`strings`), whichever tool printed the text — a sandbox
+  signature's description, a command line and the sample's strings a sandbox
+  re-serves are text, not observations; only a structured network record (a
+  flow, a DNS query, an HTTP request, a capture conversation) makes a sandbox
+  row. Such a value, with no second source, reads `no: seen only in the text
+  of <entry> (<tool>), and no second source in this run records it;
+  <artifact> lists it`. A value no answer
   holds (source `analyst`) is asked the string sweep's questions and
   otherwise reads `no: named only by an analyst (<artifact>); no tool in this
   run saw it, and the judge did not keep it as an indicator` — said only
   after that search. A report stored before the search is searched in the
-  tool sections it keeps, answered as `strings` when one holds the value,
-  and otherwise says only that no tool answer it keeps holds it. The judge
+  tool sections it keeps: a value its kept capture or flow-table section
+  holds is answered as a fresh build answers it (an unattributed address, a
+  capture-only name); a value another kept section holds is answered as
+  `strings`, the reason saying it is read from the sections the stored report
+  keeps; otherwise it says only that no tool answer it keeps holds it.
+  `/iocs?include=all` carries the analysts' listed non-network rows exactly
+  as the report's IOC table shows them. The judge
   naming such a value keeps the standing it had before, so it is published.
   One run's sixteen capture addresses were told no tool saw them before the
   capture was read. The drafts read the table's
