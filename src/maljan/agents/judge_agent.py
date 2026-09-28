@@ -536,6 +536,8 @@ _NONE_RE = re.compile(
     r"(?:\s+(?:still\s+)?(?:stand(?:s|ing)?|remain(?:s|ing)?))?[\s*_`).!]*$",
     re.IGNORECASE,
 )
+# A phrase that opens with "none" but says more than the closed wording does.
+_NONE_OPENING_RE = re.compile(r"^[\s*_`(]*none\b", re.IGNORECASE)
 # A line that sums the block up rather than stating a contradiction.
 _SUMMARY_LINE_RE = re.compile(r"^[\s*_`]*(?:summary|in summary|overall|in total)\b", re.I)
 
@@ -562,6 +564,11 @@ class ContradictionsBlock(NamedTuple):
 
     items: list[str] | None
     mixed: bool = False
+    # Why the block cannot be read either way until the mediator is asked once:
+    # ``none_beside_plain_lines`` (a NONE whose other lines are all plain, most
+    # often the mediator's own closing sentence) or ``none_phrase`` (a lone
+    # label-line phrase opening with "none" outside the closed wording).
+    ambiguous: str = ""
 
 
 def read_contradictions_block(text: str) -> ContradictionsBlock:
@@ -579,6 +586,10 @@ def read_contradictions_block(text: str) -> ContradictionsBlock:
     A "none" (:data:`_NONE_RE`) empties the block only as its whole content;
     beside contradictions it is not read and the block is ``mixed``. A block
     with nothing in it is empty; one with only table rows is unreadable.
+    Label-line text ending in ":" introduces the list and is not an item. Two
+    shapes are ``ambiguous`` and asked about once: a NONE whose other lines are
+    all plain, and a lone label-line phrase that opens with "none" outside the
+    closed wording.
     """
     lines = (text or "").splitlines()
     start = None
@@ -591,12 +602,18 @@ def read_contradictions_block(text: str) -> ContradictionsBlock:
     match = _CONTRADICTIONS_LINE_RE.match(lines[start])
     rest = (match.group(1) if match else "").strip()
     found: list[str] = []
+    listed_items = 0
     said_none = False
     table_rows = False
+    none_phrase = False
     if rest:
         if _NONE_RE.match(rest):
             said_none = True
+        elif rest.rstrip("*_` ").endswith(":"):
+            # An introduction to the list below ("the following still stand:").
+            pass
         else:
+            none_phrase = bool(_NONE_OPENING_RE.match(rest))
             found.append(rest.strip("*_`").strip())
     after_blank = False
     for index in range(start + 1, len(lines)):
@@ -630,7 +647,12 @@ def read_contradictions_block(text: str) -> ContradictionsBlock:
             said_none = True
             continue
         found.append(item)
+        listed_items += 1
     if found:
+        if said_none and not listed_items:
+            return ContradictionsBlock(found, mixed=True, ambiguous="none_beside_plain_lines")
+        if none_phrase and len(found) == 1 and not said_none:
+            return ContradictionsBlock(found, ambiguous="none_phrase")
         return ContradictionsBlock(found, mixed=said_none)
     if table_rows and not said_none:
         return ContradictionsBlock(None)
@@ -2403,17 +2425,25 @@ class JudgeAgent(BudgetMeter):
         # answer without one is asked once for it, in the conversation that
         # produced it; still without one, the note says so and agreement is
         # read from the number as before.
+        # A block that cannot be read either way (``ContradictionsBlock.ambiguous``)
+        # is asked about the same once. Answered with a NONE again, a closing
+        # sentence beside it is the mediator's prose, not a contradiction.
         block_missing = False
-        if reasoning_text.strip() and final_contradictions(reasoning_text) is None:
-            reasoning_text = await self._ask_for_contradictions_block(
-                prompt_messages, reasoning_text
-            )
-            block_missing = final_contradictions(reasoning_text) is None
+        reading = read_contradictions_block(reasoning_text)
+        if reasoning_text.strip() and (reading.items is None or reading.ambiguous):
+            asked_text = await self._ask_for_contradictions_block(prompt_messages, reasoning_text)
+            answered = asked_text != reasoning_text
+            reasoning_text = asked_text
+            reading = read_contradictions_block(reasoning_text)
+            block_missing = reading.items is None
             if block_missing:
                 self.logger.warning(
                     "Mediator: no final CONTRADICTIONS: block, also when asked once; "
                     "agreement is read from agreement_confidence alone."
                 )
+            elif answered and reading.ambiguous == "none_beside_plain_lines":
+                reading = ContradictionsBlock([])
+        stated_block = reading.items
 
         # Now extract the final structured output from the detailed reasoning.
         # IMPORTANT: reasoning_text may contain curly braces from LLM output
@@ -2444,7 +2474,7 @@ class JudgeAgent(BudgetMeter):
         # The mediator's own final block is its word on what still stands; a
         # structured extraction is a second model's transcription of it, and
         # where the two differ the block is what is read.
-        stated = final_contradictions(reasoning_text)
+        stated = stated_block
         if stated is not None and list(verdict.contradictions) != stated:
             self.logger.info(
                 "Mediator: the extraction listed %d contradiction(s) and the mediator's final "
@@ -2483,7 +2513,7 @@ class JudgeAgent(BudgetMeter):
                 CONTRADICTIONS_BLOCK_MISSING_NOTE
                 if block_missing
                 else CONTRADICTIONS_BLOCK_MIXED_NOTE
-                if read_contradictions_block(reasoning_text).mixed
+                if reading.mixed and verdict.contradictions
                 else ""
             ),
         )

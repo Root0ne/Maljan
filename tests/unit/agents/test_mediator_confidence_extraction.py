@@ -373,3 +373,56 @@ class TestTheBlockIsReadForWhatItSays:
         from maljan.agents.judge_agent import final_contradictions
 
         assert final_contradictions("CONTRADICTIONS:\nagreement_confidence: 1.0") == []
+
+
+R5_SHAPES = [
+    "CONTRADICTIONS: NONE\nAll analysts agree on the core behaviours.\nagreement_confidence: 1.0",
+    "CONTRADICTIONS: NONE\nThe remaining differences are granularity, not contradictions.\n"
+    "agreement_confidence: 1.0",
+    "CONTRADICTIONS:\n- NONE\nAll core behaviours agree.\nagreement_confidence: 1.0",
+]
+
+
+class TestANoneBesidePlainLinesIsAskedAbout:
+    """A NONE followed by the mediator's own closing sentence is not a contradiction list."""
+
+    @pytest.mark.parametrize("text", R5_SHAPES)
+    def test_the_block_is_ambiguous(self, text: str) -> None:
+        from maljan.agents.judge_agent import read_contradictions_block
+
+        assert read_contradictions_block(text).ambiguous == "none_beside_plain_lines"
+
+    def test_a_none_beside_bulleted_items_is_mixed_not_ambiguous(self) -> None:
+        from maljan.agents.judge_agent import read_contradictions_block
+
+        reading = read_contradictions_block(
+            "CONTRADICTIONS: NONE\n- static: x — dynamic: y\nagreement_confidence: 0.7"
+        )
+        assert reading.items == ["static: x — dynamic: y"]
+        assert reading.mixed is True
+        assert reading.ambiguous == ""
+
+    def test_a_label_line_intro_ending_in_a_colon_is_not_an_item(self) -> None:
+        from maljan.agents.judge_agent import read_contradictions_block
+
+        reading = read_contradictions_block(
+            "CONTRADICTIONS: the following still stand:\n- static: x — dynamic: y\n"
+            "agreement_confidence: 0.5"
+        )
+        assert reading.items == ["static: x — dynamic: y"]
+        assert reading.ambiguous == ""
+
+    def test_a_lone_none_phrase_outside_the_wording_is_asked_about(self) -> None:
+        from maljan.agents.judge_agent import read_contradictions_block
+
+        reading = read_contradictions_block(
+            "CONTRADICTIONS: none that survive scrutiny\nagreement_confidence: 1.0"
+        )
+        assert reading.ambiguous == "none_phrase"
+        # Beside a real item it is not the block's whole content: the item stands.
+        reading = read_contradictions_block(
+            "CONTRADICTIONS: none that survive scrutiny\n- static: x — ev_0003\n"
+            "agreement_confidence: 1.0"
+        )
+        assert reading.ambiguous == ""
+        assert "static: x — ev_0003" in (reading.items or [])

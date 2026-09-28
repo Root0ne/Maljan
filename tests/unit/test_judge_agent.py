@@ -656,3 +656,69 @@ class TestTheBlockAsTheMediatorWroteIt:
         assert summary.build().to_dict()["negotiation"]["mediation_notes"] == [
             CONTRADICTIONS_BLOCK_MIXED_NOTE
         ]
+
+
+class TestAnAmbiguousNoneIsAskedOnce:
+    SHAPES = [
+        "CONTRADICTIONS: NONE\nAll analysts agree on the core behaviours.\n"
+        "agreement_confidence: 1.0",
+        "CONTRADICTIONS: NONE\nThe remaining differences are granularity, not contradictions.\n"
+        "agreement_confidence: 1.0",
+        "CONTRADICTIONS:\n- NONE\nAll core behaviours agree.\nagreement_confidence: 1.0",
+    ]
+
+    @pytest.mark.parametrize("first", SHAPES)
+    def test_each_shape_is_asked_once_and_a_none_answer_is_consensus(self, first: str) -> None:
+        from maljan.agents.judge_agent import CONTRADICTIONS_BLOCK_QUESTION
+
+        model = _ScriptedModel(first, "CONTRADICTIONS: NONE\nagreement_confidence: 1.0")
+        argument, is_consensus = _mediate_with(model)
+
+        assert len(model.sent) == 2
+        assert CONTRADICTIONS_BLOCK_QUESTION in str(model.sent[1][-1].content)
+        assert is_consensus is True
+        assert argument.contradictions == []
+        assert argument.note == ""
+
+    def test_a_none_answer_with_its_closing_sentence_is_consensus(self) -> None:
+        model = _ScriptedModel(
+            self.SHAPES[0],
+            "CONTRADICTIONS: NONE\nAll analysts agree.\nagreement_confidence: 1.0",
+        )
+        argument, is_consensus = _mediate_with(model)
+
+        assert len(model.sent) == 2
+        assert is_consensus is True
+        assert argument.contradictions == []
+
+    def test_an_answer_still_mixed_goes_to_revision_with_the_note(self) -> None:
+        from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MIXED_NOTE
+
+        model = _ScriptedModel(
+            self.SHAPES[0],
+            "CONTRADICTIONS: NONE\n- static: x — ev_0003 holds none\nagreement_confidence: 1.0",
+        )
+        argument, is_consensus = _mediate_with(model)
+
+        assert is_consensus is False
+        assert argument.contradictions == ["static: x — ev_0003 holds none"]
+        assert argument.note == CONTRADICTIONS_BLOCK_MIXED_NOTE
+
+    def test_a_question_that_gets_no_answer_leaves_the_lines_standing(self) -> None:
+        from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MIXED_NOTE
+
+        model = _ScriptedModel(self.SHAPES[0], "")
+        argument, is_consensus = _mediate_with(model)
+
+        assert is_consensus is False
+        assert argument.note == CONTRADICTIONS_BLOCK_MIXED_NOTE
+
+    def test_a_lone_none_phrase_is_asked_once(self) -> None:
+        model = _ScriptedModel(
+            "CONTRADICTIONS: none that survive scrutiny\nagreement_confidence: 1.0",
+            "CONTRADICTIONS: NONE\nagreement_confidence: 1.0",
+        )
+        _argument, is_consensus = _mediate_with(model)
+
+        assert len(model.sent) == 2
+        assert is_consensus is True

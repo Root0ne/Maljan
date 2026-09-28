@@ -329,7 +329,13 @@ its whole content, and only as a whole line from a closed vocabulary ("NONE",
 "remain(s)"): "None of the analysts cites ev_0015 …" is a contradiction. A
 "none" beside contradictions is not read, the contradictions stand, and the
 round's note and `negotiation.mediation_notes` say the block was mixed. A block
-of only table rows is unreadable and asked about once. On the structured path the block, when present, decides over the
+of only table rows is unreadable and asked about once. So is a NONE whose
+other lines are all plain, most often the mediator's own closing sentence, and
+a lone label-line phrase opening with "none" outside the closed wording ("none
+that survive scrutiny"): answered with a NONE again, the round reads as the
+number says, and answered still mixed, the listed lines stand with the note.
+Label-line text ending in ":" introduces the list and is not a contradiction.
+On the structured path the block, when present, decides over the
 extractor's list. While the last mediation lists a contradiction, a stable
 agreement number does not end the debate as convergence; the round limit
 still does. An answer with no
