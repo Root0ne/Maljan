@@ -607,8 +607,9 @@ _URL_RUN = re.compile(
 # and a dash or a quotation mark a model typed is the end of the value in
 # front of it. A colon is already outside the class, so a JWT's dots are the
 # one separator left inside it — which is what lets the whole token be seen as
-# one run.
-_VALUE_RUN = re.compile(r"[^\s\"'`<>;:{}\[\](),=\\\x80-\U0010ffff]+")
+# one run. ``!`` splits too: ``kernel32.dll!<key>`` is a module name and a key,
+# and read as one run neither rule saw the key.
+_VALUE_RUN = re.compile(r"[^\s\"'`<>;:{}\[\](),=!\\\x80-\U0010ffff]+")
 # A filesystem path, wherever it starts. A slash alone is not the signal: a
 # MIME type (``application/x-msdownload``), a sub-technique id
 # (``T1055/012``), a date (``2026/09/17``) and a ratio all carry one, and
@@ -787,21 +788,32 @@ def _looks_like_a_credential(token: str) -> bool:
         return False
     if _is_api_name(token):
         return False
-    return bool(_CREDENTIAL_RUN.match(token)) or _is_a_token(token)
+    if _CREDENTIAL_RUN.match(token) or _is_a_token(token):
+        return True
+    # A key joined to other text by a slash, a bar, a plus or an ampersand is
+    # still a key: ``<jwt>/name`` failed every rule anchored to the whole run.
+    pieces = [piece for piece in _JOINS.split(token) if piece]
+    return len(pieces) > 1 and any(_looks_like_a_credential(piece) for piece in pieces)
 
 
-# The Windows function names the scrub leaves as written. The length rule reads
-# ``CreateToolhelp32Snapshot`` as a key, and the live console and the stored
-# transcript printed ``***`` where the report printed the name. Two sources,
-# both exact: the vendored export-name catalogue (``api_hashes``' data file,
-# read once), and the names this job's hash resolution read
+# The Windows function names and hash-algorithm ids the scrub leaves as
+# written. The length rule reads ``ZwSetInformationJobObject`` as a key, and a
+# pair of algorithm ids joined by a slash as one; the live console and the
+# stored transcript printed ``***`` where the report printed the names. Three
+# sources, all exact: the vendored export-name catalogue and the vendored
+# hash-algorithm catalogue (``api_hashes``' data files, each read once), and
+# the names this job's hash resolution on the analysis server read
 # (``remember_resolved_names``), which the next job forgets. A vendor prefix is
-# asked before either, and a configured value is masked by value before any
-# rule is read, so neither exempts a credential.
+# asked before any of them, and a configured value is masked by value before any
+# rule is read, so none exempts a credential.
 _EXPORT_NAMES_FILE = "data/windows_export_names_v1.json"
+_ALGORITHMS_FILE = "data/api_hash_algorithms_v1.json"
 _RESOLVED_NAMES: set[str] = set()
-# The catalogue's names, read on first use.
+# The catalogues' names, read on first use.
 _CATALOGUE: frozenset[str] | None = None
+_ALGORITHM_IDS: frozenset[str] | None = None
+# What joins several names into one run: a slash, a bar, a plus, an ampersand.
+_JOINS = re.compile(r"[/|+&]")
 # A resolved name is taken only in the shape a Windows function name has: an
 # identifier with both cases in it. An all-lowercase run is what several key
 # formats are, and no catalogue name past the length floor is written that way
@@ -809,35 +821,67 @@ _CATALOGUE: frozenset[str] | None = None
 _API_NAME_SHAPE = re.compile(r"\A[A-Za-z_?@$][A-Za-z0-9_?@$]*\Z")
 
 
+def _read_data(path: str) -> Any:
+    import json
+
+    from maljan.core.paths import resolve_data
+
+    return json.loads(resolve_data(path).read_text(encoding="utf-8"))
+
+
 def _catalogue_names() -> frozenset[str]:
     """Every exported name the vendored catalogue holds; empty when it cannot be read."""
     global _CATALOGUE
     if _CATALOGUE is None:
         try:
-            import json
-
-            from maljan.core.paths import resolve_data
-
-            document = json.loads(resolve_data(_EXPORT_NAMES_FILE).read_text(encoding="utf-8"))
+            document = _read_data(_EXPORT_NAMES_FILE)
             _CATALOGUE = frozenset(
                 str(name)
                 for exported in (document.get("dlls") or {}).values()
                 for name in exported or []
             )
         except Exception as exc:  # noqa: BLE001 — the shape rules still run
-            logger.warning("The export-name catalogue was not read for the scrub (%s).", exc)
+            logger.warning(
+                "The export-name catalogue was not read for the scrub (%s).", type(exc).__name__
+            )
             _CATALOGUE = frozenset()
     return _CATALOGUE
 
 
+def _algorithm_ids() -> frozenset[str]:
+    """Every hash-algorithm id the vendored catalogue holds; empty when it cannot be read."""
+    global _ALGORITHM_IDS
+    if _ALGORITHM_IDS is None:
+        try:
+            document = _read_data(_ALGORITHMS_FILE)
+            _ALGORITHM_IDS = frozenset(
+                str(entry["id"])
+                for entry in document.get("algorithms") or []
+                if isinstance(entry, dict) and entry.get("id")
+            )
+        except Exception as exc:  # noqa: BLE001 — the shape rules still run
+            logger.warning(
+                "The hash-algorithm catalogue was not read for the scrub (%s).", type(exc).__name__
+            )
+            _ALGORITHM_IDS = frozenset()
+    return _ALGORITHM_IDS
+
+
+def _is_a_catalogue_name(name: str) -> bool:
+    return name in _RESOLVED_NAMES or name in _catalogue_names() or name in _algorithm_ids()
+
+
 def _is_api_name(token: str) -> bool:
-    """Whether ``token`` is a Windows function name, alone or as ``module!name``."""
-    name = token
-    if "!" in token:
-        module, _, name = token.partition("!")
-        if not re.fullmatch(r"[A-Za-z0-9_.\-]+", module):
-            return False
-    return name in _RESOLVED_NAMES or name in _catalogue_names()
+    """Whether ``token`` is a Windows function name or a hash-algorithm id, alone or
+    several joined by ``/``, ``|``, ``+`` or ``&``.
+
+    A module in front of a name (``kernel32.dll!Name``) is split off by the
+    value run itself, so the name is asked alone.
+    """
+    if _is_a_catalogue_name(token):
+        return True
+    pieces = [piece for piece in _JOINS.split(token) if piece]
+    return len(pieces) > 1 and all(_is_a_catalogue_name(piece) for piece in pieces)
 
 
 def remember_resolved_names(answer: Any) -> None:

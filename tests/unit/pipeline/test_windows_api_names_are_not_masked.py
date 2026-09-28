@@ -1,12 +1,22 @@
-"""A Windows API name travels in events and the transcript as written.
+"""A Windows API name, or a hash-algorithm id, travels in events and the transcript as written.
 
 The scrub's length rule reads an unbroken run of 24 characters or more as a
-key, and a Windows function name is such a run: ``CreateToolhelp32Snapshot``
-reached the live console and the stored transcript as ``***`` while the
-report printed it whole. A name the vendored export-name catalogue holds, and
-a name this run's hash resolution read, are names and not keys. Nothing else
-changes: every credential shape is still masked, and a configured value is
-still masked by value whatever it spells.
+key. A long Windows function name is such a run, and so are two algorithm ids
+joined by a slash. Both reached the live console and the stored transcript as
+``***`` while the report printed them whole.
+
+Three kinds of name are names and not keys:
+
+- a name the vendored export-name catalogue holds;
+- a name this run's hash resolution read on the analysis server;
+- a hash-algorithm id from the vendored algorithm catalogue.
+
+Each is kept alone, after a module and ``!``, or joined to others of its kind
+by ``/``, ``|``, ``+`` or ``&``.
+
+Nothing else changes. Every credential shape is still masked, whether alone,
+after a module, or joined to a name. A configured value is still masked by
+value, whatever it spells.
 """
 
 from __future__ import annotations
@@ -22,7 +32,8 @@ from tests.unit.pipeline.test_live_event_schema import _every_key_shape
 
 # A catalogue name past the length floor, and one only a run resolved: made
 # up, mixed case with a digit, so no word rule exempts it.
-CATALOGUE_NAME = "CreateToolhelp32Snapshot"
+CATALOGUE_NAME = "ZwSetInformationJobObject"
+ALGORITHMS = "ror13_module_add/fnv1a32_lower"
 RESOLVED_ONLY = "SyntheticResolvedExport32NameW"
 
 
@@ -55,19 +66,36 @@ def _resolution(*names: str) -> dict[str, object]:
 class TestTheCatalogue:
     def test_a_long_catalogue_name_is_written_as_it_is(self) -> None:
         assert len(CATALOGUE_NAME) >= 24
-        assert ev.scrub(f"calls {CATALOGUE_NAME} to list processes") == (
-            f"calls {CATALOGUE_NAME} to list processes"
+        assert ev.scrub(f"calls {CATALOGUE_NAME} to limit a job") == (
+            f"calls {CATALOGUE_NAME} to limit a job"
         )
 
     def test_inside_json_and_with_its_module(self) -> None:
         text = json.dumps({"api": CATALOGUE_NAME, "at": f"kernel32.dll!{CATALOGUE_NAME}"})
         assert ev.scrub(text) == text
 
+    def test_a_module_name_and_a_key_after_it_is_masked(self) -> None:
+        for shape in _every_key_shape():
+            assert shape not in ev.scrub(f"kernel32.dll!{shape}"), shape
+            assert shape not in ev.scrub(f"{shape}!{CATALOGUE_NAME}"), shape
+
+    def test_joined_algorithm_ids_are_written_as_they_are(self) -> None:
+        assert len(ALGORITHMS) >= 24
+        assert ev.scrub(f"algorithms {ALGORITHMS} matched") == f"algorithms {ALGORITHMS} matched"
+        assert (
+            ev.scrub("crc32_ascii_lower|djb2_lower+ror13") == "crc32_ascii_lower|djb2_lower+ror13"
+        )
+
+    def test_an_algorithm_id_joined_to_a_key_is_masked(self) -> None:
+        for shape in _every_key_shape():
+            for joined in (f"djb2_lower/{shape}", f"{shape}/djb2_lower", f"{shape}|ror13"):
+                assert shape not in ev.scrub(joined), joined
+
     def test_a_name_the_catalogue_does_not_hold_is_still_read_by_shape(self) -> None:
         assert ev.scrub(RESOLVED_ONLY) == "***"
 
     def test_the_transcript_scrub_keeps_it_too(self) -> None:
-        text = f"Claim 8: enumerates processes with {CATALOGUE_NAME}\n  Evidence: [ev_0020]"
+        text = f"Claim 3: limits a job with {CATALOGUE_NAME}\n  Evidence: [ev_0004]"
         assert ev.scrub_keeping_layout(text) == text
 
 
@@ -86,21 +114,34 @@ class TestTheNamesThisRunResolved:
         assert ev.scrub(RESOLVED_ONLY) == "***"
 
     def test_the_recorder_hands_the_scrub_a_resolution_it_records(self) -> None:
-        recorder = EvidenceRecorder("static")
-        recorder.record(
-            tool="resolve_api_hashes",
-            args={"path": "s.exe"},
-            server=None,
-            output=json.dumps(_resolution(RESOLVED_ONLY)),
-        )
-        assert ev.scrub(RESOLVED_ONLY) == RESOLVED_ONLY
+        for server in ("analysis", "pipeline"):
+            ev.forget_resolved_names()
+            recorder = EvidenceRecorder("static")
+            recorder.record(
+                tool="resolve_api_hashes",
+                args={"path": "s.exe"},
+                server=server,
+                output=json.dumps(_resolution(RESOLVED_ONLY)),
+            )
+            assert ev.scrub(RESOLVED_ONLY) == RESOLVED_ONLY, server
+
+    def test_another_server_s_tool_of_that_name_registers_nothing(self) -> None:
+        for server in ("custom", None):
+            recorder = EvidenceRecorder("static")
+            recorder.record(
+                tool="resolve_api_hashes",
+                args={"path": "s.exe"},
+                server=server,
+                output=json.dumps(_resolution(RESOLVED_ONLY)),
+            )
+            assert ev.scrub(RESOLVED_ONLY) == "***", server
 
     def test_another_tool_s_answer_registers_nothing(self) -> None:
         recorder = EvidenceRecorder("static")
         recorder.record(
             tool="strings",
             args={"path": "s.exe"},
-            server=None,
+            server="analysis",
             output=json.dumps(_resolution(RESOLVED_ONLY)),
         )
         assert ev.scrub(RESOLVED_ONLY) == "***"
@@ -117,6 +158,7 @@ class TestNothingElseChanges:
         for shape in _every_key_shape():
             assert shape not in ev.scrub(f"{CATALOGUE_NAME} {shape} {RESOLVED_ONLY}"), shape
             assert CATALOGUE_NAME in ev.scrub(f"{CATALOGUE_NAME} {shape}")
+            assert shape not in ev.scrub(f"{ALGORITHMS} {shape} {CATALOGUE_NAME}/{shape}"), shape
 
     def test_a_credential_shape_a_resolution_names_is_still_masked(self) -> None:
         # Only a real identifier shape is taken, and a vendor prefix is a key

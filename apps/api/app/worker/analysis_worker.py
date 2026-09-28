@@ -681,11 +681,13 @@ def remember_configured_secrets(core_settings: Any) -> None:
     job's hash resolution read, which the scrub kept as written, are forgotten
     here too: the job scope starts empty. Never raises.
     """
+    from maljan.pipeline.events import forget_resolved_names
+
+    forget_resolved_names()
     try:
         from maljan.core.settings_catalog import configured_secret_values
-        from maljan.pipeline.events import forget_resolved_names, remember_secret_values
+        from maljan.pipeline.events import remember_secret_values
 
-        forget_resolved_names()
         remember_secret_values(configured_secret_values(core_settings), scope="job")
     except Exception as exc:  # noqa: BLE001 — the shape rules still run
         logger.warning(
