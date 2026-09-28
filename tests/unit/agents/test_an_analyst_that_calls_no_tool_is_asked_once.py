@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 from unittest.mock import patch
 
@@ -68,6 +69,11 @@ class _Model(BaseChatModel):
             )
         elif _asked(sent) and self.then == "keep":
             turn = AIMessage(content=" keep. ")
+        elif _asked(sent) and self.then == "marked_keep":
+            turn = AIMessage(content="**KEEP**")
+        elif _asked(sent) and self.then == "blocking":
+            time.sleep(6)
+            turn = AIMessage(content=AFTER)
         elif _asked(sent) and self.then == "reply":
             turn = AIMessage(content=REPLY)
         elif _asked(sent) and self.then == "deadline":
@@ -87,6 +93,12 @@ class _Model(BaseChatModel):
     async def _agenerate(
         self, messages: Any, stop: Any = None, run_manager: Any = None, **kw: Any
     ) -> ChatResult:
+        if self.then == "blocking":
+            # A call that blocks its thread: cancelling the await does not end it.
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                None, lambda: self._generate(messages, stop, run_manager, **kw)
+            )
         if self.then == "slow" and _asked(list(messages)):
             self.seen.append(list(messages))
             await asyncio.sleep(30)
@@ -427,3 +439,40 @@ def test_calls_made_answering_another_agent_s_ask_do_not_count() -> None:
     _run(agent)
 
     assert any(_asked(sent) for sent in model.seen)
+
+
+def test_markdown_around_the_one_word_still_keeps_the_first_answer() -> None:
+    ran: list[str] = []
+    agent = _analyst(_Model(then="marked_keep"), ran)
+
+    answer = _run(agent)
+
+    assert answer.strip() == FIRST
+    assert _ask_record(agent)["followed"] == "kept_first_answer"
+
+
+def test_the_loop_s_clock_with_a_call_that_blocks_its_thread() -> None:
+    ran: list[str] = []
+    agent = _analyst(_Model(then="blocking"), ran)
+
+    with patch.object(TurnPace, "reserve", return_value=0.1):
+        answer = _run(agent, limits=(3, None))
+
+    assert answer.strip() == FIRST
+    record = _ask_record(agent)
+    assert record["followed"] == "no_answer"
+    assert "clock" in record["why"] or "time" in record["why"]
+
+
+def test_the_loop_s_own_clock_ending_the_question_s_pass_leaves_the_first_answer() -> None:
+    """The pass's own timeout did not fire first: the loop's clock ended it."""
+    ran: list[str] = []
+    agent = _analyst(_Model(then="slow"), ran)
+
+    with patch("maljan.agents.base_agent.LoopBudget.seconds_left", return_value=None):
+        answer = _run(agent, limits=(3, None))
+
+    assert answer.strip() == FIRST
+    record = _ask_record(agent)
+    assert record["followed"] == "no_answer"
+    assert "clock" in record["why"]

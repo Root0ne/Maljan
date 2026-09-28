@@ -4213,6 +4213,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     return dict(latest)
                 tool_ask["question"] = question
                 tool_ask["first_answer"] = str(getattr(conversation[-1], "content", "") or "")
+                tool_ask["conversation"] = conversation
                 await _the_question_pass([*conversation, question], conversation, spoken, pace)
                 return dict(latest)
 
@@ -4269,7 +4270,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                 called = any(getattr(m, "tool_calls", None) for m in after)
                 if finished and answered and not called:
                     last = str(getattr(after[-1], "content", "") or "")
-                    if last.strip().strip(".").strip().upper() == KEEP_REPLY:
+                    # Emphasis marks aside, as a claim's block is compared.
+                    bare = re.sub(r"[*_`]", "", last).strip().rstrip(".").strip()
+                    if bare.upper() == KEEP_REPLY:
                         tool_ask["followed"] = "kept_first_answer"
                     return
                 if finished or (called and not why):
@@ -4497,6 +4500,26 @@ class BaseAnalyst(BudgetMeter, ABC):
                     # the analyst; the salvage gets whatever time is left,
                     # which may be none. Any other timeout is not this one.
                     nonlocal time_capped, time_detail, budget_ran_out_empty
+                    # The loop's clock ended the pass after the question about
+                    # its tools — a call that blocks its thread outlives the
+                    # pass's own deadline: the first answer stands as written.
+                    if tool_ask.get("first_answer") is not None:
+                        if "followed" not in tool_ask:
+                            held = list(tool_ask.get("conversation") or [])
+                            tool_ask["dropped"] = list(latest.get("messages") or [])[
+                                len(held) + 1 :
+                            ]
+                            latest["messages"] = held
+                            tool_ask["followed"] = "no_answer"
+                            tool_ask["why"] = (
+                                "the loop's clock ran out before an answer to the question"
+                            )
+                            self.logger.warning(
+                                "%s: the loop's clock ended the pass after the question "
+                                "about its tools; its first answer stands as written.",
+                                self.name,
+                            )
+                        return dict(latest)
                     left_now = budget.seconds_left()
                     if left_now is None or left_now > 1.0:
                         raise
