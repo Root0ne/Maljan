@@ -382,34 +382,69 @@ class RepeatGuard:
         # apart so a replayed conversation forgets its own calls and not these.
         self._seeded: dict[str, str] = {}
         self._seeded_failures: set[str] = set()
+        # The earlier calls whose result the run did not keep whole (the byte
+        # budget blanked it): nothing recorded can answer them, so one ask is
+        # run, as a failure's retry is.
+        self._seeded_reruns: set[str] = set()
+        # What each answered earlier call recorded, by entry id: the result a
+        # later chunk's identical call is answered with.
+        self._recorded: dict[str, str] = {}
         # The seeded calls this conversation has already been answered about:
         # the first answer is the first time this model hears of the earlier
         # call, and only asking again after it is a repeat.
         self._told: set[str] = set()
 
     def _seeded_count(self, key: str) -> int:
-        """Where a seeded call's count starts: one served retry for a failure."""
-        return 1 if self._seeded.get(key) in self._seeded_failures else self.SERVED
+        """Where a seeded call's count starts: one served retry for a failure or an unkept result."""
+        entry = self._seeded.get(key)
+        return 1 if entry in self._seeded_failures | self._seeded_reruns else self.SERVED
 
     def seed(
-        self, tool: str, kwargs: dict[str, Any], entry_id: str, *, failed: bool = False
+        self,
+        tool: str,
+        kwargs: dict[str, Any],
+        entry_id: str,
+        *,
+        failed: bool = False,
+        recorded: str | None = None,
+        rerun: bool = False,
     ) -> None:
-        """A call an earlier chunk made: an identical one is answered with its entry, not run.
+        """A call an earlier chunk made: an identical one is answered from its entry, not run.
 
         A later chunk is a new conversation, and its loop re-ran the calls the
         earlier chunks had made. An answered call is seeded as already asked the
-        served number of times, so the first identical call gets
-        ``repeat_notice`` naming the entry that holds the answer; a failed one
-        as asked once, so one retry is served, as the guard serves any retry
-        after a failure. Neither first touch counts toward the loop's repeats
-        (:meth:`first_touch_of_seed`).
+        served number of times, so the first identical call is answered without
+        running: with the result its entry recorded when ``recorded`` is given
+        (:meth:`recorded_answer`), and otherwise with ``repeat_notice`` naming
+        the entry. A failed one (``failed``), and one whose result the run did
+        not keep (``rerun``), is seeded as asked once, so one retry is served,
+        as the guard serves any retry after a failure. No first touch counts
+        toward the loop's repeats (:meth:`first_touch_of_seed`).
         """
         key = self._key(tool, kwargs)
         self._seeded.setdefault(key, str(entry_id))
         if failed:
             self._seeded_failures.add(str(entry_id))
+        elif rerun:
+            self._seeded_reruns.add(str(entry_id))
+        elif recorded is not None:
+            self._recorded.setdefault(str(entry_id), str(recorded))
         self._first.setdefault(key, str(entry_id))
         self._count[key] = max(self._count.get(key, 0), self._seeded_count(key))
+
+    def recorded_answer(self, tool: str, kwargs: dict[str, Any]) -> tuple[str, str] | None:
+        """``(entry id, recorded result)`` for this conversation's first ask of an earlier call.
+
+        Only for a call an earlier chunk made and answered, whose result was
+        kept; the ask is marked as told, and it is not a repeat. ``None``
+        otherwise, and for every later ask of it.
+        """
+        key = self._key(tool, kwargs)
+        entry = self._seeded.get(key)
+        if entry is None or entry not in self._recorded or key in self._told:
+            return None
+        self._told.add(key)
+        return entry, self._recorded[entry]
 
     def first_touch_of_seed(self, tool: str, kwargs: dict[str, Any]) -> bool:
         """Whether this is the conversation's first ask of a seeded call; marks it asked.
@@ -500,23 +535,54 @@ class RepeatGuard:
         """Record that the call ran, and which entry first answered it."""
         key = self._key(tool, kwargs)
         self._count[key] = self._count.get(key, 0) + 1
-        # A retry of an earlier chunk's failure answers for the call from here
-        # on: its entry is the one a later refusal names.
-        if self._first.get(key) in self._seeded_failures and key in self._seeded:
+        # A retry of an earlier chunk's failure, or of a call whose result the
+        # run did not keep, answers for the call from here on: its entry is
+        # the one a later refusal names.
+        retried = self._seeded_failures | self._seeded_reruns
+        if self._first.get(key) in retried and key in self._seeded:
             self._first[key] = entry_id
         self._first.setdefault(key, entry_id)
 
 
 def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
-    """A loop's repeat guard, seeded with the calls earlier chunks made (``RepeatGuard.seed``)."""
+    """A loop's repeat guard, seeded with the calls earlier chunks made (``RepeatGuard.seed``).
+
+    An answered call is seeded with the result its entry recorded, which is
+    what a later identical call is answered with. A call whose entry holds no
+    whole result — the byte budget blanked it, or a ceiling cut it — has
+    nothing recorded to answer with and is served once more.
+    """
     guard = RepeatGuard()
     for entry in entries or ():
         tool = str(getattr(entry, "tool", "") or "")
         entry_id = str(getattr(entry, "id", "") or "")
         args = getattr(entry, "args", None)
-        if tool and entry_id and isinstance(args, dict):
-            guard.seed(tool, args, entry_id, failed=not bool(getattr(entry, "ok", True)))
+        if not (tool and entry_id and isinstance(args, dict)):
+            continue
+        if not bool(getattr(entry, "ok", True)):
+            guard.seed(tool, args, entry_id, failed=True)
+            continue
+        output = str(getattr(entry, "output", "") or "")
+        if not output or bool(getattr(entry, "truncated", False)):
+            guard.seed(tool, args, entry_id, rerun=True)
+            continue
+        guard.seed(tool, args, entry_id, recorded=output)
     return guard
+
+
+def earlier_chunk_answer(tool: str, entry_id: str, recorded: str) -> str:
+    """What a later chunk's call an earlier chunk made is answered with.
+
+    The result as its entry recorded it, stamped with that entry's id the way
+    a call's own answer is stamped, and one sentence saying where it came
+    from. No tool runs and nothing is written to the ledger: the entry that
+    holds the result already exists, and it is the one to cite.
+    """
+    return (
+        f"[{entry_id}]\n{recorded}\n\n"
+        f"This call to {tool} with these arguments was made in an earlier chunk of this "
+        f"input and is not run again: the text above is the result recorded in [{entry_id}]."
+    )
 
 
 # What the model is told when its call ran on arguments that were closed off.
@@ -828,6 +894,12 @@ def _record_tool(
         first = repeats.answered_by(name, kwargs)
         if first is None:
             return None
+        # An earlier chunk's call, asked for the first time in this
+        # conversation: answered with the result that call recorded, not run
+        # and not a repeat.
+        recorded = repeats.recorded_answer(name, kwargs)
+        if recorded is not None:
+            return earlier_chunk_answer(name, *recorded)
         if not repeats.first_touch_of_seed(name, kwargs):
             repeats.note_repeat()
         # Told to the model, written nowhere. No tool ran: an entry here would

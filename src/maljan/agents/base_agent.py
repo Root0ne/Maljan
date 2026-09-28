@@ -2824,13 +2824,14 @@ def answer_cut_at_cap(response: Any, cap: int) -> tuple[int, str] | None:
 
 # What a later chunk's prompt opens with: the calls the earlier chunks of the
 # same analysis made, each with the entry that holds its answer. Its loop
-# answers an identical call with that entry (``seeded_repeat_guard``).
+# answers an identical call with the result that entry recorded
+# (``seeded_repeat_guard``).
 EARLIER_CHUNKS_HEAD = (
     "Earlier chunks of this same input were already analysed. These are the tool calls "
     "made there, each with the ledger entry that holds its result and the opening of "
     "what it returned. Cite those entries instead of making the same call again: an "
-    "identical call is not run again, and is answered with the entry that holds it. A "
-    "call marked failed may be made once more."
+    "identical call is not run again, and is answered with the result its entry "
+    "recorded. A call marked failed may be made once more."
 )
 
 

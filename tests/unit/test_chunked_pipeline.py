@@ -456,7 +456,14 @@ class TestSafeAnalyzeISRChunked:
         from maljan.schemas.evidence import LedgerEntry
 
         guard = seeded_repeat_guard(
-            [LedgerEntry(id="ev_0004", tool="decompile_function", args={"address": "0x1"})]
+            [
+                LedgerEntry(
+                    id="ev_0004",
+                    tool="decompile_function",
+                    args={"address": "0x1"},
+                    output="int FUN_1(void)",
+                )
+            ]
         )
 
         assert guard.answered_by("decompile_function", {"address": "0x1"}) == "ev_0004"

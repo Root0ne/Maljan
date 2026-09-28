@@ -41,6 +41,7 @@ from maljan.agents.delegation import (
     WAITING_ON_EACH_OTHER_REFUSAL,
     _what_an_ask_gets_sentence,
 )
+from maljan.agents.evidence_recorder import earlier_chunk_answer
 from maljan.agents.ghidra_http_client import no_program_as_error
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
@@ -852,6 +853,9 @@ PROMPTS: dict[str, str] = {
             LedgerEntry(id="ev_0001", tool="a", args={"x": "1"}),
             LedgerEntry(id="ev_0002", tool="b", args={}, ok=False),
         ]
+    ),
+    "a later chunk's answer from an earlier chunk's recorded result": earlier_chunk_answer(
+        "a", "ev_0001", "a recorded result"
     ),
     "analyst cut-at-cap question naming a chunk": analyst_cut_violation(
         4096, "CLAIM: The file opens a window.\nCLAIM: The fi", chunk="chunk 1 of 2"
