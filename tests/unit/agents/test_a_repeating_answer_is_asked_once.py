@@ -214,7 +214,7 @@ class TestTheValidationTurn:
         assert ANALYST_REPEATED_CODE in question
         assert ANALYST_CUT_CODE not in question
         assert "It is shown above only up to CLAIM block 4" in question
-        assert "stopped at the output limit of 4096 tokens" in question
+        assert "stopped at the output limit of 4,096 tokens" in question
         assert "it is not shown to you again" not in question
 
     def _cut_and_repeating(self, retry: str) -> tuple[_Analyst, AgentISR]:

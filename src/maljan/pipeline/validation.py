@@ -2871,7 +2871,7 @@ def analyst_repeated_violation(
     repeated, margin = int(found.repeated), int(found.margin)
     first = int(found.first_repeat)
     limit = (
-        f" It also stopped at the output limit of {int(cut)} tokens before it ended: the "
+        f" It also stopped at the output limit of {int(cut):,} tokens before it ended: the "
         "whole answer has to end well inside that limit, and any reasoning you write "
         "counts against it."
         if cut
