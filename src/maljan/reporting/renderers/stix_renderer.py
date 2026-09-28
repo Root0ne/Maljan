@@ -3330,8 +3330,8 @@ def judge_value_answer(report: Any, kind: str, value: str, corroborating: str) -
         "strings",
         reputation,
         corroborating=corroborating,
-        **sourced,
-        **emulated,
+        # The search's own facts win over the emulation record's on a shared key.
+        **{**emulated, **sourced},
     )
 
 
