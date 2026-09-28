@@ -78,7 +78,9 @@ export interface Technique {
   matches: number;
   /** Every layer that named the technique, the judge included. */
   sources: string[];
-  /** The layers that count towards corroboration — sources, minus the judge. */
+  /** The layers that count towards corroboration: the ones the backend credits
+   *  with a statement of their own (`independent_layers`), or, on a row stored
+   *  before statements were counted, the sources minus the judge. */
   corroborating: string[];
   /** `false` when the ATT&CK catalog has no entry for the id and the producer
    *  kept it after being told. */
@@ -154,6 +156,11 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
     // Only a capability cell carries this; a published mapping and a /mitre
     // row never do, which reads as published, which they are.
     const notPublished = String(t.not_published ?? "");
+    // The layers the backend credits with a statement of their own. Layers that
+    // wrote the same words count once there, and they count once here.
+    const independent = Array.isArray(t.independent_layers)
+      ? (t.independent_layers as unknown[]).map(String)
+      : null;
 
     // Canonical Enterprise display name wins for any KNOWN tactic id. This
     // covers two cases: (a) the mapping only carried the TA-id (TTPMapping has
@@ -185,7 +192,9 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
       // marked: the id either resolves or it does not.
       existing.matches += matches;
       existing.sources = [...new Set([...existing.sources, ...sources])];
-      existing.corroborating = existing.sources.filter((source) => !isJudge(source));
+      existing.corroborating = independent
+        ? [...new Set([...existing.corroborating, ...independent])]
+        : existing.sources.filter((source) => !isJudge(source));
       existing.valid = existing.valid && valid;
       existing.notPublished = existing.notPublished || notPublished;
     } else {
@@ -194,7 +203,7 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
         name: techName,
         matches,
         sources,
-        corroborating: sources.filter((source) => !isJudge(source)),
+        corroborating: independent ?? sources.filter((source) => !isJudge(source)),
         valid,
         notPublished,
       });

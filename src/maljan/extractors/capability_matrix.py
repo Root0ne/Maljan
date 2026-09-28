@@ -40,6 +40,8 @@ read.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -143,6 +145,7 @@ def build_capability_matrix(
         )
         layers = info.get("layers") or []
         valid = bool(info.get("valid", True))
+        independent, identical = independent_statements(info.get("statements") or [])
 
         # Never emit a zero-confidence cell with no evidence and no contributing
         # source — it is an empty claim the UI would render as a "verified"
@@ -216,6 +219,8 @@ def build_capability_matrix(
                 # Each analyst statement naming it, verbatim, by analyst: what
                 # the analysts said is theirs to weigh, never classified here.
                 statements=[f"{who}: {text}" for who, text in info.get("statements") or [] if text],
+                independent_layers=independent,
+                identical_statements=identical,
             )
         )
         if not_published:
@@ -235,8 +240,10 @@ def build_capability_matrix(
                 evidence_quotes=list(evidence),
                 confidence=confidence,
                 contributing_layers=layers,
-                is_corroborated=len([lyr for lyr in layers if lyr != _JUDGE_SOURCE]) >= 2,
+                is_corroborated=len(independent) >= 2,
                 technique_id_valid=valid,
+                independent_layers=independent,
+                identical_statements=identical,
             )
         )
 
@@ -254,6 +261,39 @@ def build_capability_matrix(
 _JUDGE_SOURCE = "judge"
 # The layer name the judge contributes under, for renderers that count analyst layers.
 JUDGE_SOURCE = _JUDGE_SOURCE
+
+
+def normalised_statement(text: str) -> str:
+    """A statement as it is compared for repetition: case, markup and punctuation out."""
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).split())
+
+
+def independent_statements(statements: Sequence[tuple[str, str]]) -> tuple[list[str], int]:
+    """The layers that said something of their own, and how many statements repeated one.
+
+    ``statements`` is ``(layer, text)`` in the order the layers wrote them.
+    Each distinct normalised text (:func:`normalised_statement`) is credited
+    to the first layer that wrote it; a statement whose text was already
+    written, by any layer, is counted as identical and credits nobody. The
+    judge is not a layer here: it read the analysts.
+    """
+    seen: set[str] = set()
+    credited: list[str] = []
+    identical = 0
+    for layer, text in statements:
+        if str(layer) == _JUDGE_SOURCE:
+            continue
+        key = normalised_statement(text)
+        if not key:
+            continue
+        if key in seen:
+            identical += 1
+            continue
+        seen.add(key)
+        if str(layer) not in credited:
+            credited.append(str(layer))
+    return credited, identical
+
 
 # Why an id that reached the report on a finding alone is not published. A
 # claim is questioned in its analyst's own loop — its technique id is asked
@@ -496,7 +536,13 @@ def _collect_techniques(
                         row["finding_named_by"].append(named_by)
                     if title and title not in row["evidence"]:
                         row["evidence"].append(title)
-                    row.setdefault("statements", []).append((str(layer), title))
+                    # A finding's title names it, and says nothing a second
+                    # layer could confirm: an analyst's one summary title was
+                    # listed as a statement under five techniques. What the
+                    # finding says is its detail.
+                    detail = str(getattr(finding, "detail", "") or "").strip()
+                    if detail:
+                        row.setdefault("statements", []).append((str(layer), detail))
 
     # The catalogue question, asked of every id still standing. A claim was
     # asked it in the analyst's own loop and carries the answer; an id that

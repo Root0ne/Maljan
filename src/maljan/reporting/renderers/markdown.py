@@ -3219,18 +3219,53 @@ def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     A technique a rule matched only on runtime-resolved names has its analysts'
     statements listed under the table; its row points there, so a reader of the
     row alone does not take the word for more than a count of layers.
-    """
-    if mapping is None or not mapping.is_corroborated:
-        return ""
-    if rules and all(_resolved_only(hit) for hit in rules):
-        from maljan.extractors.capability_matrix import JUDGE_SOURCE
 
-        layers = len([lyr for lyr in mapping.contributing_layers if lyr != JUDGE_SOURCE])
+    The count is of independent statements: layers that wrote the same words
+    count once, and the row says how many statements were identical. A row
+    two or more layers named in one statement between them says it is not
+    corroborated and why. A row stored before statements were counted keeps
+    the count of layers it was stored with.
+    """
+    if mapping is None:
+        return ""
+    from maljan.extractors.capability_matrix import JUDGE_SOURCE
+
+    named = len([lyr for lyr in mapping.contributing_layers if lyr != JUDGE_SOURCE])
+    independent = len(getattr(mapping, "independent_layers", None) or [])
+    identical = int(getattr(mapping, "identical_statements", 0) or 0)
+    repeated = (
+        f"{identical} statement{'' if identical == 1 else 's'} identical to another and "
+        "counted once"
+        if identical
+        else ""
+    )
+    listed = rules and all(_resolved_only(hit) for hit in rules)
+    if not mapping.is_corroborated:
+        if named < 2 or not (independent or identical):
+            return ""
         return (
-            f", corroborated (named by {layers} analyst layers; their statements are listed "
-            "below the table)"
+            f", not corroborated ({named} analyst layers name it in {independent} independent "
+            f"statement{'' if independent == 1 else 's'}"
+            + (f"; {repeated}" if repeated else "")
+            + ("; their statements are listed below the table" if listed else "")
+            + ")"
         )
-    return ", corroborated"
+    if not independent:
+        # Stored before statements were counted: the layers it was stored with.
+        if listed:
+            return (
+                f", corroborated (named by {named} analyst layers; their statements are listed "
+                "below the table)"
+            )
+        return ", corroborated"
+    parts = [f"named by {independent} analyst layers in independent statements"]
+    if repeated:
+        parts.append(repeated)
+    if listed:
+        parts.append("their statements are listed below the table")
+    if len(parts) == 1 and not listed:
+        return ", corroborated"
+    return f", corroborated ({'; '.join(parts)})"
 
 
 def _resolved_only_lines(

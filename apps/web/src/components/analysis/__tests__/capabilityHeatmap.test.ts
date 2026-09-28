@@ -27,6 +27,26 @@ function only(raw: unknown[]) {
   return tactic.techniques[0];
 }
 
+describe("layers that wrote the same words", () => {
+  it("count once, as the backend counts them", () => {
+    const tech = only([
+      row({
+        contributing_layers: ["static", "dynamic", "network"],
+        independent_layers: ["static"],
+      }),
+    ]);
+    expect(tech.sources).toEqual(["static", "dynamic", "network"]);
+    expect(tech.corroborating).toEqual(["static"]);
+    expect(isCorroborated(tech)).toBe(false);
+  });
+
+  it("leave a row stored before statements were counted as it was", () => {
+    expect(isCorroborated(only([row({ contributing_layers: ["static", "dynamic"] })]))).toBe(
+      true
+    );
+  });
+});
+
 describe("the judge as a source", () => {
   it("is not a badge beside the layers that observed the technique", () => {
     const tech = only([row({ contributing_layers: ["static", "judge"] })]);
