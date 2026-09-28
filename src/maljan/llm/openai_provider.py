@@ -21,10 +21,6 @@ from maljan.llm.tool_replies import (  # noqa: F401 — the names this module ha
     with_answered_tool_calls,
 )
 
-# The request fields llama.cpp and its forks read and a hosted
-# OpenAI-compatible API rejects. Named here because two things need the list:
-# the builder, which decides whether to send them, and the 400 self-heal,
-# which decides whether a rejection is about one of ours.
 # llama.cpp's DRY sampler, forwarded only when set (``llm.openai.dry_*``).
 LLAMA_CPP_DRY_KEYS: tuple[str, ...] = (
     "dry_multiplier",
@@ -32,6 +28,11 @@ LLAMA_CPP_DRY_KEYS: tuple[str, ...] = (
     "dry_allowed_length",
     "dry_penalty_last_n",
 )
+
+# The request fields llama.cpp and its forks read and a hosted
+# OpenAI-compatible API rejects. Named here because two things need the list:
+# the builder, which decides whether to send them, and the 400 self-heal,
+# which decides whether a rejection is about one of ours.
 LLAMA_CPP_EXTRA_KEYS: tuple[str, ...] = (
     "repeat_penalty",
     "repetition_penalty",
@@ -605,7 +606,7 @@ class OpenAIProvider:
         return _with_standard_retry(built, self, model, temperature, base_url, kwargs, compat)
 
     def _add_llama_cpp_extras(self, build_kwargs: dict[str, Any], base_url: str | None) -> None:
-        """The three request fields only llama.cpp and its forks read.
+        """The request fields only llama.cpp and its forks read.
 
         Degenerate-loop guard: forward a repetition penalty. The small
         reasoning model otherwise loops catastrophically while trying to recall
@@ -631,7 +632,10 @@ class OpenAIProvider:
         otherwise spends its whole decode budget inside ``<think>`` — empty
         answers and timeouts.
 
-        All three go through ``extra_body``: it is the only channel that
+        DRY sampler: ``llm.openai.dry_*``, each only when an operator set it
+        (``LLAMA_CPP_DRY_KEYS``); none is set by default.
+
+        All of them go through ``extra_body``: it is the only channel that
         reaches the server verbatim, and an unknown sampler key is ignored by
         llama.cpp rather than rejected.
         """

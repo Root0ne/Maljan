@@ -1734,10 +1734,12 @@ the sample's own domain and another tactic must beat the claimed id before it
 is questioned). The measurement behind the default off is in *The technique
 check* in [architecture.md](architecture.md).
 
-`validation.claim_repeat_margin` (empty) is how many claim headings an
-analyst's answer may write again before it is asked once for a whole answer
-(`isr.claims_repeated`). Empty derives the margin from the answer itself: the
-number of distinct headings it wrote. Nothing the analyst wrote is removed.
+`validation.claim_repeat_margin` (empty) is how many claims an analyst's
+answer may write again before it is asked once for a whole answer
+(`isr.claims_repeated`), with the answer shown back up to its first repeated
+claim. Empty derives the margin from the answer itself: the number of distinct
+claims it wrote. A whole answer that does not repeat replaces the repeating
+one; otherwise the answer stands as written.
 
 `mobile` and `deep_static` are built from three seeded generic agent
 definitions — `triage`, `android_static` and `reverser` — whose prompts live in

@@ -1163,13 +1163,14 @@ ANNOTATIONS: dict[str, Annotation] = {
         "subgroup": "Technique check",
     },
     "validation.claim_repeat_margin": {
-        "title": "Repeated claim headings allowed",
+        "title": "Repeated claims allowed",
         "description": (
-            "How many claim headings an analyst's answer may write again before the "
-            "analyst is asked once for a whole answer, each claim written once "
-            "(isr.claims_repeated). Empty, the default, derives it from the answer: the "
-            "number of distinct headings it wrote, so a second whole copy is within it. "
-            "Nothing the analyst wrote is removed."
+            "How many claims an analyst's answer may write again before the analyst is "
+            "asked once for a whole answer, each claim written once, with its answer "
+            "shown back up to the first repeated claim (isr.claims_repeated). Empty, the "
+            "default, derives it from the answer: the number of distinct claims it wrote, "
+            "so a second whole copy is within it. A whole answer that does not repeat "
+            "replaces the repeating one; otherwise the answer stands as written."
         ),
         "subgroup": "Technique check",
     },

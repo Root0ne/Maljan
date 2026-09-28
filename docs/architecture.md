@@ -1343,16 +1343,23 @@ bound and `tool_choice="none"`, the one other shape the server accepts.
 An analyst with tools whose first answer called none is told so and asked
 once. The loop states the fact and the tools it has, by name, in the same
 conversation (`prompt_fragments.no_tool_call_question`), and asks whether it
-wants to call any before its answer stands; if not, it writes its answer again,
-and whatever it writes next stands. The question is held to the final-answer
-nudge's checks (a turn left in the step budget, more than a second left on the
-clock, a spend ceiling that admits it), is asked at most once per analyst — not
-after any of its loops called a tool, and not inside an ask another agent made
-of it — and the loop's budget record carries `tool_ask`: the tool calls made
-after the question and what followed (`called_tools`,
-`answered_without_tools`, `no_answer`). `run_summary.nudge.no_tool_call` lists
-them per analyst. Four of seven analysts in two local runs answered in one
-turn while offered 18 to 38 tools.
+wants to call any before its answer stands. The one word KEEP keeps its answer
+as written; any other answer it writes next stands. The question is asked only
+when a whole answer after it fits: two graph steps left (one complete model
+turn), the loop's final-answer reserve at its own pace, the conversation and an
+answer of the output cap in the model's window, and a spend ceiling that admits
+it. It is asked at most once per analyst, in its own loops — not after any of
+them called a tool, and not inside an ask another agent made of it, whose tool
+calls do not count as the analyst's own. The pass after it is held inside the
+loop's clock; a stop or a failure that leaves no answer (the spend ceiling, a
+call's deadline, the clock, a full window, the step cap) puts the conversation
+back and the first answer stands as written, as it does when tools called after
+the question are followed by nothing. The loop's budget record carries
+`tool_ask`: the tool calls made after the question, what followed
+(`called_tools`, `answered_without_tools`, `kept_first_answer`, `no_answer`)
+and, when the first answer stands because nothing followed, `why`.
+`run_summary.nudge.no_tool_call` lists them per analyst. Four of seven analysts
+in two local runs answered in one turn while offered 18 to 38 tools.
 
 An answer with no CLAIM block that parses is the analyst's prose and nothing
 more. It used to be cut into sentences, each a claim at a flat 0.50 no analyst
@@ -1460,22 +1467,25 @@ fourteen questions over that answer, spent the whole cap again and returned no
 claim, and every question went unanswered.
 
 An analyst answer that writes the same claims again and again is asked the
-same whole-answer question once. After an answer arrives its claim headings
-are counted (`claim_headings.claim_heading_counts`): the claims begun, and the
-distinct headings among them once marks, case, spacing and the claim's number
-are set aside; a heading line holding only its label is named by its next
-line, and nothing under DISPUTES is counted. When the headings written again
-exceed a margin — the number of distinct headings, so a second whole copy is
-within it, or `validation.claim_repeat_margin` when an operator sets one (none
-by default) — `isr.claims_repeated` states the characters, the claims begun,
-the distinct headings and how many repeat, and asks for the claims the evidence
-supports best, each written once. The repeating answer is described, not sent
-back, and the window rule of the cut question applies. The answer that comes
-back replaces the first only when it is whole, does not repeat and carries at
-least as many claims as the first had distinct headings; otherwise what was
-written stays the analyst's and the finding is recorded. A chunk's answer is
+same whole-answer question once. After an answer arrives its claims are
+counted (`claim_headings.claim_blocks`): each claim is its whole block — the
+sentence on its heading line and every line after it up to the next heading or
+a `---` separator, blank lines aside — compared once marks, case, spacing and
+the claim's number are set aside, so a label-only heading is told apart by its
+fields and claims under one category label by their sentences; nothing under
+DISPUTES is counted. When the claims written again exceed a margin — the
+number of distinct claims, so a second whole copy is within it, or
+`validation.claim_repeat_margin` when an operator sets one (none by default) —
+`isr.claims_repeated` states the characters, the claims begun, the distinct
+claims and how many repeat, and asks for the whole answer again: the claims
+written before the repetition and any other the evidence supports, each
+written once. The answer is sent back as written up to the first claim that
+repeats an earlier one, also when it was cut as well, and the window rule of
+the cut question applies. Any whole answer that does not repeat stands, as a
+whole answer to the cut question does; a retry that repeats again, or is cut,
+keeps the answer as written and the finding is recorded. A chunk's answer is
 asked inside its chunk, as a cut one is. A local triage answer began 639 claims
-under 40 distinct headings in 32,768 tokens.
+in 32,768 tokens, 85 of them distinct.
 
 The cap the check reads is the one the call was built with. The container
 records it on the model it builds (`context_window.record_built_cap`), and the
@@ -1506,7 +1516,9 @@ returned, a failed call marked, and its loop's repeat guard is seeded with them
 result that entry recorded, stamped with its id and a sentence saying it came
 from an earlier chunk (`earlier_chunk_answer`); an entry whose result the run
 did not keep whole (the byte budget blanked it) is served once more, as a
-failure is. A reverser's second chunk, told only where the result was, asked 24
+failure is, and the block marks it so ("result not kept; may be made once
+more"). A recorded result that was shortened when first answered carries the
+same shortening notice. A reverser's second chunk, told only where the result was, asked 24
 calls for 3 new entries and ended at its repeat stop. That first answer is not counted toward
 the loop's repeat stop, since the model has not been told in this conversation;
 asking again after it counts as any repeat does. A failed earlier call is served
@@ -2720,8 +2732,12 @@ is assembled from what the run gathered rather than recomputed beside it:
   not, asked once either way with the check's finding under it
   (`undescribed_technique_finding`) — (`capability_matrix.judge_questions`),
   each with the claim or finding text and its evidence ids: keep or drop, with
-  a reason. The review keeps each finding it asked with (`undescribed`), and
-  the row prints it beside the judge's answer and reason. Each id is named as the
+  a reason. The check is asked as the analysts' check asks it
+  (`claim_asked_whether_it_describes`: not of a claim that reads as absence, or
+  whose id the catalogue does not know or the sample cannot host), and its
+  finding is stated as the term match it is: no claim naming the technique uses
+  the catalogue's terms for it. The review keeps each finding it asked with
+  (`undescribed`), and the row prints it beside the judge's answer and reason. Each id is named as the
   vendored ATT&CK table names it (`attck_loader.technique_label`), in the list,
   in the techniques the question says the bundle carries and in the evidence
   summary: asked about bare ids, a judge dropped a Winlogon Helper DLL id as

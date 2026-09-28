@@ -10,10 +10,12 @@ change landed on `main`.
 
 - **An analyst whose first answer called no tool is told so and asked once.**
   The loop states the fact and the tools the analyst has, and asks whether it
-  wants to call any before its answer stands; whatever it answers next stands.
-  Held to the final-answer nudge's step, time and spend checks, once per
-  analyst; `run_summary.nudge.no_tool_call` records the question and what
-  followed.
+  wants to call any before its answer stands; KEEP keeps the answer as written,
+  and any other answer it writes next stands. Asked only when a whole answer
+  fits (steps, the final-answer reserve, the window, the spend ceiling), once
+  per analyst in its own loops; when no answer follows, the first stands as
+  written. `run_summary.nudge.no_tool_call` records the question, what
+  followed and why.
 - **llama.cpp's DRY sampler can be forwarded.** `llm.openai.dry_multiplier`,
   `dry_base`, `dry_allowed_length` and `dry_penalty_last_n` go to a llama.cpp
   endpoint in `extra_body` when set; none is set by default.
@@ -2335,15 +2337,16 @@ change landed on `main`.
 ### Fixed
 
 - **An answer that writes its claims again past a margin is asked once for a
-  whole one.** Claim headings begun and distinct are counted when the answer
-  arrives; past the margin (the distinct count, or
+  whole one.** Claims begun and distinct, each keyed by its whole block, are
+  counted when the answer arrives; past the margin (the distinct count, or
   `validation.claim_repeat_margin`) `isr.claims_repeated` states the counts and
-  asks the cut question's whole-answer question. What was written stays unless
-  the answer covers every distinct claim.
-- **A technique no claim naming it describes goes to the judge with the
-  check's finding.** Asked once in the judge's question after its verdict,
-  keep or drop with a reason; the report row shows the finding, the answer and
-  the reason.
+  asks the cut question's whole-answer question, with the answer shown back up
+  to its first repeated claim. Any whole answer that does not repeat stands;
+  otherwise the answer stays as written.
+- **A technique no claim naming it uses the catalogue's terms for goes to the
+  judge with the check's finding.** Asked once in the judge's question after
+  its verdict, only where the analysts' check asks it, keep or drop with a
+  reason; the report row shows the finding, the answer and the reason.
 - **A later chunk's call an earlier chunk made is answered with its recorded
   result.** Not run again and not counted toward the repeat stop; a result the
   run did not keep whole is served once more.
