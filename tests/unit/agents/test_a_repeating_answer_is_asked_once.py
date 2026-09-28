@@ -62,6 +62,11 @@ class TestTheCount:
     def test_a_peer_s_claims_under_disputes_are_not_counted(self) -> None:
         assert claim_heading_counts(DISTINCT + "DISPUTES:\n" + DISTINCT) == (3, 3)
 
+    def test_prose_after_the_last_claim_is_not_part_of_it(self) -> None:
+        text = (DISTINCT * 3).rstrip("-\n") + "\n\nSummary: the sample is a loader.\n"
+
+        assert claim_heading_counts(text) == (9, 3)
+
     def test_label_only_headings_with_different_evidence_are_different_claims(self) -> None:
         text = "".join(
             f"CLAIM {n}:\nEVIDENCE: [ev_000{n}] strings\nCONFIDENCE: 0.6\nTECHNIQUE: NONE\n---\n"
@@ -189,9 +194,49 @@ class TestTheValidationTurn:
             analyst._validate_isr(isr, "evidence")
 
         (turns,) = analyst.seen_turns
-        assert ANALYST_CUT_CODE in str(turns[-1].content)
         shown = [t for t in turns if getattr(t, "type", "") == "ai"]
         assert [str(t.content) for t in shown] == [DISTINCT.rstrip()]
+
+    def test_an_answer_both_cut_and_repeating_is_asked_one_question_saying_what_is_shown(
+        self,
+    ) -> None:
+        analyst = _Analyst([WHOLE])
+        isr = analyst._text_to_isr(RUNAWAY, 0)
+        analyst._last_answer_cut = (4096, RUNAWAY)
+        with (
+            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
+        ):
+            analyst._validate_isr(isr, "evidence")
+
+        (turns,) = analyst.seen_turns
+        question = str(turns[-1].content)
+        assert ANALYST_REPEATED_CODE in question
+        assert ANALYST_CUT_CODE not in question
+        assert "It is shown above only up to CLAIM block 4" in question
+        assert "stopped at the output limit of 4096 tokens" in question
+        assert "it is not shown to you again" not in question
+
+    def _cut_and_repeating(self, retry: str) -> tuple[_Analyst, AgentISR]:
+        analyst = _Analyst([retry])
+        isr = analyst._text_to_isr(RUNAWAY, 0)
+        analyst._last_answer_cut = (4096, RUNAWAY)
+        with (
+            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
+        ):
+            return analyst, analyst._validate_isr(isr, "evidence")
+
+    def test_a_cut_and_repeating_answer_is_not_replaced_by_a_retry_that_repeats(self) -> None:
+        analyst, result = self._cut_and_repeating(DISTINCT * 6)
+
+        assert len(result.claims) == len(analyst._text_to_isr(RUNAWAY, 0).claims)
+        assert ANALYST_REPEATED_CODE in [v.code for v in analyst.validation_findings]
+
+    def test_a_cut_and_repeating_answer_is_replaced_by_a_whole_one_that_does_not(self) -> None:
+        _analyst, result = self._cut_and_repeating(WHOLE)
+
+        assert len(result.claims) == 3
 
     def test_a_whole_answer_that_does_not_repeat_is_the_analyst_s(self) -> None:
         analyst = _Analyst([WHOLE])

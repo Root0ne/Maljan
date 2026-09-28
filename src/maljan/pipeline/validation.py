@@ -2851,7 +2851,9 @@ def claims_repeated(text: str, margin: int | None = None) -> ClaimsRepeated | No
     )
 
 
-def analyst_repeated_violation(found: ClaimsRepeated, *, chunk: str = "") -> Violation:
+def analyst_repeated_violation(
+    found: ClaimsRepeated, *, chunk: str = "", cut: int | None = None
+) -> Violation:
     """What an analyst whose answer repeated its claims is told, and the whole-answer question.
 
     The same whole-answer question the cut-at-cap finding asks, with the fact
@@ -2859,18 +2861,28 @@ def analyst_repeated_violation(found: ClaimsRepeated, *, chunk: str = "") -> Vio
     many were written again. The answer is shown back only up to the first
     claim that repeats (``ClaimsRepeated.before``, sent as the assistant turn
     in place of the whole answer), and any whole answer that does not repeat
-    stands.
+    stands. ``cut`` is the output cap an answer that also stopped at it was
+    cut at: the one question then states that fact too, because the model
+    sees the answer up to its first repeat and the cut question's own words
+    would say it sees none of it.
     """
     answer = f"answer to {chunk}" if chunk else "previous answer"
     chars, begun, distinct = int(found.chars), int(found.begun), int(found.distinct)
     repeated, margin = int(found.repeated), int(found.margin)
     first = int(found.first_repeat)
+    limit = (
+        f" It also stopped at the output limit of {int(cut)} tokens before it ended: the "
+        "whole answer has to end well inside that limit, and any reasoning you write "
+        "counts against it."
+        if cut
+        else ""
+    )
     return Violation(
         code=ANALYST_REPEATED_CODE,
         message=(
             f"Your {answer} ran to {chars:,} characters and began {begun} CLAIM block(s), "
             f"{distinct} of them distinct: {repeated} repeat a claim already written, more "
-            f"than the {margin} allowed. It is shown above only up to CLAIM block {first}, "
+            f"than the {margin} allowed.{limit} It is shown above only up to CLAIM block {first}, "
             "the first that repeats an earlier one; the rest is not shown to you again. Write "
             "the whole answer again: the claims shown above and any other the evidence "
             "supports, each written once, each one sentence with its EVIDENCE, CONFIDENCE and "

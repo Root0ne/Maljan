@@ -1480,10 +1480,15 @@ number of distinct claims, so a second whole copy is within it, or
 claims and how many repeat, and asks for the whole answer again: the claims
 written before the repetition and any other the evidence supports, each
 written once. The answer is sent back as written up to the first claim that
-repeats an earlier one, also when it was cut as well, and the window rule of
-the cut question applies. Any whole answer that does not repeat stands, as a
+repeats an earlier one, also when it was cut as well; such an answer is asked
+this one question, with the output limit it stopped at stated in it, and not
+the cut question, whose words would say none of it is shown. The window rule
+of the cut question applies. Any whole answer that does not repeat stands, as a
 whole answer to the cut question does; a retry that repeats again, or is cut,
-keeps the answer as written and the finding is recorded. A chunk's answer is
+keeps the answer as written and the finding is recorded, however many
+claims it began. A claim's block also ends at the first line that is not a
+field once its field lines have begun, so prose after the last claim is not
+counted as part of it. A chunk's answer is
 asked inside its chunk, as a cut one is. A local triage answer began 639 claims
 in 32,768 tokens, 85 of them distinct.
 

@@ -1029,6 +1029,9 @@ PROMPTS: dict[str, str] = {
         "list_functions", "No file is currently open. Call open_file first."
     )["error"]["remediation"],
     "final-answer nudge": FINAL_ANSWER_NUDGE,
+    "analyst repeated-claims question with the cut folded in": analyst_repeated_violation(
+        ClaimsRepeated(begun=15, distinct=3, margin=3, chars=900, first_repeat=4), cut=4096
+    ).message,
     "analyst repeated-claims question naming a chunk": analyst_repeated_violation(
         ClaimsRepeated(begun=15, distinct=3, margin=3, chars=900), chunk="chunk 1 of 2"
     ).message,

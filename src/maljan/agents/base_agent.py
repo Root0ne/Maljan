@@ -6446,13 +6446,14 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         def _whole_answer_questions(candidate: AgentISR) -> list[Violation]:
             found = _repeated(candidate)
-            return [
-                *(
-                    analyst_cut_violation(cap, text, chunk=named)
-                    for cap, text, named in cuts.get(id(candidate)) or []
-                ),
-                *([analyst_repeated_violation(found, chunk=chunk)] if found is not None else []),
-            ]
+            cut = cuts.get(id(candidate)) or []
+            if found is not None:
+                # One question for an answer that repeated, the cut folded in:
+                # the model sees its answer up to the first repeat, and the
+                # cut question's words say it sees none of it.
+                widest = max((cap for cap, _text, _named in cut), default=0)
+                return [analyst_repeated_violation(found, chunk=chunk, cut=widest or None)]
+            return [analyst_cut_violation(cap, text, chunk=named) for cap, text, named in cut]
 
         def _validator(candidate: AgentISR) -> list[Violation]:
             first = not asked
@@ -6714,7 +6715,14 @@ class BaseAnalyst(BudgetMeter, ABC):
             # Asked for a whole shorter answer because the first was cut, and
             # given one that ended on its own: that answer is the analyst's,
             # fewer claims and all. The cut one it replaces was never whole.
-            if bool(cuts.get(id(first_answer))) and not cuts.get(id(retried)) and retried.claims:
+            # A first answer that was cut and also repeated is replaced only by
+            # one that does not repeat either.
+            if (
+                bool(cuts.get(id(first_answer)))
+                and not cuts.get(id(retried))
+                and retried.claims
+                and (_repeated(first_answer) is None or _repeated(retried) is None)
+            ):
                 self.logger.info(
                     "Validation: '%s' answered the cut-at-cap question whole; its %d claim(s) "
                     "replace the cut answer's %d.",
@@ -6742,6 +6750,16 @@ class BaseAnalyst(BudgetMeter, ABC):
                     repeated_first.begun,
                 )
                 return retried
+            # Asked because the first answer repeated its claims, and answered
+            # with one that repeats as well: what was written first stays, cut
+            # or not, however many claims the retry began.
+            if repeated_first is not None and _repeated(retried) is not None:
+                self.logger.warning(
+                    "Validation: '%s' answered the repeated-claims question with an answer "
+                    "that repeats too; the first answer is kept as written.",
+                    self.name,
+                )
+                return first_answer
             if len(retried.claims) < len(first_answer.claims):
                 self.logger.warning(
                     "Validation: the retry for '%s' returned %d claim(s) against %d; "
