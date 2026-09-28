@@ -140,3 +140,23 @@ def test_a_step_numbered_zero_is_named_by_its_number() -> None:
 
     assert mixed.message.startswith("step 0 is marked observed")
     assert bare.message.startswith("step 0 is marked observed")
+
+
+def test_the_question_says_what_the_platform_knows_of_the_other_entries() -> None:
+    (found,) = _asked(
+        _step("Loads through rundll32 and resolves by hash.", ["ev_0012", "ev_0020"]),
+        ["ev_0012"],
+    )
+
+    assert "which are not sandbox entries" in found.message
+
+
+def test_a_step_with_both_problems_is_asked_both_in_one_round() -> None:
+    found = _asked(
+        _step(f"Resolves by hash and connects to {BACKGROUND}.", ["ev_0012", "ev_0020"]),
+        ["ev_0012"],
+    )
+
+    assert len(found) == 2
+    assert "not sandbox entries" in found[0].message
+    assert BACKGROUND in found[1].message

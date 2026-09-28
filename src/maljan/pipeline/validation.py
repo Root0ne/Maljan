@@ -3075,8 +3075,8 @@ def flow_voice_violations(
                         code=FLOW_VOICE_CODE,
                         message=(
                             f"step {safe_finding_value(order)} is marked observed and also cites "
-                            f"{safe_finding_value(named)}, which record no sandbox observation "
-                            "of the sample. A step marked observed says the sandbox watched "
+                            f"{safe_finding_value(named)}, which are not sandbox entries. A step "
+                            "marked observed says the sandbox watched "
                             "every part of it. Cite only the sandbox entries that show it and "
                             "write what the other entries show as an assessed step of its own, "
                             "or mark the step assessed."
@@ -3084,7 +3084,6 @@ def flow_voice_violations(
                         path=f"steps.{index}.voice",
                     )
                 )
-                continue
             unreached = [
                 (value, said)
                 for kind, value in network_values_in(str(row.get("action") or ""))
