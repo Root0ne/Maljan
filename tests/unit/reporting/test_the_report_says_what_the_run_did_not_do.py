@@ -386,6 +386,31 @@ class TestAFamilySpecificSectionNeedsItsFamily:
         assert "| none |" not in technical
         assert "File marker" not in technical
 
+    def test_a_cipher_with_no_per_file_key_is_not_a_ransomware_section(self) -> None:
+        """``per_file_key: false`` says the files are not keyed one by one; it names no file."""
+        from maljan.reporting.models import EncryptionScheme
+
+        report = rich_report()
+        assert report.technical_analysis is not None
+        report.technical_analysis.encryption_scheme = EncryptionScheme(
+            cipher="RC4", per_file_key=False, evidence_ref="ev_0008"
+        )
+        technical = _section(_render(report), "## 5. Technical analysis")
+        assert "Ransomware behaviour" not in technical
+        packing = technical.split("### 5.1", 1)[1].split("### 5.2", 1)[0]
+        assert "| Cipher | RC4 |" in packing
+
+    def test_a_per_file_key_stays_under_the_ransomware_heading(self) -> None:
+        from maljan.reporting.models import EncryptionScheme
+
+        report = rich_report()
+        assert report.technical_analysis is not None
+        report.technical_analysis.encryption_scheme = EncryptionScheme(
+            cipher="ChaCha20", per_file_key=True
+        )
+        technical = _section(_render(report), "## 5. Technical analysis")
+        assert "Ransomware behaviour" in technical.split("### 5.9", 1)[1]
+
     def test_a_file_encryption_scheme_stays_under_the_ransomware_heading(self) -> None:
         from maljan.reporting.models import EncryptionScheme
 
