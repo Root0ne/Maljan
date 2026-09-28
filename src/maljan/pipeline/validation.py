@@ -3176,7 +3176,9 @@ class EntryTexts:
 
         text = self.texts.get(str(entry_id).strip().lower(), "")
         return bool(text) and any(
-            whole_value_in(form, text) for form in written_forms(value.lower())
+            whole_value_in(form, text)
+            for spelling in library_spellings(value)
+            for form in written_forms(spelling)
         )
 
     def holding(self, value: str) -> list[str]:
@@ -3203,6 +3205,27 @@ _ONLY_A_NUMBER_RE = re.compile(
 _WHOLE_DIGEST_RE = re.compile(
     r"[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64}|[0-9a-f]{128}", re.IGNORECASE
 )
+
+
+# A bare library or API name: one word of letters, digits and underscores that
+# is not only a number. The only shape a Windows library is written in without
+# its extension ("WinINet" for ``wininet.dll``).
+_BARE_NAME_RE = re.compile(r"[a-z_][a-z0-9_]*[a-z_][a-z0-9_]*", re.IGNORECASE)
+
+
+def library_spellings(value: str) -> tuple[str, ...]:
+    """``value`` lower-cased, and a bare name with the ``.dll`` a library carries.
+
+    DLL and API names are compared without regard to case: Windows resolves
+    them that way, and a report writes ``WinINet`` for the ``wininet.dll`` a
+    tool prints. A bare word is also the library of that name, so an entry
+    that lists ``wininet.dll`` holds the ``WinINet`` a sentence names; the
+    reverse is not read, since a word in a text is not a library it loads.
+    """
+    lowered = str(value or "").lower()
+    if _BARE_NAME_RE.fullmatch(lowered):
+        return (lowered, f"{lowered}.dll")
+    return (lowered,)
 
 
 def decidable(value: str) -> bool:
