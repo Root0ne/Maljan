@@ -112,8 +112,10 @@ from maljan.pipeline.run_state import NO_LIMIT, budget_line
 from maljan.pipeline.validation import (
     ANALYST_FEEDBACK_CLOSING,
     MALWARE_TYPES,
+    UNATTRIBUTED_INDICATOR_CODE,
     CapabilityGrounding,
     EntryTexts,
+    Violation,
     _term_ids_said,
     absence_claim_violation,
     analyst_cut_violation,
@@ -124,6 +126,7 @@ from maljan.pipeline.validation import (
     confidence_violation,
     flow_voice_violations,
     gate_removed_note,
+    kept_after_the_sandbox_fact,
     malware_object_violations,
     misstated_entry_contents,
     recommendation_indicator_violations,
@@ -154,11 +157,22 @@ from maljan.reporting.composer import (
     WHERE_QUOTED_LEAD,
     section_contract,
 )
+from maljan.reporting.evidence_bundles import sample_flow_fact
+from maljan.reporting.models import (
+    FileHashes,
+    MalwareReport,
+    NetworkDomain,
+    NetworkIOCs,
+    NetworkIP,
+    SampleIdentity,
+    TTPMapping,
+)
 from maljan.reporting.narrative_agent import (
     _SYSTEM_PROMPT,
     CLAIMS_IN_FORCE_HEADING,
     EXAMPLE_OBJECT,
     EXPECTED_OBJECT,
+    build_prompt_text,
 )
 from maljan.reporting.renderers.markdown import analyst_list_note
 from maljan.reporting.renderers.stix_renderer import (
@@ -368,6 +382,33 @@ def _analysis_tool_descriptions(*names: str) -> str:
 
 
 # Everything else a report model is shown on every run, as plain text.
+# A network block with one address the sample reached, one the sandbox
+# recorded and does not attribute, a name that resolved to the second, a name
+# with no answers, and a name it never saw: each fact the observed-step
+# question can state.
+_FLOW_FACTS_REPORT = MalwareReport(
+    identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+    network=NetworkIOCs(
+        ips=[
+            NetworkIP(address="192.0.2.9", source="sandbox", sample_process_tree=True),
+            NetworkIP(address="192.0.2.2", source="sandbox"),
+        ],
+        domains=[
+            NetworkDomain(fqdn="one.example.com", source="sandbox", resolved_ips=["192.0.2.2"]),
+            NetworkDomain(fqdn="two.example.com", source="sandbox"),
+        ],
+    ),
+    ttp_mappings=[
+        TTPMapping(
+            technique_id="T1112",
+            technique_name="Modify Registry",
+            contributing_layers=["static", "dynamic"],
+            independent_layers=["static"],
+            identical_statements=1,
+        )
+    ],
+)
+
 PROMPTS: dict[str, str] = {
     "example team document prompts": _TEAM_DOCUMENT_PROMPTS,
     "narrative contract": EXPECTED_OBJECT,
@@ -502,6 +543,21 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "judge technique answer form": TECHNIQUE_ANSWER_FORM,
+    "the judge's recorded answer after the sandbox's fact": " ".join(
+        v.message
+        for v in kept_after_the_sandbox_fact(
+            [
+                Violation(
+                    code=UNATTRIBUTED_INDICATOR_CODE,
+                    message="m",
+                    subject="domain:one.example.com",
+                )
+            ]
+        )
+    ),
+    "narrative prompt's technique lines with the independent layers": build_prompt_text(
+        _FLOW_FACTS_REPORT
+    ),
     "narrative question about a recommendation naming a value not published": " ".join(
         v.message
         for v in recommendation_indicator_violations(
@@ -556,7 +612,10 @@ PROMPTS: dict[str, str] = {
                     },
                     {
                         "order": 3,
-                        "action": "Reaches 192.0.2.1 and one.example.com.",
+                        "action": (
+                            "Reaches 192.0.2.1, 192.0.2.2, one.example.com, two.example.com "
+                            "and three.example.com."
+                        ),
                         "voice": "observed",
                         "evidence_refs": ["ev_0001"],
                     },
@@ -564,7 +623,7 @@ PROMPTS: dict[str, str] = {
             },
             ["ev_0001"],
             tools={"ev_0002": "t"},
-            flow_fact=lambda kind, value: f"no flow ({kind})",
+            flow_fact=sample_flow_fact(_FLOW_FACTS_REPORT),
         )
     ),
     "evidence summary naming each id from the vendored table": summarise(
