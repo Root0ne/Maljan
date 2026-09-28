@@ -1492,6 +1492,34 @@ counted as part of it. A chunk's answer is
 asked inside its chunk, as a cut one is. A local triage answer began 639 claims
 in 32,768 tokens, 85 of them distinct.
 
+Two more questions are asked of an analyst's answer in the same validation
+turn, each once, and what the analyst answers stands.
+
+- **Decompiled but not described** (`isr.decompiled_not_described`). The
+  functions the analyst's own ledger entries decompiled — a tool whose name
+  says it decompiles, and a call that answered — are read off those entries:
+  the address the call was given (or the one a decompiler's generic name such
+  as `FUN_`, `fcn.` or `sub_` carries) and the names the call and the
+  listing's signature give. A claim describes one when its sentence or its
+  evidence line names it: the same address, or one that differs by a multiple
+  of 64 KiB (an offset from the image base against the virtual address), or a
+  name the decompiler gave it. Citing the entry alone does not. The functions
+  no claim names are listed in one question with their names and entries. The
+  functions the kept answer still names in no claim are recorded, and §13's
+  validation list prints the line naming them. A reverser had decompiled the
+  start-up path and the installer of a loader and described neither.
+- **Library-only claims** (`isr.library_only_claims`). A claim of one
+  sentence whose subject (the sample, or none) uses, imports, calls or loads
+  libraries or their APIs, with or without a purpose ("for y"), that names no
+  code location in its sentence or its evidence line and whose evidence line
+  carries nothing beyond an import listing (ledger ids, library and API names,
+  counts, the words that say what a listing is). Every such claim is quoted in
+  one question asking to merge them into the claims whose behaviour they
+  support or to detail each. The answer stands: a retry with fewer claims is
+  kept when it keeps at least as many as the first answer had besides the
+  library-only ones, and one that keeps them is kept with the finding
+  recorded. A reverser's answer carried 36 such claims of 61.
+
 The cap the check reads is the one the call was built with. The container
 records it on the model it builds (`context_window.record_built_cap`), and the
 analysts' cut check, their spend-meter admissions and the judge's checks and

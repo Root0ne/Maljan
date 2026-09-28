@@ -60,6 +60,8 @@ from maljan.pipeline.validation import (
     ANALYST_REPEATED_CODE,
     CLAIM_DOES_NOT_DESCRIBE_CODE,
     CLAIMS_UNDER_DISPUTES_CODE,
+    DECOMPILED_NOT_DESCRIBED_CODE,
+    LIBRARY_ONLY_CLAIMS_CODE,
     VALIDITY_CODE,
     ClaimsRepeated,
     ValidationTally,
@@ -69,9 +71,14 @@ from maljan.pipeline.validation import (
     chunk_cut_unread_sentence,
     claims_kept_under_disputes_finding,
     claims_repeated,
+    decompiled_functions,
+    decompiled_not_described_violation,
+    library_only_claims,
+    library_only_claims_violation,
     mark_invalid_technique_ids,
     parse_violations,
     retry_with_feedback_sync,
+    undescribed_decompiles,
     validate_isr,
     validity_check_available,
 )
@@ -6379,6 +6386,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         ledger_ids.extend(
             str(i) for i in (getattr(self, "pack_ledger_ids", None) or []) if str(i).strip()
         )
+        # The functions this analyst's own calls decompiled: any no claim of
+        # the answer names by address or name is listed to it, once.
+        decompiled = decompiled_functions(getattr(self, "_evidence_entries", None) or [])
 
         # The validity check answers from the vendored id universe; a box
         # without it cannot check anything, and says so in the run summary
@@ -6461,9 +6471,15 @@ class BaseAnalyst(BudgetMeter, ABC):
             if only_cut:
                 return _whole_answer_questions(candidate)
             unread = [] if nudged else parse_violations(candidate)
+            undescribed = decompiled_not_described_violation(
+                undescribed_decompiles(candidate, decompiled)
+            )
+            library_only = library_only_claims_violation(candidate)
             return [
                 *_whole_answer_questions(candidate),
                 *unread,
+                *([undescribed] if undescribed is not None else []),
+                *([library_only] if library_only is not None else []),
                 *validate_isr(
                     candidate,
                     attck=knowledge,
@@ -6532,6 +6548,8 @@ class BaseAnalyst(BudgetMeter, ABC):
                     ANALYST_CUT_CODE,
                     ANALYST_REPEATED_CODE,
                     CLAIMS_UNDER_DISPUTES_CODE,
+                    DECOMPILED_NOT_DESCRIBED_CODE,
+                    LIBRARY_ONLY_CLAIMS_CODE,
                 )
                 else v
                 for v in initial
@@ -6760,6 +6778,25 @@ class BaseAnalyst(BudgetMeter, ABC):
                     self.name,
                 )
                 return first_answer
+            # Asked to merge or detail the claims that say only that a library
+            # is used: an answer that folds them away stands, as long as it
+            # keeps as many claims as the first answer had besides them.
+            library_first = len(library_only_claims(first_answer))
+            if (
+                library_first
+                and retried.claims
+                and len(retried.claims) < len(first_answer.claims)
+                and len(retried.claims) >= len(first_answer.claims) - library_first
+            ):
+                self.logger.info(
+                    "Validation: '%s' answered the library-claims question with %d claim(s) "
+                    "against %d, %d of them library-only; its answer is kept.",
+                    self.name,
+                    len(retried.claims),
+                    len(first_answer.claims),
+                    library_first,
+                )
+                return retried
             if len(retried.claims) < len(first_answer.claims):
                 self.logger.warning(
                     "Validation: the retry for '%s' returned %d claim(s) against %d; "
