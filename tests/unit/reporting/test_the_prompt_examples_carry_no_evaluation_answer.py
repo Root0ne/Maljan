@@ -104,6 +104,7 @@ from maljan.pipeline.mediation_models import (
 from maljan.pipeline.nodes import (
     NO_SANDBOX_DATA_REASON,
     NO_STATIC_FIXTURE_NOTE,
+    run_quality_note,
     skipped_analysts_reason,
 )
 from maljan.pipeline.run_state import NO_LIMIT, budget_line
@@ -414,6 +415,12 @@ PROMPTS: dict[str, str] = {
     ),
     "judge compact bundle rules": COMPACT_BUNDLE_RULES,
     "judge malware object rule": MALWARE_OBJECT_RULE,
+    "judge run quality paragraphs": " ".join(
+        [
+            run_quality_note(["a reason"], degraded=True),
+            run_quality_note(["a reason", "a note"], degraded=False, informational=["a note"]),
+        ]
+    ),
     "judge malware object questions": " ".join(
         v.message
         for v in malware_object_violations(

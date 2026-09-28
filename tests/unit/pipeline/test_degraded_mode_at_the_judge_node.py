@@ -185,3 +185,41 @@ class TestASkippedAnalystIsSaidToBeSkipped:
     def test_an_analyst_that_claimed_is_not_named(self) -> None:
         reasons = self._reasons(dynamic_claims=True)
         assert "analysts skipped (no sandbox data): network" in reasons
+
+
+class TestANoteOnPartOfAnAnswer:
+    """An unread claim beside claims read is listed and does not degrade the run."""
+
+    SENTENCE = (
+        "The static analyst's answer began 2 claim(s), and 1 were read; 1 could not be "
+        "read as a claim and are not in its findings."
+    )
+
+    def _judged(self) -> tuple[dict[str, Any], str]:
+        state = _state([])
+        isr = state["isr_reports"]["static"]
+        isr.note_claims_unread(self.SENTENCE)
+        container = _Container(EvidenceCounter())
+        judge = container.get_judge_agent(role="judge")
+        judge.give_verdict = AsyncMock(
+            return_value=JudgeVerdict(
+                bundle=Bundle(objects=[]), violations=[], retries=0, fed_back={}
+            )
+        )
+        update = asyncio.run(make_judge_node(container)(state))
+        return update, str(judge.give_verdict.call_args.kwargs.get("degradation_note") or "")
+
+    def test_the_run_is_not_degraded_and_the_note_is_listed(self) -> None:
+        update, _note = self._judged()
+
+        assert self.SENTENCE in update["degradation_reasons"]
+        assert update["degraded_mode"] is False
+        assert update["run_summary"]["degraded_mode"] is False
+
+    def test_the_judge_is_told_it_is_a_note_not_a_missing_tool(self) -> None:
+        _update, note = self._judged()
+
+        assert self.SENTENCE in note
+        assert "degraded" not in note
+        assert "claims it read standing" in note
+        assert "missing tool" not in note

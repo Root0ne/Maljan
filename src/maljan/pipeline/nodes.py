@@ -1978,22 +1978,63 @@ def claims_under_disputes_unasked(isr_reports: Mapping[str, Any]) -> list[str]:
     return out
 
 
+# What the judge is told of a run's limitations when they do not degrade it,
+# by kind: a tool that did not answer, and a note on part of an answer.
+RUN_QUALITY_ABSENT_TOOL = (
+    "The rest of the pack ran; read a missing tool as an absence of that evidence, "
+    "not as a finding."
+)
+RUN_QUALITY_ANSWER_NOTE = (
+    "A note on part of an analyst's answer leaves the claims it read standing; "
+    "weigh those as written."
+)
+
+
+def run_quality_note(
+    reasons: Sequence[str], *, degraded: bool, informational: Sequence[str] = ()
+) -> str:
+    """The RUN QUALITY paragraph the judge reads, or ``""`` when the run recorded nothing.
+
+    A degraded run is said to be one. A run that is not says what its
+    limitations are, and only the sentences that fit them: the missing-tool
+    sentence when a reason other than a note on an answer is listed, the
+    answer-note sentence when such a note is.
+    """
+    if not reasons:
+        return ""
+    sentences = "; ".join(reason_sentence(r) for r in reasons).rstrip(". ")
+    if degraded:
+        return (
+            f"RUN QUALITY — this analysis is degraded because {sentences}. "
+            "Weigh your confidence accordingly: a verdict drawn from thin "
+            "evidence should say so in its numbers, not only in its prose."
+        )
+    noted = {str(reason) for reason in informational}
+    parts = [f"RUN QUALITY — {sentences}."]
+    if any(str(reason) not in noted for reason in reasons):
+        parts.append(RUN_QUALITY_ABSENT_TOOL)
+    if any(str(reason) in noted for reason in reasons):
+        parts.append(RUN_QUALITY_ANSWER_NOTE)
+    return " ".join(parts)
+
+
 def informational_reasons_in_force(isr_reports: Mapping[str, Any]) -> list[str]:
     """The reasons of the answers in force that are notes rather than a degraded run.
 
     An answer part of which could not be read, while the analyst still has
     claims read, is its answer with a note: the claims read stand. Headings
-    under a DISPUTES section the analyst was never asked about are a note on
-    the same footing. Both stay in the run's limitations; neither makes the
-    verdict tentative. An answer none of whose claims were read is not here,
-    and still degrades the run.
+    under a DISPUTES section the analyst was never asked about, beside claims
+    it has read, are a note on the same footing. Both stay in the run's
+    limitations; neither makes the verdict tentative. An answer none of whose
+    claims were read is not here, and still degrades the run.
     """
     out: list[str] = []
-    for isr in isr_reports.values():
+    read = {key: isr for key, isr in isr_reports.items() if getattr(isr, "claims", None)}
+    for isr in read.values():
         reason = str(getattr(isr, "claims_unread_reason", "") or "")
-        if reason and getattr(isr, "claims", None) and reason not in out:
+        if reason and reason not in out:
             out.append(reason)
-    for sentence in claims_under_disputes_unasked(isr_reports):
+    for sentence in claims_under_disputes_unasked(read):
         if sentence not in out:
             out.append(sentence)
     return out
@@ -4135,21 +4176,9 @@ def make_judge_node(
             # in the report node, which told the reader the confidence was
             # capped and told the judge nothing at all. The pack's tokens are
             # rendered as sentences here and stay tokens in the run summary.
-            degradation_note = ""
-            if _degradation_reasons:
-                _sentences = "; ".join(reason_sentence(r) for r in _degradation_reasons)
-                degradation_note = (
-                    (
-                        f"RUN QUALITY — this analysis is degraded because {_sentences}. "
-                        "Weigh your confidence accordingly: a verdict drawn from thin "
-                        "evidence should say so in its numbers, not only in its prose."
-                    )
-                    if _degraded_mode
-                    else (
-                        f"RUN QUALITY — {_sentences}. The rest of the pack ran; read a "
-                        "missing tool as an absence of that evidence, not as a finding."
-                    )
-                )
+            degradation_note = run_quality_note(
+                _degradation_reasons, degraded=_degraded_mode, informational=_informational
+            )
 
             verdict = await judge.give_verdict(
                 reports=reports,

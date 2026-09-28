@@ -288,6 +288,10 @@ def test_disputes_left_unasked_are_informational() -> None:
     isr = _analyst()._text_to_isr(text, revision_round=0)
     (sentence,) = claims_under_disputes_unasked({"reverser": isr})
     assert informational_reasons_in_force({"reverser": isr}) == [sentence]
+    # Beside no claim read, the same sentence is not a note.
+    emptied = isr.model_copy(update={"claims": []})
+    assert claims_under_disputes_unasked({"reverser": emptied}) == [sentence]
+    assert informational_reasons_in_force({"reverser": emptied}) == []
 
 
 def test_a_merged_chunked_answer_carries_each_chunk_s_reason() -> None:

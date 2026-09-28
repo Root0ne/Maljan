@@ -1409,7 +1409,11 @@ are informational while the analyst still has claims read
 other limitations and counted in the header's "Notes: … see §13" line, and
 they do not set `degraded_mode` (`triage_pack.run_is_degraded(reasons,
 informational=…)`). An answer none of whose claims was read, a failed stage
-and a failed required tool still degrade the run. A TECHNIQUE line is one
+and a failed required tool still degrade the run. The judge's RUN QUALITY
+paragraph (`nodes.run_quality_note`) says a run that is not degraded is not,
+and adds only the sentences that fit its limitations: that a missing tool is an
+absence of evidence when a reason other than such a note is listed, and that a
+note on part of an answer leaves the claims it read standing when one is. A TECHNIQUE line is one
 id, or `NONE` or a dash for none; any other line (a qualifier, a negation,
 several ids) claims no id, is kept on the claim as `technique_line`, and the
 validation turn asks once for one id per claim (`isr.technique_line_unread`).
