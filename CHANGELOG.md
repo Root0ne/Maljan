@@ -25,7 +25,7 @@ change landed on `main`.
   entry alone does not count.
 
   A batch answer is an object keyed by addresses (`0x…`, or four hex digits or
-  more). A plain listing is one function at its requested address, whatever
+  more with a decimal digit among them). A plain listing is one function at its requested address, whatever
   quoted strings it holds.
 
   The functions no claim names are listed in one question
@@ -2389,8 +2389,11 @@ change landed on `main`.
     its settings.
 
   `!` now splits a value, so `kernel32.dll!<key>` masks the key. A key joined
-  to other text by `/`, `|`, `+` or `&` is masked too, and only that piece: the
-  host, the directories and the file name around it stay as written. A MIME
+  to other text by `/`, `|`, `+` or `&`, a token inside a run, and the base64
+  a run ends with before `=` padding are masked with the whole stretch of
+  base64 characters around them, so no fragment of a key travels; a dot or any
+  other character outside those alphabets ends the stretch
+  (`host.example/<key>/x.php` reads `host.***.php`). A MIME
   type is kept only with a registered top-level type and a subtype that is no
   key. Vendor prefixes are still asked first, and configured values are still
   masked by value, so every credential shape stays masked.

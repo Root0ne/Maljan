@@ -1500,7 +1500,8 @@ turn, each once, and what the analyst answers stands.
     ledger entries: a tool whose name says it decompiles, and a call that
     answered.
   - *Reading a batch.* A batch answer is a JSON object every key of which is
-    an address: `0x…`, or at least four hex digits. It gives one function per
+    an address: `0x…`, or at least four hex digits with a decimal digit among
+    them (a hex word such as `cafe` is no address). It gives one function per
     key. A key whose listing begins with `Error` is left out. A cut answer is
     read member by member from its opening brace, and keeps the functions its
     text still shows. Any other answer is no batch, so a plain listing is one
@@ -1528,7 +1529,10 @@ turn, each once, and what the analyst answers stands.
     applies. A claim can also name the function by a name
     the decompiler gave it. Citing the entry alone does not count.
   - *The question and the finding.* The functions no claim names are listed in
-    one question, with their names and entries. The functions the kept answer
+    one question, with their names and entries. The question says what was
+    read: a name the decompiler gave, or the address or its offset from the
+    image base written in hex, and that an offset written in decimal digits
+    alone is not read as one. The functions the kept answer
     still names in no claim are recorded, and §13's validation list prints the
     line naming them.
   - *Why.* A reverser had decompiled two routines holding half of what the

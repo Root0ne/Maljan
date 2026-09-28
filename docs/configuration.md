@@ -2067,9 +2067,16 @@ module and the name are read apart.
 A key is still a key:
 
 - after a module and a `!`;
-- joined to any text by `/`, `|`, `+` or `&`: only the key-shaped piece is
-  masked, and the rest of the run stays as written
-  (`example.com/gate/***/x.php`);
+- joined to any text by `/`, `|`, `+` or `&`, or with a token inside the run:
+  the key is masked together with the whole stretch of base64 and base64url
+  characters (`A-Za-z0-9+/_-`) around it, so none of its fragments travels. Any
+  other character (a dot, `%`, `|`, `&`, `!`, `:`, a space) ends the stretch:
+  `example.com/gate/<key>/x.php` reads `example.***.php`, and
+  `host.example|<key>|x.php` reads `host.example|***|x.php`;
+- followed by base64 padding (`=`): the stretch of base64 characters the run
+  ends with, when it is 24 characters or more and no digest or identifier, is
+  masked, even when the key's own `/` and `+` cut it into short fragments or it
+  begins with a slash as a path does;
 - after a word, in the shape of a MIME type. Only a registered top-level type
   (`application`, `text`, `image` and the rest, or an `x-` type) with a
   subtype that is no key is kept as a MIME type;
@@ -2077,11 +2084,19 @@ A key is still a key:
 - as a configured value, which is still masked by value before any rule is
   read.
 
-None of these sets lets a credential through. What the piece rule costs: a
-readable segment of 24 or more characters that is no word and no catalogue
-name (a random directory or file name in a path, a long method name) is shown
-as `***` in its run. A run that reads as a key as a whole, such as a base64
-value with `+` or `/` in it, is still masked whole.
+None of these sets lets a credential through. Two costs follow from
+masking the stretch, and both are accepted, because the events and the
+transcript are not what the analysts read and a key fragment costs more than a
+directory name:
+
+- the readable text in the same stretch as a key is masked with it:
+  `samples/extracted/<key>/payload.bin` reads `***.bin`, and a directory or
+  host label next to the key goes too;
+- a readable segment of 24 or more characters that is no word and no catalogue
+  name (a random directory or file name, a long method name) reads as a key by
+  its shape, and is masked with its stretch.
+
+A run that reads as a key as a whole is masked whole, as before.
 
 Nothing is lost but the name in that sentence. The identity fields a line is
 filed under — `speaker`, `agent`, `stage`, `label`, `display_name` — are
