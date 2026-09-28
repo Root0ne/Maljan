@@ -648,6 +648,48 @@ IDENTITY_FIELDS = frozenset(
 )
 
 
+def remember_process_secrets(core_settings: Any = None) -> None:
+    """Hand the scrub the secrets this worker holds from its start, kept for its life.
+
+    The worker's own database, Redis and object-store credentials, and the
+    core settings it starts with. Registered under the ``process`` scope, which
+    a job never replaces. Never raises: a failure here leaves the shape rules.
+    """
+    try:
+        from maljan.core.settings_catalog import configured_secret_values
+        from maljan.pipeline.events import remember_secret_values
+
+        sources = [get_settings()] + ([core_settings] if core_settings is not None else [])
+        remember_secret_values(configured_secret_values(*sources), scope="process")
+    except Exception as exc:  # noqa: BLE001 — the shape rules still run
+        logger.warning(
+            "The worker's configured values were not handed to the scrub (%s).",
+            type(exc).__name__,
+        )
+
+
+def remember_configured_secrets(core_settings: Any) -> None:
+    """Hand the scrub the secret values of this job's settings, to be masked by value.
+
+    Model API keys, sandbox, Ghidra and tool-server credentials. A value an
+    operator chose can have any shape — a passphrase reads as words to every
+    shape rule — so these are masked as themselves wherever the scrub runs in
+    this process. Registered under the ``job`` scope, which the next job's
+    settings replace: a secret no longer configured is not masked after it.
+    The worker's own credentials are the ``process`` scope's
+    (``remember_process_secrets``). Never raises.
+    """
+    try:
+        from maljan.core.settings_catalog import configured_secret_values
+        from maljan.pipeline.events import remember_secret_values
+
+        remember_secret_values(configured_secret_values(core_settings), scope="job")
+    except Exception as exc:  # noqa: BLE001 — the shape rules still run
+        logger.warning(
+            "The job's configured values were not handed to the scrub (%s).", type(exc).__name__
+        )
+
+
 def scrubbed(value: Any, *, field: str = "") -> Any:
     """``value`` with every string inside it scrubbed, however deeply it sits.
 
@@ -719,7 +761,14 @@ async def _publish_event(
     # Scrubbed here, once, for all three sinks. Seven producers build these
     # payloads and a new one cannot be relied on to remember; the publisher is
     # where the wire begins, so it is where the guarantee belongs. Producers
-    # may still scrub — doing it twice changes nothing. The recorder's copy is
+    # may still scrub, and this second pass changes nothing for two reasons:
+    # the scrub repeats its passes until they change nothing, so it is
+    # idempotent over its own output; and the producers that bound scrubbed
+    # text — the argument and result summaries and a finding row — cut it with
+    # ``events._cut_whole``, which keeps a digest or an identifier whole and
+    # moves a cut that a scrub would change (inside a URL, after a scheme word)
+    # back to the start of its word. A producer that cuts scrubbed text any
+    # other way has no such guarantee. The recorder's copy is
     # scrubbed where it is taken (``_make_event_sink``), not here: it is taken
     # before this coroutine is even scheduled, and on the paths the recorder
     # exists for this coroutine never runs.
@@ -1870,6 +1919,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # ``runtime_config`` today; if it ever needs core config it must
         # install its own.
         install_settings(core_settings)
+        remember_configured_secrets(core_settings)
         if overrides:
             logger.info(
                 "Applying %d runtime setting override(s) from the UI.",
@@ -1938,6 +1988,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             mock=_mock_active,
             job_id=job_id,
             analyst_mode=_analyst_mode,
+            # The job's secrets are registered above (``remember_configured_secrets``).
+            remember_secrets=False,
             event_sink=_make_event_sink(
                 redis_conn,
                 job_id,
@@ -3014,6 +3066,7 @@ async def startup(ctx: dict) -> None:
         # defaults only, same as bare get_settings() used to fall back to,
         # minus the environment read.
         core = build_settings({})
+        remember_process_secrets(core)
         sample_files.sweep(mirror_dir=core.static.r2.mirror_dir)
         # The directories this worker hands a sidecar a path into. A tool
         # server reads a path argument only inside the roots it was given, and

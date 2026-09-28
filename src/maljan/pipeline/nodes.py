@@ -1821,6 +1821,131 @@ def _corroboration_with_publication(report: Any, state: AnalysisState) -> dict[s
     return mark_unpublished(rows, published, reasons)
 
 
+def a_report_node_follows(container: Any) -> bool:
+    """Whether this run's graph has a report node after the judge. Never raises.
+
+    ``reporting.enabled`` off drops the report stage (``topology.plan``), and a
+    profile may have none; anything that cannot be read counts as one following,
+    which is the default graph.
+    """
+    try:
+        if not bool(container.config.reporting.enabled):
+            return False
+    except Exception as exc:  # noqa: BLE001 — the default graph has one
+        logger.warning(
+            "reporting.enabled could not be read (%s); the memory case waits for a report "
+            "node, as the default graph has one.",
+            type(exc).__name__,
+        )
+        return True
+    try:
+        return any(
+            str(getattr(stage, "kind", "")) == "report"
+            for stage in container.active_profile().stages
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "The profile could not be read (%s); the memory case waits for a report node, "
+            "as the default graph has one.",
+            type(exc).__name__,
+        )
+        return True
+
+
+def case_for_the_judge_alone(
+    case: Any, bundle: Any, isr_reports: Mapping[str, Any], corroborated: Sequence[str]
+) -> tuple[Any, str]:
+    """The case to hold when no report node follows the judge, and what was done, in words.
+
+    With no report, what the run publishes is the judge's bundle: the case is
+    moved to its attack-patterns' technique ids, and the thin-evidence gate is
+    asked of them. A bundle that is not one leaves no published set; the case
+    keeps the claimed techniques, is asked the gate on them, and the sentence
+    says so.
+    """
+    from maljan.memory.long_term_memory import is_thin_case, with_published_techniques
+    from maljan.pipeline.validation import _attack_pattern_technique_id
+
+    if not isinstance(bundle, Bundle):
+        if is_thin_case(case):
+            return None, "not stored: no published technique set, and the claimed set is thin"
+        return case, (
+            "no published technique set (the judge's bundle could not be read); the case "
+            "holds the claimed techniques"
+        )
+    published = [
+        tid
+        for obj in bundle.objects
+        if str(getattr(obj, "type", "")) == "attack-pattern"
+        for tid in [_attack_pattern_technique_id(obj)]
+        if tid
+    ]
+    moved = with_published_techniques(case, published, isr_reports, corroborated)
+    if is_thin_case(moved):
+        return None, (
+            f"not stored: thin published evidence (corroborated={moved.corroborated_count}, "
+            f"published techniques={moved.total_techniques})"
+        )
+    return moved, (
+        f"holds the {moved.total_techniques} technique(s) the judge's bundle published, "
+        "and is stored when the job completes"
+    )
+
+
+def _remember_the_published_techniques(
+    container: Any, report: Any, isr_reports: Mapping[str, Any], corroboration: Mapping[str, Any]
+) -> None:
+    """Move the case the judge held to what this run published, or drop it. Never raises.
+
+    The judge builds the case from the techniques claimed, before the report
+    decides which are published; the case is written once the job completes,
+    so it is moved here, where both are known: its techniques, its total, its
+    corroborated count and its search text. The thin-evidence gate the judge
+    applied to the claimed set is applied again to the published one, and a
+    case thin in what was published is not stored.
+    """
+    from maljan.analysis.corroboration import corroboration_sources
+    from maljan.memory.long_term_memory import (
+        StoredCase,
+        is_thin_case,
+        with_published_techniques,
+    )
+
+    case = getattr(container, "pending_memory_case", None)
+    if not isinstance(case, StoredCase):
+        return
+    try:
+        published = [
+            str(mapping.technique_id or "")
+            for mapping in (getattr(report, "ttp_mappings", None) or [])
+        ]
+        corroborated = [
+            str(tid)
+            for tid, row in (corroboration or {}).items()
+            if len(corroboration_sources(row)) > 1
+        ]
+        moved = with_published_techniques(case, published, isr_reports, corroborated)
+        if is_thin_case(moved):
+            container.pending_memory_case = None
+            logger.info(
+                "LTM: skipping store for '%s' (reason: thin published evidence: "
+                "corroborated=%d, published techniques=%d).",
+                case.sample_id[:16],
+                moved.corroborated_count,
+                moved.total_techniques,
+            )
+            return
+        container.pending_memory_case = moved
+        logger.info(
+            "LTM: case '%s' holds %d published technique(s) of %d claimed.",
+            case.sample_id,
+            len(moved.technique_ids),
+            len(case.technique_ids),
+        )
+    except Exception as exc:  # noqa: BLE001 — memory never costs a report
+        logger.warning("LTM: the case was not given the published techniques (%s).", exc)
+
+
 def _amended_validation(validation: Any, tally: ValidationTally) -> dict[str, Any] | None:
     """A ``validation`` block plus what the report round cost.
 
@@ -1943,6 +2068,68 @@ def claims_under_disputes_unasked(isr_reports: Mapping[str, Any]) -> list[str]:
             count,
             int(getattr(isr, "revision_round", 0) or 0),
         )
+        if sentence not in out:
+            out.append(sentence)
+    return out
+
+
+# What the judge is told of a run's limitations when they do not degrade it,
+# by kind: a tool that did not answer, and a note on part of an answer.
+RUN_QUALITY_ABSENT_TOOL = (
+    "The rest of the pack ran; read a missing tool as an absence of that evidence, "
+    "not as a finding."
+)
+RUN_QUALITY_ANSWER_NOTE = (
+    "A note on part of an analyst's answer leaves the claims it read standing; "
+    "weigh those as written."
+)
+
+
+def run_quality_note(
+    reasons: Sequence[str], *, degraded: bool, informational: Sequence[str] = ()
+) -> str:
+    """The RUN QUALITY paragraph the judge reads, or ``""`` when the run recorded nothing.
+
+    A degraded run is said to be one. A run that is not says what its
+    limitations are, and only the sentences that fit them: the missing-tool
+    sentence when a reason other than a note on an answer is listed, the
+    answer-note sentence when such a note is.
+    """
+    if not reasons:
+        return ""
+    sentences = "; ".join(reason_sentence(r) for r in reasons).rstrip(". ")
+    if degraded:
+        return (
+            f"RUN QUALITY — this analysis is degraded because {sentences}. "
+            "Weigh your confidence accordingly: a verdict drawn from thin "
+            "evidence should say so in its numbers, not only in its prose."
+        )
+    noted = {str(reason) for reason in informational}
+    parts = [f"RUN QUALITY — {sentences}."]
+    if any(str(reason) not in noted for reason in reasons):
+        parts.append(RUN_QUALITY_ABSENT_TOOL)
+    if any(str(reason) in noted for reason in reasons):
+        parts.append(RUN_QUALITY_ANSWER_NOTE)
+    return " ".join(parts)
+
+
+def informational_reasons_in_force(isr_reports: Mapping[str, Any]) -> list[str]:
+    """The reasons of the answers in force that are notes rather than a degraded run.
+
+    An answer part of which could not be read, while the analyst still has
+    claims read, is its answer with a note: the claims read stand. Headings
+    under a DISPUTES section the analyst was never asked about, beside claims
+    it has read, are a note on the same footing. Both stay in the run's
+    limitations; neither makes the verdict tentative. An answer none of whose
+    claims were read is not here, and still degrades the run.
+    """
+    out: list[str] = []
+    read = {key: isr for key, isr in isr_reports.items() if getattr(isr, "claims", None)}
+    for isr in read.values():
+        reason = str(getattr(isr, "claims_unread_reason", "") or "")
+        if reason and reason not in out:
+            out.append(reason)
+    for sentence in claims_under_disputes_unasked(read):
         if sentence not in out:
             out.append(sentence)
     return out
@@ -4070,7 +4257,12 @@ def make_judge_node(
             # about; only the identity tools, or the pack itself, failing makes
             # the run degraded on their own. Everything that is not the pack's
             # keeps the weight it always had.
-            _degraded_mode = run_is_degraded(_degradation_reasons)
+            # A note on part of an answer whose other claims were read is
+            # listed with the reasons and does not make the verdict tentative.
+            _informational: list[str] = []
+            with suppress(Exception):
+                _informational = informational_reasons_in_force(isr_reports)
+            _degraded_mode = run_is_degraded(_degradation_reasons, informational=_informational)
             if _degraded_mode:
                 logger.warning("Degraded run detected (%s).", "; ".join(_degradation_reasons))
 
@@ -4079,21 +4271,9 @@ def make_judge_node(
             # in the report node, which told the reader the confidence was
             # capped and told the judge nothing at all. The pack's tokens are
             # rendered as sentences here and stay tokens in the run summary.
-            degradation_note = ""
-            if _degradation_reasons:
-                _sentences = "; ".join(reason_sentence(r) for r in _degradation_reasons)
-                degradation_note = (
-                    (
-                        f"RUN QUALITY — this analysis is degraded because {_sentences}. "
-                        "Weigh your confidence accordingly: a verdict drawn from thin "
-                        "evidence should say so in its numbers, not only in its prose."
-                    )
-                    if _degraded_mode
-                    else (
-                        f"RUN QUALITY — {_sentences}. The rest of the pack ran; read a "
-                        "missing tool as an absence of that evidence, not as a finding."
-                    )
-                )
+            degradation_note = run_quality_note(
+                _degradation_reasons, degraded=_degraded_mode, informational=_informational
+            )
 
             verdict = await judge.give_verdict(
                 reports=reports,
@@ -4325,7 +4505,7 @@ def make_judge_node(
                     verdict_reading(bundle) if isinstance(bundle, Bundle) else VERDICT_READ_FALLBACK
                 )
                 logger.info(
-                    "RunSummary built: verdict=%s, rounds=%d, techniques=%d, "
+                    "RunSummary built: verdict=%s, rounds=%d, claimed techniques=%d, "
                     "validation retries=%d, unresolved=%d",
                     decision,
                     summary.negotiation.rounds_completed,
@@ -4337,17 +4517,14 @@ def make_judge_node(
                 logger.warning("RunSummary build failed (%s). Skipping.", exc)
 
             if memory_store is not None and isr_reports:
-                # Quality gate: skip the upsert
-                # when the run is clearly degraded (no corroboration, no
-                # techniques, failed analysts, etc.). A polluted entry
-                # poisons future analyses via the few-shot prior block.
+                # Quality gate: skip the upsert when the run is clearly
+                # degraded (failed analysts, no negotiation). A polluted entry
+                # poisons future analyses via the few-shot prior block. The
+                # thin-evidence gate is not asked here of what was claimed: it
+                # decides on what the run published, in the report node when
+                # one runs and below from the judge's own bundle when none does.
                 _ltm_skip_reason: str | None = None
-                if _corroborated == 0 and _technique_count <= 1:
-                    _ltm_skip_reason = (
-                        f"thin evidence: corroborated={_corroborated}, "
-                        f"techniques={_technique_count}"
-                    )
-                elif _failed_analysts:
+                if _failed_analysts:
                     _ltm_skip_reason = f"analyst failures: {', '.join(_failed_analysts)}"
                 elif state.get("iteration_count", 0) == 0 and not state.get("is_consensus", False):
                     _ltm_skip_reason = "no negotiation rounds completed"
@@ -4378,14 +4555,25 @@ def make_judge_node(
                         # Held, not written: the case is stored once the
                         # job has completed (``remember_the_run``), so a job
                         # that fails after its judge leaves no entry behind.
-                        container.pending_memory_case = case
-                        logger.info(
-                            "LTM: case '%s' (category=%s, techniques=%d) is stored "
-                            "when the job completes.",
-                            case.sample_id,
-                            case.malware_category,
-                            len(case.technique_ids),
-                        )
+                        if a_report_node_follows(container):
+                            container.pending_memory_case = case
+                            logger.info(
+                                "LTM: case '%s' (category=%s, claimed techniques=%d) is held "
+                                "for the report node, which moves it to the published "
+                                "techniques and decides whether it is stored.",
+                                case.sample_id,
+                                case.malware_category,
+                                len(case.technique_ids),
+                            )
+                        else:
+                            _agreed = [
+                                str(tid)
+                                for tid, row in _corroboration.items()
+                                if len(corroboration_sources(row)) > 1
+                            ]
+                            held, how = case_for_the_judge_alone(case, bundle, isr_reports, _agreed)
+                            container.pending_memory_case = held
+                            logger.info("LTM: case '%s': %s.", case.sample_id, how)
                     except Exception as e:
                         logger.warning(
                             "LTM case could not be built (%s). Analysis result is unaffected.",
@@ -5219,6 +5407,24 @@ def make_report_node(
         # run whose report printed three enterprise-only ids on an Android
         # sample said nothing about their not being published anywhere.
         _published_summary = _corroboration_with_publication(report, state)
+        _remember_the_published_techniques(
+            container,
+            report,
+            isr_reports,
+            (report.run_summary or {}).get("corroboration")
+            or (state.get("run_summary") or {}).get("corroboration")
+            or {},
+        )
+        # The exported bundle's size, now that it exists: the judge's summary
+        # counted the judge's own bundle, which the export extends. Only on a
+        # summary the judge wrote, which keeps the mock-mode contract.
+        if extended_dump is not None and state.get("run_summary"):
+            _exported = len(extended_dump.get("objects") or [])
+            _state_summary["stix_object_count"] = _exported
+            _counted = dict(report.run_summary or {})
+            if _counted:
+                _counted["stix_object_count"] = _exported
+                report.run_summary = _counted
         if _published_summary is not None:
             _state_summary["corroboration"] = _published_summary
             _with_publication = dict(report.run_summary or {})

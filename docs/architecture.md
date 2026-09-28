@@ -973,7 +973,17 @@ malware object's `sample_refs` is carried. Feedback names the judge's own positi
 drop maps them back. Nothing is written into a judge object that the judge left
 out: an untyped indicator stays untyped, and a malware object without
 `is_family`, which STIX requires, is asked about (`stix.is_family_missing`),
-and an `is_family` the judge wrote is published as written.
+and an `is_family` the judge wrote is published as written. Two more questions
+are asked of a judge malware object, once each, and answered by the judge:
+`is_family: false` on an object whose name is the family the judge attributed
+(`stix.is_family_contradicts_family`), and a kind the export cannot state
+(`stix.malware_type_vocabulary`) — `labels` written with no `malware_types`
+(the export does not carry `labels`, which the validator reads from the answer
+as written), or a `malware_types` value outside STIX 2.1's `malware-type-ov`
+vocabulary, which the question lists (`validation.MALWARE_TYPES`). The judge's
+prompt says an object named after the attributed family stands for it and that
+its kind goes under `malware_types` from that vocabulary. Nothing is rewritten:
+what the judge keeps is published as written.
 
 A judge malware object the export declines for a property the standard
 requires does not take the judge's relationships with it. The platform's own
@@ -1393,7 +1403,17 @@ in force the question was never put to (a nudged answer, a validation turn not
 asked for want of time, a path with no validation turn) is stated as a
 degradation reason apart from `claims_unread_reason` ("wrote N claim
 heading(s) under its DISPUTES section, which are not read as its own"). The
-code does not read the label's words to decide which they are. A TECHNIQUE line is one
+code does not read the label's words to decide which they are. Both sentences
+are informational while the analyst still has claims read
+(`nodes.informational_reasons_in_force`): they are listed in §13 with the
+other limitations and counted in the header's "Notes: … see §13" line, and
+they do not set `degraded_mode` (`triage_pack.run_is_degraded(reasons,
+informational=…)`). An answer none of whose claims was read, a failed stage
+and a failed required tool still degrade the run. The judge's RUN QUALITY
+paragraph (`nodes.run_quality_note`) says a run that is not degraded is not,
+and adds only the sentences that fit its limitations: that a missing tool is an
+absence of evidence when a reason other than such a note is listed, and that a
+note on part of an answer leaves the claims it read standing when one is. A TECHNIQUE line is one
 id, or `NONE` or a dash for none; any other line (a qualifier, a negation,
 several ids) claims no id, is kept on the claim as `technique_line`, and the
 validation turn asks once for one id per claim (`isr.technique_line_unread`).
@@ -2124,7 +2144,32 @@ worker, once the completed row is committed and the `completed` event is
 published, calls `MaljanApp.remember_the_run`, as the command line does once
 its run returns. A job that fails after its judge — a later node, or the worker
 storing its report — leaves neither, so a verdict nobody kept does not reach
-the next run's few-shot prior block or its family matches.
+the next run's few-shot prior block or its family matches. The judge builds
+the case from the techniques the analysts claimed, before the report decides
+which are published; the report node then hands it the published ids
+(`long_term_memory.with_published_techniques`, from `report.ttp_mappings`), so
+the case, §8, the export and `mitre.json` count one set. Its
+`total_techniques`, its `corroborated_count` (the kept ids more than one
+source named) and its search text (the claims' own words and only the kept
+ids, which a later run's attribution reads) follow. The thin-evidence gate —
+nothing corroborated and one technique at most — decides on the published set
+alone: the judge does not ask it of the claimed set when a report node follows
+(`nodes.a_report_node_follows`), and the report node drops a case thin in
+what was published. A run with no report node (`reporting.enabled` off, or a
+profile without a report stage) publishes the judge's bundle, so the judge
+moves the case to that bundle's attack-pattern ids and asks the gate of them
+(`nodes.case_for_the_judge_alone`); when the bundle cannot be read there is no
+published set, and the case keeps the claimed techniques and the log says so.
+The judge still skips a run with failed analysts or no negotiation round. An
+id the case leaves out of memory (a claim kept after the absence question, an
+id the catalogue lacks) stays out although the run published it. The judge's
+log line counts the claimed techniques and says so.
+
+The run summary's `stix_object_count` is the exported bundle's object count
+once the report node has built the export, on the state's summary and on
+`report.run_summary` alike; the judge's own bundle size is kept as
+`judge_stix_object_count`. A run whose export was not built keeps the judge's
+count in both.
 
 A cached vector records what produced it, and is reused only by the same
 thing. `maljan.memory.embeddings` has two backends — the sentence model and a

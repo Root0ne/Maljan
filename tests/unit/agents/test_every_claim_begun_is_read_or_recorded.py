@@ -257,6 +257,43 @@ def test_only_the_answers_in_force_carry_their_unread_claims_reason() -> None:
     assert claims_unread_in_force({"reverser": copied}) == [short.claims_unread_reason]
 
 
+def test_an_unread_claim_beside_claims_read_is_informational() -> None:
+    """Part of an answer unread, while the analyst's other claims were read, is a note.
+
+    The run states it in its limitations; it does not make the verdict
+    tentative. An answer none of whose claims were read still degrades.
+    """
+    from maljan.pipeline.nodes import claims_unread_in_force, informational_reasons_in_force
+
+    analyst = _analyst()
+    short = analyst._text_to_isr(MALFORMED, revision_round=0)
+    assert short.claims and short.claims_unread_reason
+    assert informational_reasons_in_force({"reverser": short}) == [short.claims_unread_reason]
+    # No claim left read (the consistency gate's copy set them all aside):
+    # the same sentence is not informational.
+    nothing = short.model_copy(update={"claims": []})
+    assert nothing.claims_unread_reason
+    assert claims_unread_in_force({"reverser": nothing}) == [nothing.claims_unread_reason]
+    assert informational_reasons_in_force({"reverser": nothing}) == []
+
+
+def test_disputes_left_unasked_are_informational() -> None:
+    from maljan.pipeline.nodes import claims_under_disputes_unasked, informational_reasons_in_force
+
+    text = (
+        "CLAIM 1: The file is a DLL.\nEVIDENCE: [ev_1]\nCONFIDENCE: 0.7\n\n"
+        "DISPUTES:\n\n"
+        "CLAIM 2: It creates a mutex.\nEVIDENCE: [ev_2]\nCONFIDENCE: 0.6\n"
+    )
+    isr = _analyst()._text_to_isr(text, revision_round=0)
+    (sentence,) = claims_under_disputes_unasked({"reverser": isr})
+    assert informational_reasons_in_force({"reverser": isr}) == [sentence]
+    # Beside no claim read, the same sentence is not a note.
+    emptied = isr.model_copy(update={"claims": []})
+    assert claims_under_disputes_unasked({"reverser": emptied}) == [sentence]
+    assert informational_reasons_in_force({"reverser": emptied}) == []
+
+
 def test_a_merged_chunked_answer_carries_each_chunk_s_reason() -> None:
     from maljan.analysis.chunk_merger import merge_chunk_isrs
 

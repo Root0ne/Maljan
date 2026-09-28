@@ -13,6 +13,8 @@ into existence.
 from __future__ import annotations
 
 import hashlib
+import random
+import uuid
 from typing import Any
 
 from maljan.pipeline import events as ev
@@ -20,6 +22,7 @@ from tests.credential_shapes import (
     jwt,
     lowercase_base64_blob,
     lowercase_body,
+    password,
     prefixed_key,
     standard_base64_key,
 )
@@ -517,6 +520,270 @@ class TestArgumentSummaries:
     def test_a_failure_with_no_remediation_still_says_nothing_raw(self) -> None:
         summary = ev.summarize_result("Traceback: /etc/maljan/secrets.env", ok=False)
         assert summary == "the call failed"
+
+
+class TestWordsJoinedBySeparators:
+    """A run of words with separators between them is prose, not a key.
+
+    The length rule read any 24-plus run of the base64 alphabet as a key, and
+    the run's own words fall into it: a claim's ``anti-debugging/environment``,
+    a STIX property name and an analyst's roster key all read ``***`` in the
+    published report. A run that splits on ``_``, ``-`` or ``/`` into two or
+    more pieces of letters alone, each shorter than a key, is words.
+    """
+
+    def test_the_word_runs_a_report_carries_are_kept(self) -> None:
+        for words in (
+            "anti-debugging/environment",
+            "x_maljan_contributing_agents",
+            "all_tools_reverser_ghidra",
+            "MALWARE_REVERSE_ENGINEER_ANALYST",
+        ):
+            assert ev.scrub(words) == words, words
+            assert ev.scrub(f"seen for {words} detection") == f"seen for {words} detection"
+
+    def test_a_key_made_of_letters_is_still_a_key(self) -> None:
+        """Letters alone do not make a run words: its pieces must be word-shaped."""
+        letters = "".join(char for char in lowercase_body(72) if char.isalpha())
+        for value in (
+            "ghs_" + letters[:36],
+            "key-" + letters[:32],
+            letters[:12] + "-" + letters[12:40],
+            "AbCdEfGhIjKl-MnOpQrStUvWx",
+            _vendor_key(body="-".join(["word"] * 6)),
+        ):
+            assert ev.scrub(value) == "***", value
+
+    def test_every_key_shape_is_still_masked(self) -> None:
+        for value in _every_key_shape():
+            assert ev.scrub(value) == "***", value
+            assert ev.scrub(f"the key {value} was sent") == "the key *** was sent", value
+
+
+def _word_shaped_body() -> str:
+    """A key body of lowercase letter groups, which the word rule alone reads as words."""
+    letters = "".join(char for char in lowercase_body(72) if char.isalpha())
+    return "-".join([letters[0:7], letters[7:14], letters[14:21]])
+
+
+class TestAVendorPrefixIsAskedBeforeTheWords:
+    """A known vendor format is a key whatever its body reads like, once the body is key-long."""
+
+    PREFIXES = (
+        "glpat-",
+        "xoxp-",
+        "xoxb-",
+        "xoxa-",
+        "xoxs-",
+        "xapp-",
+        "ghs_",
+        "ghp_",
+        "gho_",
+        "ghu_",
+        "ghr_",
+        "github_pat_",
+        "hf_",
+        "rk_live_",
+        "sk_live_",
+        "pk_live_",
+        "npm_",
+        "gocspx-",
+        "sk-",
+        "sk_",
+        "nvapi-",
+    )
+
+    def test_each_prefix_with_a_word_shaped_body_is_masked(self) -> None:
+        body = _word_shaped_body()
+        assert len(body) >= ev.PREFIXED_KEY_BODY_FLOOR
+        for prefix in self.PREFIXES:
+            value = prefix + body
+            assert ev.scrub(value) == "***", value
+            assert ev.scrub(f"sent {value} once") == "sent *** once", value
+
+    def test_a_short_word_after_a_prefix_is_a_word(self) -> None:
+        for words in ("key-exchange", "key-derivation-step"):
+            assert ev.scrub(words) == words
+
+    def test_key_dash_with_words_after_it_is_words(self) -> None:
+        """``key-`` begins ordinary phrases; only a body that is not words makes it a key."""
+        for words in ("key-derivation-function-parameters", "key-exchange-algorithm-negotiation"):
+            assert ev.scrub(words) == words
+            assert ev.scrub(f"the {words} step") == f"the {words} step"
+
+    def test_key_dash_with_a_mailgun_shaped_body_is_a_key(self) -> None:
+        body = hashlib.md5(b"a mailgun-shaped body").hexdigest()
+        assert len(body) == 32
+        assert ev.scrub("key-" + body) == "***"
+        assert ev.scrub(f"sent key-{body} once") == "sent *** once"
+
+
+class TestAConfiguredSecretIsMaskedByValue:
+    """A secret the platform holds is masked wherever it appears, whatever its shape.
+
+    The registry is reset around every test (``tests/conftest.py``).
+    """
+
+    @staticmethod
+    def _passphrase() -> str:
+        letters = "".join(char for char in lowercase_body(72) if char.isalpha())
+        return "-".join([letters[0:6], letters[6:11], letters[11:18], letters[18:24]])
+
+    def test_a_passphrase_shaped_secret_is_masked_once_remembered(self) -> None:
+        secret = self._passphrase()
+        assert ev.scrub(f"login with {secret} failed") == f"login with {secret} failed"
+
+        ev.remember_secret_values([secret])
+
+        assert ev.scrub(f"login with {secret} failed") == "login with *** failed"
+        assert ev.scrub_keeping_layout(f"a\n  {secret}\n") == "a\n  ***"
+        assert secret not in ev.safe_finding_value(f"the key is {secret}")
+        assert secret not in ev.summarize_args({"note": f"use {secret}"})
+        assert secret not in ev.summarize_result(f"answer {secret}")
+
+    def test_a_value_below_the_floor_is_not_remembered(self) -> None:
+        ev.remember_secret_values(["", "   ", "short"])
+        assert ev.scrub("a short word") == "a short word"
+
+    def test_a_value_is_masked_only_as_a_whole_word(self) -> None:
+        """No letter, digit or underscore may touch it: the value inside a longer word stays."""
+        ev.remember_secret_values(["minioadmin", "maljan_dev"])
+
+        assert ev.scrub("minioadministrator and maljan_development") == (
+            "minioadministrator and maljan_development"
+        )
+        assert ev.scrub("user minioadmin, db maljan_dev.") == "user ***, db ***."
+        assert ev.scrub("(minioadmin)") == "(***)"
+
+    def test_an_escape_sequence_is_a_boundary(self) -> None:
+        """A tool answer carried as JSON text puts ``\\n`` or ``\\t`` against a value."""
+        secret = self._passphrase()
+        ev.remember_secret_values([secret])
+        for escape in ("\\n", "\\t", "\\r", '\\"', "\\\\", "\\u00a0"):
+            text = '{"out":"line' + escape + secret + escape + 'next"}'
+            scrubbed = ev.scrub(text)
+            assert secret not in scrubbed, escape
+            assert scrubbed == '{"out":"line' + escape + "***" + escape + 'next"}', escape
+
+    def test_a_scope_registered_again_replaces_what_it_held(self) -> None:
+        first, second, own = password(16), password(16, variant=1), password(16, variant=2)
+        ev.remember_secret_values([own], scope="process")
+        ev.remember_secret_values([first], scope="job")
+        ev.remember_secret_values([second], scope="job")
+
+        assert ev.scrub(f"{first} {second} {own}") == f"{first} *** ***"
+
+    def test_forgetting_clears_every_scope(self) -> None:
+        secret = password(16)
+        ev.remember_secret_values([secret], scope="process")
+        ev.forget_secret_values()
+        assert ev.scrub(secret) == secret
+
+
+def _every_key_shape() -> list[str]:
+    """Every shape ``tests/credential_shapes.py`` builds that the scrub reads by shape.
+
+    A plaintext password and a stored hash are not among them: those are
+    masked by the name of the field that carries them, never by their shape.
+    """
+    return [
+        lowercase_body(24),
+        lowercase_body(32),
+        prefixed_key("key-"),
+        prefixed_key("gocspx-", 24),
+        prefixed_key("ghs_", 36),
+        prefixed_key("sk-"),
+        prefixed_key("sk_"),
+        prefixed_key("nvapi-"),
+        prefixed_key("ghp_", 36),
+        prefixed_key("gho_", 36),
+        prefixed_key("xoxb-"),
+        prefixed_key(""),
+        lowercase_base64_blob(),
+        standard_base64_key(),
+        jwt(),
+        jwt(header=b'{ "alg":"HS256"}'),
+    ]
+
+
+class TestASummaryIsCutOutsideADigest:
+    """A capped value keeps a digest whole, so a second scrub finds nothing to mask.
+
+    The publisher scrubs every payload again. A ``<sha256>.exe`` file name is
+    longer than one argument's cap, and cutting it inside the digest left a
+    63-character hex run the second pass read as a key.
+    """
+
+    def test_a_digest_file_name_is_kept_whole(self) -> None:
+        name = _digest("sha256") + ".exe"
+        assert len(name) > ev.ARGUMENT_VALUE_CHARS
+        summary = ev.summarize_args({"file_path": name})
+        assert _digest("sha256") in summary
+        assert ev.scrub(summary) == summary
+
+    def test_the_whole_line_is_not_cut_inside_a_digest(self) -> None:
+        sha = _digest("sha256")
+        note = ("plain words " * 20)[:50].strip()
+        args = {f"note{index}": note for index in range(3)}
+        args["sample"] = sha
+        whole = ", ".join(f"{name}={value}" for name, value in args.items())
+        assert whole.index(sha) < ev.ARGUMENT_SUMMARY_CHARS < len(whole)
+        summary = ev.summarize_args(args)
+        assert sha in summary
+        assert ev.scrub(summary) == summary
+
+    def test_a_result_headline_is_not_cut_inside_a_digest(self) -> None:
+        sha = _digest("sha256")
+        output = "plain words " * 18 + sha + " and more after it"
+        assert output.index(sha) < ev.RESULT_SUMMARY_CHARS < output.index(sha) + len(sha)
+        summary = ev.summarize_result(output)
+        assert sha in summary
+        assert ev.scrub(summary) == summary
+
+    def test_the_scrub_leaves_any_summary_as_it_is(self) -> None:
+        """Generated, seeded: whatever a producer builds, a second scrub changes nothing."""
+        rng = random.Random(20260917)
+        for _ in range(800):
+            args = {f"arg{index}": _generated_text(rng) for index in range(rng.randint(1, 8))}
+            summary = ev.summarize_args(args)
+            assert ev.scrub(summary) == summary, args
+            one = ev.summarize_args({"value": _generated_text(rng)})
+            assert ev.scrub(one) == one
+            text = _generated_text(rng, pieces=rng.randint(10, 60))
+            for made in (ev.summarize_result(text), ev.safe_finding_value(text), ev.scrub(text)):
+                assert ev.scrub(made) == made, text
+
+    def test_a_cut_never_lands_inside_a_url_or_after_a_scheme_word(self) -> None:
+        url = "https://" + "host" * 20 + ".example/path?q=1"
+        for text in ("a " * 100 + url, "b " * 115 + "token " + "c" * 40, "d " * 117 + "Bearer x"):
+            for made in (ev.summarize_result(text), ev.summarize_args({"v": text})):
+                assert ev.scrub(made) == made, made
+
+
+def _generated_text(rng: random.Random, pieces: int = 0) -> str:
+    """A text of the fragments a scrub rule reads, in a seeded order."""
+    sha, md5 = _digest("sha256", str(rng.random()).encode()), _digest("md5")
+    fragments = [
+        lambda: "https://" + "h" * rng.randint(3, 60) + ".example/" + "p" * rng.randint(0, 30),
+        lambda: _url_with_userinfo("op", password(12), "vt.example:8443/x?k=" + password(20)),
+        lambda: (
+            rng.choice(["Bearer", "token", "Basic", "bearer"]) + " " + password(rng.randint(4, 30))
+        ),
+        lambda: sha + rng.choice(["", ".exe", ".dll", "." + "e" * 20]),
+        lambda: md5 * rng.randint(1, 3),
+        lambda: str(uuid.UUID(int=rng.getrandbits(128))),
+        lambda: "/home/op/samples/" + lowercase_body(rng.randint(10, 36)),
+        lambda: r"C:\\Users\\op\\" + lowercase_body(rng.randint(10, 36)) + ".exe",
+        lambda: "all_tools_reverser_ghidra",
+        lambda: "anti-debugging/environment",
+        lambda: standard_base64_key(),
+        lambda: prefixed_key(rng.choice(["ghs_", "key-", "sk-", ""])),
+        lambda: rng.choice(["the", "sample", "wrote", "a", "file", "=", ",", ";", ":", "(x)"]),
+        lambda: "word " * rng.randint(1, 30),
+        lambda: jwt(),
+    ]
+    count = pieces or rng.randint(1, 12)
+    return rng.choice([" ", "", ", "]).join(rng.choice(fragments)() for _ in range(count))
 
 
 class TestTheKeyShapesARunOfWordCharactersMisses:

@@ -26,11 +26,11 @@ from __future__ import annotations
 import base64
 import binascii
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from maljan.core.logger import logger
-from maljan.utils.marked_cut import marked_cut
+from maljan.utils.marked_cut import CUT_MARK, marked_cut
 
 # (event_type, payload) -> None. Must be safe to call from any thread.
 EventSink = Callable[[str, dict[str, Any]], None]
@@ -420,6 +420,60 @@ _SECRET_ARGUMENT_WORDS = (
 # echoed by an API response travelled verbatim while the same key passed as a
 # bare argument was replaced.
 _CREDENTIAL_PREFIXES = ("sk-", "sk_", "nvapi-", "ghp_", "gho_", "xoxb-")
+# Vendor key formats whose prefix is also the start of ordinary words
+# (``key-exchange``) or whose body can be letter groups the word rule below
+# reads as words. A run that begins with one of these and carries a body of at
+# least ``PREFIXED_KEY_BODY_FLOOR`` characters after it is a key, asked before
+# the word rule: GitLab, Slack, GitHub, Hugging Face, Mailgun, Stripe, npm and
+# Google OAuth client secrets. Every real body of these formats is longer than
+# the floor. Mailgun's ``key-`` is asked apart (``_MAILGUN_PREFIX``): it begins
+# ordinary phrases (``key-derivation-function-parameters``), so its body must
+# also not be words.
+_PREFIXED_KEY_FORMATS = (
+    "glpat-",
+    "xoxp-",
+    "xoxb-",
+    "xoxa-",
+    "xoxs-",
+    "xoxr-",
+    "xapp-",
+    "ghs_",
+    "ghp_",
+    "gho_",
+    "ghu_",
+    "ghr_",
+    "github_pat_",
+    "hf_",
+    "rk_live_",
+    "sk_live_",
+    "pk_live_",
+    "rk_test_",
+    "sk_test_",
+    "pk_test_",
+    "npm_",
+    "gocspx-",
+    *_CREDENTIAL_PREFIXES,
+)
+PREFIXED_KEY_BODY_FLOOR = 20
+_MAILGUN_PREFIX = "key-"
+# The secret values this process holds in its own settings — model API keys,
+# sandbox and Ghidra tokens, the VirusTotal key, the database, Redis and object
+# store passwords — masked by exact value wherever the scrub runs, whatever
+# their shape: a passphrase an operator configured reads as words to every
+# shape rule here, and this is what catches it. Held per scope — ``process``
+# for what a worker or an app holds from its start, ``job`` for a job's own
+# settings — and a scope registered again replaces what it held, so a secret no
+# longer configured stops being masked. Filled by ``remember_secret_values``.
+_SECRET_SCOPES: dict[str, frozenset[str]] = {}
+# The union of every scope as one pattern, longest value first so a secret that
+# contains another is masked whole, and each value only where no letter, digit
+# or underscore touches it: ``minioadmin`` configured leaves ``minioadministrator``
+# as written. ``None`` when nothing is registered.
+_CONFIGURED_PATTERN: re.Pattern[str] | None = None
+# A configured value shorter than this is not masked by value: a four-letter
+# password masked everywhere would take every word it spells out of every
+# sentence. Such a value is still masked by name and by shape.
+CONFIGURED_SECRET_FLOOR = 8
 # Where a run of interest may begin: the start of the text, or right after a
 # character that separates values. Whitespace is not enough — a compact JSON
 # body from a tool server is one whitespace-separated word, and everything
@@ -498,6 +552,16 @@ _JWT_RUN = re.compile(r"\A[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]
 # a second separator: ``/wJalrXUtnFEMIK7MDENG`` is a key that begins with a
 # slash, not a directory.
 _MIME_TYPE = re.compile(r"\A[a-z]+/[a-z0-9][a-z0-9.+_\-]*\Z")
+# Words with separators between them, which the base64 alternative above reads
+# as a key by its length alone: a claim's ``anti-debugging/environment``, a
+# STIX property name and an analyst's roster key are all 24 characters and
+# more of that alphabet. Two or more pieces split on ``_``, ``-`` or ``/``,
+# each written the way a word is — all lower case, all capitals, or one
+# capital in front — and each shorter than the length floor, so that a piece
+# which would be a key on its own keeps the whole run a key. A key's body of
+# random letters mixes its case or runs past the floor; a vendor prefix is
+# asked before this and wins.
+_WORD_PIECE = re.compile(r"\A(?:[a-z]{1,23}|[A-Z]{1,23}|[A-Z][a-z]{1,22})\Z")
 # The identifier this system issues for a job, a report, a sample and a
 # message. Exempt for the reason a digest is: it is on the job, on the report
 # and on the event that announced it, and an event reading ``report_id=***``
@@ -585,6 +649,11 @@ _PATH_RUN = re.compile(
 # 64 rather than a rounder number so a sha256 — the one long value this is
 # meant to let through whole — fits exactly instead of arriving one character
 # short of identifying anything.
+#
+# Each of these caps, and ``FINDING_VALUE_LIMIT`` below, can be exceeded by one
+# whole value: a digest or an identifier the cut would split is kept whole with
+# its extension (``_cut_whole``), so ``<sha256>.exe`` runs past the cap by a
+# few characters rather than arriving as half a digest a second scrub masks.
 ARGUMENT_VALUE_CHARS = 64
 ARGUMENT_SUMMARY_CHARS = 240
 ARGUMENTS_SUMMARISED = 6
@@ -685,24 +754,51 @@ def _looks_like_a_credential(token: str) -> bool:
     carries are exempted where their names are known, by key, in the
     publisher (``analysis_worker.scrubbed``); they are not guessed at here.
 
-    What that costs, stated rather than discovered: an agent key of 24 to 32
-    characters — the pattern allows up to 32 — has the shape of a key, so it
-    reads as ``***`` inside a *sentence*. The identity fields the line is
+    Words joined by separators are exempt by their shape (``_is_words``):
+    every piece letters alone, written the way a word is, and shorter than the
+    floor. That is what keeps a claim's ``anti-debugging/environment`` and an
+    agent key such as ``windows_pe_static_reverse_engineer`` in a sentence.
+    What is left costs, stated rather than discovered: an agent key of 24 to
+    32 characters with a digit in one of its pieces has the shape of a key, so
+    it reads as ``***`` inside a *sentence*. The identity fields the line is
     filed under are exempt by name and travel whole, so attribution is
     unaffected and only the name inside the prose goes. The roster is not
     consulted here on purpose: this is one pure function shared by every job
     on the worker, and a redaction rule whose answer depended on which run was
-    publishing would not be a redaction rule. ``docs/configuration.md`` tells
-    an operator to keep keys short; no shipped key is close to the floor.
+    publishing would not be a redaction rule.
     """
     if _DIGEST.match(token) or _IDENTIFIER.match(token) or token in _OWN_VARIABLE_NAMES:
         return False
     lowered = token.lower()
     if any(lowered.startswith(prefix) for prefix in _CREDENTIAL_PREFIXES):
         return True
-    if _MIME_TYPE.match(token) or _PATH_SHAPED.match(token):
+    if any(
+        lowered.startswith(prefix) and len(token) - len(prefix) >= PREFIXED_KEY_BODY_FLOOR
+        for prefix in _PREFIXED_KEY_FORMATS
+    ):
+        return True
+    if (
+        lowered.startswith(_MAILGUN_PREFIX)
+        and len(token) - len(_MAILGUN_PREFIX) >= PREFIXED_KEY_BODY_FLOOR
+        and not _is_words(token)
+    ):
+        return True
+    if _MIME_TYPE.match(token) or _PATH_SHAPED.match(token) or _is_words(token):
         return False
     return bool(_CREDENTIAL_RUN.match(token)) or _is_a_token(token)
+
+
+def _is_words(run: str) -> bool:
+    """Whether this run is words joined by ``_``, ``-`` or ``/`` rather than a key.
+
+    What this costs: no shape tells a passphrase or a letters-only grouped
+    code from a hyphenated phrase, so a secret of that shape passes this rule.
+    A vendor prefix is asked before it (``_PREFIXED_KEY_FORMATS``), and the
+    secrets the platform holds are masked by value before any shape is read
+    (``remember_secret_values``); ``docs/configuration.md`` states the rest.
+    """
+    pieces = re.split(r"[_\-/]", run)
+    return len(pieces) >= 2 and all(_WORD_PIECE.match(piece) for piece in pieces)
 
 
 def _shorten_url(found: re.Match[str]) -> str:
@@ -777,8 +873,86 @@ def scrub(text: Any) -> str:
     return _scrub_line(" ".join(str(text or "").split()))
 
 
+def remember_secret_values(values: Iterable[str], *, scope: str = "job") -> None:
+    """Set the values the scrub masks by exact value under ``scope``, in this process.
+
+    A scope registered again replaces what it held: the worker registers each
+    job's settings under ``job``, so a secret the operator removed is not masked
+    in the next job, and its own startup secrets under ``process``, which stay.
+    A value shorter than ``CONFIGURED_SECRET_FLOOR``, or blank, is not kept.
+    Only the count is logged, never a value.
+    """
+    kept = frozenset(
+        text
+        for text in (str(value or "") for value in values)
+        if len(text) >= CONFIGURED_SECRET_FLOOR and text.strip()
+    )
+    _SECRET_SCOPES[scope] = kept
+    _rebuild_configured_pattern()
+    logger.debug("The scrub masks %d configured value(s) under %s.", len(kept), scope)
+
+
+def forget_secret_values() -> None:
+    """Clear every scope: nothing is masked by value afterwards."""
+    _SECRET_SCOPES.clear()
+    _rebuild_configured_pattern()
+
+
+def _rebuild_configured_pattern() -> None:
+    global _CONFIGURED_PATTERN
+    values = sorted(set().union(*_SECRET_SCOPES.values()), key=len, reverse=True)
+    _CONFIGURED_PATTERN = (
+        re.compile(
+            _SECRET_BOUNDARY_BEFORE
+            + "(?:"
+            + "|".join(re.escape(value) for value in values)
+            + r")(?![A-Za-z0-9_])"
+        )
+        if values
+        else None
+    )
+
+
+# In front of a configured value: no letter, digit or underscore — or the end of
+# an escape sequence. A tool answer carried as JSON text puts ``\n``, ``\t`` or
+# ``\u00a0`` against a value at the start of a line, and the escape's letter or
+# last hex digit is not part of the value. After the value an escape begins with
+# a backslash, which already counts as a boundary.
+_SECRET_BOUNDARY_BEFORE = r"(?:(?<![A-Za-z0-9_])|(?<=\\[A-Za-z])|(?<=\\u[0-9A-Fa-f]{4}))"
+
+
+def _mask_configured_values(line: str) -> str:
+    """``line`` with every configured value replaced by the redaction mark."""
+    if _CONFIGURED_PATTERN is None:
+        return line
+    return _CONFIGURED_PATTERN.sub(_REDACTED, line)
+
+
+# How many times the passes are repeated at most before the text is taken as
+# settled. Each pass only removes or masks, so the text settles in two or three.
+_SCRUB_PASSES = 4
+
+
 def _scrub_line(line: str) -> str:
-    """The four passes, over text that is already one line."""
+    """The passes over text that is already one line, repeated until they change nothing.
+
+    Once is not always enough: a path cut to its last segment can leave a
+    key-shaped segment the value pass had not seen as a run of its own, and a
+    second scrub then masked it. Repeating until nothing changes makes the
+    scrub idempotent, which is what lets the publisher scrub a payload a
+    producer already scrubbed without changing a character of it.
+    """
+    for _ in range(_SCRUB_PASSES):
+        scrubbed = _scrub_once(line)
+        if scrubbed == line:
+            break
+        line = scrubbed
+    return line
+
+
+def _scrub_once(line: str) -> str:
+    """The configured secrets by value, then the four passes, once."""
+    line = _mask_configured_values(line)
     line = _SCHEME_AND_SECRET.sub(lambda m: f"{m.group(1)} {_REDACTED}", line)
     line = _URL_RUN.sub(_shorten_url, line)
     line = _VALUE_RUN.sub(_hide_credentials, line)
@@ -804,11 +978,11 @@ def safe_finding_value(value: Any) -> str:
     analysis page, and none of them is an event, so none of them was covered by
     the scrubbing the publisher does.
     """
-    from maljan.utils.marked_cut import marked_cut
-
     # Bounded where it is shown, and marked: a claim quoted back to its analyst
-    # cut mid-word read as the analyst's own ending.
-    return marked_cut(scrub(value), FINDING_VALUE_LIMIT)
+    # cut mid-word read as the analyst's own ending. Cut the way an event
+    # summary is (``_cut_whole``): a row that reaches the event feed is
+    # scrubbed again, and a digest cut in two was masked there.
+    return _cut_whole(scrub(value), FINDING_VALUE_LIMIT)
 
 
 def scrub_keeping_layout(text: Any) -> str:
@@ -876,10 +1050,52 @@ def _summarize_value(value: Any) -> str:
         return str(value)
     if isinstance(value, dict | list | tuple):
         return f"<{len(value)} items>" if not isinstance(value, dict) else f"<{len(value)} keys>"
-    text = scrub(value)
-    if len(text) > ARGUMENT_VALUE_CHARS:
-        text = text[: ARGUMENT_VALUE_CHARS - 1] + "…"
-    return text
+    return _cut_whole(scrub(value), ARGUMENT_VALUE_CHARS)
+
+
+# A digest or an identifier inside a longer text, which a cut must not split:
+# the publisher scrubs every payload again, and the part of a digest left in
+# front of the cut is a hex run of no digest's length, which that second pass
+# reads as a key.
+_WHOLE_RUN = re.compile(
+    r"(?<![A-Za-z0-9])(?:[A-Fa-f0-9]{64}|[A-Fa-f0-9]{40}|[A-Fa-f0-9]{32}"
+    r"|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+    r"(?:\.[A-Za-z0-9]{1,16}(?![A-Za-z0-9.]))?(?![A-Za-z0-9])"
+)
+
+
+def _cut_whole(text: str, limit: int) -> str:
+    """``text`` bounded near ``limit`` and marked, never cut inside a value the scrub kept.
+
+    ``text`` is already scrubbed. A digest or an identifier the cut would
+    split is kept whole, with the file extension after it: ``<sha256>.exe`` is
+    the name a reader needs, and it runs past the cap by a few characters. Any
+    other run the cut would leave in a shape the scrub reads as a key is cut in
+    front of instead. And whatever the cut leaves, a URL cut short or a scheme
+    word with the cut mark after it, the result is scrubbed once more: while
+    that changes it, the cut moves back to the start of the word it falls in,
+    so scrubbing the result again changes nothing.
+    """
+    if len(text) <= limit:
+        return text
+    cut = limit - 1
+    for found in _WHOLE_RUN.finditer(text):
+        if found.start() < cut < found.end():
+            cut = found.end()
+            break
+    if cut >= len(text):
+        return text
+    for found in _VALUE_RUN.finditer(text):
+        if found.start() < cut < found.end():
+            if _looks_like_a_credential(text[found.start() : cut]):
+                cut = found.start()
+            break
+    made = text[:cut] + CUT_MARK
+    while cut > 0 and scrub(made) != made:
+        cut = text.rfind(" ", 0, cut)
+        cut = max(cut, 0)
+        made = text[:cut].rstrip() + CUT_MARK
+    return made
 
 
 def summarize_args(args: Any) -> str:
@@ -904,8 +1120,9 @@ def summarize_args(args: Any) -> str:
         parts.append(f"{name}={shown}")
     if len(args) > ARGUMENTS_SUMMARISED:
         parts.append(f"+{len(args) - ARGUMENTS_SUMMARISED} more")
-    line = ", ".join(parts)
-    return line[: ARGUMENT_SUMMARY_CHARS - 1] + "…" if len(line) > ARGUMENT_SUMMARY_CHARS else line
+    # The joined line is scrubbed as a whole too: two values side by side can
+    # make a run neither was alone.
+    return _cut_whole(scrub(", ".join(parts)), ARGUMENT_SUMMARY_CHARS)
 
 
 def summarize_result(output: Any, *, ok: bool = True, remediation: str = "") -> str:
@@ -926,9 +1143,7 @@ def summarize_result(output: Any, *, ok: bool = True, remediation: str = "") -> 
         text = f"{headline}; {fix}" if fix else headline
     else:
         text = scrub(output)
-    if len(text) > RESULT_SUMMARY_CHARS:
-        text = text[: RESULT_SUMMARY_CHARS - 1] + "…"
-    return text
+    return _cut_whole(text, RESULT_SUMMARY_CHARS)
 
 
 def emit_tool_call_started(

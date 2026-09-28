@@ -206,6 +206,24 @@ class TestBaseBundlePreserved:
         assert [m.is_family for m in malware_objs] == [True]
         assert judge_malware.is_family is True
 
+    def test_a_kind_and_an_is_family_the_judge_was_asked_about_are_published_as_written(
+        self,
+    ) -> None:
+        # The judge is asked about ``is_family: false`` on an object named for
+        # the family and about a type outside the vocabulary; what it keeps is
+        # published, and nothing edits it on the way.
+        judge_malware = Malware(
+            id="malware--b2c3d4e5-f6a7-8901-bcde-f12345678901",
+            name="Examplefamily",
+            malware_types=["stealer"],
+            is_family=False,
+        )
+        bundle = ExtendedSTIXRenderer().render(
+            _build(), base_bundle=Bundle(objects=[judge_malware])
+        )
+        (kept,) = [o for o in bundle.objects if isinstance(o, Malware)]
+        assert (kept.is_family, kept.malware_types) == (False, ["stealer"])
+
 
 class TestObservedDataAndNote:
     @pytest.fixture

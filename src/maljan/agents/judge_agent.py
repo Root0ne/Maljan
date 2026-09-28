@@ -1259,6 +1259,20 @@ def read_technique_answer(text: str, asked: Sequence[str]) -> list[Any]:
 # The judge's system prompt. A module constant so that
 # ``composition.builtin_prompt("judge")`` and ``give_verdict`` cannot disagree
 # about what the judge is told.
+# How the judge writes its malware object: when it stands for the family, and
+# which vocabulary its kind is written in. The vocabulary is named, not listed;
+# the question that asks about a kind outside it lists it
+# (``validation.malware_object_violations``).
+MALWARE_OBJECT_RULE = (
+    "- Write a STIX ``malware`` object only for a sample you conclude is "
+    "malware, with is_family: true when the object stands for the family you "
+    "name under family.name (an object you name after that family stands for "
+    "it), false when it stands for this one sample. Give its kind under "
+    "malware_types, in values from the STIX 2.1 malware-type-ov vocabulary; "
+    "labels is not carried into the export.\n"
+)
+
+
 JUDGE_VERDICT_SYSTEM = (
     "You are the Chief Malware Judge. Based on the expert reports below, "
     "provide a final verdict: Malware, Benign, or Suspicious.\n\n"
@@ -1305,9 +1319,8 @@ JUDGE_VERDICT_SYSTEM = (
     "the other three you cannot support. A family name MUST cite the evidence "
     "ids it was read from; a family with no evidence ids is a guess, and the "
     "report will say so.\n"
-    "- Write a STIX ``malware`` object only for a sample you conclude is "
-    "malware, with is_family (false when it stands for this one sample). The "
-    "objects illustrate the verdict you stated; they are not a "
+    + MALWARE_OBJECT_RULE
+    + "- The objects illustrate the verdict you stated; they are not a "
     "second way of stating one, and a malware object added as a container for "
     "a sample you call benign contradicts your own assessment.\n"
     "- Benign is a finding, not a default. It says the evidence was examined "
@@ -2888,6 +2901,7 @@ class JudgeAgent(BudgetMeter):
                     corpus_state=corpus_state,
                     technique_sources=technique_sources,
                     origins=where,
+                    written=as_written[0] if as_written else None,
                 ),
                 *assessment_violations(bundle),
                 *assessment_conflict_violations(bundle),

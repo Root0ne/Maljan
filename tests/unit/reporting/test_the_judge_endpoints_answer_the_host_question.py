@@ -462,6 +462,8 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
             "stix.indicator_type_vocabulary",
             "stix.credit_without_claim",
             "stix.is_family_missing",
+            "stix.is_family_contradicts_family",
+            "stix.malware_type_vocabulary",
             "stix.annotation_out_of_schema",
             "stix.duplicate_label",
             "stix.unknown_object_path",

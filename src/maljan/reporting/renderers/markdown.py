@@ -2769,12 +2769,14 @@ def _encrypts_files(enc: Any) -> bool:
     The ransomware block is family-specific: a file marker, an extension, a
     partial-encryption threshold or a per-file key make it one. A loader's
     string or traffic cipher is not, and prints beside the anti-analysis prose.
+    ``per_file_key: false`` says the model saw no per-file key, which names no
+    file encryption; only ``true`` does.
     """
     return bool(
         _said(enc.file_marker)
         or _said(enc.extension)
         or _said(enc.partial_threshold)
-        or enc.per_file_key is not None
+        or enc.per_file_key is True
     )
 
 

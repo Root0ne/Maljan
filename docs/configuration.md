@@ -1975,11 +1975,62 @@ day when parallel was on. The console clears the mark on the first stage edit
 
 ### Long agent keys in the conversation
 
-An agent key is a slug of at most 32 characters. Keep it well under that, for
-one reason: everything the live feed publishes as prose is scrubbed by the
-publisher, and a run of 24 or more letters, digits, `_` and `-` is the shape a
-credential has. A key that long is redacted to `***` **inside a sentence** —
-`"windows_pe_static_analyst failed"` reaches a reader as `"*** failed"`.
+An agent key is a slug of at most 32 characters. Everything the live feed
+publishes as prose is scrubbed by the publisher, and a run of 24 or more
+letters, digits, `_` and `-` is the shape a credential has. A run made of words
+— two or more pieces split on `_`, `-` or `/`, each only letters written the
+way a word is (all lower case, all capitals, or one capital in front) and each
+shorter than 24 — is read as words and travels whole:
+`"windows_pe_static_reverse_engineer failed"` reaches a reader as written. A
+key of 24 or more characters with a digit in one of its pieces does not have
+that shape and is redacted to `***` **inside a sentence** —
+`"windows_pe_static_analyst2 failed"` reaches a reader as `"*** failed"`.
+
+What the word rule costs, stated: no shape tells a passphrase
+(`three-plain-words-together`) from a hyphenated phrase, nor a letters-only
+grouped code (a base32 recovery code, a product key in letter groups) from
+words in capitals, so a secret of that shape is published as written unless
+something else catches it. Two things do. A run that begins with a known
+vendor prefix (`glpat-`, `xoxp-`, `xoxb-`, `xapp-`, `ghs_`, `ghp_`, `gho_`,
+`github_pat_`, `hf_`, `rk_live_`, `sk_live_`, `pk_live_`, `npm_`, `gocspx-` and
+the rest of `events._PREFIXED_KEY_FORMATS`) with at least 20 characters after
+it is a key whatever its body reads like. Mailgun's `key-` begins ordinary
+phrases, so a `key-` run is a key only when its body is not words: a 32-hex
+body is masked, `key-derivation-function-parameters` is not. And every secret
+value the platform holds is masked by exact value wherever the scrub runs,
+whatever its shape (`events.remember_secret_values`, filled from
+`settings_catalog.configured_secret_values`):
+
+- what is collected is a secret *value*: a `SecretStr` or a setting the
+  catalogue marks secret, the password inside a service URL, and an entry of a
+  mapping (a tool server's `env` or headers, the REST sandbox's
+  `submit_fields` and `extra_fields`) whose key's last word names a credential
+  — `password`, `passwd`, `passphrase`, `pass`, `secret`, `key`,
+  `apikey`, `token`, `pat`, `credential(s)`, `authorization`, `bearer`,
+  optionally followed by `value` (`VT_API_KEY`, `DB_PASSWORD`, `GITLAB_PAT`). A
+  key ending in anything else is a setting about a credential and is not read
+  (`AUTH_MODE`, `TOKEN_TTL`, `PASSWORD_POLICY`, `SECRET_MANAGER`, and `PWD`,
+  the shell's working directory); nor is a
+  value that is all digits or a switch word (true, false, yes, no, on, off,
+  none, null), nor the REST sandbox's JSONPath maps (`field_names`,
+  `channels`). `SECRET_KEY_BASE` is missed by this rule, which costs less than
+  masking a setting's word in every report;
+- a value is masked only where no letter, digit or underscore touches it —
+  the end of an escape sequence (`\n`, `\t`, `\u00a0`) in JSON text counts
+  as a boundary: `minioadmin` configured leaves `minioadministrator` as
+  written, and a passphrase after `\n` in a tool answer is masked;
+- the values are held per scope, and a scope registered again replaces what it
+  held. The worker registers its own database, Redis and object-store
+  credentials and its starting settings under `process` when it starts, and
+  each job's settings under `job` when the job installs them, so a secret
+  removed from the settings is not masked in the next job. The command line
+  registers its settings when it builds the app (`app`); the worker's app
+  leaves that to the job's registration;
+- a configured value shorter than 8 characters is not masked by value, because
+  masking it everywhere would take the word it spells out of every sentence.
+
+A secret the platform does not hold — one a sample carries, or one a tool
+answer quotes from elsewhere — of passphrase shape is the remaining cost.
 
 Nothing is lost but the name in that sentence. The identity fields a line is
 filed under — `speaker`, `agent`, `stage`, `label`, `display_name` — are

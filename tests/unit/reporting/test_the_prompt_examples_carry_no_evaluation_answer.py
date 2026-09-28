@@ -49,6 +49,7 @@ from maljan.agents.judge_agent import (
     CONTRADICTIONS_BLOCK_RULE,
     EVIDENCE_SHORTENED_NOTICE,
     LOWERED_ENTRY_MARK,
+    MALWARE_OBJECT_RULE,
     MEDIATION_EXTRACTION_SYSTEM,
     MEDIATOR_HUMAN_CLOSING,
     MEDIATOR_SYSTEM_HEAD,
@@ -103,11 +104,13 @@ from maljan.pipeline.mediation_models import (
 from maljan.pipeline.nodes import (
     NO_SANDBOX_DATA_REASON,
     NO_STATIC_FIXTURE_NOTE,
+    run_quality_note,
     skipped_analysts_reason,
 )
 from maljan.pipeline.run_state import NO_LIMIT, budget_line
 from maljan.pipeline.validation import (
     ANALYST_FEEDBACK_CLOSING,
+    MALWARE_TYPES,
     CapabilityGrounding,
     EntryTexts,
     _term_ids_said,
@@ -119,6 +122,7 @@ from maljan.pipeline.validation import (
     claims_under_disputes_violation,
     confidence_violation,
     gate_removed_note,
+    malware_object_violations,
     misstated_entry_contents,
     repeated_item_violations,
     section_cut_violation,
@@ -410,6 +414,46 @@ PROMPTS: dict[str, str] = {
         )
     ),
     "judge compact bundle rules": COMPACT_BUNDLE_RULES,
+    "judge malware object rule": MALWARE_OBJECT_RULE,
+    "judge run quality paragraphs": " ".join(
+        [
+            run_quality_note(["a reason"], degraded=True),
+            run_quality_note(["a reason", "a note"], degraded=False, informational=["a note"]),
+        ]
+    ),
+    "judge malware object questions": " ".join(
+        v.message
+        for v in malware_object_violations(
+            Bundle.model_validate(
+                {
+                    "objects": [
+                        {
+                            "type": "malware",
+                            "id": "malware--1",
+                            "name": "Examplefamily",
+                            "is_family": False,
+                            "malware_types": ["stealer"],
+                        }
+                    ]
+                }
+            ).objects[0],
+            path="objects[0]",
+            family="Examplefamily",
+            written={"labels": ["stealer"]},
+        )
+    )
+    + " "
+    + " ".join(
+        v.message
+        for v in malware_object_violations(
+            Bundle.model_validate(
+                {"objects": [{"type": "malware", "id": "malware--1", "name": "x"}]}
+            ).objects[0],
+            path="objects[0]",
+            family="",
+            written={"labels": ["stealer"]},
+        )
+    ),
     "judge cut-at-cap question": verdict_cut_violation(
         8192, '{"type": "bundle", "objects": [{"type": "attack-pattern", "id": "a"}'
     ).message,
@@ -932,10 +976,35 @@ def _without_rendered_identifiers(text: str) -> str:
     )
 
 
+# The entries that list STIX 2.1's malware-type vocabulary, as the standard
+# lists it and whole: the question about a malware object's kind names every
+# value side by side, so the list says nothing about which one a sample is.
+# The allowance is the joined vocabulary and nothing else; a value written as a
+# word anywhere, these entries included, is still a scored term.
+STIX_VOCABULARY_LISTED: frozenset[str] = frozenset({"judge malware object questions"})
+_LISTED_VOCABULARY = ", ".join(MALWARE_TYPES)
+
+
+def _without_the_listed_vocabulary(text: str) -> str:
+    """``text`` with each whole listing of the malware-type vocabulary taken out."""
+    return text.replace(_LISTED_VOCABULARY, " ")
+
+
 def _scanned(name: str) -> str:
     """The text of one ``PROMPTS`` entry as the scan reads it."""
     text = PROMPTS[name].lower()
+    if name in STIX_VOCABULARY_LISTED:
+        text = _without_the_listed_vocabulary(text)
     return _without_rendered_identifiers(text) if name in RENDERED_TOOL_OUTPUT else text
+
+
+def test_the_vocabulary_allowance_is_the_whole_listing_and_nothing_else() -> None:
+    assert STIX_VOCABULARY_LISTED <= set(PROMPTS)
+    for name in STIX_VOCABULARY_LISTED:
+        assert _LISTED_VOCABULARY in PROMPTS[name].lower(), name
+    # One value of the vocabulary written as a word is scanned as it stands.
+    assert "downloader" in _without_the_listed_vocabulary("write downloader under the types")
+    assert "downloader" not in _without_the_listed_vocabulary(f"one of: {_LISTED_VOCABULARY}.")
 
 
 def test_the_catalogue_allowance_is_the_two_catalogues_and_nothing_else() -> None:
