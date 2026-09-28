@@ -856,7 +856,7 @@ def judge_questions(
             questions.setdefault(tid, TechniqueQuestion(tid, "claimed")).mentions.append(mention)
     if attck is not None:
         for tid, rows in by_technique.items():
-            check = _undescribed(tid, [claim for _agent, claim, _mention in rows], attck)
+            check = _undescribed(tid, [claim for _agent, claim, _mention in rows], attck, sample)
             if not check:
                 continue
             question = questions.get(tid)
@@ -892,17 +892,24 @@ def judge_questions(
     return [q for tid, q in questions.items() if tid not in not_asked], not_asked
 
 
-def _undescribed(technique_id: str, claims: list[Any], attck: Any) -> str:
-    """The check's finding when no claim in ``claims`` describes ``technique_id``, else ``""``."""
+def _undescribed(
+    technique_id: str, claims: list[Any], attck: Any, sample: dict[str, Any] | None = None
+) -> str:
+    """The check's finding when every claim in ``claims`` is asked the does-not-describe question.
+
+    Asked as the analysts' check asks it (``claim_asked_whether_it_describes``):
+    a claim that reads as absence, or whose id the catalogue does not know or
+    the sample cannot host, is asked its own question instead, and a
+    technique with such a claim carries no finding. ``""`` otherwise.
+    """
     try:
         from maljan.pipeline.validation import (
-            claim_does_not_describe_violation,
+            claim_asked_whether_it_describes,
             undescribed_technique_finding,
         )
 
-        if not claims or any(
-            claim_does_not_describe_violation(claim, technique_id, attck) is None
-            for claim in claims
+        if not claims or not all(
+            claim_asked_whether_it_describes(claim, technique_id, attck, sample) for claim in claims
         ):
             return ""
         return undescribed_technique_finding(technique_id, attck, len(claims))
@@ -917,6 +924,13 @@ def techniques_for_the_judge(
     stix_output: dict[str, Any] | None,
     isr_reports: dict[str, Any] | None,
     sample: dict[str, Any] | None = None,
+    *,
+    attck: Any = None,
 ) -> list[TechniqueQuestion]:
-    """The techniques :func:`judge_questions` puts to the judge."""
-    return judge_questions(stix_output, isr_reports, sample)[0]
+    """The techniques :func:`judge_questions` puts to the judge, given the same catalogue.
+
+    ``JudgeAgent.decide_techniques`` passes the vendored catalogue, which adds
+    the techniques no claim naming which uses its terms; without it those are
+    not listed.
+    """
+    return judge_questions(stix_output, isr_reports, sample, attck=attck)[0]

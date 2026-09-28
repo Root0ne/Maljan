@@ -20,7 +20,11 @@ from maljan.agents.judge_agent import (
     JudgeAgent,
     technique_question_text,
 )
-from maljan.extractors.capability_matrix import build_capability_matrix, judge_questions
+from maljan.extractors.capability_matrix import (
+    build_capability_matrix,
+    judge_questions,
+    techniques_for_the_judge,
+)
 from maljan.pipeline.validation import undescribed_technique_finding
 from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
 from maljan.reporting.renderers.markdown import MarkdownRenderer
@@ -144,8 +148,8 @@ class TestWhatIsAsked:
 
         finding = undescribed_technique_finding(UNDESCRIBED, knowledge, 2)
         assert f"   check: {finding}" in text
-        assert "in your bundle" in text
-        assert "not describe" in TECHNIQUE_QUESTION_SYSTEM
+        assert "in your bundle; the ATT&CK check found no claim naming it uses" in text
+        assert "uses the catalogue's terms" in TECHNIQUE_QUESTION_SYSTEM
 
     def test_the_judge_is_asked_once_through_its_technique_question(self) -> None:
         review, llm = _ask(f"{UNDESCRIBED}: drop: nothing reads credentials\n{LEFT_OUT}: drop: no")
@@ -169,7 +173,8 @@ class TestTheReportShowsTheAnswer:
         assert (
             "the judge dropped it (nothing reads credentials)" in cells[UNDESCRIBED].not_published
         )
-        assert "no claim naming it describes it" in cells[UNDESCRIBED].not_published
+        finding = "no claim naming it uses the catalogue's terms for it"
+        assert finding in cells[UNDESCRIBED].not_published
 
     def test_a_kept_technique_is_published_with_the_finding_and_the_reason(self) -> None:
         review, _ = _ask(f"{UNDESCRIBED}: keep: the PEB walk reads LSASS\n{LEFT_OUT}: keep: yes")
@@ -178,7 +183,7 @@ class TestTheReportShowsTheAnswer:
 
         assert UNDESCRIBED in published
         note = cells[UNDESCRIBED].note
-        assert "no claim naming it describes it" in note
+        assert "no claim naming it uses the catalogue's terms for it" in note
         assert "kept by the judge when asked (the PEB walk reads LSASS)" in note
 
     def test_the_markdown_carries_both(self) -> None:
@@ -197,3 +202,31 @@ class TestTheReportShowsTheAnswer:
         markdown = MarkdownRenderer().render(report)
 
         assert "the judge dropped it (nothing reads credentials)" in markdown
+
+
+class TestTheAnalystsExemptionsHold:
+    def test_a_technique_with_a_claim_that_reads_as_absence_carries_no_finding(self) -> None:
+        isrs = _isrs()
+        isrs["dynamic"].claims[0] = _claim(
+            "The sample does not dump credentials from LSASS", UNDESCRIBED
+        )
+
+        questions, _ = judge_questions(_bundle().model_dump(), isrs, attck=knowledge)
+
+        assert UNDESCRIBED not in {q.technique_id for q in questions}
+
+    def test_a_technique_the_sample_cannot_host_carries_no_finding(self) -> None:
+        questions, _ = judge_questions(
+            _bundle().model_dump(),
+            _isrs(),
+            {"platform": "android", "file_type": "apk"},
+            attck=knowledge,
+        )
+
+        assert not any(q.check and q.technique_id == UNDESCRIBED for q in questions)
+
+
+def test_the_listing_names_what_the_judge_is_asked_given_the_catalogue() -> None:
+    listed = techniques_for_the_judge(_bundle().model_dump(), _isrs(), attck=knowledge)
+
+    assert {q.technique_id for q in listed} == {UNDESCRIBED, LEFT_OUT}

@@ -846,9 +846,9 @@ _NO_TOOLS_NEEDED = "No Threat Intelligence tools are needed for this run.\n"
 TECHNIQUE_QUESTION_SYSTEM = (
     "You are the Chief Malware Judge. Your verdict is given. The analysts named some "
     "techniques that your bundle does not carry, some that appear only on an "
-    "analyst's finding, which no check has asked about, and some that the ATT&CK "
-    "check found are not described by any claim naming them; a technique of that last kind "
-    "carries the check's finding. You decide, for each one, whether the report "
+    "analyst's finding, which no check has asked about, and some for which the ATT&CK "
+    "check found that no claim naming them uses the catalogue's terms for them; a "
+    "technique of that last kind carries the check's finding. You decide, for each one, whether the report "
     "publishes it. You are shown the run state and the pack, the analysts' reports as "
     "your verdict call was shown them, your verdict and the techniques your bundle "
     "carries, and for each technique the claims or findings that name it with the "
@@ -987,7 +987,10 @@ def technique_question_text(
     for n, question in enumerate(questions, 1):
         where = {
             "claimed": "claimed by an analyst and not in your bundle",
-            "undescribed": "in your bundle; no claim naming it describes it",
+            "undescribed": (
+                "in your bundle; the ATT&CK check found no claim naming it uses the "
+                "catalogue's terms for it"
+            ),
         }.get(question.kind, "named only on an analyst's finding")
         lines.append(f"{n}. {technique_label(question.technique_id)} — {where}")
         for agent, text, ids in question.mentions:

@@ -1032,8 +1032,17 @@ PROMPTS: dict[str, str] = {
     "analyst repeated-claims question naming a chunk": analyst_repeated_violation(
         ClaimsRepeated(begun=15, distinct=3, margin=3, chars=900), chunk="chunk 1 of 2"
     ).message,
-    "judge technique question's describe-check finding": undescribed_technique_finding(
-        "T1112", knowledge, 2
+    "judge technique question's describe-check finding and its kind's label": (
+        technique_question_text(
+            [
+                TechniqueQuestion(
+                    "T1112",
+                    "undescribed",
+                    [("static", "The file opens a window.", ["ev_0001"])],
+                    check=undescribed_technique_finding("T1112", knowledge, 1),
+                )
+            ]
+        )
     ),
     "question to an analyst whose first answer called no tool": no_tool_call_question(
         ["lookup", "strings"]
