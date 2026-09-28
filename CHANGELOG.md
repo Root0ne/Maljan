@@ -9,25 +9,34 @@ change landed on `main`.
 ### Added
 
 - **A function an analyst decompiled and no claim describes is listed to it,
-  once.** The functions an analyst's own ledger entries decompiled (a tool
-  whose name says it decompiles, and a call that answered) are read off those
-  entries: the address the call was given and the names the call and the
-  listing's signature give. A claim describes one when its sentence or its
-  evidence line names it by address (the same address, or an offset from the
-  image base against the virtual address, which differ by a multiple of
-  64 KiB) or by a name the decompiler gave it; citing the entry alone does not.
+  once.** The functions come from the analyst's own ledger entries that
+  decompiled something and answered:
+  - a batch answer keyed by address gives one function per key, its `Error`
+    keys left out;
+  - otherwise, the address the call was given (hex or an integer) and the names
+    the call and the listing's signature give.
+
+  A claim describes a function when its sentence or its evidence line names it
+  by address or by a name the decompiler gave it. The address may be written as
+  `0x…`, `…h` or bare hex. It must be the same, or differ by the image base the
+  run read; with no base known, a difference of a multiple of 64 KiB counts.
+  Citing the entry alone does not count.
+
   The functions no claim names are listed in one question
-  (`isr.decompiled_not_described`) with their names and entries; what the
-  analyst answers stands, and the functions its kept answer still names in no
-  claim are the §13 validation line that names them.
-- **Claims that say only that a library or its APIs are used are found and
-  asked about once.** One sentence whose subject uses, imports, calls or loads
-  libraries or their APIs, with or without a purpose ("for y"), no code
-  location in the sentence or the evidence line, and no evidence detail beyond
-  an import listing (ids, library and API names, counts, listing words) is
-  such a claim. `isr.library_only_claims` quotes every one and asks once to
-  merge them into the claims they support or to detail each; the answer
-  stands, a merge that keeps at least the answer's other claims included.
+  (`isr.decompiled_not_described`), with their names and entries. What the
+  analyst answers stands. The functions its kept answer still names in no claim
+  are the §13 validation line that names them.
+- **Claims that name only a library or its APIs and a short purpose are found
+  and asked about once.** Such a claim is one sentence whose subject uses,
+  imports, calls or loads libraries or their APIs, with at most a short
+  "for y" purpose. It has no code location in the sentence or the evidence
+  line, and no evidence detail beyond an import listing. A claim stating an
+  action ("to …", "and downloads …") is not one.
+
+  `isr.library_only_claims` quotes every such claim and asks once to merge them
+  into the claims they support or to detail each. The answer stands, including
+  a merge that folds them away, provided it keeps as many claims that are not
+  library-only as the first answer had.
 - **The decoded string's second hop.** `decode_string_blobs`'
   `output_passed_to` now carries its own `output_passed_to`: from the call
   that received the decoder's output, the next call that receives that call's
@@ -2362,14 +2371,21 @@ change landed on `main`.
 
 ### Fixed
 
-- **Windows API names are no longer masked in the events and the
-  transcript.** The scrub's length rule read `CreateToolhelp32Snapshot` and
-  every other long export name as a key. A name the vendored export-name
-  catalogue holds, or one this job's hash resolution read, alone or as
-  `module!name`, travels as written; the resolved names are forgotten when
-  the next job installs its settings. Vendor prefixes are still asked first
-  and configured values are still masked by value, so every credential shape
-  stays masked.
+- **Windows API names and hash-algorithm ids are no longer masked in the events
+  and the transcript.** The scrub's length rule read every long export name
+  (`ZwSetInformationJobObject`) as a key, and two algorithm ids joined by a
+  slash as one. These now travel as written, alone or joined to others of their
+  kind by `/`, `|`, `+` or `&`:
+  - a name the vendored export-name catalogue holds;
+  - an id of the vendored algorithm catalogue (`data/api_hash_algorithms_v1.json`);
+  - a name this job's hash resolution read, from the pack's call or the analysis
+    server's tool only. These names are forgotten when the next job installs
+    its settings.
+
+  `!` now splits a value, so `kernel32.dll!<key>` masks the key. A key joined
+  to other text by `/`, `|`, `+` or `&` is masked too. Vendor prefixes are still
+  asked first, and configured values are still masked by value, so every
+  credential shape stays masked.
 - **An answer that writes its claims again past a margin is asked once for a
   whole one.** Claims begun and distinct, each keyed by its whole block, are
   counted when the answer arrives; past the margin (the distinct count, or

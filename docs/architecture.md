@@ -1495,30 +1495,53 @@ in 32,768 tokens, 85 of them distinct.
 Two more questions are asked of an analyst's answer in the same validation
 turn, each once, and what the analyst answers stands.
 
-- **Decompiled but not described** (`isr.decompiled_not_described`). The
-  functions the analyst's own ledger entries decompiled — a tool whose name
-  says it decompiles, and a call that answered — are read off those entries:
-  the address the call was given (or the one a decompiler's generic name such
-  as `FUN_`, `fcn.` or `sub_` carries) and the names the call and the
-  listing's signature give. A claim describes one when its sentence or its
-  evidence line names it: the same address, or one that differs by a multiple
-  of 64 KiB (an offset from the image base against the virtual address), or a
-  name the decompiler gave it. Citing the entry alone does not. The functions
-  no claim names are listed in one question with their names and entries. The
-  functions the kept answer still names in no claim are recorded, and §13's
-  validation list prints the line naming them. A reverser had decompiled the
-  start-up path and the installer of a loader and described neither.
-- **Library-only claims** (`isr.library_only_claims`). A claim of one
-  sentence whose subject (the sample, or none) uses, imports, calls or loads
-  libraries or their APIs, with or without a purpose ("for y"), that names no
-  code location in its sentence or its evidence line and whose evidence line
-  carries nothing beyond an import listing (ledger ids, library and API names,
-  counts, the words that say what a listing is). Every such claim is quoted in
-  one question asking to merge them into the claims whose behaviour they
-  support or to detail each. The answer stands: a retry with fewer claims is
-  kept when it keeps at least as many as the first answer had besides the
-  library-only ones, and one that keeps them is kept with the finding
-  recorded. A reverser's answer carried 36 such claims of 61.
+- **Decompiled but not described** (`isr.decompiled_not_described`).
+  - *What counts as decompiled.* The functions come from the analyst's own
+    ledger entries: a tool whose name says it decompiles, and a call that
+    answered.
+  - *Reading a batch.* A batch answer keyed by address (`batch_decompile`)
+    gives one function per key. A key whose listing begins with `Error` is left
+    out, and a cut answer keeps the functions its text still shows. A batch
+    whose answer is not keyed takes the addresses in its `functions` argument.
+  - *Reading a single call.* The address is the one the call was given, as hex
+    or as an integer, or the one a decompiler's generic name carries (`FUN_`,
+    `fcn.`, `sub_`). The names are the one the call was given and the one the
+    listing's signature prints. The signature is read line by line: a line
+    holding only the return type is passed over, and comments are skipped.
+  - *Merging.* A function asked for by name alone is the one asked for by
+    address that carries the same name.
+  - *How a claim names a function.* Its sentence or its evidence line writes
+    the address as `0x…`, as `…h`, as bare hex with a letter and a digit in
+    it, or inside a generic name. The address must be the same, or differ by
+    an image base the run read (`image_base` in the pack's answers, handed to
+    every agent, or in the analyst's own). With no base known, a difference of
+    a multiple of 64 KiB counts. A claim can also name the function by a name
+    the decompiler gave it. Citing the entry alone does not count.
+  - *The question and the finding.* The functions no claim names are listed in
+    one question, with their names and entries. The functions the kept answer
+    still names in no claim are recorded, and §13's validation list prints the
+    line naming them.
+  - *Why.* A reverser had decompiled two routines holding half of what the
+    analysis needed and described neither.
+- **Library-only claims** (`isr.library_only_claims`).
+  - *What counts.* A claim of one sentence whose subject (the sample, or none)
+    uses, imports, calls or loads libraries or their APIs. It may add a short
+    "for y" purpose: at most six words, with no comma, no second verb joined by
+    "and" or "or", and no quote, digit, address, host or path.
+  - *What does not count.* A claim whose object runs on with "to" states an
+    action and is not one of these.
+  - *Other conditions.* The claim names no code location in its sentence or
+    its evidence line. Its evidence line carries nothing beyond an import
+    listing: ledger ids, library and API names, counts, and the words that say
+    what a listing is.
+  - *The question.* It states what was read, not a judgement, and quotes every
+    such claim. It asks to merge them into the claims whose behaviour they
+    support, or to detail each.
+  - *What stands.* The answer stands. A retry with fewer claims is kept when it
+    has at least as many claims that are not library-only as the first answer
+    had. One that keeps the library-only claims is kept, with the finding
+    recorded.
+  - *Why.* One analyst's answer was mostly such claims.
 
 The cap the check reads is the one the call was built with. The container
 records it on the model it builds (`context_window.record_built_cap`), and the
@@ -2592,8 +2615,9 @@ and every string of every event — a message's text and its report, a
 correction, a cap's detail, a summary — is scrubbed once by the publisher, for
 all three sinks at once: anything shaped like a credential is replaced, a URL
 keeps its scheme and host only, and every path is cut to its file name. A
-Windows function name the vendored export-name catalogue holds, or one this
-job's hash resolution read, is a name and travels as written, as it does in the
+Windows function name the vendored export-name catalogue holds, one this
+job's hash resolution on the analysis server read, or a hash-algorithm id of
+the vendored algorithm catalogue, is a name and travels as written, as it does in the
 report (`docs/configuration.md`, "Long agent keys in the conversation"). A
 producer may scrub as well; the publisher is what makes it a guarantee rather
 than a habit, and the transcript's copy is scrubbed as it is taken, so a
