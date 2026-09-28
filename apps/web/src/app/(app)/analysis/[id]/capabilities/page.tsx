@@ -9,7 +9,7 @@ import {
   associatedBy,
   corroborationLists,
   corroborationSources,
-  retiredIn,
+  retiredNote,
   isCorroborated,
   orderedTactics,
   parseTechniques,
@@ -235,9 +235,9 @@ export default function AttackTab() {
                             <summary className="text-[10px] uppercase tracking-wider text-text-muted cursor-pointer">
                               Asserted by {lists.asserted_by.length}
                               , claimed by {lists.claimed_by.length}
-                              {retiredIn(corroboration, tech.id) && (
+                              {retiredNote(corroboration, tech.id) && (
                                 <span className="ml-1 normal-case tracking-normal text-status-orange">
-                                  (retired in ATT&amp;CK {retiredIn(corroboration, tech.id)})
+                                  ({retiredNote(corroboration, tech.id)})
                                 </span>
                               )}
                             </summary>
