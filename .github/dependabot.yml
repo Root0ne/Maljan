@@ -19,6 +19,10 @@ updates:
       # pinned below 2 in pyproject.toml until it is done.
       - dependency-name: "mcp"
         update-types: ["version-update:semver-major"]
+      # Published without its JSON schemas, so it validates nothing
+      # (oasis-open/cti-stix-validator#248); a later release is still offered.
+      - dependency-name: "stix2-validator"
+        versions: ["3.3.1"]
     open-pull-requests-limit: 5
 
   - package-ecosystem: "npm"
