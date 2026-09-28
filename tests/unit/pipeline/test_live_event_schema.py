@@ -13,6 +13,7 @@ into existence.
 from __future__ import annotations
 
 import hashlib
+import random
 import uuid
 from typing import Any
 
@@ -701,18 +702,49 @@ class TestASummaryIsCutOutsideADigest:
         assert ev.scrub(summary) == summary
 
     def test_the_scrub_leaves_any_summary_as_it_is(self) -> None:
-        sha, md5 = _digest("sha256"), _digest("md5")
-        for args in (
-            {"file_path": sha + ".exe", "offset": 12},
-            {"query": "prefix " * 8 + sha},
-            {"value": md5 * 3},
-            {"a": "b" * 50 + " " + sha, "c": sha + "." + "d" * 30},
-            {"ids": str(uuid.UUID(int=7)) * 3},
-            {"words": "all_tools_reverser_ghidra " * 5},
-            {"blob": standard_base64_key() * 3},
-        ):
+        """Generated, seeded: whatever a producer builds, a second scrub changes nothing."""
+        rng = random.Random(20260917)
+        for _ in range(800):
+            args = {f"arg{index}": _generated_text(rng) for index in range(rng.randint(1, 8))}
             summary = ev.summarize_args(args)
-            assert ev.scrub(summary) == summary, summary
+            assert ev.scrub(summary) == summary, args
+            one = ev.summarize_args({"value": _generated_text(rng)})
+            assert ev.scrub(one) == one
+            text = _generated_text(rng, pieces=rng.randint(10, 60))
+            for made in (ev.summarize_result(text), ev.safe_finding_value(text), ev.scrub(text)):
+                assert ev.scrub(made) == made, text
+
+    def test_a_cut_never_lands_inside_a_url_or_after_a_scheme_word(self) -> None:
+        url = "https://" + "host" * 20 + ".example/path?q=1"
+        for text in ("a " * 100 + url, "b " * 115 + "token " + "c" * 40, "d " * 117 + "Bearer x"):
+            for made in (ev.summarize_result(text), ev.summarize_args({"v": text})):
+                assert ev.scrub(made) == made, made
+
+
+def _generated_text(rng: random.Random, pieces: int = 0) -> str:
+    """A text of the fragments a scrub rule reads, in a seeded order."""
+    sha, md5 = _digest("sha256", str(rng.random()).encode()), _digest("md5")
+    fragments = [
+        lambda: "https://" + "h" * rng.randint(3, 60) + ".example/" + "p" * rng.randint(0, 30),
+        lambda: _url_with_userinfo("op", password(12), "vt.example:8443/x?k=" + password(20)),
+        lambda: (
+            rng.choice(["Bearer", "token", "Basic", "bearer"]) + " " + password(rng.randint(4, 30))
+        ),
+        lambda: sha + rng.choice(["", ".exe", ".dll", "." + "e" * 20]),
+        lambda: md5 * rng.randint(1, 3),
+        lambda: str(uuid.UUID(int=rng.getrandbits(128))),
+        lambda: "/home/op/samples/" + lowercase_body(rng.randint(10, 36)),
+        lambda: r"C:\\Users\\op\\" + lowercase_body(rng.randint(10, 36)) + ".exe",
+        lambda: "all_tools_reverser_ghidra",
+        lambda: "anti-debugging/environment",
+        lambda: standard_base64_key(),
+        lambda: prefixed_key(rng.choice(["ghs_", "key-", "sk-", ""])),
+        lambda: rng.choice(["the", "sample", "wrote", "a", "file", "=", ",", ";", ":", "(x)"]),
+        lambda: "word " * rng.randint(1, 30),
+        lambda: jwt(),
+    ]
+    count = pieces or rng.randint(1, 12)
+    return rng.choice([" ", "", ", "]).join(rng.choice(fragments)() for _ in range(count))
 
 
 class TestTheKeyShapesARunOfWordCharactersMisses:

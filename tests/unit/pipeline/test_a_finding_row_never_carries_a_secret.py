@@ -138,6 +138,21 @@ class TestARowKeepsWordsAndMasksKeys:
             assert value not in row, value
             assert row == "the analyst quoted *** as the key", value
 
+    def test_a_row_is_not_cut_inside_a_digest(self) -> None:
+        """A row that reaches the event feed is scrubbed again, and half a digest is a key there."""
+        import hashlib
+
+        from maljan.pipeline.events import FINDING_VALUE_LIMIT, scrub
+
+        digest = hashlib.sha256(b"a sample").hexdigest()
+        text = "word " * ((FINDING_VALUE_LIMIT - 20) // 5) + digest + " and the rest of it"
+        assert text.index(digest) < FINDING_VALUE_LIMIT < text.index(digest) + len(digest)
+
+        row = safe_finding_value(text)
+
+        assert digest in row
+        assert scrub(row) == row
+
     def test_the_word_runs_of_a_report_are_kept_in_a_row(self) -> None:
         for words in (
             "anti-debugging/environment",

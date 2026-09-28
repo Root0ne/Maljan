@@ -30,7 +30,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from maljan.core.logger import logger
-from maljan.utils.marked_cut import marked_cut
+from maljan.utils.marked_cut import CUT_MARK, marked_cut
 
 # (event_type, payload) -> None. Must be safe to call from any thread.
 EventSink = Callable[[str, dict[str, Any]], None]
@@ -884,8 +884,30 @@ def _hide_configured_secrets(line: str) -> str:
     return line
 
 
+# How many times the passes are repeated at most before the text is taken as
+# settled. Each pass only removes or masks, so the text settles in two or three.
+_SCRUB_PASSES = 4
+
+
 def _scrub_line(line: str) -> str:
-    """The configured secrets by value, then the four passes, over text that is already one line."""
+    """The passes over text that is already one line, repeated until they change nothing.
+
+    Once is not always enough: a path cut to its last segment can leave a
+    key-shaped segment the value pass had not seen as a run of its own, and a
+    second scrub then masked it. Repeating until nothing changes makes the
+    scrub idempotent, which is what lets the publisher scrub a payload a
+    producer already scrubbed without changing a character of it.
+    """
+    for _ in range(_SCRUB_PASSES):
+        scrubbed = _scrub_once(line)
+        if scrubbed == line:
+            break
+        line = scrubbed
+    return line
+
+
+def _scrub_once(line: str) -> str:
+    """The configured secrets by value, then the four passes, once."""
     line = _hide_configured_secrets(line)
     line = _SCHEME_AND_SECRET.sub(lambda m: f"{m.group(1)} {_REDACTED}", line)
     line = _URL_RUN.sub(_shorten_url, line)
@@ -912,11 +934,11 @@ def safe_finding_value(value: Any) -> str:
     analysis page, and none of them is an event, so none of them was covered by
     the scrubbing the publisher does.
     """
-    from maljan.utils.marked_cut import marked_cut
-
     # Bounded where it is shown, and marked: a claim quoted back to its analyst
-    # cut mid-word read as the analyst's own ending.
-    return marked_cut(scrub(value), FINDING_VALUE_LIMIT)
+    # cut mid-word read as the analyst's own ending. Cut the way an event
+    # summary is (``_cut_whole``): a row that reaches the event feed is
+    # scrubbed again, and a digest cut in two was masked there.
+    return _cut_whole(scrub(value), FINDING_VALUE_LIMIT)
 
 
 def scrub_keeping_layout(text: Any) -> str:
@@ -1001,11 +1023,14 @@ _WHOLE_RUN = re.compile(
 def _cut_whole(text: str, limit: int) -> str:
     """``text`` bounded near ``limit`` and marked, never cut inside a value the scrub kept.
 
-    A digest or an identifier the cut would split is kept whole, with the
-    file extension after it: ``<sha256>.exe`` is the name a reader needs,
-    and it runs past the cap by a few characters. Any other run the cut would
-    leave in a shape the scrub reads as a key is cut in front of instead, so
-    scrubbing the result again changes nothing.
+    ``text`` is already scrubbed. A digest or an identifier the cut would
+    split is kept whole, with the file extension after it: ``<sha256>.exe`` is
+    the name a reader needs, and it runs past the cap by a few characters. Any
+    other run the cut would leave in a shape the scrub reads as a key is cut in
+    front of instead. And whatever the cut leaves, a URL cut short or a scheme
+    word with the cut mark after it, the result is scrubbed once more: while
+    that changes it, the cut moves back to the start of the word it falls in,
+    so scrubbing the result again changes nothing.
     """
     if len(text) <= limit:
         return text
@@ -1021,7 +1046,12 @@ def _cut_whole(text: str, limit: int) -> str:
             if _looks_like_a_credential(text[found.start() : cut]):
                 cut = found.start()
             break
-    return text[:cut] + "…"
+    made = text[:cut] + CUT_MARK
+    while cut > 0 and scrub(made) != made:
+        cut = text.rfind(" ", 0, cut)
+        cut = max(cut, 0)
+        made = text[:cut].rstrip() + CUT_MARK
+    return made
 
 
 def summarize_args(args: Any) -> str:
@@ -1046,7 +1076,9 @@ def summarize_args(args: Any) -> str:
         parts.append(f"{name}={shown}")
     if len(args) > ARGUMENTS_SUMMARISED:
         parts.append(f"+{len(args) - ARGUMENTS_SUMMARISED} more")
-    return _cut_whole(", ".join(parts), ARGUMENT_SUMMARY_CHARS)
+    # The joined line is scrubbed as a whole too: two values side by side can
+    # make a run neither was alone.
+    return _cut_whole(scrub(", ".join(parts)), ARGUMENT_SUMMARY_CHARS)
 
 
 def summarize_result(output: Any, *, ok: bool = True, remediation: str = "") -> str:
