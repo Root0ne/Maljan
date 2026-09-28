@@ -2324,6 +2324,38 @@ change landed on `main`.
 
 ### Fixed
 
+- **Redaction removes secrets, not words.** A 24-plus run of the base64
+  alphabet was read as a key even when it was words: a claim's
+  `anti-debugging/environment`, a STIX property name and an analyst's roster
+  key were published as `***`. A run that splits on `_`, `-` or `/` into two or
+  more pieces of letters, each written the way a word is and shorter than the
+  floor, is words; every key shape the tests build is still masked. An argument
+  summary, the whole summary line and a result headline are no longer cut
+  inside a digest or an identifier (a `<sha256>.exe` stays whole), so the
+  publisher's second scrub changes nothing.
+- **Informational notes do not make the verdict tentative.** One empty
+  CONFIDENCE among hundreds of read claims set `degraded_mode` and the
+  DEGRADED RUN banner. An unread-claims reason for an analyst that still has
+  claims read, and DISPUTES headings left unasked, are listed in §13 and the
+  header's Notes line and do not degrade the run; an analyst with no claim
+  read, a failed stage and a failed required tool still do.
+- **One technique count and one STIX object count.** `run_summary.stix_object_count`
+  was the judge's bundle size beside a larger export, and the long-term-memory
+  case stored the claimed techniques against fewer published. After the export
+  is built, `stix_object_count` is its object count on the stored summary and
+  the report's; the judge's is `judge_stix_object_count`. The case stores the
+  published techniques and its total follows; the judge's log line says
+  "claimed techniques".
+- **The judge is asked about its malware object.** `is_family: false` on an
+  object named for the attributed family is asked about
+  (`stix.is_family_contradicts_family`), and so are `labels` with no
+  `malware_types` and a `malware_types` value outside STIX 2.1's
+  `malware-type-ov` vocabulary (`stix.malware_type_vocabulary`), which the
+  question lists. The judge answers; nothing is rewritten. The prompt says when
+  an object stands for the family and names the vocabulary.
+- **A cipher is file encryption only when the model said it is.**
+  `per_file_key: false` put a loader's cipher under "Ransomware behaviour"; only
+  `true` does now, and the cipher renders in §5.1.
 - **A mediation that lists contradictions is not consensus.** The mediator
   ends with a final `CONTRADICTIONS:` block, one line per contradiction still
   standing, or `CONTRADICTIONS: NONE`; a claim a ledger entry contradicts is a
@@ -5621,6 +5653,16 @@ change landed on `main`.
   benign PuTTY control after its verdict fell back.
 
 ### Upgrading
+
+**STIX object counts in the run summary.** `run_summary.stix_object_count` is
+the exported bundle's object count once the report node has built the export,
+on the stored column and on the report's own summary; before, it was the
+judge's bundle size. The judge's count is the new key
+`run_summary.judge_stix_object_count`. A consumer that read
+`stix_object_count` as the judge's should read the new key; a summary stored
+before this release has only `stix_object_count`, and it is the judge's. The
+long-term-memory case a completed run stores holds the published techniques,
+and its `total_techniques` counts them.
 
 **Analysts run in parallel on a hosted API.** `llm.parallel_analysts` is `auto`
 by default. A deployment that never set it and calls a host resolving only to
