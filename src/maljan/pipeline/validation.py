@@ -3799,6 +3799,8 @@ def indicator_type_contradicts_verdict(
 
 UNKNOWN_OBSERVABLE_TYPE_CODE = "stix.unknown_observable_type"
 IS_FAMILY_MISSING_CODE = "stix.is_family_missing"
+IS_FAMILY_CONTRADICTS_FAMILY_CODE = "stix.is_family_contradicts_family"
+MALWARE_TYPE_VOCABULARY_CODE = "stix.malware_type_vocabulary"
 FILE_UNIDENTIFIED_CODE = "stix.file_unidentified"
 UNKNOWN_OBJECT_PATH_CODE = "stix.unknown_object_path"
 STRAY_BACKSLASH_CODE = "stix.unescaped_backslash"
@@ -3818,6 +3820,131 @@ INDICATOR_TYPES = (
     "attribution",
     "unknown",
 )
+
+
+# STIX 2.1's malware-type vocabulary (``malware-type-ov``, STIX 2.1 section
+# 10.12), vendored as the standard lists it. Open, like the indicator-type
+# vocabulary: a value outside it is legal and published as written. It is asked
+# about because a word outside it (``stealer`` beside ``spyware``) reaches a
+# consumer that filters on the vocabulary as no kind at all.
+MALWARE_TYPES = (
+    "adware",
+    "backdoor",
+    "bot",
+    "bootkit",
+    "ddos",
+    "downloader",
+    "dropper",
+    "exploit-kit",
+    "keylogger",
+    "ransomware",
+    "remote-access-trojan",
+    "resource-exploitation",
+    "rogue-security-software",
+    "rootkit",
+    "screen-capture",
+    "spyware",
+    "trojan",
+    "unknown",
+    "virus",
+    "webshell",
+    "wiper",
+    "worm",
+)
+
+
+def _written_objects(written: Mapping[str, Any] | None) -> dict[str, Mapping[str, Any]]:
+    """The judge's objects as it wrote them, by id, before anything was dropped."""
+    objects = (written or {}).get("objects") if isinstance(written, Mapping) else None
+    return {
+        str(obj.get("id")): obj
+        for obj in (objects if isinstance(objects, list) else [])
+        if isinstance(obj, Mapping) and obj.get("id")
+    }
+
+
+def malware_object_violations(
+    obj: Any,
+    *,
+    path: str,
+    family: str,
+    written: Mapping[str, Any] | None = None,
+) -> list[Violation]:
+    """A judge malware object whose ``is_family`` or kind reads against its own answer.
+
+    Two questions, each asked once and answered by the judge; nothing is
+    rewritten, and what the judge keeps is published as written:
+
+    - ``is_family`` false while the object's name is the family the judge
+      attributed, which is the name of an object standing for the family;
+    - ``labels`` written with no ``malware_types`` (the export does not carry
+      ``labels``, so the object reaches it with no kind), or a
+      ``malware_types`` value outside STIX 2.1's vocabulary.
+
+    ``written`` is the object as the judge wrote it, before undeclared keys
+    were dropped; without it only ``malware_types`` is read.
+    """
+    out: list[Violation] = []
+    named = str(getattr(obj, "name", "") or "").strip()
+    subject = named or str(getattr(obj, "id", "") or "")
+    if (
+        getattr(obj, "is_family", None) is False
+        and family
+        and named.casefold() == family.strip().casefold()
+    ):
+        out.append(
+            Violation(
+                code=IS_FAMILY_CONTRADICTS_FAMILY_CODE,
+                message=(
+                    f"the malware object {safe_finding_value(named)!r} says is_family false, "
+                    f"and its name is the family you attributed ({safe_finding_value(family)!r}). "
+                    "is_family is true when the object stands for a family and false when it "
+                    "stands for this one sample. Set is_family true, or name the object for "
+                    "this sample, or keep it as written — whichever you answer is what this "
+                    "run publishes."
+                ),
+                path=path,
+                subject=subject,
+            )
+        )
+    types = [str(t).strip() for t in (getattr(obj, "malware_types", None) or [])]
+    labels = (written or {}).get("labels") if isinstance(written, Mapping) else None
+    labels = [str(label) for label in labels] if isinstance(labels, list) else []
+    vocabulary = ", ".join(MALWARE_TYPES)
+    if labels and not types:
+        out.append(
+            Violation(
+                code=MALWARE_TYPE_VOCABULARY_CODE,
+                message=(
+                    f"the malware object {safe_finding_value(subject)!r} gives its kind as "
+                    f"labels {', '.join(repr(safe_finding_value(label)) for label in labels)}, "
+                    "which the export does not carry, and has no malware_types, so the export "
+                    "says nothing of what kind of malware it is. malware_types takes values "
+                    f"from STIX 2.1's malware-type vocabulary: {vocabulary}. Write the ones "
+                    "that fit under malware_types, or leave it out — nothing is filled in "
+                    "for you."
+                ),
+                path=path,
+                subject=subject,
+            )
+        )
+    outside = [t for t in types if t.lower() not in MALWARE_TYPES]
+    if outside:
+        out.append(
+            Violation(
+                code=MALWARE_TYPE_VOCABULARY_CODE,
+                message=(
+                    f"the malware object {safe_finding_value(subject)!r} has malware_types "
+                    f"{', '.join(repr(safe_finding_value(t)) for t in outside)}, outside "
+                    f"STIX 2.1's malware-type vocabulary: {vocabulary}. Use the ones that "
+                    "fit, or keep yours — the vocabulary is open, and whichever you answer "
+                    "is what this run publishes."
+                ),
+                path=path,
+                subject=subject,
+            )
+        )
+    return out
 
 
 def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation]:
@@ -4266,8 +4393,14 @@ def validate_verdict_bundle(
     corpus_state: CorpusState | None = None,
     technique_sources: Mapping[str, Sequence[str]] | None = None,
     origins: Sequence[tuple[int | None, str]] | None = None,
+    written: Mapping[str, Any] | None = None,
 ) -> list[Violation]:
     """What is wrong with the judge's answer, in the judge's own terms.
+
+    ``written`` is the answer as the judge wrote it, before properties the
+    platform does not carry were dropped: a malware object's ``labels`` is
+    read there (``malware_object_violations``). ``None`` reads the bundle
+    alone.
 
     ``technique_sources`` is who named which technique in this run, the
     evidence summary as data; a relationship crediting an agent with a
@@ -4347,6 +4480,11 @@ def validate_verdict_bundle(
         for comparison in read_comparisons(str(getattr(obj, "pattern", "") or ""))
         if comparison.operator == "=" and comparison.literal.strip()
     }
+    # The family the judge attributed, which a malware object's name is read
+    # against, and the objects as it wrote them.
+    _family = getattr(getattr(bundle, "x_maljan_assessment", None), "family", None)
+    attributed = str(getattr(_family, "name", "") or "").strip()
+    as_written = _written_objects(written)
     for index, obj in enumerate(objects):
         where = _object_path(index, origins)
         kind = str(getattr(obj, "type", "") or "")
@@ -4411,6 +4549,15 @@ def validate_verdict_bundle(
                     ),
                     path=where,
                     subject=named or str(getattr(obj, "id", "") or ""),
+                )
+            )
+        if kind == "malware":
+            violations.extend(
+                malware_object_violations(
+                    obj,
+                    path=where,
+                    family=attributed,
+                    written=as_written.get(str(getattr(obj, "id", "") or "")),
                 )
             )
         elif kind == "attack-pattern":

@@ -973,7 +973,17 @@ malware object's `sample_refs` is carried. Feedback names the judge's own positi
 drop maps them back. Nothing is written into a judge object that the judge left
 out: an untyped indicator stays untyped, and a malware object without
 `is_family`, which STIX requires, is asked about (`stix.is_family_missing`),
-and an `is_family` the judge wrote is published as written.
+and an `is_family` the judge wrote is published as written. Two more questions
+are asked of a judge malware object, once each, and answered by the judge:
+`is_family: false` on an object whose name is the family the judge attributed
+(`stix.is_family_contradicts_family`), and a kind the export cannot state
+(`stix.malware_type_vocabulary`) — `labels` written with no `malware_types`
+(the export does not carry `labels`, which the validator reads from the answer
+as written), or a `malware_types` value outside STIX 2.1's `malware-type-ov`
+vocabulary, which the question lists (`validation.MALWARE_TYPES`). The judge's
+prompt says an object named after the attributed family stands for it and that
+its kind goes under `malware_types` from that vocabulary. Nothing is rewritten:
+what the judge keeps is published as written.
 
 A judge malware object the export declines for a property the standard
 requires does not take the judge's relationships with it. The platform's own
