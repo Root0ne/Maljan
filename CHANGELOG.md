@@ -2329,10 +2329,18 @@ change landed on `main`.
   `anti-debugging/environment`, a STIX property name and an analyst's roster
   key were published as `***`. A run that splits on `_`, `-` or `/` into two or
   more pieces of letters, each written the way a word is and shorter than the
-  floor, is words; every key shape the tests build is still masked. An argument
-  summary, the whole summary line and a result headline are no longer cut
-  inside a digest or an identifier (a `<sha256>.exe` stays whole), so the
-  publisher's second scrub changes nothing.
+  floor, is words; every key shape the tests build is still masked. What that
+  costs is a passphrase-shaped secret, which no shape tells from a phrase, so
+  two rules stand in front of it: a run that begins with a known vendor prefix
+  (`glpat-`, `xoxp-`, `ghs_`, `hf_`, `key-`, `rk_live_` and more) with at least
+  20 characters after it is a key, and every secret value the worker holds —
+  the job's model, sandbox, Ghidra and tool-server credentials and its own
+  database, Redis and object-store ones — is masked by exact value wherever the
+  scrub runs. The scrub repeats its passes until they change nothing, and an
+  argument summary, the whole summary line, a result headline and a finding row
+  are cut so that a second scrub changes nothing: a digest or an identifier is
+  kept whole (a `<sha256>.exe` stays whole), and a cut inside a URL or after a
+  scheme word moves back to the start of its word.
 - **Informational notes do not make the verdict tentative.** One empty
   CONFIDENCE among hundreds of read claims set `degraded_mode` and the
   DEGRADED RUN banner. An unread-claims reason for an analyst that still has
@@ -2344,15 +2352,19 @@ change landed on `main`.
   case stored the claimed techniques against fewer published. After the export
   is built, `stix_object_count` is its object count on the stored summary and
   the report's; the judge's is `judge_stix_object_count`. The case stores the
-  published techniques and its total follows; the judge's log line says
-  "claimed techniques".
+  published techniques, and its total, corroborated count and search text
+  follow them; a case thin in what was published is not stored. The judge's
+  log line says "claimed techniques", and the terminal's corroboration line
+  says "technique(s) named".
 - **The judge is asked about its malware object.** `is_family: false` on an
   object named for the attributed family is asked about
   (`stix.is_family_contradicts_family`), and so are `labels` with no
   `malware_types` and a `malware_types` value outside STIX 2.1's
   `malware-type-ov` vocabulary (`stix.malware_type_vocabulary`), which the
-  question lists. The judge answers; nothing is rewritten. The prompt says when
-  an object stands for the family and names the vocabulary.
+  question lists; a type is compared exactly. The judge answers; nothing is
+  rewritten. The prompt says when an object stands for the family and names
+  the vocabulary. The object is read at its place in the answer as written,
+  since every published id is minted anew.
 - **A cipher is file encryption only when the model said it is.**
   `per_file_key: false` put a loader's cipher under "Ransomware behaviour"; only
   `true` does now, and the cipher renders in §5.1.
@@ -5661,8 +5673,19 @@ judge's bundle size. The judge's count is the new key
 `run_summary.judge_stix_object_count`. A consumer that read
 `stix_object_count` as the judge's should read the new key; a summary stored
 before this release has only `stix_object_count`, and it is the judge's. The
-long-term-memory case a completed run stores holds the published techniques,
-and its `total_techniques` counts them.
+long-term-memory case a completed run stores holds the published techniques;
+its `total_techniques` and `corroborated_count` count them, its search text
+lists only them, and a case with nothing corroborated and one published
+technique at most is not stored.
+
+**Configured secrets are masked by value.** Every secret value the worker
+holds (the job's model API keys, sandbox, Ghidra and tool-server tokens, a tool
+server's credential-named environment and header entries, and the worker's
+database, Redis and object-store credentials) of 8 characters or more is
+replaced by `***` wherever it appears in what the worker publishes and stores:
+events, finding rows and summaries. A secret that equals an ordinary word of 8
+characters or more takes that word out of every sentence as well; choose
+secrets that are not words.
 
 **Analysts run in parallel on a hosted API.** `llm.parallel_analysts` is `auto`
 by default. A deployment that never set it and calls a host resolving only to
