@@ -550,8 +550,13 @@ _JWT_RUN = re.compile(r"\A[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]
 # name by the pass below, which is what a reader needs, and reading it as a
 # key would replace the file name too. A path here is one with a marker *and*
 # a second separator: ``/wJalrXUtnFEMIK7MDENG`` is a key that begins with a
-# slash, not a directory.
-_MIME_TYPE = re.compile(r"\A[a-z]+/[a-z0-9][a-z0-9.+_\-]*\Z")
+# slash, not a directory. The type is one of the registered top-level types
+# (or an ``x-`` one), and the subtype is exempt only when it is no key itself:
+# ``left/<key>`` has the shape of a MIME type and is a key after a word.
+_MIME_TYPE = re.compile(
+    r"\A(?:application|audio|chemical|font|image|inode|message|model|multipart|text|video"
+    r"|x-[a-z0-9.+\-]+)/[a-z0-9][a-z0-9.+_\-]*\Z"
+)
 # Words with separators between them, which the base64 alternative above reads
 # as a key by its length alone: a claim's ``anti-debugging/environment``, a
 # STIX property name and an analyst's roster key are all 24 characters and
@@ -738,7 +743,7 @@ def _is_a_token(run: str) -> bool:
     return decoded.lstrip().startswith(b"{")
 
 
-def _looks_like_a_credential(token: str) -> bool:
+def _looks_like_a_credential(token: str, *, whole: bool = False) -> bool:
     """Whether this run of characters is a key rather than a word or a digest.
 
     In this order, and the order is the argument. A digest and an identifier
@@ -784,14 +789,19 @@ def _looks_like_a_credential(token: str) -> bool:
         and not _is_words(token)
     ):
         return True
-    if _MIME_TYPE.match(token) or _PATH_SHAPED.match(token) or _is_words(token):
+    if _MIME_TYPE.match(token) and not _looks_like_a_credential(token.split("/", 1)[1]):
+        return False
+    if _PATH_SHAPED.match(token) or _is_words(token):
         return False
     if _is_api_name(token):
         return False
     if _CREDENTIAL_RUN.match(token) or _is_a_token(token):
         return True
+    if whole:
+        return False
     # A key joined to other text by a slash, a bar, a plus or an ampersand is
     # still a key: ``<jwt>/name`` failed every rule anchored to the whole run.
+    # ``whole`` asks only the rules that read the run as one.
     pieces = [piece for piece in _JOINS.split(token) if piece]
     return len(pieces) > 1 and any(_looks_like_a_credential(piece) for piece in pieces)
 
@@ -983,8 +993,20 @@ def _shorten_path(found: re.Match[str]) -> str:
 
 
 def _hide_credentials(found: re.Match[str]) -> str:
+    """One value run, masked whole when it reads as a key as one run, and otherwise with
+    only its key-shaped pieces masked: the host, the directories and the file name
+    around a random segment stay as written."""
     value = found.group(0)
-    return _REDACTED if _looks_like_a_credential(value) else value
+    if not _looks_like_a_credential(value):
+        return value
+    if _looks_like_a_credential(value, whole=True):
+        return _REDACTED
+    return "".join(
+        _REDACTED
+        if part and not _JOINS.fullmatch(part) and _looks_like_a_credential(part)
+        else part
+        for part in re.split(r"([/|+&])", value)
+    )
 
 
 def scrub(text: Any) -> str:

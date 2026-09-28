@@ -30,8 +30,9 @@ from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.pipeline import events as ev
 from tests.unit.pipeline.test_live_event_schema import _every_key_shape
 
-# A catalogue name past the length floor, and one only a run resolved: made
-# up, mixed case with a digit, so no word rule exempts it.
+# A real export past the length floor, a pair of real algorithm ids, and a name
+# only a run resolved: made up, mixed case with a digit, so no word rule
+# exempts it.
 CATALOGUE_NAME = "ZwSetInformationJobObject"
 ALGORITHMS = "ror13_module_add/fnv1a32_lower"
 RESOLVED_ONLY = "SyntheticResolvedExport32NameW"
@@ -90,6 +91,35 @@ class TestTheCatalogue:
         for shape in _every_key_shape():
             for joined in (f"djb2_lower/{shape}", f"{shape}/djb2_lower", f"{shape}|ror13"):
                 assert shape not in ev.scrub(joined), joined
+
+    def test_only_the_key_shaped_piece_of_a_joined_run_is_masked(self) -> None:
+        # A random segment of 24 or more characters: read as a key by its shape.
+        segment = "Q" * 26
+        cases = {
+            f"example.com/gate/{segment}/x.php": "example.com/gate/***/x.php",
+            f"to %APPDATA%/Vendor/{segment}/svc.exe": "to %APPDATA%/Vendor/***/svc.exe",
+            f"samples/extracted/{segment}/payload.bin": "samples/extracted/***/payload.bin",
+            f"Assembly.GetCallingAssembly/{segment}": "Assembly.GetCallingAssembly/***",
+        }
+        for text, said in cases.items():
+            assert ev.scrub(text) == said, text
+            assert ev.safe_finding_value(text) == said, text
+
+    def test_every_key_shape_in_every_joined_form_is_masked(self) -> None:
+        for shape in _every_key_shape():
+            for joined in (
+                *(f"left{joiner}{shape}{joiner}right" for joiner in "/|+&"),
+                *(f"{shape}{joiner}right" for joiner in "/|+&"),
+                *(f"left{joiner}{shape}" for joiner in "/|+&"),
+                f"kernel32.dll!{shape}",
+                f"{shape}!{CATALOGUE_NAME}",
+            ):
+                for scrubbed in (
+                    ev.scrub(joined),
+                    ev.scrub_keeping_layout(joined),
+                    ev.safe_finding_value(joined),
+                ):
+                    assert shape not in scrubbed, joined
 
     def test_a_name_the_catalogue_does_not_hold_is_still_read_by_shape(self) -> None:
         assert ev.scrub(RESOLVED_ONLY) == "***"
