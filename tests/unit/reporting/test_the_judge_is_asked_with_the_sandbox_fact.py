@@ -34,14 +34,18 @@ from maljan.reporting.models import (
 )
 from maljan.reporting.renderers.stix_renderer import (
     JUDGE_KEPT_WHEN_TOLD,
-    JUDGE_NOT_TOLD,
+    JUDGE_NOT_ASKED_IN_TIME,
+    JUDGE_QUESTION_NOT_RECORDED,
     ExtendedSTIXRenderer,
+    indicator_publish_reason,
     judge_indicator_rows,
+    judge_not_told,
     publishes,
     sandbox_facts_for_the_judge,
     sandbox_row_kwargs,
 )
 from maljan.schemas.stix_models import Bundle
+from tests.unit.reporting._sandbox_fact import answered_the_sandbox_fact
 
 GUEST = "198.51.100.7"
 OWN = "192.0.2.10"
@@ -190,7 +194,7 @@ class TestTheDecision:
         said = sandbox_row_kwargs(_report(told=False), "ip", GUEST)
 
         assert said["kept_by"] == ""
-        assert said["untold"] == JUDGE_NOT_TOLD
+        assert said["untold"] == judge_not_told(JUDGE_QUESTION_NOT_RECORDED)
 
     def test_an_address_kept_after_the_question_keeps_it_by_that_answer(self) -> None:
         said = sandbox_row_kwargs(_report(told=True), "ip", GUEST)
@@ -204,7 +208,7 @@ class TestTheDecision:
         answer = _row(report, TLS_ONLY).published
 
         assert answer.startswith("no: a TLS name only the capture recorded")
-        assert JUDGE_NOT_TOLD in answer
+        assert JUDGE_QUESTION_NOT_RECORDED in answer
         assert not publishes(answer)
         assert dict((i.value, a) for i, a in judge_indicator_rows(report))[TLS_ONLY] == answer
 
@@ -365,3 +369,86 @@ class TestThePipelineReadsTheFacts:
         from maljan.pipeline.nodes import judge_sandbox_facts
 
         assert judge_sandbox_facts([], None, None) is None
+
+
+class TestTheWithheldReasonNamesItsCase:
+    """Which of the three cases the run summary records, in the row's own words."""
+
+    @staticmethod
+    def _answer(rows: list[dict[str, str]]) -> str:
+        report = _report(told=False)
+        report.run_summary = {"validation": {"unresolved": rows}}
+        return _row(report, TLS_ONLY).published
+
+    def test_no_row_says_no_question_is_recorded(self) -> None:
+        answer = self._answer([])
+
+        assert JUDGE_QUESTION_NOT_RECORDED in answer
+        assert "no question with this fact is recorded for this run" in answer
+        assert answer.endswith("so its keep publishes nothing") or "publishes nothing" in answer
+
+    def test_a_row_first_written_in_the_last_answer_says_so(self) -> None:
+        answer = self._answer(
+            [
+                {
+                    "agent": "judge",
+                    "code": UNATTRIBUTED_INDICATOR_CODE,
+                    "message": "m",
+                    "asked": "false",
+                    "subject": f"domain:{TLS_ONLY}",
+                }
+            ]
+        )
+
+        assert JUDGE_NOT_ASKED_IN_TIME in answer
+        assert "the judge wrote it in its last answer" in answer
+        assert not publishes(answer)
+
+    def test_an_answered_row_publishes(self) -> None:
+        answer = self._answer(
+            answered_the_sandbox_fact(f"domain:{TLS_ONLY}")["validation"]["unresolved"]
+        )
+
+        assert publishes(answer)
+
+
+class TestAURLOnAnAddressSaysItsAddressWasKept:
+    # A routable address the reference run never reached: a documentation
+    # address is refused by the address rule before attribution is asked.
+    ADDRESS = "185.199.111.20"
+    URL = f"http://{ADDRESS}/in"
+
+    def _report(self, told: bool, indicator: JudgeIndicator | None = None) -> MalwareReport:
+        from maljan.reporting.models import NetworkURL
+
+        return MalwareReport(
+            identity=SampleIdentity(hashes=FileHashes(sha256=SHA256)),
+            verdict="Malware",
+            overall_confidence=0.9,
+            network=NetworkIOCs(
+                ips=[NetworkIP(address=self.ADDRESS, source="sandbox")],
+                urls=[NetworkURL(url=self.URL, source="sandbox")],
+            ),
+            judge_indicators=[indicator or JudgeIndicator(kind="ip", value=self.ADDRESS)],
+            run_summary=answered_the_sandbox_fact(f"ip:{self.ADDRESS}") if told else {},
+        )
+
+    def test_told_the_url_says_its_address_was_kept(self) -> None:
+        said = sandbox_row_kwargs(self._report(told=True), "url", self.URL)
+        answer = indicator_publish_reason("url", self.URL, "sandbox", None, **said)
+
+        assert answer is not None
+        kept = f"its address {self.ADDRESS} was kept as an indicator by the judge"
+        assert answer.startswith(kept)
+
+    def test_untold_the_url_says_the_judge_named_its_address(self) -> None:
+        said = sandbox_row_kwargs(self._report(told=False), "url", self.URL)
+
+        assert f"the judge's indicator names its address {self.ADDRESS}" in said["untold"]
+
+    def test_a_told_judge_url_on_the_address_is_not_asked_again_under_the_url(self) -> None:
+        report = self._report(told=True, indicator=JudgeIndicator(kind="url", value=self.URL))
+
+        (answer,) = [a for _i, a in judge_indicator_rows(report)]
+
+        assert publishes(answer), answer

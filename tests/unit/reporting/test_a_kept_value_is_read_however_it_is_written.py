@@ -128,7 +128,7 @@ def test_the_host_of_a_url_the_judge_kept_unasked_is_not_kept() -> None:
     )
 
     assert not publishes(answer)
-    assert "the judge was not asked with this fact" in answer
+    assert "no question with this fact is recorded for this run" in answer
 
 
 def test_nothing_is_kept_without_a_model() -> None:

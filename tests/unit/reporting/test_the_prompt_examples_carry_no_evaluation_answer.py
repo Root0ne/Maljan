@@ -167,10 +167,12 @@ from maljan.reporting.renderers.stix_renderer import (
     CAPTURE_TLS_NAME,
     FLOW_OUTSIDE_THE_TREE,
     JUDGE_KEPT_WHEN_TOLD,
-    JUDGE_NOT_TOLD,
+    JUDGE_NOT_ASKED_IN_TIME,
+    JUDGE_QUESTION_NOT_RECORDED,
     SEARCHED_THE_REPORT,
     UNATTRIBUTED_FLOW,
     disputed_flow_reason,
+    judge_not_told,
     named_only_reason,
     not_kept_reason,
     public_resolver_reason,
@@ -531,7 +533,14 @@ PROMPTS: dict[str, str] = {
         )
     ),
     "publish rule words for the judge's keep and a published row": " ".join(
-        [JUDGE_KEPT_WHEN_TOLD, JUDGE_NOT_TOLD, yes_because("identity"), yes_because("sandbox")]
+        [
+            JUDGE_KEPT_WHEN_TOLD,
+            JUDGE_NOT_ASKED_IN_TIME,
+            JUDGE_QUESTION_NOT_RECORDED,
+            judge_not_told(JUDGE_NOT_ASKED_IN_TIME, "its address 192.0.2.1"),
+            yes_because("identity"),
+            yes_because("sandbox"),
+        ]
     ),
     "execution step questions for an observed step not watched whole": " ".join(
         v.message

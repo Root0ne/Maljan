@@ -1830,6 +1830,7 @@ def indicator_publish_reason(
     tool_search: str = "",
     asked_in: str = "",
     untold: str = "",
+    kept_address: str = "",
 ) -> str | None:
     """Why this run may publish one indicator of ``kind``, or ``None``.
 
@@ -1913,7 +1914,7 @@ def indicator_publish_reason(
         if in_published_url and not is_well_known_benign_host(value):
             return f"the host of {in_published_url}, which this run publishes"
         if in_published_url or unattributed:
-            return _kept_with_the_fact(kept_by, unattributed) or _recovered_and_held(
+            return _kept_with_the_fact(kept_by, unattributed, kept_address) or _recovered_and_held(
                 value, recovered, verdict, unattributed
             )
         return corroboration_reason(source, reputation, value) or _emulation_admits(
@@ -1921,7 +1922,7 @@ def indicator_publish_reason(
         )
     if kind == "ip":
         if unattributed and address_is_publishable(value, source):
-            return _kept_with_the_fact(kept_by, unattributed) or _recovered_and_held(
+            return _kept_with_the_fact(kept_by, unattributed, kept_address) or _recovered_and_held(
                 value, recovered, verdict, unattributed
             )
         admitted = ip_corroboration_reason(value, source, reputation)
@@ -1936,7 +1937,7 @@ def indicator_publish_reason(
         if is_public_resolver(host.strip("[]")):
             return None
         if unattributed and host_is_public(host):
-            return _kept_with_the_fact(kept_by, unattributed) or _recovered_and_held(
+            return _kept_with_the_fact(kept_by, unattributed, kept_address) or _recovered_and_held(
                 host, recovered, verdict, unattributed
             )
         admitted = url_corroboration_reason(value, source, reputation)
@@ -2036,9 +2037,15 @@ def _kept_by_a_model(kept_by: str) -> str | None:
     return f"kept as an indicator by {kept_by}" if kept_by else None
 
 
-def _kept_with_the_fact(kept_by: str, unattributed: str) -> str | None:
-    """A model's keep, with the sandbox's fact it was kept against beside it."""
+def _kept_with_the_fact(kept_by: str, unattributed: str, kept_address: str = "") -> str | None:
+    """A model's keep, with the sandbox's fact it was kept against beside it.
+
+    ``kept_address`` names the address a URL row stands on when the keep was
+    of that address, not of the URL: the reason says whose keep it is.
+    """
     kept = _kept_by_a_model(kept_by)
+    if kept and kept_address:
+        kept = f"its address {kept_address} was {kept}"
     return f"{kept}; {unattributed}" if kept and unattributed else kept
 
 
@@ -2046,31 +2053,54 @@ def _kept_with_the_fact(kept_by: str, unattributed: str) -> str | None:
 # stands on: the judge's answer to the question that told it the sandbox's fact
 # (``validation.unattributed_indicator_violations``), and nothing less.
 JUDGE_KEPT_WHEN_TOLD = "the judge when asked with the sandbox's fact"
-JUDGE_NOT_TOLD = (
-    "the judge's indicator names it, and the judge was not asked with this fact, so its "
-    "keep publishes nothing"
+# Why a judge's keep of such a value publishes nothing, by what the run summary
+# records: the question first raised by the judge's last answer, with no turn
+# left to ask it; or no question recorded at all (a report stored before the
+# question existed, or a verdict with no readable network record).
+JUDGE_NOT_ASKED_IN_TIME = (
+    "the judge wrote it in its last answer, and no turn was left to ask it with this fact"
 )
+JUDGE_QUESTION_NOT_RECORDED = "no question with this fact is recorded for this run"
+
+# The three states the run summary gives a judge's keep of such a value.
+FACT_ANSWERED = "answered"
+FACT_ASKED_TOO_LATE = "last answer"
+FACT_NOT_RECORDED = ""
 
 
-def _judge_answered_the_fact(report: Any, subject: str) -> bool:
-    """Whether the judge was asked with the sandbox's fact about ``subject`` and kept it.
+def judge_not_told(why: str, what: str = "it") -> str:
+    """The reason a judge's keep publishes nothing: what its indicator names, and why."""
+    return f"the judge's indicator names {what}, and {why}, so its keep publishes nothing"
 
-    Read from ``run_summary.validation.unresolved``, where the kept question is
-    recorded answered (``validation.kept_after_the_sandbox_fact``).
+
+def _judge_answered_the_fact(report: Any, subject: str) -> str:
+    """What the run summary records of the judge's question about ``subject``.
+
+    :data:`FACT_ANSWERED` when the judge was asked with the sandbox's fact and
+    kept its indicator (``validation.kept_after_the_sandbox_fact``),
+    :data:`FACT_ASKED_TOO_LATE` when the question was first raised by its last
+    answer (``asked: "false"``), :data:`FACT_NOT_RECORDED` when no question
+    about it is recorded. Read from ``run_summary.validation.unresolved``.
     """
     from maljan.pipeline.validation import UNATTRIBUTED_INDICATOR_CODE
 
     summary = _field(report, "run_summary")
     validation = summary.get("validation") if isinstance(summary, dict) else None
-    rows = validation.get("unresolved") if isinstance(validation, dict) else None
-    return any(
-        isinstance(row, dict)
+    rows = [
+        row
+        for row in (validation.get("unresolved") if isinstance(validation, dict) else None) or []
+        if isinstance(row, dict)
         and row.get("code") == UNATTRIBUTED_INDICATOR_CODE
-        and str(row.get("answered") or "") == "true"
-        and str(row.get("asked") or "") != "false"
         and str(row.get("subject") or "") == subject
-        for row in rows or []
-    )
+    ]
+    if any(
+        str(row.get("answered") or "") == "true" and str(row.get("asked") or "") != "false"
+        for row in rows
+    ):
+        return FACT_ANSWERED
+    if any(str(row.get("asked") or "") == "false" for row in rows):
+        return FACT_ASKED_TOO_LATE
+    return FACT_NOT_RECORDED
 
 
 def _the_judge_s_keep(report: Any, kind: str, key: str, said: dict[str, str]) -> dict[str, str]:
@@ -2081,19 +2111,26 @@ def _the_judge_s_keep(report: Any, kind: str, key: str, said: dict[str, str]) ->
     keep is then named as such. A keep it was never asked about is taken out of
     ``kept_by`` and stated (``untold``). Every other keep passes through.
     """
-    if not said.get("unattributed"):
+    if not said.get("unattributed") or said.get("untold"):
+        # No fact to ask about, or the row already carries the answer (a URL
+        # takes its address's, decided under the address).
         return said
     kept = [by for by in str(said.get("kept_by") or "").split(", ") if by]
+    if JUDGE_KEPT_WHEN_TOLD in kept:
+        return said
     judge = [by for by in kept if by.startswith("the judge")]
     if not judge:
         return said
     others = [by for by in kept if not by.startswith("the judge")]
     out = dict(said)
-    if _judge_answered_the_fact(report, f"{kind}:{key}"):
+    state = _judge_answered_the_fact(report, f"{kind}:{key}")
+    if state == FACT_ANSWERED:
         out["kept_by"] = ", ".join([JUDGE_KEPT_WHEN_TOLD, *others])
     else:
         out["kept_by"] = ", ".join(others)
-        out["untold"] = JUDGE_NOT_TOLD
+        out["untold"] = judge_not_told(
+            JUDGE_NOT_ASKED_IN_TIME if state == FACT_ASKED_TOO_LATE else JUDGE_QUESTION_NOT_RECORDED
+        )
     return out
 
 
@@ -2389,7 +2426,17 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
         # A sandbox URL whose host is an address takes that address's facts.
         host = url_host(value).strip("[]")
         if _field(row, "source") == "sandbox" and _parses_as_an_address(host):
-            return sandbox_row_kwargs(report, "ip", host)
+            said = dict(sandbox_row_kwargs(report, "ip", host))
+            # The keep, told or not, is of the address the URL stands on.
+            if said.get("untold"):
+                said["untold"] = said["untold"].replace(
+                    "the judge's indicator names it,",
+                    f"the judge's indicator names its address {host},",
+                    1,
+                )
+            if JUDGE_KEPT_WHEN_TOLD in str(said.get("kept_by") or ""):
+                said["kept_address"] = host
+            return said
         return {}
     if kind == "ip":
         if row is None or _field(row, "source") != "sandbox":
@@ -3046,6 +3093,7 @@ def publish_answer(
     tool_search: str = "",
     asked_in: str = "",
     untold: str = "",
+    kept_address: str = "",
 ) -> str:
     """The publish rule's answer for one row, as the report prints it.
 
@@ -3076,6 +3124,7 @@ def publish_answer(
         kept_by=kept_by,
         mentioned_by=mentioned_by,
         in_published_url=in_published_url,
+        kept_address=kept_address,
     )
     if admitted:
         return yes_because(admitted)
