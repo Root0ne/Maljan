@@ -86,7 +86,9 @@ class TestWhatIsFilledInIsNotAsked:
         # asks of the judge's value.
         from maljan.reporting.models import NetworkIOCs, NetworkIP
 
-        report.network = NetworkIOCs(ips=[NetworkIP(address="82.157.13.47", source="sandbox")])
+        report.network = NetworkIOCs(
+            ips=[NetworkIP(address="82.157.13.47", source="sandbox", sample_process_tree=True)]
+        )
 
         exported = ExtendedSTIXRenderer().render(report, bundle).model_dump(mode="json")
 

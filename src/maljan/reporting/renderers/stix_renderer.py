@@ -39,6 +39,7 @@ from maljan.agents._indicator_denylists import (
     whole_value_in,
 )
 from maljan.analysis.technique_ids import attack_reference_id
+from maljan.core.logger import logger
 from maljan.extractors.network_extractor import (
     address_is_publishable,
     corroboration_reason,
@@ -757,7 +758,7 @@ def _judge_indicator_unpublished(
     named = safe_finding_value(getattr(indicator, "name", "") or indicator.pattern)
     for value in rule_values(indicator.pattern or ""):
         answer = judge_value_answer(report, value.kind, value.value, corroborating)
-        if answer == "yes":
+        if publishes(answer):
             continue
         return (
             UNPUBLISHED_VALUE_CODE,
@@ -1313,6 +1314,9 @@ class ExtendedSTIXRenderer:
         # values the bundle did not carry.
         from maljan.agents.judge_postprocess import enforce_bundle_integrity
 
+        # Every indicator the export carries says why it is published, in the
+        # words the report's IOC table prints for its values.
+        objects = _with_the_publish_reason(objects, report)
         objects = enforce_bundle_integrity(objects, ledger=ledger)
         _record_indicator_cap(ledger, removed=0)
         # A note, opinion, grouping or report is about the objects it names,
@@ -1825,8 +1829,13 @@ def indicator_publish_reason(
     seen_in: str = "",
     tool_search: str = "",
     asked_in: str = "",
+    untold: str = "",
 ) -> str | None:
     """Why this run may publish one indicator of ``kind``, or ``None``.
+
+    ``untold`` is set on a sandbox row the judge's indicator names when the
+    judge was never asked with the sandbox's fact (:func:`sandbox_row_kwargs`):
+    its keep is then not among ``kept_by``, and publishes nothing.
 
     ``in_published_url`` names a URL this run publishes whose host is this
     domain (:func:`published_url_hosts`). The domain follows that URL's
@@ -1904,7 +1913,7 @@ def indicator_publish_reason(
         if in_published_url and not is_well_known_benign_host(value):
             return f"the host of {in_published_url}, which this run publishes"
         if in_published_url or unattributed:
-            return _kept_by_a_model(kept_by) or _recovered_and_held(
+            return _kept_with_the_fact(kept_by, unattributed) or _recovered_and_held(
                 value, recovered, verdict, unattributed
             )
         return corroboration_reason(source, reputation, value) or _emulation_admits(
@@ -1912,7 +1921,7 @@ def indicator_publish_reason(
         )
     if kind == "ip":
         if unattributed and address_is_publishable(value, source):
-            return _kept_by_a_model(kept_by) or _recovered_and_held(
+            return _kept_with_the_fact(kept_by, unattributed) or _recovered_and_held(
                 value, recovered, verdict, unattributed
             )
         admitted = ip_corroboration_reason(value, source, reputation)
@@ -1927,7 +1936,7 @@ def indicator_publish_reason(
         if is_public_resolver(host.strip("[]")):
             return None
         if unattributed and host_is_public(host):
-            return _kept_by_a_model(kept_by) or _recovered_and_held(
+            return _kept_with_the_fact(kept_by, unattributed) or _recovered_and_held(
                 host, recovered, verdict, unattributed
             )
         admitted = url_corroboration_reason(value, source, reputation)
@@ -2018,13 +2027,99 @@ def _published_url_hosts(report: Any) -> dict[str, tuple[str, str]]:
     if judged:
         corroborating = _corroborating_values(report)
         for url in judged:
-            if url and judge_value_answer(report, "url", url, corroborating) == "yes":
+            if url and publishes(judge_value_answer(report, "url", url, corroborating)):
                 _carry(url, "judge")
     return out
 
 
 def _kept_by_a_model(kept_by: str) -> str | None:
     return f"kept as an indicator by {kept_by}" if kept_by else None
+
+
+def _kept_with_the_fact(kept_by: str, unattributed: str) -> str | None:
+    """A model's keep, with the sandbox's fact it was kept against beside it."""
+    kept = _kept_by_a_model(kept_by)
+    return f"{kept}; {unattributed}" if kept and unattributed else kept
+
+
+# What a judge's keep of a value the sandbox attributes no flow of the sample to
+# stands on: the judge's answer to the question that told it the sandbox's fact
+# (``validation.unattributed_indicator_violations``), and nothing less.
+JUDGE_KEPT_WHEN_TOLD = "the judge when asked with the sandbox's fact"
+JUDGE_NOT_TOLD = (
+    "the judge's indicator names it, and the judge was not asked with this fact, so its "
+    "keep publishes nothing"
+)
+
+
+def _judge_answered_the_fact(report: Any, subject: str) -> bool:
+    """Whether the judge was asked with the sandbox's fact about ``subject`` and kept it.
+
+    Read from ``run_summary.validation.unresolved``, where the kept question is
+    recorded answered (``validation.kept_after_the_sandbox_fact``).
+    """
+    from maljan.pipeline.validation import UNATTRIBUTED_INDICATOR_CODE
+
+    summary = _field(report, "run_summary")
+    validation = summary.get("validation") if isinstance(summary, dict) else None
+    rows = validation.get("unresolved") if isinstance(validation, dict) else None
+    return any(
+        isinstance(row, dict)
+        and row.get("code") == UNATTRIBUTED_INDICATOR_CODE
+        and str(row.get("answered") or "") == "true"
+        and str(row.get("asked") or "") != "false"
+        and str(row.get("subject") or "") == subject
+        for row in rows or []
+    )
+
+
+def _the_judge_s_keep(report: Any, kind: str, key: str, said: dict[str, str]) -> dict[str, str]:
+    """``said`` with the judge's keep standing only on its answer to the sandbox's fact.
+
+    A row with an ``unattributed`` fact that the judge's indicator names keeps
+    it only when the judge was asked with that fact and kept the indicator; the
+    keep is then named as such. A keep it was never asked about is taken out of
+    ``kept_by`` and stated (``untold``). Every other keep passes through.
+    """
+    if not said.get("unattributed"):
+        return said
+    kept = [by for by in str(said.get("kept_by") or "").split(", ") if by]
+    judge = [by for by in kept if by.startswith("the judge")]
+    if not judge:
+        return said
+    others = [by for by in kept if not by.startswith("the judge")]
+    out = dict(said)
+    if _judge_answered_the_fact(report, f"{kind}:{key}"):
+        out["kept_by"] = ", ".join([JUDGE_KEPT_WHEN_TOLD, *others])
+    else:
+        out["kept_by"] = ", ".join(others)
+        out["untold"] = JUDGE_NOT_TOLD
+    return out
+
+
+def sandbox_facts_for_the_judge(network: Any) -> Any:
+    """``(kind, value) -> fact`` for the judge's question, or ``None`` with no network block.
+
+    The sandbox's fact about a value it recorded and attributes no flow of the
+    sample to, in the publish rule's own words (:func:`sandbox_row_kwargs`),
+    and ``""`` for any other value. Read from the network block the report
+    will be built from, before the judge's verdict exists, so nothing about
+    the judge's own keep is in it.
+    """
+    if network is None:
+        return None
+    from types import SimpleNamespace
+
+    facts = SimpleNamespace(network=network, judge_indicators=[], run_summary={})
+
+    def _fact(kind: str, value: str) -> str:
+        try:
+            return str(sandbox_row_kwargs(facts, kind, value).get("unattributed") or "")
+        except Exception as exc:  # noqa: BLE001 — a fact not read asks nothing
+            logger.debug("stix_renderer: no sandbox fact for a judge value (%s).", exc)
+            return ""
+
+    return _fact
 
 
 def _recovery_refusal(recovered: str, verdict: Any, host: str) -> str:
@@ -2209,7 +2304,7 @@ def _listing_kwargs(report: Any, kind: str, key: str, row: Any) -> dict[str, str
     recorded = _stored_network_record(report, kind, key)
     if recorded:
         said["unattributed"] = recorded
-        return said
+        return _the_judge_s_keep(report, kind, key, said)
     seen, searched = listed_value_sightings(report, kind, key)
     if seen:
         said["seen_in"] = seen
@@ -2328,7 +2423,9 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
             why = BENIGN_NAME_RESOLVED
         else:
             return {}
-    return {"unattributed": why, **kept_kwargs(report, kind, key, row)}
+    return _the_judge_s_keep(
+        report, kind, key, {"unattributed": why, **kept_kwargs(report, kind, key, row)}
+    )
 
 
 def _parses_as_an_address(text: str) -> bool:
@@ -2380,7 +2477,15 @@ _READING: ContextVar[dict[str, Any] | None] = ContextVar("maljan_stix_reading", 
 
 @contextmanager
 def one_reading(report: Any) -> Iterator[None]:
-    """Hold the report's lookups for the duration of one table, export or feed."""
+    """Hold the report's lookups for the duration of one table, export or feed.
+
+    A reading already held for the same report is kept: the export reads the
+    IOC table for its reasons inside its own reading, and builds nothing twice.
+    """
+    current = _READING.get()
+    if current is not None and current.get("report") == id(report):
+        yield
+        return
     token = _READING.set({"report": id(report)})
     try:
         yield
@@ -2893,6 +2998,35 @@ def _is_a_whole_digest(value: Any) -> bool:
     return bool(_WHOLE_DIGEST_RE.match(text)) and len(text) in _DIGEST_HEX_LENGTHS
 
 
+# What a bare source name admits a row as, in words: the rule answers some rows
+# by who recorded them, and a reader is owed the sentence.
+_SOURCE_WORDS = {
+    "sandbox": "the sandbox recorded it",
+    "identity": "the sample's own digest",
+    "persistence": "a persistence mechanism this run recorded",
+    "static": "a file a static tool carved out of the sample",
+    "judge": "the judge's indicator, which the rule publishes",
+    "analyst": "an analyst listed it",
+}
+
+
+def published_because(reason: str) -> str:
+    """The publish rule's reason for a row, as a sentence a reader can check."""
+    said = str(reason or "").strip()
+    return _SOURCE_WORDS.get(said.lower(), said)
+
+
+def yes_because(reason: str) -> str:
+    """``yes: <why>``: the answer every published row prints, on every surface."""
+    return f"yes: {published_because(reason)}"
+
+
+def publishes(answer: Any) -> bool:
+    """Whether a publish answer publishes: ``yes``, with or without its reason."""
+    text = str(answer or "").strip()
+    return text == "yes" or text.startswith("yes:")
+
+
 def publish_answer(
     kind: str,
     value: str,
@@ -2911,11 +3045,13 @@ def publish_answer(
     seen_in: str = "",
     tool_search: str = "",
     asked_in: str = "",
+    untold: str = "",
 ) -> str:
     """The publish rule's answer for one row, as the report prints it.
 
-    ``yes``, or ``no: <reason>`` naming the half of :func:`indicator_publish_reason`
-    that refused it. The decision is that function's and nothing here decides
+    ``yes: <reason>`` with the reason :func:`indicator_publish_reason` gave, in
+    words (:func:`published_because`), or ``no: <reason>`` naming the half of
+    it that refused the row. The decision is that function's and nothing here decides
     anything: the reason is read back from the same questions it asks, in the
     same order. ``corroborating`` is the run's second-source record
     (:func:`corroborating_values`), asked whole-value for a string row the way
@@ -2928,7 +3064,7 @@ def publish_answer(
         if from_strings and text and corroborating and whole_value_in(text, corroborating)
         else ""
     )
-    if indicator_publish_reason(
+    admitted = indicator_publish_reason(
         kind,
         text,
         source,
@@ -2940,8 +3076,9 @@ def publish_answer(
         kept_by=kept_by,
         mentioned_by=mentioned_by,
         in_published_url=in_published_url,
-    ):
-        return "yes"
+    )
+    if admitted:
+        return yes_because(admitted)
     if kind == "ip" and is_public_resolver(text):
         return public_resolver_reason(unattributed, listed_by, mentioned_by)
     if kind == "url" and is_public_resolver(url_host(text).strip("[]")):
@@ -2958,6 +3095,15 @@ def publish_answer(
         )
     if unattributed and kind in ("ip", "domain", "url"):
         refused = _recovery_refusal(recovered, verdict, url_host(text) if kind == "url" else text)
+        if untold:
+            said = f"no: {unattributed}; {untold}"
+            if refused:
+                said += f"; {refused}"
+            if listed_by:
+                said += f"; {listed_by} lists it"
+            if mentioned_by:
+                said += f" ({mentioned_by} mentions it and does not keep it)"
+            return said
         if refused:
             # A recovering tool read the value too, and its own refusal
             # stands: both facts are stated.
@@ -3020,7 +3166,31 @@ def judge_value_answer(report: Any, kind: str, value: str, corroborating: str) -
     text = str(value or "").strip()
     network = getattr(report, "network", None)
     emulated = emulation_kwargs(report, kind, text)
-    if emulated.get("unattributed") or emulated.get("in_published_url"):
+    if emulated.get("unattributed"):
+        # A value the sandbox attributes no flow of the sample to is the
+        # judge's only by its answer to the question that told it so.
+        emulated = _the_judge_s_keep(
+            report,
+            kind,
+            _value_key(kind, text),
+            {
+                **emulated,
+                "kept_by": ", ".join(
+                    dict.fromkeys(
+                        [
+                            *(by for by in str(emulated.get("kept_by") or "").split(", ") if by),
+                            *(
+                                ()
+                                if emulated.get("untold")
+                                or JUDGE_KEPT_WHEN_TOLD in str(emulated.get("kept_by") or "")
+                                else ("the judge's indicator",)
+                            ),
+                        ]
+                    )
+                ),
+            },
+        )
+    elif emulated.get("in_published_url"):
         # The value is the judge's own: a model kept it, which is what a row
         # the observation alone does not publish waits for.
         kept = [by for by in str(emulated.get("kept_by") or "").split(", ") if by]
@@ -3539,6 +3709,51 @@ def _indicator_for_url(url: NetworkURL, report: Any = None) -> Indicator | None:
         # As for a domain, only the surprising admission is spelled out.
         description=admitted if source == "strings" else None,
     )
+
+
+# What an exported indicator's description says of why it is published.
+PUBLISHED_BECAUSE = "Published because"
+
+
+def _with_the_publish_reason(objects: list[Any], report: Any) -> list[Any]:
+    """Each indicator with the reason the one publish rule gave for its values, in words.
+
+    Read from the report's IOC table (``build_consolidated_iocs``), the
+    answers every other surface prints, so the export says what the table
+    says. The reason follows whatever description the indicator carries — the
+    judge's own words for one it wrote stay first and unchanged, and the
+    judge's own bundle is not touched. An indicator whose values the table
+    has no published answer for keeps what it carries.
+    """
+    from maljan.reporting.builder import build_consolidated_iocs
+
+    rows = list(getattr(report, "consolidated_iocs", None) or []) or build_consolidated_iocs(report)
+    answers: dict[tuple[str, str], str] = {}
+    for row in rows:
+        kind = str(row.kind or "")
+        if publishes(row.published):
+            answers.setdefault((kind, _value_key(kind, row.value)), str(row.published))
+    out: list[Any] = []
+    for obj in objects:
+        if not isinstance(obj, Indicator):
+            out.append(obj)
+            continue
+        said: list[str] = []
+        for value in rule_values(obj.pattern or ""):
+            answer = answers.get((value.kind, _value_key(value.kind, value.value)))
+            if answer:
+                why = answer.split(":", 1)[1].strip() if ":" in answer else answer
+                if why and why not in said:
+                    said.append(why)
+        if not said:
+            out.append(obj)
+            continue
+        reason = f"{PUBLISHED_BECAUSE}: {'; '.join(said)}."
+        before = str(obj.description or "").strip()
+        out.append(
+            obj.model_copy(update={"description": f"{before} {reason}" if before else reason})
+        )
+    return out
 
 
 def _host_reputation(report: Any, host: str) -> dict[str, Any] | None:

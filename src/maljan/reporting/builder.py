@@ -607,6 +607,7 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         publish_answer,
         query_answers,
         recovered_by_words,
+        yes_because,
     )
 
     rows: list[ConsolidatedIOC] = []
@@ -672,7 +673,9 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         ("ssdeep", h.ssdeep),
         ("TLSH", h.tlsh),
     ):
-        _add(label, "hash", digest or "", "identity", "the sample", published="yes")
+        _add(
+            label, "hash", digest or "", "identity", "the sample", published=yes_because("identity")
+        )
 
     static = report.static
     dynamic = report.dynamic
@@ -780,6 +783,9 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
 
     net = report.network
     reputations: dict[str, Any] = {}
+    # A fingerprint and a user agent are the sandbox's own records of the
+    # traffic; no string sweep produces one, and the reason says so.
+    _seen = yes_because("sandbox")
     if net:
         for d in net.domains:
             reputations[d.fqdn.strip().lower().rstrip(".")] = d.reputation
@@ -850,11 +856,11 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 is_network=True,
             )
         for ua in net.user_agents:
-            _add("User-Agent", "user_agent", ua, "sandbox", published="yes", is_network=True)
+            _add("User-Agent", "user_agent", ua, "sandbox", published=_seen, is_network=True)
         for ja3 in net.ja3_fingerprints:
-            _add("JA3", "ja3", ja3, "sandbox", published="yes", is_network=True)
+            _add("JA3", "ja3", ja3, "sandbox", published=_seen, is_network=True)
         for ja3s in net.ja3s_fingerprints:
-            _add("JA3S", "ja3s", ja3s, "sandbox", published="yes", is_network=True)
+            _add("JA3S", "ja3s", ja3s, "sandbox", published=_seen, is_network=True)
 
     labels = {"url": "URL", "domain": "Domain", "email": "Email"}
     for s in strings:

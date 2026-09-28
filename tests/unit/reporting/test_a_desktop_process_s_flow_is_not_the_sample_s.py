@@ -36,6 +36,7 @@ from maljan.reporting.renderers.stix_renderer import (
     ExtendedSTIXRenderer,
     emulation_kwargs,
     publish_answer,
+    publishes,
 )
 from maljan.schemas.evidence import build_entry
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -230,7 +231,7 @@ def test_a_flow_both_facts_give_the_sample_reaches_every_surface() -> None:
     flows = [{"proto": "tcp", "dst": f"{DESKTOP_ADDRESS}:443", "procid": 84, "pid": 1}]
     report = _report({84, 87, 105}, flows)
     (table_row,) = [i for i in report.consolidated_iocs if i.value == DESKTOP_ADDRESS]
-    assert table_row.published == "yes"
+    assert publishes(table_row.published)
     patterns = [
         str(getattr(o, "pattern", "")) for o in ExtendedSTIXRenderer().render(report).objects
     ]

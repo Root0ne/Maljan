@@ -238,7 +238,7 @@ class TestThePublishRuleFailsClosed:
         from app.services import report_service
 
         assert hasattr(report_service, "indicator_publish_reason")
-        body = ast.parse(textwrap.dedent(inspect.getsource(report_service._publishable)))
+        body = ast.parse(textwrap.dedent(inspect.getsource(report_service._published)))
         assert not [
             node for node in ast.walk(body) if isinstance(node, ast.Import | ast.ImportFrom)
         ], "the rule is imported once, at module scope, not per call"
@@ -270,6 +270,9 @@ class TestAPublishedURLCarriesItsHost:
                 "value": "relay-alpha-7f3c.top",
                 "source": "sandbox",
                 "published": True,
+                "publish_answer": (
+                    "yes: the host of http://relay-alpha-7f3c.top/gate, which this run publishes"
+                ),
             }
         ]
 

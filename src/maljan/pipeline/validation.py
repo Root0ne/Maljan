@@ -6263,3 +6263,95 @@ def unsupported_malware_violations(
             path="objects",
         )
     ]
+
+
+# A judge indicator naming a value the sandbox recorded and attributes no flow
+# of the sample to. The judge is asked once, with the sandbox's own fact beside
+# the value; what it answers decides whether the value is published. A keep it
+# was never asked about publishes nothing (``stix_renderer.sandbox_row_kwargs``).
+UNATTRIBUTED_INDICATOR_CODE = "stix.indicator_unattributed_flow"
+
+
+def unattributed_indicator_violations(
+    bundle: Any, facts: Callable[[str, str], str] | None
+) -> list[Violation]:
+    """Indicators that name a value the sandbox attributes no flow of the sample to.
+
+    ``facts`` is ``(kind, value) -> the sandbox's fact`` for a value the
+    sandbox recorded and did not attribute to the sample's process tree, and
+    ``""`` otherwise (``stix_renderer.sandbox_facts_for_the_judge``). Each such
+    value is one question, with the fact written beside it; ``subject`` names
+    the value the fact is about, which is what the report's publish rule reads.
+    Nothing is removed: a keep after the question is the judge's answer.
+    """
+    if facts is None:
+        return []
+    from maljan.reporting.ledger_projection import value_key
+    from maljan.reporting.renderers.stix_renderer import rule_values, url_host
+
+    out: list[Violation] = []
+    seen: set[str] = set()
+    for obj in getattr(bundle, "objects", None) or []:
+        if str(getattr(obj, "type", "") or "") != "indicator":
+            continue
+        name = safe_finding_value(getattr(obj, "name", "") or getattr(obj, "pattern", ""))
+        for value in rule_values(str(getattr(obj, "pattern", "") or "")):
+            if value.kind not in ("ip", "domain", "url"):
+                continue
+            said = facts(value.kind, value.value)
+            if not said:
+                continue
+            kind, about = value.kind, value.value
+            host = url_host(about).strip("[]") if kind == "url" else ""
+            try:
+                ipaddress.ip_address(host)
+            except ValueError:
+                pass
+            else:
+                # A URL on an address takes the address's fact, and the
+                # answer is about the address.
+                kind, about = "ip", host
+            subject = f"{kind}:{value_key(kind, about)}"
+            if subject in seen:
+                continue
+            seen.add(subject)
+            out.append(
+                Violation(
+                    code=UNATTRIBUTED_INDICATOR_CODE,
+                    message=(
+                        f"the indicator {name!r} names {safe_finding_value(value.value)!r}, and "
+                        f"{safe_finding_value(said)}: the sandbox attributes no flow of the "
+                        "sample to it, and without one it is the analysis machine's own "
+                        "traffic. Keep the indicator only if this run's evidence shows the "
+                        "sample itself reached it, and cite that entry in the indicator's "
+                        "description; otherwise remove the indicator."
+                    ),
+                    path="objects",
+                    subject=subject,
+                )
+            )
+    return out
+
+
+def kept_after_the_sandbox_fact(violations: Sequence[Violation]) -> list[Violation]:
+    """The unattributed-indicator questions the judge answered by keeping the indicator.
+
+    A question the judge was shown and whose indicator it kept is its answer,
+    recorded as one (``answered``): the value is then published, with the
+    reason. A question it was never shown stays what it is, and publishes
+    nothing. Every other row passes through unchanged.
+    """
+    out: list[Violation] = []
+    for violation in violations:
+        if violation.code == UNATTRIBUTED_INDICATOR_CODE and violation.asked:
+            violation = replace(
+                violation,
+                message=(
+                    "Asked with the sandbox's fact, the judge kept its indicator on "
+                    f"{safe_finding_value(violation.subject.partition(':')[2])}."
+                ),
+                sentence="",
+                answered=True,
+            )
+        out.append(violation)
+    return out

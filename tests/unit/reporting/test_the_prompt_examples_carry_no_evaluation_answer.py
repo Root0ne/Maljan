@@ -129,6 +129,7 @@ from maljan.pipeline.validation import (
     repeated_item_violations,
     section_cut_violation,
     technique_line_violation,
+    unattributed_indicator_violations,
     ungrounded_capabilities,
     validate_verdict_bundle,
 )
@@ -164,6 +165,8 @@ from maljan.reporting.renderers.stix_renderer import (
     BENIGN_NAME_RESOLVED,
     CAPTURE_TLS_NAME,
     FLOW_OUTSIDE_THE_TREE,
+    JUDGE_KEPT_WHEN_TOLD,
+    JUDGE_NOT_TOLD,
     SEARCHED_THE_REPORT,
     UNATTRIBUTED_FLOW,
     disputed_flow_reason,
@@ -171,6 +174,7 @@ from maljan.reporting.renderers.stix_renderer import (
     not_kept_reason,
     public_resolver_reason,
     seen_in_reason,
+    yes_because,
 )
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import (
@@ -495,6 +499,28 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "judge technique answer form": TECHNIQUE_ANSWER_FORM,
+    "judge question about an indicator on a value the sample did not reach": " ".join(
+        v.message
+        for v in unattributed_indicator_violations(
+            Bundle.model_validate(
+                {
+                    "type": "bundle",
+                    "objects": [
+                        {
+                            "type": "indicator",
+                            "id": "indicator--1",
+                            "pattern": "[domain-name:value = 'one.example']",
+                            "indicator_types": ["malicious-activity"],
+                        }
+                    ],
+                }
+            ),
+            lambda kind, value: CAPTURE_TLS_NAME,
+        )
+    ),
+    "publish rule words for the judge's keep and a published row": " ".join(
+        [JUDGE_KEPT_WHEN_TOLD, JUDGE_NOT_TOLD, yes_because("identity"), yes_because("sandbox")]
+    ),
     "execution step questions for an observed step not watched whole": " ".join(
         v.message
         for v in flow_voice_violations(

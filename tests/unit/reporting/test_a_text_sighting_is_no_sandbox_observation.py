@@ -35,9 +35,11 @@ from maljan.reporting.renderers.stix_renderer import (
     CAPTURE_TLS_NAME,
     emulation_kwargs,
     publish_answer,
+    publishes,
 )
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR, Artifact
+from tests.unit.reporting._sandbox_fact import answered_the_sandbox_fact
 
 NAME = "relay-alpha-7f3c.top"
 ADDRESS = "185.199.110.77"
@@ -69,7 +71,7 @@ def _build(ledger: list[LedgerEntry], isrs: dict[str, Any] | None = None, **extr
         reports={},
         isr_reports=isrs or {},
         stix_output=extra.get("stix_output") or {"objects": []},
-        run_summary={},
+        run_summary=extra.get("run_summary") or {},
         discussion_history=[],
         final_decision="Malware",
         overall_confidence=0.8,
@@ -157,9 +159,13 @@ class TestACaptureOnlyName:
                 }
             ]
         }
-        report = _build([self._capture()], stix_output=judge)
+        report = _build(
+            [self._capture()],
+            stix_output=judge,
+            run_summary=answered_the_sandbox_fact(f"domain:{NAME}"),
+        )
 
-        assert _row(report, NAME).published == "yes"
+        assert publishes(_row(report, NAME).published)
 
     def test_a_name_the_sandbox_also_resolved_keeps_the_name_rule(self) -> None:
         dns = _entry("ev_0002", "sandbox_network", {"dns": [{"request": NAME}]})
@@ -167,7 +173,7 @@ class TestACaptureOnlyName:
 
         assert report.network is not None
         assert report.network.domains[0].capture_only is False
-        assert _row(report, NAME).published == "yes"
+        assert publishes(_row(report, NAME).published)
 
 
 class TestAnAnswerToAQueryForTheValue:
@@ -260,6 +266,7 @@ class TestAStoredReportsCaptureHeldValue:
             overall_confidence=0.8,
             network=NetworkIOCs(domains=[NetworkDomain(fqdn=NAME, source="analyst")]),
             judge_indicators=[JudgeIndicator(kind="domain", value=NAME)],
+            run_summary=answered_the_sandbox_fact(f"domain:{NAME}"),
             sections=[
                 EvidenceSection(
                     key="pcap_summary",
@@ -276,4 +283,4 @@ class TestAStoredReportsCaptureHeldValue:
             "domain", NAME, "analyst", None, **emulation_kwargs(report, "domain", NAME)
         )
 
-        assert answer == "yes"
+        assert publishes(answer)

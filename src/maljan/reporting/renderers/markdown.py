@@ -356,8 +356,10 @@ class MarkdownRenderer:
         if top:
             named = ", ".join(f"{m.technique_id} {m.technique_name}" for m in top)
             lines.append(_item(f"Top published techniques: {named} _({ASSESSED})_"))
+        from maljan.reporting.renderers.stix_renderer import publishes
+
         published = sum(
-            1 for row in ctx.iocs if row.kind in _NETWORK_KINDS and row.published == "yes"
+            1 for row in ctx.iocs if row.kind in _NETWORK_KINDS and publishes(row.published)
         )
         lines.append(_item(f"Published network indicators: {published} _({MEASURED})_"))
         return "\n".join(lines)
@@ -1206,7 +1208,7 @@ class MarkdownRenderer:
             lines.append(_row("Value", "Kind", "Notes", "Published"))
             lines.append(_divider(4))
             for ioc in static.interesting_strings[:60]:
-                published = answers.get((ioc.kind, ioc.value.strip().lower())) or "-"
+                published = ctx.plain(answers.get((ioc.kind, ioc.value.strip().lower())) or "-")
                 lines.append(
                     _row(
                         f"`{_truncate(ioc.value, _CELL_LIMIT)}`",
@@ -1369,7 +1371,7 @@ class MarkdownRenderer:
                         f"`{row.value}`",
                         row.context or "-",
                         row.source or "-",
-                        row.published or "-",
+                        ctx.plain(row.published or "-"),
                     )
                 )
             if any(not row.published for row in host):
@@ -1406,7 +1408,7 @@ class MarkdownRenderer:
                     )
                     or "-",
                     row.source or "-",
-                    row.published or "-",
+                    ctx.plain(row.published or "-"),
                 ]
                 if reputation:
                     cells.append(reputation.get(row.value.strip().lower().rstrip("."), "-"))

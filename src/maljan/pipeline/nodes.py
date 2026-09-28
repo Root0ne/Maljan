@@ -346,6 +346,35 @@ def skipped_analysts_reason(why: str, names: Sequence[str]) -> str:
 SAMPLE_FED_ROLES: tuple[str, ...] = ("static", *PROMPT_ROLES)
 
 
+def judge_sandbox_facts(ledger: Any, isr_reports: Any, sandbox_report: Any) -> Any:
+    """What the sandbox says about each value it recorded, for the judge's indicator question.
+
+    The network block the report will be built from, read before the verdict
+    exists (``ledger_projection.network_from_ledger``), and the publish rule's
+    own words for a value the sandbox attributes no flow of the sample to
+    (``stix_renderer.sandbox_facts_for_the_judge``). ``None`` when no network
+    block can be read: then nothing is asked, and nothing such a question
+    would have decided is published.
+    """
+    from maljan.reporting.ledger_projection import network_from_ledger
+    from maljan.reporting.renderers.stix_renderer import sandbox_facts_for_the_judge
+
+    try:
+        network = network_from_ledger(
+            list(ledger or []),
+            isr_reports,
+            sandbox_report=sandbox_report if isinstance(sandbox_report, dict) else None,
+        )
+    except Exception as exc:  # noqa: BLE001 — a fact not read asks nothing
+        logger.warning(
+            "Judge verdict: the sandbox's network record could not be read for the "
+            "indicator question (%s).",
+            type(exc).__name__,
+        )
+        return None
+    return sandbox_facts_for_the_judge(network)
+
+
 def _sandbox_report_is_synthetic(state: AnalysisState) -> bool:
     """True when the sandbox report stands in for a run that never happened.
 
@@ -4306,6 +4335,12 @@ def make_judge_node(
                     tid: [source for source, _confidence in rows]
                     for tid, rows in collect_technique_sources(isr_reports, _ledger).items()
                 },
+                # What the sandbox says about each value it recorded and does
+                # not attribute to the sample: an indicator on one is asked
+                # about once, with the fact beside it.
+                sandbox_facts=judge_sandbox_facts(
+                    _ledger, isr_reports, state.get("sandbox_report")
+                ),
             )
             # A verdict the judge never expressed as a bundle is the thinnest
             # answer this pipeline can produce — no severity, no reasoning the

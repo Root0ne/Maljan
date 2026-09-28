@@ -160,7 +160,18 @@ def _published_rows(report: MalwareReport) -> list[Any]:
         from maljan.reporting.builder import build_consolidated_iocs
 
         rows = build_consolidated_iocs(report)
-    return [row for row in rows if str(getattr(row, "published", "") or "") == "yes"]
+    from maljan.reporting.renderers.stix_renderer import publishes
+
+    return [row for row in rows if publishes(getattr(row, "published", ""))]
+
+
+def _why_published(row: Any) -> str:
+    """``<value>: published because <reason>``, one line a draft's comment carries."""
+    answer = str(getattr(row, "published", "") or "")
+    why = answer.split(":", 1)[1].strip() if ":" in answer else "the publish rule published it"
+    said = f"{getattr(row, 'value', '')}: published because {why}"
+    # A comment is one line: no control character reaches it.
+    return "".join(c if c >= " " else " " for c in said)
 
 
 # Names that assert an attribution the report does not actually have. A rule
@@ -278,12 +289,14 @@ def _build_yara(report: MalwareReport) -> DetectionRule | None:
 
     imphash = report.identity.hashes.imphash
     strings: list[tuple[str, str]] = []  # (slot, value)
+    reasons: dict[str, str] = {}  # slot -> why the value is published
     sources: list[str] = [f"sha256:{sha256}"]
 
     eligible = [row for row in _published_rows(report) if _yara_string_eligible(row)]
     for row in eligible[:_MAX_YARA_STRINGS]:
         slot = f"$s{len(strings)}"
         strings.append((slot, row.value))
+        reasons[slot] = _why_published(row)
         sources.append(f"string:{row.kind}:{row.value}")
 
     # Gated above when the seed is a placeholder, so this normally uses the real
@@ -299,6 +312,7 @@ def _build_yara(report: MalwareReport) -> DetectionRule | None:
         family=report.attribution.family or report.malware_category or "unknown",
         verdict=report.verdict,
         generated_at_iso=report.generated_at.isoformat(),
+        reasons=reasons,
     )
 
     if len(eligible) > _MAX_YARA_STRINGS:
@@ -324,6 +338,7 @@ def _render_yara(
     family: str,
     verdict: str,
     generated_at_iso: str,
+    reasons: dict[str, str] | None = None,
 ) -> str:
     lines: list[str] = []
     imports = ['import "hash"']
@@ -345,7 +360,11 @@ def _render_yara(
     if strings:
         lines.append("    strings:")
         for slot, value in strings:
-            lines.append(f'        {slot} = "{_escape_yara(value)}" ascii wide nocase')
+            why = (reasons or {}).get(slot)
+            lines.append(
+                f'        {slot} = "{_escape_yara(value)}" ascii wide nocase'
+                + (f"  // {why}" if why else "")
+            )
     lines.append("    condition:")
 
     conditions: list[str] = [f'hash.sha256(0, filesize) == "{_escape_yara(sha256)}"']
@@ -498,6 +517,8 @@ def sigma_admits(report: MalwareReport) -> frozenset[str]:
     string sweep's row, an ``analyst`` row the table refuses — reaches a
     selection.
     """
+    from maljan.reporting.renderers.stix_renderer import publishes
+
     rows = list(getattr(report, "consolidated_iocs", None) or [])
     if not rows:
         from maljan.reporting.builder import build_consolidated_iocs
@@ -510,7 +531,7 @@ def sigma_admits(report: MalwareReport) -> frozenset[str]:
     return frozenset(
         row.value.strip().lower()
         for row in rows
-        if str(row.published or "") == "yes"
+        if publishes(row.published)
         or (str(row.source or "") == "sandbox" and row.kind not in _DRAFT_NETWORK_KINDS)
     )
 
@@ -688,6 +709,7 @@ _SURICATA_MAX_BODY_BYTES = 16_000
 def _build_suricata(report: MalwareReport) -> DetectionRule | None:
     """Alert rules over the network indicators this run publishes, and no others."""
     published = [row for row in _published_rows(report) if row.kind in _DRAFT_NETWORK_KINDS]
+    why = {(row.kind, row.value): _why_published(row) for row in published}
     domains = [NetworkDomain(fqdn=row.value) for row in published if row.kind == "domain"]
     ips = [NetworkIP(address=row.value) for row in published if row.kind == "ip"]
     urls = [NetworkURL(url=row.value) for row in published if row.kind == "url"]
@@ -716,6 +738,7 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
     for domain in domains[:_MAX_SURICATA_RULES]:
         rule = _suricata_dns_rule(domain, sid, sha256, family)
         if rule is not None:
+            lines.append(f"# {why.get(('domain', domain.fqdn), domain.fqdn)}")
             lines.append(rule)
             sources.append(f"domain:{domain.fqdn}")
             sid += 1
@@ -723,6 +746,9 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
     if ips:
         rule = _suricata_ip_rule(ips[:_MAX_SURICATA_RULES], sid, sha256, family)
         if rule is not None:
+            lines.extend(
+                f"# {why.get(('ip', ip.address), ip.address)}" for ip in ips[:_MAX_SURICATA_RULES]
+            )
             lines.append(rule)
             sources.append("ips:" + ",".join(ip.address for ip in ips[:_MAX_SURICATA_RULES]))
             sid += 1
@@ -730,6 +756,7 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
     for url in urls[:_MAX_SURICATA_RULES]:
         rule = _suricata_http_rule(url, sid, sha256, family)
         if rule is not None:
+            lines.append(f"# {why.get(('url', url.url), url.url)}")
             lines.append(rule)
             sources.append(f"url:{url.url}")
             sid += 1

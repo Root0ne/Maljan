@@ -312,6 +312,10 @@ class IOCEntry(BaseModel):
     # bundle is built with. A feed another system consumes returns only these
     # by default; ``include`` widens it.
     published: bool = True
+    # The publish rule's answer as the report's IOC table prints it: ``yes:``
+    # and why the row is published, or ``no:`` and why not. Absent on a row
+    # the service did not ask the rule about.
+    publish_answer: str | None = None
     # For a domain, address or URL a recovering tool read from text the sample
     # hid: which tool (``floss``, emulation; ``decode_string_blobs``, a static
     # decoding of the file's bytes), its ledger entry and where in the file,

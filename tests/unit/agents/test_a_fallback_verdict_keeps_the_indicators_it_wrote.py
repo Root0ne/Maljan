@@ -32,6 +32,7 @@ from maljan.reporting.renderers.stix_renderer import (
     emulation_from_ledger,
     exported_indicator_values,
     judge_indicator_rows,
+    publishes,
 )
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -238,7 +239,7 @@ class TestTheFallbackPath:
 
         rows = judge_indicator_rows(_report(verdict.bundle, "Malware"))
 
-        assert [(row.value, answer) for row, answer in rows] == [(C2_URL, "yes")]
+        assert [(row.value, publishes(answer)) for row, answer in rows] == [(C2_URL, True)]
 
     @pytest.mark.asyncio
     async def test_under_a_benign_verdict_the_rule_publishes_nothing(self) -> None:

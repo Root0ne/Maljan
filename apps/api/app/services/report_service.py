@@ -13,8 +13,11 @@ from maljan.reporting.renderers.stix_renderer import (
     indicator_publish_reason,
     judge_indicator_rows,
     one_reading,
+    publish_answer,
     published_url_hosts,
+    publishes,
     recovered_by_words,
+    yes_because,
 )
 from maljan.reporting.run_diff import RunRecord, diff_runs
 from sqlalchemy import select
@@ -85,11 +88,21 @@ def _shorten_hash_like(stem: str) -> str:
 def _publishable(
     kind: str, value: Any, source: Any, reputation: Any, emulated: dict[str, Any] | None = None
 ) -> bool:
-    """Whether the platform's own publish rule would publish this row.
+    """Whether the platform's own publish rule would publish this row (:func:`_published`)."""
+    return bool(_published(kind, value, source, reputation, emulated)["published"])
+
+
+def _published(
+    kind: str, value: Any, source: Any, reputation: Any, emulated: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """``published`` and ``publish_answer`` for one row: the rule's decision and its reason.
 
     The one rule, asked from a second place rather than copied into it: the
     STIX bundle and this feed cannot come to disagree about whether a name only
-    the sample's bytes know is infrastructure.
+    the sample's bytes know is infrastructure. ``publish_answer`` is what the
+    report's IOC table prints for the row — ``yes: <why>`` or ``no: <why>`` —
+    so a consumer of the feed reads why each row is published, not only that
+    it is.
 
     Imported at module scope, like every other core import in this application:
     ``maljan`` is a hard dependency of the API, so a guard around the import
@@ -101,9 +114,12 @@ def _publishable(
     operator notices and can work around with ``include=all``.
     """
     try:
-        return (
-            indicator_publish_reason(kind, str(value or ""), source, reputation, **(emulated or {}))
-            is not None
+        text = str(value or "")
+        admitted = indicator_publish_reason(kind, text, source, reputation, **(emulated or {}))
+        answer = (
+            yes_because(admitted)
+            if admitted is not None
+            else publish_answer(kind, text, source, reputation, **(emulated or {}))
         )
     except Exception as exc:  # noqa: BLE001 — a feed answers, and says what broke
         logger.error(
@@ -113,7 +129,8 @@ def _publishable(
             type(exc).__name__,
             log_safe(exc),
         )
-        return False
+        answer = "no: the publish rule could not answer for this row"
+    return {"published": publishes(answer), "publish_answer": answer}
 
 
 def _typed_report(mr: dict) -> Any:
@@ -160,7 +177,8 @@ def _with_the_analysts_listed_rows(out: list[dict], typed: Any, kind: str | None
                 "value": row.value,
                 "source": "analyst",
                 "notes": row.published,
-                "published": row.published == "yes",
+                "published": publishes(row.published),
+                "publish_answer": row.published,
             }
         )
 
@@ -195,9 +213,7 @@ def _with_the_hosts_of_published_urls(out: list[dict], typed: Any, kind: str | N
                 "kind": "domain",
                 "value": host,
                 "source": source,
-                "published": _publishable(
-                    "domain", host, source, None, emulation_kwargs(typed, "domain", host)
-                ),
+                **_published("domain", host, source, None, emulation_kwargs(typed, "domain", host)),
             }
         )
 
@@ -247,7 +263,13 @@ def _with_the_judge_s_values(
         ):
             continue
         out.append(
-            {"kind": item.kind, "value": value, "source": "judge", "published": answer == "yes"}
+            {
+                "kind": item.kind,
+                "value": value,
+                "source": "judge",
+                "published": publishes(answer),
+                "publish_answer": answer,
+            }
         )
 
 
@@ -662,7 +684,14 @@ class ReportService:
                     continue
                 # The sample's own identity, established by the router rather than
                 # read out of the bytes: always published.
-                out.append({"kind": "hash", "value": f"{algo}:{value}", "source": "identity"})
+                out.append(
+                    {
+                        "kind": "hash",
+                        "value": f"{algo}:{value}",
+                        "source": "identity",
+                        "publish_answer": yes_because("identity"),
+                    }
+                )
             if not kind or kind == "domain":
                 for dom in network.get("domains") or []:
                     out.append(
@@ -675,7 +704,7 @@ class ReportService:
                             # like a hostname are not the same claim, and this feed
                             # presented them identically.
                             "source": dom.get("source"),
-                            "published": _publishable(
+                            **_published(
                                 "domain",
                                 dom.get("fqdn"),
                                 dom.get("source"),
@@ -694,7 +723,7 @@ class ReportService:
                             "value": ip.get("address", ""),
                             "is_suspicious": bool(ip.get("is_suspicious")),
                             "source": ip.get("source"),
-                            "published": _publishable(
+                            **_published(
                                 "ip",
                                 ip.get("address"),
                                 ip.get("source"),
@@ -717,7 +746,7 @@ class ReportService:
                             # URL row that records no source at all is the weakest
                             # claim there is, and two readings of "unrecorded" is
                             # how one surface publishes what the other withholds.
-                            "published": _publishable(
+                            **_published(
                                 "url",
                                 url.get("url"),
                                 url.get("source") or "strings",
@@ -737,7 +766,14 @@ class ReportService:
                 if kind and kind != row_kind:
                     continue
                 for value in network.get(field) or []:
-                    out.append({"kind": row_kind, "value": value, "source": "sandbox"})
+                    out.append(
+                        {
+                            "kind": row_kind,
+                            "value": value,
+                            "source": "sandbox",
+                            "publish_answer": yes_because("sandbox"),
+                        }
+                    )
             _with_the_judge_s_values(out, mr, kind, typed)
             _with_the_hosts_of_published_urls(out, typed, kind)
             _with_the_analysts_listed_rows(out, typed, kind)
