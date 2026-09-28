@@ -129,6 +129,7 @@ class TestTheRunSummaryRecordsTheProfileThatRan:
             "file_name",
             "final_decision",
             "stix_object_count",
+            "judge_stix_object_count",
             "elapsed_seconds",
             "timestamp",
             "negotiation",

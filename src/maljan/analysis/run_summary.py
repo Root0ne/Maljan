@@ -774,7 +774,10 @@ class RunSummary:
         file_hash:          Sample identifier.
         file_name:          Human-readable filename (if provided).
         final_decision:     Pipeline verdict (Malware / Benign / Suspicious).
-        stix_object_count:  Number of objects in the STIX Bundle.
+        stix_object_count:  Number of objects in the exported STIX bundle once
+                            the report node has built it; the judge's bundle
+                            size until then.
+        judge_stix_object_count: Number of objects in the judge's own bundle.
         negotiation:        Negotiation loop metrics.
         agent_stats:        Per-agent ISR statistics.
         validation:         What the validation loop found (None if it never ran).
@@ -807,6 +810,10 @@ class RunSummary:
     # Per technique id, ``{asserted_by: [deterministic sources], claimed_by:
     # [agents]}``. Two flat lists and no score.
     corroboration: dict[str, dict[str, list[str]]] = field(default_factory=dict)
+    # The judge's own bundle size. ``stix_object_count`` is the exported
+    # bundle's once the report node has built it, and the two differ by every
+    # object the export adds.
+    judge_stix_object_count: int = 0
     tokens: TokenUsageMetrics | None = None
     truncation: TruncationMetrics | None = None
     timestamp: float = field(default_factory=time.time)
@@ -882,6 +889,14 @@ class RunSummary:
             tid: corroboration_row(row) for tid, row in (self.corroboration or {}).items()
         }
 
+    def _judge_bundle_note(self) -> str:
+        """The judge's bundle size beside the exported one, when the two differ."""
+        if self.judge_stix_object_count and (
+            self.judge_stix_object_count != self.stix_object_count
+        ):
+            return f" (the judge's bundle: {self.judge_stix_object_count})"
+        return ""
+
     def to_markdown(self) -> str:
         """Render the full run summary as a human-readable Markdown report."""
         sample_label = f"{self.file_hash}"
@@ -893,7 +908,7 @@ class RunSummary:
             "",
             f"**Sample**: `{sample_label}`  ",
             f"**Verdict**: {self.final_decision}  ",
-            f"**STIX objects**: {self.stix_object_count}  ",
+            f"**STIX objects**: {self.stix_object_count}{self._judge_bundle_note()}  ",
             f"**Elapsed**: {self.elapsed_seconds:.1f}s  ",
             *([f"**Sandbox**: {self.sandbox['statement']}  "] if self.sandbox else []),
             *(
@@ -1207,6 +1222,7 @@ class RunSummary:
             "file_name": self.file_name,
             "final_decision": self.final_decision,
             "stix_object_count": self.stix_object_count,
+            "judge_stix_object_count": self.judge_stix_object_count,
             "elapsed_seconds": round(self.elapsed_seconds, 3),
             "timestamp": self.timestamp,
             "negotiation": {
@@ -1702,6 +1718,11 @@ class RunSummaryBuilder:
         return self
 
     def set_verdict(self, final_decision: str, stix_object_count: int) -> RunSummaryBuilder:
+        """The verdict and the judge's bundle size.
+
+        The size is both counts until the report node builds the export and
+        writes the exported bundle's size over ``stix_object_count``.
+        """
         self._final_decision = final_decision
         self._stix_object_count = stix_object_count
         return self
@@ -1865,6 +1886,7 @@ class RunSummaryBuilder:
             file_name=self._file_name,
             final_decision=self._final_decision,
             stix_object_count=self._stix_object_count,
+            judge_stix_object_count=self._stix_object_count,
             negotiation=self._negotiation,
             agent_stats=self._agent_stats,
             validation=self._validation,

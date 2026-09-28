@@ -1821,6 +1821,36 @@ def _corroboration_with_publication(report: Any, state: AnalysisState) -> dict[s
     return mark_unpublished(rows, published, reasons)
 
 
+def _remember_the_published_techniques(
+    container: Any, report: Any, isr_reports: Mapping[str, Any]
+) -> None:
+    """Hand the case the judge held the techniques this run published. Never raises.
+
+    The judge builds the case from the techniques claimed, before the report
+    decides which are published; the case is written once the job completes,
+    so it is amended here, where both are known.
+    """
+    from maljan.memory.long_term_memory import StoredCase, with_published_techniques
+
+    case = getattr(container, "pending_memory_case", None)
+    if not isinstance(case, StoredCase):
+        return
+    try:
+        published = [
+            str(mapping.technique_id or "")
+            for mapping in (getattr(report, "ttp_mappings", None) or [])
+        ]
+        container.pending_memory_case = with_published_techniques(case, published, isr_reports)
+        logger.info(
+            "LTM: case '%s' holds %d published technique(s) of %d claimed.",
+            case.sample_id,
+            len(container.pending_memory_case.technique_ids),
+            len(case.technique_ids),
+        )
+    except Exception as exc:  # noqa: BLE001 — memory never costs a report
+        logger.warning("LTM: the case was not given the published techniques (%s).", exc)
+
+
 def _amended_validation(validation: Any, tally: ValidationTally) -> dict[str, Any] | None:
     """A ``validation`` block plus what the report round cost.
 
@@ -4351,7 +4381,7 @@ def make_judge_node(
                     verdict_reading(bundle) if isinstance(bundle, Bundle) else VERDICT_READ_FALLBACK
                 )
                 logger.info(
-                    "RunSummary built: verdict=%s, rounds=%d, techniques=%d, "
+                    "RunSummary built: verdict=%s, rounds=%d, claimed techniques=%d, "
                     "validation retries=%d, unresolved=%d",
                     decision,
                     summary.negotiation.rounds_completed,
@@ -4371,7 +4401,7 @@ def make_judge_node(
                 if _corroborated == 0 and _technique_count <= 1:
                     _ltm_skip_reason = (
                         f"thin evidence: corroborated={_corroborated}, "
-                        f"techniques={_technique_count}"
+                        f"claimed techniques={_technique_count}"
                     )
                 elif _failed_analysts:
                     _ltm_skip_reason = f"analyst failures: {', '.join(_failed_analysts)}"
@@ -4406,8 +4436,8 @@ def make_judge_node(
                         # that fails after its judge leaves no entry behind.
                         container.pending_memory_case = case
                         logger.info(
-                            "LTM: case '%s' (category=%s, techniques=%d) is stored "
-                            "when the job completes.",
+                            "LTM: case '%s' (category=%s, claimed techniques=%d) is stored "
+                            "with the published techniques when the job completes.",
                             case.sample_id,
                             case.malware_category,
                             len(case.technique_ids),
@@ -5245,6 +5275,17 @@ def make_report_node(
         # run whose report printed three enterprise-only ids on an Android
         # sample said nothing about their not being published anywhere.
         _published_summary = _corroboration_with_publication(report, state)
+        _remember_the_published_techniques(container, report, isr_reports)
+        # The exported bundle's size, now that it exists: the judge's summary
+        # counted the judge's own bundle, which the export extends. Only on a
+        # summary the judge wrote, which keeps the mock-mode contract.
+        if extended_dump is not None and state.get("run_summary"):
+            _exported = len(extended_dump.get("objects") or [])
+            _state_summary["stix_object_count"] = _exported
+            _counted = dict(report.run_summary or {})
+            if _counted:
+                _counted["stix_object_count"] = _exported
+                report.run_summary = _counted
         if _published_summary is not None:
             _state_summary["corroboration"] = _published_summary
             _with_publication = dict(report.run_summary or {})

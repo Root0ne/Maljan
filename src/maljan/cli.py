@@ -262,6 +262,7 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
             file_name=run_summary_dict.get("file_name"),
             final_decision=run_summary_dict.get("final_decision", "Unknown"),
             stix_object_count=run_summary_dict.get("stix_object_count", 0),
+            judge_stix_object_count=run_summary_dict.get("judge_stix_object_count", 0),
             negotiation=negotiation,
             agent_stats=agent_stats,
             validation=validation,

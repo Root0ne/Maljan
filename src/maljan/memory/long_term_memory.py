@@ -32,7 +32,8 @@ Helper build_stored_case():
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -245,3 +246,32 @@ def build_stored_case(
         total_techniques=total_techniques or len(technique_ids),
         has_analyst_errors=has_analyst_errors,
     )
+
+
+def with_published_techniques(
+    case: StoredCase,
+    published: Iterable[str],
+    isr_reports: Mapping[str, AgentISR] | None = None,
+) -> StoredCase:
+    """``case`` with the techniques the run published in place of the ones claimed.
+
+    The judge builds the case before the report decides what is published;
+    the report node hands it the published ids once they are known, so the
+    case, the report, the export and ``mitre.json`` count one set. An id every
+    claim naming it left out of memory (``a_past_case_technique``) stays out
+    although the run published it. The total follows the ids kept.
+    """
+    withheld: set[str] = set()
+    remembered: set[str] = set()
+    for isr in (isr_reports or {}).values():
+        for claim in getattr(isr, "claims", None) or []:
+            tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
+            if not tid:
+                continue
+            (remembered if a_past_case_technique(claim) else withheld).add(tid)
+    kept: list[str] = []
+    for raw in published:
+        tid = str(raw or "").strip().upper()
+        if tid and tid not in kept and not (tid in withheld and tid not in remembered):
+            kept.append(tid)
+    return replace(case, technique_ids=kept, total_techniques=len(kept))

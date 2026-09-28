@@ -2130,7 +2130,21 @@ worker, once the completed row is committed and the `completed` event is
 published, calls `MaljanApp.remember_the_run`, as the command line does once
 its run returns. A job that fails after its judge — a later node, or the worker
 storing its report — leaves neither, so a verdict nobody kept does not reach
-the next run's few-shot prior block or its family matches.
+the next run's few-shot prior block or its family matches. The judge builds
+the case from the techniques the analysts claimed, before the report decides
+which are published; the report node then hands it the published ids
+(`long_term_memory.with_published_techniques`, from `report.ttp_mappings`), so
+the case, §8, the export and `mitre.json` count one set, and its
+`total_techniques` follows. An id the case leaves out of memory (a claim kept
+after the absence question, an id the catalogue lacks) stays out although the
+run published it. The judge's log line and its thin-evidence gate count the
+claimed techniques and say so.
+
+The run summary's `stix_object_count` is the exported bundle's object count
+once the report node has built the export, on the state's summary and on
+`report.run_summary` alike; the judge's own bundle size is kept as
+`judge_stix_object_count`. A run whose export was not built keeps the judge's
+count in both.
 
 A cached vector records what produced it, and is reused only by the same
 thing. `maljan.memory.embeddings` has two backends — the sentence model and a
