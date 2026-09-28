@@ -1020,7 +1020,8 @@ client is built with a 1,800 s request timeout
 same). httpx reads it as the longest silence it waits through, not as a
 deadline for the whole answer, so it ended an answer only on a server that
 sends nothing until it has finished — a non-streaming llama.cpp server, whose
-answers it held to about 1,800 s of generation. A streamed answer, and
+answers it held to about 1,800 s of generation (a llama.cpp server's answer
+is now read as a stream; see *Loops have no default limit* below). A streamed answer, and
 DeepSeek's, which sends keep-alive lines while it generates, were not ended
 by it. Once the model's pace is measured, an OpenAI-compatible (chat
 completions or Responses API), Anthropic or Gemini request whose output cap
@@ -1104,7 +1105,32 @@ included), or the client's own timeout — `PROVIDER_REQUEST_TIMEOUT_SECONDS`,
 1,800 s — where nothing is measured. The client's timeout stays as a second
 guard, on silence: httpx reads it as the longest gap it waits through, so a
 server that trickles keep-alive bytes or answers slowly but steadily was held
-by nothing else. A model list gives no turn deadline in such a loop; a stalled
+by nothing else.
+
+Where nothing is measured, the 1,800 s bounds only the silence before the
+first piece of an answer. Once pieces arrive, the call measures its own pace:
+its pieces over its wall clock, prompt read included. Its deadline becomes its
+output cap at that pace, times 1.5, wherever that is longer than the deadline
+it started with. A call that keeps producing is therefore never cut by the
+unmeasured value, and one that stops is cut when the deadline its pace set
+passes. A call with no output cap has nothing to size a longer deadline from
+and keeps the timeout. A piece is one streamed chunk, at most one generated
+unit on the servers Maljan speaks to, so the pace errs slow and the deadline
+long. The pieces of a call that is cut, fails or is ended from outside are
+recorded for its model as a completed call's measurement is, so a retry is
+sized from them. The deadline message says which rule applied — the model's
+measured pace, the pace measured in this call, or silence before the first
+generated piece — and its numbers.
+
+Pieces are seen only where the answer is streamed. A llama.cpp server's
+answer is read as a stream for this reason, with its usage on the closing
+chunk and `langchain-openai`'s own 120 s gap limit off, and the chunks are
+joined into the answer the server would have sent whole: the same text, tool
+calls read as strictly as a whole answer's (a call cut mid-argument stays an
+invalid call), finish reason, `timings` and usage. Ollama's client streams
+every answer. A hosted API's answer is read whole, as before, and its first
+piece is its whole answer, so there the provider's timeout still bounds the
+call until the model's pace is measured. A model list gives no turn deadline in such a loop; a stalled
 model is ended at its whole-call deadline, which the list reads as a provider
 failure and moves on from. The run-state block says `budget remaining: no step
 limit, no time limit` rather than a number, and the run summary's `budget` rows

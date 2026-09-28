@@ -2377,6 +2377,29 @@ change landed on `main`.
 
 ### Fixed
 
+- **A model call that is still producing is no longer cut at 1,800 s because
+  nothing was measured yet.** Until a model's pace was measured, every call's
+  whole-call deadline was the provider's request timeout, 1,800 s. A dense
+  local model generating 2.3 units a second was cut there on its first call
+  while it was still decoding. Its retry got the same 1,800 s, because a cut
+  call left no measurement. The rule now:
+  - before any piece of the answer arrives, silence is the only fact, and the
+    provider's request timeout bounds it;
+  - once pieces arrive, the call's pieces over its wall clock (prompt read
+    included) are a measured pace. The deadline becomes the output cap at that
+    pace, times the same 1.5 margin as a measured model's, wherever that is
+    longer. A call that stops producing is cut when that deadline passes;
+  - the pieces of a call that is cut, fails or is ended from outside are
+    recorded for its model, so the next call is sized from them.
+
+  A llama.cpp server's answer is now read as a stream, because a non-streamed
+  answer sends nothing until it has finished. The chunks are joined into the
+  answer the server would have sent whole: its text, finish reason, `timings`
+  and closing usage, and its tool calls read as strictly as a whole answer's,
+  so a call cut mid-argument stays an invalid call. ik_llama.cpp's running
+  usage total on each chunk is not added up. A hosted API is read as before. The deadline message names the rule that applied (the model's
+  measured pace, the pace measured in this call, or silence before the first
+  generated piece) and its numbers.
 - **Windows API names and hash-algorithm ids are no longer masked in the events
   and the transcript.** The scrub's length rule read every long export name
   (`ZwSetInformationJobObject`) as a key, and two algorithm ids joined by a
