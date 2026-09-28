@@ -2867,6 +2867,10 @@ def repeated_item_violations(
 
 
 CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
+# A recommendation or hunting note that acts on a value this run does not
+# publish. Asked once with the IOC table's own answer; a value kept after it
+# is recorded beside the recommendation.
+UNPUBLISHED_RECOMMENDATION_CODE = "narrative.unpublished_indicator"
 ENTRY_CONTENTS_MISSTATED_CODE = "report.entry_contents_misstated"
 UNCITED_IDENTIFIER_CODE = "report.identifier_uncited"
 TECHNIQUE_NAME_CODE = "report.technique_name"
@@ -2889,6 +2893,7 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         TECHNIQUE_NAME_CODE,
         RULE_MATCH_AS_ACTION_CODE,
         REPEATED_ITEMS_CODE,
+        UNPUBLISHED_RECOMMENDATION_CODE,
     }
 )
 
@@ -2979,6 +2984,51 @@ def network_values_in(text: str) -> list[tuple[str, str]]:
         if value and ("domain", value) not in found:
             found.append(("domain", value))
     return found
+
+
+# What a recommendation's check says of a value no row of the IOC table holds.
+NO_TABLE_ROW = "no row of this run's IOC table holds it"
+
+
+def recommendation_indicator_violations(
+    payload: Any, answers: Callable[[str, str], str]
+) -> list[Violation]:
+    """Recommendations that name an address or a host this run does not publish.
+
+    ``answers`` is ``(kind, value) -> the IOC table's answer`` for a value, or
+    ``""`` when no row holds it (``narrative_agent.published_answers``). Every
+    field of a recommendation is read — the action, the rationale and the
+    detection the hunting notes print — and each value the table does not
+    answer ``yes`` for is named with the table's reason, one question per
+    recommendation. Nothing is removed: what the model answers stands.
+    """
+    out: list[Violation] = []
+    for index, row in enumerate(_rows_of(payload, "defensive_recommendations")):
+        text = " ".join(str(row.get(key) or "") for key in ("action", "rationale", "detection"))
+        refused: list[str] = []
+        for kind, value in network_values_in(text):
+            answer = str(answers(kind, value) or "")
+            if answer.strip() == "yes" or answer.startswith("yes:"):
+                continue
+            why = answer or f"no: {NO_TABLE_ROW}"
+            said = f"{safe_finding_value(value)} ({safe_finding_value(why)})"
+            if said not in refused:
+                refused.append(said)
+        if not refused:
+            continue
+        out.append(
+            Violation(
+                code=UNPUBLISHED_RECOMMENDATION_CODE,
+                message=(
+                    f"recommendation {safe_finding_value(index + 1)} names a value this run "
+                    "does not publish: "
+                    f"{'; '.join(refused)}. A recommendation acts on the indicators this run "
+                    "publishes. Write it over the published indicators, or without the value."
+                ),
+                path=f"defensive_recommendations.{index}",
+            )
+        )
+    return out
 
 
 def flow_voice_violations(

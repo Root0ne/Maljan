@@ -126,6 +126,7 @@ from maljan.pipeline.validation import (
     gate_removed_note,
     malware_object_violations,
     misstated_entry_contents,
+    recommendation_indicator_violations,
     repeated_item_violations,
     section_cut_violation,
     technique_line_violation,
@@ -499,6 +500,17 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "judge technique answer form": TECHNIQUE_ANSWER_FORM,
+    "narrative question about a recommendation naming a value not published": " ".join(
+        v.message
+        for v in recommendation_indicator_violations(
+            {
+                "defensive_recommendations": [
+                    {"action": "Block 192.0.2.1 and one.example.com.", "detection": "x"}
+                ]
+            },
+            lambda kind, value: "no: x" if kind == "ip" else "",
+        )
+    ),
     "judge question about an indicator on a value the sample did not reach": " ".join(
         v.message
         for v in unattributed_indicator_violations(
