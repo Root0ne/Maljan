@@ -3384,6 +3384,10 @@ class ValidationConfig(BaseModel):
     alignment_threshold: Annotated[float, Field(ge=0.0, le=1.0)] = 0.05
     alignment_margin: Annotated[float, Field(ge=0.0, le=1.0)] = 0.20
     weak_alignment: bool = False
+    # How many claim headings an analyst's answer may write again before it is
+    # asked once for a whole answer (``isr.claims_repeated``). ``None`` derives
+    # it from the answer: the number of distinct headings it wrote.
+    claim_repeat_margin: Annotated[int, Field(ge=0)] | None = None
 
 
 # ---------------------------------------------------------------------------

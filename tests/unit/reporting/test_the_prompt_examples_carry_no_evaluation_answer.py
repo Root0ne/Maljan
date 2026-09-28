@@ -116,11 +116,13 @@ from maljan.pipeline.validation import (
     MALWARE_TYPES,
     UNATTRIBUTED_INDICATOR_CODE,
     CapabilityGrounding,
+    ClaimsRepeated,
     EntryTexts,
     Violation,
     _term_ids_said,
     absence_claim_violation,
     analyst_cut_violation,
+    analyst_repeated_violation,
     chunk_cut_unread_sentence,
     claim_does_not_describe_violation,
     claims_kept_under_disputes_finding,
@@ -1027,6 +1029,9 @@ PROMPTS: dict[str, str] = {
         "list_functions", "No file is currently open. Call open_file first."
     )["error"]["remediation"],
     "final-answer nudge": FINAL_ANSWER_NUDGE,
+    "analyst repeated-claims question naming a chunk": analyst_repeated_violation(
+        ClaimsRepeated(begun=15, distinct=3, margin=3, chars=900), chunk="chunk 1 of 2"
+    ).message,
     "judge technique question's describe-check finding": undescribed_technique_finding(
         "T1112", knowledge, 2
     ),

@@ -102,3 +102,41 @@ def claims_headed(text: str) -> str:
 def count_claims_begun(text: str) -> int:
     """How many claims ``text`` begins: every claim heading before its DISPUTES section."""
     return sum(1 for line in before_disputes(text).splitlines() if CLAIM_HEAD_RE.match(line))
+
+
+# The field labels a claim block writes under its heading, which never name it.
+_FIELD_LABEL_RE = re.compile(
+    r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|TECHNIQUE|DISSENT)\b", re.IGNORECASE
+)
+
+
+def _heading_key(text: str) -> str:
+    """A heading's sentence as compared: marks, case, spacing and a closing stop aside."""
+    words = re.sub(r"[*_`#>]", " ", text).lower().split()
+    return " ".join(words).rstrip(" .;:")
+
+
+def claim_heading_counts(text: str) -> tuple[int, int]:
+    """``(claims begun, distinct headings)`` of an answer, before its DISPUTES section.
+
+    A heading is the sentence written on its ``CLAIM`` line, or, when the
+    line holds only the label, the next line that is not a field label. Two
+    headings are the same when their sentences are the same with marks, case,
+    spacing and a closing stop aside; the claim's number is not part of it.
+    """
+    begun = 0
+    seen: set[str] = set()
+    waiting = False
+    for line in before_disputes(text).splitlines():
+        heading = CLAIM_HEAD_RE.match(line)
+        if heading is not None:
+            begun += 1
+            key = _heading_key(line[heading.end() :])
+            waiting = not key
+            if key:
+                seen.add(key)
+            continue
+        if waiting and line.strip() and not _FIELD_LABEL_RE.match(line):
+            seen.add(_heading_key(line))
+            waiting = False
+    return begun, len(seen)

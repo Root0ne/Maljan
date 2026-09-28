@@ -29,7 +29,7 @@ from typing import Any, get_args, get_origin
 
 from pydantic import ValidationError
 
-from maljan.agents.claim_headings import count_claims_begun
+from maljan.agents.claim_headings import claim_heading_counts, count_claims_begun
 from maljan.agents.run_evidence_corpus import CorpusState, both_searched
 
 # The row helpers live with the shape (``analysis.corroboration``) and are
@@ -2764,6 +2764,65 @@ def analyst_cut_violation(cap: int, text: str = "", *, chunk: str = "") -> Viola
             f"{int(cap)} tokens: the claims the evidence supports best, each written once, "
             "each one sentence with its EVIDENCE, CONFIDENCE and TECHNIQUE lines, and nothing "
             "between the blocks."
+        ),
+    )
+
+
+# An analyst's answer that writes the same claims again and again. A local
+# triage answer began 639 claims under 40 distinct headings, and ran to its
+# cap for it; the same whole-answer question is asked of it, once.
+ANALYST_REPEATED_CODE = "isr.claims_repeated"
+
+
+@dataclass(frozen=True)
+class ClaimsRepeated:
+    """What an answer's claim headings say: begun, distinct, and the margin they passed."""
+
+    begun: int
+    distinct: int
+    margin: int
+    chars: int
+
+    @property
+    def repeated(self) -> int:
+        """The headings begun again after the first of each."""
+        return self.begun - self.distinct
+
+
+def claims_repeated(text: str, margin: int | None = None) -> ClaimsRepeated | None:
+    """The finding for an answer whose repeated claim headings exceed the margin, or ``None``.
+
+    Read off the answer as it arrived (``claim_headings.claim_heading_counts``).
+    The margin is the number of distinct headings, so a second whole copy of
+    the answer is within it; ``margin`` is an operator's own number
+    (``validation.claim_repeat_margin``), and there is none by default.
+    """
+    begun, distinct = claim_heading_counts(text or "")
+    allowed = distinct if margin is None else max(0, int(margin))
+    if begun - distinct <= allowed:
+        return None
+    return ClaimsRepeated(begun=begun, distinct=distinct, margin=allowed, chars=len(text or ""))
+
+
+def analyst_repeated_violation(found: ClaimsRepeated, *, chunk: str = "") -> Violation:
+    """What an analyst whose answer repeated its claims is told, and the whole-answer question.
+
+    The same question the cut-at-cap finding asks, with the fact that raised
+    it: the claims begun, the distinct headings among them and how many were
+    written again. The answer is not sent back; it is described.
+    """
+    answer = f"answer to {chunk}" if chunk else "previous answer"
+    chars, begun, distinct = int(found.chars), int(found.begun), int(found.distinct)
+    repeated, margin = int(found.repeated), int(found.margin)
+    return Violation(
+        code=ANALYST_REPEATED_CODE,
+        message=(
+            f"Your {answer} ran to {chars:,} characters and began {begun} CLAIM block(s) "
+            f"under {distinct} distinct heading(s): {repeated} of them repeat a heading "
+            f"already written, more than the {margin} allowed, and it is not shown to you "
+            "again. Write the whole answer again: the claims the evidence supports best, each "
+            "written once, each one sentence with its EVIDENCE, CONFIDENCE and TECHNIQUE lines, "
+            "and nothing between the blocks."
         ),
     )
 

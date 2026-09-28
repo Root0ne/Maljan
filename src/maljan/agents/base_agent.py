@@ -57,14 +57,18 @@ from maljan.pipeline.validation import (
     ABSENCE_CLAIM_CODE,
     ALIGNMENT_MARGIN,
     ANALYST_CUT_CODE,
+    ANALYST_REPEATED_CODE,
     CLAIM_DOES_NOT_DESCRIBE_CODE,
     CLAIMS_UNDER_DISPUTES_CODE,
     VALIDITY_CODE,
+    ClaimsRepeated,
     ValidationTally,
     Violation,
     analyst_cut_violation,
+    analyst_repeated_violation,
     chunk_cut_unread_sentence,
     claims_kept_under_disputes_finding,
+    claims_repeated,
     mark_invalid_technique_ids,
     parse_violations,
     retry_with_feedback_sync,
@@ -5867,8 +5871,16 @@ class BaseAnalyst(BudgetMeter, ABC):
                         # Taken whether the chunk answered or raised: a cut
                         # left here would be read as the next chunk's.
                         self._last_answer_cut = None
-                    if cut is not None:
-                        # A cut is answered inside the chunk it happened in:
+                    repeat_margin = getattr(
+                        getattr(get_settings(), "validation", None), "claim_repeat_margin", None
+                    )
+                    repeats = claims_repeated(
+                        isr.answer_text or isr.unparsed_answer or "",
+                        None if repeat_margin is None else int(repeat_margin),
+                    )
+                    if cut is not None or repeats is not None:
+                        # A cut, or an answer that repeated its claims, is
+                        # answered inside the chunk it happened in:
                         # this chunk's answer is asked for a whole one over
                         # this chunk's own input, and what comes back stands
                         # for this chunk alone in the merge.
@@ -6221,20 +6233,40 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Read once: the next model call records its own.
         self._last_answer_cut = None
 
-        def _validator(candidate: AgentISR) -> list[Violation]:
-            first = not asked
-            asked.append(True)
-            if only_cut:
-                return [
-                    analyst_cut_violation(cap, text, chunk=named)
-                    for cap, text, named in cuts.get(id(candidate)) or []
-                ]
-            unread = [] if nudged else parse_violations(candidate)
+        # Whether the answer being checked wrote the same claims again past
+        # the margin, read off its own text (``validation.claims_repeated``).
+        # Asked the same whole-answer question as a cut answer, once, and not
+        # sent back; keyed by the parsed answer as the cuts are.
+        repeat_margin = getattr(cfg_validation, "claim_repeat_margin", None)
+        repeated_by: dict[int, ClaimsRepeated | None] = {}
+
+        def _repeated(candidate: AgentISR) -> ClaimsRepeated | None:
+            key = id(candidate)
+            if key not in repeated_by:
+                text = candidate.answer_text or candidate.unparsed_answer or ""
+                repeated_by[key] = claims_repeated(
+                    text, None if repeat_margin is None else int(repeat_margin)
+                )
+            return repeated_by[key]
+
+        def _whole_answer_questions(candidate: AgentISR) -> list[Violation]:
+            found = _repeated(candidate)
             return [
                 *(
                     analyst_cut_violation(cap, text, chunk=named)
                     for cap, text, named in cuts.get(id(candidate)) or []
                 ),
+                *([analyst_repeated_violation(found, chunk=chunk)] if found is not None else []),
+            ]
+
+        def _validator(candidate: AgentISR) -> list[Violation]:
+            first = not asked
+            asked.append(True)
+            if only_cut:
+                return _whole_answer_questions(candidate)
+            unread = [] if nudged else parse_violations(candidate)
+            return [
+                *_whole_answer_questions(candidate),
                 *unread,
                 *validate_isr(
                     candidate,
@@ -6302,6 +6334,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     ABSENCE_CLAIM_CODE,
                     CLAIM_DOES_NOT_DESCRIBE_CODE,
                     ANALYST_CUT_CODE,
+                    ANALYST_REPEATED_CODE,
                     CLAIMS_UNDER_DISPUTES_CODE,
                 )
                 else v
@@ -6350,8 +6383,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         if isr.gate_removed and isr.answer_text:
             closing = f"{gate_removed_note(isr.gate_removed)}\n{closing}"
         sent = with_question(messages, feedback_text(initial, closing=closing))
+        loop_repeat = _repeated(isr)
         widest = max((cap for cap, _text, _chunk in loop_cuts), default=0)
-        if loop_cuts and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
+        if loop_repeat is not None:
+            # A whole answer is asked for, and one may take the whole cap.
+            widest = max(widest, int(self.output_cap_tokens() or 0))
+        if (loop_cuts or loop_repeat is not None) and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
             self, sent, widest
         ):
             detail = (
@@ -6368,7 +6405,17 @@ class BaseAnalyst(BudgetMeter, ABC):
                         asked=False,
                     )
                 )
+            if loop_repeat is not None:
+                unasked_repeat = analyst_repeated_violation(loop_repeat, chunk=chunk)
+                self.validation_findings.append(
+                    replace(
+                        unasked_repeat,
+                        message=f"{unasked_repeat.message} {detail[:1].upper()}{detail[1:]}.",
+                        asked=False,
+                    )
+                )
             cuts[id(isr)] = []
+            repeated_by[id(isr)] = None
 
         def _run(turns: list[Any]) -> Any:
             if first:
@@ -6471,6 +6518,26 @@ class BaseAnalyst(BudgetMeter, ABC):
                     len(first_answer.claims),
                 )
                 return retried
+            # Asked for a whole answer because the first repeated its claims,
+            # and given one that is whole, does not repeat, and carries at
+            # least as many claims as the first had distinct headings: that
+            # answer is the analyst's. Anything less keeps what was written.
+            repeated_first = _repeated(first_answer)
+            if (
+                repeated_first is not None
+                and _repeated(retried) is None
+                and not cuts.get(id(retried))
+                and len(retried.claims) >= repeated_first.distinct
+                and retried.claims
+            ):
+                self.logger.info(
+                    "Validation: '%s' answered the repeated-claims question whole; its %d "
+                    "claim(s) replace the %d the repeating answer began.",
+                    self.name,
+                    len(retried.claims),
+                    repeated_first.begun,
+                )
+                return retried
             if len(retried.claims) < len(first_answer.claims):
                 self.logger.warning(
                     "Validation: the retry for '%s' returned %d claim(s) against %d; "
@@ -6494,7 +6561,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 agent=str(self.name),
                 stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
                 keep=_keep,
-                drop_answer_for=frozenset({ANALYST_CUT_CODE}),
+                drop_answer_for=frozenset({ANALYST_CUT_CODE, ANALYST_REPEATED_CODE}),
                 closing=closing,
             )
         except Exception as exc:  # noqa: BLE001 — a retry that fails keeps the first answer

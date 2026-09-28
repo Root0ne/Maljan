@@ -1124,6 +1124,17 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Technique check",
     },
+    "validation.claim_repeat_margin": {
+        "title": "Repeated claim headings allowed",
+        "description": (
+            "How many claim headings an analyst's answer may write again before the "
+            "analyst is asked once for a whole answer, each claim written once "
+            "(isr.claims_repeated). Empty, the default, derives it from the answer: the "
+            "number of distinct headings it wrote, so a second whole copy is within it. "
+            "Nothing the analyst wrote is removed."
+        ),
+        "subgroup": "Technique check",
+    },
     "react_agent_max_steps": {
         "title": "Steps per agent loop",
         "description": (
