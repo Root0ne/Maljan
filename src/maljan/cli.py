@@ -155,8 +155,10 @@ def _print_run_summary_inline(run_summary_dict: dict) -> None:
         from maljan.pipeline.validation import corroboration_sources
 
         multi = sum(1 for row in corroboration.values() if len(corroboration_sources(row)) > 1)
+        # Every id any producer named, claimed or asserted by a rule, and not
+        # the published count: the line says "named" for that reason.
         typer.echo(
-            f"\nCorroboration: {len(corroboration)} technique(s) | "
+            f"\nCorroboration: {len(corroboration)} technique(s) named | "
             f"{multi} named by more than one source"
         )
         # Most sources first, which is the order a reader wants and the same

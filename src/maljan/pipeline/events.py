@@ -640,6 +640,11 @@ _PATH_RUN = re.compile(
 # 64 rather than a rounder number so a sha256 — the one long value this is
 # meant to let through whole — fits exactly instead of arriving one character
 # short of identifying anything.
+#
+# Each of these caps, and ``FINDING_VALUE_LIMIT`` below, can be exceeded by one
+# whole value: a digest or an identifier the cut would split is kept whole with
+# its extension (``_cut_whole``), so ``<sha256>.exe`` runs past the cap by a
+# few characters rather than arriving as half a digest a second scrub masks.
 ARGUMENT_VALUE_CHARS = 64
 ARGUMENT_SUMMARY_CHARS = 240
 ARGUMENTS_SUMMARISED = 6
