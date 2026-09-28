@@ -172,12 +172,18 @@ def build_capability_matrix(
         # without the question, marked as not confirmed.
         asked = review is not None and tid in review.asked
         decided = review.decision_for(tid) if review is not None and asked else None
+        # The check's finding the question carried, when it was asked with one.
+        undescribed = (
+            (review.undescribed.get(tid, "") if review is not None else "") if asked else ""
+        )
         if not valid:
             not_published = unknown_id_reason(tid)
         elif out_of_scope.get(tid):
             not_published = out_of_scope[tid]
         elif decided is not None and decided.decision == "drop":
             not_published = judge_dropped_reason(decided.reason)
+            if undescribed:
+                not_published = f"{not_published}, asked after {undescribed}"
         elif not info.get("claimed") and not (decided is not None and decided.decision == "keep"):
             not_published = FINDING_ONLY_REASON
         else:
@@ -196,6 +202,8 @@ def build_capability_matrix(
             notes.append(
                 judge_and_findings_note(on_findings) if on_findings else JUDGE_ONLY_TECHNIQUE_MARKER
             )
+        if undescribed and not not_published:
+            notes.append(undescribed)
         if decided is not None and decided.decision == "keep":
             notes.append(judge_kept_note(decided.reason))
         elif asked and decided is None and not not_published:
@@ -732,14 +740,19 @@ class TechniqueQuestion:
     """One technique the judge is asked about after its verdict, with what names it.
 
     ``kind`` is ``claimed`` for a technique an analyst claimed that the judge's
-    bundle does not carry, and ``finding`` for one named only on a finding.
-    Each mention is ``(agent, the claim's or the finding's text, its evidence
-    ids)``, the text as the analyst wrote it.
+    bundle does not carry, ``finding`` for one named only on a finding, and
+    ``undescribed`` for one the bundle carries that no claim naming it
+    describes. Each mention is ``(agent, the claim's or the finding's text, its
+    evidence ids)``, the text as the analyst wrote it. ``check`` is the ATT&CK
+    check's finding when no claim naming the technique describes it
+    (``validation.undescribed_technique_finding``), shown with the question,
+    and ``""`` otherwise.
     """
 
     technique_id: str
     kind: str
     mentions: list[tuple[str, str, list[str]]] = field(default_factory=list)
+    check: str = ""
 
 
 def technique_review(stix_output: dict[str, Any] | None) -> TechniqueReview | None:
@@ -797,8 +810,16 @@ def judge_questions(
     stix_output: dict[str, Any] | None,
     isr_reports: dict[str, Any] | None,
     sample: dict[str, Any] | None = None,
+    *,
+    attck: Any = None,
 ) -> tuple[list[TechniqueQuestion], dict[str, str]]:
     """The techniques to put to the judge after its verdict, and the ones left out, with why.
+
+    With ``attck``, the catalogue the analysts' check reads, (c) each
+    technique every claim naming which the check says does not describe it
+    (``validation.claim_does_not_describe_violation``) is asked about too,
+    once, with the check's finding: as ``undescribed`` when the bundle carries
+    it, and on its ``claimed`` question when it does not.
 
     (a) Each technique an analyst claimed that the judge's bundle carries
     neither as an attack-pattern nor on an edge, and (b) each technique named
@@ -812,6 +833,8 @@ def judge_questions(
     questions: dict[str, TechniqueQuestion] = {}
     claimed: set[str] = set()
     flagged: set[str] = set()
+    # Every claim naming each technique, in the order named, for the check below.
+    by_technique: dict[str, list[tuple[str, Any, tuple[str, str, list[str]]]]] = {}
     for agent_name, isr in (isr_reports or {}).items():
         agent = str(getattr(isr, "agent_id", "") or agent_name)
         for claim in getattr(isr, "claims", None) or []:
@@ -821,16 +844,28 @@ def judge_questions(
             claimed.add(tid)
             if not getattr(claim, "technique_id_valid", True):
                 flagged.add(tid)
+            evidence = str(getattr(claim, "evidence_ref", "") or "")
+            mention = (
+                agent,
+                str(getattr(claim, "claim", "") or ""),
+                list(dict.fromkeys(found.lower() for found in ENTRY_ID_RE.findall(evidence))),
+            )
+            by_technique.setdefault(tid, []).append((agent, claim, mention))
             if tid in in_bundle:
                 continue
-            evidence = str(getattr(claim, "evidence_ref", "") or "")
-            questions.setdefault(tid, TechniqueQuestion(tid, "claimed")).mentions.append(
-                (
-                    agent,
-                    str(getattr(claim, "claim", "") or ""),
-                    list(dict.fromkeys(found.lower() for found in ENTRY_ID_RE.findall(evidence))),
+            questions.setdefault(tid, TechniqueQuestion(tid, "claimed")).mentions.append(mention)
+    if attck is not None:
+        for tid, rows in by_technique.items():
+            check = _undescribed(tid, [claim for _agent, claim, _mention in rows], attck)
+            if not check:
+                continue
+            question = questions.get(tid)
+            if question is None:
+                question = TechniqueQuestion(
+                    tid, "undescribed", [mention for _agent, _claim, mention in rows]
                 )
-            )
+                questions[tid] = question
+            question.check = check
     for agent_name, isr in (isr_reports or {}).items():
         agent = str(getattr(isr, "agent_id", "") or agent_name)
         for finding in getattr(isr, "findings", None) or []:
@@ -855,6 +890,27 @@ def judge_questions(
         elif out_of_scope.get(tid):
             not_asked[tid] = f"not asked: {out_of_scope[tid]}"
     return [q for tid, q in questions.items() if tid not in not_asked], not_asked
+
+
+def _undescribed(technique_id: str, claims: list[Any], attck: Any) -> str:
+    """The check's finding when no claim in ``claims`` describes ``technique_id``, else ``""``."""
+    try:
+        from maljan.pipeline.validation import (
+            claim_does_not_describe_violation,
+            undescribed_technique_finding,
+        )
+
+        if not claims or any(
+            claim_does_not_describe_violation(claim, technique_id, attck) is None
+            for claim in claims
+        ):
+            return ""
+        return undescribed_technique_finding(technique_id, attck, len(claims))
+    except Exception as exc:  # noqa: BLE001 — a check that cannot run asks nothing
+        logger.debug(
+            "capability_matrix: the describe check for %s did not run (%s)", technique_id, exc
+        )
+        return ""
 
 
 def techniques_for_the_judge(

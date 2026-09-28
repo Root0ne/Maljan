@@ -1020,6 +1020,25 @@ def claim_does_not_describe_violation(
     )
 
 
+def undescribed_technique_finding(technique_id: str, attck: Any, claims: int) -> str:
+    """The check's finding on a technique none of whose ``claims`` claims describes it.
+
+    The fact :func:`claim_does_not_describe_violation` raises on each claim,
+    said of the technique as a whole, for the judge's question after its
+    verdict and for the report row that shows its answer. ``""`` without the
+    catalogue's name for the id: nothing is stated that cannot be checked.
+    """
+    name, _stems = _name_terms(technique_id, attck)
+    if not name:
+        return ""
+    tid = safe_finding_value(technique_id)
+    return (
+        f"the ATT&CK check found that no claim naming it describes it: none of the "
+        f"{int(claims)} claim sentence(s) naming {tid} {safe_finding_value(name)} shares a "
+        "term with that technique, not its name, its tactic or the words that describe it"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Domain and platform consistency
 # ---------------------------------------------------------------------------

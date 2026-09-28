@@ -839,18 +839,21 @@ _NO_TOOLS_NEEDED = "No Threat Intelligence tools are needed for this run.\n"
 
 
 # The question asked once after the verdict about the techniques the verdict's
-# bundle does not carry: the ones an analyst claimed, and the ones named only on
-# a finding. The judge decides; with no answer nothing is withheld. The system
+# bundle does not carry (the ones an analyst claimed, and the ones named only on
+# a finding) and the ones no claim naming them describes, by the ATT&CK check's
+# finding. The judge decides; with no answer nothing is withheld. The system
 # text says exactly what the question shows.
 TECHNIQUE_QUESTION_SYSTEM = (
     "You are the Chief Malware Judge. Your verdict is given. The analysts named some "
-    "techniques that your bundle does not carry, and some that appear only on an "
-    "analyst's finding, which no check has asked about. You decide, for each one, "
-    "whether the report publishes it. You are shown the run state and the pack, the "
-    "analysts' reports as your verdict call was shown them, your verdict and the "
-    "techniques your bundle carries, and for each technique the claims or findings "
-    "that name it with the text of every evidence entry they cite. This turn carries "
-    "no tools: decide from what is shown."
+    "techniques that your bundle does not carry, some that appear only on an "
+    "analyst's finding, which no check has asked about, and some that the ATT&CK "
+    "check found are not described by any claim naming them; a technique of that last kind "
+    "carries the check's finding. You decide, for each one, whether the report "
+    "publishes it. You are shown the run state and the pack, the analysts' reports as "
+    "your verdict call was shown them, your verdict and the techniques your bundle "
+    "carries, and for each technique the claims or findings that name it with the "
+    "text of every evidence entry they cite. This turn carries no tools: decide from "
+    "what is shown."
 )
 # The answer's form: a JSON array the reader parses.
 TECHNIQUE_ANSWER_FORM = (
@@ -982,16 +985,18 @@ def technique_question_text(
     lines = ["TECHNIQUES TO DECIDE"]
     cited: list[str] = []
     for n, question in enumerate(questions, 1):
-        where = (
-            "claimed by an analyst and not in your bundle"
-            if question.kind == "claimed"
-            else "named only on an analyst's finding"
-        )
+        where = {
+            "claimed": "claimed by an analyst and not in your bundle",
+            "undescribed": "in your bundle; no claim naming it describes it",
+        }.get(question.kind, "named only on an analyst's finding")
         lines.append(f"{n}. {technique_label(question.technique_id)} — {where}")
         for agent, text, ids in question.mentions:
             listed = ", ".join(ids) if ids else "none cited"
             lines.append(f"   - {agent}: {' '.join(str(text).split())} (evidence: {listed})")
             cited.extend(i.lower() for i in ids if i.lower() not in cited)
+        check = str(getattr(question, "check", "") or "")
+        if check:
+            lines.append(f"   check: {check}")
     if cited:
         lines += ["", "EVIDENCE CITED"]
         if notice:
@@ -3078,16 +3083,28 @@ class JudgeAgent(BudgetMeter):
 
         try:
             dumped = bundle.model_dump()
-            questions, not_asked = judge_questions(dumped, isr_reports, routed)
+            attck: Any = None
+            try:
+                from maljan.tools import knowledge
+
+                attck = knowledge
+            except Exception:  # noqa: BLE001 — no catalogue, no describe check
+                attck = None
+            questions, not_asked = judge_questions(dumped, isr_reports, routed, attck=attck)
         except Exception as exc:  # noqa: BLE001 — a question not built is none asked
             self.logger.warning("Judge technique question not built (%s).", type(exc).__name__)
             return None
         if not questions:
             return TechniqueReview(not_asked=not_asked) if not_asked else None
         asked = [q.technique_id for q in questions]
+        # The check's finding each question carried, kept on the answer for the report.
+        undescribed = {q.technique_id: q.check for q in questions if q.check}
         if verdict_timed_out:
             return TechniqueReview(
-                asked=asked, unanswered=TECHNIQUE_QUESTION_NOT_ASKED, not_asked=not_asked
+                asked=asked,
+                undescribed=undescribed,
+                unanswered=TECHNIQUE_QUESTION_NOT_ASKED,
+                not_asked=not_asked,
             )
 
         carried = sorted(bundle_technique_ids(dumped))
@@ -3137,7 +3154,7 @@ class JudgeAgent(BudgetMeter):
             call="judge:techniques",
         )
         self.logger.info(
-            "JudgeAgent asking about %d technique(s) its bundle does not carry (timeout=%s): %s",
+            "JudgeAgent asking about %d technique(s) after its verdict (timeout=%s): %s",
             len(asked),
             limit_text(timeout, "s"),
             ", ".join(asked),
@@ -3152,7 +3169,10 @@ class JudgeAgent(BudgetMeter):
             self._spend_admits("technique question", messages, slot=question_slot, holdable=False)
         except SpendCeilingStop as stop:
             return TechniqueReview(
-                asked=asked, unanswered=f"not asked: {stop}", not_asked=not_asked
+                asked=asked,
+                undescribed=undescribed,
+                unanswered=f"not asked: {stop}",
+                not_asked=not_asked,
             )
         structured = self._supports_structured_output()
 
@@ -3209,7 +3229,11 @@ class JudgeAgent(BudgetMeter):
 
         def _unanswered(reason: str) -> Any:
             return TechniqueReview(
-                asked=asked, unanswered=reason, not_asked=not_asked, shortened=notice or None
+                asked=asked,
+                undescribed=undescribed,
+                unanswered=reason,
+                not_asked=not_asked,
+                shortened=notice or None,
             )
 
         try:
@@ -3240,7 +3264,11 @@ class JudgeAgent(BudgetMeter):
         if not decisions:
             return _unanswered(TECHNIQUE_ANSWER_UNREAD)
         return TechniqueReview(
-            asked=asked, decisions=decisions, not_asked=not_asked, shortened=notice or None
+            asked=asked,
+            undescribed=undescribed,
+            decisions=decisions,
+            not_asked=not_asked,
+            shortened=notice or None,
         )
 
     def _question_room(self, fixed_chars: int, cap_tokens: int) -> int | None:

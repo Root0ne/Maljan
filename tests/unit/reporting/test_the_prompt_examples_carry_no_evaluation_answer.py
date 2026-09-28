@@ -136,6 +136,7 @@ from maljan.pipeline.validation import (
     section_cut_violation,
     technique_line_violation,
     unattributed_indicator_violations,
+    undescribed_technique_finding,
     ungrounded_capabilities,
     validate_verdict_bundle,
 )
@@ -1026,6 +1027,9 @@ PROMPTS: dict[str, str] = {
         "list_functions", "No file is currently open. Call open_file first."
     )["error"]["remediation"],
     "final-answer nudge": FINAL_ANSWER_NUDGE,
+    "judge technique question's describe-check finding": undescribed_technique_finding(
+        "T1112", knowledge, 2
+    ),
     "question to an analyst whose first answer called no tool": no_tool_call_question(
         ["lookup", "strings"]
     ),
