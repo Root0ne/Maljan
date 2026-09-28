@@ -320,7 +320,14 @@ ledger entry contradicts. Only that last block is read into the verdict's
 contradictions, on the text path and the structured one alike; contradictions
 the reasoning drafted and then resolved are not counted. A non-empty block is
 not consensus whatever number the mediator wrote: the number is kept and shown
-beside the list, and the router sends the analysts to revise. An answer with no
+beside the list, and the router sends the analysts to revise, each told the
+block's lines. The block is one contradiction per bullet or numbered line;
+every spelling of none ("NONE", "(none)", "N/A", "no contradictions …") is an
+empty block, and a block of text with no list line is unreadable and asked
+about once. On the structured path the block, when present, decides over the
+extractor's list. While the last mediation lists a contradiction, a stable
+agreement number does not end the debate as convergence; the round limit
+still does. An answer with no
 block is asked once for it, with no tools, after the mediator's own answer;
 still without one, the round's note and the run summary's
 `negotiation.mediation_notes` say so, and agreement is read from the number as
@@ -1415,18 +1422,26 @@ fallback of 8,192 tokens while every call carried 32,768: an answer of about
 32,768 was not told at all. Only a model the container did not build carries
 no record, and only then is the cap derived from settings.
 
-A chunked analysis keeps each chunk's cut: every chunk's loop records its own
-last answer, so each chunk's cut is taken as the chunk ends and every one is
-passed to the merged answer's check, the question naming the chunk ("Your
-answer to chunk 1 of 2 stopped at the output limit …"). Before, a cut in chunk
-1 was overwritten by a short chunk 2 and never asked about.
+A chunked analysis answers each chunk's cut inside that chunk, before the
+merge: the cut is taken as the chunk ends (in a `finally`, so a chunk that
+raises leaves none for the next), and that chunk's own answer is asked once for
+a whole shorter one over that chunk's own input, the question naming it ("Your
+answer to chunk 1 of 2 stopped at the output limit …"). What comes back stands
+for that chunk alone in the merge; the merged answer is never replaced by one
+retry. A chunk still cut after its question is kept as it was cut and recorded
+as unread for that chunk. Before, a cut in chunk 1 was overwritten by a short
+chunk 2 and never asked about.
 
 A later chunk is told what the earlier chunks already called. Each chunk is a
 new conversation, so its prompt opens with the earlier chunks' tool calls,
-every one, as `tool(args) → ev_id` lines, a failed call marked, and its loop's
-repeat guard is seeded with them (`seeded_repeat_guard`): an identical call is
-not run and is answered with the notice naming the entry that holds it. A
-replayed conversation keeps the seeds. A run's second chunk re-ran ten
+every one, as `tool(args) → ev_id` lines with the headline of what each
+returned, a failed call marked, and its loop's repeat guard is seeded with them
+(`seeded_repeat_guard`): an identical call is not run and is answered with the
+notice naming the entry that holds it. That first answer is not counted toward
+the loop's repeat stop, since the model has not been told in this conversation;
+asking again after it counts as any repeat does. A failed earlier call is served
+once more, as any retry after a failure is. A replayed conversation keeps the
+seeds. A run's second chunk re-ran ten
 decompiles the first had done.
 
 An analyst whose loop ended with nothing at all — no claim and no prose — is

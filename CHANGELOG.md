@@ -2338,8 +2338,10 @@ change landed on `main`.
   their spend meter and the judge read it there instead of deriving it again,
   which after the window cache expired gave 8,192 against calls built with
   32,768: a false cut on one analyst, a real one named with the wrong number,
-  and a whole-cap answer accepted silently. A chunked analysis now passes every
-  chunk's cut, named by its chunk, to the merged answer's check.
+  and a whole-cap answer accepted silently. A chunk's cut is now asked about
+  inside that chunk, over its own input, before the merge, and what comes back
+  replaces that chunk's contribution alone; a chunk still cut is recorded
+  unread, named by its chunk.
 - **A validation finding sits on the technique it is about.** Every technique
   check sets the finding's `subject` to its technique id and the ATT&CK table
   matches on it, so the closest real techniques an `attck.unknown_id` message
@@ -2357,7 +2359,8 @@ change landed on `main`.
 - **A later chunk is told what the earlier chunks already called.** Its prompt
   lists every earlier call as `tool(args) → ev_id` and its repeat guard is
   seeded with them, so an identical call is answered with the entry that holds
-  it rather than run again.
+  it rather than run again. That first answer does not count toward the repeat
+  stop, and a failed earlier call is served once more.
 - **An analyst's table never enters a measured block.** An analyst artifact of
   imports, IOCs, processes or persistence was merged into the import table,
   the string table, the process tree and the persistence mechanisms, so one
