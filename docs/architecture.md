@@ -1340,6 +1340,20 @@ the plain request still fails, the nudge asks once more with the loop's tools
 bound and `tool_choice="none"`, the one other shape the server accepts.
 `run_summary.nudge.retry_mode` names which analysts needed which repair.
 
+An analyst with tools whose first answer called none is told so and asked
+once. The loop states the fact and the tools it has, by name, in the same
+conversation (`prompt_fragments.no_tool_call_question`), and asks whether it
+wants to call any before its answer stands; if not, it writes its answer again,
+and whatever it writes next stands. The question is held to the final-answer
+nudge's checks (a turn left in the step budget, more than a second left on the
+clock, a spend ceiling that admits it), is asked at most once per analyst — not
+after any of its loops called a tool, and not inside an ask another agent made
+of it — and the loop's budget record carries `tool_ask`: the tool calls made
+after the question and what followed (`called_tools`,
+`answered_without_tools`, `no_answer`). `run_summary.nudge.no_tool_call` lists
+them per analyst. Four of seven analysts in two local runs answered in one
+turn while offered 18 to 38 tools.
+
 An answer with no CLAIM block that parses is the analyst's prose and nothing
 more. It used to be cut into sentences, each a claim at a flat 0.50 no analyst
 stated, Markdown headings included. The analyst's validation turn now asks
@@ -1445,6 +1459,24 @@ static analyst answered with 42 claims in exactly its 4,096 tokens, was asked
 fourteen questions over that answer, spent the whole cap again and returned no
 claim, and every question went unanswered.
 
+An analyst answer that writes the same claims again and again is asked the
+same whole-answer question once. After an answer arrives its claim headings
+are counted (`claim_headings.claim_heading_counts`): the claims begun, and the
+distinct headings among them once marks, case, spacing and the claim's number
+are set aside; a heading line holding only its label is named by its next
+line, and nothing under DISPUTES is counted. When the headings written again
+exceed a margin — the number of distinct headings, so a second whole copy is
+within it, or `validation.claim_repeat_margin` when an operator sets one (none
+by default) — `isr.claims_repeated` states the characters, the claims begun,
+the distinct headings and how many repeat, and asks for the claims the evidence
+supports best, each written once. The repeating answer is described, not sent
+back, and the window rule of the cut question applies. The answer that comes
+back replaces the first only when it is whole, does not repeat and carries at
+least as many claims as the first had distinct headings; otherwise what was
+written stays the analyst's and the finding is recorded. A chunk's answer is
+asked inside its chunk, as a cut one is. A local triage answer began 639 claims
+under 40 distinct headings in 32,768 tokens.
+
 The cap the check reads is the one the call was built with. The container
 records it on the model it builds (`context_window.record_built_cap`), and the
 analysts' cut check, their spend-meter admissions and the judge's checks and
@@ -1471,7 +1503,11 @@ new conversation, so its prompt opens with the earlier chunks' tool calls,
 every one, as `tool(args) → ev_id` lines with the headline of what each
 returned, a failed call marked, and its loop's repeat guard is seeded with them
 (`seeded_repeat_guard`): an identical call is not run and is answered with the
-notice naming the entry that holds it. That first answer is not counted toward
+result that entry recorded, stamped with its id and a sentence saying it came
+from an earlier chunk (`earlier_chunk_answer`); an entry whose result the run
+did not keep whole (the byte budget blanked it) is served once more, as a
+failure is. A reverser's second chunk, told only where the result was, asked 24
+calls for 3 new entries and ended at its repeat stop. That first answer is not counted toward
 the loop's repeat stop, since the model has not been told in this conversation;
 asking again after it counts as any repeat does. A failed earlier call is served
 once more, as any retry after a failure is. A replayed conversation keeps the
@@ -2678,9 +2714,14 @@ is assembled from what the run gathered rather than recomputed beside it:
   the judge node asks the judge once (`JudgeAgent.decide_techniques`), in one
   tool-free question with the verdict's framing and sizing, about the
   techniques an analyst claimed that its bundle carries on no attack-pattern
-  and no edge, and the ones named only on a finding
-  (`capability_matrix.judge_questions`), each with the claim or finding text
-  and its evidence ids: keep or drop, with a reason. Each id is named as the
+  and no edge, the ones named only on a finding, and the ones every claim
+  naming which the ATT&CK check says does not describe it
+  (`validation.claim_does_not_describe_violation`) — carried by the bundle or
+  not, asked once either way with the check's finding under it
+  (`undescribed_technique_finding`) — (`capability_matrix.judge_questions`),
+  each with the claim or finding text and its evidence ids: keep or drop, with
+  a reason. The review keeps each finding it asked with (`undescribed`), and
+  the row prints it beside the judge's answer and reason. Each id is named as the
   vendored ATT&CK table names it (`attck_loader.technique_label`), in the list,
   in the techniques the question says the bundle carries and in the evidence
   summary: asked about bare ids, a judge dropped a Winlogon Helper DLL id as

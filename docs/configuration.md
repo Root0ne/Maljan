@@ -187,6 +187,11 @@ the `n_predict` echo of the output cap that llama.cpp reads where it ignores
 `max_completion_tokens`, and `chat_template_kwargs.enable_thinking` — and a
 hosted API answers all three with `400 Unsupported parameter`.
 
+llama.cpp's DRY sampler is a fourth, opt-in: `llm.openai.dry_multiplier`,
+`dry_base`, `dry_allowed_length` and `dry_penalty_last_n` are forwarded in the
+same `extra_body` when set, each on its own, and none is set by default. It
+penalises a token that extends a sequence already repeated in the context.
+
 | Value | What is sent |
 | --- | --- |
 | `auto` (default) | `llama_cpp` when the base URL host is loopback, link-local, `.local` or a private address; `standard` otherwise |
@@ -1728,6 +1733,11 @@ paper's gate) and `validation.alignment_margin` (0.20, how far a candidate from
 the sample's own domain and another tactic must beat the claimed id before it
 is questioned). The measurement behind the default off is in *The technique
 check* in [architecture.md](architecture.md).
+
+`validation.claim_repeat_margin` (empty) is how many claim headings an
+analyst's answer may write again before it is asked once for a whole answer
+(`isr.claims_repeated`). Empty derives the margin from the answer itself: the
+number of distinct headings it wrote. Nothing the analyst wrote is removed.
 
 `mobile` and `deep_static` are built from three seeded generic agent
 definitions — `triage`, `android_static` and `reverser` — whose prompts live in
