@@ -2336,9 +2336,12 @@ change landed on `main`.
   before this change renders such a value withheld** in the IOC table, `/iocs`
   and the export, with "no question with this fact is recorded for this run";
   every published row of it gains its reason, and a run diff against it
-  compares the decision, not the wording. A judge value no tool and no string
-  of the file holds reads "named only by the judge's indicator", not "seen only
-  in the file's strings". **Every
+  compares the decision, not the wording. A judge value no row publishes is
+  refused naming the source that holds it: the file's strings when a strings
+  row does, else the tool answers the build's whole-value search finds (the
+  judge's values join the `tool_sightings` search), else "named only by the
+  judge's indicator; no tool answer in this run holds it" — on a report stored
+  before this change, "no tool answer this report keeps holds it". **Every
   published row says why**: the IOC table prints `yes: <reason>`, `/iocs`
   carries `publish_answer`, each exported indicator's description ends with
   "Published because: …", and the YARA and Suricata drafts comment each value

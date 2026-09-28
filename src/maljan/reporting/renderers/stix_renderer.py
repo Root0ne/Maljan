@@ -2274,6 +2274,23 @@ def named_only_reason(
     )
 
 
+def judge_only_reason(searched: str = SEARCHED_THE_RUN, asked_in: str = "") -> str:
+    """The ``no:`` a judge value reads when no row and no tool answer holds it.
+
+    "No tool answer in this run holds it" is said only after the whole-value
+    search of every answer (``SEARCHED_THE_RUN``); a report stored before the
+    search was run for the judge's values says only that no tool answer it
+    keeps holds it. An answer to a query for the value is named as that.
+    """
+    if asked_in:
+        unseen = f"only the answer to a query for it holds it ({asked_in})"
+    elif searched == SEARCHED_THE_RUN:
+        unseen = "no tool answer in this run holds it"
+    else:
+        unseen = "no tool answer this report keeps holds it"
+    return f"no: named only by the judge's indicator; {unseen}, and no second source records it"
+
+
 def seen_in_reason(seen_in: str, listed_by: str = "") -> str:
     """The ``no:`` a listed value reads when only a tool's text, and no second source, holds it."""
     said = f"no: seen only in the text of {seen_in}, and no second source in this run records it"
@@ -3108,7 +3125,7 @@ def publish_answer(
     asked_in: str = "",
     untold: str = "",
     kept_address: str = "",
-    named_only_by: str = "",
+    judge_only: str = "",
 ) -> str:
     """The publish rule's answer for one row, as the report prints it.
 
@@ -3206,8 +3223,8 @@ def publish_answer(
         return "no: the export has no object for this kind"
     if seen_in:
         return seen_in_reason(seen_in, listed_by)
-    if named_only_by:
-        return f"no: named only by {named_only_by}, and no second source in this run records it"
+    if judge_only:
+        return judge_only
     return "no: seen only in the file's strings"
 
 
@@ -3289,19 +3306,31 @@ def judge_value_answer(report: Any, kind: str, value: str, corroborating: str) -
         if text.lower() in own:
             return publish_answer("hash", text, "identity")
     reputation = _host_reputation(report, url_host(text)) if kind == "url" else None
-    # A value the file's strings do not hold was named by the judge alone,
-    # and the refusal says so rather than naming the strings as its source.
+    # Asked as the string sweep's, and refused naming the source that holds
+    # it: the file's strings when a strings row does, else the tool answers
+    # the run's whole-value search found (``tool_sightings``, which the build
+    # runs for the judge's values too), else the judge alone, saying what
+    # was searched.
     in_strings = any(
         str(getattr(row, "value", "") or "").strip().lower() == text.lower()
         for row in (getattr(getattr(report, "static", None), "interesting_strings", None) or [])
     )
+    sourced: dict[str, str] = {}
+    if not in_strings:
+        seen, searched = listed_value_sightings(report, kind, text)
+        if seen:
+            sourced["seen_in"] = seen
+        else:
+            sourced["judge_only"] = judge_only_reason(
+                searched, "" if searched != SEARCHED_THE_RUN else query_answers(report, kind, text)
+            )
     return publish_answer(
         kind,
         text,
         "strings",
         reputation,
         corroborating=corroborating,
-        named_only_by="" if in_strings else "the judge's indicator",
+        **sourced,
         **emulated,
     )
 

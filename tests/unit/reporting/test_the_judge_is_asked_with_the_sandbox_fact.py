@@ -503,5 +503,6 @@ def test_a_judge_url_on_a_host_it_published_names_the_judge_as_its_only_source()
 
     assert publishes(rows[TLS_ONLY])
     assert rows[url] == (
-        "no: named only by the judge's indicator, and no second source in this run records it"
+        "no: named only by the judge's indicator; no tool answer this report keeps holds it, "
+        "and no second source records it"
     )

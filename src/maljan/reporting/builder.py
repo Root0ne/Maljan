@@ -163,8 +163,17 @@ class MalwareReportBuilder:
         # Where the run's tools saw each value an analyst listed: a listed
         # value stands on the answer that holds it, and "no tool saw it" is
         # said only when this search of the whole ledger found none.
+        # The judge's indicator values too: a value it names and no row
+        # publishes is said to be the judge's alone only after this search.
         sightings, queries = tool_sightings(
-            self.evidence_ledger, analyst_listed_values(self.isr_reports)
+            self.evidence_ledger,
+            [
+                *analyst_listed_values(self.isr_reports),
+                *(
+                    (value.kind, value.value)
+                    for value in exported_indicator_values(self.stix_output)
+                ),
+            ],
         )
         network = network_from_ledger(
             self.evidence_ledger,

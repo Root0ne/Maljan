@@ -45,7 +45,12 @@ SWEPT = "crl.example-authority.org"
 SHA256 = "a" * 64
 DROPPED = "b" * 64
 FOREIGN = "d" * 64
-JUDGE_ONLY = "no: named only by the judge's indicator, and no second source in this run records it"
+# These reports are built without the build's search of the tool answers,
+# so the refusal says only the answers such a report keeps were searched.
+JUDGE_ONLY = (
+    "no: named only by the judge's indicator; no tool answer this report keeps holds it, and "
+    "no second source records it"
+)
 
 
 def _indicator(index: int, pattern: str) -> dict[str, Any]:
