@@ -1,21 +1,29 @@
 """A function the analyst decompiled and no claim describes is listed to it, once.
 
-A reverser decompiled the start-up path and the installer of a loader, held
-both in its own ledger, and wrote claims about neither. The functions an
-analyst's own ledger entries decompiled are read off those entries (the
-address the call was given, the name the decompiler printed), and a claim
-describes one when its sentence or its evidence line names the function by
-its address, as an offset from the image base or as a virtual address, or by
-a name the decompiler gave it. The functions no claim names are listed in one
-question, asked once; what the analyst answers stands, and the functions its
-kept answer still names in no claim are recorded as a finding the report
-prints.
+A reverser decompiled two routines that held half of what the analysis needed,
+kept both listings in its own ledger, and wrote no claim about either. The
+functions are read off the analyst's own ledger entries:
 
-Every address and name is synthetic.
+- the address the call was given, as a hex string or as an integer;
+- each function of a batch decompile, one per key of its answer;
+- the name the decompiler printed.
+
+A claim describes a function when its sentence or its evidence line names it.
+It can name it by address: the same address, or one that differs by the image
+base the run read, or, with no base known, by a multiple of 64 KiB. It can
+write the address as ``0x…``, as ``…h`` or as bare hex. Or it can use a name
+the decompiler gave.
+
+The functions no claim names are listed in one question, asked once. What the
+analyst answers stands. The functions its kept answer still names in no claim
+are recorded as a finding, and the report prints it.
+
+Every address, name and sentence here is made up for the test.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -27,13 +35,17 @@ from maljan.pipeline.validation import (
     DecompiledFunction,
     decompiled_functions,
     decompiled_not_described_violation,
+    image_bases_in,
     undescribed_decompiles,
 )
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
-START_UP = 0x140003868
-INSTALLER = 0x1400033AC
+BASE = 0x140000000
+FIRST_OFFSET = 0x1230
+SECOND_OFFSET = 0x4AB0
+FIRST_FN = BASE + FIRST_OFFSET
+SECOND_FN = BASE + SECOND_OFFSET
 
 
 def _r2(entry: str, address: int, name: str = "") -> LedgerEntry:
@@ -66,23 +78,23 @@ def _claim(text: str, evidence: str = "[ev_0003]") -> ClaimEvidence:
 class TestWhatWasDecompiled:
     def test_the_address_and_the_decompiler_s_name_are_read_off_each_entry(self) -> None:
         found = decompiled_functions(
-            [_r2("ev_0003", START_UP), _ghidra("ev_0004", INSTALLER, "InstallService")]
+            [_r2("ev_0003", FIRST_FN), _ghidra("ev_0004", SECOND_FN, "InstallService")]
         )
 
         assert [(f.address, f.names, f.entries) for f in found] == [
-            (START_UP, (f"fcn.{START_UP:x}",), ("ev_0003",)),
-            (INSTALLER, ("InstallService",), ("ev_0004",)),
+            (FIRST_FN, (f"fcn.{FIRST_FN:x}",), ("ev_0003",)),
+            (SECOND_FN, ("InstallService",), ("ev_0004",)),
         ]
 
     def test_a_failed_call_and_another_tool_are_not_decompiles(self) -> None:
-        failed = _ghidra("ev_0005", START_UP)
+        failed = _ghidra("ev_0005", FIRST_FN)
         failed.ok = False
         listing = LedgerEntry(id="ev_0006", tool="list_functions", args={}, output="x")
 
         assert decompiled_functions([failed, listing]) == []
 
     def test_one_function_decompiled_twice_is_one_function(self) -> None:
-        found = decompiled_functions([_r2("ev_0003", START_UP), _ghidra("ev_0007", START_UP)])
+        found = decompiled_functions([_r2("ev_0003", FIRST_FN), _ghidra("ev_0007", FIRST_FN)])
 
         assert len(found) == 1
         assert found[0].entries == ("ev_0003", "ev_0007")
@@ -99,42 +111,185 @@ class TestWhatWasDecompiled:
 
         assert (found.address, found.names) == (None, ("ParseConfig",))
 
+    def test_by_address_and_then_by_name_is_one_function(self) -> None:
+        by_name = LedgerEntry(
+            id="ev_0009",
+            tool="decompile_function_by_name",
+            args={"name": "InstallService"},
+            output="int InstallService(void)\n{\n  return 0;\n}\n",
+        )
+
+        found = decompiled_functions([_ghidra("ev_0004", SECOND_FN, "InstallService"), by_name])
+
+        assert [(f.address, f.names, f.entries) for f in found] == [
+            (SECOND_FN, ("InstallService",), ("ev_0004", "ev_0009"))
+        ]
+
+    def test_an_integer_address_is_read_as_the_integer(self) -> None:
+        entry = LedgerEntry(
+            id="ev_0010",
+            tool="decompile",
+            args={"ea": FIRST_FN},
+            output="int sub_x(void)\n{\n  return 0;\n}\n",
+        )
+
+        (found,) = decompiled_functions([entry])
+
+        assert found.address == FIRST_FN
+
+    def test_the_return_type_on_its_own_line_names_nothing_wrong(self) -> None:
+        entry = LedgerEntry(
+            id="ev_0011",
+            tool="decompile_function",
+            args={"address": hex(FIRST_FN)},
+            output=f"undefined8\nFUN_{FIRST_FN:x}(void)\n{{\n  return 0;\n}}\n",
+        )
+
+        (found,) = decompiled_functions([entry])
+
+        assert found.names == (f"FUN_{FIRST_FN:x}",)
+
+
+class TestABatchDecompile:
+    """One call, five functions asked for, one answer keyed by address."""
+
+    ADDRESSES = [BASE + offset for offset in (0x1230, 0x2340, 0x3450, 0x4560, 0x5670)]
+
+    def _entry(self) -> LedgerEntry:
+        first, second, third, fourth, fifth = self.ADDRESSES
+        answer = {
+            hex(first): f"\nundefined8 FUN_{first:x}(void)\n\n{{\n  return 0;\n}}\n\n",
+            hex(second): "Error: Function not found",
+            hex(third): f"\nundefined8\nFUN_{third:x}(longlong p)\n\n{{\n  return 1;\n}}\n",
+            hex(fourth): "\nint ReadSettings(char *path)\n\n{\n  return 2;\n}\n",
+            hex(fifth): (
+                f"\n/* a comment ( with a parenthesis */\nvoid FUN_{fifth:x}(void)\n{{\n}}\n"
+            ),
+        }
+        return LedgerEntry(
+            id="ev_0012",
+            tool="batch_decompile",
+            args={"functions": ",".join(hex(a) for a in self.ADDRESSES)},
+            output=json.dumps(answer),
+        )
+
+    def test_every_function_it_answered_is_one_function_with_its_own_name(self) -> None:
+        first, _second, third, fourth, fifth = self.ADDRESSES
+
+        found = decompiled_functions([self._entry()])
+
+        assert [(f.address, f.names, f.entries) for f in found] == [
+            (first, (f"FUN_{first:x}",), ("ev_0012",)),
+            (third, (f"FUN_{third:x}",), ("ev_0012",)),
+            (fourth, ("ReadSettings",), ("ev_0012",)),
+            (fifth, (f"FUN_{fifth:x}",), ("ev_0012",)),
+        ]
+
+    def test_an_answer_cut_short_keeps_what_it_shows(self) -> None:
+        entry = self._entry()
+        entry.output = entry.output[: entry.output.index("Error") + 40]
+        first, second = self.ADDRESSES[:2]
+
+        found = decompiled_functions([entry])
+
+        assert [f.address for f in found] == [first]
+        assert second not in [f.address for f in found]
+
+    def test_an_answer_that_is_no_object_takes_the_addresses_it_was_given(self) -> None:
+        entry = self._entry()
+        entry.output = "listings follow"
+
+        found = decompiled_functions([entry])
+
+        assert [f.address for f in found] == self.ADDRESSES
+        assert all(f.names == () for f in found)
+
 
 class TestWhatAClaimNames:
     FUNCTIONS = [
-        DecompiledFunction(address=START_UP, names=(f"FUN_{START_UP:x}",), entries=("ev_0003",)),
-        DecompiledFunction(address=INSTALLER, names=("InstallService",), entries=("ev_0004",)),
+        DecompiledFunction(address=FIRST_FN, names=(f"FUN_{FIRST_FN:x}",), entries=("ev_0003",)),
+        DecompiledFunction(address=SECOND_FN, names=("InstallService",), entries=("ev_0004",)),
     ]
 
-    def _left(self, *claims: ClaimEvidence) -> list[int | None]:
+    def _left(self, *claims: ClaimEvidence, bases: tuple[int, ...] = ()) -> list[int | None]:
         isr = AgentISR(agent_id="reverser", domain="static", claims=list(claims))
-        return [f.address for f in undescribed_decompiles(isr, self.FUNCTIONS)]
+        return [f.address for f in undescribed_decompiles(isr, self.FUNCTIONS, bases)]
 
     def test_an_offset_from_the_image_base_names_the_virtual_address(self) -> None:
-        assert self._left(_claim("0x3868 exits when the mutex exists.")) == [INSTALLER]
+        said = _claim(f"{FIRST_OFFSET:#x} exits when the event already exists.")
+        assert self._left(said) == [SECOND_FN]
+        assert self._left(said, bases=(BASE,)) == [SECOND_FN]
+
+    def test_with_the_base_known_another_function_64_kib_away_does_not(self) -> None:
+        said = _claim(f"{FIRST_FN + 0x10000:#x} is another routine.")
+        assert self._left(said) == [SECOND_FN]
+        assert self._left(said, bases=(BASE,)) == [FIRST_FN, SECOND_FN]
+
+    def test_an_h_suffixed_and_a_bare_hex_address_name_it(self) -> None:
+        assert self._left(_claim(f"{FIRST_OFFSET:X}h checks the event."), bases=(BASE,)) == [
+            SECOND_FN
+        ]
+        assert self._left(_claim(f"{SECOND_FN:x} writes the copy."), bases=(BASE,)) == [FIRST_FN]
 
     def test_the_virtual_address_and_the_decompiler_s_name_both_name_it(self) -> None:
         assert (
             self._left(
-                _claim(f"FUN_{START_UP:x} checks the process count."),
-                _claim("It registers a task.", f"[ev_0004] decompile of 0x{INSTALLER:x}"),
+                _claim(f"FUN_{FIRST_FN:x} checks the process count."),
+                _claim("It registers a task.", f"[ev_0004] decompile of 0x{SECOND_FN:x}"),
             )
             == []
         )
 
     def test_a_given_name_names_it(self) -> None:
-        assert self._left(_claim("InstallService writes the copy.")) == [START_UP]
+        assert self._left(_claim("InstallService writes the copy.")) == [FIRST_FN]
 
     def test_citing_the_entry_alone_does_not(self) -> None:
-        assert self._left(
-            _claim("The sample has update capabilities.", "[ev_0003], [ev_0004]")
-        ) == [
-            START_UP,
-            INSTALLER,
+        assert self._left(_claim("The sample has update logic.", "[ev_0003], [ev_0004]")) == [
+            FIRST_FN,
+            SECOND_FN,
         ]
 
     def test_another_address_does_not(self) -> None:
-        assert self._left(_claim("0x3869 and 0x33a0 are helpers.")) == [START_UP, INSTALLER]
+        said = _claim(f"{FIRST_OFFSET + 1:#x} and {SECOND_OFFSET + 1:#x} are helpers.")
+        assert self._left(said) == [FIRST_FN, SECOND_FN]
+
+    def test_the_image_base_is_read_off_the_run_s_entries(self) -> None:
+        entries = [
+            LedgerEntry(
+                id="ev_0001",
+                tool="resolve_api_hashes",
+                output=json.dumps({"image_base": hex(BASE), "hits": []}),
+            ),
+            LedgerEntry(
+                id="ev_0002",
+                tool="get_current_program_info",
+                output=json.dumps({"image_base": f"{BASE:x}"}),
+            ),
+            LedgerEntry(id="ev_0003", tool="strings", output="no base here"),
+        ]
+        assert image_bases_in(entries) == (BASE,)
+
+    def test_every_agent_is_handed_the_base_the_pack_read(self) -> None:
+        from maljan.pipeline.nodes import pack_image_bases
+
+        state: Any = {
+            "evidence_ledger": [
+                LedgerEntry(
+                    id="ev_0001",
+                    agent="pipeline",
+                    tool="decode_string_blobs",
+                    output=json.dumps({"image_base": hex(BASE), "results": []}),
+                ).model_dump(),
+                LedgerEntry(
+                    id="ev_0002",
+                    agent="static",
+                    tool="x",
+                    output=json.dumps({"image_base": "0x10000000"}),
+                ).model_dump(),
+            ]
+        }
+
+        assert pack_image_bases(state) == (BASE,)
 
 
 class TestTheQuestion:
@@ -143,8 +298,8 @@ class TestTheQuestion:
 
         assert violation is not None
         assert violation.code == DECOMPILED_NOT_DESCRIBED_CODE
-        assert f"0x{START_UP:x} (FUN_{START_UP:x}; ev_0003)" in violation.message
-        assert f"0x{INSTALLER:x} (InstallService; ev_0004)" in violation.message
+        assert f"0x{FIRST_FN:x} (FUN_{FIRST_FN:x}; ev_0003)" in violation.message
+        assert f"0x{SECOND_FN:x} (InstallService; ev_0004)" in violation.message
         assert violation.message.startswith("You decompiled 2 function(s) that no claim")
         assert "naming it by its address" in violation.message
         assert "?" not in violation.message
@@ -154,17 +309,17 @@ class TestTheQuestion:
 
 
 FIRST = (
-    "CLAIM 1: The sample has update capabilities.\n"
+    "CLAIM 1: The sample has update logic.\n"
     "EVIDENCE: [ev_0003], [ev_0004]\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
 )
 BOTH = FIRST + (
-    f"CLAIM 2: 0x{START_UP:x} returns -1 when the mutex already exists.\n"
+    f"CLAIM 2: 0x{FIRST_FN:x} returns -1 when the event already exists.\n"
     "EVIDENCE: [ev_0003]\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
-    f"CLAIM 3: 0x{INSTALLER:x} passes the decoded task name to the task routine.\n"
+    f"CLAIM 3: 0x{SECOND_FN:x} passes a decoded name to the next routine.\n"
     "EVIDENCE: [ev_0004]\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
 )
 ONE = FIRST + (
-    "CLAIM 2: 0x3868 returns -1 when the mutex already exists.\n"
+    f"CLAIM 2: {FIRST_OFFSET:#x} returns -1 when the event already exists.\n"
     "EVIDENCE: [ev_0003]\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
 )
 
@@ -198,7 +353,7 @@ def _check(analyst: _Analyst, first: str = FIRST) -> AgentISR:
         return analyst._validate_isr(isr, "evidence")
 
 
-ENTRIES = [_ghidra("ev_0003", START_UP), _ghidra("ev_0004", INSTALLER)]
+ENTRIES = [_ghidra("ev_0003", FIRST_FN), _ghidra("ev_0004", SECOND_FN)]
 
 
 class TestTheValidationTurn:
@@ -210,7 +365,7 @@ class TestTheValidationTurn:
         (turns,) = analyst.seen_turns
         question = str(turns[-1].content)
         assert DECOMPILED_NOT_DESCRIBED_CODE in question
-        assert f"0x{START_UP:x}" in question and f"0x{INSTALLER:x}" in question
+        assert f"0x{FIRST_FN:x}" in question and f"0x{SECOND_FN:x}" in question
         assert len(result.claims) == 3
         assert DECOMPILED_NOT_DESCRIBED_CODE not in [v.code for v in analyst.validation_findings]
 
@@ -223,8 +378,23 @@ class TestTheValidationTurn:
         (left,) = [
             v for v in analyst.validation_findings if v.code == DECOMPILED_NOT_DESCRIBED_CODE
         ]
-        assert f"0x{INSTALLER:x}" in left.message
-        assert f"0x{START_UP:x}" not in left.message
+        assert f"0x{SECOND_FN:x}" in left.message
+        assert f"0x{FIRST_FN:x}" not in left.message
+
+    def test_the_pack_s_image_base_decides_the_match(self) -> None:
+        # A claim 64 KiB off the first function: with the base the pack read,
+        # it is another function, and the first is still listed.
+        off = FIRST + (
+            f"CLAIM 2: {FIRST_FN + 0x10000:#x} is another routine.\n"
+            "EVIDENCE: [ev_0003]\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
+        )
+        analyst = _Analyst([off], [_ghidra("ev_0003", FIRST_FN)])
+        analyst.pack_image_bases = (BASE,)
+
+        _check(analyst, off)
+
+        (turns,) = analyst.seen_turns
+        assert f"0x{FIRST_FN:x}" in str(turns[-1].content)
 
     def test_the_report_prints_the_line_naming_them(self) -> None:
         from maljan.pipeline.validation import validation_metrics
@@ -245,7 +415,7 @@ class TestTheValidationTurn:
 
         (line,) = [text for text in markdown.splitlines() if DECOMPILED_NOT_DESCRIBED_CODE in text]
         assert "(reverser)" in line
-        assert f"0x{INSTALLER:x} (FUN_{INSTALLER:x}; ev_0004)" in line
+        assert f"0x{SECOND_FN:x} (FUN_{SECOND_FN:x}; ev_0004)" in line
 
     def test_an_analyst_that_decompiled_nothing_is_not_asked(self) -> None:
         analyst = _Analyst([], [])

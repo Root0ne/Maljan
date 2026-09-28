@@ -73,6 +73,7 @@ from maljan.pipeline.validation import (
     claims_repeated,
     decompiled_functions,
     decompiled_not_described_violation,
+    image_bases_in,
     library_only_claims,
     library_only_claims_violation,
     mark_invalid_technique_ids,
@@ -6389,6 +6390,16 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The functions this analyst's own calls decompiled: any no claim of
         # the answer names by address or name is listed to it, once.
         decompiled = decompiled_functions(getattr(self, "_evidence_entries", None) or [])
+        # The image bases the run read, the analyst's own calls' and the
+        # pack's: an offset and a virtual address are matched by them.
+        image_bases = tuple(
+            dict.fromkeys(
+                [
+                    *image_bases_in(getattr(self, "_evidence_entries", None) or []),
+                    *(getattr(self, "pack_image_bases", None) or ()),
+                ]
+            )
+        )
 
         # The validity check answers from the vendored id universe; a box
         # without it cannot check anything, and says so in the run summary
@@ -6472,7 +6483,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return _whole_answer_questions(candidate)
             unread = [] if nudged else parse_violations(candidate)
             undescribed = decompiled_not_described_violation(
-                undescribed_decompiles(candidate, decompiled)
+                undescribed_decompiles(candidate, decompiled, image_bases)
             )
             library_only = library_only_claims_violation(candidate)
             return [
@@ -6778,15 +6789,19 @@ class BaseAnalyst(BudgetMeter, ABC):
                     self.name,
                 )
                 return first_answer
-            # Asked to merge or detail the claims that say only that a library
-            # is used: an answer that folds them away stands, as long as it
-            # keeps as many claims as the first answer had besides them.
+            # Asked to merge or detail the claims that name only a library:
+            # an answer that folds them away stands, as long as it keeps at
+            # least as many other claims as the first answer had. Only where
+            # the question was asked: a chunk's cut turn never asks it.
             library_first = len(library_only_claims(first_answer))
+            library_retried = len(library_only_claims(retried))
             if (
-                library_first
+                not only_cut
+                and library_first
                 and retried.claims
                 and len(retried.claims) < len(first_answer.claims)
-                and len(retried.claims) >= len(first_answer.claims) - library_first
+                and len(retried.claims) - library_retried
+                >= len(first_answer.claims) - library_first
             ):
                 self.logger.info(
                     "Validation: '%s' answered the library-claims question with %d claim(s) "
