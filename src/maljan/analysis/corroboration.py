@@ -27,6 +27,8 @@ def corroboration_row(row: Mapping[str, Any] | Sequence[str] | None) -> dict[str
         }
         if row.get("retired_in"):
             out["retired_in"] = str(row["retired_in"])
+        if row.get("retired_reason"):
+            out["retired_reason"] = str(row["retired_reason"])
         if row.get("associated_by"):
             out["associated_by"] = [str(x) for x in row["associated_by"]]
         if row.get("not_published"):
@@ -86,7 +88,9 @@ def technique_label(technique_id: str, row: Mapping[str, Any] | None) -> str:
     """
     parts: list[str] = []
     if isinstance(row, Mapping):
-        if row.get("retired_in"):
+        if row.get("retired_reason"):
+            parts.append(str(row["retired_reason"]))
+        elif row.get("retired_in"):
             parts.append(f"retired in ATT&CK {row['retired_in']}")
         if row.get("not_published"):
             parts.append(f"claimed, not published: {row['not_published']}")

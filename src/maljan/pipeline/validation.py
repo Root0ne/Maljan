@@ -1487,6 +1487,19 @@ def _retired_note(technique_id: str, attck: Any) -> str:
     return f" (retired in ATT&CK {release})" if release else ""
 
 
+def _catalogue_rejection(technique_id: str, attck: Any) -> str:
+    """Why the catalogue rejects an id, as the clause after "which".
+
+    A retired id has an entry the catalogue no longer lists as current, so it
+    is said to have no current entry and what happened to it; only an id the
+    retired set does not carry has no entry in any domain.
+    """
+    note = _retired_note(technique_id, attck)
+    if note:
+        return f"the MITRE ATT&CK catalogue has no current entry for it: it was {note[2:-1]}"
+    return "the MITRE ATT&CK catalogue has no entry for in any domain"
+
+
 def _suggest_techniques(claim_text: str, attck: Any) -> list[str]:
     """Up to :data:`MAX_SUGGESTIONS` real ids for what the claim describes."""
     resolve = getattr(attck, "resolve_technique", None)
@@ -4442,9 +4455,8 @@ def validate_verdict_bundle(
                     Violation(
                         code="stix.unknown_technique",
                         message=(
-                            f"the attack-pattern names {safe_finding_value(tid)}, which the "
-                            "MITRE ATT&CK catalogue has no entry for in any domain"
-                            f"{_retired_note(tid, attck)}. Use a real technique id or "
+                            f"the attack-pattern names {safe_finding_value(tid)}, which "
+                            f"{_catalogue_rejection(tid, attck)}. Use a real technique id or "
                             "drop the attack-pattern."
                         ),
                         path=where,
@@ -5898,8 +5910,21 @@ def corroboration(
         retired = _retired_release(tid)
         if retired:
             row["retired_in"] = retired
+        reason = _retired_reason(tid)
+        if reason:
+            row["retired_reason"] = reason
         out[tid] = row
     return out
+
+
+def _retired_reason(technique_id: str) -> str | None:
+    """What happened to a retired id (``attck_loader.retired_reason``), or ``None``."""
+    try:
+        from maljan.memory.attck_loader import retired_reason
+
+        return retired_reason(technique_id)
+    except Exception:  # noqa: BLE001 — a note, not a check
+        return None
 
 
 def _retired_release(technique_id: str) -> str | None:

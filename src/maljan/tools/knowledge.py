@@ -332,7 +332,7 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
     which costs a file read. Nothing here loads a STIX bundle, so this is
     cheap enough to call inside an analyst's own loop.
     """
-    from maljan.memory.attck_loader import retired_in, valid_ids
+    from maljan.memory.attck_loader import retired_in, retired_reason, revoked_by, valid_ids
 
     known = valid_ids()
     unknown = [t for t in (str(raw).strip().upper() for raw in ids or []) if t and t not in known]
@@ -346,6 +346,14 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
         retired = retired_in(tid)
         if retired:
             row["retired_in"] = retired
+        # What happened to it, as every surface says it, and what replaced it
+        # where the bundle names a replacement.
+        reason = retired_reason(tid)
+        if reason:
+            row["reason"] = reason
+        successor = revoked_by(tid)
+        if successor:
+            row["revoked_by"] = successor
         # The parent of a bogus sub-technique is the single most likely intent,
         # and it is a string operation rather than a search — a suggestion that
         # cost an embedding model would be worse than no suggestion.

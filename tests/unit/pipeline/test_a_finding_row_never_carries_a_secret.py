@@ -274,9 +274,17 @@ BUILTIN_NAMES: frozenset[str] = BUILTIN_ANSWERS | frozenset(
 # and every value of the judge's it quotes goes through the helper inside it.
 CODE_OWNED_CALLS: frozenset[str] = (
     # ``_term_ids_said`` joins the grounding check's own technique ids;
-    # ``count_claims_begun`` answers a number of claim headings.
+    # ``count_claims_begun`` answers a number of claim headings; ``_catalogue_rejection``
+    # answers in the retired set's own words, as ``_retired_note`` does.
     frozenset(
-        {"_retired_note", "_object_path", "_object_problem", "_term_ids_said", "count_claims_begun"}
+        {
+            "_retired_note",
+            "_catalogue_rejection",
+            "_object_path",
+            "_object_problem",
+            "_term_ids_said",
+            "count_claims_begun",
+        }
     )
     | BUILTIN_ANSWERS
 )
