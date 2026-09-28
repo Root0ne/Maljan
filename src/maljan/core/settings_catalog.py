@@ -228,14 +228,14 @@ _SCHEME_PREFIX = ("bearer ", "basic ", "token ")
 # key that ends in anything else is a setting about the credential
 # (``TOKEN_TTL``, ``PASSWORD_POLICY``, ``SECRET_MANAGER``, ``AUTH_MODE``), not the
 # credential. A key such as ``SECRET_KEY_BASE`` is missed, which costs less than
-# masking a setting's word in every report.
+# masking a setting's word in every report. ``PWD`` is not on the list: in a tool
+# server's environment it is the shell's working directory.
 _CREDENTIAL_LAST_WORDS = frozenset(
     {
         "password",
         "passwd",
         "passphrase",
         "pass",
-        "pwd",
         "secret",
         "key",
         "apikey",

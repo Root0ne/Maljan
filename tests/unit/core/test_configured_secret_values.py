@@ -119,6 +119,12 @@ def test_a_setting_about_a_credential_is_not_collected() -> None:
     assert configured_secret_values(_Settings(servers=[server])) == set()
 
 
+def test_the_shell_s_working_directory_is_not_a_secret() -> None:
+    server = _Server(env={"PWD": "/home/operator/work", "OLDPWD": "/home/operator"})
+
+    assert configured_secret_values(_Settings(servers=[server])) == set()
+
+
 def test_a_number_or_a_boolean_word_is_not_a_secret() -> None:
     server = _Server(env={"API_TOKEN": "12345678901", "DB_PASSWORD": "false", "SECRET": "none"})
 

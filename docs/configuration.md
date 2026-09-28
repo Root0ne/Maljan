@@ -2005,11 +2005,12 @@ whatever its shape (`events.remember_secret_values`, filled from
   catalogue marks secret, the password inside a service URL, and an entry of a
   mapping (a tool server's `env` or headers, the REST sandbox's
   `submit_fields` and `extra_fields`) whose key's last word names a credential
-  — `password`, `passwd`, `passphrase`, `pass`, `pwd`, `secret`, `key`,
+  — `password`, `passwd`, `passphrase`, `pass`, `secret`, `key`,
   `apikey`, `token`, `pat`, `credential(s)`, `authorization`, `bearer`,
   optionally followed by `value` (`VT_API_KEY`, `DB_PASSWORD`, `GITLAB_PAT`). A
   key ending in anything else is a setting about a credential and is not read
-  (`AUTH_MODE`, `TOKEN_TTL`, `PASSWORD_POLICY`, `SECRET_MANAGER`); nor is a
+  (`AUTH_MODE`, `TOKEN_TTL`, `PASSWORD_POLICY`, `SECRET_MANAGER`, and `PWD`,
+  the shell's working directory); nor is a
   value that is all digits or a switch word (true, false, yes, no, on, off,
   none, null), nor the REST sandbox's JSONPath maps (`field_names`,
   `channels`). `SECRET_KEY_BASE` is missed by this rule, which costs less than
