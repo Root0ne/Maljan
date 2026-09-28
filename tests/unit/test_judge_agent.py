@@ -415,3 +415,142 @@ class TestJudgeToolCallsAreCitable:
     def test_a_judge_with_no_tools_records_nothing(self, mock_llm: MagicMock) -> None:
         judge = JudgeAgent(llm=mock_llm)
         assert judge.drain_evidence_entries() == []
+
+
+class _ScriptedModel:
+    """Answers in turn from a script, recording every conversation it is sent."""
+
+    def __init__(self, *answers: str, structured: MediatorVerdict | None = None) -> None:
+        self.answers = list(answers)
+        self.sent: list[list] = []
+        self.structured = structured
+
+    async def ainvoke(self, messages, **_kw):
+        from langchain_core.messages import AIMessage
+
+        self.sent.append(list(messages))
+        return AIMessage(content=self.answers.pop(0) if self.answers else "")
+
+    def with_structured_output(self, _schema, **_kw):
+        from langchain_core.messages import AIMessage
+        from langchain_core.runnables import RunnableLambda
+
+        return RunnableLambda(
+            lambda _in: {
+                "raw": AIMessage(content=""),
+                "parsed": self.structured,
+                "parsing_error": None,
+            }
+        )
+
+
+def _claiming_isrs() -> dict:
+    from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+
+    return {
+        name: AgentISR(
+            agent_id=name,
+            domain=name,
+            claims=[
+                ClaimEvidence(claim=f"{name} claim", evidence_ref="[ev_0001] x", confidence=0.8)
+            ],
+        )
+        for name in ("static", "dynamic")
+    }
+
+
+def _mediate_with(model: "_ScriptedModel", *, structured: bool = False):
+    judge = JudgeAgent(llm=model)  # type: ignore[arg-type]
+    with patch.object(judge, "_supports_structured_output", return_value=structured):
+        return asyncio.run(
+            judge.mediate(
+                {"static": "found things", "dynamic": "saw things"},
+                [],
+                isr_reports=_claiming_isrs(),
+            )
+        )
+
+
+class TestAMediationThatListsContradictionsIsNotConsensus:
+    """The final ``CONTRADICTIONS:`` block decides, whatever number the model wrote."""
+
+    RUN_SHAPE = (
+        "- static: a library written beside the file — dynamic saw none\n"
+        "- triage: a packer — static names none\n"
+        "The second is withdrawn on a closer reading.\n"
+        "CONTRADICTIONS:\n"
+        "- static: a library written beside the file — dynamic: no such file\n"
+        "- network: a host contacted — ev_0012 holds no such flow\n"
+        "agreement_confidence: 1.0"
+    )
+
+    def test_two_standing_contradictions_at_full_confidence_are_not_consensus(self) -> None:
+        model = _ScriptedModel(self.RUN_SHAPE)
+        argument, is_consensus = _mediate_with(model)
+
+        assert is_consensus is False
+        # The model's number is kept and shown beside the list.
+        assert argument.confidence_score == pytest.approx(1.0)
+        assert "Confidence: 1.00" in argument.finding
+        assert "ev_0012 holds no such flow" in argument.finding
+        assert "a packer" not in argument.finding.split("Contradictions:")[-1]
+        assert len(model.sent) == 1
+
+    def test_none_at_full_confidence_is_consensus(self) -> None:
+        model = _ScriptedModel("All aligned.\nCONTRADICTIONS: NONE\nagreement_confidence: 1.0")
+        argument, is_consensus = _mediate_with(model)
+
+        assert is_consensus is True
+        assert argument.note == ""
+        assert len(model.sent) == 1
+
+    def test_a_missing_block_is_asked_for_once(self) -> None:
+        from maljan.agents.judge_agent import CONTRADICTIONS_BLOCK_QUESTION
+
+        model = _ScriptedModel(
+            "All aligned.\nagreement_confidence: 1.0",
+            "CONTRADICTIONS:\n- static: x — ev_0004 says otherwise\nagreement_confidence: 0.9",
+        )
+        argument, is_consensus = _mediate_with(model)
+
+        assert len(model.sent) == 2
+        assert CONTRADICTIONS_BLOCK_QUESTION in str(model.sent[1][-1].content)
+        # The first answer is in the conversation the question follows.
+        assert "All aligned." in str(model.sent[1][-2].content)
+        assert is_consensus is False
+        assert "ev_0004 says otherwise" in argument.finding
+
+    def test_a_block_still_missing_is_stated_and_the_number_read_as_before(self) -> None:
+        from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MISSING_NOTE
+
+        model = _ScriptedModel(
+            "All aligned.\nagreement_confidence: 1.0", "agreement_confidence: 1.0"
+        )
+        argument, is_consensus = _mediate_with(model)
+
+        assert len(model.sent) == 2
+        assert is_consensus is True
+        assert argument.note == CONTRADICTIONS_BLOCK_MISSING_NOTE
+
+    def test_the_structured_path_holds_the_same_rule(self) -> None:
+        model = _ScriptedModel(
+            self.RUN_SHAPE,
+            structured=MediatorVerdict(
+                contradictions=["static: x — dynamic: y"], resolution_summary="s", confidence=1.0
+            ),
+        )
+        argument, is_consensus = _mediate_with(model, structured=True)
+
+        assert is_consensus is False
+        assert argument.confidence_score == pytest.approx(1.0)
+
+    def test_the_prompt_asks_for_the_block_and_counts_a_ledger_contradiction(self) -> None:
+        from maljan.agents.judge_agent import CONTRADICTION_DEFINITION, CONTRADICTIONS_BLOCK_RULE
+
+        model = _ScriptedModel("CONTRADICTIONS: NONE\nagreement_confidence: 1.0")
+        _mediate_with(model)
+        system = str(model.sent[0][0].content)
+
+        assert CONTRADICTIONS_BLOCK_RULE in system
+        assert CONTRADICTION_DEFINITION in system
+        assert "ledger entry" in CONTRADICTION_DEFINITION

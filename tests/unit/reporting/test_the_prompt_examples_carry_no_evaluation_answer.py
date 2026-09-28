@@ -43,8 +43,12 @@ from maljan.agents.delegation import (
 from maljan.agents.ghidra_http_client import no_program_as_error
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
+    CONTRADICTION_DEFINITION,
+    CONTRADICTIONS_BLOCK_QUESTION,
+    CONTRADICTIONS_BLOCK_RULE,
     EVIDENCE_SHORTENED_NOTICE,
     LOWERED_ENTRY_MARK,
+    MEDIATION_EXTRACTION_SYSTEM,
     NO_ENTRY_TEXT,
     PARTIAL_ENTRY_MARK,
     PROMPT_SHORTENED_NOTICE,
@@ -83,6 +87,7 @@ from maljan.analysis.pcap_summary import CaptureRead
 from maljan.extractors.capability_matrix import NOT_ASKED_UNKNOWN_ID, TechniqueQuestion
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.pipeline import triage_pack
+from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.pipeline.nodes import (
     NO_SANDBOX_DATA_REASON,
     NO_STATIC_FIXTURE_NOTE,
@@ -429,6 +434,15 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "judge technique answer form": TECHNIQUE_ANSWER_FORM,
+    "mediator contradiction definition, closing block rule and its one question": " ".join(
+        [CONTRADICTION_DEFINITION, CONTRADICTIONS_BLOCK_RULE, CONTRADICTIONS_BLOCK_QUESTION]
+    ),
+    "mediator structured extraction and its schema": " ".join(
+        [
+            MEDIATION_EXTRACTION_SYSTEM,
+            str(MediatorVerdict.model_fields["contradictions"].description or ""),
+        ]
+    ),
     "judge prompt shortened to its window": PROMPT_SHORTENED_NOTICE.format(
         cut=2, total=5, names="static report, evidence summary", width=900
     ),

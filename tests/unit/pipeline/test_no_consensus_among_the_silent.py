@@ -264,6 +264,100 @@ class TestNoSurfacePrintsAnAgreement:
         assert summary["termination_reason"] == "not_applicable"
 
 
+class _Scripted:
+    """A mediator model that answers in turn from a script."""
+
+    def __init__(self, *answers: str) -> None:
+        self.answers = list(answers)
+        self.calls = 0
+
+    async def ainvoke(self, _messages: Any, **_kw: Any) -> AIMessage:
+        self.calls += 1
+        return AIMessage(content=self.answers.pop(0) if self.answers else "")
+
+
+# The run's shape: bullets drafted, some argued away, a final block with two
+# that still stand, and full agreement written beneath it.
+RUN_SHAPE = (
+    "- static: a library written beside the file — dynamic saw none\n"
+    "- network: a host contacted — ev_0012 holds no such flow\n"
+    "- triage: a packer — static names none\n"
+    "The third is withdrawn on a closer reading.\n\n"
+    "CONTRADICTIONS:\n"
+    "- static: a library written beside the file — dynamic: no such file\n"
+    "- network: a host contacted — ev_0012 holds no such flow\n"
+    "agreement_confidence: 1.0"
+)
+
+CLAIMING_STATE: dict[str, Any] = {
+    "iteration_count": 0,
+    "reports": {"static": "found things", "dynamic": "saw things"},
+    "isr_reports": {"static": _isr("static", 2), "dynamic": _isr("dynamic", 1)},
+}
+
+
+def _round_with(model: _Scripted) -> dict[str, Any]:
+    container = _container((AgentArgument(agent_name="Mediator", finding="x"), True))
+    judge = JudgeAgent(llm=model)  # type: ignore[arg-type]
+    container.get_judge_agent.return_value = judge
+    with (
+        patch.object(judge, "_supports_structured_output", return_value=False),
+        patch("maljan.pipeline.nodes.detect_sycophancy", return_value=False),
+    ):
+        return asyncio.run(make_negotiation_node(container)(CLAIMING_STATE))
+
+
+class TestListedContradictionsSendTheAnalystsToRevise:
+    def test_the_run_s_shape_routes_to_revision(self) -> None:
+        from maljan.core.config import Settings
+
+        result = _round_with(_Scripted(RUN_SHAPE))
+
+        assert result["is_consensus"] is False
+        argument = result["discussion_history"][0]
+        assert argument.confidence_score == pytest.approx(1.0)
+        state = {**CLAIMING_STATE, **result}
+        assert ConsensusRouter(Settings()).should_continue(state) == "revision"
+
+    def test_none_at_full_agreement_goes_to_the_judge(self) -> None:
+        from maljan.core.config import Settings
+
+        result = _round_with(_Scripted("CONTRADICTIONS: NONE\nagreement_confidence: 1.0"))
+
+        assert result["is_consensus"] is True
+        state = {**CLAIMING_STATE, **result}
+        assert ConsensusRouter(Settings()).should_continue(state) == "judge"
+
+    def test_a_missing_block_is_asked_for_and_the_summary_states_it_when_still_missing(
+        self,
+    ) -> None:
+        from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MISSING_NOTE
+
+        model = _Scripted("aligned\nagreement_confidence: 1.0", "agreement_confidence: 1.0")
+        result = _round_with(model)
+
+        assert model.calls == 2
+        summary = (
+            RunSummaryBuilder(start_time=0.0)
+            .set_negotiation({**CLAIMING_STATE, **result}, max_iterations=3)
+            .build()
+        )
+        assert CONTRADICTIONS_BLOCK_MISSING_NOTE in summary.to_markdown()
+        negotiation = summary.to_dict()["negotiation"]
+        assert negotiation["mediation_notes"] == [CONTRADICTIONS_BLOCK_MISSING_NOTE]
+        assert CONTRADICTIONS_BLOCK_MISSING_NOTE in _appendix_text(summary.to_dict())
+
+    def test_a_block_given_leaves_the_summary_silent(self) -> None:
+        result = _round_with(_Scripted(RUN_SHAPE))
+        summary = (
+            RunSummaryBuilder(start_time=0.0)
+            .set_negotiation({**CLAIMING_STATE, **result}, max_iterations=3)
+            .build()
+        )
+
+        assert "mediation_notes" not in summary.to_dict()["negotiation"]
+
+
 def _appendix_text(run_summary: dict) -> str:
     """The report's run-summary appendix for a report carrying ``run_summary``."""
     from maljan.reporting.models import MalwareReport

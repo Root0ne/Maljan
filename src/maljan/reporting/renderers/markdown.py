@@ -1880,6 +1880,8 @@ class MarkdownRenderer:
                     pass
             for sentence in negotiation.get("revision_replacements") or []:
                 lines.append(_item(str(sentence)))
+            for sentence in negotiation.get("mediation_notes") or []:
+                lines.append(_item(str(sentence)))
         for line in generation_lines(run_summary.get("generation")):
             lines.append(_item(line))
         ungrounded = run_summary.get("sections_without_evidence")

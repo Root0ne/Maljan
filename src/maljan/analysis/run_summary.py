@@ -34,6 +34,7 @@ from maljan.analysis.corroboration import (
     published_count,
     technique_label,
 )
+from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MISSING_NOTE
 
 # ---------------------------------------------------------------------------
 # Sub-components
@@ -83,6 +84,9 @@ class NegotiationMetrics:
     # One sentence per revision that stood with fewer claims than the answer
     # it replaced (``nodes.revision_replacement_sentence``).
     revision_replacements: list[str] = field(default_factory=list)
+    # The platform's sentences about the mediation rounds, once each: a
+    # mediation that gave no final ``CONTRADICTIONS:`` block when asked.
+    mediation_notes: list[str] = field(default_factory=list)
 
     @property
     def consensus_applicable(self) -> bool:
@@ -945,6 +949,9 @@ class RunSummary:
             lines += ["**Revisions that replaced an answer with fewer claims:**", ""]
             lines += [f"- {sentence}" for sentence in n.revision_replacements]
             lines.append("")
+        if n.mediation_notes:
+            lines += [f"- {sentence}" for sentence in n.mediation_notes]
+            lines.append("")
 
         # Agent ISR statistics
         lines += ["## Agent ISR Statistics", ""]
@@ -1218,6 +1225,7 @@ class RunSummary:
                     if n.revision_replacements
                     else {}
                 ),
+                **({"mediation_notes": list(n.mediation_notes)} if n.mediation_notes else {}),
             },
             "agent_stats": [
                 {
@@ -1762,6 +1770,14 @@ class RunSummaryBuilder:
             revision_replacements=[
                 str(sentence) for sentence in (state.get("revision_replacements") or [])
             ],
+            mediation_notes=list(
+                dict.fromkeys(
+                    CONTRADICTIONS_BLOCK_MISSING_NOTE
+                    for arg in discussion_history
+                    if getattr(arg, "agent_name", "") == "Mediator"
+                    and getattr(arg, "note", "") == CONTRADICTIONS_BLOCK_MISSING_NOTE
+                )
+            ),
         )
         return self
 

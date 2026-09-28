@@ -38,7 +38,7 @@ from maljan.llm import context_window as cw
 
 WINDOW = 32_768
 REPLY = 8_192
-REASONING = "Contradictions: none that the lookups support.\nagreement_confidence: 0.8"
+REASONING = "The lookups support no contradiction.\nCONTRADICTIONS: NONE\nagreement_confidence: 0.8"
 
 
 class _Server(BaseChatModel):

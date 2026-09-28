@@ -79,6 +79,7 @@ from maljan.llm.generation_rate import GenerationRates, ModelCallDeadline, model
 from maljan.memory.long_term_memory import a_past_case_technique
 from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
 from maljan.pipeline.mediation_models import (
+    CONTRADICTIONS_BLOCK_MISSING_NOTE,
     MediatorVerdict,
     analysts_with_claims,
     consensus_applies,
@@ -440,6 +441,88 @@ _AGREEMENT_RE = re.compile(
     r"confidence[^\n:=]{0,24}?[:=]\s*(\d*\.?\d+)\s*(%?)",
     re.IGNORECASE,
 )
+
+# What the mediator is told a contradiction is. A claim the evidence ledger
+# contradicts counts as much as two analysts saying incompatible things.
+CONTRADICTION_DEFINITION = (
+    "A contradiction is two analysts stating incompatible things, or an analyst's "
+    "claim that an evidence ledger entry contradicts."
+)
+
+# The closing block the mediator writes, and the only part of its answer the
+# contradictions are read from (``final_contradictions``).
+CONTRADICTIONS_BLOCK_RULE = (
+    "After your reasoning, write one final block. It begins with a line reading exactly "
+    "'CONTRADICTIONS:' and then lists each contradiction still standing on a line of its "
+    "own: the analyst, its claim, and what contradicts it (another analyst's claim, or the "
+    "id of the ledger entry). When none stands, write the single line "
+    "'CONTRADICTIONS: NONE'. Only this final block is counted: a contradiction you drafted "
+    "above it and then resolved is left out of it, and any line in it sends the analysts "
+    "to revise, whatever agreement_confidence you write."
+)
+
+# The one question asked when the mediator's answer carried no such block. The
+# turn carries no tools and follows the mediator's own answer.
+CONTRADICTIONS_BLOCK_QUESTION = (
+    "Your answer has no final 'CONTRADICTIONS:' block. Write it now: a line reading "
+    "exactly 'CONTRADICTIONS:' followed by one line per contradiction still standing (the "
+    "analyst, its claim, and what contradicts it: another analyst's claim or the id of the "
+    "ledger entry), or the single line 'CONTRADICTIONS: NONE'; then the line "
+    "'agreement_confidence: <number>'. This turn carries no tools."
+)
+
+# What the structured extraction is told: the contradictions are the final
+# block's lines, never the ones the reasoning drafted and then resolved.
+MEDIATION_EXTRACTION_SYSTEM = (
+    "Extract the final structured verdict from the mediator's reasoning log.\n"
+    "You MUST produce a structured response with:\n"
+    "- contradictions: the lines of the log's final 'CONTRADICTIONS:' block, one item "
+    "per line, and an empty list when that block reads 'CONTRADICTIONS: NONE'. A "
+    "contradiction the log drafted above that block and then resolved is not one.\n"
+    "- resolution_summary: what was resolved and what remains\n"
+    "- confidence: the log's last agreement_confidence, a float 0.0-1.0"
+)
+
+# The block's opening line: the label in capitals, with any Markdown emphasis
+# or heading marks a model puts around it, and what follows on the same line.
+_CONTRADICTIONS_LINE_RE = re.compile(r"^[\s#>*_`]*CONTRADICTIONS[\s*_`]*:[\s*_`]*(.*)$")
+# A block line's list marker: a bullet or a number.
+_LIST_MARKER_RE = re.compile(r"^\s*(?:[-*•]+|\d+[.)])\s*")
+# The agreement line that closes the block.
+_AGREEMENT_LINE_RE = re.compile(r"^[\s#>*_`]*(?:agreement_)?confidence\b", re.IGNORECASE)
+# ``NONE``, however the model dressed it.
+_NONE_RE = re.compile(r"^[\s*_`]*none[\s*_`.]*$", re.IGNORECASE)
+
+
+def final_contradictions(text: str) -> list[str] | None:
+    """The lines of the answer's last ``CONTRADICTIONS:`` block, or ``None`` with no block.
+
+    Only the last block counts: one drafted earlier and then argued away is not
+    the mediator's word. The block runs to the agreement line or the end of the
+    answer; ``CONTRADICTIONS: NONE`` is an empty list. The label is matched in
+    capitals, as the prompt spells it, so a prose heading such as
+    "Contradictions:" in the reasoning is not taken for it.
+    """
+    lines = (text or "").splitlines()
+    start = None
+    for index in range(len(lines) - 1, -1, -1):
+        if _CONTRADICTIONS_LINE_RE.match(lines[index]):
+            start = index
+            break
+    if start is None:
+        return None
+    match = _CONTRADICTIONS_LINE_RE.match(lines[start])
+    rest = (match.group(1) if match else "").strip()
+    if _NONE_RE.match(rest):
+        return []
+    found: list[str] = []
+    for line in [rest, *lines[start + 1 :]]:
+        if _AGREEMENT_LINE_RE.match(line):
+            break
+        item = _LIST_MARKER_RE.sub("", line).strip().strip("*_`").strip()
+        if item and not _NONE_RE.match(item):
+            found.append(item)
+    return found
 
 
 # The notice a judge prompt carries when its parts did not fit the judge's
@@ -2053,8 +2136,8 @@ class JudgeAgent(BudgetMeter):
                 "system",
                 "You are the Lead Cyber Security Mediator. Your ONLY task is to "
                 "compare expert analyst reports and emit:\n"
-                "  1. A list of EXPLICIT contradictions between agents "
-                "(one bullet per contradiction).\n"
+                "  1. The contradictions still standing, in a final "
+                "CONTRADICTIONS: block. " + CONTRADICTION_DEFINITION + "\n"
                 "  2. A single agreement_confidence in [0.0, 1.0] for how "
                 "aligned the agents are — NOT the maliciousness of the sample.\n\n"
                 "HARD RULES:\n"
@@ -2068,7 +2151,9 @@ class JudgeAgent(BudgetMeter):
                 "- agreement_confidence reflects ONLY agent alignment, NOT how "
                 "suspicious the sample looks. Two analysts unanimously saying "
                 "nothing is still high alignment (1.0).\n"
-                "- Your LAST line MUST be exactly 'agreement_confidence: <number>' "
+                "- " + CONTRADICTIONS_BLOCK_RULE + "\n"
+                "- Your LAST line, right after that block, MUST be exactly "
+                "'agreement_confidence: <number>' "
                 "with a decimal between 0.0 and 1.0 — no percent sign, no words, "
                 "no range. Nothing may follow it. When this line is missing or "
                 "unreadable the run is treated as no-consensus and every analyst "
@@ -2099,8 +2184,8 @@ class JudgeAgent(BudgetMeter):
                 f"{_standing_blocks(run_state, facts_block)}"
                 f"{_identity_prefix(sample)}"
                 f"Expert Reports:\n{reports_text}\n\nPrevious Discussion:\n{history}\n\n"
-                "List the contradictions and give a single agreement_confidence "
-                "score. Do not state a verdict.",
+                "End with the CONTRADICTIONS: block and then the agreement_confidence "
+                "line. Do not state a verdict.",
             ),
         ]
 
@@ -2197,6 +2282,22 @@ class JudgeAgent(BudgetMeter):
                 None,
             )
 
+        # The contradictions are read from the answer's final block alone. An
+        # answer without one is asked once for it, in the conversation that
+        # produced it; still without one, the note says so and agreement is
+        # read from the number as before.
+        block_missing = False
+        if reasoning_text.strip() and final_contradictions(reasoning_text) is None:
+            reasoning_text = await self._ask_for_contradictions_block(
+                prompt_messages, reasoning_text
+            )
+            block_missing = final_contradictions(reasoning_text) is None
+            if block_missing:
+                self.logger.warning(
+                    "Mediator: no final CONTRADICTIONS: block, also when asked once; "
+                    "agreement is read from agreement_confidence alone."
+                )
+
         # Now extract the final structured output from the detailed reasoning.
         # IMPORTANT: reasoning_text may contain curly braces from LLM output
         # (e.g. JSON, {type}), so we use a template variable instead of f-string.
@@ -2204,11 +2305,7 @@ class JudgeAgent(BudgetMeter):
             [
                 (
                     "system",
-                    "Extract the final structured verdict from the mediator's reasoning log.\n"
-                    "You MUST produce a structured response with:\n"
-                    "- contradictions: list of specific contradictions found\n"
-                    "- resolution_summary: what was resolved and what remains\n"
-                    "- confidence: float 0.0-1.0 (0.9+ means experts agree, no contradictions)",
+                    MEDIATION_EXTRACTION_SYSTEM,
                 ),
                 (
                     "human",
@@ -2228,9 +2325,20 @@ class JudgeAgent(BudgetMeter):
             else self._fallback_mediate(reasoning_text)
         )
 
-        is_consensus = verdict.confidence >= self._consensus_threshold(consensus_threshold)
-        log_msg = "Consensus reached" if is_consensus else "No consensus yet"
-        self.logger.info("%s (confidence=%.2f)", log_msg, verdict.confidence)
+        # A contradiction still standing is not consensus, whatever number the
+        # mediator wrote; the number is kept and shown beside the list.
+        reached = verdict.confidence >= self._consensus_threshold(consensus_threshold)
+        is_consensus = reached and not verdict.contradictions
+        if reached and verdict.contradictions:
+            self.logger.info(
+                "No consensus: the mediator lists %d contradiction(s) still standing "
+                "(confidence=%.2f).",
+                len(verdict.contradictions),
+                verdict.confidence,
+            )
+        else:
+            log_msg = "Consensus reached" if is_consensus else "No consensus yet"
+            self.logger.info("%s (confidence=%.2f)", log_msg, verdict.confidence)
 
         finding = (
             f"{verdict.resolution_summary}\n\n"
@@ -2241,8 +2349,50 @@ class JudgeAgent(BudgetMeter):
             agent_name="Mediator",
             finding=finding,
             confidence_score=verdict.confidence,
+            note=CONTRADICTIONS_BLOCK_MISSING_NOTE if block_missing else "",
         )
         return argument, is_consensus
+
+    async def _ask_for_contradictions_block(
+        self, prompt_messages: list[tuple[str, str]], reasoning_text: str
+    ) -> str:
+        """The mediation with the answer to one question for its missing block.
+
+        One turn with no tools, after the mediator's own answer in the
+        conversation that produced it. What comes back is appended to the
+        answer, so its last agreement line is the one read; a question that is
+        not made or fails leaves the answer as it was.
+        """
+        from langchain_core.messages import AIMessage, BaseMessage
+
+        from maljan.llm.context_window import output_bound_kwargs
+
+        turns: list[BaseMessage] = [
+            SystemMessage(content=text) if role == "system" else HumanMessage(content=text)
+            for role, text in prompt_messages
+        ]
+        turns += [
+            AIMessage(content=reasoning_text),
+            HumanMessage(content=CONTRADICTIONS_BLOCK_QUESTION),
+        ]
+        timeout = _seconds_or_none(loop_limits("judge")[0])
+        slot = object()
+        try:
+            bound = self._spend_admits("mediation", turns, slot=slot, deadline_s=timeout)
+        except SpendCeilingStop as stop:
+            self.logger.warning("Mediator block question not asked: %s.", stop)
+            return reasoning_text
+        held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
+        try:
+            response = await asyncio.wait_for(self.llm.ainvoke(turns, **held), timeout)
+            self._record_usage(response, call="mediation block question")
+        except Exception as exc:  # noqa: BLE001 — an unanswered question leaves the answer as it was
+            self.logger.warning("Mediator block question failed (%s).", type(exc).__name__)
+            return reasoning_text
+        finally:
+            self._spend_release(slot)
+        answer = str(getattr(response, "content", "") or "").strip()
+        return f"{reasoning_text.rstrip()}\n\n{answer}" if answer else reasoning_text
 
     async def give_verdict(
         self,
@@ -3412,7 +3562,8 @@ class JudgeAgent(BudgetMeter):
         # analysts and the judge read as the mediation, and a cut at a fixed
         # length removed its conclusion without a mark.
         return MediatorVerdict(
-            contradictions=[],
+            # The final block's lines; none when the answer has no block.
+            contradictions=final_contradictions(reasoning_text) or [],
             resolution_summary=reasoning_text,
             confidence=confidence,
         )
