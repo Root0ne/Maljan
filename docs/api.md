@@ -149,7 +149,9 @@ Every row carries `kind`, `value`, `is_suspicious`, `notes`, **`source`** —
 `sandbox` for something the sample resolved, reached or requested, `analyst`
 for something an agent put in an artefact, `strings` for a run of bytes in the
 file that has the shape of one, `identity` for the sample's own hashes,
-`judge` for a value the judge's own indicators name — and **`published`**.
+`judge` for a value the judge's own indicators name — **`published`**, and
+**`publish_answer`**: the publish rule's answer as the report's IOC table
+prints it, `yes:` and why the row is published, or `no:` and why not.
 A domain, address or URL the sample hid also carries **`recovered_by`**: the
 tool that recovered it (`floss` by emulation, `decode_string_blobs` from the
 file's bytes), its ledger entry and where in the file, as the report's IOC
@@ -163,9 +165,11 @@ watched. A `sandbox` address is the sample's observation only when the
 sandbox report attributes a flow to it to the sample's process tree; one it
 attributes elsewhere, or does not attribute — every address a CAPE, REST or
 mock report records, since those carry no process on a flow — and a
-well-known benign name the guest resolved, is published only when a model
-keeps it as an indicator (an analyst's artifact, or the judge's indicator); a
-claim that only mentions it keeps nothing. The host of a URL the feed
+well-known benign name the guest resolved, is published only when the judge
+keeps it as an indicator after it was asked once with the sandbox's fact
+(`stix.indicator_unattributed_flow`, recorded answered in
+`run_summary.validation`); a judge's indicator it was never asked about, an
+analyst's artifact listing it and a claim that only mentions it keep nothing. The host of a URL the feed
 publishes is a `domain` row with the URL's decision, added when the report has
 no row for it, unless it is a well-known benign host no model kept.
 

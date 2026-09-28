@@ -2324,6 +2324,49 @@ change landed on `main`.
 
 ### Fixed
 
+- **A value the sandbox attributes no flow of the sample to is the judge's only
+  by its answer to the sandbox's fact.** A CDN address was published as C2 on
+  the judge's indicator alone. An indicator naming such a value is now asked
+  about once through the verdict's own question, with the fact beside it
+  (`stix.indicator_unattributed_flow`); a keep after that question is recorded
+  answered and publishes the value with both facts in its reason, and a keep
+  the judge was never asked about publishes nothing and says so. **Every
+  published row says why**: the IOC table prints `yes: <reason>`, `/iocs`
+  carries `publish_answer`, each exported indicator's description ends with
+  "Published because: …", and the YARA and Suricata drafts comment each value
+  with its reason.
+- **Corroboration counts independent statements.** Four analysts writing one
+  sentence word for word made a contradicted technique "corroborated (named by
+  6 analyst layers)". Statements with the same normalised text now count once,
+  credited to the first layer that wrote them (`independent_layers`); the row
+  says how many were identical (`identical_statements`) and, where copying
+  leaves one voice, that it is not corroborated. A finding's title is not a
+  statement; its detail is. The console's badge reads the same list.
+- **A recommendation acts only on published indicators.** A hunting note and a
+  P0 recommendation told the reader to block an address the IOC table refused.
+  A recommendation naming an address or a host the table does not publish is
+  asked about once with the table's answer
+  (`narrative.unpublished_indicator`); a value kept after it is recorded.
+- **A URL's HTTP method is read from the evidence.** Every URL defaulted to
+  `GET`, beside a POST beacon; the method is now the one the sandbox request
+  record states, and absent (`null`, printed `-`) on a URL no request carries.
+- **The citation check reads a library name however it is written.** "WinINet"
+  cited to the resolved-hashes entry was said not to be in it; the entry lists
+  `wininet.dll`. DLL and API names are compared without regard to case, and a
+  bare library name is held by an entry that writes it with its `.dll`.
+- **A step marked observed is observed whole.** A step joining the rundll32
+  load the sandbox watched to hashing a static tool read kept "(observed in
+  sandbox)". An observed step citing an entry that is no sandbox observation,
+  or naming an address or a host no flow of the sample's process tree reached
+  (a name judged by its DNS answers, now kept as `resolved_ips`), is asked
+  about once through `report.flow_voice`.
+- **Every technique name comes from the vendored ATT&CK table.** The judge was
+  asked about bare ids and wrote its own names into its drop reasons ("T1547.004
+  (Scheduled Task/Job)"). The technique question, the ids it says the bundle
+  carries and the evidence summary name each id from the table, and the
+  reference back-filled on an attack-pattern reads the same table instead of a
+  short hand-written list.
+
 - **Redaction removes secrets, not words.** A 24-plus run of the base64
   alphabet was read as a key even when it was words: a claim's
   `anti-debugging/environment`, a STIX property name and an analyst's roster
