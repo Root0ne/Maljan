@@ -3822,11 +3822,12 @@ INDICATOR_TYPES = (
 )
 
 
-# STIX 2.1's malware-type vocabulary (``malware-type-ov``, STIX 2.1 section
-# 10.12), vendored as the standard lists it. Open, like the indicator-type
-# vocabulary: a value outside it is legal and published as written. It is asked
-# about because a word outside it (``stealer`` beside ``spyware``) reaches a
-# consumer that filters on the vocabulary as no kind at all.
+# STIX 2.1's malware-type vocabulary (STIX 2.1 OS, section 10.15, Malware Type
+# Vocabulary, ``malware-type-ov``), vendored as the standard lists it. Open,
+# like the indicator-type vocabulary: a value outside it is legal and published
+# as written. It is asked about because a word outside it (``stealer`` beside
+# ``spyware``) reaches a consumer that filters on the vocabulary as no kind at
+# all. Values are compared exactly, the way such a consumer compares them.
 MALWARE_TYPES = (
     "adware",
     "backdoor",
@@ -3853,14 +3854,31 @@ MALWARE_TYPES = (
 )
 
 
-def _written_objects(written: Mapping[str, Any] | None) -> dict[str, Mapping[str, Any]]:
-    """The judge's objects as it wrote them, by id, before anything was dropped."""
-    objects = (written or {}).get("objects") if isinstance(written, Mapping) else None
-    return {
-        str(obj.get("id")): obj
-        for obj in (objects if isinstance(objects, list) else [])
-        if isinstance(obj, Mapping) and obj.get("id")
-    }
+def _written_object(
+    index: int,
+    obj: Any,
+    written: Mapping[str, Any] | None,
+    origins: Sequence[tuple[int | None, str]] | None,
+) -> Mapping[str, Any] | None:
+    """The object at ``index`` of the checked bundle as the judge wrote it, or ``None``.
+
+    Found by its position in the judge's answer (``origins``): the
+    post-processor mints every published id anew, so the id the checked object
+    carries is never the one the judge wrote. Without ``origins`` the checked
+    bundle is the answer as written, and the object is found by its own id.
+    """
+    objects = written.get("objects") if isinstance(written, Mapping) else None
+    if not isinstance(objects, list):
+        return None
+    if origins is not None:
+        position = origins[index][0] if index < len(origins) else None
+        found = objects[position] if position is not None and position < len(objects) else None
+        return found if isinstance(found, Mapping) else None
+    own = str(getattr(obj, "id", "") or "")
+    for candidate in objects:
+        if isinstance(candidate, Mapping) and own and str(candidate.get("id") or "") == own:
+            return candidate
+    return None
 
 
 def malware_object_violations(
@@ -3882,7 +3900,8 @@ def malware_object_violations(
       ``malware_types`` value outside STIX 2.1's vocabulary.
 
     ``written`` is the object as the judge wrote it, before undeclared keys
-    were dropped; without it only ``malware_types`` is read.
+    were dropped; without it only ``malware_types`` is read. A type is compared
+    exactly: ``Spyware`` is not a value of the vocabulary.
     """
     out: list[Violation] = []
     named = str(getattr(obj, "name", "") or "").strip()
@@ -3928,7 +3947,7 @@ def malware_object_violations(
                 subject=subject,
             )
         )
-    outside = [t for t in types if t.lower() not in MALWARE_TYPES]
+    outside = [t for t in types if t not in MALWARE_TYPES]
     if outside:
         out.append(
             Violation(
@@ -4481,10 +4500,9 @@ def validate_verdict_bundle(
         if comparison.operator == "=" and comparison.literal.strip()
     }
     # The family the judge attributed, which a malware object's name is read
-    # against, and the objects as it wrote them.
+    # against.
     _family = getattr(getattr(bundle, "x_maljan_assessment", None), "family", None)
     attributed = str(getattr(_family, "name", "") or "").strip()
-    as_written = _written_objects(written)
     for index, obj in enumerate(objects):
         where = _object_path(index, origins)
         kind = str(getattr(obj, "type", "") or "")
@@ -4557,7 +4575,7 @@ def validate_verdict_bundle(
                     obj,
                     path=where,
                     family=attributed,
-                    written=as_written.get(str(getattr(obj, "id", "") or "")),
+                    written=_written_object(index, obj, written, origins),
                 )
             )
         elif kind == "attack-pattern":

@@ -181,11 +181,21 @@ class TestAMalwareObjectsKind:
 
     def test_types_from_the_vocabulary_are_asked_nothing(self) -> None:
         written = {"objects": [_malware(is_family=True, labels=["x"], malware_types=["bot"])]}
-        bundle = _attributed(_malware(is_family=True, malware_types=["bot", "Spyware"]))
+        bundle = _attributed(_malware(is_family=True, malware_types=["bot", "spyware"]))
 
         assert MALWARE_TYPE_VOCABULARY_CODE not in [
             v.code for v in validate_verdict_bundle(bundle, {"x"}, written=written)
         ]
+
+    def test_a_type_is_compared_exactly(self) -> None:
+        bundle = _attributed(_malware(is_family=True, malware_types=["Spyware"]))
+        (row,) = [
+            v
+            for v in validate_verdict_bundle(bundle, {"x"})
+            if v.code == MALWARE_TYPE_VOCABULARY_CODE
+        ]
+
+        assert "'Spyware'" in row.message
 
     def test_no_labels_and_no_types_are_asked_nothing(self) -> None:
         bundle = _attributed(_malware(is_family=True))
@@ -227,3 +237,55 @@ class TestAMalwareObjectsKind:
         assert "family.name" in MALWARE_OBJECT_RULE
         assert "malware_types" in MALWARE_OBJECT_RULE
         assert "malware-type-ov" in MALWARE_OBJECT_RULE
+
+
+class TestTheQuestionsReadTheAnswerTheJudgeWrote:
+    """Through the judge's own reading of its answer, where every id is minted anew.
+
+    The post-processor replaces every id the judge wrote, so the answer as
+    written is found by the object's position in it, not by the published id.
+    """
+
+    @staticmethod
+    def _asked(object_id: str) -> list[str]:
+        import json
+        from unittest.mock import MagicMock
+
+        from maljan.agents.judge_agent import JudgeAgent
+
+        answer = {
+            "type": "bundle",
+            "id": "bundle--1",
+            "x_maljan_assessment": {
+                "verdict": "Malware",
+                "confidence": 0.9,
+                "family": {"name": FAMILY, "confidence": 0.9, "evidence_ids": ["ev_0001"]},
+            },
+            "objects": [
+                {"type": "note", "id": "note--1", "content": "first", "object_refs": [object_id]},
+                {
+                    "type": "malware",
+                    "id": object_id,
+                    "name": FAMILY,
+                    "is_family": False,
+                    "labels": ["stealer", "bot"],
+                },
+            ],
+        }
+        origins: list[tuple[int | None, str]] = []
+        written: list[dict] = []
+        bundle = JudgeAgent(llm=MagicMock())._bundle_from_response(
+            json.dumps(answer), {}, None, origins=origins, as_written=written
+        )
+        (published,) = [o for o in bundle.objects if o.type == "malware"]
+        assert published.id != object_id, "the harness must go through the minted ids"
+        return [
+            v.code
+            for v in validate_verdict_bundle(bundle, {"x"}, origins=origins, written=written[0])
+        ]
+
+    def test_both_questions_are_asked_of_a_labelled_object(self) -> None:
+        for object_id in ("malware--1", "malware--0f1e2d3c-4b5a-4968-8776-655443332201"):
+            codes = self._asked(object_id)
+            assert IS_FAMILY_CONTRADICTS_FAMILY_CODE in codes, object_id
+            assert MALWARE_TYPE_VOCABULARY_CODE in codes, object_id
