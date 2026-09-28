@@ -2003,21 +2003,28 @@ whatever its shape (`events.remember_secret_values`, filled from
 
 - what is collected is a secret *value*: a `SecretStr` or a setting the
   catalogue marks secret, the password inside a service URL, and an entry of a
-  mapping (a tool server's `env` or headers) whose key names a credential value
-  — `password`, `passwd`, `passphrase`, `secret`, `api_key`/`apikey`, `token`,
-  `bearer`, `private_key`, `credential(s)`, `authorization`. A key that only
-  mentions one (`AUTH_MODE`, `SESSION_DIR`) is not read, nor one whose last
-  word qualifies it (`TOKEN_LIMIT`, `PASSWORD_FILE`, `API_TOKEN_URL`: the last
-  word is one of mode, type, dir, file, path, limit, timeout, url, host, port,
-  name, id, enabled), nor the REST sandbox's JSONPath field maps;
-- a value is masked only where no letter, digit or underscore touches it:
-  `minioadmin` configured leaves `minioadministrator` as written;
+  mapping (a tool server's `env` or headers, the REST sandbox's
+  `submit_fields` and `extra_fields`) whose key's last word names a credential
+  — `password`, `passwd`, `passphrase`, `pass`, `pwd`, `secret`, `key`,
+  `apikey`, `token`, `pat`, `credential(s)`, `authorization`, `bearer`,
+  optionally followed by `value` (`VT_API_KEY`, `DB_PASSWORD`, `GITLAB_PAT`). A
+  key ending in anything else is a setting about a credential and is not read
+  (`AUTH_MODE`, `TOKEN_TTL`, `PASSWORD_POLICY`, `SECRET_MANAGER`); nor is a
+  value that is all digits or a switch word (true, false, yes, no, on, off,
+  none, null), nor the REST sandbox's JSONPath maps (`field_names`,
+  `channels`). `SECRET_KEY_BASE` is missed by this rule, which costs less than
+  masking a setting's word in every report;
+- a value is masked only where no letter, digit or underscore touches it —
+  the end of an escape sequence (`\n`, `\t`, `\u00a0`) in JSON text counts
+  as a boundary: `minioadmin` configured leaves `minioadministrator` as
+  written, and a passphrase after `\n` in a tool answer is masked;
 - the values are held per scope, and a scope registered again replaces what it
   held. The worker registers its own database, Redis and object-store
   credentials and its starting settings under `process` when it starts, and
   each job's settings under `job` when the job installs them, so a secret
   removed from the settings is not masked in the next job. The command line
-  registers its settings when it builds the app (`app`);
+  registers its settings when it builds the app (`app`); the worker's app
+  leaves that to the job's registration;
 - a configured value shorter than 8 characters is not masked by value, because
   masking it everywhere would take the word it spells out of every sentence.
 

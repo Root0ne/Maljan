@@ -88,15 +88,41 @@ def test_only_a_credential_value_is_collected_from_a_mapping() -> None:
     assert found == {secret}
 
 
-def test_the_rest_sandbox_field_maps_are_not_read() -> None:
+def test_the_rest_sandbox_jsonpath_maps_are_not_read_and_its_form_fields_are() -> None:
+    """``field_names`` and ``channels`` hold where a response keeps a value; the others are sent."""
+    form_key, extra_key = password(20), password(20, variant=1)
+
     class _Rest(BaseModel):
         field_names: dict[str, str] = {"token": "$.data.token_value"}
-        submit_fields: dict[str, str] = {"api_key": "$.request.api_key_field"}
+        channels: dict[str, str] = {"api_key": "$.report.api_key_field"}
+        submit_fields: dict[str, str] = {"apikey": form_key, "priority": "normalpriority"}
+        extra_fields: dict[str, str] = {"auth_token": extra_key}
 
     class _Holder(BaseModel):
         rest: _Rest = _Rest()
 
-    assert configured_secret_values(_Holder()) == set()
+    assert configured_secret_values(_Holder()) == {form_key, extra_key}
+
+
+def test_a_setting_about_a_credential_is_not_collected() -> None:
+    """Only a key whose last word names a credential holds one."""
+    server = _Server(
+        env={
+            "TOKEN_TTL": "86400000",
+            "PASSWORD_POLICY": "stronglong",
+            "SECRET_MANAGER": "vaultserver",
+            "GITHUB_TOKEN_SCOPES": "repo,read:org",
+            "USE_TOKEN_CACHE": "enabledyes",
+        }
+    )
+
+    assert configured_secret_values(_Settings(servers=[server])) == set()
+
+
+def test_a_number_or_a_boolean_word_is_not_a_secret() -> None:
+    server = _Server(env={"API_TOKEN": "12345678901", "DB_PASSWORD": "false", "SECRET": "none"})
+
+    assert configured_secret_values(_Settings(servers=[server])) == set()
 
 
 def test_each_credential_key_is_collected() -> None:
@@ -113,6 +139,9 @@ def test_each_credential_key_is_collected() -> None:
         "private_key",
         "credentials",
         "Authorization",
+        "GITLAB_PAT",
+        "DB_PASS",
+        "API_KEY_VALUE",
     )
     values = {name: password(20, variant=index) for index, name in enumerate(names)}
 

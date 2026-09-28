@@ -222,46 +222,38 @@ def core_catalog() -> list[CatalogEntry]:
 # An authorization scheme in front of a header's secret: the secret is what
 # follows it.
 _SCHEME_PREFIX = ("bearer ", "basic ", "token ")
-# The words of a mapping key that name a credential *value* — a tool server's
-# ``VT_API_KEY``, ``DB_PASSWORD``, ``Authorization`` header. A key that only
-# mentions one (``AUTH_MODE``, ``SESSION_DIR``) holds no secret, and a key whose
-# last word qualifies it (``TOKEN_LIMIT``, ``PASSWORD_FILE``, ``API_TOKEN_URL``)
-# holds a setting about the credential, not the credential.
-_CREDENTIAL_KEY_WORDS = frozenset(
+# The last word of a mapping key that names a credential *value* — a tool
+# server's ``VT_API_KEY``, ``DB_PASSWORD``, ``GITLAB_PAT``, an ``Authorization``
+# header — optionally followed by ``value``. An allow-list on the last word: a
+# key that ends in anything else is a setting about the credential
+# (``TOKEN_TTL``, ``PASSWORD_POLICY``, ``SECRET_MANAGER``, ``AUTH_MODE``), not the
+# credential. A key such as ``SECRET_KEY_BASE`` is missed, which costs less than
+# masking a setting's word in every report.
+_CREDENTIAL_LAST_WORDS = frozenset(
     {
         "password",
         "passwd",
         "passphrase",
+        "pass",
+        "pwd",
         "secret",
+        "key",
         "apikey",
         "token",
-        "bearer",
+        "pat",
         "credential",
         "credentials",
         "authorization",
+        "bearer",
     }
 )
-_CREDENTIAL_KEY_PAIRS = frozenset({("api", "key"), ("private", "key")})
-_QUALIFIER_WORDS = frozenset(
-    {
-        "mode",
-        "type",
-        "dir",
-        "file",
-        "path",
-        "limit",
-        "timeout",
-        "url",
-        "host",
-        "port",
-        "name",
-        "id",
-        "enabled",
-    }
-)
-# Mappings whose values are where a response keeps a field, not a field's
-# value: the generic REST sandbox's JSONPath maps. Never read for secrets.
-_FIELD_MAPS = frozenset({"field_names", "submit_fields", "extra_fields", "channels"})
+# A value that is a number or a switch is a setting whatever its key says.
+_NOT_A_SECRET_VALUE = frozenset({"true", "false", "yes", "no", "on", "off", "none", "null"})
+# The generic REST sandbox's JSONPath maps: each value says where a response
+# keeps a field, not what the field holds. Never read for secrets. Its
+# ``submit_fields`` and ``extra_fields`` are form fields sent with every
+# submission and are read like any other mapping.
+_FIELD_MAPS = frozenset({"field_names", "channels"})
 
 
 def names_a_credential_value(key: str) -> bool:
@@ -270,11 +262,9 @@ def names_a_credential_value(key: str) -> bool:
 
     spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(key))
     words = [word for word in re.split(r"[^a-z0-9]+", spaced.lower()) if word]
-    if not words or words[-1] in _QUALIFIER_WORDS:
-        return False
-    if any(word in _CREDENTIAL_KEY_WORDS for word in words):
-        return True
-    return any(pair in _CREDENTIAL_KEY_PAIRS for pair in zip(words, words[1:], strict=False))
+    if len(words) > 1 and words[-1] == "value":
+        words = words[:-1]
+    return bool(words) and words[-1] in _CREDENTIAL_LAST_WORDS
 
 
 def configured_secret_values(*sources: Any) -> set[str]:
@@ -297,7 +287,9 @@ def configured_secret_values(*sources: Any) -> set[str]:
 
     def _add(value: str) -> None:
         text = str(value or "")
-        if not text.strip():
+        if not text.strip() or text.strip().isdigit():
+            return
+        if text.strip().lower() in _NOT_A_SECRET_VALUE:
             return
         found.add(text)
         lowered = text.lower()
