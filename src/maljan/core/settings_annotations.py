@@ -638,6 +638,44 @@ ANNOTATIONS: dict[str, Annotation] = {
         "subgroup": "OpenAI",
         "advanced": True,
     },
+    "llm.openai.dry_multiplier": {
+        "title": "DRY sampler multiplier",
+        "description": (
+            "llama.cpp's DRY sampler strength, forwarded to a llama.cpp endpoint via "
+            "extra_body when set; it penalises a token that extends a sequence already "
+            "repeated in the context. Empty, the default, sends nothing; 0 turns it off."
+        ),
+        "subgroup": "OpenAI",
+        "advanced": True,
+    },
+    "llm.openai.dry_base": {
+        "title": "DRY sampler base",
+        "description": (
+            "The base the DRY penalty grows by with each token of a repeat, forwarded to a "
+            "llama.cpp endpoint when set. Empty, the default, sends nothing."
+        ),
+        "subgroup": "OpenAI",
+        "advanced": True,
+    },
+    "llm.openai.dry_allowed_length": {
+        "title": "DRY sampler allowed length",
+        "description": (
+            "How long a repeated sequence may grow before the DRY penalty applies, "
+            "forwarded to a llama.cpp endpoint when set. Empty, the default, sends nothing."
+        ),
+        "subgroup": "OpenAI",
+        "advanced": True,
+    },
+    "llm.openai.dry_penalty_last_n": {
+        "title": "DRY sampler window",
+        "description": (
+            "How many recent tokens the DRY sampler looks back over (-1 the whole context, "
+            "0 off), forwarded to a llama.cpp endpoint when set. Empty, the default, sends "
+            "nothing."
+        ),
+        "subgroup": "OpenAI",
+        "advanced": True,
+    },
     "llm.parallel_analysts": {
         "title": "Run analysts in parallel",
         "description": (

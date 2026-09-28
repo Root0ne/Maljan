@@ -25,12 +25,20 @@ from maljan.llm.tool_replies import (  # noqa: F401 — the names this module ha
 # OpenAI-compatible API rejects. Named here because two things need the list:
 # the builder, which decides whether to send them, and the 400 self-heal,
 # which decides whether a rejection is about one of ours.
+# llama.cpp's DRY sampler, forwarded only when set (``llm.openai.dry_*``).
+LLAMA_CPP_DRY_KEYS: tuple[str, ...] = (
+    "dry_multiplier",
+    "dry_base",
+    "dry_allowed_length",
+    "dry_penalty_last_n",
+)
 LLAMA_CPP_EXTRA_KEYS: tuple[str, ...] = (
     "repeat_penalty",
     "repetition_penalty",
     "n_predict",
     "max_tokens",
     "chat_template_kwargs",
+    *LLAMA_CPP_DRY_KEYS,
 )
 
 # Base URLs already known to reject our extras, so the self-heal pays for the
@@ -633,6 +641,12 @@ class OpenAIProvider:
         if rp and rp != 1.0:
             extra.setdefault("repeat_penalty", rp)
             extra.setdefault("repetition_penalty", rp)
+
+        # The DRY sampler's parameters, each only when the operator set it.
+        for key in LLAMA_CPP_DRY_KEYS:
+            value = getattr(self._config.llm.openai, key, None)
+            if value is not None:
+                extra.setdefault(key, value)
 
         cap = build_kwargs.get("max_tokens")
         if isinstance(cap, int) and cap > 0:
