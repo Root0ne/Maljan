@@ -2885,14 +2885,20 @@ class _PriorAnswer:
     second copy that drifts.
     """
 
-    def __init__(self, isr: AgentISR) -> None:
+    def __init__(self, isr: AgentISR, shown: str | None = None) -> None:
         self.isr = isr
         # The answer as the model wrote it, CLAIM blocks and findings block
         # included: shown a summary of its parsed claims, a model answered
         # again in the summary's shape, and nothing in that shape is a claim.
         # The summary stands only for an ISR no single answer produced — a
-        # merge of chunks.
-        self.content = isr.answer_text or isr.unparsed_answer or isr.to_text_summary()
+        # merge of chunks. ``shown`` replaces it where only part of the answer
+        # is sent back: an answer that repeated its claims is shown up to the
+        # first claim that repeats.
+        self.content = (
+            shown
+            if shown is not None
+            else isr.answer_text or isr.unparsed_answer or isr.to_text_summary()
+        )
 
 
 def alignment_gate(knowledge: Any, cfg_validation: Any, log: Any, name: str) -> Any | None:
@@ -6365,7 +6371,13 @@ class BaseAnalyst(BudgetMeter, ABC):
             run_state=str(getattr(self, "run_state_block", "") or ""),
         )
 
-        first: list[Any] = [_PriorAnswer(isr)]
+        # An answer that repeated its claims is sent back as written up to the
+        # first claim that repeats, whether or not it was also cut: the model
+        # rewrites its answer with what it wrote in front of it.
+        shown_repeat = _repeated(isr)
+        first: list[Any] = [
+            _PriorAnswer(isr, shown=shown_repeat.before if shown_repeat is not None else None)
+        ]
 
         # A retry that asks for a whole new answer is sent only when the
         # conversation it sends leaves the cap free in the window. Every other
@@ -6416,6 +6428,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 )
             cuts[id(isr)] = []
             repeated_by[id(isr)] = None
+            # Not asked for a whole answer: the other questions ask for a fix
+            # to the answer, which is sent back whole.
+            shown_repeat = None
+            first[:] = [_PriorAnswer(isr)]
 
         def _run(turns: list[Any]) -> Any:
             if first:
@@ -6519,15 +6535,14 @@ class BaseAnalyst(BudgetMeter, ABC):
                 )
                 return retried
             # Asked for a whole answer because the first repeated its claims,
-            # and given one that is whole, does not repeat, and carries at
-            # least as many claims as the first had distinct headings: that
-            # answer is the analyst's. Anything less keeps what was written.
+            # with the part written before the repetition in front of it, and
+            # given one that is whole and does not repeat: that answer is the
+            # analyst's, as a whole answer to the cut question is.
             repeated_first = _repeated(first_answer)
             if (
                 repeated_first is not None
                 and _repeated(retried) is None
                 and not cuts.get(id(retried))
-                and len(retried.claims) >= repeated_first.distinct
                 and retried.claims
             ):
                 self.logger.info(
@@ -6561,7 +6576,11 @@ class BaseAnalyst(BudgetMeter, ABC):
                 agent=str(self.name),
                 stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
                 keep=_keep,
-                drop_answer_for=frozenset({ANALYST_CUT_CODE, ANALYST_REPEATED_CODE}),
+                # A repeating answer is sent back up to its first repeat (the
+                # prior answer's own content), even when it was also cut.
+                drop_answer_for=(
+                    frozenset() if shown_repeat is not None else frozenset({ANALYST_CUT_CODE})
+                ),
                 closing=closing,
             )
         except Exception as exc:  # noqa: BLE001 — a retry that fails keeps the first answer

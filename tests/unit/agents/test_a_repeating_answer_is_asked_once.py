@@ -62,6 +62,33 @@ class TestTheCount:
     def test_a_peer_s_claims_under_disputes_are_not_counted(self) -> None:
         assert claim_heading_counts(DISTINCT + "DISPUTES:\n" + DISTINCT) == (3, 3)
 
+    def test_label_only_headings_with_different_evidence_are_different_claims(self) -> None:
+        text = "".join(
+            f"CLAIM {n}:\nEVIDENCE: [ev_000{n}] strings\nCONFIDENCE: 0.6\nTECHNIQUE: NONE\n---\n"
+            for n in (1, 2, 3)
+        )
+
+        assert claim_heading_counts(text) == (3, 3)
+        assert claims_repeated(text, margin=0) is None
+
+    def test_claims_under_one_category_label_are_told_apart_by_their_sentences(self) -> None:
+        sentences = [
+            ("Persistence", "The sample writes a Run key."),
+            ("Persistence", "The sample creates a scheduled task."),
+            ("Persistence", "The sample copies itself to the startup folder."),
+            ("Discovery", "The sample lists running processes."),
+            ("Discovery", "The sample reads the computer name."),
+            ("Discovery", "The sample enumerates drives."),
+            ("Discovery", "The sample reads the user name."),
+        ]
+        text = "".join(
+            f"CLAIM {n}: {label}\n{sentence}\nEVIDENCE: [ev_0001]\n\n"
+            for n, (label, sentence) in enumerate(sentences, start=1)
+        )
+
+        assert claim_heading_counts(text) == (7, 7)
+        assert claims_repeated(text, margin=0) is None
+
 
 class TestTheMargin:
     def test_repeats_past_the_distinct_count_are_a_finding(self) -> None:
@@ -92,10 +119,18 @@ class TestTheMargin:
 
         assert violation.code == ANALYST_REPEATED_CODE != ANALYST_CUT_CODE
         assert "answer to chunk 2 of 3" in violation.message
-        assert "began 15 CLAIM block(s) under 3 distinct" in violation.message
-        assert "12 of them repeat" in violation.message
+        assert "began 15 CLAIM block(s), 3 of them distinct" in violation.message
+        assert "12 repeat a claim already written" in violation.message
+        assert "shown above only up to CLAIM block 4" in violation.message
         assert "Write the whole answer again" in violation.message
         assert "each written once" in violation.message
+
+    def test_the_part_before_the_first_repeat_is_what_was_written(self) -> None:
+        found = claims_repeated(RUNAWAY)
+        assert found is not None
+
+        assert found.first_repeat == 4
+        assert found.before == DISTINCT.rstrip()
 
 
 class _Analyst(BaseAnalyst):
@@ -128,7 +163,9 @@ def _check(analyst: _Analyst, first: str = RUNAWAY) -> AgentISR:
 
 
 class TestTheValidationTurn:
-    def test_the_question_is_asked_once_and_the_repeating_answer_is_not_sent_back(self) -> None:
+    def test_the_question_is_asked_once_with_the_part_before_the_repeat_shown_back(
+        self,
+    ) -> None:
         analyst = _Analyst([WHOLE])
 
         _check(analyst)
@@ -136,10 +173,27 @@ class TestTheValidationTurn:
         (turns,) = analyst.seen_turns
         question = str(turns[-1].content)
         assert ANALYST_REPEATED_CODE in question
-        assert "began 15 CLAIM block(s) under 3 distinct" in question
+        assert "began 15 CLAIM block(s), 3 of them distinct" in question
+        shown = [t for t in turns if getattr(t, "type", "") == "ai"]
+        assert [str(t.content) for t in shown] == [DISTINCT.rstrip()]
         assert not any("CLAIM 12:" in str(t.content) for t in turns)
 
-    def test_a_whole_answer_covering_every_distinct_claim_is_the_analyst_s(self) -> None:
+    def test_an_answer_both_cut_and_repeating_is_shown_up_to_its_first_repeat(self) -> None:
+        analyst = _Analyst([WHOLE])
+        isr = analyst._text_to_isr(RUNAWAY, 0)
+        analyst._last_answer_cut = (4096, RUNAWAY)
+        with (
+            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
+        ):
+            analyst._validate_isr(isr, "evidence")
+
+        (turns,) = analyst.seen_turns
+        assert ANALYST_CUT_CODE in str(turns[-1].content)
+        shown = [t for t in turns if getattr(t, "type", "") == "ai"]
+        assert [str(t.content) for t in shown] == [DISTINCT.rstrip()]
+
+    def test_a_whole_answer_that_does_not_repeat_is_the_analyst_s(self) -> None:
         analyst = _Analyst([WHOLE])
 
         result = _check(analyst)
@@ -147,10 +201,18 @@ class TestTheValidationTurn:
         assert len(result.claims) == 3
         assert ANALYST_REPEATED_CODE not in [v.code for v in analyst.validation_findings]
 
-    def test_a_retry_with_fewer_claims_keeps_what_was_written_and_records_the_finding(
+    def test_a_whole_answer_with_fewer_claims_stands_too(self) -> None:
+        analyst = _Analyst([_block(1)])
+
+        result = _check(analyst)
+
+        assert len(result.claims) == 1
+        assert ANALYST_REPEATED_CODE not in [v.code for v in analyst.validation_findings]
+
+    def test_a_retry_that_repeats_again_keeps_what_was_written_and_records_the_finding(
         self,
     ) -> None:
-        analyst = _Analyst([_block(1)])
+        analyst = _Analyst([RUNAWAY])
 
         result = _check(analyst)
 

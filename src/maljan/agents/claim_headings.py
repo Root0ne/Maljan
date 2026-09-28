@@ -104,39 +104,45 @@ def count_claims_begun(text: str) -> int:
     return sum(1 for line in before_disputes(text).splitlines() if CLAIM_HEAD_RE.match(line))
 
 
-# The field labels a claim block writes under its heading, which never name it.
-_FIELD_LABEL_RE = re.compile(
-    r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|TECHNIQUE|DISSENT)\b", re.IGNORECASE
-)
+# A line that ends a claim's block: a ``---`` separator.
+_SEPARATOR_RE = re.compile(r"^[ \t]*-{3,}[ \t]*$")
 
 
-def _heading_key(text: str) -> str:
-    """A heading's sentence as compared: marks, case, spacing and a closing stop aside."""
-    words = re.sub(r"[*_`#>]", " ", text).lower().split()
+def _block_key(lines: list[str]) -> str:
+    """A claim's block as compared: marks, case and spacing aside, blank lines left out."""
+    words = re.sub(r"[*_`#>]", " ", " ".join(lines)).lower().split()
     return " ".join(words).rstrip(" .;:")
 
 
-def claim_heading_counts(text: str) -> tuple[int, int]:
-    """``(claims begun, distinct headings)`` of an answer, before its DISPUTES section.
+def claim_blocks(text: str) -> list[tuple[int, str]]:
+    """``(offset, key)`` of each claim ``text`` begins, before its DISPUTES section.
 
-    A heading is the sentence written on its ``CLAIM`` line, or, when the
-    line holds only the label, the next line that is not a field label. Two
-    headings are the same when their sentences are the same with marks, case,
-    spacing and a closing stop aside; the claim's number is not part of it.
+    A claim is its whole block: the sentence on its heading line and every
+    line after it up to the next heading or a ``---`` separator, blank lines
+    aside; the claim's number is not part of it. Two claims under one label
+    with different sentences or evidence are different claims, and a heading
+    that holds only its label is told apart by what follows it. ``offset`` is
+    where the heading line starts in ``text``.
     """
-    begun = 0
-    seen: set[str] = set()
-    waiting = False
-    for line in before_disputes(text).splitlines():
-        heading = CLAIM_HEAD_RE.match(line)
+    body = before_disputes(text)
+    blocks: list[tuple[int, list[str]]] = []
+    current: list[str] | None = None
+    offset = 0
+    for line in body.splitlines(keepends=True):
+        bare = line.rstrip("\r\n")
+        heading = CLAIM_HEAD_RE.match(bare)
         if heading is not None:
-            begun += 1
-            key = _heading_key(line[heading.end() :])
-            waiting = not key
-            if key:
-                seen.add(key)
-            continue
-        if waiting and line.strip() and not _FIELD_LABEL_RE.match(line):
-            seen.add(_heading_key(line))
-            waiting = False
-    return begun, len(seen)
+            current = [bare[heading.end() :]]
+            blocks.append((offset, current))
+        elif _SEPARATOR_RE.match(bare):
+            current = None
+        elif current is not None and bare.strip():
+            current.append(bare)
+        offset += len(line)
+    return [(start, _block_key(lines)) for start, lines in blocks]
+
+
+def claim_heading_counts(text: str) -> tuple[int, int]:
+    """``(claims begun, distinct claims)`` of an answer, each claim keyed by its block."""
+    blocks = claim_blocks(text)
+    return len(blocks), len({key for _start, key in blocks})
