@@ -2613,14 +2613,21 @@ is assembled from what the run gathered rather than recomputed beside it:
   corroboration record lists them as its sources. **Corroboration counts
   independent statements** (`capability_matrix.independent_statements`): each
   analyst statement naming a technique is compared by its normalised text
-  (case, markup and punctuation out), each distinct text is credited to the
-  first layer that wrote it, and `is_corroborated` is two layers credited so
-  (`independent_layers`). A statement another layer already wrote is counted
-  once and the row says how many were identical (`identical_statements`); a
-  row two or more layers name in one statement between them prints "not
-  corroborated" with both counts. A finding's detail is a statement and its
-  title is not: an analyst's one summary title was listed under five
-  techniques. The console's badge reads the same list. A knowledge-table rule
+  (case, markup and punctuation out) with every statement written before it.
+  Two count once when they are the same text, when one is inside the other
+  word for word, or when at least 90% of the shorter one's words are in the
+  other (the overlap coefficient over their word sets,
+  `REPEATED_WORDS_SHARE`): a copy cut short or with a word put in or taken
+  out is one statement, and two analysts' own sentences about one tool's
+  output stay two. Every other statement is credited to the layer that wrote
+  it, and `is_corroborated` is two layers credited so (`independent_layers`).
+  The row says how many statements were identical or near-identical
+  (`identical_statements`); a row fewer than two layers stand behind that way
+  prints "not corroborated (N analyst layers name it; K of them in a
+  statement of its own; …)". A finding's detail is a statement and its
+  procedure, and its title is neither: an analyst's one summary title was
+  listed under five techniques. The console's badge and the narrative prompt
+  (`independent=`) read the same list. A knowledge-table rule
   that matched only names resolved at runtime (every matched name in its
   `resolved_apis`) is named as a source "rule match on names resolved at
   runtime from hashes only, no import; not counted as corroboration", and
@@ -2935,7 +2942,12 @@ is assembled from what the run gathered rather than recomputed beside it:
   `kind:value`). The publish rule reads that answer
   (`stix_renderer.sandbox_row_kwargs`): the row's reason states both the keep
   and the sandbox's fact, and a judge's keep it was never asked about
-  publishes nothing and says so. **Every published row says why, on every
+  publishes nothing and says which case applies: the judge wrote the value in
+  its last answer and no turn was left to ask it, or no question with the fact
+  is recorded for this run (a report stored before the question, or a verdict
+  with no readable network record). A judge URL is asked about its host, the
+  value its keep stands on, and a URL row on an address says the judge kept,
+  or named, its address. **Every published row says why, on every
   surface**: the IOC table's `yes:` reason, `/iocs`' `publish_answer`, the end
   of each exported indicator's `description` ("Published because: …") and a
   comment beside each value in the YARA and Suricata drafts.
@@ -3202,18 +3214,20 @@ is assembled from what the run gathered rather than recomputed beside it:
   value and never with nulls, and that a value is a JSON string, numbers
   included: a configuration section whose items carried `"value": null` —
   as the contract then allowed — failed its schema twice and was dropped. Five
-  checks are shown to the model once through the existing retry-with-feedback
+  checks across the composer and the narrative round are shown to the model
+  once through the existing retry-with-feedback
   and recorded unresolved when they survive, and none drops what it is about:
   `narrative.ungrounded_finding` (a key finding cites an id no ledger entry
   carries), `report.flow_voice` (a step marked observed cites no sandbox
-  entry; or cites one beside an entry that is no sandbox observation, since
+  entry; or cites one beside entries that are not sandbox entries, since
   every statement of an observed step is one the sandbox watched; or names an
   address or a host no flow of the sample's process tree reached, by
   `evidence_bundles.sample_flow_fact`, a name judged by the addresses its DNS
   answers gave (`NetworkDomain.resolved_ips`)),
-  `narrative.unpublished_indicator` (a recommendation's action, rationale or
-  detection names an address or a host the IOC table does not publish; asked
-  with the table's answer), `report.configuration_uncited` (a value said to be decrypted or
+  `narrative.unpublished_indicator` (the narrative round's: a recommendation's
+  action, rationale or detection names an address or a host the IOC table does
+  not publish, a well-known reference host no row holds aside; asked with the
+  table's answer), `report.configuration_uncited` (a value said to be decrypted or
   observed cites no entry) and `report.identifier_uncited` (a host identifier
   cites no entry of the run). A field a model did not supply is absent from
   the report. The recommendation's category is the model's own. The Markdown

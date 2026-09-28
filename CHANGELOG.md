@@ -2330,18 +2330,28 @@ change landed on `main`.
   about once through the verdict's own question, with the fact beside it
   (`stix.indicator_unattributed_flow`); a keep after that question is recorded
   answered and publishes the value with both facts in its reason, and a keep
-  the judge was never asked about publishes nothing and says so. **Every
+  the judge was never asked about publishes nothing and says which case
+  applies (the value was first written in its last answer, or no question is
+  recorded for the run). A judge URL is asked about its host. **A report stored
+  before this change renders such a value withheld** in the IOC table, `/iocs`
+  and the export, with "no question with this fact is recorded for this run";
+  every published row of it gains its reason, and a run diff against it
+  compares the decision, not the wording. **Every
   published row says why**: the IOC table prints `yes: <reason>`, `/iocs`
   carries `publish_answer`, each exported indicator's description ends with
   "Published because: …", and the YARA and Suricata drafts comment each value
   with its reason.
 - **Corroboration counts independent statements.** Four analysts writing one
   sentence word for word made a contradicted technique "corroborated (named by
-  6 analyst layers)". Statements with the same normalised text now count once,
-  credited to the first layer that wrote them (`independent_layers`); the row
-  says how many were identical (`identical_statements`) and, where copying
-  leaves one voice, that it is not corroborated. A finding's title is not a
-  statement; its detail is. The console's badge reads the same list.
+  6 analyst layers)". Two statements now count once when their normalised
+  text is the same, one is inside the other word for word, or at least 90% of
+  the shorter one's words are in the other (overlap coefficient); the rest are
+  credited to the layer that wrote them (`independent_layers`). The row says
+  how many statements were identical or near-identical
+  (`identical_statements`) and, where fewer than two layers stand behind it,
+  that it is not corroborated. A finding's title is neither a statement nor a
+  procedure; its detail is both. The console's badge and the narrative prompt
+  read the same list.
 - **A recommendation acts only on published indicators.** A hunting note and a
   P0 recommendation told the reader to block an address the IOC table refused.
   A recommendation naming an address or a host the table does not publish is
