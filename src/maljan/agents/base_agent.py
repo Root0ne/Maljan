@@ -2827,9 +2827,10 @@ def answer_cut_at_cap(response: Any, cap: int) -> tuple[int, str] | None:
 # answers an identical call with that entry (``seeded_repeat_guard``).
 EARLIER_CHUNKS_HEAD = (
     "Earlier chunks of this same input were already analysed. These are the tool calls "
-    "made there, each with the ledger entry that holds its result. Cite those entries "
-    "instead of making the same call again: an identical call is not run again, and is "
-    "answered with the entry that holds it."
+    "made there, each with the ledger entry that holds its result and the opening of "
+    "what it returned. Cite those entries instead of making the same call again: an "
+    "identical call is not run again, and is answered with the entry that holds it. A "
+    "call marked failed may be made once more."
 )
 
 
@@ -2849,8 +2850,22 @@ def earlier_chunks_block(entries: Sequence[Any]) -> str:
             shown = json.dumps(args, sort_keys=True, default=str)
         except (TypeError, ValueError):
             shown = repr(args)
-        failed = "" if bool(getattr(entry, "ok", True)) else " (failed)"
-        lines.append(f"- {tool}({shown}) \u2192 {entry_id}{failed}")
+        ok = bool(getattr(entry, "ok", True))
+        failed = "" if ok else " (failed)"
+        # What the call found, as the console's headline of it, on one line:
+        # the entry's answer is in another conversation and no tool reads a
+        # ledger entry by its id.
+        from maljan.pipeline.events import summarize_result
+
+        headline = " ".join(
+            summarize_result(
+                str(getattr(entry, "output", "") or ""),
+                ok=ok,
+                remediation=str(getattr(entry, "remediation", "") or ""),
+            ).split()
+        )
+        said = f": {headline}" if headline else ""
+        lines.append(f"- {tool}({shown}) \u2192 {entry_id}{failed}{said}")
     if not lines:
         return ""
     return "\n".join([EARLIER_CHUNKS_HEAD, *lines])

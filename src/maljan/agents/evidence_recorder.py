@@ -382,6 +382,14 @@ class RepeatGuard:
         # apart so a replayed conversation forgets its own calls and not these.
         self._seeded: dict[str, str] = {}
         self._seeded_failures: set[str] = set()
+        # The seeded calls this conversation has already been answered about:
+        # the first answer is the first time this model hears of the earlier
+        # call, and only asking again after it is a repeat.
+        self._told: set[str] = set()
+
+    def _seeded_count(self, key: str) -> int:
+        """Where a seeded call's count starts: one served retry for a failure."""
+        return 1 if self._seeded.get(key) in self._seeded_failures else self.SERVED
 
     def seed(
         self, tool: str, kwargs: dict[str, Any], entry_id: str, *, failed: bool = False
@@ -389,16 +397,32 @@ class RepeatGuard:
         """A call an earlier chunk made: an identical one is answered with its entry, not run.
 
         A later chunk is a new conversation, and its loop re-ran the calls the
-        earlier chunks had made. Seeded as already asked the served number of
-        times, so the first identical call gets ``repeat_notice`` naming the
-        entry that holds the answer. ``failed`` says that entry is a failure.
+        earlier chunks had made. An answered call is seeded as already asked the
+        served number of times, so the first identical call gets
+        ``repeat_notice`` naming the entry that holds the answer; a failed one
+        as asked once, so one retry is served, as the guard serves any retry
+        after a failure. Neither first touch counts toward the loop's repeats
+        (:meth:`first_touch_of_seed`).
         """
         key = self._key(tool, kwargs)
         self._seeded.setdefault(key, str(entry_id))
         if failed:
             self._seeded_failures.add(str(entry_id))
         self._first.setdefault(key, str(entry_id))
-        self._count[key] = max(self._count.get(key, 0), self.SERVED)
+        self._count[key] = max(self._count.get(key, 0), self._seeded_count(key))
+
+    def first_touch_of_seed(self, tool: str, kwargs: dict[str, Any]) -> bool:
+        """Whether this is the conversation's first ask of a seeded call; marks it asked.
+
+        That ask is answered (refused with its entry, or a failure's one retry
+        served) and not counted as a repeat: the model has not yet been told
+        in this conversation. An ask after it counts as any repeat does.
+        """
+        key = self._key(tool, kwargs)
+        if key not in self._seeded or key in self._told:
+            return False
+        self._told.add(key)
+        return True
 
     def seeded_failure(self, entry_id: str) -> bool:
         """Whether a seeded entry recorded a failure."""
@@ -460,7 +484,8 @@ class RepeatGuard:
         first time, and counting them ended an analyst for a dropped socket.
         """
         self._first = dict(self._seeded)
-        self._count = dict.fromkeys(self._seeded, self.SERVED)
+        self._count = {key: self._seeded_count(key) for key in self._seeded}
+        self._told = set()
         self.served_repeats = 0
 
     def ending_the_loop(self) -> bool:
@@ -475,6 +500,10 @@ class RepeatGuard:
         """Record that the call ran, and which entry first answered it."""
         key = self._key(tool, kwargs)
         self._count[key] = self._count.get(key, 0) + 1
+        # A retry of an earlier chunk's failure answers for the call from here
+        # on: its entry is the one a later refusal names.
+        if self._first.get(key) in self._seeded_failures and key in self._seeded:
+            self._first[key] = entry_id
         self._first.setdefault(key, entry_id)
 
 
@@ -799,7 +828,8 @@ def _record_tool(
         first = repeats.answered_by(name, kwargs)
         if first is None:
             return None
-        repeats.note_repeat()
+        if not repeats.first_touch_of_seed(name, kwargs):
+            repeats.note_repeat()
         # Told to the model, written nowhere. No tool ran: an entry here would
         # be a successful call that made none, and the id on it would be an
         # evidence id a report could cite for evidence that does not exist.
@@ -834,6 +864,10 @@ def _record_tool(
             return None
         repeated = repeats.repeat_of(name, kwargs)
         if repeated is not None:
+            # An earlier chunk's failure, retried for the first time in this
+            # conversation: served as a first call, with no steering.
+            if repeats.first_touch_of_seed(name, kwargs):
+                return None
             repeats.note_repeat()
         return repeated
 

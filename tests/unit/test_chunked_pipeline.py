@@ -429,6 +429,8 @@ class TestSafeAnalyzeISRChunked:
                     tool="decompile_function",
                     args={"address": f"0x{n:04x}"},
                     ok=n != 2,
+                    output=f"int FUN_{n:04x}(void)\n{{ return {n}; }}",
+                    remediation=None if n != 2 else "load the program first",
                 )
             )
             return real_analyze(data)
@@ -443,6 +445,8 @@ class TestSafeAnalyzeISRChunked:
         assert first_call in prompts[1]
         assert first_call in prompts[2]
         assert failed_call in prompts[2]
+        assert f"{first_call}: int FUN_0001(void) {{ return 1; }}" in prompts[1]
+        assert f"{failed_call}: the call failed; load the program first" in prompts[2]
         assert seeds == [[], ["ev_0001"], ["ev_0001", "ev_0002"]]
         # The calls of this analysis alone, and none left behind for a later loop.
         assert getattr(analyst, "_prior_chunk_calls", None) in (None, [])
