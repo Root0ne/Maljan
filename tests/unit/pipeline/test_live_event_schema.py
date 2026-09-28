@@ -21,6 +21,7 @@ from tests.credential_shapes import (
     jwt,
     lowercase_base64_blob,
     lowercase_body,
+    password,
     prefixed_key,
     standard_base64_key,
 )
@@ -556,6 +557,87 @@ class TestWordsJoinedBySeparators:
         for value in _every_key_shape():
             assert ev.scrub(value) == "***", value
             assert ev.scrub(f"the key {value} was sent") == "the key *** was sent", value
+
+
+def _word_shaped_body() -> str:
+    """A key body of lowercase letter groups, which the word rule alone reads as words."""
+    letters = "".join(char for char in lowercase_body(72) if char.isalpha())
+    return "-".join([letters[0:7], letters[7:14], letters[14:21]])
+
+
+class TestAVendorPrefixIsAskedBeforeTheWords:
+    """A known vendor format is a key whatever its body reads like, once the body is key-long."""
+
+    PREFIXES = (
+        "glpat-",
+        "xoxp-",
+        "xoxb-",
+        "xoxa-",
+        "xoxs-",
+        "xapp-",
+        "ghs_",
+        "ghp_",
+        "gho_",
+        "ghu_",
+        "ghr_",
+        "github_pat_",
+        "hf_",
+        "key-",
+        "rk_live_",
+        "sk_live_",
+        "pk_live_",
+        "npm_",
+        "gocspx-",
+        "sk-",
+        "sk_",
+        "nvapi-",
+    )
+
+    def test_each_prefix_with_a_word_shaped_body_is_masked(self) -> None:
+        body = _word_shaped_body()
+        assert len(body) >= ev.PREFIXED_KEY_BODY_FLOOR
+        for prefix in self.PREFIXES:
+            value = prefix + body
+            assert ev.scrub(value) == "***", value
+            assert ev.scrub(f"sent {value} once") == "sent *** once", value
+
+    def test_a_short_word_after_a_prefix_is_a_word(self) -> None:
+        for words in ("key-exchange", "key-derivation-step"):
+            assert ev.scrub(words) == words
+
+
+class TestAConfiguredSecretIsMaskedByValue:
+    """A secret the platform holds is masked wherever it appears, whatever its shape."""
+
+    @staticmethod
+    def _passphrase() -> str:
+        letters = "".join(char for char in lowercase_body(72) if char.isalpha())
+        return "-".join([letters[0:6], letters[6:11], letters[11:18], letters[18:24]])
+
+    def test_a_passphrase_shaped_secret_is_masked_once_remembered(self, monkeypatch: Any) -> None:
+        secret = self._passphrase()
+        monkeypatch.setattr(ev, "_CONFIGURED_SECRETS", ())
+        assert ev.scrub(f"login with {secret} failed") == f"login with {secret} failed"
+
+        ev.remember_secret_values([secret])
+
+        assert ev.scrub(f"login with {secret} failed") == "login with *** failed"
+        assert ev.scrub_keeping_layout(f"a\n  {secret}\n") == "a\n  ***"
+        assert secret not in ev.safe_finding_value(f"the key is {secret}")
+        assert secret not in ev.summarize_args({"note": f"use {secret}"})
+        assert secret not in ev.summarize_result(f"answer {secret}")
+
+    def test_a_value_below_the_floor_is_not_remembered(self, monkeypatch: Any) -> None:
+        monkeypatch.setattr(ev, "_CONFIGURED_SECRETS", ())
+        ev.remember_secret_values(["", "   ", "short"])
+        assert ev.scrub("a short word") == "a short word"
+
+    def test_values_are_added_to_not_replaced(self, monkeypatch: Any) -> None:
+        monkeypatch.setattr(ev, "_CONFIGURED_SECRETS", ())
+        first, second = password(16), password(16, variant=1)
+        ev.remember_secret_values([first])
+        ev.remember_secret_values([second])
+        assert ev.scrub(f"{first} {second}") == "*** ***"
 
 
 def _every_key_shape() -> list[str]:

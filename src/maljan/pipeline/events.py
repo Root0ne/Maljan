@@ -26,7 +26,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from maljan.core.logger import logger
@@ -420,6 +420,51 @@ _SECRET_ARGUMENT_WORDS = (
 # echoed by an API response travelled verbatim while the same key passed as a
 # bare argument was replaced.
 _CREDENTIAL_PREFIXES = ("sk-", "sk_", "nvapi-", "ghp_", "gho_", "xoxb-")
+# Vendor key formats whose prefix is also the start of ordinary words
+# (``key-exchange``) or whose body can be letter groups the word rule below
+# reads as words. A run that begins with one of these and carries a body of at
+# least ``PREFIXED_KEY_BODY_FLOOR`` characters after it is a key, asked before
+# the word rule: GitLab, Slack, GitHub, Hugging Face, Mailgun, Stripe, npm and
+# Google OAuth client secrets. Every real body of these formats is longer than
+# the floor; ``key-exchange`` is not.
+_PREFIXED_KEY_FORMATS = (
+    "glpat-",
+    "xoxp-",
+    "xoxb-",
+    "xoxa-",
+    "xoxs-",
+    "xoxr-",
+    "xapp-",
+    "ghs_",
+    "ghp_",
+    "gho_",
+    "ghu_",
+    "ghr_",
+    "github_pat_",
+    "hf_",
+    "key-",
+    "rk_live_",
+    "sk_live_",
+    "pk_live_",
+    "rk_test_",
+    "sk_test_",
+    "pk_test_",
+    "npm_",
+    "gocspx-",
+    *_CREDENTIAL_PREFIXES,
+)
+PREFIXED_KEY_BODY_FLOOR = 20
+# The secret values this process holds in its own settings — model API keys,
+# sandbox and Ghidra tokens, the VirusTotal key, the database, Redis and object
+# store passwords — masked by exact value wherever the scrub runs, whatever
+# their shape: a passphrase an operator configured reads as words to every
+# shape rule here, and this is what catches it. Longest first, so a secret
+# that contains another is masked whole. Filled by ``remember_secret_values``.
+_CONFIGURED_SECRETS: tuple[str, ...] = ()
+# A configured value shorter than this is not masked by value: a four-letter
+# password masked everywhere would take every word it spells out of every
+# sentence. Such a value is still masked by name and by shape.
+CONFIGURED_SECRET_FLOOR = 8
 # Where a run of interest may begin: the start of the text, or right after a
 # character that separates values. Whitespace is not enough — a compact JSON
 # body from a tool server is one whitespace-separated word, and everything
@@ -623,6 +668,14 @@ def _name_words(name: str) -> set[str]:
     return set(re.split(r"[^a-z0-9]+", spaced.lower())) - {""}
 
 
+def is_secret_argument_name(name: str) -> bool:
+    """Whether a name says its value is a credential.
+
+    An argument's, a header's or an environment variable's name alike.
+    """
+    return _is_secret_argument(name)
+
+
 def _is_secret_argument(name: str) -> bool:
     """Whether this argument's *name* says its value is a credential.
 
@@ -713,13 +766,25 @@ def _looks_like_a_credential(token: str) -> bool:
     lowered = token.lower()
     if any(lowered.startswith(prefix) for prefix in _CREDENTIAL_PREFIXES):
         return True
+    if any(
+        lowered.startswith(prefix) and len(token) - len(prefix) >= PREFIXED_KEY_BODY_FLOOR
+        for prefix in _PREFIXED_KEY_FORMATS
+    ):
+        return True
     if _MIME_TYPE.match(token) or _PATH_SHAPED.match(token) or _is_words(token):
         return False
     return bool(_CREDENTIAL_RUN.match(token)) or _is_a_token(token)
 
 
 def _is_words(run: str) -> bool:
-    """Whether this run is words joined by ``_``, ``-`` or ``/`` rather than a key."""
+    """Whether this run is words joined by ``_``, ``-`` or ``/`` rather than a key.
+
+    What this costs: no shape tells a passphrase or a letters-only grouped
+    code from a hyphenated phrase, so a secret of that shape passes this rule.
+    A vendor prefix is asked before it (``_PREFIXED_KEY_FORMATS``), and the
+    secrets the platform holds are masked by value before any shape is read
+    (``remember_secret_values``); ``docs/configuration.md`` states the rest.
+    """
     pieces = re.split(r"[_\-/]", run)
     return len(pieces) >= 2 and all(_WORD_PIECE.match(piece) for piece in pieces)
 
@@ -796,8 +861,32 @@ def scrub(text: Any) -> str:
     return _scrub_line(" ".join(str(text or "").split()))
 
 
+def remember_secret_values(values: Iterable[str]) -> None:
+    """Add these values to the ones the scrub masks by exact value, in this process.
+
+    Added to, never replaced: a secret rotated out may still be quoted by a
+    tool answer written before the rotation. A value shorter than
+    ``CONFIGURED_SECRET_FLOOR``, or blank, is not added.
+    """
+    global _CONFIGURED_SECRETS
+    kept = set(_CONFIGURED_SECRETS)
+    for value in values:
+        text = str(value or "")
+        if len(text) >= CONFIGURED_SECRET_FLOOR and text.strip():
+            kept.add(text)
+    _CONFIGURED_SECRETS = tuple(sorted(kept, key=len, reverse=True))
+
+
+def _hide_configured_secrets(line: str) -> str:
+    for secret in _CONFIGURED_SECRETS:
+        if secret in line:
+            line = line.replace(secret, _REDACTED)
+    return line
+
+
 def _scrub_line(line: str) -> str:
-    """The four passes, over text that is already one line."""
+    """The configured secrets by value, then the four passes, over text that is already one line."""
+    line = _hide_configured_secrets(line)
     line = _SCHEME_AND_SECRET.sub(lambda m: f"{m.group(1)} {_REDACTED}", line)
     line = _URL_RUN.sub(_shorten_url, line)
     line = _VALUE_RUN.sub(_hide_credentials, line)

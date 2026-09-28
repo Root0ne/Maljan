@@ -648,6 +648,24 @@ IDENTITY_FIELDS = frozenset(
 )
 
 
+def remember_configured_secrets(core_settings: Any) -> None:
+    """Hand the scrub every secret value this worker holds, to be masked by value.
+
+    The job's settings (model API keys, sandbox, Ghidra and tool-server tokens)
+    and the worker's own (the database, Redis and object-store credentials).
+    A value an operator chose can have any shape — a passphrase reads as words
+    to every shape rule — so these are masked as themselves wherever the scrub
+    runs in this process. Never raises: a failure here leaves the shape rules.
+    """
+    try:
+        from maljan.core.settings_catalog import configured_secret_values
+        from maljan.pipeline.events import remember_secret_values
+
+        remember_secret_values(configured_secret_values(core_settings, get_settings()))
+    except Exception as exc:  # noqa: BLE001 — the shape rules still run
+        logger.warning("The configured secrets were not handed to the scrub (%s).", exc)
+
+
 def scrubbed(value: Any, *, field: str = "") -> Any:
     """``value`` with every string inside it scrubbed, however deeply it sits.
 
@@ -1874,6 +1892,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # ``runtime_config`` today; if it ever needs core config it must
         # install its own.
         install_settings(core_settings)
+        remember_configured_secrets(core_settings)
         if overrides:
             logger.info(
                 "Applying %d runtime setting override(s) from the UI.",
@@ -3018,6 +3037,7 @@ async def startup(ctx: dict) -> None:
         # defaults only, same as bare get_settings() used to fall back to,
         # minus the environment read.
         core = build_settings({})
+        remember_configured_secrets(core)
         sample_files.sweep(mirror_dir=core.static.r2.mirror_dir)
         # The directories this worker hands a sidecar a path into. A tool
         # server reads a path argument only inside the roots it was given, and

@@ -217,3 +217,65 @@ def core_catalog() -> list[CatalogEntry]:
     order = {g: i for i, (g, _) in enumerate(GROUP_ORDER)}
     entries.sort(key=lambda e: (order[e.group], e.order, e.path))
     return entries
+
+
+# An authorization scheme in front of a header's secret: the secret is what
+# follows it.
+_SCHEME_PREFIX = ("bearer ", "basic ", "token ")
+
+
+def configured_secret_values(*sources: Any) -> set[str]:
+    """Every secret-kind value the given settings hold, as the platform would send it.
+
+    What is secret is this catalogue's own secret kind — a ``SecretStr``, or a
+    field named in ``_SECRET_NAMES`` — plus the password inside a service URL
+    (``database_url``, ``redis_url``) and an entry of a mapping whose key names
+    a credential (a tool server's ``env`` or ``headers``). A header value that
+    begins with an authorization scheme contributes what follows the scheme as
+    well. Nothing else is collected: a field that merely mentions a token in
+    its name (``max_tokens``, a session directory) holds no secret. The scrub
+    masks these values by exact value (``pipeline.events.remember_secret_values``).
+    """
+    from urllib.parse import urlsplit
+
+    from maljan.pipeline.events import is_secret_argument_name
+
+    found: set[str] = set()
+
+    def _add(value: str) -> None:
+        text = str(value or "")
+        if not text.strip():
+            return
+        found.add(text)
+        lowered = text.lower()
+        for scheme in _SCHEME_PREFIX:
+            if lowered.startswith(scheme) and text[len(scheme) :].strip():
+                found.add(text[len(scheme) :].strip())
+
+    def _walk(value: Any, name: str, named_secret: bool) -> None:
+        if isinstance(value, SecretStr):
+            _add(value.get_secret_value())
+        elif isinstance(value, BaseModel):
+            fields = dict(type(value).model_fields)
+            for key in fields:
+                _walk(getattr(value, key, None), key, key in _SECRET_NAMES)
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                _walk(item, str(key), is_secret_argument_name(str(key)))
+        elif isinstance(value, list | tuple | set):
+            for item in value:
+                _walk(item, name, named_secret)
+        elif isinstance(value, str):
+            if named_secret:
+                _add(value)
+            elif "://" in value and "@" in value:
+                try:
+                    secret = urlsplit(value).password
+                except ValueError:
+                    secret = None
+                if secret:
+                    _add(secret)
+
+    for source in sources:
+        _walk(source, "", False)
+    return found

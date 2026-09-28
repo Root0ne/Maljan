@@ -1986,6 +1986,27 @@ key of 24 or more characters with a digit in one of its pieces does not have
 that shape and is redacted to `***` **inside a sentence** —
 `"windows_pe_static_analyst2 failed"` reaches a reader as `"*** failed"`.
 
+What the word rule costs, stated: no shape tells a passphrase
+(`three-plain-words-together`) from a hyphenated phrase, nor a letters-only
+grouped code (a base32 recovery code, a product key in letter groups) from
+words in capitals, so a secret of that shape is published as written unless
+something else catches it. Two things do. A run that begins with a known
+vendor prefix (`glpat-`, `xoxp-`, `xoxb-`, `xapp-`, `ghs_`, `ghp_`, `gho_`,
+`github_pat_`, `hf_`, `key-`, `rk_live_`, `sk_live_`, `pk_live_`, `npm_`,
+`gocspx-` and the rest of `events._PREFIXED_KEY_FORMATS`) with at least 20
+characters after it is a key whatever its body reads like. And every secret
+value the worker holds — the job's model API keys, sandbox, Ghidra and tool
+server tokens (and a tool server's credential-named `env` and header entries),
+and the worker's own database, Redis and object-store credentials — is masked
+by exact value wherever the scrub runs, whatever its shape
+(`events.remember_secret_values`, filled from
+`settings_catalog.configured_secret_values` when the worker starts and when a
+job installs its settings). A configured value shorter than 8 characters is
+not masked by value, because masking it everywhere would take the word it
+spells out of every sentence. A secret the platform does not hold — one a
+sample carries, or one a tool answer quotes from elsewhere — of passphrase
+shape is the remaining cost.
+
 Nothing is lost but the name in that sentence. The identity fields a line is
 filed under — `speaker`, `agent`, `stage`, `label`, `display_name` — are
 exempt by name in the publisher and travel whole, so the console still files
