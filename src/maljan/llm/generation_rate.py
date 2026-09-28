@@ -814,8 +814,9 @@ class _CallDeadline:
             return self.cap, f"its output cap of {self.cap} output units"
         if self.room > 0:
             return self.room, (
-                f"the {self.room} output units its model's {self.window}-unit window leaves "
-                "after the prompt (it has no output cap)"
+                f"about {self.room} output units, the room its model's {self.window}-unit "
+                "window leaves after the prompt counted at three characters a unit (it has "
+                "no output cap)"
             )
         return 0, "it has no output cap and its model's window is not known"
 
@@ -1026,6 +1027,14 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                             result = task.result()
                         except TimeoutError as exc:
                             raise _provider_timeout(exc) from exc
+                        except Exception as exc:
+                            # As on the streamed path: a client that streams
+                            # inside this call (Ollama's) ends a stall after
+                            # its pieces in its own read timeout, which is the
+                            # silence after the last piece.
+                            if deadline.progress.pieces > 0 and _transport_read_timeout(exc):
+                                raise deadline.silence_ended(loop.time(), exc) from exc
+                            raise
                         break
             except BaseException:
                 if not task.done():
@@ -1144,7 +1153,10 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                 done.wait(timeout=left)
             if "error" in outcome:
                 deadline.record_unfinished()
-                raise outcome["error"]
+                error = outcome["error"]
+                if deadline.progress.pieces > 0 and _transport_read_timeout(error):
+                    raise deadline.silence_ended(time.monotonic(), error) from error
+                raise error
             return stamp_sent_at(outcome["answer"], sent)
 
         members["_generate"] = _generate

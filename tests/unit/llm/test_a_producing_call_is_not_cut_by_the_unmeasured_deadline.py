@@ -231,7 +231,7 @@ class TestACallWithNoOutputCap:
 
         room = 32768 - 1  # "hi" is one unit at three characters a unit
         assert took == pytest.approx((1 / _PACE + room / _PACE) * TIMEOUT_MARGIN, rel=1e-6)
-        assert "the 32767 output units its model's 32768-unit window leaves" in str(exc)
+        assert "about 32767 output units, the room its model's 32768-unit window" in str(exc)
 
 
 class TestAfterACutTheRetryIsSizedFromTheMeasurement:
@@ -467,3 +467,80 @@ class TestTheBuiltModelCarriesItsKnownWindow:
         model = LLMProviderRegistry(_registry_settings()).build_model()
 
         assert built_window(model) is None
+
+
+class _OllamaShaped(_Slow):
+    """Streams inside ``_agenerate`` as Ollama's client does, and its transport times out.
+
+    Reads its prompt for 60 s, sends ``pieces`` at 2.3 a second through the
+    run manager, then is silent until the client's own read timeout ends the
+    request (``httpx.ReadTimeout``), ``timeout_after`` seconds later.
+    """
+
+    timeout_after: float = _CLIENT
+
+    async def _agenerate(
+        self, messages: Any, stop: Any = None, run_manager: Any = None, **_: Any
+    ) -> Any:
+        import httpx
+
+        await asyncio.sleep(60.0)
+        for _index in range(self.pieces):
+            await asyncio.sleep(1.0 / self.pace)
+            if run_manager:
+                await run_manager.on_llm_new_token("x")
+        await asyncio.sleep(self.timeout_after)
+        raise httpx.ReadTimeout("no data within the read timeout")
+
+    def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **_: Any) -> Any:
+        import httpx
+
+        for _index in range(self.pieces):
+            if run_manager:
+                run_manager.on_llm_new_token("x")
+        raise httpx.ReadTimeout("no data within the read timeout")
+
+
+class TestAClientThatStreamsInsideItsCallAndTimesOut:
+    def test_a_stall_after_pieces_ends_as_the_call_deadline(self) -> None:
+        rates = GenerationRates()
+        model = attach_rate_meter(
+            with_sized_request_timeout(_OllamaShaped)(pieces=100), rates, "ollama"
+        )
+
+        exc, took = run_expecting(ModelCallDeadline, _ask(model))
+
+        # A call deadline, so the loop salvages what it gathered; it ends when
+        # the transport's silence bound after the last piece does, well inside
+        # the deadline the call's own pace set, which is still the one sized.
+        last = 60.0 + 100 / _PACE
+        assert took == pytest.approx(last + _CLIENT)
+        assert isinstance(exc, TimeoutError)
+        said = str(exc)
+        assert "silence after its last generated piece" in said
+        assert "after piece 100" in said
+        in_call = (60.0 + 1 / _PACE + _CAP / _PACE) * TIMEOUT_MARGIN
+        assert took < in_call
+        assert rates.rate("ollama") == pytest.approx(_PACE)
+
+    def test_a_timeout_before_any_piece_is_raised_as_it_came(self) -> None:
+        import httpx
+
+        # The read timeout comes before the call's own silence bound: the
+        # transport's error, as it came, as on dev.
+        model = with_sized_request_timeout(_OllamaShaped)(pieces=0, timeout_after=100.0)
+
+        exc, _took = run_expecting(httpx.ReadTimeout, _ask(model))
+
+        assert not isinstance(exc, ModelCallDeadline)
+
+    def test_the_synchronous_call_follows_the_same_rule(self) -> None:
+        import httpx
+
+        after = with_sized_request_timeout(_OllamaShaped)(pieces=3)
+        before = with_sized_request_timeout(_OllamaShaped)(pieces=0)
+
+        with pytest.raises(ModelCallDeadline, match="silence after its last generated piece"):
+            after.invoke([HumanMessage(content="hi")])
+        with pytest.raises(httpx.ReadTimeout):
+            before.invoke([HumanMessage(content="hi")])
