@@ -1831,14 +1831,24 @@ def a_report_node_follows(container: Any) -> bool:
     try:
         if not bool(container.config.reporting.enabled):
             return False
-    except Exception:  # noqa: BLE001 — the default graph has one
+    except Exception as exc:  # noqa: BLE001 — the default graph has one
+        logger.warning(
+            "reporting.enabled could not be read (%s); the memory case waits for a report "
+            "node, as the default graph has one.",
+            type(exc).__name__,
+        )
         return True
     try:
         return any(
             str(getattr(stage, "kind", "")) == "report"
             for stage in container.active_profile().stages
         )
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "The profile could not be read (%s); the memory case waits for a report node, "
+            "as the default graph has one.",
+            type(exc).__name__,
+        )
         return True
 
 

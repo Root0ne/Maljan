@@ -1985,6 +1985,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             mock=_mock_active,
             job_id=job_id,
             analyst_mode=_analyst_mode,
+            # The job's secrets are registered above (``remember_configured_secrets``).
+            remember_secrets=False,
             event_sink=_make_event_sink(
                 redis_conn,
                 job_id,

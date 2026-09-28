@@ -63,12 +63,15 @@ class MaljanApp:
         event_sink: EventSink | None = None,
         job_id: str = "",
         analyst_mode: Any = None,
+        remember_secrets: bool = True,
     ) -> None:
         self.config = config or Settings()
         # The secrets these settings hold are masked by value wherever the
         # scrub runs in this process: on the command line this is the one
-        # place that knows them (the worker also registers its own).
-        _remember_the_secrets_of(self.config)
+        # place that knows them. The worker registers a job's settings itself
+        # (``remember_configured_secrets``) and builds its app without this.
+        if remember_secrets:
+            _remember_the_secrets_of(self.config)
         self.container = ServiceContainer(
             config=self.config,
             mock=mock,

@@ -313,3 +313,19 @@ def test_a_bundle_that_could_not_be_read_keeps_the_claimed_ids_and_says_so() -> 
 
     assert case is claimed
     assert "claimed" in note
+
+
+def test_a_profile_that_cannot_be_read_is_said(caplog: Any) -> None:
+    import logging
+    from unittest.mock import MagicMock
+
+    from maljan.pipeline.nodes import a_report_node_follows
+
+    container = MagicMock()
+    container.config.reporting.enabled = True
+    container.active_profile.side_effect = RuntimeError("no profile")
+
+    with caplog.at_level(logging.WARNING):
+        assert a_report_node_follows(container) is True
+
+    assert any("report node" in record.getMessage() for record in caplog.records)
