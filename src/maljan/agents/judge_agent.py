@@ -2393,7 +2393,9 @@ class JudgeAgent(BudgetMeter):
         timeout = _seconds_or_none(loop_limits("judge")[0])
         slot = object()
         try:
-            bound = self._spend_admits("mediation", turns, slot=slot, deadline_s=timeout)
+            bound = self._spend_admits(
+                "mediation block question", turns, slot=slot, deadline_s=timeout
+            )
         except SpendCeilingStop as stop:
             self.logger.warning("Mediator block question not asked: %s.", stop)
             return reasoning_text
