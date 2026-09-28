@@ -2053,6 +2053,9 @@ def _kept_with_the_fact(kept_by: str, unattributed: str, kept_address: str = "")
 # stands on: the judge's answer to the question that told it the sandbox's fact
 # (``validation.unattributed_indicator_violations``), and nothing less.
 JUDGE_KEPT_WHEN_TOLD = "the judge when asked with the sandbox's fact"
+# The same keep of a URL the judge named itself, answered about its host.
+JUDGE_KEPT_WHEN_TOLD_OF_ITS_HOST = "the judge when asked with its host's fact"
+_JUDGE_KEPT_WHEN_TOLD = frozenset({JUDGE_KEPT_WHEN_TOLD, JUDGE_KEPT_WHEN_TOLD_OF_ITS_HOST})
 # Why a judge's keep of such a value publishes nothing, by what the run summary
 # records: the question first raised by the judge's last answer, with no turn
 # left to ask it; or no question recorded at all (a report stored before the
@@ -2103,20 +2106,23 @@ def _judge_answered_the_fact(report: Any, subject: str) -> str:
     return FACT_NOT_RECORDED
 
 
-def _the_judge_s_keep(report: Any, kind: str, key: str, said: dict[str, str]) -> dict[str, str]:
+def _the_judge_s_keep(
+    report: Any, kind: str, key: str, said: dict[str, str], *, what: str = "it"
+) -> dict[str, str]:
     """``said`` with the judge's keep standing only on its answer to the sandbox's fact.
 
     A row with an ``unattributed`` fact that the judge's indicator names keeps
     it only when the judge was asked with that fact and kept the indicator; the
     keep is then named as such. A keep it was never asked about is taken out of
-    ``kept_by`` and stated (``untold``). Every other keep passes through.
+    ``kept_by`` and stated (``untold``), naming ``what`` the judge's indicator
+    names. Every other keep passes through.
     """
     if not said.get("unattributed") or said.get("untold"):
         # No fact to ask about, or the row already carries the answer (a URL
         # takes its address's, decided under the address).
         return said
     kept = [by for by in str(said.get("kept_by") or "").split(", ") if by]
-    if JUDGE_KEPT_WHEN_TOLD in kept:
+    if _JUDGE_KEPT_WHEN_TOLD & set(kept):
         return said
     judge = [by for by in kept if by.startswith("the judge")]
     if not judge:
@@ -2129,7 +2135,10 @@ def _the_judge_s_keep(report: Any, kind: str, key: str, said: dict[str, str]) ->
     else:
         out["kept_by"] = ", ".join(others)
         out["untold"] = judge_not_told(
-            JUDGE_NOT_ASKED_IN_TIME if state == FACT_ASKED_TOO_LATE else JUDGE_QUESTION_NOT_RECORDED
+            JUDGE_NOT_ASKED_IN_TIME
+            if state == FACT_ASKED_TOO_LATE
+            else JUDGE_QUESTION_NOT_RECORDED,
+            what,
         )
     return out
 
@@ -2395,7 +2404,7 @@ def disputed_flow_reason(marked_only: list[str], file_only: list[str]) -> str:
     return "the sandbox report attributes its flows to " + "; and to ".join(parts)
 
 
-def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
+def sandbox_row_kwargs(report: Any, kind: str, value: str, *, what: str = "it") -> dict[str, str]:
     """``unattributed``, ``kept_by``, ``listed_by`` and ``mentioned_by`` for one value's row.
 
     Asked of the report's network block. An address the sandbox saw is the
@@ -2426,16 +2435,21 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
         # A sandbox URL whose host is an address takes that address's facts.
         host = url_host(value).strip("[]")
         if _field(row, "source") == "sandbox" and _parses_as_an_address(host):
-            said = dict(sandbox_row_kwargs(report, "ip", host))
-            # The keep, told or not, is of the address the URL stands on.
-            if said.get("untold"):
-                said["untold"] = said["untold"].replace(
-                    "the judge's indicator names it,",
-                    f"the judge's indicator names its address {host},",
-                    1,
-                )
-            if JUDGE_KEPT_WHEN_TOLD in str(said.get("kept_by") or ""):
-                said["kept_address"] = host
+            # Whose keep it is: the judge's URL itself, answered about its
+            # host, or the judge's indicator on the address the URL stands on.
+            own = ("url", _value_key("url", value)) in _judge_index(report)
+            said = dict(
+                sandbox_row_kwargs(report, "ip", host, what="it" if own else f"its address {host}")
+            )
+            kept = [by for by in str(said.get("kept_by") or "").split(", ") if by]
+            if JUDGE_KEPT_WHEN_TOLD in kept:
+                if own:
+                    said["kept_by"] = ", ".join(
+                        JUDGE_KEPT_WHEN_TOLD_OF_ITS_HOST if by == JUDGE_KEPT_WHEN_TOLD else by
+                        for by in kept
+                    )
+                else:
+                    said["kept_address"] = host
             return said
         return {}
     if kind == "ip":
@@ -2471,7 +2485,7 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
         else:
             return {}
     return _the_judge_s_keep(
-        report, kind, key, {"unattributed": why, **kept_kwargs(report, kind, key, row)}
+        report, kind, key, {"unattributed": why, **kept_kwargs(report, kind, key, row)}, what=what
     )
 
 
@@ -3231,7 +3245,8 @@ def judge_value_answer(report: Any, kind: str, value: str, corroborating: str) -
                             *(
                                 ()
                                 if emulated.get("untold")
-                                or JUDGE_KEPT_WHEN_TOLD in str(emulated.get("kept_by") or "")
+                                or _JUDGE_KEPT_WHEN_TOLD
+                                & set(str(emulated.get("kept_by") or "").split(", "))
                                 else ("the judge's indicator",)
                             ),
                         ]

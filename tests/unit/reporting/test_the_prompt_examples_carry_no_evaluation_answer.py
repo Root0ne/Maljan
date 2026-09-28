@@ -181,6 +181,7 @@ from maljan.reporting.renderers.stix_renderer import (
     CAPTURE_TLS_NAME,
     FLOW_OUTSIDE_THE_TREE,
     JUDGE_KEPT_WHEN_TOLD,
+    JUDGE_KEPT_WHEN_TOLD_OF_ITS_HOST,
     JUDGE_NOT_ASKED_IN_TIME,
     JUDGE_QUESTION_NOT_RECORDED,
     SEARCHED_THE_REPORT,
@@ -591,6 +592,7 @@ PROMPTS: dict[str, str] = {
     "publish rule words for the judge's keep and a published row": " ".join(
         [
             JUDGE_KEPT_WHEN_TOLD,
+            JUDGE_KEPT_WHEN_TOLD_OF_ITS_HOST,
             JUDGE_NOT_ASKED_IN_TIME,
             JUDGE_QUESTION_NOT_RECORDED,
             judge_not_told(JUDGE_NOT_ASKED_IN_TIME, "its address 192.0.2.1"),

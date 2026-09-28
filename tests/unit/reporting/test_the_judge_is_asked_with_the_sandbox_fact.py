@@ -468,6 +468,24 @@ class TestAURLOnAnAddressSaysItsAddressWasKept:
 
         assert f"the judge's indicator names its address {self.ADDRESS}" in said["untold"]
 
+    def test_told_a_url_the_judge_kept_itself_says_the_judge_kept_it(self) -> None:
+        report = self._report(told=True, indicator=JudgeIndicator(kind="url", value=self.URL))
+        said = sandbox_row_kwargs(report, "url", self.URL)
+        answer = indicator_publish_reason("url", self.URL, "sandbox", None, **said)
+
+        assert answer is not None
+        assert answer.startswith(
+            "kept as an indicator by the judge when asked with its host's fact"
+        )
+        assert "its address" not in answer
+
+    def test_untold_a_url_the_judge_named_itself_says_the_judge_names_it(self) -> None:
+        report = self._report(told=False, indicator=JudgeIndicator(kind="url", value=self.URL))
+
+        said = sandbox_row_kwargs(report, "url", self.URL)
+
+        assert said["untold"] == judge_not_told(JUDGE_QUESTION_NOT_RECORDED)
+
     def test_a_told_judge_url_on_the_address_is_not_asked_again_under_the_url(self) -> None:
         report = self._report(told=True, indicator=JudgeIndicator(kind="url", value=self.URL))
 
