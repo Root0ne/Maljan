@@ -204,6 +204,60 @@ class TestABatchDecompile:
         assert [f.address for f in found] == self.ADDRESSES
         assert all(f.names == () for f in found)
 
+    def test_a_batch_keyed_by_bare_hex_addresses(self) -> None:
+        first, second = self.ADDRESSES[:2]
+        entry = LedgerEntry(
+            id="ev_0013",
+            tool="batch_decompile",
+            args={"functions": [first, second]},
+            output=json.dumps(
+                {f"{first:x}": "int ReadSettings(void)\n{\n}\n", f"{second:x}": "Error: none"}
+            ),
+        )
+
+        (found,) = decompiled_functions([entry])
+
+        assert (found.address, found.names) == (first, ("ReadSettings",))
+
+
+class TestAPlainListingIsOneFunction:
+    """A listing whose text holds quoted strings is one function at its own address."""
+
+    def _one(self, output: str, **args: Any) -> DecompiledFunction:
+        entry = LedgerEntry(
+            id="ev_0020",
+            tool="decompile_function",
+            args=args or {"address": hex(FIRST_FN)},
+            output=output,
+        )
+        (found,) = decompiled_functions([entry])
+        return found
+
+    def test_string_literals_in_a_ternary(self) -> None:
+        found = self._one(
+            f'int FUN_{FIRST_FN:x}(int a)\n{{\n  printf(a ? "1" : "0");\n'
+            '  puts(a ? "ab" : "cd");\n  return 0;\n}\n'
+        )
+
+        assert (found.address, found.names) == (FIRST_FN, (f"FUN_{FIRST_FN:x}",))
+
+    def test_json_in_a_string_literal(self) -> None:
+        found = self._one(
+            "void ReportState(char *out)\n{\n"
+            '  sprintf(out, "{\\"cd\\":\\"%s\\",\\"ab12\\":\\"%d\\"}", a, b);\n}\n'
+        )
+
+        assert (found.address, found.names) == (FIRST_FN, ("ReportState",))
+
+    def test_a_json_answer_whose_keys_are_no_addresses(self) -> None:
+        found = self._one(
+            json.dumps({"ea": f"{FIRST_FN:x}", "f": "int helper(void)\n{\n}\n"}),
+            ea=FIRST_FN,
+        )
+
+        assert found.address == FIRST_FN
+        assert found.names == ()
+
 
 class TestWhatAClaimNames:
     FUNCTIONS = [
@@ -252,6 +306,34 @@ class TestWhatAClaimNames:
     def test_another_address_does_not(self) -> None:
         said = _claim(f"{FIRST_OFFSET + 1:#x} and {SECOND_OFFSET + 1:#x} are helpers.")
         assert self._left(said) == [FIRST_FN, SECOND_FN]
+
+    def test_digits_alone_name_a_function_whose_hex_they_spell_exactly(self) -> None:
+        assert f"{FIRST_FN:x}".isdigit()
+        assert self._left(_claim(f"The routine at {FIRST_FN:x} checks the event.")) == [SECOND_FN]
+        assert self._left(_claim(f"The routine at 00{FIRST_FN:x} checks it.")) == [SECOND_FN]
+        assert self._left(_claim(f"The count is {FIRST_FN + 1:x} or {FIRST_OFFSET:x}.")) == [
+            FIRST_FN,
+            SECOND_FN,
+        ]
+
+    def _bases(self, output: str) -> tuple[int, ...]:
+        return image_bases_in([LedgerEntry(id="ev_0001", tool="x", output=output)])
+
+    def test_an_integer_base_is_the_integer(self) -> None:
+        assert self._bases(json.dumps({"image_base": BASE})) == (BASE,)
+
+    def test_a_base_written_in_hex_is_read_as_hex(self) -> None:
+        assert self._bases(json.dumps({"image_base": hex(BASE)})) == (BASE,)
+        assert self._bases(json.dumps({"image_base": f"{BASE:x}h"})) == (BASE,)
+        lettered = 0x14AB0000
+        assert self._bases(json.dumps({"image_base": f"{lettered:x}"})) == (lettered,)
+
+    def test_a_string_of_decimal_digits_is_no_base(self) -> None:
+        assert self._bases(json.dumps({"image_base": str(BASE)})) == ()
+        assert self._bases(json.dumps({"image_base": f"{BASE:x}"})) == ()
+
+    def test_a_base_off_a_64_kib_boundary_is_no_base(self) -> None:
+        assert self._bases(json.dumps({"image_base": hex(BASE + 0x1000)})) == ()
 
     def test_the_image_base_is_read_off_the_run_s_entries(self) -> None:
         entries = [

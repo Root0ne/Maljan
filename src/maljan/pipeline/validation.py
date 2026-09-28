@@ -2934,9 +2934,15 @@ _NOT_A_NAME = frozenset({"if", "while", "for", "switch", "return", "sizeof", "do
 # One function of a batch decompile's answer as its text shows it, when the
 # answer is cut and no longer parses: the address key and its listing, which
 # may itself be cut.
-_BATCH_KEY = re.compile(r'"((?:0x)?[0-9a-fA-F]{1,16})"\s*:\s*"((?:[^"\\]|\\.)*)')
-# An image base a tool stated: ``"image_base": "0x140000000"``.
-_IMAGE_BASE = re.compile(r'"image_base"\s*:\s*"?(?:0x)?([0-9a-fA-F]{1,16})"?')
+_BATCH_MEMBER = re.compile(r'\s*"([^"\\]*)"\s*:\s*"((?:[^"\\]|\\.)*)(")?')
+# A batch answer's key that is an address: ``0x`` and hex digits, or at least
+# four hex digits.
+_ADDRESS_KEY = re.compile(r"(?:0x([0-9a-fA-F]{1,16})|([0-9a-fA-F]{4,16}))")
+# An image base a tool stated: an unquoted number, or a quoted string.
+_IMAGE_BASE = re.compile(r'"image_base"\s*:\s*(?:(\d+)\b|"([^"]*)")')
+# A letterless run of digits a claim writes, read against a function's own hex
+# spelling exactly.
+_DIGIT_RUN = re.compile(r"(?<![\w.])(\d{1,20})(?![\w])")
 # Where a loaded image's base may sit: a multiple of 64 KiB. With no base
 # known, a claim's address and a decompiled one are one function when they
 # differ by a positive multiple of this (an offset from the image base against
@@ -2994,22 +3000,63 @@ def _signature_name(output: str) -> str:
 
 
 def _listing_text(output: str) -> str:
-    """The listing an answer carries: a JSON string's own text, else the output as it is."""
+    """The listing an answer carries: a JSON string's own text, the output as it is when
+    it is no JSON, and nothing when it is a JSON object or list whose listing is not
+    known."""
     try:
         parsed = json.loads(output)
     except (ValueError, TypeError):
         return output
-    return parsed if isinstance(parsed, str) else output
+    if isinstance(parsed, str):
+        return parsed
+    return "" if isinstance(parsed, dict | list) else output
+
+
+def _address_key(key: str) -> int | None:
+    """A batch answer's key as an address: ``0x`` and hex digits, or four hex digits or more."""
+    match = _ADDRESS_KEY.fullmatch(str(key).strip())
+    return int(match.group(1) or match.group(2), 16) if match else None
+
+
+def _cut_batch_items(output: str) -> list[tuple[str, str]]:
+    """The keys and listings a cut batch answer still shows, read from its opening brace.
+
+    Only an answer that begins with ``{`` and a quoted key is read, one
+    member after another; a listing cut short ends the reading with what it
+    held.
+    """
+    opening = re.match(r"\s*\{", output)
+    if opening is None:
+        return []
+    items: list[tuple[str, str]] = []
+    at = opening.end()
+    while True:
+        member = _BATCH_MEMBER.match(output, at)
+        if member is None:
+            break
+        raw, closed = member.group(2), member.group(3)
+        try:
+            text = json.loads(f'"{raw}"')
+        except ValueError:
+            text = ""
+        items.append((member.group(1), str(text)))
+        if not closed:
+            break
+        comma = re.compile(r"\s*,").match(output, member.end())
+        if comma is None:
+            break
+        at = comma.end()
+    return items
 
 
 def _batch_listings(output: str) -> tuple[bool, dict[int, str]]:
     """``(shown, listings)`` of an answer keyed by address, one function per key.
 
-    ``shown`` is whether the answer is keyed by address at all. A key whose
-    listing begins with ``Error`` was not decompiled. An answer cut short
-    keeps the functions its text still shows.
+    ``shown`` is whether the answer is an object every key of which reads as
+    an address (``_address_key``). A key whose listing begins with ``Error``
+    was not decompiled. An answer cut short keeps the functions its text still
+    shows (``_cut_batch_items``). Any other answer is no batch.
     """
-    items: list[tuple[str, str]] = []
     try:
         parsed = json.loads(output)
     except (ValueError, TypeError):
@@ -3017,24 +3064,18 @@ def _batch_listings(output: str) -> tuple[bool, dict[int, str]]:
     if isinstance(parsed, dict):
         items = [(str(key), str(value)) for key, value in parsed.items()]
     elif parsed is None:
-        for match in _BATCH_KEY.finditer(output):
-            raw = match.group(2)
-            try:
-                text = json.loads(f'"{raw}"')
-            except ValueError:
-                text = ""
-            items.append((match.group(1), str(text)))
+        items = _cut_batch_items(output)
+    else:
+        items = []
+    addresses = [_address_key(key) for key, _text in items]
+    if not items or any(address is None for address in addresses):
+        return False, {}
     listings: dict[int, str] = {}
-    shown = False
-    for key, text in items:
-        address = _hex_value(key)
-        if address is None:
-            continue
-        shown = True
-        if text.lstrip().lower().startswith("error"):
+    for address, (_key, text) in zip(addresses, items, strict=True):
+        if address is None or text.lstrip().lower().startswith("error"):
             continue
         listings[address] = text
-    return shown, listings
+    return True, listings
 
 
 def _entry_functions(entry: Any) -> list[tuple[int | None, list[str]]]:
@@ -3136,13 +3177,38 @@ def decompiled_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
     return list(found.values())
 
 
+def _base_value(number: str | None, text: str | None) -> int | None:
+    """One stated image base, or ``None`` when it cannot be read without a guess.
+
+    An unquoted number is the number. A quoted string is hex when it says so
+    (``0x…``, ``…h``) or holds a hex letter; a quoted string of decimal digits
+    alone could be either, and is no base.
+    """
+    if number is not None:
+        return int(number)
+    written = str(text or "").strip()
+    prefixed = re.fullmatch(r"0x([0-9a-fA-F]{1,16})", written, re.IGNORECASE)
+    if prefixed:
+        return int(prefixed.group(1), 16)
+    suffixed = re.fullmatch(r"([0-9a-fA-F]{1,16})h", written, re.IGNORECASE)
+    if suffixed:
+        return int(suffixed.group(1), 16)
+    if re.fullmatch(r"[0-9a-fA-F]{1,16}", written) and re.search(r"[a-fA-F]", written):
+        return int(written, 16)
+    return None
+
+
 def image_bases_in(entries: Iterable[Any]) -> tuple[int, ...]:
-    """The image bases these ledger entries' answers state (``"image_base"``), once each."""
+    """The image bases these ledger entries' answers state (``"image_base"``), once each.
+
+    Read by ``_base_value``; a value that is not a positive multiple of 64 KiB,
+    where every image base sits, is no base.
+    """
     bases: list[int] = []
     for entry in entries:
         for match in _IMAGE_BASE.finditer(str(getattr(entry, "output", "") or "")):
-            value = int(match.group(1), 16)
-            if value and value not in bases:
+            value = _base_value(match.group(1), match.group(2))
+            if value and value % _IMAGE_BASE_ALIGNMENT == 0 and value not in bases:
                 bases.append(value)
     return tuple(bases)
 
@@ -3176,6 +3242,14 @@ def _named_by(text: str, function: DecompiledFunction, bases: Sequence[int] = ()
         _one_function(function.address, address, bases) for address in _addresses_written(text)
     ):
         return True
+    # A run of digits alone names the function only when it is the function's
+    # own hex spelling, exactly, leading zeros aside.
+    if function.address is not None:
+        spelled = f"{function.address:x}"
+        if spelled.isdigit() and any(
+            run.group(1).lstrip("0") == spelled.lstrip("0") for run in _DIGIT_RUN.finditer(text)
+        ):
+            return True
     for name in function.names:
         if _GENERIC_FUNCTION_NAME.fullmatch(name):
             continue
