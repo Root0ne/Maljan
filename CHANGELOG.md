@@ -2349,8 +2349,9 @@ change landed on `main`.
   text is the same, one is inside the other word for word, or at least 90% of
   the shorter one's words are in the other (overlap coefficient). The shorter
   of a pair is the repeat, read longest first, so each group is credited to
-  the layer of its longest statement and the count does not depend on the
-  order the analysts are read in (`independent_layers`). The row says
+  the layer of its longest statement (ties by the text, then the layer's
+  name) and the count depends only on what was written, not on the order the
+  analysts are read in (`independent_layers`). The row says
   how many statements were identical or near-identical
   (`identical_statements`) and, where fewer than two layers stand behind it,
   that it is not corroborated. A finding's title is neither a statement nor a

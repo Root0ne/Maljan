@@ -46,7 +46,8 @@ def test_the_same_sentence_from_three_layers_is_one_independent_statement() -> N
     cell, mapping = _mapping(isrs)
 
     assert mapping is not None
-    assert mapping.independent_layers == ["static"]
+    # The same text from several layers credits the first of them by name.
+    assert mapping.independent_layers == ["dynamic"]
     assert mapping.identical_statements == 3
     assert mapping.is_corroborated is False
     assert cell.identical_statements == 3
@@ -62,7 +63,7 @@ def test_two_layers_in_their_own_words_corroborate() -> None:
     _cell, mapping = _mapping(isrs)
 
     assert mapping is not None
-    assert mapping.independent_layers == ["static", "dynamic"]
+    assert mapping.independent_layers == ["dynamic", "network"]
     assert mapping.identical_statements == 1
     assert mapping.is_corroborated is True
 
@@ -170,7 +171,8 @@ def test_a_copy_with_a_word_put_in_counts_once() -> None:
 def test_a_word_reordered_copy_counts_once() -> None:
     credited, repeated = independent_statements([("static", LONG), ("dynamic", REORDERED)])
 
-    assert (credited, repeated) == (["static"], 1)
+    # Of two statements of one length the group is the one whose text sorts first.
+    assert (credited, repeated) == (["dynamic"], 1)
 
 
 def test_an_honest_paraphrase_is_its_own_statement() -> None:
@@ -203,7 +205,9 @@ def test_three_sentences_of_one_layer_are_not_called_one_statement() -> None:
             _claim("A registry value under Run launches the dropped copy at boot."),
             _claim("The installer writes its payload beside the shortcut it creates."),
         ),
-        "network": _isr("network", _claim(COPIED)),
+        "network": _isr(
+            "network", _claim("persists by writing a shortcut into the Startup folder")
+        ),
     }
     _cell, mapping = _mapping(isrs)
 
@@ -258,7 +262,7 @@ def test_the_narrative_is_told_which_layers_said_something_of_their_own() -> Non
 
     text = build_prompt_text(report)
 
-    assert "layers=static,dynamic,network, independent=static,network" in text
+    assert "layers=static,dynamic,network, independent=dynamic,network" in text
 
 
 # A short statement and two long ones that each hold its words and nothing of
@@ -306,3 +310,31 @@ def test_the_count_does_not_depend_on_the_order_statements_are_read() -> None:
     }
 
     assert answers == {(frozenset({"dynamic", "reverser", "static", "qu1cksc0pe"}), 2)}
+
+
+# Three statements of one length, each edited a word from the last: the first
+# and the second repeat each other, the second and the third too, the first
+# and the third do not.
+CHAIN_A = "alpha bravo charlie delta echo foxtrot golf hotel india juliet"
+CHAIN_B = "alpha bravo charlie delta echo foxtrot golf hotel india kilo"
+CHAIN_C = "alpha bravo charlie delta echo foxtrot golf hotel kilo lima"
+
+
+def test_a_chain_of_equal_length_statements_counts_alike_in_every_order() -> None:
+    from itertools import permutations
+
+    statements = [("static", CHAIN_A), ("dynamic", CHAIN_B), ("network", CHAIN_C)]
+    answers = {
+        (frozenset(credited), repeated)
+        for order in permutations(statements)
+        for credited, repeated in [independent_statements(list(order))]
+    }
+
+    assert len(answers) == 1
+
+
+def test_the_same_text_from_two_layers_is_credited_alike_in_either_order() -> None:
+    one = independent_statements([("static", COPIED), ("dynamic", COPIED)])
+    two = independent_statements([("dynamic", COPIED), ("static", COPIED)])
+
+    assert set(one[0]) == set(two[0]) and one[1] == two[1] == 1

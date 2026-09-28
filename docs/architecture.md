@@ -2619,7 +2619,7 @@ is assembled from what the run gathered rather than recomputed beside it:
   word sets, `REPEATED_WORDS_SHARE`): a copy cut short or with a word put in or
   taken out is one statement, and two analysts' own sentences about one tool's
   output stay two. The repeat is the shorter of a pair: statements are read
-  longest first (word count, ties in written order) and each is compared with
+  longest first (word count, then normalised text, then layer) and each is compared with
   the ones already kept, so each group is credited to the layer of its
   longest statement and a short statement can never absorb two longer ones
   that share only its words; the count does not depend on the order the

@@ -299,14 +299,18 @@ def independent_statements(statements: Sequence[tuple[str, str]]) -> tuple[list[
 
     ``statements`` is ``(layer, text)`` in the order the layers wrote them.
     A repeat is the shorter statement of a pair: the statements are read
-    longest first (normalised word count, ties in written order), and each is
+    longest first (normalised word count, then normalised text, then layer, so
+    the order depends on what was written and not on who was read first), and
+    each is
     compared by its normalised text (:func:`normalised_statement`) with the
     ones already kept. One that :func:`repeats` a kept statement is counted as
     identical or near-identical and credits nobody; every other is kept and
     credits its layer. Each group of repeats is so credited to the layer of
-    its longest statement, and a short statement read first can no longer
-    absorb two longer ones that share only its words: the count does not
-    depend on the order the analysts are read in. The credited layers are
+    its longest statement (the same text from two layers credits the first
+    layer by name), and a short statement read first can no longer absorb two
+    longer ones that share only its words. The count, the credited layers and
+    the repeats are a function of the set of statements alone, a chain of
+    equal-length near-copies included. The credited layers are
     returned in the order they first wrote. The judge is not a layer here: it
     read the analysts.
     """
@@ -318,7 +322,9 @@ def independent_statements(statements: Sequence[tuple[str, str]]) -> tuple[list[
     kept: list[str] = []
     credited: set[str] = set()
     identical = 0
-    for _index, layer, key in sorted(written, key=lambda row: (-len(row[2].split()), row[0])):
+    for _index, layer, key in sorted(
+        written, key=lambda row: (-len(row[2].split()), row[2], row[1])
+    ):
         if any(repeats(key, longer) for longer in kept):
             identical += 1
             continue
