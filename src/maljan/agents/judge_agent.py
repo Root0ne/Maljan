@@ -2443,6 +2443,7 @@ class JudgeAgent(BudgetMeter):
             agent_name="Mediator",
             finding=finding,
             confidence_score=verdict.confidence,
+            contradictions=list(verdict.contradictions),
             note=CONTRADICTIONS_BLOCK_MISSING_NOTE if block_missing else "",
         )
         return argument, is_consensus

@@ -1745,7 +1745,7 @@ class RunSummaryBuilder:
             termination_reason = MEDIATION_FAILED
         elif is_consensus:
             termination_reason = "consensus"
-        elif len(confidence_history) >= 3:
+        elif len(confidence_history) >= 3 and not getattr(last_mediator, "contradictions", None):
             recent = confidence_history[-3:]
             std = _rolling_std(recent)
             termination_reason = "convergence" if std < 0.02 else "hard_limit"
