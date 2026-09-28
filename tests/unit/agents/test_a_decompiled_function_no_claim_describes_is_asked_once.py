@@ -204,6 +204,18 @@ class TestABatchDecompile:
         assert [f.address for f in found] == self.ADDRESSES
         assert all(f.names == () for f in found)
 
+    def test_keys_that_are_hex_words_are_no_batch(self) -> None:
+        entry = LedgerEntry(
+            id="ev_0014",
+            tool="decompile_function",
+            args={"address": hex(FIRST_FN)},
+            output=json.dumps({"face": "int A(void)\n{\n}\n", "cafe": "x", "dead": "beef"}),
+        )
+
+        (found,) = decompiled_functions([entry])
+
+        assert (found.address, found.names) == (FIRST_FN, ())
+
     def test_a_batch_keyed_by_bare_hex_addresses(self) -> None:
         first, second = self.ADDRESSES[:2]
         entry = LedgerEntry(
@@ -385,6 +397,17 @@ class TestTheQuestion:
         assert violation.message.startswith("You decompiled 2 function(s) that no claim")
         assert "naming it by its address" in violation.message
         assert "?" not in violation.message
+
+    def test_it_says_what_was_read_and_what_was_not(self) -> None:
+        violation = decompiled_not_described_violation(TestWhatAClaimNames.FUNCTIONS)
+
+        assert violation is not None
+        assert (
+            "that no claim of this answer names by a name the decompiler gave it, or by its "
+            "address or its offset from the image base written in hex (with 0x, with a "
+            "trailing h, as bare hex digits, or inside a name such as FUN_); an offset "
+            "written in decimal digits alone is not read as one: "
+        ) in violation.message
 
     def test_nothing_left_is_no_question(self) -> None:
         assert decompiled_not_described_violation([]) is None

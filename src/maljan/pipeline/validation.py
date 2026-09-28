@@ -2937,7 +2937,7 @@ _NOT_A_NAME = frozenset({"if", "while", "for", "switch", "return", "sizeof", "do
 _BATCH_MEMBER = re.compile(r'\s*"([^"\\]*)"\s*:\s*"((?:[^"\\]|\\.)*)(")?')
 # A batch answer's key that is an address: ``0x`` and hex digits, or at least
 # four hex digits.
-_ADDRESS_KEY = re.compile(r"(?:0x([0-9a-fA-F]{1,16})|([0-9a-fA-F]{4,16}))")
+_ADDRESS_KEY = re.compile(r"(?:0x([0-9a-fA-F]{1,16})|((?=[0-9a-fA-F]*\d)[0-9a-fA-F]{4,16}))")
 # An image base a tool stated: an unquoted number, or a quoted string.
 _IMAGE_BASE = re.compile(r'"image_base"\s*:\s*(?:(\d+)\b|"([^"]*)")')
 # A letterless run of digits a claim writes, read against a function's own hex
@@ -3306,7 +3306,10 @@ def decompiled_not_described_violation(
         code=DECOMPILED_NOT_DESCRIBED_CODE,
         message=(
             f"You decompiled {len(functions)} function(s) that no claim of this answer names "
-            "by its address or by a name the decompiler gave it: "
+            "by a name the decompiler gave it, or by its address or its offset from the "
+            "image base written in hex (with 0x, with a trailing h, as bare hex digits, or "
+            "inside a name such as FUN_); an offset written in decimal digits alone is not "
+            "read as one: "
             f"{'; '.join(safe_finding_value(_decompiled_words(f)) for f in functions)}. For "
             "each one that matters to this analysis, write a claim naming it by its address "
             "and saying what its code does: the checks it makes, the calls it makes and "
