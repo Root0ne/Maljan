@@ -2346,9 +2346,14 @@ change landed on `main`.
   suggests no longer print "unresolved". An id the catalogue rejects says what
   happened to it where the retired set knows (retired, revoked, deprecated, and
   by what), and the retired-id generator records the bundle's own revoked and
-  deprecated attack-patterns. **Upgrading:** `data/attck_retired_ids.json` is
-  not regenerated here; running
-  `scripts/knowledge/prepare_attck_malware_fixtures.py` adds those rows.
+  deprecated attack-patterns. `data/attck_retired_ids.json` is regenerated
+  from the cached 19.2 bundles (205 revoked or deprecated ids added, every
+  existing row gains its `status`; the id catalogue and the technique table
+  are unchanged). **Upgrading:** to regenerate it offline, from a checkout,
+  run `PYTHONPATH=src python scripts/knowledge/prepare_attck_malware_fixtures.py
+  --no-labeled-sentences --cache-dir ~/.cache/maljan/attck`; without
+  `--cache-dir` the script downloads the current upstream release and may
+  rewrite all three catalogue files.
 - **A later chunk is told what the earlier chunks already called.** Its prompt
   lists every earlier call as `tool(args) → ev_id` and its repeat guard is
   seeded with them, so an identical call is answered with the entry that holds

@@ -365,3 +365,26 @@ class TestARetiredIdIsNamedForWhatHappenedToIt:
             "not asked: the ATT&CK catalogue has no current entry for this id: it was revoked "
             "in the ATT&CK catalogue"
         )
+
+
+class TestTheVendoredSetCarriesTheBundlesRevokedIds:
+    def test_an_id_the_bundle_revoked_is_named_revoked_with_its_successor(self) -> None:
+        attck_loader.reset_caches()
+        assert attck_loader.retired_status("T1024") == "revoked"
+        assert attck_loader.revoked_by("T1024") == "T1573"
+        assert attck_loader.retired_reason("T1024") == "revoked by T1573 in the ATT&CK catalogue"
+        assert attck_loader.retired_reason("T1103") == (
+            "revoked by T1546.010 in the ATT&CK catalogue"
+        )
+
+    def test_a_release_diff_row_keeps_its_wording(self) -> None:
+        attck_loader.reset_caches()
+        assert attck_loader.retired_reason("T1562.001") == (
+            "retired in ATT&CK 19.2 and revoked by T1685"
+        )
+
+    def test_no_retired_id_is_live(self) -> None:
+        attck_loader.reset_caches()
+        rows = json.loads(attck_loader.RETIRED_IDS_FILE.read_text(encoding="utf-8"))
+        live = attck_loader.valid_ids()
+        assert not {tid for tid in rows if not tid.startswith("_")} & set(live)
