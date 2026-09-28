@@ -241,6 +241,96 @@ class TestTheStreamAddsUpToTheServersAnswer:
         assert rates.prompt_rate("m") == pytest.approx(300.0)
         assert rates.snapshot()["models"]["m"]["prompt_sources"] == [LLAMA_CPP_PROMPT_SOURCE]
 
+    @pytest.mark.parametrize(
+        "where",
+        ["the closing chunk", "the finish chunk", "every chunk"],
+    )
+    def test_the_usage_is_the_last_the_stream_sends(self, where: str) -> None:
+        chunks = _stream(running_usage=where == "every chunk")
+        final = chunks.pop()  # the closing chunk without choices
+        if where == "the finish chunk":
+            chunks[-1]["usage"] = final["usage"]
+            chunks[-1]["timings"] = final["timings"]
+        else:
+            chunks.append(final)
+        seen: list[dict[str, Any]] = []
+
+        answer = _local(chunks, seen).invoke([HumanMessage(content="hi")])
+
+        assert answer.usage_metadata["output_tokens"] == 3
+        assert answer.response_metadata["token_usage"]["completion_tokens"] == 3
+        assert answer.response_metadata["timings"] == _TIMINGS
+
+    def test_timings_on_every_chunk_are_the_last(self) -> None:
+        chunks = _stream(running_usage=False)
+        for index, chunk in enumerate(chunks[:-1]):
+            chunk["timings"] = {**_TIMINGS, "predicted_n": index, "predicted_ms": 10.5 * index}
+        seen: list[dict[str, Any]] = []
+
+        answer = _local(chunks, seen).invoke([HumanMessage(content="hi")])
+
+        assert answer.response_metadata["timings"] == _TIMINGS
+
+    @pytest.mark.parametrize(
+        "calls",
+        [
+            [("call-1", "lookup", '{"q": "x"}'), ("call-2", "fetch", '{"url": "u"}')],
+            [("call-1", "lookup", '{"q": "x"}'), ("call-2", "fetch", "{not json}")],
+            [("call-1", "lookup", "")],
+        ],
+        ids=["parallel", "one-malformed", "no-arguments"],
+    )
+    def test_tool_calls_are_read_as_a_whole_answer_s_are(
+        self, calls: list[tuple[str, str, str]]
+    ) -> None:
+        from .streamed_wire import streamed
+
+        whole = {
+            "id": "chatcmpl-1",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "m",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {"id": i, "type": "function", "function": {"name": n, "arguments": a}}
+                            for i, n, a in calls
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
+            "usage": {"prompt_tokens": 120, "completion_tokens": 9, "total_tokens": 129},
+        }
+
+        def _as_stream(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200, content=streamed(whole), headers={"content-type": "text/event-stream"}
+            )
+
+        def _as_whole(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=whole)
+
+        local = OpenAIProvider(_settings("http://127.0.0.1:8080/v1", "llama_cpp")).build_model(
+            "m",
+            0.0,
+            max_tokens=512,
+            http_client=httpx.Client(transport=httpx.MockTransport(_as_stream)),
+        )
+        hosted = OpenAIProvider(_settings("https://api.example.org/v1", "auto")).build_model(
+            "m", 0.0, http_client=httpx.Client(transport=httpx.MockTransport(_as_whole))
+        )
+
+        read_streamed = local.invoke([HumanMessage(content="hi")])
+        read_whole = hosted.invoke([HumanMessage(content="hi")])
+
+        assert read_streamed.tool_calls == read_whole.tool_calls
+        assert read_streamed.invalid_tool_calls == read_whole.invalid_tool_calls
+
     @pytest.mark.asyncio
     async def test_a_cut_tool_call_stays_a_cut_call(self) -> None:
         # A call whose arguments end mid-string, as a call the output cap cut
@@ -266,14 +356,33 @@ class TestASlowLocalModelEndToEnd:
     """The real client over a server that makes 2.3 pieces a second, on a clock that jumps."""
 
     @staticmethod
-    def _slow_server(pieces: int, stall_after: int | None = None) -> httpx.MockTransport:
+    def _slow_server(
+        pieces: int,
+        stall_after: int | None = None,
+        *,
+        field: str = "content",
+        read_timeout_after: float | None = None,
+        error_after: int | None = None,
+    ) -> httpx.MockTransport:
+        """``read_timeout_after``: the stall ends in the connection's read timeout, that late.
+
+        ``error_after``: after that many pieces the server reports a failure
+        inside the stream, as llama.cpp does once a stream has begun.
+        """
+
         async def body() -> Any:
             yield _sse(_chunk({"role": "assistant", "content": None}))
             for index in range(pieces):
+                if error_after is not None and index >= error_after:
+                    yield _sse({"error": {"code": 500, "message": "boom", "type": "server_error"}})
+                    return
                 if stall_after is not None and index >= stall_after:
-                    await asyncio.Event().wait()
+                    if read_timeout_after is None:
+                        await asyncio.Event().wait()
+                    await asyncio.sleep(read_timeout_after or 0.0)
+                    raise httpx.ReadTimeout("no data within the read timeout")
                 await asyncio.sleep(1 / 2.3)
-                yield _sse(_chunk({"content": "x"}))
+                yield _sse(_chunk({field: "x"}))
             closing = _chunk({})
             closing["choices"][0]["finish_reason"] = "stop"
             yield _sse(closing)
@@ -302,13 +411,72 @@ class TestASlowLocalModelEndToEnd:
         assert answer.content == "x" * 5000
         assert answer.usage_metadata["output_tokens"] == 5000
 
-    def test_when_it_stalls_it_is_cut_at_its_cap_at_the_pace_it_showed(self) -> None:
+    @pytest.mark.parametrize("field", ["content", "reasoning_content"])
+    def test_when_it_stalls_it_is_cut_at_its_cap_at_the_pace_it_showed(self, field: str) -> None:
+        # Reasoning pieces are generated pieces too: a thinking model's pace
+        # is its reasoning's until it starts to answer.
         rates = GenerationRates()
-        model = attach_rate_meter(self._model(self._slow_server(5000, 100)), rates, "m")
+        model = attach_rate_meter(
+            self._model(self._slow_server(5000, 100, field=field)), rates, "m"
+        )
 
         exc, took = run_expecting(ModelCallDeadline, model.ainvoke([HumanMessage(content="hi")]))
 
-        # 101 chunks, the opening one and 100 pieces, the last 100 / 2.3 s in.
-        assert took == pytest.approx(8192 / (101 / (100 / 2.3)) * TIMEOUT_MARGIN, rel=1e-6)
+        # The opening chunk names only the role and is no piece; 100 pieces,
+        # the first 1 / 2.3 s in, then the cap at 2.3 a second.
+        assert took == pytest.approx((1 / 2.3 + 8192 / 2.3) * TIMEOUT_MARGIN, rel=1e-6)
         assert "pace measured in this call" in str(exc)
         assert rates.rate_source("m") == [IN_CALL_SOURCE]
+        assert rates.rate("m") == pytest.approx(2.3)
+
+    def test_a_reasoning_answer_is_joined_without_its_reasoning(self) -> None:
+        # ``langchain-openai`` leaves a whole answer's reasoning out; so does the join.
+        answer, _took = run(
+            self._model(self._slow_server(5, field="reasoning_content")).ainvoke(
+                [HumanMessage(content="hi")]
+            )
+        )
+
+        assert "reasoning_content" not in answer.additional_kwargs
+
+    def test_a_read_timeout_after_pieces_is_the_silence_after_the_last_one(self) -> None:
+        model = self._model(self._slow_server(5000, 10, read_timeout_after=1800.0))
+
+        exc, took = run_expecting(ModelCallDeadline, model.ainvoke([HumanMessage(content="hi")]))
+
+        assert took == pytest.approx(10 / 2.3 + 1800.0)
+        said = str(exc)
+        assert "silence after its last generated piece" in said
+        assert "no piece for 1800 s after piece 10" in said
+
+    def test_a_read_timeout_before_any_piece_is_raised_as_it_came(self) -> None:
+        model = self._model(self._slow_server(5000, 0, read_timeout_after=1700.0))
+
+        exc, _took = run_expecting(Exception, model.ainvoke([HumanMessage(content="hi")]))
+
+        assert not isinstance(exc, ModelCallDeadline)
+        assert isinstance(exc, httpx.ReadTimeout)
+
+    def test_a_server_error_inside_the_stream_is_the_error_a_whole_answer_raises(self) -> None:
+        import openai
+
+        streamed_error, _took = run_expecting(
+            Exception,
+            self._model(self._slow_server(5000, error_after=3)).ainvoke(
+                [HumanMessage(content="hi")]
+            ),
+        )
+
+        def _whole(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                500, json={"error": {"code": 500, "message": "boom", "type": "server_error"}}
+            )
+
+        hosted = OpenAIProvider(_settings("https://api.example.org/v1", "auto")).build_model(
+            "m", 0.0, http_client=httpx.Client(transport=httpx.MockTransport(_whole))
+        )
+        with pytest.raises(Exception) as whole:
+            hosted.invoke([HumanMessage(content="hi")])
+
+        assert isinstance(streamed_error, openai.InternalServerError)
+        assert type(streamed_error) is type(whole.value)

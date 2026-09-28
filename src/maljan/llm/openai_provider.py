@@ -389,16 +389,49 @@ def with_per_request_llama_cap(chat_class: Any) -> Any:
 _STREAMED_LLAMA_CLASSES: dict[type, type] = {}
 
 
+def _keep_last(chunks: list[Any]) -> None:
+    """Each field llama.cpp may repeat, kept on the last chunk that carries it only.
+
+    ik_llama.cpp puts ``usage`` on every chunk of an answer as a running total,
+    and a server asked for ``timings_per_token`` puts ``timings`` on every
+    chunk; the chunks' values are added together when the chunks are joined,
+    which would count the answer many times over (and cannot add two
+    ``timings`` at all). The last one a stream sends is the answer's.
+    """
+    last_usage = max(
+        (i for i, c in enumerate(chunks) if getattr(c.message, "usage_metadata", None)),
+        default=None,
+    )
+    for index, chunk in enumerate(chunks):
+        if index != last_usage and getattr(chunk.message, "usage_metadata", None):
+            chunk.message.usage_metadata = None
+    for key in ("token_usage", "timings"):
+        last = max(
+            (i for i, c in enumerate(chunks) if key in (c.generation_info or {})),
+            default=None,
+        )
+        for index, chunk in enumerate(chunks):
+            info = chunk.generation_info
+            if index != last and info and key in info:
+                chunk.generation_info = {k: v for k, v in info.items() if k != key} or None
+
+
 def _joined_answer(chunks: list[Any]) -> Any:
     """The streamed chunks of one answer as the answer the server would have sent whole.
 
     Joined as langchain joins a stream (each chunk's generation info in its
-    message's metadata, then the chunks added up), with one difference: the
-    tool calls. langchain reads a streamed call's arguments with a partial
-    JSON parser, which closes a call cut off mid-string as if it had ended
-    there. A whole answer's calls are read strictly, and a cut one is an
-    invalid call; the joined answer's calls are read the same way, from the
-    same text.
+    message's metadata, then the chunks added up), with three differences:
+
+    * the fields llama.cpp may repeat on every chunk are taken from the last
+      chunk that carries them (:func:`_keep_last`);
+    * the reasoning pieces, kept on each chunk so that the call's deadline sees
+      them arrive, are not in the answer, as ``langchain-openai`` leaves them
+      out of a whole one;
+    * the tool calls. langchain reads a streamed call's arguments with a
+      partial JSON parser, which closes a call cut off mid-string as if it had
+      ended there. A whole answer's calls are read strictly, and a cut one is
+      an invalid call; the joined answer's calls are read the same way, from
+      the same text.
     """
     from langchain_core.messages import AIMessage
     from langchain_core.output_parsers.openai_tools import (
@@ -409,7 +442,9 @@ def _joined_answer(chunks: list[Any]) -> Any:
 
     if not chunks:
         raise ValueError("No generations found in stream.")
+    _keep_last(chunks)
     for chunk in chunks:
+        chunk.message.additional_kwargs.pop(REASONING_CONTENT_KEY, None)
         chunk.message.response_metadata = {
             **(chunk.generation_info or {}),
             **chunk.message.response_metadata,
@@ -447,6 +482,51 @@ def _joined_answer(chunks: list[Any]) -> Any:
     )
 
 
+def _as_status_error(exc: Any) -> Any:
+    """A server error sent inside a stream, as the class the same error has when sent whole.
+
+    After a stream has begun, llama.cpp reports a failure as an ``error`` event
+    in it, and the OpenAI SDK raises a bare ``APIError`` for that. Sent before
+    the stream, or on a whole answer, the same failure is an HTTP status and a
+    status error (``InternalServerError`` for a 5xx), which is what the callers
+    that retry a server fault read. The status is the one the event names
+    (llama.cpp's ``code``), a server fault where it names none; langchain's
+    reading of the status error follows, as on a whole answer. Anything else is
+    returned as it is.
+    """
+    import openai
+
+    if type(exc) is not openai.APIError:
+        return exc
+    body = exc.body if isinstance(exc.body, dict) else {}
+    code = body.get("code")
+    status = code if isinstance(code, int) and 400 <= code <= 599 else 500
+    # The SDK's own response type: it runs on httpx2.
+    import httpx2
+
+    response = httpx2.Response(status, request=getattr(exc, "request", None), json={"error": body})
+    classes: dict[int, type[Any]] = {
+        400: openai.BadRequestError,
+        401: openai.AuthenticationError,
+        403: openai.PermissionDeniedError,
+        404: openai.NotFoundError,
+        409: openai.ConflictError,
+        422: openai.UnprocessableEntityError,
+        429: openai.RateLimitError,
+    }
+    kind = classes.get(status) or (
+        openai.InternalServerError if status >= 500 else openai.APIStatusError
+    )
+    error = kind(exc.message, response=response, body=body)
+    try:
+        from langchain_openai.chat_models.base import _handle_openai_api_error
+
+        _handle_openai_api_error(error)
+    except Exception as handled:  # noqa: BLE001 — the reading langchain gives a whole answer
+        return handled
+    return error
+
+
 def with_streamed_llama_answers(chat_class: Any) -> Any:
     """``chat_class`` reading a llama.cpp answer as a stream, joined into the whole answer.
 
@@ -459,18 +539,17 @@ def with_streamed_llama_answers(chat_class: Any) -> Any:
     (``generation_rate._CallDeadline``); the chunks are then joined into the
     answer the server would have sent whole (:func:`_joined_answer`).
 
-    Two fields of llama.cpp's stream are not OpenAI's, and each chunk is
-    changed only in them:
+    Each chunk is changed only where llama.cpp's stream is not OpenAI's:
 
-    * ``timings`` comes on the closing chunk; it is kept in that chunk's
-      metadata, as :func:`with_server_timings` keeps it on a whole answer, so
-      ``RateMeter`` reads the server's own reading and generation times;
-    * ik_llama.cpp puts ``usage`` on every chunk of the answer as a running
-      total, and the chunks' usages are added together when the chunks are
-      joined, which would count the answer's units many times over. A chunk
-      that carries a choice keeps none; the total the stream closes with, on
-      its chunk without choices, is the answer's usage, kept as
-      ``token_usage`` too, where a whole answer carries it.
+    * ``timings`` is kept in the chunk's generation info, and ``usage`` also
+      as ``token_usage``, where a whole answer carries it; the join keeps the
+      last of each, since ik_llama.cpp repeats a running usage total on every
+      chunk;
+    * a reasoning piece (``reasoning_content``) is kept on its chunk, so the
+      call's deadline counts it as generated, and left out of the joined
+      answer;
+    * a server error sent inside the stream is raised as the status error the
+      same error is on a whole answer (:func:`_as_status_error`).
 
     Anything that is not a chat model class is returned as it is.
     """
@@ -488,10 +567,12 @@ def with_streamed_llama_answers(chat_class: Any) -> Any:
         if generation is None or not isinstance(chunk, dict):
             return generation
         message: Any = getattr(generation, "message", None)
-        if chunk.get("choices"):
-            if getattr(message, "usage_metadata", None) is not None:
-                message.usage_metadata = None
-        elif isinstance(chunk.get("usage"), dict):
+        choices = chunk.get("choices") or []
+        delta = (choices[0] or {}).get("delta") if choices else None
+        piece = delta.get(REASONING_CONTENT_KEY) if isinstance(delta, dict) else None
+        if isinstance(piece, str) and piece and message is not None:
+            message.additional_kwargs[REASONING_CONTENT_KEY] = piece
+        if isinstance(chunk.get("usage"), dict):
             generation.generation_info = {
                 **(generation.generation_info or {}),
                 "token_usage": chunk["usage"],
@@ -499,10 +580,36 @@ def with_streamed_llama_answers(chat_class: Any) -> Any:
         timings = server_timings_of(chunk)
         if timings is not None:
             generation.generation_info = {**(generation.generation_info or {}), "timings": timings}
-            metadata = getattr(message, "response_metadata", None)
-            if isinstance(metadata, dict):
-                metadata.setdefault("timings", timings)
         return generation
+
+    async def _astream(
+        self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Any:
+        stream = base._astream(self, messages, stop=stop, run_manager=run_manager, **kwargs)
+        try:
+            async for chunk in stream:
+                yield chunk
+        except Exception as exc:
+            error = _as_status_error(exc)
+            if error is exc:
+                raise
+            raise error from exc
+        finally:
+            await stream.aclose()
+
+    def _stream(
+        self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Any:
+        stream = base._stream(self, messages, stop=stop, run_manager=run_manager, **kwargs)
+        try:
+            yield from stream
+        except Exception as exc:
+            error = _as_status_error(exc)
+            if error is exc:
+                raise
+            raise error from exc
+        finally:
+            stream.close()
 
     async def _agenerate(
         self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
@@ -525,6 +632,8 @@ def with_streamed_llama_answers(chat_class: Any) -> Any:
         (chat_class,),
         {
             "_convert_chunk_to_generation_chunk": _convert_chunk_to_generation_chunk,
+            "_astream": _astream,
+            "_stream": _stream,
             "_agenerate": _agenerate,
             "_generate": _generate,
         },
