@@ -2835,7 +2835,8 @@ EARLIER_CHUNKS_HEAD = (
     "made there, each with the ledger entry that holds its result and the opening of "
     "what it returned. Cite those entries instead of making the same call again: an "
     "identical call is not run again, and is answered with the result its entry "
-    "recorded. A call marked failed may be made once more."
+    "recorded. A call marked failed, or marked as one whose result was not kept, may be "
+    "made once more."
 )
 
 
@@ -2856,7 +2857,14 @@ def earlier_chunks_block(entries: Sequence[Any]) -> str:
         except (TypeError, ValueError):
             shown = repr(args)
         ok = bool(getattr(entry, "ok", True))
-        failed = "" if ok else " (failed)"
+        # A result the run did not keep whole cannot answer the call again,
+        # which is then made once more, as a failed one may be.
+        kept = bool(str(getattr(entry, "output", "") or "")) and not bool(
+            getattr(entry, "truncated", False)
+        )
+        failed = (
+            " (failed)" if not ok else "" if kept else " (result not kept; may be made once more)"
+        )
         # What the call found, as the console's headline of it, on one line:
         # the entry's answer is in another conversation and no tool reads a
         # ledger entry by its id.

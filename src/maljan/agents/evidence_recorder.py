@@ -570,7 +570,9 @@ def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
     return guard
 
 
-def earlier_chunk_answer(tool: str, entry_id: str, recorded: str) -> str:
+def earlier_chunk_answer(
+    tool: str, entry_id: str, recorded: str, narrowing: Sequence[str] = ()
+) -> str:
     """What a later chunk's call an earlier chunk made is answered with.
 
     The result as its entry recorded it, stamped with that entry's id the way
@@ -578,8 +580,11 @@ def earlier_chunk_answer(tool: str, entry_id: str, recorded: str) -> str:
     from. No tool runs and nothing is written to the ledger: the entry that
     holds the result already exists, and it is the one to cite.
     """
+    # The notice the original answer carried when it was shortened, read off
+    # the recorded text the same way (``_stamp``).
+    shortened = shortened_notice(recorded, narrowing=narrowing)
     return (
-        f"[{entry_id}]\n{recorded}\n\n"
+        f"[{entry_id}]\n{recorded}{shortened}\n\n"
         f"This call to {tool} with these arguments was made in an earlier chunk of this "
         f"input and is not run again: the text above is the result recorded in [{entry_id}]."
     )
@@ -899,7 +904,7 @@ def _record_tool(
         # and not a repeat.
         recorded = repeats.recorded_answer(name, kwargs)
         if recorded is not None:
-            return earlier_chunk_answer(name, *recorded)
+            return earlier_chunk_answer(name, *recorded, narrowing)
         if not repeats.first_touch_of_seed(name, kwargs):
             repeats.note_repeat()
         # Told to the model, written nowhere. No tool ran: an entry here would

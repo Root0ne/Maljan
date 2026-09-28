@@ -243,3 +243,33 @@ def test_the_second_chunk_s_model_reads_the_earlier_calls_and_their_result() -> 
     answered = [m for m in second[-1] if isinstance(m, ToolMessage)]
     assert answered and str(answered[-1].content).startswith("[ev_0001]\nfresh answer for 0x3c7c")
     assert "earlier chunk" in str(answered[-1].content)
+
+
+class TestWhatTheBlockAndTheAnswerSay:
+    def test_an_entry_the_run_did_not_keep_is_marked_as_one_that_may_be_made_again(
+        self,
+    ) -> None:
+        from maljan.agents.base_agent import earlier_chunks_block
+
+        block = earlier_chunks_block(
+            [_entry(), _entry(id="ev_0004", args={"path": "0x4000"}, output="", truncated=True)]
+        )
+
+        kept, blanked = block.splitlines()[1:]
+        assert "not kept" not in kept
+        assert "ev_0004 (result not kept; may be made once more)" in blanked
+
+    def test_a_shortened_earlier_result_carries_its_shortening_notice(self) -> None:
+        import json
+
+        from maljan.agents.evidence_recorder import shortened_notice
+        from maljan.agents.output_shortening import shorten_json_document
+
+        answer = json.dumps({"rows": [{"n": index} for index in range(400)]})
+        shortened = shorten_json_document(answer, 2000).text
+        notice = shortened_notice(shortened, narrowing=["path"])
+        assert notice
+
+        served = earlier_chunk_answer("decompile_function", "ev_0003", shortened, ["path"])
+
+        assert notice in served
