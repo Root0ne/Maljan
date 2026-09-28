@@ -2332,7 +2332,9 @@ change landed on `main`.
   number is kept and shown), so the analysts revise. A missing block is asked
   for once; still missing, `run_summary.negotiation.mediation_notes` says so
   and the number decides as before. A run declared consensus at 1.0 over five
-  contradictions its mediator had listed.
+  contradictions its mediator had listed. Each line of the block is one
+  contradiction, plain or bulleted; a "none" empties it only as its whole
+  content, so "None of the analysts …" is a contradiction.
 - **The cut-at-cap check uses the cap the call was built with.** The container
   records the output cap on the model it builds, and the analysts' cut check,
   their spend meter and the judge read it there instead of deriving it again,
@@ -2348,7 +2350,8 @@ change landed on `main`.
   suggests no longer print "unresolved". An id the catalogue rejects says what
   happened to it where the retired set knows (retired, revoked, deprecated, and
   by what), and the retired-id generator records the bundle's own revoked and
-  deprecated attack-patterns. `data/attck_retired_ids.json` is regenerated
+  deprecated attack-patterns, and the console's capability heatmap shows the
+  same reason. `data/attck_retired_ids.json` is regenerated
   from the cached 19.2 bundles (205 revoked or deprecated ids added, every
   existing row gains its `status`; the id catalogue and the technique table
   are unchanged). **Upgrading:** to regenerate it offline, from a checkout,
