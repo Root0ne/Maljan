@@ -2105,10 +2105,12 @@ directory name:
 A run that reads as a key as a whole is masked whole, as before.
 
 The names the scrub keeps (words, catalogue names, the platform's own variable
-names, digests, identifiers and MIME types, alone or joined by `/` and `+`) are
-asked before the padding rule, so a kept name stays readable in front of an
-assignment: `ZwSetInformationJobObject=1`, `GHIDRA_CONTAINER_SAMPLES_PATH=/x`
-and an argument summary's `anti_debugging_techniques_seen=3` travel as written.
+names, digests, identifiers and MIME types, alone or joined by `/`; catalogue
+names also joined by `|`, `+` or `&`) are asked before the padding rule, so a
+kept name stays readable in front of an assignment: `ZwSetInformationJobObject=1`,
+`GHIDRA_CONTAINER_SAMPLES_PATH=/x` and an argument summary's
+`anti_debugging_techniques_seen=3` travel as written. Words are never joined by
+`+`, so a key that `+` cuts into letter-only pieces is still masked.
 A path's shape is not asked before the padding rule, because a key can begin
 with a slash; a path is still kept when no padding follows it.
 

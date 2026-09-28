@@ -1040,16 +1040,20 @@ def _hide_credentials(found: re.Match[str]) -> str:
 
 
 def _names_only(stretch: str) -> bool:
-    """Whether a run is a name the scrub keeps, or names joined by ``/`` and ``+``,
-    with no vendor prefix in it: ``path/ZwSetInformationJobObject`` is a word and a
+    """Whether a run is a name the scrub keeps, or names joined by ``/``, with no
+    vendor prefix in it: ``path/ZwSetInformationJobObject`` is a word and a
     catalogue name, and a random key is not written that way.
+
+    Split on ``/`` alone: ``+`` joins no words, and a key cut by its own ``+``
+    into letter-only pieces is a key. Catalogue names joined by ``+`` are kept
+    as one run by the catalogue rule (``_is_api_name``).
 
     Asked before the padding rule, so a kept name stays readable in front of
     ``=``. A path's shape is not asked here: a key that begins with a slash has
     it, and padding after a run is what a path does not end with; the path rule
     is asked in ``_hide_in_run``, for a run with no padding after it.
     """
-    pieces = [piece for piece in re.split(r"[/+]", stretch) if piece]
+    pieces = [piece for piece in stretch.split("/") if piece]
     if _kept_name(stretch):
         return True
     return (

@@ -306,3 +306,15 @@ class TestAnAssignmentIsNoPadding:
             for text in (key, f"{key} next", f"{key}/x.php", f"left.x/{key}/x.php"):
                 scrubbed = ev.scrub(text)
                 assert not _fragment_of(body, scrubbed), (text, scrubbed)
+
+    def test_a_key_whose_plus_pieces_read_as_words_is_still_masked(self) -> None:
+        # ``+`` joins no words: a key cut by it into letter-only pieces is a key.
+        letters = "abcdefghijklmnopqrstuvwxyz"
+        key = "+".join(letters[at : at + 10].capitalize() for at in (0, 10, 16))
+        for text in (f"{key}==", key, f"{key}== next", f"host.example/{key}==/x.php"):
+            scrubbed = ev.scrub(text)
+            assert not any(piece in scrubbed for piece in key.split("+")), (text, scrubbed)
+
+    def test_catalogue_names_joined_by_plus_are_still_kept(self) -> None:
+        for text in (f"{CATALOGUE_NAME}+{CATALOGUE_NAME}=1", f"{ALGORITHMS}+ror13=2"):
+            assert ev.scrub(text) == text, text
