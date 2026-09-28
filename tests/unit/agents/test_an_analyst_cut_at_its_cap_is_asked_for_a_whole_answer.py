@@ -283,8 +283,85 @@ class TestACutInAChunkIsNamed:
             patch("maljan.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", return_value=False),
         ):
-            analyst._validate_isr(isr, "evidence", chunk_cuts=[(CAP, FIRST, "chunk 1 of 2")])
+            analyst._last_answer_cut = (CAP, FIRST)
+            analyst._validate_isr(isr, "evidence", chunk="chunk 1 of 2", only_cut=True)
 
         (finding,) = [v for v in analyst.validation_findings if v.code == ANALYST_CUT_CODE]
         assert finding.message.startswith("Your answer to chunk 1 of 2 stopped")
         assert f"output limit of {CAP} tokens" in finding.message
+
+
+def _claims(prefix: str, count: int) -> str:
+    return "".join(
+        f"CLAIM: The file carries {prefix} string number {n}.\n"
+        "EVIDENCE: [ev_0001] strings\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
+        for n in range(1, count + 1)
+    )
+
+
+class _Chunked(_Analyst):
+    """Two chunks: the first answer is cut at the cap, the second is short and whole."""
+
+    def __init__(self, replies: list[tuple[str, int]], answers: list[tuple[str, int]]) -> None:
+        super().__init__(replies)
+        self._answers = list(answers)
+
+    def analyze_isr(self, data: str) -> AgentISR:
+        text, tokens = self._answers.pop(0)
+        self._record_usage(_message(text, tokens))
+        return self._text_to_isr(text, 0)
+
+
+class TestACutChunkIsAnsweredInsideItsChunk:
+    """A cut in chunk 1 replaces chunk 1's contribution alone, never the merged answer."""
+
+    CUT = _claims("first-chunk", 3) + "CLAIM: The file carries first-chunk str"
+    SECOND = _claims("second-chunk", 6)
+
+    def _run(self, retry: tuple[str, int]) -> tuple[_Chunked, AgentISR]:
+        from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
+
+        analyst = _Chunked([retry], [(self.CUT, CAP), (self.SECOND, 900)])
+        chunks = [
+            TextChunk(
+                index=i,
+                total=2,
+                strategy=ChunkStrategy.SLIDING_WINDOW,
+                content=f"part {i}",
+                char_count=6,
+                token_estimate=2,
+                domain="static",
+            )
+            for i in range(2)
+        ]
+        with (
+            patch("maljan.agents.base_agent.analyst_output_cap", return_value=CAP),
+            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
+            patch("maljan.tools.knowledge.resolve_technique", return_value={"candidates": []}),
+        ):
+            return analyst, analyst.safe_analyze_isr_chunked(chunks)
+
+    def test_the_second_chunk_s_claims_all_survive(self) -> None:
+        analyst, merged = self._run((_claims("rewritten", 1), 300))
+
+        texts = [c.claim for c in merged.claims]
+        for n in range(1, 7):
+            assert f"The file carries second-chunk string number {n}." in texts
+        assert "The file carries rewritten string number 1." in texts
+        assert not any("first-chunk" in t for t in texts)
+        # The question went to chunk 1's own input, named by its chunk.
+        (turns,) = analyst.seen_turns
+        assert "Your answer to chunk 1 of 2 stopped" in str(turns[-1].content)
+        assert any("part 0" in str(t.content) for t in turns)
+        assert not any("part 1" in str(t.content) for t in turns)
+
+    def test_a_chunk_still_cut_is_kept_and_recorded_unread_for_that_chunk(self) -> None:
+        analyst, merged = self._run((_claims("again", 2) + "CLAIM: cut", CAP))
+
+        texts = [c.claim for c in merged.claims]
+        assert sum("second-chunk" in t for t in texts) == 6
+        assert sum("first-chunk" in t for t in texts) >= 3
+        (finding,) = [v for v in analyst.validation_findings if v.code == ANALYST_CUT_CODE]
+        assert "chunk 1 of 2" in finding.message
+        assert "is unread" in finding.message

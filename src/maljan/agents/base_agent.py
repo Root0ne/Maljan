@@ -63,6 +63,7 @@ from maljan.pipeline.validation import (
     ValidationTally,
     Violation,
     analyst_cut_violation,
+    chunk_cut_unread_sentence,
     claims_kept_under_disputes_finding,
     mark_invalid_technique_ids,
     parse_violations,
@@ -2978,9 +2979,15 @@ class BudgetMeter:
         """
         from maljan.llm.context_window import built_output_cap
 
-        built = built_output_cap(getattr(self, "llm", None))
+        model = getattr(self, "llm", None)
+        built = built_output_cap(model)
         if built is not None:
             return int(built.tokens)
+        logger.debug(
+            "output cap: %s's %s carries no built cap; derived from settings.",
+            getattr(self, "name", ""),
+            type(model).__name__,
+        )
         return analyst_output_cap(str(getattr(self, "name", "") or ""))
 
     def _record_turns_taken(self, latest: Mapping[str, Any], sent: int) -> None:
@@ -5674,9 +5681,6 @@ class BaseAnalyst(BudgetMeter, ABC):
         # the calls the earlier ones made, and its loop does not make them again.
         entries = getattr(self, "_evidence_entries", None)
         first_entry = len(entries) if isinstance(entries, list) else 0
-        # Each chunk's cut at the output cap, named: the next chunk's answers
-        # record their own, and the merged answer is checked once.
-        chunk_cuts: list[tuple[int, str, str]] = []
 
         for chunk in chunks:
             # No new chunk once the job's spend ceiling is reached: what the
@@ -5698,12 +5702,24 @@ class BaseAnalyst(BudgetMeter, ABC):
                     self._prior_chunk_calls = earlier
                     try:
                         isr = self.analyze_isr(prompt_text)
+                        cut = getattr(self, "_last_answer_cut", None)
                     finally:
                         self._prior_chunk_calls = []
-                    cut = getattr(self, "_last_answer_cut", None)
-                    self._last_answer_cut = None
-                if cut is not None:
-                    chunk_cuts.append((*cut, f"chunk {chunk.index + 1} of {chunk.total}"))
+                        # Taken whether the chunk answered or raised: a cut
+                        # left here would be read as the next chunk's.
+                        self._last_answer_cut = None
+                    if cut is not None:
+                        # A cut is answered inside the chunk it happened in:
+                        # this chunk's answer is asked for a whole one over
+                        # this chunk's own input, and what comes back stands
+                        # for this chunk alone in the merge.
+                        self._last_answer_cut = cut
+                        isr = self._validate_isr(
+                            isr,
+                            prompt_text,
+                            chunk=f"chunk {chunk.index + 1} of {chunk.total}",
+                            only_cut=True,
+                        )
                 chunk_isrs.append(isr)
                 self.logger.debug(
                     "Chunk %d/%d analyzed: %d claims.",
@@ -5742,9 +5758,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # and a delegated ask of this agent landing between the mark and the
         # slice would move its own findings onto this ISR, or these onto its.
         with lock_for(self):
-            return self._validate_isr(
-                self._apply_consistency_gate(merged, evidence), evidence, chunk_cuts=chunk_cuts
-            )
+            return self._validate_isr(self._apply_consistency_gate(merged, evidence), evidence)
 
     # ------------------------------------------------------------------
     # View-decomposition (findings-log §3.6) — text path only
@@ -5960,7 +5974,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         self,
         isr: AgentISR,
         evidence: str,
-        chunk_cuts: Sequence[tuple[int, str, str]] | None = None,
+        *,
+        chunk: str = "",
+        only_cut: bool = False,
     ) -> AgentISR:
         """Tell the analyst what is wrong with its own answer, once.
 
@@ -5973,6 +5989,11 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         Never raises: a validation loop that could fail a run would be a worse
         failure mode than the one it replaces.
+
+        ``only_cut`` asks about the output cap alone: the turn a chunk of a
+        chunked analysis gets when its own answer was cut, before the merge,
+        whose other questions the merged answer is asked. ``chunk`` names the
+        chunk ("chunk 1 of 2") in the question and in what is recorded.
         """
         try:
             from maljan.tools import knowledge
@@ -6032,14 +6053,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         # the question describes it.
         # Keyed by the parsed answer, because the loop checks the kept answer
         # again after choosing it, and that may be the first one.
-        # Each cut is ``(cap, text, chunk)``: a merge of chunks passes every
-        # chunk's cut, named, because each chunk's loop recorded its own and
-        # only the last of them would otherwise still be held.
+        # Each cut is ``(cap, text, chunk)``, the chunk named when the answer
+        # checked is one chunk's.
         loop_answer_cut = getattr(self, "_last_answer_cut", None)
         cuts: dict[int, list[tuple[int, str, str]]] = {
-            id(isr): list(chunk_cuts)
-            if chunk_cuts is not None
-            else ([(*loop_answer_cut, "")] if loop_answer_cut is not None else [])
+            id(isr): [(*loop_answer_cut, chunk)] if loop_answer_cut is not None else []
         }
         # Read once: the next model call records its own.
         self._last_answer_cut = None
@@ -6047,11 +6065,16 @@ class BaseAnalyst(BudgetMeter, ABC):
         def _validator(candidate: AgentISR) -> list[Violation]:
             first = not asked
             asked.append(True)
+            if only_cut:
+                return [
+                    analyst_cut_violation(cap, text, chunk=named)
+                    for cap, text, named in cuts.get(id(candidate)) or []
+                ]
             unread = [] if nudged else parse_violations(candidate)
             return [
                 *(
-                    analyst_cut_violation(cap, text, chunk=chunk)
-                    for cap, text, chunk in cuts.get(id(candidate)) or []
+                    analyst_cut_violation(cap, text, chunk=named)
+                    for cap, text, named in cuts.get(id(candidate)) or []
                 ),
                 *unread,
                 *validate_isr(
@@ -6066,14 +6089,17 @@ class BaseAnalyst(BudgetMeter, ABC):
                 ),
             ]
 
-        if nudged:
+        if nudged and not only_cut:
             self.validation_findings.extend(parse_violations(isr))
 
         # The findings and artifacts the answer being checked carried are its
         # own from here on: a retry's are kept apart (``_parse``) and go with
-        # the retry only if the retry is the answer kept.
-        if isinstance(getattr(self, "_findings_buffer", None), list) and isinstance(
-            getattr(self, "_artifacts_buffer", None), list
+        # the retry only if the retry is the answer kept. A chunk's are left in
+        # the buffers for the merged answer, which is where they are drained.
+        if (
+            not only_cut
+            and isinstance(getattr(self, "_findings_buffer", None), list)
+            and isinstance(getattr(self, "_artifacts_buffer", None), list)
         ):
             BaseAnalyst._drain_findings(self, isr)  # type: ignore[arg-type]
 
@@ -6174,8 +6200,8 @@ class BaseAnalyst(BudgetMeter, ABC):
                 f"{widest}-token answer it asks for do not fit this model's window"
             )
             self.logger.warning("%s: the cut-at-cap question was %s.", self.name, detail)
-            for cap, text, chunk in loop_cuts:
-                unasked_cut = analyst_cut_violation(cap, text, chunk=chunk)
+            for cap, text, named in loop_cuts:
+                unasked_cut = analyst_cut_violation(cap, text, chunk=named)
                 self.validation_findings.append(
                     replace(
                         unasked_cut,
@@ -6222,7 +6248,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 parsed.artifacts = artifacts[a_mark:]
                 del artifacts[a_mark:]
             retry_cut = getattr(self, "_last_answer_cut", None)
-            cuts[id(parsed)] = [(*retry_cut, "")] if retry_cut is not None else []
+            cuts[id(parsed)] = [(*retry_cut, chunk)] if retry_cut is not None else []
             self._last_answer_cut = None
             return parsed
 
@@ -6334,6 +6360,27 @@ class BaseAnalyst(BudgetMeter, ABC):
             if all(v.code != CLAIMS_UNDER_DISPUTES_CODE for v in violations):
                 violations.append(answered)
             self.logger.info("Validation: '%s': %s", self.name, answered.message)
+
+        if only_cut:
+            # A chunk's retry that is kept carries its own findings block; the
+            # merged answer is where findings are drained, so they go back.
+            if revised is not isr:
+                findings = getattr(self, "_findings_buffer", None)
+                artifacts = getattr(self, "_artifacts_buffer", None)
+                if isinstance(findings, list) and revised.findings:
+                    findings.extend(revised.findings)
+                    revised.findings = []
+                if isinstance(artifacts, list) and revised.artifacts:
+                    artifacts.extend(revised.artifacts)
+                    revised.artifacts = []
+            # Still cut after the question: the chunk's answer is kept as it
+            # was cut, and what it did not reach is unread.
+            violations = [
+                replace(v, message=f"{v.message} {chunk_cut_unread_sentence(chunk)}")
+                if v.code == ANALYST_CUT_CODE
+                else v
+                for v in violations
+            ]
 
         if violations:
             mark_invalid_technique_ids(revised, violations)

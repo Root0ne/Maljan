@@ -50,6 +50,8 @@ from maljan.agents.judge_agent import (
     EVIDENCE_SHORTENED_NOTICE,
     LOWERED_ENTRY_MARK,
     MEDIATION_EXTRACTION_SYSTEM,
+    MEDIATOR_HUMAN_CLOSING,
+    MEDIATOR_SYSTEM_HEAD,
     NO_ENTRY_TEXT,
     PARTIAL_ENTRY_MARK,
     PROMPT_SHORTENED_NOTICE,
@@ -93,7 +95,7 @@ from maljan.extractors.capability_matrix import (
 )
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.pipeline import triage_pack
-from maljan.pipeline.mediation_models import MediatorVerdict
+from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MISSING_NOTE, MediatorVerdict
 from maljan.pipeline.nodes import (
     NO_SANDBOX_DATA_REASON,
     NO_STATIC_FIXTURE_NOTE,
@@ -107,6 +109,7 @@ from maljan.pipeline.validation import (
     _term_ids_said,
     absence_claim_violation,
     analyst_cut_violation,
+    chunk_cut_unread_sentence,
     claim_does_not_describe_violation,
     claims_kept_under_disputes_finding,
     claims_under_disputes_violation,
@@ -444,6 +447,10 @@ PROMPTS: dict[str, str] = {
     "mediator contradiction definition, closing block rule and its one question": " ".join(
         [CONTRADICTION_DEFINITION, CONTRADICTIONS_BLOCK_RULE, CONTRADICTIONS_BLOCK_QUESTION]
     ),
+    "mediator system turn, its closing line and the missing-block note": " ".join(
+        [MEDIATOR_SYSTEM_HEAD, MEDIATOR_HUMAN_CLOSING, CONTRADICTIONS_BLOCK_MISSING_NOTE]
+    ),
+    "a chunk still cut after its question": chunk_cut_unread_sentence("chunk 1 of 2"),
     "mediator structured extraction and its schema": " ".join(
         [
             MEDIATION_EXTRACTION_SYSTEM,

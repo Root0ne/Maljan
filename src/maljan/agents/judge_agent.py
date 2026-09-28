@@ -484,6 +484,40 @@ MEDIATION_EXTRACTION_SYSTEM = (
     "- confidence: the log's last agreement_confidence, a float 0.0-1.0"
 )
 
+# The mediator's system turn up to the sentence about its tools, which depends
+# on the run, and the line its human turn closes on.
+MEDIATOR_SYSTEM_HEAD = (
+    "You are the Lead Cyber Security Mediator. Your ONLY task is to "
+    "compare expert analyst reports and emit:\n"
+    "  1. The contradictions still standing, in a final "
+    "CONTRADICTIONS: block. " + CONTRADICTION_DEFINITION + "\n"
+    "  2. A single agreement_confidence in [0.0, 1.0] for how "
+    "aligned the agents are — NOT the maliciousness of the sample.\n\n"
+    "HARD RULES:\n"
+    "- DO NOT emit a verdict. Never write 'Malware', 'Benign', "
+    "'Suspicious', 'CLEAN', 'NO THREAT', or any synonym.\n"
+    "- DO NOT recommend re-running pipelines or filling data gaps.\n"
+    "- When an analyst has failed/empty output, write 'no input "
+    "from <agent>' and EXCLUDE that analyst from the contradiction "
+    "count. DO NOT treat absence of input as confirmation of "
+    "cleanliness.\n"
+    "- agreement_confidence reflects ONLY agent alignment, NOT how "
+    "suspicious the sample looks. Two analysts unanimously saying "
+    "nothing is still high alignment (1.0).\n"
+    "- " + CONTRADICTIONS_BLOCK_RULE + "\n"
+    "- Your LAST line, right after that block, MUST be exactly "
+    "'agreement_confidence: <number>' "
+    "with a decimal between 0.0 and 1.0 — no percent sign, no words, "
+    "no range. Nothing may follow it. When this line is missing or "
+    "unreadable the run is treated as no-consensus and every analyst "
+    "is made to revise again, so it is not optional.\n"
+    "- The downstream Judge alone decides Malware/Benign/Suspicious. "
+)
+MEDIATOR_HUMAN_CLOSING = (
+    "End with the CONTRADICTIONS: block and then the agreement_confidence line. "
+    "Do not state a verdict."
+)
+
 # The block's opening line: the label in capitals, with any Markdown emphasis
 # or heading marks a model puts around it, and what follows on the same line.
 _CONTRADICTIONS_LINE_RE = re.compile(r"^[\s#>*_`]*CONTRADICTIONS[\s*_`]*:[\s*_`]*(.*)$")
@@ -2207,31 +2241,7 @@ class JudgeAgent(BudgetMeter):
         prompt_messages = [
             (
                 "system",
-                "You are the Lead Cyber Security Mediator. Your ONLY task is to "
-                "compare expert analyst reports and emit:\n"
-                "  1. The contradictions still standing, in a final "
-                "CONTRADICTIONS: block. " + CONTRADICTION_DEFINITION + "\n"
-                "  2. A single agreement_confidence in [0.0, 1.0] for how "
-                "aligned the agents are — NOT the maliciousness of the sample.\n\n"
-                "HARD RULES:\n"
-                "- DO NOT emit a verdict. Never write 'Malware', 'Benign', "
-                "'Suspicious', 'CLEAN', 'NO THREAT', or any synonym.\n"
-                "- DO NOT recommend re-running pipelines or filling data gaps.\n"
-                "- When an analyst has failed/empty output, write 'no input "
-                "from <agent>' and EXCLUDE that analyst from the contradiction "
-                "count. DO NOT treat absence of input as confirmation of "
-                "cleanliness.\n"
-                "- agreement_confidence reflects ONLY agent alignment, NOT how "
-                "suspicious the sample looks. Two analysts unanimously saying "
-                "nothing is still high alignment (1.0).\n"
-                "- " + CONTRADICTIONS_BLOCK_RULE + "\n"
-                "- Your LAST line, right after that block, MUST be exactly "
-                "'agreement_confidence: <number>' "
-                "with a decimal between 0.0 and 1.0 — no percent sign, no words, "
-                "no range. Nothing may follow it. When this line is missing or "
-                "unreadable the run is treated as no-consensus and every analyst "
-                "is made to revise again, so it is not optional.\n"
-                "- The downstream Judge alone decides Malware/Benign/Suspicious. "
+                MEDIATOR_SYSTEM_HEAD
                 + (
                     "You have reputation tools and no analyst has consulted one. "
                     f"Look the sample's hash up once — its sha256 is {_sha256_of(sample)} "
@@ -2257,8 +2267,7 @@ class JudgeAgent(BudgetMeter):
                 f"{_standing_blocks(run_state, facts_block)}"
                 f"{_identity_prefix(sample)}"
                 f"Expert Reports:\n{reports_text}\n\nPrevious Discussion:\n{history}\n\n"
-                "End with the CONTRADICTIONS: block and then the agreement_confidence "
-                "line. Do not state a verdict.",
+                f"{MEDIATOR_HUMAN_CLOSING}",
             ),
         ]
 

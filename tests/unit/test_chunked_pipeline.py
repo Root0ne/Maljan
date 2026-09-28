@@ -366,17 +366,45 @@ class TestSafeAnalyzeISRChunked:
             analyst._last_answer_cut = next(answers)
             return isr
 
-        seen: dict[str, object] = {}
+        seen: list[tuple[object, dict[str, object]]] = []
 
         def _validate(isr: AgentISR, evidence: str, **kw: object) -> AgentISR:
-            seen.update(kw)
+            seen.append((analyst._last_answer_cut, dict(kw)))
             return isr
 
         analyst.analyze_isr = _analyze  # type: ignore[method-assign]
         analyst._validate_isr = _validate  # type: ignore[method-assign]
         analyst.safe_analyze_isr_chunked([_make_chunk(i, 2) for i in range(2)])
 
-        assert seen["chunk_cuts"] == [(32768, cut_text, "chunk 1 of 2")]
+        # Chunk 1's cut is asked about inside chunk 1; the merged check gets no cut.
+        assert seen == [
+            ((32768, cut_text), {"chunk": "chunk 1 of 2", "only_cut": True}),
+            (None, {}),
+        ]
+
+    def test_a_chunk_that_raises_after_a_cut_leaves_no_cut_for_the_next(
+        self, analyst: _ConcreteAnalyst
+    ) -> None:
+        real_analyze = analyst.analyze_isr
+        calls: list[int] = []
+        seen: list[object] = []
+
+        def _analyze(data: str) -> AgentISR:
+            calls.append(1)
+            if len(calls) == 1:
+                analyst._last_answer_cut = (32768, "CLAIM: cut")
+                raise RuntimeError("the loop failed after its answer")
+            return real_analyze(data)
+
+        def _validate(isr: AgentISR, evidence: str, **kw: object) -> AgentISR:
+            seen.append(analyst._last_answer_cut)
+            return isr
+
+        analyst.analyze_isr = _analyze  # type: ignore[method-assign]
+        analyst._validate_isr = _validate  # type: ignore[method-assign]
+        analyst.safe_analyze_isr_chunked([_make_chunk(i, 2) for i in range(2)])
+
+        assert seen == [None]
 
     def test_a_later_chunk_is_told_what_the_earlier_ones_called(
         self, analyst: _ConcreteAnalyst

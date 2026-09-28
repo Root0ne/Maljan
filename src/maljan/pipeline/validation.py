@@ -2736,6 +2736,14 @@ def analyst_cut_violation(cap: int, text: str = "", *, chunk: str = "") -> Viola
     )
 
 
+def chunk_cut_unread_sentence(chunk: str) -> str:
+    """What a chunk's cut finding adds when the question did not get a whole answer."""
+    return (
+        f"The answer to {chunk} is kept as the limit cut it; what it did not reach of "
+        f"{chunk} is unread."
+    )
+
+
 # How much of a cut answer its question shows, as a sample of its shape, marked
 # with … where it is cut.
 SECTION_CUT_HEAD_CHARS = 160
