@@ -498,6 +498,16 @@ _JWT_RUN = re.compile(r"\A[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]
 # a second separator: ``/wJalrXUtnFEMIK7MDENG`` is a key that begins with a
 # slash, not a directory.
 _MIME_TYPE = re.compile(r"\A[a-z]+/[a-z0-9][a-z0-9.+_\-]*\Z")
+# Words with separators between them, which the base64 alternative above reads
+# as a key by its length alone: a claim's ``anti-debugging/environment``, a
+# STIX property name and an analyst's roster key are all 24 characters and
+# more of that alphabet. Two or more pieces split on ``_``, ``-`` or ``/``,
+# each written the way a word is — all lower case, all capitals, or one
+# capital in front — and each shorter than the length floor, so that a piece
+# which would be a key on its own keeps the whole run a key. A key's body of
+# random letters mixes its case or runs past the floor; a vendor prefix is
+# asked before this and wins.
+_WORD_PIECE = re.compile(r"\A(?:[a-z]{1,23}|[A-Z]{1,23}|[A-Z][a-z]{1,22})\Z")
 # The identifier this system issues for a job, a report, a sample and a
 # message. Exempt for the reason a digest is: it is on the job, on the report
 # and on the event that announced it, and an event reading ``report_id=***``
@@ -685,24 +695,33 @@ def _looks_like_a_credential(token: str) -> bool:
     carries are exempted where their names are known, by key, in the
     publisher (``analysis_worker.scrubbed``); they are not guessed at here.
 
-    What that costs, stated rather than discovered: an agent key of 24 to 32
-    characters — the pattern allows up to 32 — has the shape of a key, so it
-    reads as ``***`` inside a *sentence*. The identity fields the line is
+    Words joined by separators are exempt by their shape (``_is_words``):
+    every piece letters alone, written the way a word is, and shorter than the
+    floor. That is what keeps a claim's ``anti-debugging/environment`` and an
+    agent key such as ``windows_pe_static_reverse_engineer`` in a sentence.
+    What is left costs, stated rather than discovered: an agent key of 24 to
+    32 characters with a digit in one of its pieces has the shape of a key, so
+    it reads as ``***`` inside a *sentence*. The identity fields the line is
     filed under are exempt by name and travel whole, so attribution is
     unaffected and only the name inside the prose goes. The roster is not
     consulted here on purpose: this is one pure function shared by every job
     on the worker, and a redaction rule whose answer depended on which run was
-    publishing would not be a redaction rule. ``docs/configuration.md`` tells
-    an operator to keep keys short; no shipped key is close to the floor.
+    publishing would not be a redaction rule.
     """
     if _DIGEST.match(token) or _IDENTIFIER.match(token) or token in _OWN_VARIABLE_NAMES:
         return False
     lowered = token.lower()
     if any(lowered.startswith(prefix) for prefix in _CREDENTIAL_PREFIXES):
         return True
-    if _MIME_TYPE.match(token) or _PATH_SHAPED.match(token):
+    if _MIME_TYPE.match(token) or _PATH_SHAPED.match(token) or _is_words(token):
         return False
     return bool(_CREDENTIAL_RUN.match(token)) or _is_a_token(token)
+
+
+def _is_words(run: str) -> bool:
+    """Whether this run is words joined by ``_``, ``-`` or ``/`` rather than a key."""
+    pieces = re.split(r"[_\-/]", run)
+    return len(pieces) >= 2 and all(_WORD_PIECE.match(piece) for piece in pieces)
 
 
 def _shorten_url(found: re.Match[str]) -> str:
@@ -876,10 +895,44 @@ def _summarize_value(value: Any) -> str:
         return str(value)
     if isinstance(value, dict | list | tuple):
         return f"<{len(value)} items>" if not isinstance(value, dict) else f"<{len(value)} keys>"
-    text = scrub(value)
-    if len(text) > ARGUMENT_VALUE_CHARS:
-        text = text[: ARGUMENT_VALUE_CHARS - 1] + "…"
-    return text
+    return _cut_whole(scrub(value), ARGUMENT_VALUE_CHARS)
+
+
+# A digest or an identifier inside a longer text, which a cut must not split:
+# the publisher scrubs every payload again, and the part of a digest left in
+# front of the cut is a hex run of no digest's length, which that second pass
+# reads as a key.
+_WHOLE_RUN = re.compile(
+    r"(?<![A-Za-z0-9])(?:[A-Fa-f0-9]{64}|[A-Fa-f0-9]{40}|[A-Fa-f0-9]{32}"
+    r"|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+    r"(?:\.[A-Za-z0-9]{1,16}(?![A-Za-z0-9.]))?(?![A-Za-z0-9])"
+)
+
+
+def _cut_whole(text: str, limit: int) -> str:
+    """``text`` bounded near ``limit`` and marked, never cut inside a value the scrub kept.
+
+    A digest or an identifier the cut would split is kept whole, with the
+    file extension after it: ``<sha256>.exe`` is the name a reader needs,
+    and it runs past the cap by a few characters. Any other run the cut would
+    leave in a shape the scrub reads as a key is cut in front of instead, so
+    scrubbing the result again changes nothing.
+    """
+    if len(text) <= limit:
+        return text
+    cut = limit - 1
+    for found in _WHOLE_RUN.finditer(text):
+        if found.start() < cut < found.end():
+            cut = found.end()
+            break
+    if cut >= len(text):
+        return text
+    for found in _VALUE_RUN.finditer(text):
+        if found.start() < cut < found.end():
+            if _looks_like_a_credential(text[found.start() : cut]):
+                cut = found.start()
+            break
+    return text[:cut] + "…"
 
 
 def summarize_args(args: Any) -> str:
@@ -904,8 +957,7 @@ def summarize_args(args: Any) -> str:
         parts.append(f"{name}={shown}")
     if len(args) > ARGUMENTS_SUMMARISED:
         parts.append(f"+{len(args) - ARGUMENTS_SUMMARISED} more")
-    line = ", ".join(parts)
-    return line[: ARGUMENT_SUMMARY_CHARS - 1] + "…" if len(line) > ARGUMENT_SUMMARY_CHARS else line
+    return _cut_whole(", ".join(parts), ARGUMENT_SUMMARY_CHARS)
 
 
 def summarize_result(output: Any, *, ok: bool = True, remediation: str = "") -> str:
@@ -926,9 +978,7 @@ def summarize_result(output: Any, *, ok: bool = True, remediation: str = "") -> 
         text = f"{headline}; {fix}" if fix else headline
     else:
         text = scrub(output)
-    if len(text) > RESULT_SUMMARY_CHARS:
-        text = text[: RESULT_SUMMARY_CHARS - 1] + "…"
-    return text
+    return _cut_whole(text, RESULT_SUMMARY_CHARS)
 
 
 def emit_tool_call_started(

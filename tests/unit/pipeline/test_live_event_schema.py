@@ -13,6 +13,7 @@ into existence.
 from __future__ import annotations
 
 import hashlib
+import uuid
 from typing import Any
 
 from maljan.pipeline import events as ev
@@ -517,6 +518,119 @@ class TestArgumentSummaries:
     def test_a_failure_with_no_remediation_still_says_nothing_raw(self) -> None:
         summary = ev.summarize_result("Traceback: /etc/maljan/secrets.env", ok=False)
         assert summary == "the call failed"
+
+
+class TestWordsJoinedBySeparators:
+    """A run of words with separators between them is prose, not a key.
+
+    The length rule read any 24-plus run of the base64 alphabet as a key, and
+    the run's own words fall into it: a claim's ``anti-debugging/environment``,
+    a STIX property name and an analyst's roster key all read ``***`` in the
+    published report. A run that splits on ``_``, ``-`` or ``/`` into two or
+    more pieces of letters alone, each shorter than a key, is words.
+    """
+
+    def test_the_word_runs_a_report_carries_are_kept(self) -> None:
+        for words in (
+            "anti-debugging/environment",
+            "x_maljan_contributing_agents",
+            "all_tools_reverser_ghidra",
+            "MALWARE_REVERSE_ENGINEER_ANALYST",
+        ):
+            assert ev.scrub(words) == words, words
+            assert ev.scrub(f"seen for {words} detection") == f"seen for {words} detection"
+
+    def test_a_key_made_of_letters_is_still_a_key(self) -> None:
+        """Letters alone do not make a run words: its pieces must be word-shaped."""
+        letters = "".join(char for char in lowercase_body(72) if char.isalpha())
+        for value in (
+            "ghs_" + letters[:36],
+            "key-" + letters[:32],
+            letters[:12] + "-" + letters[12:40],
+            "AbCdEfGhIjKl-MnOpQrStUvWx",
+            _vendor_key(body="-".join(["word"] * 6)),
+        ):
+            assert ev.scrub(value) == "***", value
+
+    def test_every_key_shape_is_still_masked(self) -> None:
+        for value in _every_key_shape():
+            assert ev.scrub(value) == "***", value
+            assert ev.scrub(f"the key {value} was sent") == "the key *** was sent", value
+
+
+def _every_key_shape() -> list[str]:
+    """Every shape ``tests/credential_shapes.py`` builds that the scrub reads by shape.
+
+    A plaintext password and a stored hash are not among them: those are
+    masked by the name of the field that carries them, never by their shape.
+    """
+    return [
+        lowercase_body(24),
+        lowercase_body(32),
+        prefixed_key("key-"),
+        prefixed_key("gocspx-", 24),
+        prefixed_key("ghs_", 36),
+        prefixed_key("sk-"),
+        prefixed_key("sk_"),
+        prefixed_key("nvapi-"),
+        prefixed_key("ghp_", 36),
+        prefixed_key("gho_", 36),
+        prefixed_key("xoxb-"),
+        prefixed_key(""),
+        lowercase_base64_blob(),
+        standard_base64_key(),
+        jwt(),
+        jwt(header=b'{ "alg":"HS256"}'),
+    ]
+
+
+class TestASummaryIsCutOutsideADigest:
+    """A capped value keeps a digest whole, so a second scrub finds nothing to mask.
+
+    The publisher scrubs every payload again. A ``<sha256>.exe`` file name is
+    longer than one argument's cap, and cutting it inside the digest left a
+    63-character hex run the second pass read as a key.
+    """
+
+    def test_a_digest_file_name_is_kept_whole(self) -> None:
+        name = _digest("sha256") + ".exe"
+        assert len(name) > ev.ARGUMENT_VALUE_CHARS
+        summary = ev.summarize_args({"file_path": name})
+        assert _digest("sha256") in summary
+        assert ev.scrub(summary) == summary
+
+    def test_the_whole_line_is_not_cut_inside_a_digest(self) -> None:
+        sha = _digest("sha256")
+        note = ("plain words " * 20)[:50].strip()
+        args = {f"note{index}": note for index in range(3)}
+        args["sample"] = sha
+        whole = ", ".join(f"{name}={value}" for name, value in args.items())
+        assert whole.index(sha) < ev.ARGUMENT_SUMMARY_CHARS < len(whole)
+        summary = ev.summarize_args(args)
+        assert sha in summary
+        assert ev.scrub(summary) == summary
+
+    def test_a_result_headline_is_not_cut_inside_a_digest(self) -> None:
+        sha = _digest("sha256")
+        output = "plain words " * 18 + sha + " and more after it"
+        assert output.index(sha) < ev.RESULT_SUMMARY_CHARS < output.index(sha) + len(sha)
+        summary = ev.summarize_result(output)
+        assert sha in summary
+        assert ev.scrub(summary) == summary
+
+    def test_the_scrub_leaves_any_summary_as_it_is(self) -> None:
+        sha, md5 = _digest("sha256"), _digest("md5")
+        for args in (
+            {"file_path": sha + ".exe", "offset": 12},
+            {"query": "prefix " * 8 + sha},
+            {"value": md5 * 3},
+            {"a": "b" * 50 + " " + sha, "c": sha + "." + "d" * 30},
+            {"ids": str(uuid.UUID(int=7)) * 3},
+            {"words": "all_tools_reverser_ghidra " * 5},
+            {"blob": standard_base64_key() * 3},
+        ):
+            summary = ev.summarize_args(args)
+            assert ev.scrub(summary) == summary, summary
 
 
 class TestTheKeyShapesARunOfWordCharactersMisses:

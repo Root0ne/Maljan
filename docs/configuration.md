@@ -1975,11 +1975,16 @@ day when parallel was on. The console clears the mark on the first stage edit
 
 ### Long agent keys in the conversation
 
-An agent key is a slug of at most 32 characters. Keep it well under that, for
-one reason: everything the live feed publishes as prose is scrubbed by the
-publisher, and a run of 24 or more letters, digits, `_` and `-` is the shape a
-credential has. A key that long is redacted to `***` **inside a sentence** —
-`"windows_pe_static_analyst failed"` reaches a reader as `"*** failed"`.
+An agent key is a slug of at most 32 characters. Everything the live feed
+publishes as prose is scrubbed by the publisher, and a run of 24 or more
+letters, digits, `_` and `-` is the shape a credential has. A run made of words
+— two or more pieces split on `_`, `-` or `/`, each only letters written the
+way a word is (all lower case, all capitals, or one capital in front) and each
+shorter than 24 — is read as words and travels whole:
+`"windows_pe_static_reverse_engineer failed"` reaches a reader as written. A
+key of 24 or more characters with a digit in one of its pieces does not have
+that shape and is redacted to `***` **inside a sentence** —
+`"windows_pe_static_analyst2 failed"` reaches a reader as `"*** failed"`.
 
 Nothing is lost but the name in that sentence. The identity fields a line is
 filed under — `speaker`, `agent`, `stage`, `label`, `display_name` — are

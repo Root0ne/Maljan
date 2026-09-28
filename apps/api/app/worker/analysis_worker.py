@@ -719,7 +719,11 @@ async def _publish_event(
     # Scrubbed here, once, for all three sinks. Seven producers build these
     # payloads and a new one cannot be relied on to remember; the publisher is
     # where the wire begins, so it is where the guarantee belongs. Producers
-    # may still scrub — doing it twice changes nothing. The recorder's copy is
+    # may still scrub, and a second pass changes nothing only because the
+    # scrub is idempotent over what they hand on: ``summarize_args`` never cuts
+    # inside a digest or an identifier, whose remainder this pass would read
+    # as a key. A producer that bounds scrubbed text cuts it the same way
+    # (``events._cut_whole``). The recorder's copy is
     # scrubbed where it is taken (``_make_event_sink``), not here: it is taken
     # before this coroutine is even scheduled, and on the paths the recorder
     # exists for this coroutine never runs.

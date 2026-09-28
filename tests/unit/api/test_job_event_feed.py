@@ -810,22 +810,11 @@ class TestWhatTheScrubMustNotTouchAndWhatItMust:
         assert data["addressed_to"] == self.AGENT_KEY
         assert data["display_name"] == self.LABEL
 
-    def test_a_long_key_inside_a_sentence_is_the_price_of_the_rule(self) -> None:
-        """Recorded rather than fixed, and here is why it is a fair trade.
+    def test_a_long_key_made_of_words_travels_inside_a_sentence(self) -> None:
+        """A key of words joined by ``_`` is words, however long.
 
-        A key of 24 characters or more is the shape a credential has, and
-        nothing is exempt for being lowercase — four real key formats are
-        nothing but lowercase letters, digits and a separator. The scrubber is
-        one pure function shared by every job on this worker and is not told
-        which roster is publishing, because a redaction rule whose answer
-        changes with the configuration is not one.
-
-        What it costs is the name inside a *sentence*. What it does not cost
-        is attribution: the identity fields travel whole, so the line is still
-        filed under the right participant and still drawn with the operator's
-        label. No shipped key is close to the floor — the longest is
-        ``android_static``, at fourteen — and ``docs/configuration.md`` tells
-        an operator to keep keys short for exactly this reason.
+        Every piece of the key is letters written the way a word is and
+        shorter than a key, which is the shape the scrub reads as words.
         """
         data = self._publish(
             "agent_message",
@@ -838,8 +827,39 @@ class TestWhatTheScrubMustNotTouchAndWhatItMust:
         )
 
         assert len(self.AGENT_KEY) >= 24
-        assert data["text"] == "*** failed"
+        assert data["text"] == f"{self.AGENT_KEY} failed"
         assert data["speaker"] == self.AGENT_KEY
+
+    def test_a_long_key_with_a_digit_inside_a_sentence_is_the_price_of_the_rule(self) -> None:
+        """Recorded rather than fixed, and here is why it is a fair trade.
+
+        A key of 24 characters or more is the shape a credential has, and
+        nothing is exempt for being lowercase — four real key formats are
+        nothing but lowercase letters, digits and a separator. A piece with a
+        digit in it is not a word, so such a key is not exempt as words. The
+        scrubber is one pure function shared by every job on this worker and
+        is not told which roster is publishing, because a redaction rule whose
+        answer changes with the configuration is not one.
+
+        What it costs is the name inside a *sentence*. What it does not cost
+        is attribution: the identity fields travel whole, so the line is still
+        filed under the right participant and still drawn with the operator's
+        label.
+        """
+        key = "windows_pe_static_analyst2"
+        data = self._publish(
+            "agent_message",
+            {
+                "speaker": key,
+                "display_name": self.LABEL,
+                "role": "analyst",
+                "text": f"{key} failed",
+            },
+        )
+
+        assert len(key) >= 24
+        assert data["text"] == "*** failed"
+        assert data["speaker"] == key
         assert data["display_name"] == self.LABEL
 
     def test_a_key_of_a_shipped_length_reads_as_itself(self) -> None:

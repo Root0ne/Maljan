@@ -24,6 +24,7 @@ import ast
 import pathlib
 from typing import Any
 
+from maljan.pipeline.events import safe_finding_value
 from maljan.pipeline.validation import (
     Violation,
     schema_violations,
@@ -34,6 +35,7 @@ from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from maljan.schemas.stix_models import Bundle
 from tests.credential_shapes import prefixed_key
 from tests.unit.pipeline._source_names import called_name, names_reaching
+from tests.unit.pipeline.test_live_event_schema import _every_key_shape
 from tests.unit.pipeline.test_validation import _Attck
 
 SRC = pathlib.Path(__file__).resolve().parents[3] / "src" / "maljan"
@@ -119,6 +121,30 @@ class TestTheRowsThatQuoteAJudge:
         row = next(v for v in violations if v.code == "attribution.ungrounded_family")
         assert secret not in row.message
         assert len(row.message) < MESSAGE_LIMIT
+
+
+class TestARowKeepsWordsAndMasksKeys:
+    """A row's words survive the scrub; no key shape does.
+
+    The length rule used to take a run of words with separators between them
+    for a key, and a claim reading ``anti-debugging/environment detection``
+    was stored as ``*** detection``. Lifting that must not lift a key: every
+    shape the scrub reads is run through the row helper here.
+    """
+
+    def test_every_key_shape_is_masked_in_a_row(self) -> None:
+        for value in _every_key_shape():
+            row = safe_finding_value(f"the analyst quoted {value} as the key")
+            assert value not in row, value
+            assert row == "the analyst quoted *** as the key", value
+
+    def test_the_word_runs_of_a_report_are_kept_in_a_row(self) -> None:
+        for words in (
+            "anti-debugging/environment",
+            "x_maljan_contributing_agents",
+            "all_tools_reverser_ghidra",
+        ):
+            assert safe_finding_value(f"for {words} detection") == f"for {words} detection"
 
 
 class TestTheRowsThatQuoteAnAnalyst:
