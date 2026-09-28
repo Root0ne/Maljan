@@ -321,10 +321,15 @@ contradictions, on the text path and the structured one alike; contradictions
 the reasoning drafted and then resolved are not counted. A non-empty block is
 not consensus whatever number the mediator wrote: the number is kept and shown
 beside the list, and the router sends the analysts to revise, each told the
-block's lines. The block is one contradiction per bullet or numbered line;
-every spelling of none ("NONE", "(none)", "N/A", "no contradictions …") is an
-empty block, and a block of text with no list line is unreadable and asked
-about once. On the structured path the block, when present, decides over the
+block's lines. The block is one contradiction per line, bulleted, numbered or
+plain, the label line's own text included; a table's border and header rows
+and a summary line are not contradictions. A "none" empties the block only as
+its whole content, and only as a whole line from a closed vocabulary ("NONE",
+"(none)", "N/A", "No contradictions", optionally "still standing", "stands" or
+"remain(s)"): "None of the analysts cites ev_0015 …" is a contradiction. A
+"none" beside contradictions is not read, the contradictions stand, and the
+round's note and `negotiation.mediation_notes` say the block was mixed. A block
+of only table rows is unreadable and asked about once. On the structured path the block, when present, decides over the
 extractor's list. While the last mediation lists a contradiction, a stable
 agreement number does not end the debate as convergence; the round limit
 still does. An answer with no

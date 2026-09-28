@@ -24,6 +24,12 @@ CONTRADICTIONS_BLOCK_MISSING_NOTE = (
     "The mediator wrote no final CONTRADICTIONS: block, also when asked once for it; "
     "its agreement was read from its agreement_confidence alone."
 )
+# The sentence for a block that lists contradictions and also says none
+# stands: the contradictions are read, the "none" line is not.
+CONTRADICTIONS_BLOCK_MIXED_NOTE = (
+    "The mediator's final CONTRADICTIONS: block listed contradictions and also said none "
+    "stands; the contradictions it listed were read and the line saying none was not."
+)
 
 
 def analysts_with_claims(names: Iterable[str], isr_reports: Mapping[str, Any] | None) -> list[str]:

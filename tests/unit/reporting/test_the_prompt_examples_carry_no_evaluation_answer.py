@@ -95,7 +95,11 @@ from maljan.extractors.capability_matrix import (
 )
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.pipeline import triage_pack
-from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MISSING_NOTE, MediatorVerdict
+from maljan.pipeline.mediation_models import (
+    CONTRADICTIONS_BLOCK_MISSING_NOTE,
+    CONTRADICTIONS_BLOCK_MIXED_NOTE,
+    MediatorVerdict,
+)
 from maljan.pipeline.nodes import (
     NO_SANDBOX_DATA_REASON,
     NO_STATIC_FIXTURE_NOTE,
@@ -448,7 +452,12 @@ PROMPTS: dict[str, str] = {
         [CONTRADICTION_DEFINITION, CONTRADICTIONS_BLOCK_RULE, CONTRADICTIONS_BLOCK_QUESTION]
     ),
     "mediator system turn, its closing line and the missing-block note": " ".join(
-        [MEDIATOR_SYSTEM_HEAD, MEDIATOR_HUMAN_CLOSING, CONTRADICTIONS_BLOCK_MISSING_NOTE]
+        [
+            MEDIATOR_SYSTEM_HEAD,
+            MEDIATOR_HUMAN_CLOSING,
+            CONTRADICTIONS_BLOCK_MISSING_NOTE,
+            CONTRADICTIONS_BLOCK_MIXED_NOTE,
+        ]
     ),
     "a chunk still cut after its question": chunk_cut_unread_sentence("chunk 1 of 2"),
     "mediator structured extraction and its schema": " ".join(

@@ -80,6 +80,7 @@ from maljan.memory.long_term_memory import a_past_case_technique
 from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
+    CONTRADICTIONS_BLOCK_MIXED_NOTE,
     MediatorVerdict,
     analysts_with_claims,
     consensus_applies,
@@ -525,13 +526,18 @@ _CONTRADICTIONS_LINE_RE = re.compile(r"^[\s#>*_`]*CONTRADICTIONS[\s*_`]*:[\s*_`]
 _LIST_MARKER_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
 # The agreement line that closes the block.
 _AGREEMENT_LINE_RE = re.compile(r"^[\s#>*_`]*(?:agreement_)?confidence\b", re.IGNORECASE)
-# "None stands", however the model spelled it: ``NONE``, ``(none)``, ``N/A``,
-# "No contradictions stand.", and ``NONE`` or ``N/A`` followed by more words.
+# "None stands", as a whole line from a closed vocabulary: ``NONE``, ``(none)``,
+# ``N/A``, "No contradictions", each optionally followed by "still standing",
+# "stands", "remain(s)" or "remaining", and punctuation. A line that says more,
+# such as "None of the analysts …" or "No contradiction on C2, but …", is not
+# one of these: it is a contradiction.
 _NONE_RE = re.compile(
-    r"^[\s*_`(]*(?:none\b|n/a\b|no\s+contradictions?\b).*$",
+    r"^[\s*_`(]*(?:none|n/?a|no\s+contradictions?)"
+    r"(?:\s+(?:still\s+)?(?:stand(?:s|ing)?|remain(?:s|ing)?))?[\s*_`).!]*$",
     re.IGNORECASE,
 )
-
+# A line that sums the block up rather than stating a contradiction.
+_SUMMARY_LINE_RE = re.compile(r"^[\s*_`]*(?:summary|in summary|overall|in total)\b", re.I)
 
 _TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*$")
 
@@ -545,8 +551,21 @@ def _table_border_or_header(lines: list[str], index: int) -> bool:
     return line.lstrip().startswith("|") and bool(_TABLE_SEPARATOR_RE.match(following))
 
 
-def final_contradictions(text: str) -> list[str] | None:
-    """The contradictions the answer's last ``CONTRADICTIONS:`` block lists, or ``None``.
+class ContradictionsBlock(NamedTuple):
+    """How the answer's last ``CONTRADICTIONS:`` block reads.
+
+    ``items`` is ``None`` for no block, or a block that holds only table rows
+    and cannot be read either way. ``mixed`` is a block that lists
+    contradictions and also says none stands: the contradictions are kept and
+    the "none" line is not read, and the run's record says so.
+    """
+
+    items: list[str] | None
+    mixed: bool = False
+
+
+def read_contradictions_block(text: str) -> ContradictionsBlock:
+    """The answer's last ``CONTRADICTIONS:`` block, read (:class:`ContradictionsBlock`).
 
     Only the last block counts: one drafted earlier and then argued away is not
     the mediator's word. The label is matched in capitals, as the prompt spells
@@ -554,11 +573,12 @@ def final_contradictions(text: str) -> list[str] | None:
     taken for it. The block runs to the agreement line, the end of the answer,
     or a blank line followed by a line that is not a list line.
 
-    One contradiction per bullet or numbered line, and nothing else is one: a
-    table's rows, a summary line and a wrapped continuation are not. A "none"
-    in any of its spellings (:data:`_NONE_RE`), or a block with nothing in it,
-    is an empty list. ``None`` is no block, or a block that holds text and no
-    list line, which cannot be read either way and is asked about again.
+    Each line is one contradiction, bulleted, numbered or plain, the text on
+    the label line included; an indented line under an item continues it. A
+    table's border and header rows and a summary line are not contradictions.
+    A "none" (:data:`_NONE_RE`) empties the block only as its whole content;
+    beside contradictions it is not read and the block is ``mixed``. A block
+    with nothing in it is empty; one with only table rows is unreadable.
     """
     lines = (text or "").splitlines()
     start = None
@@ -567,14 +587,17 @@ def final_contradictions(text: str) -> list[str] | None:
             start = index
             break
     if start is None:
-        return None
+        return ContradictionsBlock(None)
     match = _CONTRADICTIONS_LINE_RE.match(lines[start])
     rest = (match.group(1) if match else "").strip()
-    if rest and _NONE_RE.match(rest):
-        return []
     found: list[str] = []
     said_none = False
-    unread = bool(rest)
+    table_rows = False
+    if rest:
+        if _NONE_RE.match(rest):
+            said_none = True
+        else:
+            found.append(rest.strip("*_`").strip())
     after_blank = False
     for index in range(start + 1, len(lines)):
         line = lines[index]
@@ -587,11 +610,18 @@ def final_contradictions(text: str) -> list[str] | None:
         if after_blank and not listed:
             break
         after_blank = False
+        stripped = line.strip()
         if not listed:
-            if _NONE_RE.match(line.strip()):
+            if _NONE_RE.match(stripped):
                 said_none = True
-            elif not _table_border_or_header(lines, index):
-                unread = True
+            elif stripped.startswith("|"):
+                table_rows = table_rows or not _table_border_or_header(lines, index)
+            elif _table_border_or_header(lines, index) or _SUMMARY_LINE_RE.match(stripped):
+                continue
+            elif line[:1].isspace() and found:
+                found[-1] = f"{found[-1]} {stripped}"
+            else:
+                found.append(stripped.strip("*_`").strip())
             continue
         item = line[listed.end() :].strip().strip("*_`").strip()
         if not item:
@@ -601,10 +631,15 @@ def final_contradictions(text: str) -> list[str] | None:
             continue
         found.append(item)
     if found:
-        return found
-    if said_none or not unread:
-        return []
-    return None
+        return ContradictionsBlock(found, mixed=said_none)
+    if table_rows and not said_none:
+        return ContradictionsBlock(None)
+    return ContradictionsBlock([])
+
+
+def final_contradictions(text: str) -> list[str] | None:
+    """The contradictions the answer's last block lists, or ``None`` (``read_contradictions_block``)."""
+    return read_contradictions_block(text).items
 
 
 # The notice a judge prompt carries when its parts did not fit the judge's
@@ -2444,7 +2479,13 @@ class JudgeAgent(BudgetMeter):
             finding=finding,
             confidence_score=verdict.confidence,
             contradictions=list(verdict.contradictions),
-            note=CONTRADICTIONS_BLOCK_MISSING_NOTE if block_missing else "",
+            note=(
+                CONTRADICTIONS_BLOCK_MISSING_NOTE
+                if block_missing
+                else CONTRADICTIONS_BLOCK_MIXED_NOTE
+                if read_contradictions_block(reasoning_text).mixed
+                else ""
+            ),
         )
         return argument, is_consensus
 

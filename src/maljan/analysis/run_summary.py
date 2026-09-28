@@ -34,7 +34,10 @@ from maljan.analysis.corroboration import (
     published_count,
     technique_label,
 )
-from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MISSING_NOTE
+from maljan.pipeline.mediation_models import (
+    CONTRADICTIONS_BLOCK_MISSING_NOTE,
+    CONTRADICTIONS_BLOCK_MIXED_NOTE,
+)
 
 # ---------------------------------------------------------------------------
 # Sub-components
@@ -85,7 +88,8 @@ class NegotiationMetrics:
     # it replaced (``nodes.revision_replacement_sentence``).
     revision_replacements: list[str] = field(default_factory=list)
     # The platform's sentences about the mediation rounds, once each: a
-    # mediation that gave no final ``CONTRADICTIONS:`` block when asked.
+    # mediation that gave no final ``CONTRADICTIONS:`` block when asked, and one
+    # whose block listed contradictions and also said none stands.
     mediation_notes: list[str] = field(default_factory=list)
 
     @property
@@ -1772,10 +1776,11 @@ class RunSummaryBuilder:
             ],
             mediation_notes=list(
                 dict.fromkeys(
-                    CONTRADICTIONS_BLOCK_MISSING_NOTE
+                    str(getattr(arg, "note", ""))
                     for arg in discussion_history
                     if getattr(arg, "agent_name", "") == "Mediator"
-                    and getattr(arg, "note", "") == CONTRADICTIONS_BLOCK_MISSING_NOTE
+                    and getattr(arg, "note", "")
+                    in (CONTRADICTIONS_BLOCK_MISSING_NOTE, CONTRADICTIONS_BLOCK_MIXED_NOTE)
                 )
             ),
         )

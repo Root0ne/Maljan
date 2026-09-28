@@ -614,3 +614,45 @@ class TestTheJudgeHasOneCapReader:
         judge = JudgeAgent(llm=MagicMock())
         assert judge.output_cap_tokens() == int(judge_output_cap().tokens or 0)
         assert judge.output_cap_tokens() == int(judge._output_cap().tokens or 0)
+
+
+class TestTheBlockAsTheMediatorWroteIt:
+    def test_plain_lines_are_contradictions_and_not_consensus(self) -> None:
+        model = _ScriptedModel(
+            "CONTRADICTIONS:\n"
+            "reverser: drops a library — ev_0015 records 0 dropped files\n"
+            "static: x — dynamic: y\n"
+            "agreement_confidence: 1.0"
+        )
+        argument, is_consensus = _mediate_with(model)
+
+        assert is_consensus is False
+        assert len(argument.contradictions) == 2
+        assert len(model.sent) == 1
+
+    def test_a_none_of_bullet_alone_is_not_consensus(self) -> None:
+        model = _ScriptedModel(
+            "CONTRADICTIONS:\n- None of the analysts cites ev_0015, which records 0 dropped "
+            "files\nagreement_confidence: 1.0"
+        )
+        _argument, is_consensus = _mediate_with(model)
+
+        assert is_consensus is False
+
+    def test_a_mixed_block_keeps_its_items_and_says_so(self) -> None:
+        from maljan.analysis.run_summary import RunSummaryBuilder
+        from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MIXED_NOTE
+
+        model = _ScriptedModel(
+            "CONTRADICTIONS:\n- static: x — dynamic: y\nNONE\nagreement_confidence: 1.0"
+        )
+        argument, is_consensus = _mediate_with(model)
+
+        assert is_consensus is False
+        assert argument.note == CONTRADICTIONS_BLOCK_MIXED_NOTE
+        summary = RunSummaryBuilder(start_time=0.0).set_negotiation(
+            {"iteration_count": 1, "discussion_history": [argument]}, max_iterations=3
+        )
+        assert summary.build().to_dict()["negotiation"]["mediation_notes"] == [
+            CONTRADICTIONS_BLOCK_MIXED_NOTE
+        ]

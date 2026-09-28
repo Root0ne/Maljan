@@ -224,7 +224,7 @@ class TestOnlyTheFinalContradictionsBlockIsCounted:
 
 
 class TestTheBlockIsReadForWhatItSays:
-    """A spelling of "none" is no contradiction, and only a list line is one."""
+    """A "none" empties the block only as its whole content; every other line is a contradiction."""
 
     @pytest.mark.parametrize(
         "rest",
@@ -236,7 +236,7 @@ class TestTheBlockIsReadForWhatItSays:
             "N/A",
             "n/a",
             "NONE still standing.",
-            "None remain after review.",
+            "None remain.",
             "No contradictions stand.",
             "no contradiction remains",
         ],
@@ -255,6 +255,61 @@ class TestTheBlockIsReadForWhatItSays:
 
         text = f"CONTRADICTIONS:\n{line}\nagreement_confidence: 0.9"
         assert final_contradictions(text) == []
+
+    LEDGER = (
+        "None of the analysts cites ev_0015, which records 0 dropped files, against "
+        "the reverser's dropped DLL"
+    )
+
+    def test_a_bullet_that_opens_with_none_of_is_a_contradiction(self) -> None:
+        from maljan.agents.judge_agent import final_contradictions
+
+        text = f"CONTRADICTIONS:\n- {self.LEDGER}\nagreement_confidence: 1.0"
+        assert final_contradictions(text) == [self.LEDGER]
+
+    def test_it_is_kept_beside_another_item(self) -> None:
+        from maljan.agents.judge_agent import final_contradictions
+
+        text = (
+            f"CONTRADICTIONS:\n- {self.LEDGER}\n- static: x — dynamic: y\nagreement_confidence: 0.8"
+        )
+        assert final_contradictions(text) == [self.LEDGER, "static: x — dynamic: y"]
+
+    def test_a_label_line_that_opens_with_none_of_is_a_contradiction(self) -> None:
+        from maljan.agents.judge_agent import final_contradictions
+
+        text = "CONTRADICTIONS: None of the analysts agree on the packer\nagreement_confidence: 1"
+        assert final_contradictions(text) == ["None of the analysts agree on the packer"]
+
+    def test_no_contradiction_on_one_thing_but_another_is_a_contradiction(self) -> None:
+        from maljan.agents.judge_agent import final_contradictions
+
+        line = "No contradiction on C2, but the reverser's DLL claim contradicts ev_0015"
+        text = f"CONTRADICTIONS:\n- {line}\nagreement_confidence: 1.0"
+        assert final_contradictions(text) == [line]
+
+    def test_a_none_beside_items_is_ignored_and_the_block_said_to_be_mixed(self) -> None:
+        from maljan.agents.judge_agent import final_contradictions, read_contradictions_block
+
+        text = "CONTRADICTIONS:\n- static: x — dynamic: y\nNONE\nagreement_confidence: 0.7"
+        assert final_contradictions(text) == ["static: x — dynamic: y"]
+        reading = read_contradictions_block(text)
+        assert reading.mixed is True
+        assert read_contradictions_block("CONTRADICTIONS: NONE").mixed is False
+
+    def test_plain_lines_one_per_contradiction_are_items(self) -> None:
+        from maljan.agents.judge_agent import final_contradictions
+
+        text = (
+            "CONTRADICTIONS:\n"
+            "reverser: drops a library — ev_0015 records 0 dropped files\n"
+            "static: x — dynamic: y\n"
+            "agreement_confidence: 1.0"
+        )
+        assert final_contradictions(text) == [
+            "reverser: drops a library — ev_0015 records 0 dropped files",
+            "static: x — dynamic: y",
+        ]
 
     def test_table_borders_and_headers_are_not_contradictions(self) -> None:
         from maljan.agents.judge_agent import final_contradictions
@@ -291,7 +346,7 @@ class TestTheBlockIsReadForWhatItSays:
         )
         assert final_contradictions(text) == ["static: x — dynamic: y"]
 
-    def test_one_contradiction_per_bullet_or_numbered_line(self) -> None:
+    def test_a_wrapped_line_continues_its_item(self) -> None:
         from maljan.agents.judge_agent import final_contradictions
 
         text = (
@@ -303,7 +358,7 @@ class TestTheBlockIsReadForWhatItSays:
             "agreement_confidence: 0.3"
         )
         assert final_contradictions(text) == [
-            "static: x — dynamic: y",
+            "static: x — dynamic: y which dynamic did not observe",
             "network: z — ev_0012",
             "triage: w — static: v",
         ]
@@ -311,25 +366,8 @@ class TestTheBlockIsReadForWhatItSays:
     def test_the_block_ends_at_a_blank_line_followed_by_prose(self) -> None:
         from maljan.agents.judge_agent import final_contradictions
 
-        text = (
-            "CONTRADICTIONS:\n"
-            "- static: x — dynamic: y\n"
-            "\n"
-            "- a later note that is prose after all\n"
-            "Overall the analysts mostly agree.\n"
-        )
-        assert final_contradictions(text) == [
-            "static: x — dynamic: y",
-            "a later note that is prose after all",
-        ]
         text = "CONTRADICTIONS:\n- static: x — dynamic: y\n\nThen prose.\n- not in the block"
         assert final_contradictions(text) == ["static: x — dynamic: y"]
-
-    def test_prose_on_the_label_line_with_no_list_is_asked_for(self) -> None:
-        from maljan.agents.judge_agent import final_contradictions
-
-        text = "CONTRADICTIONS: static and dynamic disagree on x.\nagreement_confidence: 0.5"
-        assert final_contradictions(text) is None
 
     def test_an_empty_block_is_empty(self) -> None:
         from maljan.agents.judge_agent import final_contradictions
