@@ -8,7 +8,7 @@ All tests use a mocked LLM to avoid real API calls.
 """
 
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -554,3 +554,63 @@ class TestAMediationThatListsContradictionsIsNotConsensus:
         assert CONTRADICTIONS_BLOCK_RULE in system
         assert CONTRADICTION_DEFINITION in system
         assert "ledger entry" in CONTRADICTION_DEFINITION
+
+
+class TestTheMediatorsOwnBlockWinsOverTheExtractor:
+    """The extractor transcribes; the mediator's final block is its word."""
+
+    def test_an_extractor_that_drops_the_block_s_items_is_not_consensus(self) -> None:
+        model = _ScriptedModel(
+            TestAMediationThatListsContradictionsIsNotConsensus.RUN_SHAPE,
+            structured=MediatorVerdict(contradictions=[], resolution_summary="s", confidence=1.0),
+        )
+        argument, is_consensus = _mediate_with(model, structured=True)
+
+        assert is_consensus is False
+        assert "ev_0012 holds no such flow" in argument.finding
+
+    def test_an_extractor_that_copies_drafts_over_a_none_block_is_consensus(self) -> None:
+        model = _ScriptedModel(
+            "- drafted: x — y\nwithdrawn.\nCONTRADICTIONS: NONE\nagreement_confidence: 1.0",
+            structured=MediatorVerdict(
+                contradictions=["drafted: x — y"], resolution_summary="s", confidence=1.0
+            ),
+        )
+        argument, is_consensus = _mediate_with(model, structured=True)
+
+        assert is_consensus is True
+        assert "Contradictions: None" in argument.finding
+
+
+class TestTheBlockQuestionSurvivesADroppedConnection:
+    def test_a_connection_error_is_retried_rather_than_read_as_no_block(self) -> None:
+        import openai
+
+        class _Flaky(_ScriptedModel):
+            dropped = False
+
+            async def ainvoke(self, messages, **kw):
+                if len(self.sent) == 1 and not self.dropped:
+                    self.dropped = True
+                    raise openai.APIConnectionError(request=MagicMock())
+                return await super().ainvoke(messages, **kw)
+
+        model = _Flaky(
+            "All aligned.\nagreement_confidence: 1.0",
+            "CONTRADICTIONS:\n- static: x — ev_0004\nagreement_confidence: 0.9",
+        )
+        with patch("maljan.agents.base_agent.asyncio.sleep", AsyncMock(return_value=None)):
+            argument, is_consensus = _mediate_with(model)
+
+        assert model.dropped is True
+        assert is_consensus is False
+        assert argument.note == ""
+
+
+class TestTheJudgeHasOneCapReader:
+    def test_the_usage_check_and_the_judge_read_the_same_cap(self) -> None:
+        from maljan.agents.judge_agent import judge_output_cap
+
+        judge = JudgeAgent(llm=MagicMock())
+        assert judge.output_cap_tokens() == int(judge_output_cap().tokens or 0)
+        assert judge.output_cap_tokens() == int(judge._output_cap().tokens or 0)

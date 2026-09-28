@@ -487,22 +487,44 @@ MEDIATION_EXTRACTION_SYSTEM = (
 # The block's opening line: the label in capitals, with any Markdown emphasis
 # or heading marks a model puts around it, and what follows on the same line.
 _CONTRADICTIONS_LINE_RE = re.compile(r"^[\s#>*_`]*CONTRADICTIONS[\s*_`]*:[\s*_`]*(.*)$")
-# A block line's list marker: a bullet or a number.
-_LIST_MARKER_RE = re.compile(r"^\s*(?:[-*•]+|\d+[.)])\s*")
+# A block line's list marker: a bullet or a number, then a space.
+_LIST_MARKER_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
 # The agreement line that closes the block.
 _AGREEMENT_LINE_RE = re.compile(r"^[\s#>*_`]*(?:agreement_)?confidence\b", re.IGNORECASE)
-# ``NONE``, however the model dressed it.
-_NONE_RE = re.compile(r"^[\s*_`]*none[\s*_`.]*$", re.IGNORECASE)
+# "None stands", however the model spelled it: ``NONE``, ``(none)``, ``N/A``,
+# "No contradictions stand.", and ``NONE`` or ``N/A`` followed by more words.
+_NONE_RE = re.compile(
+    r"^[\s*_`(]*(?:none\b|n/a\b|no\s+contradictions?\b).*$",
+    re.IGNORECASE,
+)
+
+
+_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*$")
+
+
+def _table_border_or_header(lines: list[str], index: int) -> bool:
+    """Whether a line is a Markdown table's separator row, or the header row above one."""
+    line = lines[index]
+    if _TABLE_SEPARATOR_RE.match(line):
+        return True
+    following = lines[index + 1] if index + 1 < len(lines) else ""
+    return line.lstrip().startswith("|") and bool(_TABLE_SEPARATOR_RE.match(following))
 
 
 def final_contradictions(text: str) -> list[str] | None:
-    """The lines of the answer's last ``CONTRADICTIONS:`` block, or ``None`` with no block.
+    """The contradictions the answer's last ``CONTRADICTIONS:`` block lists, or ``None``.
 
     Only the last block counts: one drafted earlier and then argued away is not
-    the mediator's word. The block runs to the agreement line or the end of the
-    answer; ``CONTRADICTIONS: NONE`` is an empty list. The label is matched in
-    capitals, as the prompt spells it, so a prose heading such as
-    "Contradictions:" in the reasoning is not taken for it.
+    the mediator's word. The label is matched in capitals, as the prompt spells
+    it, so a prose heading such as "Contradictions:" in the reasoning is not
+    taken for it. The block runs to the agreement line, the end of the answer,
+    or a blank line followed by a line that is not a list line.
+
+    One contradiction per bullet or numbered line, and nothing else is one: a
+    table's rows, a summary line and a wrapped continuation are not. A "none"
+    in any of its spellings (:data:`_NONE_RE`), or a block with nothing in it,
+    is an empty list. ``None`` is no block, or a block that holds text and no
+    list line, which cannot be read either way and is asked about again.
     """
     lines = (text or "").splitlines()
     start = None
@@ -514,16 +536,41 @@ def final_contradictions(text: str) -> list[str] | None:
         return None
     match = _CONTRADICTIONS_LINE_RE.match(lines[start])
     rest = (match.group(1) if match else "").strip()
-    if _NONE_RE.match(rest):
+    if rest and _NONE_RE.match(rest):
         return []
     found: list[str] = []
-    for line in [rest, *lines[start + 1 :]]:
+    said_none = False
+    unread = bool(rest)
+    after_blank = False
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
         if _AGREEMENT_LINE_RE.match(line):
             break
-        item = _LIST_MARKER_RE.sub("", line).strip().strip("*_`").strip()
-        if item and not _NONE_RE.match(item):
-            found.append(item)
-    return found
+        if not line.strip():
+            after_blank = True
+            continue
+        listed = _LIST_MARKER_RE.match(line)
+        if after_blank and not listed:
+            break
+        after_blank = False
+        if not listed:
+            if _NONE_RE.match(line.strip()):
+                said_none = True
+            elif not _table_border_or_header(lines, index):
+                unread = True
+            continue
+        item = line[listed.end() :].strip().strip("*_`").strip()
+        if not item:
+            continue
+        if _NONE_RE.match(item):
+            said_none = True
+            continue
+        found.append(item)
+    if found:
+        return found
+    if said_none or not unread:
+        return []
+    return None
 
 
 # The notice a judge prompt carries when its parts did not fit the judge's
@@ -1376,7 +1423,18 @@ class JudgeAgent(BudgetMeter):
         """
         from maljan.llm.context_window import built_output_cap
 
-        return built_output_cap(self.llm) or judge_output_cap()
+        built = built_output_cap(self.llm)
+        if built is not None:
+            return built
+        self.logger.debug(
+            "output cap: the judge's %s carries no built cap; derived from settings.",
+            type(self.llm).__name__,
+        )
+        return judge_output_cap()
+
+    def output_cap_tokens(self) -> int:
+        """The judge's cap in tokens, from the one reader the judge has (``_output_cap``)."""
+        return int(self._output_cap().tokens or 0)
 
     def _spend_admits(
         self,
@@ -2339,6 +2397,18 @@ class JudgeAgent(BudgetMeter):
             if reasoning_text.strip()
             else self._fallback_mediate(reasoning_text)
         )
+        # The mediator's own final block is its word on what still stands; a
+        # structured extraction is a second model's transcription of it, and
+        # where the two differ the block is what is read.
+        stated = final_contradictions(reasoning_text)
+        if stated is not None and list(verdict.contradictions) != stated:
+            self.logger.info(
+                "Mediator: the extraction listed %d contradiction(s) and the mediator's final "
+                "block %d; the block is read.",
+                len(verdict.contradictions),
+                len(stated),
+            )
+            verdict = verdict.model_copy(update={"contradictions": stated})
 
         # A contradiction still standing is not consensus, whatever number the
         # mediator wrote; the number is kept and shown beside the list.
@@ -2401,8 +2471,20 @@ class JudgeAgent(BudgetMeter):
             return reasoning_text
         held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
         try:
-            response = await asyncio.wait_for(self.llm.ainvoke(turns, **held), timeout)
+            # Retried on a dropped connection as the fast path is: a socket that
+            # closed is not an answer that left the block out.
+            response = await asyncio.wait_for(
+                retry_on_connection_error(
+                    lambda: self.llm.ainvoke(turns, **held),
+                    what="Mediator block question",
+                    log=self.logger,
+                ),
+                timeout,
+            )
             self._record_usage(response, call="mediation block question")
+            record_judge_response(
+                getattr(self, "truncation_ledger", None), response, cap=self._output_cap().tokens
+            )
         except Exception as exc:  # noqa: BLE001 — an unanswered question leaves the answer as it was
             self.logger.warning("Mediator block question failed (%s).", type(exc).__name__)
             return reasoning_text
