@@ -1393,7 +1393,13 @@ in force the question was never put to (a nudged answer, a validation turn not
 asked for want of time, a path with no validation turn) is stated as a
 degradation reason apart from `claims_unread_reason` ("wrote N claim
 heading(s) under its DISPUTES section, which are not read as its own"). The
-code does not read the label's words to decide which they are. A TECHNIQUE line is one
+code does not read the label's words to decide which they are. Both sentences
+are informational while the analyst still has claims read
+(`nodes.informational_reasons_in_force`): they are listed in §13 with the
+other limitations and counted in the header's "Notes: … see §13" line, and
+they do not set `degraded_mode` (`triage_pack.run_is_degraded(reasons,
+informational=…)`). An answer none of whose claims was read, a failed stage
+and a failed required tool still degrade the run. A TECHNIQUE line is one
 id, or `NONE` or a dash for none; any other line (a qualifier, a negation,
 several ids) claims no id, is kept on the claim as `technique_line`, and the
 validation turn asks once for one id per claim (`isr.technique_line_unread`).

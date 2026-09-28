@@ -840,6 +840,20 @@ class TestWhichPackFailuresDegradeTheRun:
         assert run_is_degraded(["triage.capa_failed", "analyst failures: static"]) is True
         assert run_is_degraded([]) is False
 
+    def test_an_informational_reason_does_not_degrade_the_run(self) -> None:
+        from maljan.pipeline.triage_pack import run_is_degraded
+
+        note = (
+            "The triage analyst's answer began 3 claim(s), and 2 were read; 1 could not be "
+            "read as a claim and are not in its findings."
+        )
+        assert run_is_degraded([note]) is True
+        assert run_is_degraded([note], informational=[note]) is False
+        assert run_is_degraded([note, "triage.capa_failed"], informational=[note]) is False
+        # What still degrades is not made informational by being listed beside one.
+        assert run_is_degraded([note, "analyst failures: static"], informational=[note]) is True
+        assert run_is_degraded([note, "triage.hashes_failed"], informational=[note]) is True
+
 
 class TestADegradedAnswerIsAnAnswer:
     """A tool that answered less than it wanted to still answered.

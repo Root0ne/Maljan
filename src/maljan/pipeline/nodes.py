@@ -1948,6 +1948,27 @@ def claims_under_disputes_unasked(isr_reports: Mapping[str, Any]) -> list[str]:
     return out
 
 
+def informational_reasons_in_force(isr_reports: Mapping[str, Any]) -> list[str]:
+    """The reasons of the answers in force that are notes rather than a degraded run.
+
+    An answer part of which could not be read, while the analyst still has
+    claims read, is its answer with a note: the claims read stand. Headings
+    under a DISPUTES section the analyst was never asked about are a note on
+    the same footing. Both stay in the run's limitations; neither makes the
+    verdict tentative. An answer none of whose claims were read is not here,
+    and still degrades the run.
+    """
+    out: list[str] = []
+    for isr in isr_reports.values():
+        reason = str(getattr(isr, "claims_unread_reason", "") or "")
+        if reason and getattr(isr, "claims", None) and reason not in out:
+            out.append(reason)
+    for sentence in claims_under_disputes_unasked(isr_reports):
+        if sentence not in out:
+            out.append(sentence)
+    return out
+
+
 def label_of(container: ServiceContainer, key: str) -> str:
     """The label an operator gave this agent, or its key. Never raises."""
     try:
@@ -4070,7 +4091,12 @@ def make_judge_node(
             # about; only the identity tools, or the pack itself, failing makes
             # the run degraded on their own. Everything that is not the pack's
             # keeps the weight it always had.
-            _degraded_mode = run_is_degraded(_degradation_reasons)
+            # A note on part of an answer whose other claims were read is
+            # listed with the reasons and does not make the verdict tentative.
+            _informational: list[str] = []
+            with suppress(Exception):
+                _informational = informational_reasons_in_force(isr_reports)
+            _degraded_mode = run_is_degraded(_degradation_reasons, informational=_informational)
             if _degraded_mode:
                 logger.warning("Degraded run detected (%s).", "; ".join(_degradation_reasons))
 

@@ -303,17 +303,23 @@ def is_unavailable_tool_reason(reason: str) -> bool:
     return bool(_UNAVAILABLE_RE.match(str(reason or "")))
 
 
-def run_is_degraded(reasons: Sequence[str]) -> bool:
+def run_is_degraded(reasons: Sequence[str], informational: Sequence[str] = ()) -> bool:
     """Whether a run's degradation reasons make it degraded.
 
     Every reason that is not the pack's keeps the weight it always had; a
     pack reason counts only for an essential tool or the pack itself. A capa
     that ran out of budget is an absence the judge is told about, not a
     degraded run.
+
+    ``informational`` names the reasons that describe part of an answer while
+    the rest of it was read: they are the run's limitations and are listed
+    with the others, but they do not make the verdict tentative.
     """
+    noted = {str(reason) for reason in informational or ()}
     return any(
         degrades_run(reason) if is_pack_reason(reason) else not is_unavailable_tool_reason(reason)
         for reason in reasons or []
+        if str(reason) not in noted
     )
 
 
