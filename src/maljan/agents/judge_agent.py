@@ -2940,6 +2940,9 @@ class JudgeAgent(BudgetMeter):
             stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
             # The cut answer is described, not repeated: see verdict_cut_violation.
             drop_answer_for=frozenset({VERDICT_CUT_CODE}),
+            # A kept indicator after the sandbox's fact is the judge's answer,
+            # and the conversation is told so before it is told the rest.
+            answered=lambda left, told: kept_after_the_sandbox_fact(not_asked(left, told)),
         )
         violations = kept_after_the_sandbox_fact(not_asked(violations, shown))
         _from_the_loop = list(violations)

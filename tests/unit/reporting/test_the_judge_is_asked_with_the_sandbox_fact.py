@@ -298,7 +298,9 @@ class TestTheVerdictAsksOnce:
         )
 
     @staticmethod
-    async def _verdict(*answers: str) -> tuple[Any, list[list[Any]]]:
+    async def _verdict(
+        *answers: str, published: list[tuple[str, Any]] | None = None
+    ) -> tuple[Any, list[list[Any]]]:
         from unittest.mock import MagicMock
 
         from maljan.agents.judge_agent import JudgeAgent
@@ -312,6 +314,12 @@ class TestTheVerdictAsksOnce:
                 return MagicMock(content=queue.pop(0))
 
         judge = JudgeAgent(llm=_Llm())  # type: ignore[arg-type]
+        if published is not None:
+            from types import SimpleNamespace
+
+            judge._container = SimpleNamespace(
+                event_sink=lambda kind, data: published.append((kind, data))
+            )
         verdict = await judge.give_verdict(
             reports={"static": "It reaches a relay."},
             history=[],
@@ -331,6 +339,20 @@ class TestTheVerdictAsksOnce:
         assert "a TLS name only the capture recorded" in feedback
         (row,) = [v for v in verdict.violations if v.code == UNATTRIBUTED_INDICATOR_CODE]
         assert (row.subject, row.answered, row.asked) == (f"domain:{TLS_ONLY}", True, True)
+
+    @pytest.mark.asyncio
+    async def test_the_conversation_shows_the_answered_question_as_resolved(self) -> None:
+        kept = self._answer(f"[domain-name:value = '{TLS_ONLY}']")
+        published: list[tuple[str, Any]] = []
+
+        await self._verdict(kept, kept, published=published)
+
+        states = [
+            data["state"]
+            for kind, data in published
+            if kind == "validation_feedback" and data["code"] == UNATTRIBUTED_INDICATOR_CODE
+        ]
+        assert states == ["retried", "resolved"]
 
     @pytest.mark.asyncio
     async def test_an_indicator_removed_after_the_question_leaves_no_row(self) -> None:

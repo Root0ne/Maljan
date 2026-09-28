@@ -6042,6 +6042,7 @@ async def retry_with_feedback[T](
     stage: str = "",
     drop_answer_for: frozenset[str] = frozenset(),
     can_retry: Callable[[list[Any]], bool] | None = None,
+    answered: Callable[[list[Violation], list[Violation]], list[Violation]] | None = None,
 ) -> tuple[T, list[Violation], int]:
     """Run, validate, and give the model one chance to fix what it got wrong.
 
@@ -6066,6 +6067,11 @@ async def retry_with_feedback[T](
     rather than following it, and ``can_retry`` is asked about the retry's
     whole conversation before it is sent: answered no, the loop ends there
     with what it has, and the caller records why.
+
+    ``answered`` maps what is left, given what the producer was shown, before
+    the conversation is told the outcome: a question the producer answered as
+    the question allows (``Violation.answered``) is published ``resolved``,
+    not ``survived``, and the mapped rows are what is returned.
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
@@ -6088,8 +6094,10 @@ async def retry_with_feedback[T](
             answer = await run(turns)
         parsed = parse(answer)
         violations = _collect(parsed, validators)
+    if answered is not None:
+        violations = answered(violations, shown)
     if feed is not None:
-        feed.outcome(shown, violations, retries)
+        feed.outcome(shown, [v for v in violations if not v.answered], retries)
     return parsed, violations, retries
 
 
@@ -6393,7 +6401,7 @@ def unattributed_indicator_violations(
                         "sample itself reached it, and cite that entry in the indicator's "
                         "description; otherwise remove the indicator."
                     ),
-                    path="objects",
+                    path=f"objects.{subject}",
                     subject=subject,
                 )
             )
@@ -6410,7 +6418,11 @@ def kept_after_the_sandbox_fact(violations: Sequence[Violation]) -> list[Violati
     """
     out: list[Violation] = []
     for violation in violations:
-        if violation.code == UNATTRIBUTED_INDICATOR_CODE and violation.asked:
+        if (
+            violation.code == UNATTRIBUTED_INDICATOR_CODE
+            and violation.asked
+            and not violation.answered
+        ):
             violation = replace(
                 violation,
                 message=(
