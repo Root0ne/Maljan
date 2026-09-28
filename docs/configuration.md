@@ -2044,6 +2044,16 @@ whatever its shape (`events.remember_secret_values`, filled from
 A secret the platform does not hold — one a sample carries, or one a tool
 answer quotes from elsewhere — of passphrase shape is the remaining cost.
 
+A Windows function name is a name, not a key, though a long one has the
+length rule's shape (`CreateToolhelp32Snapshot`, `RtlFormatCurrentUserKeyPath`).
+Two sets of names travel as written, alone or as `module!name`: every name the
+vendored export-name catalogue (`data/windows_export_names_v1.json`) holds, and
+every name this job's hash resolution (`resolve_api_hashes`, the pack's call or
+an analyst's) read, taken only when it is an identifier with both cases in it
+and forgotten when the next job installs its settings. A vendor prefix is still
+asked first, and a configured value is still masked by value before any rule is
+read, so neither set lets a credential through.
+
 Nothing is lost but the name in that sentence. The identity fields a line is
 filed under — `speaker`, `agent`, `stage`, `label`, `display_name` — are
 exempt by name in the publisher and travel whole, so the console still files

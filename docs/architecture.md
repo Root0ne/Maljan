@@ -2564,6 +2564,9 @@ and every string of every event — a message's text and its report, a
 correction, a cap's detail, a summary — is scrubbed once by the publisher, for
 all three sinks at once: anything shaped like a credential is replaced, a URL
 keeps its scheme and host only, and every path is cut to its file name. A
+Windows function name the vendored export-name catalogue holds, or one this
+job's hash resolution read, is a name and travels as written, as it does in the
+report (`docs/configuration.md`, "Long agent keys in the conversation"). A
 producer may scrub as well; the publisher is what makes it a guarantee rather
 than a habit, and the transcript's copy is scrubbed as it is taken, so a
 replayed run reads exactly as the live one did.

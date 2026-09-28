@@ -785,7 +785,98 @@ def _looks_like_a_credential(token: str) -> bool:
         return True
     if _MIME_TYPE.match(token) or _PATH_SHAPED.match(token) or _is_words(token):
         return False
+    if _is_api_name(token):
+        return False
     return bool(_CREDENTIAL_RUN.match(token)) or _is_a_token(token)
+
+
+# The Windows function names the scrub leaves as written. The length rule reads
+# ``CreateToolhelp32Snapshot`` as a key, and the live console and the stored
+# transcript printed ``***`` where the report printed the name. Two sources,
+# both exact: the vendored export-name catalogue (``api_hashes``' data file,
+# read once), and the names this job's hash resolution read
+# (``remember_resolved_names``), which the next job forgets. A vendor prefix is
+# asked before either, and a configured value is masked by value before any
+# rule is read, so neither exempts a credential.
+_EXPORT_NAMES_FILE = "data/windows_export_names_v1.json"
+_RESOLVED_NAMES: set[str] = set()
+# The catalogue's names, read on first use.
+_CATALOGUE: frozenset[str] | None = None
+# A resolved name is taken only in the shape a Windows function name has: an
+# identifier with both cases in it. An all-lowercase run is what several key
+# formats are, and no catalogue name past the length floor is written that way
+# except words joined by underscores, which the word rule already keeps.
+_API_NAME_SHAPE = re.compile(r"\A[A-Za-z_?@$][A-Za-z0-9_?@$]*\Z")
+
+
+def _catalogue_names() -> frozenset[str]:
+    """Every exported name the vendored catalogue holds; empty when it cannot be read."""
+    global _CATALOGUE
+    if _CATALOGUE is None:
+        try:
+            import json
+
+            from maljan.core.paths import resolve_data
+
+            document = json.loads(resolve_data(_EXPORT_NAMES_FILE).read_text(encoding="utf-8"))
+            _CATALOGUE = frozenset(
+                str(name)
+                for exported in (document.get("dlls") or {}).values()
+                for name in exported or []
+            )
+        except Exception as exc:  # noqa: BLE001 — the shape rules still run
+            logger.warning("The export-name catalogue was not read for the scrub (%s).", exc)
+            _CATALOGUE = frozenset()
+    return _CATALOGUE
+
+
+def _is_api_name(token: str) -> bool:
+    """Whether ``token`` is a Windows function name, alone or as ``module!name``."""
+    name = token
+    if "!" in token:
+        module, _, name = token.partition("!")
+        if not re.fullmatch(r"[A-Za-z0-9_.\-]+", module):
+            return False
+    return name in _RESOLVED_NAMES or name in _catalogue_names()
+
+
+def remember_resolved_names(answer: Any) -> None:
+    """Add the function names a ``resolve_api_hashes`` answer read to the names kept as written.
+
+    ``answer`` is the tool's answer as a dict or as its JSON text; every
+    reading under ``hits`` and ``lone_hits`` is taken whose name has the shape
+    a Windows function name has (``_API_NAME_SHAPE`` and both cases). Held for
+    the job, in this process, until ``forget_resolved_names``. Never raises.
+    """
+    try:
+        if isinstance(answer, str):
+            import json
+
+            answer = json.loads(answer)
+        if not isinstance(answer, dict):
+            return
+        for key in ("hits", "lone_hits"):
+            for hit in answer.get(key) or []:
+                for reading in (hit.get("readings") or []) if isinstance(hit, dict) else []:
+                    name = str(reading.get("name") or "") if isinstance(reading, dict) else ""
+                    if (
+                        _API_NAME_SHAPE.match(name)
+                        and any(c.islower() for c in name)
+                        and any(c.isupper() for c in name)
+                    ):
+                        _RESOLVED_NAMES.add(name)
+    except Exception as exc:  # noqa: BLE001 — the shape rules still run
+        logger.debug("A hash resolution's names were not handed to the scrub (%s).", exc)
+
+
+def forget_resolved_names() -> None:
+    """Clear the names a job's hash resolution read: the next job starts with none."""
+    _RESOLVED_NAMES.clear()
+
+
+def resolved_names_held() -> int:
+    """How many resolved names the scrub keeps as written for this job."""
+    return len(_RESOLVED_NAMES)
 
 
 def _is_words(run: str) -> bool:

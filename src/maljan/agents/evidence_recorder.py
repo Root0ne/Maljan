@@ -31,6 +31,7 @@ from maljan.pipeline.events import (
     EventSink,
     emit_tool_call_finished,
     emit_tool_call_started,
+    remember_resolved_names,
     summarize_args,
     summarize_result,
 )
@@ -301,6 +302,10 @@ class EvidenceRecorder:
             model=self.model or None,
         )
         self.entries.append(entry)
+        # The function names a hash resolution read are names, and the event
+        # and transcript scrub keeps them as written for the rest of the job.
+        if tool == "resolve_api_hashes" and entry.ok:
+            remember_resolved_names(output)
         # ``output``, the text the model was handed, and not ``entry.output``,
         # which the ledger has already trimmed and the byte budget may blank
         # to nothing. What the run saw is what a grounding check must search.

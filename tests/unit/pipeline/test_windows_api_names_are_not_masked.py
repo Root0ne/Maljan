@@ -1,0 +1,132 @@
+"""A Windows API name travels in events and the transcript as written.
+
+The scrub's length rule reads an unbroken run of 24 characters or more as a
+key, and a Windows function name is such a run: ``CreateToolhelp32Snapshot``
+reached the live console and the stored transcript as ``***`` while the
+report printed it whole. A name the vendored export-name catalogue holds, and
+a name this run's hash resolution read, are names and not keys. Nothing else
+changes: every credential shape is still masked, and a configured value is
+still masked by value whatever it spells.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterator
+
+import pytest
+
+from maljan.agents.evidence_recorder import EvidenceRecorder
+from maljan.pipeline import events as ev
+from tests.unit.pipeline.test_live_event_schema import _every_key_shape
+
+# A catalogue name past the length floor, and one only a run resolved: made
+# up, mixed case with a digit, so no word rule exempts it.
+CATALOGUE_NAME = "CreateToolhelp32Snapshot"
+RESOLVED_ONLY = "SyntheticResolvedExport32NameW"
+
+
+@pytest.fixture(autouse=True)
+def _clean() -> Iterator[None]:
+    ev.forget_resolved_names()
+    ev.forget_secret_values()
+    yield
+    ev.forget_resolved_names()
+    ev.forget_secret_values()
+
+
+def _resolution(*names: str) -> dict[str, object]:
+    return {
+        "hits": [
+            {
+                "value": "0x12345678",
+                "readings": [
+                    {"algorithm": "crc32", "set": "exports", "name": name, "dlls": ["x.dll"]}
+                    for name in names
+                ],
+            }
+        ],
+        "lone_hits": [
+            {"value": "0x9abcdef0", "readings": [{"set": "exports", "name": "LoneHitName"}]}
+        ],
+    }
+
+
+class TestTheCatalogue:
+    def test_a_long_catalogue_name_is_written_as_it_is(self) -> None:
+        assert len(CATALOGUE_NAME) >= 24
+        assert ev.scrub(f"calls {CATALOGUE_NAME} to list processes") == (
+            f"calls {CATALOGUE_NAME} to list processes"
+        )
+
+    def test_inside_json_and_with_its_module(self) -> None:
+        text = json.dumps({"api": CATALOGUE_NAME, "at": f"kernel32.dll!{CATALOGUE_NAME}"})
+        assert ev.scrub(text) == text
+
+    def test_a_name_the_catalogue_does_not_hold_is_still_read_by_shape(self) -> None:
+        assert ev.scrub(RESOLVED_ONLY) == "***"
+
+    def test_the_transcript_scrub_keeps_it_too(self) -> None:
+        text = f"Claim 8: enumerates processes with {CATALOGUE_NAME}\n  Evidence: [ev_0020]"
+        assert ev.scrub_keeping_layout(text) == text
+
+
+class TestTheNamesThisRunResolved:
+    def test_a_resolved_name_is_written_as_it_is(self) -> None:
+        ev.remember_resolved_names(_resolution(RESOLVED_ONLY))
+        assert ev.scrub(f"resolves {RESOLVED_ONLY}") == f"resolves {RESOLVED_ONLY}"
+
+    def test_the_answer_may_arrive_as_its_json_text(self) -> None:
+        ev.remember_resolved_names(json.dumps(_resolution(RESOLVED_ONLY)))
+        assert ev.scrub(RESOLVED_ONLY) == RESOLVED_ONLY
+
+    def test_forgotten_at_the_next_job(self) -> None:
+        ev.remember_resolved_names(_resolution(RESOLVED_ONLY))
+        ev.forget_resolved_names()
+        assert ev.scrub(RESOLVED_ONLY) == "***"
+
+    def test_the_recorder_hands_the_scrub_a_resolution_it_records(self) -> None:
+        recorder = EvidenceRecorder("static")
+        recorder.record(
+            tool="resolve_api_hashes",
+            args={"path": "s.exe"},
+            server=None,
+            output=json.dumps(_resolution(RESOLVED_ONLY)),
+        )
+        assert ev.scrub(RESOLVED_ONLY) == RESOLVED_ONLY
+
+    def test_another_tool_s_answer_registers_nothing(self) -> None:
+        recorder = EvidenceRecorder("static")
+        recorder.record(
+            tool="strings",
+            args={"path": "s.exe"},
+            server=None,
+            output=json.dumps(_resolution(RESOLVED_ONLY)),
+        )
+        assert ev.scrub(RESOLVED_ONLY) == "***"
+
+    def test_a_reading_that_is_no_identifier_is_not_taken(self) -> None:
+        ev.remember_resolved_names(_resolution("two words here and more past the floor"))
+        # The lone hit's name alone.
+        assert ev.resolved_names_held() == 1
+
+
+class TestNothingElseChanges:
+    def test_every_credential_shape_is_still_masked(self) -> None:
+        ev.remember_resolved_names(_resolution(RESOLVED_ONLY))
+        for shape in _every_key_shape():
+            assert shape not in ev.scrub(f"{CATALOGUE_NAME} {shape} {RESOLVED_ONLY}"), shape
+            assert CATALOGUE_NAME in ev.scrub(f"{CATALOGUE_NAME} {shape}")
+
+    def test_a_credential_shape_a_resolution_names_is_still_masked(self) -> None:
+        # Only a real identifier shape is taken, and a vendor prefix is a key
+        # whatever else reads it.
+        shapes = _every_key_shape()
+        ev.remember_resolved_names(_resolution(*shapes))
+        for shape in shapes:
+            assert shape not in ev.scrub(f"value {shape}"), shape
+
+    def test_a_configured_value_is_masked_by_value_whatever_it_spells(self) -> None:
+        ev.remember_secret_values([CATALOGUE_NAME], scope="job")
+        ev.remember_resolved_names(_resolution(CATALOGUE_NAME))
+        assert CATALOGUE_NAME not in ev.scrub(f"calls {CATALOGUE_NAME}")
