@@ -4130,6 +4130,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # the coroutine so a loop the hard cap stops still hands over the turns
         # it took: they were answered and spent.
         latest: dict = {"messages": list(messages)}
+        # The question asked when the model's first answer called no tool,
+        # once it is asked: what followed it is read after the loop.
+        tool_ask: dict[str, Any] = {}
 
         # Run the ReAct coroutine on the shared, never-closing agent
         # loop (see ``_get_agent_loop``) instead of a throwaway per-call loop.
@@ -4169,19 +4172,52 @@ class BaseAnalyst(BudgetMeter, ABC):
                 alive until the loop's finalizer gets to it, and on a box with
                 one llama-server slot a run that is still alive is not free.
                 """
-                nonlocal time_capped, time_detail, final_reserve, spend_capped
-                nonlocal call_deadline_hit, spend_refusal
-                stream: Any = agent_executor.astream(
-                    {"messages": messages},
-                    {"recursion_limit": recursion_limit(max_steps)},
-                    stream_mode="values",
-                )
                 spoken: set[str] = set()
                 pace = TurnPace(_rate_of_the_answering_model)
                 # Kept past the loop: what one turn and a final answer cost at
                 # this model's pace is what the stage asks before it gives
                 # this analyst a second loop.
                 self._last_pace = pace
+                # A replayed conversation starts without the question: it is
+                # asked again, if at all, of the replay's own answer.
+                tool_ask.clear()
+                start: list[Any] = list(messages)
+                while True:
+                    if not await _one_pass(start, spoken, pace) or tool_ask:
+                        return dict(latest)
+                    # The model answered. An analyst with tools whose first
+                    # answer called none is told so, with the tools it has,
+                    # and asked once in the same conversation; whatever it
+                    # answers next stands.
+                    conversation = list(latest.get("messages") or [])
+                    question = self._no_tool_call_question(
+                        conversation, budget, max_steps, recorded
+                    )
+                    if question is None:
+                        return dict(latest)
+                    tool_ask["question"] = question
+                    start = [*conversation, question]
+                    latest["messages"] = start
+
+            async def _one_pass(start: list[Any], spoken: set[str], pace: TurnPace) -> bool:
+                """One run of the graph from ``start``; whether the model ended it by answering.
+
+                ``False`` when a stop below ended it — the repeat guard, the
+                room, the spend ceiling, the clock, a call's deadline, the step
+                cap or a full window — and ``latest`` holds the conversation as
+                it stood.
+                """
+                nonlocal time_capped, time_detail, final_reserve, spend_capped
+                nonlocal call_deadline_hit, spend_refusal
+                # What the steps have left after the turns ``start`` already
+                # spent; the first pass has spent none.
+                steps = None if max_steps is None else max(1, max_steps - steps_used(start))
+                stream: Any = agent_executor.astream(
+                    {"messages": start},
+                    {"recursion_limit": recursion_limit(steps)},
+                    stream_mode="values",
+                )
+                finished = False
                 async with contextlib.aclosing(stream) as snapshots:
                     try:
                         async for snapshot in snapshots:
@@ -4252,6 +4288,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                                     time_detail,
                                 )
                                 break
+                        else:
+                            # The graph ran to its end: the model answered.
+                            finished = True
                     except ModelCallDeadline as exc:
                         # One model call ran past its whole-call deadline: a
                         # failed turn, not the loop's clock. The tool phase
@@ -4319,7 +4358,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                             self.name,
                             type(exc).__name__,
                         )
-                return dict(latest)
+                return finished
 
             last_conn_exc: Exception | None = None
             for _attempt in range(3):
@@ -4489,6 +4528,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         # is a non-empty list. Counting them is cheap and the most useful
         # single metric for "did this analyst overspend on Ghidra".
         tool_call_count = sum(len(getattr(m, "tool_calls", None) or []) for m in msgs)
+        # Every loop's calls count toward the analyst's own: an analyst that
+        # called a tool in any loop is not asked why it called none.
+        self._tool_calls_made = int(getattr(self, "_tool_calls_made", 0) or 0) + tool_call_count
+        asked_about_tools = self._what_followed_the_tool_question(msgs, tool_ask.get("question"))
         # The ReAct tool-loop's LLM calls happen INSIDE
         # langgraph's ``create_react_agent`` executor, so they never passed
         # through ``_invoke_llm_with_timeout`` where token usage is tallied.
@@ -4590,6 +4633,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             why = f"{why}; {note}" if why else note
             self.logger.warning("%s: %s.", self.name, note)
         self._record_budget(budget, msgs, cap, detail=why)
+        if asked_about_tools is not None:
+            self._note_on_last_loop("tool_ask", asked_about_tools)
         self._budget_tick(budget, msgs, final=True, ledger_entries=len(recorder.entries))
         # Counted above, where it cost a step; not sent back to a model, which
         # would read the graph's sentence as its own last turn.
@@ -4759,6 +4804,104 @@ class BaseAnalyst(BudgetMeter, ABC):
             enter(float(remaining), min(1.0, float(reserve) / float(remaining)))
         except Exception as exc:  # noqa: BLE001 — a deadline is never worth a turn
             self.logger.debug("final-turn deadline not set (%s).", exc)
+
+    def _no_tool_call_question(
+        self, conversation: list[Any], budget: LoopBudget, max_steps: int | None, tools: list[Any]
+    ) -> Any | None:
+        """The question for an analyst whose first answer called no tool, or ``None``.
+
+        Asked once per analyst, of its first answer only: not in a loop that
+        called a tool, not after any earlier loop of this analyst called one or
+        was asked, and not inside an ask another agent made of it. Held to the
+        final-answer question's checks: a turn left in the step budget, more
+        than a second left on the clock, and a spend ceiling that admits it.
+        Nothing is decided for the model: the question states the fact and
+        the tools it has, and the model answers it.
+        """
+        from langchain_core.messages import HumanMessage
+
+        from maljan.agents.prompt_fragments import no_tool_call_question
+
+        if getattr(self, "_asked_about_tools", False):
+            return None
+        if getattr(self, "_budget_ceiling", None) is not None:
+            return None
+        if int(getattr(self, "_tool_calls_made", 0) or 0) > 0:
+            return None
+        if any(getattr(message, "tool_calls", None) for message in conversation):
+            return None
+        last = conversation[-1] if conversation else None
+        if not is_model_turn(last) or not str(getattr(last, "content", "") or "").strip():
+            return None
+        names = [str(getattr(tool, "name", "") or "") for tool in tools or ()]
+        if not any(names):
+            return None
+        turns = model_turns_left(max_steps, conversation)
+        if turns is not None and turns < 1:
+            self.logger.info("%s: no step budget left to ask about its tools.", self.name)
+            return None
+        seconds = budget.seconds_left()
+        if seconds is not None and seconds <= 1.0:
+            self.logger.info("%s: no time budget left to ask about its tools.", self.name)
+            return None
+        question = HumanMessage(content=no_tool_call_question(names))
+        if self._spend_refuses("no-tool-call question", [*conversation, question]):
+            self.logger.info(
+                "%s: the spend ceiling leaves no room to ask about its tools.", self.name
+            )
+            return None
+        self.logger.warning(
+            "%s answered without calling any of its %d tool(s); asking once whether it "
+            "wants to call one before its answer stands.",
+            self.name,
+            len([name for name in names if name]),
+        )
+        return question
+
+    def _what_followed_the_tool_question(
+        self, messages: list[Any], question: Any
+    ) -> dict[str, Any] | None:
+        """What the model did after the no-tool-call question, for the loop's record.
+
+        ``tool_calls_after`` is the calls it made after the question, and
+        ``followed`` says what came of it: ``called_tools``,
+        ``answered_without_tools`` or ``no_answer``. ``None`` when the
+        question was not asked in this loop.
+        """
+        if question is None:
+            return None
+        self._asked_about_tools = True
+        text = str(getattr(question, "content", "") or "")
+        at = next(
+            (
+                index
+                for index in range(len(messages) - 1, -1, -1)
+                if messages[index] is question
+                or (
+                    getattr(messages[index], "type", "") == "human"
+                    and str(getattr(messages[index], "content", "") or "") == text
+                )
+            ),
+            None,
+        )
+        after = [] if at is None else list(messages[at + 1 :])
+        calls = sum(len(getattr(m, "tool_calls", None) or []) for m in after)
+        answered = bool(after) and (
+            is_model_turn(after[-1]) and bool(str(getattr(after[-1], "content", "") or "").strip())
+        )
+        if calls:
+            followed = "called_tools"
+        elif answered:
+            followed = "answered_without_tools"
+        else:
+            followed = "no_answer"
+        self.logger.info(
+            "%s: after the question about its tools it made %d tool call(s) (%s).",
+            self.name,
+            calls,
+            followed,
+        )
+        return {"tool_calls_after": calls, "followed": followed}
 
     def _settle_final_answer(
         self,

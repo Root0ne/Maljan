@@ -70,6 +70,7 @@ from maljan.agents.prompt_fragments import (
     ENDPOINTS_ROW_SHAPE,
     NO_TOOLS_STATEMENT,
     TOOL_FREE_TURN_STATEMENT,
+    no_tool_call_question,
     tools_statement,
 )
 from maljan.agents.prompts import (
@@ -1025,6 +1026,9 @@ PROMPTS: dict[str, str] = {
         "list_functions", "No file is currently open. Call open_file first."
     )["error"]["remediation"],
     "final-answer nudge": FINAL_ANSWER_NUDGE,
+    "question to an analyst whose first answer called no tool": no_tool_call_question(
+        ["lookup", "strings"]
+    ),
     "skipped-analyst degradation reason": skipped_analysts_reason(
         NO_SANDBOX_DATA_REASON, ["dynamic", "network"]
     ),

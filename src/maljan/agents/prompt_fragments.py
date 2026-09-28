@@ -354,6 +354,22 @@ def tool_names(tools: Sequence[object]) -> frozenset[str]:
     return frozenset(str(getattr(tool, "name", "")) for tool in offered(tools))
 
 
+def no_tool_call_question(names: Sequence[str]) -> str:
+    """The question an analyst is asked once when its first answer called no tool.
+
+    States the fact and the tools it has, by the names they are offered under,
+    and leaves the decision to the model: it may call any of them first, or
+    write its answer again, and whichever answer it writes next stands.
+    """
+    listed = ", ".join(sorted({str(name) for name in names if str(name)}))
+    return (
+        "Your answer above was written without calling any tool. The tools you have in "
+        f"this loop are: {listed}. If you want to call any of them before your answer "
+        "stands, call them now and then write your final answer. If not, write your final "
+        "answer again, whole: the answer you write next is the one that stands."
+    )
+
+
 # What a turn that can call no tool says in place of the loop's sentence. The
 # final-answer nudge and the forced synthesis resend the loop's conversation,
 # system turn included, with no tool callable; the sentence that described the
