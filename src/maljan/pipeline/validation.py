@@ -2867,6 +2867,10 @@ def repeated_item_violations(
 
 
 CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
+# A recommendation or hunting note that acts on a value this run does not
+# publish. Asked once with the IOC table's own answer; a value kept after it
+# is recorded beside the recommendation.
+UNPUBLISHED_RECOMMENDATION_CODE = "narrative.unpublished_indicator"
 ENTRY_CONTENTS_MISSTATED_CODE = "report.entry_contents_misstated"
 UNCITED_IDENTIFIER_CODE = "report.identifier_uncited"
 TECHNIQUE_NAME_CODE = "report.technique_name"
@@ -2889,6 +2893,7 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         TECHNIQUE_NAME_CODE,
         RULE_MATCH_AS_ACTION_CODE,
         REPEATED_ITEMS_CODE,
+        UNPUBLISHED_RECOMMENDATION_CODE,
     }
 )
 
@@ -2944,19 +2949,172 @@ def key_finding_citation_violations(payload: Any, known_ids: Iterable[str]) -> l
     return out
 
 
-def flow_voice_violations(payload: Any, sandbox_ids: Iterable[str]) -> list[Violation]:
-    """Execution-flow steps marked ``observed`` that cite no sandbox entry.
+_DOTTED_ADDRESS_RE = re.compile(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w.]*\w)")
+
+
+def _refanged(text: str) -> str:
+    """``text`` with the usual defanging undone: ``[.]``, ``[:]``, ``hxxp``."""
+    out = re.sub(r"\[(\.|:)\]|\((\.)\)", lambda m: m.group(1) or m.group(2), str(text or ""))
+    return re.sub(r"\bhxxp", "http", out, flags=re.IGNORECASE)
+
+
+def network_values_in(text: str) -> list[tuple[str, str]]:
+    """The addresses and hosts a sentence names, ``(kind, value)``, once each, in order.
+
+    A URL is read as its host. An address is any dotted quad that parses as
+    one; a host is what the string sweep's own reader takes for one
+    (``tools.strings.iocs_from_text``), so a file name is not a host.
+    """
+    from maljan.tools.strings import iocs_from_text
+
+    plain = _refanged(text)
+    found: list[tuple[str, str]] = []
+    for match in _DOTTED_ADDRESS_RE.finditer(plain):
+        try:
+            ipaddress.ip_address(match.group(0))
+        except ValueError:
+            continue
+        if ("ip", match.group(0)) not in found:
+            found.append(("ip", match.group(0)))
+    # A sentence's full stop is not part of the host it ends on.
+    for row in (
+        iocs_from_text(re.sub(r"[.,;:!?)]+(?=\s|$)", " ", plain), ["domain"]).get("iocs") or []
+    ):
+        value = str(row.get("value") or "").strip().lower().rstrip(".")
+        if value and ("domain", value) not in found:
+            found.append(("domain", value))
+    return found
+
+
+# What a recommendation's check says of a value no row of the IOC table holds.
+NO_TABLE_ROW = "no row of this run's IOC table holds it"
+
+
+def recommendation_indicator_violations(
+    payload: Any, answers: Callable[[str, str], str]
+) -> list[Violation]:
+    """Recommendations that name an address or a host this run does not publish.
+
+    ``answers`` is ``(kind, value) -> the IOC table's answer`` for a value, or
+    ``""`` when no row holds it (``narrative_agent.published_answers``). Every
+    field of a recommendation is read — the action, the rationale and the
+    detection the hunting notes print — and each value the table does not
+    answer ``yes`` for is named with the table's reason, one question per
+    recommendation. Nothing is removed: what the model answers stands.
+    """
+    from maljan.extractors.network_extractor import is_well_known_benign_host
+    from maljan.reporting.renderers.stix_renderer import publishes
+
+    out: list[Violation] = []
+    for index, row in enumerate(_rows_of(payload, "defensive_recommendations")):
+        text = " ".join(str(row.get(key) or "") for key in ("action", "rationale", "detection"))
+        refused: list[str] = []
+        for kind, value in network_values_in(text):
+            answer = str(answers(kind, value) or "")
+            if publishes(answer):
+                continue
+            if not answer and kind == "domain" and is_well_known_benign_host(value):
+                # A reference or vendor host the run never recorded: a place to
+                # read, not an indicator to act on.
+                continue
+            why = answer or f"no: {NO_TABLE_ROW}"
+            said = f"{safe_finding_value(value)} ({safe_finding_value(why)})"
+            if said not in refused:
+                refused.append(said)
+        if not refused:
+            continue
+        out.append(
+            Violation(
+                code=UNPUBLISHED_RECOMMENDATION_CODE,
+                message=(
+                    f"recommendation {safe_finding_value(index + 1)} names a value this run "
+                    "does not publish: "
+                    f"{'; '.join(refused)}. A recommendation acts on the indicators this run "
+                    "publishes. Write it over the published indicators, or without the value."
+                ),
+                path=f"defensive_recommendations.{index}",
+            )
+        )
+    return out
+
+
+def _step_order(row: Mapping[str, Any], index: int) -> str:
+    """A step's number as a question names it: its own ``order``, zero included."""
+    order = row.get("order")
+    return str(index + 1 if order is None or order == "" else order)
+
+
+def flow_voice_violations(
+    payload: Any,
+    sandbox_ids: Iterable[str],
+    *,
+    tools: Mapping[str, str] | None = None,
+    flow_fact: Callable[[str, str], str] | None = None,
+) -> list[Violation]:
+    """Execution-flow steps marked ``observed`` that the sandbox did not watch whole.
 
     ``observed`` tells a reader a sandbox watched the step happen. A step read
     from the code is ``assessed``, and the mark is the model's to choose; this
-    only asks, once, when the mark and the citations disagree.
+    only asks, once, when the mark and the citations disagree: a step that
+    cites no sandbox entry; one that also cites an entry that is not a sandbox
+    observation (``tools`` names the tool behind each id), since every
+    statement of an observed step is one the sandbox watched; and one that
+    names an address or a host the sandbox attributes no flow of the sample
+    to (``flow_fact``, :func:`reporting.evidence_bundles.sample_flow_fact`),
+    since a network step is observed for its own value.
     """
     sandbox = {str(value) for value in sandbox_ids}
     out: list[Violation] = []
     for index, row in enumerate(_rows_of(payload, "steps")):
         if str(row.get("voice") or "").strip().lower() != "observed":
             continue
-        if any(value in sandbox for value in _cited(row, "evidence_refs")):
+        cited = _cited(row, "evidence_refs")
+        if any(value in sandbox for value in cited):
+            order = _step_order(row, index)
+            others = [value for value in cited if value not in sandbox]
+            if others:
+                named = _named_ids(
+                    f"{value} ({(tools or {}).get(value)})" if (tools or {}).get(value) else value
+                    for value in others
+                )
+                out.append(
+                    Violation(
+                        code=FLOW_VOICE_CODE,
+                        message=(
+                            f"step {safe_finding_value(order)} is marked observed and also cites "
+                            f"{safe_finding_value(named)}, which are not sandbox entries. A step "
+                            "marked observed says the sandbox watched "
+                            "every part of it. Cite only the sandbox entries that show it and "
+                            "write what the other entries show as an assessed step of its own, "
+                            "or mark the step assessed."
+                        ),
+                        path=f"steps.{index}.voice",
+                    )
+                )
+            unreached = [
+                (value, said)
+                for kind, value in network_values_in(str(row.get("action") or ""))
+                if flow_fact is not None and (said := flow_fact(kind, value))
+            ]
+            if unreached:
+                facts = "; ".join(
+                    f"{safe_finding_value(value)}: {safe_finding_value(said)}"
+                    for value, said in unreached
+                )
+                out.append(
+                    Violation(
+                        code=FLOW_VOICE_CODE,
+                        message=(
+                            f"step {safe_finding_value(order)} is marked observed and names a "
+                            "network value the "
+                            f"sandbox attributes no flow of the sample to ({facts}). A network "
+                            "step is observed only for a value the sample's own process tree "
+                            "reached. Mark the step assessed, or leave the value out of the "
+                            "observed step."
+                        ),
+                        path=f"steps.{index}.voice",
+                    )
+                )
             continue
         where = (
             f"the sandbox answers that recorded something are {_named_ids(sorted(sandbox))}"
@@ -2967,7 +3125,7 @@ def flow_voice_violations(payload: Any, sandbox_ids: Iterable[str]) -> list[Viol
             Violation(
                 code=FLOW_VOICE_CODE,
                 message=(
-                    f"step {safe_finding_value(row.get('order', index + 1))} is marked observed "
+                    f"step {safe_finding_value(_step_order(row, index))} is marked observed "
                     f"but cites no sandbox entry ({safe_finding_value(where)}). Cite the sandbox "
                     "entry that shows "
                     "it, or mark the step assessed."
@@ -3176,7 +3334,9 @@ class EntryTexts:
 
         text = self.texts.get(str(entry_id).strip().lower(), "")
         return bool(text) and any(
-            whole_value_in(form, text) for form in written_forms(value.lower())
+            whole_value_in(form, text)
+            for spelling in library_spellings(value)
+            for form in written_forms(spelling)
         )
 
     def holding(self, value: str) -> list[str]:
@@ -3203,6 +3363,27 @@ _ONLY_A_NUMBER_RE = re.compile(
 _WHOLE_DIGEST_RE = re.compile(
     r"[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64}|[0-9a-f]{128}", re.IGNORECASE
 )
+
+
+# A bare library or API name: one word of letters, digits and underscores that
+# is not only a number. The only shape a Windows library is written in without
+# its extension ("WinINet" for ``wininet.dll``).
+_BARE_NAME_RE = re.compile(r"[a-z_][a-z0-9_]*[a-z_][a-z0-9_]*", re.IGNORECASE)
+
+
+def library_spellings(value: str) -> tuple[str, ...]:
+    """``value`` lower-cased, and a bare name with the ``.dll`` a library carries.
+
+    DLL and API names are compared without regard to case: Windows resolves
+    them that way, and a report writes ``WinINet`` for the ``wininet.dll`` a
+    tool prints. A bare word is also the library of that name, so an entry
+    that lists ``wininet.dll`` holds the ``WinINet`` a sentence names; the
+    reverse is not read, since a word in a text is not a library it loads.
+    """
+    lowered = str(value or "").lower()
+    if _BARE_NAME_RE.fullmatch(lowered):
+        return (lowered, f"{lowered}.dll")
+    return (lowered,)
 
 
 def decidable(value: str) -> bool:
@@ -5861,6 +6042,7 @@ async def retry_with_feedback[T](
     stage: str = "",
     drop_answer_for: frozenset[str] = frozenset(),
     can_retry: Callable[[list[Any]], bool] | None = None,
+    answered: Callable[[list[Violation], list[Violation]], list[Violation]] | None = None,
 ) -> tuple[T, list[Violation], int]:
     """Run, validate, and give the model one chance to fix what it got wrong.
 
@@ -5885,6 +6067,11 @@ async def retry_with_feedback[T](
     rather than following it, and ``can_retry`` is asked about the retry's
     whole conversation before it is sent: answered no, the loop ends there
     with what it has, and the caller records why.
+
+    ``answered`` maps what is left, given what the producer was shown, before
+    the conversation is told the outcome: a question the producer answered as
+    the question allows (``Violation.answered``) is published ``resolved``,
+    not ``survived``, and the mapped rows are what is returned.
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
@@ -5907,8 +6094,10 @@ async def retry_with_feedback[T](
             answer = await run(turns)
         parsed = parse(answer)
         violations = _collect(parsed, validators)
+    if answered is not None:
+        violations = answered(violations, shown)
     if feed is not None:
-        feed.outcome(shown, violations, retries)
+        feed.outcome(shown, [v for v in violations if not v.answered], retries)
     return parsed, violations, retries
 
 
@@ -6145,3 +6334,103 @@ def unsupported_malware_violations(
             path="objects",
         )
     ]
+
+
+# A judge indicator naming a value the sandbox recorded and attributes no flow
+# of the sample to. The judge is asked once, with the sandbox's own fact beside
+# the value; what it answers decides whether the value is published. A keep it
+# was never asked about publishes nothing (``stix_renderer.sandbox_row_kwargs``).
+UNATTRIBUTED_INDICATOR_CODE = "stix.indicator_unattributed_flow"
+
+
+def unattributed_indicator_violations(
+    bundle: Any, facts: Callable[[str, str], str] | None
+) -> list[Violation]:
+    """Indicators that name a value the sandbox attributes no flow of the sample to.
+
+    ``facts`` is ``(kind, value) -> the sandbox's fact`` for a value the
+    sandbox recorded and did not attribute to the sample's process tree, and
+    ``""`` otherwise (``stix_renderer.sandbox_facts_for_the_judge``). Each such
+    value is one question, with the fact written beside it; ``subject`` names
+    the value the fact is about, which is what the report's publish rule reads.
+    Nothing is removed: a keep after the question is the judge's answer.
+    """
+    if facts is None:
+        return []
+    from maljan.reporting.ledger_projection import value_key
+    from maljan.reporting.renderers.stix_renderer import rule_values, url_host
+
+    out: list[Violation] = []
+    seen: set[str] = set()
+    for obj in getattr(bundle, "objects", None) or []:
+        if str(getattr(obj, "type", "") or "") != "indicator":
+            continue
+        name = safe_finding_value(getattr(obj, "name", "") or getattr(obj, "pattern", ""))
+        for value in rule_values(str(getattr(obj, "pattern", "") or "")):
+            if value.kind not in ("ip", "domain", "url"):
+                continue
+            kind, about, host = value.kind, value.value, ""
+            said = facts(kind, about)
+            if kind == "url":
+                # A URL is kept for its host: the judge's URL keeps the address
+                # or the name it is on, and the question is about that host.
+                host = url_host(about).strip("[]")
+                try:
+                    ipaddress.ip_address(host)
+                except ValueError:
+                    kind = "domain"
+                else:
+                    kind = "ip"
+                about = host
+                said = said or (facts(kind, host) if host else "")
+            if not said:
+                continue
+            subject = f"{kind}:{value_key(kind, about)}"
+            if subject in seen:
+                continue
+            seen.add(subject)
+            out.append(
+                Violation(
+                    code=UNATTRIBUTED_INDICATOR_CODE,
+                    message=(
+                        f"the indicator {name!r} names {safe_finding_value(value.value)!r}"
+                        + (f", its host {safe_finding_value(host)!r}," if host else "")
+                        + f" and {safe_finding_value(said)}: the sandbox attributes no flow of the "
+                        "sample to it, and without one it is the analysis machine's own "
+                        "traffic. Keep the indicator only if this run's evidence shows the "
+                        "sample itself reached it, and cite that entry in the indicator's "
+                        "description; otherwise remove the indicator."
+                    ),
+                    path=f"objects.{subject}",
+                    subject=subject,
+                )
+            )
+    return out
+
+
+def kept_after_the_sandbox_fact(violations: Sequence[Violation]) -> list[Violation]:
+    """The unattributed-indicator questions the judge answered by keeping the indicator.
+
+    A question the judge was shown and whose indicator it kept is its answer,
+    recorded as one (``answered``): the value is then published, with the
+    reason. A question it was never shown stays what it is, and publishes
+    nothing. Every other row passes through unchanged.
+    """
+    out: list[Violation] = []
+    for violation in violations:
+        if (
+            violation.code == UNATTRIBUTED_INDICATOR_CODE
+            and violation.asked
+            and not violation.answered
+        ):
+            violation = replace(
+                violation,
+                message=(
+                    "Asked with the sandbox's fact, the judge kept its indicator on "
+                    f"{safe_finding_value(violation.subject.partition(':')[2])}."
+                ),
+                sentence="",
+                answered=True,
+            )
+        out.append(violation)
+    return out

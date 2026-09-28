@@ -40,6 +40,8 @@ read.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -143,6 +145,7 @@ def build_capability_matrix(
         )
         layers = info.get("layers") or []
         valid = bool(info.get("valid", True))
+        independent, identical = independent_statements(info.get("statements") or [])
 
         # Never emit a zero-confidence cell with no evidence and no contributing
         # source — it is an empty claim the UI would render as a "verified"
@@ -216,6 +219,8 @@ def build_capability_matrix(
                 # Each analyst statement naming it, verbatim, by analyst: what
                 # the analysts said is theirs to weigh, never classified here.
                 statements=[f"{who}: {text}" for who, text in info.get("statements") or [] if text],
+                independent_layers=independent,
+                identical_statements=identical,
             )
         )
         if not_published:
@@ -235,8 +240,10 @@ def build_capability_matrix(
                 evidence_quotes=list(evidence),
                 confidence=confidence,
                 contributing_layers=layers,
-                is_corroborated=len([lyr for lyr in layers if lyr != _JUDGE_SOURCE]) >= 2,
+                is_corroborated=len(independent) >= 2,
                 technique_id_valid=valid,
+                independent_layers=independent,
+                identical_statements=identical,
             )
         )
 
@@ -254,6 +261,78 @@ def build_capability_matrix(
 _JUDGE_SOURCE = "judge"
 # The layer name the judge contributes under, for renderers that count analyst layers.
 JUDGE_SOURCE = _JUDGE_SOURCE
+
+
+def normalised_statement(text: str) -> str:
+    """A statement as it is compared for repetition: case, markup and punctuation out."""
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).split())
+
+
+# The share of the shorter statement's words the longer one has to hold for the
+# two to count once (the overlap coefficient over their normalised word sets).
+# A copy cut short, or with a word put in or taken out, holds all or nearly all
+# of them; two analysts reading one tool's output in their own words hold far
+# fewer.
+REPEATED_WORDS_SHARE = 0.9
+
+
+def repeats(later: str, earlier: str) -> bool:
+    """Whether two normalised statements are one statement written twice.
+
+    The same text; one inside the other, word for word; or the overlap
+    coefficient over their word sets, ``|A∩B| / min(|A|, |B|)``, at least
+    :data:`REPEATED_WORDS_SHARE`.
+    """
+    if later == earlier:
+        return True
+    short, long = sorted((later, earlier), key=len)
+    if f" {short} " in f" {long} ":
+        return True
+    a, b = set(later.split()), set(earlier.split())
+    if not a or not b:
+        return False
+    return len(a & b) / min(len(a), len(b)) >= REPEATED_WORDS_SHARE
+
+
+def independent_statements(statements: Sequence[tuple[str, str]]) -> tuple[list[str], int]:
+    """The layers that said something of their own, and how many statements repeated one.
+
+    ``statements`` is ``(layer, text)`` in the order the layers wrote them.
+    A repeat is the shorter statement of a pair: the statements are read
+    longest first (normalised word count, then normalised text, then layer, so
+    the order depends on what was written and not on who was read first), and
+    each is
+    compared by its normalised text (:func:`normalised_statement`) with the
+    ones already kept. One that :func:`repeats` a kept statement is counted as
+    identical or near-identical and credits nobody; every other is kept and
+    credits its layer. Each group of repeats is so credited to the layer of
+    its longest statement (the same text from two layers credits the first
+    layer by name), and a short statement read first can no longer absorb two
+    longer ones that share only its words. The count, the credited layers and
+    the repeats are a function of the set of statements alone, a chain of
+    equal-length near-copies included. The credited layers are
+    returned in the order they first wrote. The judge is not a layer here: it
+    read the analysts.
+    """
+    written = [
+        (index, str(layer), key)
+        for index, (layer, text) in enumerate(statements)
+        if str(layer) != _JUDGE_SOURCE and (key := normalised_statement(text))
+    ]
+    kept: list[str] = []
+    credited: set[str] = set()
+    identical = 0
+    for _index, layer, key in sorted(
+        written, key=lambda row: (-len(row[2].split()), row[2], row[1])
+    ):
+        if any(repeats(key, longer) for longer in kept):
+            identical += 1
+            continue
+        kept.append(key)
+        credited.add(layer)
+    order = list(dict.fromkeys(layer for _index, layer, _key in written))
+    return [layer for layer in order if layer in credited], identical
+
 
 # Why an id that reached the report on a finding alone is not published. A
 # claim is questioned in its analyst's own loop — its technique id is asked
@@ -477,7 +556,6 @@ def _collect_techniques(
             # and published nowhere; see ``FINDING_ONLY_REASON``.
             for finding in getattr(isr, "findings", None) or []:
                 stated = getattr(finding, "confidence", None)
-                title = str(getattr(finding, "title", "") or "")
                 layer = getattr(isr, "domain", None) or agent_name or "agent"
                 for raw in getattr(finding, "technique_ids", None) or []:
                     tid = str(raw or "").strip().upper()
@@ -494,9 +572,16 @@ def _collect_techniques(
                     named_by = str(getattr(isr, "agent_id", "") or agent_name or "")
                     if named_by and named_by not in row.setdefault("finding_named_by", []):
                         row["finding_named_by"].append(named_by)
-                    if title and title not in row["evidence"]:
-                        row["evidence"].append(title)
-                    row.setdefault("statements", []).append((str(layer), title))
+                    # A finding's title names it, and says nothing a second
+                    # layer could confirm or a reader could take as the
+                    # procedure: an analyst's one summary title was listed as a
+                    # statement under five techniques. What the finding says
+                    # is its detail.
+                    detail = str(getattr(finding, "detail", "") or "").strip()
+                    if detail:
+                        if detail not in row["evidence"]:
+                            row["evidence"].append(detail)
+                        row.setdefault("statements", []).append((str(layer), detail))
 
     # The catalogue question, asked of every id still standing. A claim was
     # asked it in the analyst's own loop and carries the answer; an id that

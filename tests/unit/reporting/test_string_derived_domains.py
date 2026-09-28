@@ -15,7 +15,7 @@ from typing import Any
 
 from maljan.reporting.ledger_projection import network_from_ledger
 from maljan.reporting.models import NetworkDomain, NetworkIOCs
-from maljan.reporting.renderers.stix_renderer import _indicator_for_domain
+from maljan.reporting.renderers.stix_renderer import _indicator_for_domain, publishes
 from maljan.schemas.evidence import build_entry
 
 
@@ -181,7 +181,7 @@ class TestTheReportSaysWhereEachNameCameFrom:
         rows = [line for line in self._markdown().splitlines() if line.startswith("| Domain |")]
         by_fqdn = {line.split("`")[1]: line for line in rows}
         assert "| strings | no: seen only in the file's strings |" in by_fqdn["rosoft[.]com"]
-        assert "| sandbox | yes |" in by_fqdn["c2[.]evil[.]tld"]
+        assert "| sandbox | yes: the sandbox recorded it |" in by_fqdn["c2[.]evil[.]tld"]
 
 
 def _a_v3_onion() -> str:
@@ -271,7 +271,7 @@ class TestTheMachineReadableSurfacesSayItToo:
         assert rows["rosoft.com"].source == "strings"
         assert rows["rosoft.com"].published == "no: seen only in the file's strings"
         assert rows["c2.evil.tld"].source == "sandbox"
-        assert rows["c2.evil.tld"].published == "yes"
+        assert publishes(rows["c2.evil.tld"].published)
 
 
 class TestAnIndicatorWithNothingToSaySaysNothing:

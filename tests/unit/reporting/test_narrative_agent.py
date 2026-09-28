@@ -111,7 +111,8 @@ def _valid_narrative() -> NarrativeOutput:
         defensive_recommendations=[
             DefensiveRecommendation(
                 category="firewall",
-                action="Block 1.2.3.4/32 outbound at the perimeter.",
+                # A value the report publishes: a recommendation acts on those.
+                action="Block evil.duckdns.org outbound at the perimeter.",
                 rationale="Sample observed beaconing to this IP.",
                 priority="P0",
             ),

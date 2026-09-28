@@ -25,9 +25,10 @@ import pytest
 
 from maljan.reporting.ledger_projection import kept_network_values, network_from_ledger
 from maljan.reporting.models import JudgeIndicator, MalwareReport
-from maljan.reporting.renderers.stix_renderer import emulation_kwargs, publish_answer
+from maljan.reporting.renderers.stix_renderer import emulation_kwargs, publish_answer, publishes
 from maljan.schemas.evidence import build_entry
 from maljan.schemas.isr_models import AgentISR, Artifact
+from tests.unit.reporting._sandbox_fact import answered_the_sandbox_fact
 
 CONTACT = "185.199.108.153"
 CONTACT_V6 = "2a00:1450:4001:82b::200e"
@@ -110,12 +111,24 @@ def test_an_ipv6_address_in_bracket_form_with_its_port_is_listed() -> None:
 
 
 def test_the_host_of_a_url_the_judge_kept_is_kept() -> None:
+    # Kept after the judge was asked with the sandbox's fact about the address.
+    answer = _answer(
+        None,
+        judge_indicators=[JudgeIndicator(kind="url", value=f"http://{CONTACT}/gate.php")],
+        run_summary=answered_the_sandbox_fact(f"ip:{CONTACT}"),
+    )
+
+    assert publishes(answer)
+
+
+def test_the_host_of_a_url_the_judge_kept_unasked_is_not_kept() -> None:
     answer = _answer(
         None,
         judge_indicators=[JudgeIndicator(kind="url", value=f"http://{CONTACT}/gate.php")],
     )
 
-    assert answer == "yes"
+    assert not publishes(answer)
+    assert "no question with this fact is recorded for this run" in answer
 
 
 def test_nothing_is_kept_without_a_model() -> None:

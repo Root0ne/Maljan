@@ -135,7 +135,7 @@ class TestEverySurfaceCountsTheSameRows:
         assert "similar_cases" not in block
         assert "resolve_technique" not in block
         assert "T1048.004" not in block and "T1082" not in block
-        assert "T1027.005: 1 source(s) — capa" in block
+        assert "T1027.005 Indicator Removal from Tools: 1 source(s) — capa" in block
 
     def test_the_report_line_counts_two_asserted(self) -> None:
         rows = corroboration({}, _lookup_heavy_ledger())

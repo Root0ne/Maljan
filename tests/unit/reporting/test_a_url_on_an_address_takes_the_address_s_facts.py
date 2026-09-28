@@ -30,6 +30,7 @@ from maljan.reporting.renderers.stix_renderer import (
     ExtendedSTIXRenderer,
     emulation_kwargs,
     indicator_publish_reason,
+    publishes,
 )
 from maljan.schemas.stix_models import Bundle
 
@@ -90,7 +91,7 @@ class TestAnUnattributedAddress:
     def test_an_attributed_address_s_url_is_published(self) -> None:
         said = _surfaces(_report(CONTACT, self.URL, True), self.URL)
 
-        assert said["table"] == "yes"
+        assert publishes(said["table"])
         assert said["feed"] is not None
         assert said["stix"]
 

@@ -356,8 +356,10 @@ class MarkdownRenderer:
         if top:
             named = ", ".join(f"{m.technique_id} {m.technique_name}" for m in top)
             lines.append(_item(f"Top published techniques: {named} _({ASSESSED})_"))
+        from maljan.reporting.renderers.stix_renderer import publishes
+
         published = sum(
-            1 for row in ctx.iocs if row.kind in _NETWORK_KINDS and row.published == "yes"
+            1 for row in ctx.iocs if row.kind in _NETWORK_KINDS and publishes(row.published)
         )
         lines.append(_item(f"Published network indicators: {published} _({MEASURED})_"))
         return "\n".join(lines)
@@ -851,7 +853,7 @@ class MarkdownRenderer:
             for u in observed_urls[:20]:
                 measured.append(
                     _row(
-                        u.method,
+                        u.method or "-",
                         f"`{defang(_truncate(u.url, _CELL_LIMIT), 'url')}`",
                         u.status or "-",
                         _truncate(u.user_agent or "-", _CELL_LIMIT),
@@ -1206,7 +1208,7 @@ class MarkdownRenderer:
             lines.append(_row("Value", "Kind", "Notes", "Published"))
             lines.append(_divider(4))
             for ioc in static.interesting_strings[:60]:
-                published = answers.get((ioc.kind, ioc.value.strip().lower())) or "-"
+                published = ctx.plain(answers.get((ioc.kind, ioc.value.strip().lower())) or "-")
                 lines.append(
                     _row(
                         f"`{_truncate(ioc.value, _CELL_LIMIT)}`",
@@ -1369,7 +1371,7 @@ class MarkdownRenderer:
                         f"`{row.value}`",
                         row.context or "-",
                         row.source or "-",
-                        row.published or "-",
+                        ctx.plain(row.published or "-"),
                     )
                 )
             if any(not row.published for row in host):
@@ -1406,7 +1408,7 @@ class MarkdownRenderer:
                     )
                     or "-",
                     row.source or "-",
-                    row.published or "-",
+                    ctx.plain(row.published or "-"),
                 ]
                 if reputation:
                     cells.append(reputation.get(row.value.strip().lower().rstrip("."), "-"))
@@ -3219,18 +3221,52 @@ def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     A technique a rule matched only on runtime-resolved names has its analysts'
     statements listed under the table; its row points there, so a reader of the
     row alone does not take the word for more than a count of layers.
-    """
-    if mapping is None or not mapping.is_corroborated:
-        return ""
-    if rules and all(_resolved_only(hit) for hit in rules):
-        from maljan.extractors.capability_matrix import JUDGE_SOURCE
 
-        layers = len([lyr for lyr in mapping.contributing_layers if lyr != JUDGE_SOURCE])
+    The count is of layers with a statement of their own: statements with the
+    same words, or with at least 90% of the shorter one's words in the other,
+    count once (``capability_matrix.repeats``), and the row says how many were
+    identical or near-identical. A row fewer than two layers stand behind that
+    way says it is not corroborated and why. A row stored before statements
+    were counted keeps the count of layers it was stored with.
+    """
+    if mapping is None:
+        return ""
+    from maljan.extractors.capability_matrix import JUDGE_SOURCE
+
+    named = len([lyr for lyr in mapping.contributing_layers if lyr != JUDGE_SOURCE])
+    independent = len(getattr(mapping, "independent_layers", None) or [])
+    identical = int(getattr(mapping, "identical_statements", 0) or 0)
+    repeated = (
+        f"{identical} statement{'' if identical == 1 else 's'} identical or near-identical "
+        "to another, counted once"
+        if identical
+        else ""
+    )
+    listed = rules and all(_resolved_only(hit) for hit in rules)
+    if not mapping.is_corroborated:
+        if named < 2 or not (independent or identical):
+            return ""
         return (
-            f", corroborated (named by {layers} analyst layers; their statements are listed "
-            "below the table)"
+            f", not corroborated ({named} analyst layers name it; {independent} of them in a "
+            "statement of its own"
+            + (f"; {repeated}" if repeated else "")
+            + ("; their statements are listed below the table" if listed else "")
+            + ")"
         )
-    return ", corroborated"
+    if not independent:
+        # Stored before statements were counted: the layers it was stored with.
+        if listed:
+            return (
+                f", corroborated (named by {named} analyst layers; their statements are listed "
+                "below the table)"
+            )
+        return ", corroborated"
+    parts = [f"named by {independent} analyst layers, each in a statement of its own"]
+    if repeated:
+        parts.append(repeated)
+    if listed:
+        parts.append("their statements are listed below the table")
+    return f", corroborated ({'; '.join(parts)})"
 
 
 def _resolved_only_lines(

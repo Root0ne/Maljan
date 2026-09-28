@@ -565,6 +565,17 @@ def technique_entry(technique_id: str) -> VendoredTechnique | None:
     return _technique_table()[0].get(tid) if tid else None
 
 
+def technique_label(technique_id: str) -> str:
+    """``T1027 Obfuscated Files or Information``: the id with the vendored table's name.
+
+    The one place a technique's name is written from. An id the table does not
+    have is its id alone: a name nobody can check is not written beside it.
+    """
+    tid = (technique_id or "").strip().upper()
+    entry = technique_entry(tid)
+    return f"{tid} {entry.name}" if entry is not None and entry.name else tid
+
+
 def technique_ids_named(name: str) -> list[str]:
     """The ids the vendored table gives ``name`` to, compared without case or punctuation.
 

@@ -18,7 +18,11 @@ from __future__ import annotations
 from typing import Any
 
 from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.renderers.stix_renderer import emulation_kwargs, indicator_publish_reason
+from maljan.reporting.renderers.stix_renderer import (
+    emulation_kwargs,
+    indicator_publish_reason,
+    publishes,
+)
 from maljan.schemas.evidence import LedgerEntry
 
 ADDRESS = "185.199.110.88"
@@ -102,7 +106,7 @@ class TestADecodedAddressTheCaptureReached:
         assert report.network is not None
         (ip,) = report.network.ips
         assert ip.source == "sandbox"
-        assert _published(report, ADDRESS) == "yes"
+        assert publishes(_published(report, ADDRESS))
         reason = indicator_publish_reason(
             "ip", ADDRESS, "sandbox", None, **emulation_kwargs(report, "ip", ADDRESS)
         )
@@ -128,7 +132,7 @@ class TestADecodedNameInTheCapturesTLSList:
         assert report.network is not None
         (domain,) = report.network.domains
         assert (domain.source, domain.capture_only) == ("sandbox", True)
-        assert _published(report, NAME) == "yes"
+        assert publishes(_published(report, NAME))
 
 
 class TestADecodedPublicResolver:

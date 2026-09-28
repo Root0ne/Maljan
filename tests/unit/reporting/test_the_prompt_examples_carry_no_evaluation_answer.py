@@ -96,6 +96,7 @@ from maljan.extractors.capability_matrix import (
 )
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.pipeline import triage_pack
+from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
     CONTRADICTIONS_BLOCK_MIXED_NOTE,
@@ -111,8 +112,10 @@ from maljan.pipeline.run_state import NO_LIMIT, budget_line
 from maljan.pipeline.validation import (
     ANALYST_FEEDBACK_CLOSING,
     MALWARE_TYPES,
+    UNATTRIBUTED_INDICATOR_CODE,
     CapabilityGrounding,
     EntryTexts,
+    Violation,
     _term_ids_said,
     absence_claim_violation,
     analyst_cut_violation,
@@ -121,12 +124,16 @@ from maljan.pipeline.validation import (
     claims_kept_under_disputes_finding,
     claims_under_disputes_violation,
     confidence_violation,
+    flow_voice_violations,
     gate_removed_note,
+    kept_after_the_sandbox_fact,
     malware_object_violations,
     misstated_entry_contents,
+    recommendation_indicator_violations,
     repeated_item_violations,
     section_cut_violation,
     technique_line_violation,
+    unattributed_indicator_violations,
     ungrounded_capabilities,
     validate_verdict_bundle,
 )
@@ -150,11 +157,22 @@ from maljan.reporting.composer import (
     WHERE_QUOTED_LEAD,
     section_contract,
 )
+from maljan.reporting.evidence_bundles import sample_flow_fact
+from maljan.reporting.models import (
+    FileHashes,
+    MalwareReport,
+    NetworkDomain,
+    NetworkIOCs,
+    NetworkIP,
+    SampleIdentity,
+    TTPMapping,
+)
 from maljan.reporting.narrative_agent import (
     _SYSTEM_PROMPT,
     CLAIMS_IN_FORCE_HEADING,
     EXAMPLE_OBJECT,
     EXPECTED_OBJECT,
+    build_prompt_text,
 )
 from maljan.reporting.renderers.markdown import analyst_list_note
 from maljan.reporting.renderers.stix_renderer import (
@@ -162,19 +180,27 @@ from maljan.reporting.renderers.stix_renderer import (
     BENIGN_NAME_RESOLVED,
     CAPTURE_TLS_NAME,
     FLOW_OUTSIDE_THE_TREE,
+    JUDGE_KEPT_WHEN_TOLD,
+    JUDGE_KEPT_WHEN_TOLD_OF_ITS_HOST,
+    JUDGE_NOT_ASKED_IN_TIME,
+    JUDGE_QUESTION_NOT_RECORDED,
     SEARCHED_THE_REPORT,
     UNATTRIBUTED_FLOW,
     disputed_flow_reason,
+    judge_not_told,
+    judge_only_reason,
     named_only_reason,
     not_kept_reason,
     public_resolver_reason,
     seen_in_reason,
+    yes_because,
 )
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
     JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
+    AgentISR,
     ClaimEvidence,
     judge_and_findings_note,
     judge_dropped_reason,
@@ -358,6 +384,33 @@ def _analysis_tool_descriptions(*names: str) -> str:
 
 
 # Everything else a report model is shown on every run, as plain text.
+# A network block with one address the sample reached, one the sandbox
+# recorded and does not attribute, a name that resolved to the second, a name
+# with no answers, and a name it never saw: each fact the observed-step
+# question can state.
+_FLOW_FACTS_REPORT = MalwareReport(
+    identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+    network=NetworkIOCs(
+        ips=[
+            NetworkIP(address="192.0.2.9", source="sandbox", sample_process_tree=True),
+            NetworkIP(address="192.0.2.2", source="sandbox"),
+        ],
+        domains=[
+            NetworkDomain(fqdn="one.example.com", source="sandbox", resolved_ips=["192.0.2.2"]),
+            NetworkDomain(fqdn="two.example.com", source="sandbox"),
+        ],
+    ),
+    ttp_mappings=[
+        TTPMapping(
+            technique_id="T1112",
+            technique_name="Modify Registry",
+            contributing_layers=["static", "dynamic"],
+            independent_layers=["static"],
+            identical_statements=1,
+        )
+    ],
+)
+
 PROMPTS: dict[str, str] = {
     "example team document prompts": _TEAM_DOCUMENT_PROMPTS,
     "narrative contract": EXPECTED_OBJECT,
@@ -492,6 +545,106 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "judge technique answer form": TECHNIQUE_ANSWER_FORM,
+    "the judge's recorded answer after the sandbox's fact": " ".join(
+        v.message
+        for v in kept_after_the_sandbox_fact(
+            [
+                Violation(
+                    code=UNATTRIBUTED_INDICATOR_CODE,
+                    message="m",
+                    subject="domain:one.example.com",
+                )
+            ]
+        )
+    ),
+    "narrative prompt's technique lines with the independent layers": build_prompt_text(
+        _FLOW_FACTS_REPORT
+    ),
+    "narrative question about a recommendation naming a value not published": " ".join(
+        v.message
+        for v in recommendation_indicator_violations(
+            {
+                "defensive_recommendations": [
+                    {"action": "Block 192.0.2.1 and one.example.com.", "detection": "x"}
+                ]
+            },
+            lambda kind, value: "no: x" if kind == "ip" else "",
+        )
+    ),
+    "judge question about an indicator on a value the sample did not reach": " ".join(
+        v.message
+        for v in unattributed_indicator_violations(
+            Bundle.model_validate(
+                {
+                    "type": "bundle",
+                    "objects": [
+                        {
+                            "type": "indicator",
+                            "id": "indicator--1",
+                            "pattern": "[domain-name:value = 'one.example']",
+                            "indicator_types": ["malicious-activity"],
+                        }
+                    ],
+                }
+            ),
+            lambda kind, value: CAPTURE_TLS_NAME,
+        )
+    ),
+    "publish rule words for the judge's keep and a published row": " ".join(
+        [
+            JUDGE_KEPT_WHEN_TOLD,
+            JUDGE_KEPT_WHEN_TOLD_OF_ITS_HOST,
+            JUDGE_NOT_ASKED_IN_TIME,
+            JUDGE_QUESTION_NOT_RECORDED,
+            judge_not_told(JUDGE_NOT_ASKED_IN_TIME, "its address 192.0.2.1"),
+            yes_because("identity"),
+            judge_only_reason(),
+            judge_only_reason(SEARCHED_THE_REPORT),
+            judge_only_reason(asked_in="ev_0004 get_domain_report"),
+            yes_because("sandbox"),
+        ]
+    ),
+    "execution step questions for an observed step not watched whole": " ".join(
+        v.message
+        for v in flow_voice_violations(
+            {
+                "steps": [
+                    {"order": 1, "action": "a", "voice": "observed", "evidence_refs": []},
+                    {
+                        "order": 2,
+                        "action": "a",
+                        "voice": "observed",
+                        "evidence_refs": ["ev_0001", "ev_0002"],
+                    },
+                    {
+                        "order": 3,
+                        "action": (
+                            "Reaches 192.0.2.1, 192.0.2.2, one.example.com, two.example.com "
+                            "and three.example.com."
+                        ),
+                        "voice": "observed",
+                        "evidence_refs": ["ev_0001"],
+                    },
+                ]
+            },
+            ["ev_0001"],
+            tools={"ev_0002": "t"},
+            flow_fact=sample_flow_fact(_FLOW_FACTS_REPORT),
+        )
+    ),
+    "evidence summary naming each id from the vendored table": summarise(
+        {
+            "a": AgentISR(
+                agent_id="a",
+                domain="static",
+                claims=[
+                    ClaimEvidence(
+                        claim="x", evidence_ref="[ev_0001]", confidence=0.5, technique_id="T1112"
+                    )
+                ],
+            )
+        }
+    ),
     "mediator contradiction definition, closing block rule and its one question": " ".join(
         [CONTRADICTION_DEFINITION, CONTRADICTIONS_BLOCK_RULE, CONTRADICTIONS_BLOCK_QUESTION]
     ),

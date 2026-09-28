@@ -20,7 +20,7 @@ import pytest
 
 from maljan.reporting.builder import MalwareReportBuilder, build_consolidated_iocs
 from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer, publishes
 from maljan.schemas.evidence import build_entry
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from maljan.schemas.stix_models import Bundle
@@ -251,13 +251,13 @@ class TestTheSigmaTitle:
 class TestThePublishedURLsCarryTheirNames:
     def test_the_urls_are_published(self, report: MalwareReport) -> None:
         for url in URLS:
-            assert _row(report, url).published == "yes"
+            assert publishes(_row(report, url).published)
 
     def test_each_host_is_a_published_domain_row(self, report: MalwareReport) -> None:
         for host in HOSTS:
             row = _row(report, host)
             assert row.kind == "domain"
-            assert row.published == "yes"
+            assert publishes(row.published)
 
     def test_the_export_carries_each_host(self, report: MalwareReport) -> None:
         patterns = _patterns(report)

@@ -2324,6 +2324,67 @@ change landed on `main`.
 
 ### Fixed
 
+- **A value the sandbox attributes no flow of the sample to is the judge's only
+  by its answer to the sandbox's fact.** A CDN address was published as C2 on
+  the judge's indicator alone. An indicator naming such a value is now asked
+  about once through the verdict's own question, with the fact beside it
+  (`stix.indicator_unattributed_flow`); a keep after that question is recorded
+  answered and publishes the value with both facts in its reason, and a keep
+  the judge was never asked about publishes nothing and says which case
+  applies (the value was first written in its last answer, or no question is
+  recorded for the run). A judge URL is asked about its host. **A report stored
+  before this change renders such a value withheld** in the IOC table, `/iocs`
+  and the export, with "no question with this fact is recorded for this run";
+  every published row of it gains its reason, and a run diff against it
+  compares the decision, not the wording. A judge value no row publishes is
+  refused naming the source that holds it: the file's strings when a strings
+  row does, else the tool answers the build's whole-value search finds (the
+  judge's values join the `tool_sightings` search), else "named only by the
+  judge's indicator; no tool answer in this run holds it" — on a report stored
+  before this change, "no tool answer this report keeps holds it". **Every
+  published row says why**: the IOC table prints `yes: <reason>`, `/iocs`
+  carries `publish_answer`, each exported indicator's description ends with
+  "Published because: …", and the YARA and Suricata drafts comment each value
+  with its reason.
+- **Corroboration counts independent statements.** Four analysts writing one
+  sentence word for word made a contradicted technique "corroborated (named by
+  6 analyst layers)". Two statements now count once when their normalised
+  text is the same, one is inside the other word for word, or at least 90% of
+  the shorter one's words are in the other (overlap coefficient). The shorter
+  of a pair is the repeat, read longest first, so each group is credited to
+  the layer of its longest statement (ties by the text, then the layer's
+  name) and the count depends only on what was written, not on the order the
+  analysts are read in (`independent_layers`). The row says
+  how many statements were identical or near-identical
+  (`identical_statements`) and, where fewer than two layers stand behind it,
+  that it is not corroborated. A finding's title is neither a statement nor a
+  procedure; its detail is both. The console's badge and the narrative prompt
+  read the same list.
+- **A recommendation acts only on published indicators.** A hunting note and a
+  P0 recommendation told the reader to block an address the IOC table refused.
+  A recommendation naming an address or a host the table does not publish is
+  asked about once with the table's answer
+  (`narrative.unpublished_indicator`); a value kept after it is recorded.
+- **A URL's HTTP method is read from the evidence.** Every URL defaulted to
+  `GET`, beside a POST beacon; the method is now the one the sandbox request
+  record states, and absent (`null`, printed `-`) on a URL no request carries.
+- **The citation check reads a library name however it is written.** "WinINet"
+  cited to the resolved-hashes entry was said not to be in it; the entry lists
+  `wininet.dll`. DLL and API names are compared without regard to case, and a
+  bare library name is held by an entry that writes it with its `.dll`.
+- **A step marked observed is observed whole.** A step joining the rundll32
+  load the sandbox watched to hashing a static tool read kept "(observed in
+  sandbox)". An observed step citing an entry that is no sandbox observation,
+  or naming an address or a host no flow of the sample's process tree reached
+  (a name judged by its DNS answers, now kept as `resolved_ips`), is asked
+  about once through `report.flow_voice`.
+- **Every technique name comes from the vendored ATT&CK table.** The judge was
+  asked about bare ids and wrote its own names into its drop reasons ("T1547.004
+  (Scheduled Task/Job)"). The technique question, the ids it says the bundle
+  carries and the evidence summary name each id from the table, and the
+  reference back-filled on an attack-pattern reads the same table instead of a
+  short hand-written list.
+
 - **Redaction removes secrets, not words.** A 24-plus run of the base64
   alphabet was read as a key even when it was words: a claim's
   `anti-debugging/environment`, a STIX property name and an analyst's roster

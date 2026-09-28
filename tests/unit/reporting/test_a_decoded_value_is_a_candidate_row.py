@@ -21,6 +21,7 @@ from maljan.reporting.models import MalwareReport
 from maljan.reporting.renderers.markdown import MarkdownRenderer
 from maljan.reporting.renderers.stix_renderer import (
     emulation_from_ledger,
+    publishes,
     recovered_network_values,
 )
 from maljan.schemas.evidence import LedgerEntry
@@ -123,10 +124,10 @@ class TestADecodedURLNoModelNamed:
         (url,) = report.network.urls
         assert (url.url, url.source) == (C2_URL, "strings")
         row = _row(report, C2_URL)
-        assert row.published == "yes"
+        assert publishes(row.published)
         assert "floss, ev_0012" in row.recovered_by
         assert "decode_string_blobs, ev_0020" in row.recovered_by
-        assert _row(report, C2).published == "yes"
+        assert publishes(_row(report, C2).published)
 
     def test_it_is_answered_exactly_as_the_same_value_an_analyst_named(self) -> None:
         """The path that gave a recovered value a row before: an analyst's endpoints table."""
@@ -137,7 +138,7 @@ class TestADecodedURLNoModelNamed:
         for value in (C2_URL, C2):
             one, other = _row(unnamed, value), _row(named, value)
             assert (one.published, one.recovered_by) == (other.published, other.recovered_by)
-        assert _row(unnamed, C2_URL).published == "yes"
+        assert publishes(_row(unnamed, C2_URL).published)
 
     def test_under_a_benign_verdict_it_is_refused_with_the_reason(self) -> None:
         report = _build([_strings(), _floss(C2_URL)], verdict="Benign")

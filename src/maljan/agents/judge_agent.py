@@ -76,6 +76,7 @@ from maljan.llm.context_window import (
     window_full_error,
 )
 from maljan.llm.generation_rate import GenerationRates, ModelCallDeadline, model_name_of
+from maljan.memory.attck_loader import technique_label
 from maljan.memory.long_term_memory import a_past_case_technique
 from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
 from maljan.pipeline.mediation_models import (
@@ -95,9 +96,11 @@ from maljan.pipeline.validation import (
     assessment_conflict_violations,
     assessment_violations,
     drop_ungrounded_indicators,
+    kept_after_the_sandbox_fact,
     not_asked,
     retry_with_feedback,
     stated_verdict_violations,
+    unattributed_indicator_violations,
     unsupported_benign_violations,
     unsupported_malware_violations,
     validate_verdict_bundle,
@@ -921,7 +924,8 @@ def technique_question_head(reports_text: str, verdict: str, carried: Sequence[s
     return (
         f"{QUESTION_REPORTS_LABEL}\n{reports_text}\n\n"
         f"{QUESTION_VERDICT_LABEL} {verdict}\n"
-        f"{QUESTION_CARRIED_LABEL} {', '.join(carried) if carried else 'none'}\n\n"
+        f"{QUESTION_CARRIED_LABEL} "
+        f"{', '.join(technique_label(tid) for tid in carried) if carried else 'none'}\n\n"
     )
 
 
@@ -983,7 +987,7 @@ def technique_question_text(
             if question.kind == "claimed"
             else "named only on an analyst's finding"
         )
-        lines.append(f"{n}. {question.technique_id} — {where}")
+        lines.append(f"{n}. {technique_label(question.technique_id)} — {where}")
         for agent, text, ids in question.mentions:
             listed = ", ".join(ids) if ids else "none cited"
             lines.append(f"   - {agent}: {' '.join(str(text).split())} (evidence: {listed})")
@@ -2605,6 +2609,7 @@ class JudgeAgent(BudgetMeter):
         facts_block: str = "",
         run_state: str = "",
         technique_sources: Mapping[str, Sequence[str]] | None = None,
+        sandbox_facts: Any = None,
     ) -> JudgeVerdict:
         """The final decision: a STIX bundle plus the judge's own assessment.
 
@@ -2617,7 +2622,12 @@ class JudgeAgent(BudgetMeter):
         same facts the analysts were given. ``technique_sources`` is the
         evidence summary as data, ``{technique id: [source]}``: a relationship
         crediting an agent with a technique it never named is asked about
-        against it, and ``None`` asks nothing.
+        against it, and ``None`` asks nothing. ``sandbox_facts`` is
+        ``(kind, value) -> the sandbox's fact`` for a value the sandbox recorded
+        and attributes no flow of the sample to
+        (``stix_renderer.sandbox_facts_for_the_judge``): an indicator naming one
+        is asked about once, with the fact, and a keep after that question is
+        recorded as the judge's answer, which is what publishes the value.
 
         The answer is validated (``pipeline.validation.validate_verdict_bundle``)
         and, when something is wrong, handed back once with the problems named.
@@ -2906,6 +2916,7 @@ class JudgeAgent(BudgetMeter):
                 *assessment_violations(bundle),
                 *assessment_conflict_violations(bundle),
                 *_verdict_checks(bundle),
+                *unattributed_indicator_violations(bundle, sandbox_facts),
             ]
 
         # What the judge was shown. A finding its retry's answer raised first
@@ -2929,8 +2940,11 @@ class JudgeAgent(BudgetMeter):
             stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
             # The cut answer is described, not repeated: see verdict_cut_violation.
             drop_answer_for=frozenset({VERDICT_CUT_CODE}),
+            # A kept indicator after the sandbox's fact is the judge's answer,
+            # and the conversation is told so before it is told the rest.
+            answered=lambda left, told: kept_after_the_sandbox_fact(not_asked(left, told)),
         )
-        violations = not_asked(violations, shown)
+        violations = kept_after_the_sandbox_fact(not_asked(violations, shown))
         _from_the_loop = list(violations)
         if timed_out:
             # No answer at all, so there is nothing to feed back and nothing

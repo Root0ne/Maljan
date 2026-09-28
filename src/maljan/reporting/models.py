@@ -430,7 +430,10 @@ class NetworkURL(BaseModel):
     model_config = _STRICT_CONFIG
 
     url: str
-    method: str = "GET"
+    # The HTTP method the evidence records for the request, ``None`` when no
+    # record holds one: a URL read out of the file's bytes was made by no
+    # request anybody saw, and a default "GET" contradicted a POST beacon.
+    method: str | None = None
     status: int | None = None
     user_agent: str | None = None
     # Where the URL came from, with the same three answers and the same weight
@@ -569,6 +572,15 @@ class CapabilityCell(BaseModel):
     # analyst's layer ("static: …"): printed where a rule matched only names
     # resolved at runtime, so a reader weighs what the analysts said.
     statements: list[str] = Field(default_factory=list)
+    # The analyst layers that named the technique in a statement of their own:
+    # each distinct statement, compared by its normalised text, credited to the
+    # first layer that wrote it (``capability_matrix.independent_statements``).
+    # A layer that only repeated another's words, or named the technique only on
+    # a finding's title, is not in it. Corroboration is two of these.
+    independent_layers: list[str] = Field(default_factory=list)
+    # How many analyst statements naming the technique repeated one written
+    # before them, word for word once normalised, and were counted once.
+    identical_statements: int = 0
 
 
 class TTPMapping(BaseModel):
@@ -587,6 +599,9 @@ class TTPMapping(BaseModel):
     is_corroborated: bool = False
     # See ``CapabilityCell.technique_id_valid``.
     technique_id_valid: bool = True
+    # See ``CapabilityCell.independent_layers`` and ``identical_statements``.
+    independent_layers: list[str] = Field(default_factory=list)
+    identical_statements: int = 0
 
 
 # ---------------------------------------------------------------------------

@@ -40,6 +40,7 @@ from maljan.reporting.renderers.stix_renderer import (
     emulation_kwargs,
     emulation_record,
     indicator_publish_reason,
+    publishes,
     recovered_by_words,
 )
 from maljan.schemas.evidence import LedgerEntry
@@ -189,7 +190,7 @@ class TestADecodedDomain:
     def test_publishes_exactly_as_the_same_floss_value(self) -> None:
         decoded, floss = _decoded(C2, ("domain", C2)), _floss(C2, ("domain", C2))
 
-        assert _row(decoded, C2).published == _row(floss, C2).published == "yes"
+        assert publishes(_row(decoded, C2).published) and publishes(_row(floss, C2).published)
         assert C2 in _exported(decoded) and C2 in _exported(floss)
         assert indicator_publish_reason(
             "domain", C2, "strings", **emulation_kwargs(decoded, "domain", C2)
@@ -243,7 +244,9 @@ class TestADecodedUrl:
         decoded = _decoded(C2_URL, ("url", C2_URL))
         floss = _floss(C2_URL, ("url", C2_URL))
 
-        assert _row(decoded, C2_URL).published == _row(floss, C2_URL).published == "yes"
+        assert publishes(_row(decoded, C2_URL).published) and publishes(
+            _row(floss, C2_URL).published
+        )
 
 
 class TestADecodedTextWithNoIndicator:
@@ -317,7 +320,9 @@ class TestTheSameTextFromEitherTool:
         for text, kind, value in self.CASES:
             decoded, floss = _decoded(text, (kind, value)), _floss(text, (kind, value))
 
-            assert _row(decoded, value).published == _row(floss, value).published == "yes", text
+            assert publishes(_row(decoded, value).published) and publishes(
+                _row(floss, value).published
+            ), text
             reasons = [
                 indicator_publish_reason(kind, value, "strings", **emulation_kwargs(r, kind, value))
                 for r in (decoded, floss)

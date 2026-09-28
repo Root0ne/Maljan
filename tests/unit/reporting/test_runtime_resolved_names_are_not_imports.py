@@ -124,8 +124,11 @@ def _judge_bundle(technique: str) -> dict[str, Any]:
     }
 
 
-def _finding_isr(agent: str, domain: str, title: str) -> Any:
-    finding = SimpleNamespace(technique_ids=["T1055"], confidence=0.85, title=title)
+def _finding_isr(agent: str, domain: str, detail: str) -> Any:
+    # What a finding says is its detail; its title only names it.
+    finding = SimpleNamespace(
+        technique_ids=["T1055"], confidence=0.85, title="Injection", detail=detail
+    )
     return SimpleNamespace(agent_id=agent, domain=domain, claims=[], findings=[finding])
 
 
@@ -185,11 +188,12 @@ class TestARuleMatchOnRuntimeNamesIsStatedAndNotCounted:
         markdown = MarkdownRenderer().render(report)
 
         (mapping,) = [m for m in report.ttp_mappings if m.technique_id == "T1055"]
-        # Two analyst layers named it: corroborated, whatever their words say.
+        # Two analyst layers named it in their own words: corroborated, whatever
+        # their words say.
         assert mapping.is_corroborated is True
         assert (
-            "published, corroborated (named by 2 analyst layers; their statements are listed "
-            "below the table)"
+            "published, corroborated (named by 2 analyst layers, each in a statement of its own; "
+            "their statements are listed below the table)"
         ) in markdown
         assert "Techniques a rule matched only on names resolved at runtime" in markdown
         for text in STATEMENTS:

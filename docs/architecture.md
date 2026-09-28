@@ -685,7 +685,10 @@ Two producers use it:
   constant), or a record's `value` or
   `endpoints` — is looked for in the text of each entry the sentence (or its record) cites, as
   the run holds it (`validation.EntryTexts`: the corpus copy, else the stored
-  output). Held by a cited entry, the citation stands; held only by another
+  output). A DLL or API name is compared without regard to case, and a bare
+  library name is held by an entry that writes it with its `.dll`
+  (`validation.library_spellings`): `WinINet` is held by an entry listing
+  `wininet.dll`. Held by a cited entry, the citation stands; held only by another
   entry, the model is asked once with that entry named; held by none, nothing
   is said, because a paraphrase or a composed value cannot be judged. "Held"
   means held as a whole value in one of its spellings, never as a slice of a
@@ -2607,7 +2610,28 @@ is assembled from what the run gathered rather than recomputed beside it:
   rule it is published by and not as a gap. When analysts named it on a
   finding and no claim carries it, the row names them instead ("stated by the
   judge; named on a finding, not on a claim, by …"), since the run's
-  corroboration record lists them as its sources. A knowledge-table rule
+  corroboration record lists them as its sources. **Corroboration counts
+  independent statements** (`capability_matrix.independent_statements`): each
+  analyst statement naming a technique is compared by its normalised text
+  (case, markup and punctuation out). Two count once when they are the same
+  text, when one is inside the other word for word, or when at least 90% of
+  the shorter one's words are in the other (the overlap coefficient over their
+  word sets, `REPEATED_WORDS_SHARE`): a copy cut short or with a word put in or
+  taken out is one statement, and two analysts' own sentences about one tool's
+  output stay two. The repeat is the shorter of a pair: statements are read
+  longest first (word count, then normalised text, then layer) and each is compared with
+  the ones already kept, so each group is credited to the layer of its
+  longest statement and a short statement can never absorb two longer ones
+  that share only its words; the count does not depend on the order the
+  analysts are read in. `is_corroborated` is two layers credited so
+  (`independent_layers`).
+  The row says how many statements were identical or near-identical
+  (`identical_statements`); a row fewer than two layers stand behind that way
+  prints "not corroborated (N analyst layers name it; K of them in a
+  statement of its own; …)". A finding's detail is a statement and its
+  procedure, and its title is neither: an analyst's one summary title was
+  listed under five techniques. The console's badge and the narrative prompt
+  (`independent=`) read the same list. A knowledge-table rule
   that matched only names resolved at runtime (every matched name in its
   `resolved_apis`) is named as a source "rule match on names resolved at
   runtime from hashes only, no import; not counted as corroboration", and
@@ -2656,7 +2680,13 @@ is assembled from what the run gathered rather than recomputed beside it:
   techniques an analyst claimed that its bundle carries on no attack-pattern
   and no edge, and the ones named only on a finding
   (`capability_matrix.judge_questions`), each with the claim or finding text
-  and its evidence ids: keep or drop, with a reason. The question shows what
+  and its evidence ids: keep or drop, with a reason. Each id is named as the
+  vendored ATT&CK table names it (`attck_loader.technique_label`), in the list,
+  in the techniques the question says the bundle carries and in the evidence
+  summary: asked about bare ids, a judge dropped a Winlogon Helper DLL id as
+  "Scheduled Task/Job". Every technique name the platform writes comes from
+  that table, the reference the export back-fills on an attack-pattern
+  included. The question shows what
   it asks the judge to decide from — the analysts' reports as the verdict call
   sees them (`verdict_reports_text`), the verdict and the techniques the bundle
   carries, and the text of every cited evidence entry — and when the entries
@@ -2906,7 +2936,25 @@ is assembled from what the run gathered rather than recomputed beside it:
   row states those processes (`outside_processes`, `marked_only_processes`,
   `file_only_processes`, as `<image> (procid N)`), and the publish rule's
   `no:` and the IOC table's context name them with both facts. A disputed
-  row, like any unattributed one, is published only when the judge keeps it.
+  row, like any unattributed one, is published only when the judge keeps it
+  after being asked once with the sandbox's fact: the verdict's own question
+  names each judge indicator on such a value with the fact beside it
+  (`validation.unattributed_indicator_violations`, the facts read by
+  `nodes.judge_sandbox_facts` from the network block the report is built
+  from), and a keep after that question is recorded answered
+  (`stix.indicator_unattributed_flow`, `answered: true`, `subject`
+  `kind:value`). The publish rule reads that answer
+  (`stix_renderer.sandbox_row_kwargs`): the row's reason states both the keep
+  and the sandbox's fact, and a judge's keep it was never asked about
+  publishes nothing and says which case applies: the judge wrote the value in
+  its last answer and no turn was left to ask it, or no question with the fact
+  is recorded for this run (a report stored before the question, or a verdict
+  with no readable network record). A judge URL is asked about its host, the
+  value its keep stands on, and a URL row on an address says the judge kept,
+  or named, its address. **Every published row says why, on every
+  surface**: the IOC table's `yes:` reason, `/iocs`' `publish_answer`, the end
+  of each exported indicator's `description` ("Published because: …") and a
+  comment beside each value in the YARA and Suricata drafts.
   **CAPE, REST and mock reports carry no process on a flow**, so every address
   they record is unattributed and is published only when the judge keeps it. The
   network block is projected from the job's whole report, never from a paged
@@ -2986,7 +3034,10 @@ is assembled from what the run gathered rather than recomputed beside it:
   signature's description, a command line and the sample's strings a sandbox
   re-serves are text, not observations; only a structured network record (a
   flow, a DNS query, an HTTP request, a capture conversation) makes a sandbox
-  row. Such a value, with no second source, reads `no: seen only in the text
+  row. A URL's HTTP method is the one its request record states and is absent
+  on a URL no request carries (`NetworkURL.method`, `null`): every URL used to
+  default to `GET`, which contradicted a POST beacon decoded from the file.
+  A name's DNS answers are its `resolved_ips`. Such a value, with no second source, reads `no: seen only in the text
   of <entry> (<tool>), and no second source in this run records it;
   <artifact> lists it`. A value no answer
   holds (source `analyst`) is asked the string sweep's questions and
@@ -3013,8 +3064,9 @@ is assembled from what the run gathered rather than recomputed beside it:
   are built once per table, export or feed (`one_reading`).
 * **The IOC table is the one publish rule's answer, row by row.**
   `build_consolidated_iocs` stores every indicator live with its kind, who
-  recorded it and `published`: `yes`, or `no:` and the half of
-  `indicator_publish_reason` that refused it (`stix_renderer.publish_answer`),
+  recorded it and `published`: `yes:` and the reason
+  `indicator_publish_reason` gave, in words (`stix_renderer.yes_because`), or
+  `no:` and the half of it that refused the row (`stix_renderer.publish_answer`),
   asked with the arguments `/iocs` and the export ask it with. The renderer
   rebuilds the table on request from the stored report, the way `/iocs` does,
   so an enrichment that ran later is reflected and a report stored before the
@@ -3165,12 +3217,21 @@ is assembled from what the run gathered rather than recomputed beside it:
   (`composer.section_contract`) says that a list item is written only with a
   value and never with nulls, and that a value is a JSON string, numbers
   included: a configuration section whose items carried `"value": null` —
-  as the contract then allowed — failed its schema twice and was dropped. Four
-  checks are shown to the model once through the existing retry-with-feedback
+  as the contract then allowed — failed its schema twice and was dropped. Five
+  checks across the composer and the narrative round are shown to the model
+  once through the existing retry-with-feedback
   and recorded unresolved when they survive, and none drops what it is about:
   `narrative.ungrounded_finding` (a key finding cites an id no ledger entry
   carries), `report.flow_voice` (a step marked observed cites no sandbox
-  entry), `report.configuration_uncited` (a value said to be decrypted or
+  entry; or cites one beside entries that are not sandbox entries, since
+  every statement of an observed step is one the sandbox watched; or names an
+  address or a host no flow of the sample's process tree reached, by
+  `evidence_bundles.sample_flow_fact`, a name judged by the addresses its DNS
+  answers gave (`NetworkDomain.resolved_ips`)),
+  `narrative.unpublished_indicator` (the narrative round's: a recommendation's
+  action, rationale or detection names an address or a host the IOC table does
+  not publish, a well-known reference host no row holds aside; asked with the
+  table's answer), `report.configuration_uncited` (a value said to be decrypted or
   observed cites no entry) and `report.identifier_uncited` (a host identifier
   cites no entry of the run). A field a model did not supply is absent from
   the report. The recommendation's category is the model's own. The Markdown

@@ -16,6 +16,7 @@ from maljan.reporting.models import (
     StaticAnalysis,
     StringIOC,
 )
+from maljan.reporting.renderers.stix_renderer import publishes
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 
@@ -44,7 +45,7 @@ class TestConsolidatedIOCs:
         assert by_type["IPv4"].value == "94.156.79.162"
         assert by_type["SHA-256"].value == "a" * 64
         assert by_type["SHA-256"].is_network is False
-        assert by_type["SHA-256"].published == "yes"
+        assert publishes(by_type["SHA-256"].published)
 
     def test_dedupes(self) -> None:
         r = _report(

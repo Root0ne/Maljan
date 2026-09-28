@@ -68,7 +68,12 @@ from maljan.pipeline.validation import (
     technique_name_violations,
     wrong_entry_citations,
 )
-from maljan.reporting.evidence_bundles import bundle_for, is_empty, sandbox_entry_ids
+from maljan.reporting.evidence_bundles import (
+    bundle_for,
+    is_empty,
+    sample_flow_fact,
+    sandbox_entry_ids,
+)
 from maljan.reporting.models import (
     C2Channel,
     CliFlag,
@@ -753,6 +758,11 @@ class ReportComposer:
         # configuration value said to be decrypted one of the first.
         known_ids = [row.id for row in report.evidence_index]
         sandbox_ids = sandbox_entry_ids(report)
+        # Which tool answered each entry, so a question names what a step
+        # cites; and what the sandbox says about a flow to each value a step
+        # names.
+        entry_tools = {row.id: str(row.tool or "") for row in report.evidence_index}
+        flow_fact = sample_flow_fact(report)
 
         # 2. The execution flow, entry to steady state.
         flow = await self._author(
@@ -761,7 +771,11 @@ class ReportComposer:
             isr_reports,
             _FlowOut,
             _INSTRUCTIONS["execution_flow"],
-            validators=[lambda p: flow_voice_violations(p, sandbox_ids)],
+            validators=[
+                lambda p: flow_voice_violations(
+                    p, sandbox_ids, tools=entry_tools, flow_fact=flow_fact
+                )
+            ],
         )
         if flow and isinstance(flow, _FlowOut) and flow.steps:
             ta.execution_flow = list(flow.steps)

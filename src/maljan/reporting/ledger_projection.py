@@ -849,6 +849,17 @@ def network_from_ledger(
                 name = _first_str(row, "request", "hostname", "domain", "name")
                 _add("domain", name, "sandbox")
                 resolved.add(value_key("domain", name))
+                # The addresses the answer gave for it, as the record states them.
+                known_name = domains.get(value_key("domain", name)) if name else None
+                answers = row.get("answers") if isinstance(row, dict) else None
+                for answer in answers if isinstance(answers, list) else []:
+                    address = address_key(_first_str(answer, "data", "ip", "address"))
+                    if (
+                        known_name is not None
+                        and _parses_as_an_address(address)
+                        and address not in known_name.resolved_ips
+                    ):
+                        known_name.resolved_ips.append(address)
         # An address the sample really reached, labelled as one: the default
         # source is ``strings``, so every observed address was recorded as
         # though a string sweep had produced it, which is the weakest claim
@@ -889,7 +900,14 @@ def network_from_ledger(
             # A request the sample made, and labelled as one: the default
             # source is ``strings``, so an observed URL used to be recorded as
             # though it had been read out of the file's bytes.
-            _add("url", _http_url(row, host), "sandbox")
+            url = _http_url(row, host)
+            _add("url", url, "sandbox")
+            # The method the request record states, and none where it states
+            # none: the first record of the URL that names one.
+            method = _first_str(row, "method").upper() if isinstance(row, dict) else ""
+            known_url = urls.get(_fold_url_host(url)) if url else None
+            if method and known_url is not None and not known_url.method:
+                known_url.method = method
 
     for _entry, data in _payloads(ledger, "pcap_summary"):
         for row in data.get("conversations") or []:

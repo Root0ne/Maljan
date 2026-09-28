@@ -328,6 +328,9 @@ export interface IOCRow {
   notes?: string | null;
   source?: string | null;
   published?: boolean;
+  /** The publish rule's answer as the report's IOC table prints it: `yes:` and
+   *  why the row is published, or `no:` and why not. */
+  publish_answer?: string | null;
   recovered_by?: string | null;
 }
 
@@ -343,6 +346,7 @@ const _IOC_ROW_SCHEMA: Record<string, ExpectedShape> = {
   notes: "string?",
   source: "string?",
   published: "boolean?",
+  publish_answer: "string?",
   recovered_by: "string?",
 };
 

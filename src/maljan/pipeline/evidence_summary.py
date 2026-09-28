@@ -23,6 +23,7 @@ from maljan.analysis.technique_ids import (
     sigma_technique_ids,
     technique_ids_in,
 )
+from maljan.memory.attck_loader import technique_label
 
 # Every technique and every source is named. The judge's prompt this block
 # goes into is sized from the judge's own window, and it is shortened there,
@@ -63,7 +64,7 @@ def summarise(isrs: dict[str, Any] | None, ledger: Sequence[Any] | None = None) 
             f"{name} ({confidence:.2f})" if confidence is not None else name
             for name, confidence in sources
         )
-        lines.append(f"- {tid}: {len(sources)} source(s) — {rendered}")
+        lines.append(f"- {technique_label(tid)}: {len(sources)} source(s) — {rendered}")
     return "\n".join(lines)
 
 

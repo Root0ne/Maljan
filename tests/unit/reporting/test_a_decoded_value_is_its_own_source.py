@@ -38,6 +38,7 @@ from maljan.reporting.renderers.stix_renderer import (
     emulation_kwargs,
     emulation_record,
     indicator_publish_reason,
+    publishes,
 )
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.stix_models import Bundle
@@ -194,7 +195,7 @@ class TestAMalwareVerdict:
         report = _report()
 
         assert C2 in _exported(report)
-        assert _published(report, C2) == "yes"
+        assert publishes(_published(report, C2))
         assert _publishable("domain", C2, "strings", None, emulation_kwargs(report, "domain", C2))
 
     def test_a_swept_row_of_a_decoded_value_publishes_with_the_reason(self) -> None:
@@ -206,7 +207,7 @@ class TestAMalwareVerdict:
             o for o in exported["objects"] if o["type"] == "indicator" and C2 in o["pattern"]
         ]
         assert f"{RECOVERED_BY_EMULATION}, ev_0012" in indicator["description"]
-        assert _published(report, C2) == "yes"
+        assert publishes(_published(report, C2))
 
     def test_a_value_the_sweep_alone_read_stays_unpublished(self) -> None:
         report = _report(
@@ -289,7 +290,7 @@ class TestAReportStoredBeforeTheRecord:
         assert indicator_publish_reason(
             "domain", C2, "strings", **emulation_kwargs(report, "domain", C2)
         ) == (f"{RECOVERED_BY_EMULATION}, ev_0012 (the record is partial: {record.partial})")
-        assert _published(report, C2) == "yes"
+        assert publishes(_published(report, C2))
 
 
 class TestAPublicSuffixName:

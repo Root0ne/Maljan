@@ -55,6 +55,7 @@ from maljan.pipeline.validation import (
     misstated_entry_contents,
     narrative_capability_violations,
     pack_line_ids,
+    recommendation_indicator_violations,
     record_flagged_statements,
     retry_with_feedback,
     schema_violations,
@@ -351,12 +352,19 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
         for mapping in report.ttp_mappings:
             quote = " | ".join(q for q in mapping.evidence_quotes if q)
             layers = ",".join(mapping.contributing_layers) or "-"
+            # The layers that said something of their own: copies count once.
+            independent = (
+                f", independent={','.join(mapping.independent_layers)}"
+                if mapping.independent_layers
+                else ""
+            )
             rule_note = (
                 f" — {rule_only[mapping.technique_id]}" if mapping.technique_id in rule_only else ""
             )
             lines.append(
                 f"  - {mapping.technique_id} {mapping.technique_name} "
-                f"(conf={confidence_text(mapping.confidence)}, layers={layers}){rule_note}: "
+                f"(conf={confidence_text(mapping.confidence)}, layers={layers}{independent})"
+                f"{rule_note}: "
                 f"{quote}"
             )
         if any(m.technique_id in rule_only for m in report.ttp_mappings):
@@ -477,6 +485,35 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
 
 # The narrative's prose fields: the only ones a citation is looked for in.
 NARRATIVE_PROSE = ("executive_summary", "key_findings")
+
+
+def published_answers(report: MalwareReport) -> Any:
+    """``(kind, value) -> the IOC table's answer`` for a value, ``""`` when no row holds it.
+
+    The table the report prints and ``/iocs`` serves
+    (``builder.build_consolidated_iocs``): what a recommendation is checked
+    against, so it acts on the indicators the run publishes.
+    """
+    from maljan.reporting.ledger_projection import value_key
+
+    rows = list(report.consolidated_iocs or [])
+    if not rows:
+        from maljan.reporting.builder import build_consolidated_iocs
+
+        rows = build_consolidated_iocs(report)
+    table: dict[tuple[str, str], str] = {}
+    for row in rows:
+        kind = str(row.kind or "")
+        answer = str(row.published or "")
+        key = (kind, value_key(kind, row.value))
+        # A value with two rows is published when either publishes it.
+        if key not in table or answer.startswith("yes"):
+            table[key] = answer
+
+    def _answer(kind: str, value: str) -> str:
+        return table.get((kind, value_key(kind, value)), "")
+
+    return _answer
 
 
 class NarrativeAgent:
@@ -680,6 +717,8 @@ class NarrativeAgent:
         # the ISRs, a capability an analyst stated in a claim would be a
         # violation here and a pass there, on one run.
         grounding = CapabilityGrounding.from_report(report, isr_reports)
+        # What the run publishes, which is what a recommendation may act on.
+        answers = published_answers(report)
         # The entries a key finding may cite: the ledger's, which the pack's
         # own entries are part of.
         known_ids = [row.id for row in report.evidence_index]
@@ -731,7 +770,7 @@ class NarrativeAgent:
                     )
                 if isinstance(result, NarrativeOutput):
                     return self._kept_with_ungrounded_recorded(
-                        result, grounding, known_ids, citable, evidence
+                        result, grounding, known_ids, citable, evidence, answers
                     )
                 # Some providers return a dict — coerce defensively.
                 if isinstance(result, dict):
@@ -741,6 +780,7 @@ class NarrativeAgent:
                         known_ids,
                         citable,
                         evidence,
+                        answers,
                     )
                 logger.warning(
                     "NarrativeAgent: unexpected structured-output type %s; "
@@ -811,6 +851,7 @@ class NarrativeAgent:
                     lambda p: wrong_entry_citations(p, evidence, prose=NARRATIVE_PROSE),
                     lambda p: misstated_entry_contents(p, evidence, prose=NARRATIVE_PROSE),
                     technique_name_violations,
+                    lambda p: recommendation_indicator_violations(p, answers),
                 ],
                 parse=_narrative_payload,
                 on_feedback=self.validation_tally.count,
@@ -875,6 +916,7 @@ class NarrativeAgent:
         known_ids: list[str] | None = None,
         citable: Sequence[str] = (),
         evidence: EntryTexts | None = None,
+        answers: Any = None,
     ) -> NarrativeOutput:
         """The structured path's answer, with its over-claims and stray citations recorded.
 
@@ -891,6 +933,7 @@ class NarrativeAgent:
             *wrong_entry_citations(answer, evidence, prose=NARRATIVE_PROSE),
             *misstated_entry_contents(answer, evidence, prose=NARRATIVE_PROSE),
             *technique_name_violations(answer),
+            *(recommendation_indicator_violations(answer, answers) if answers else []),
         ]
         self.validation_tally.count(found)
         self._record_ungrounded(found, asked=False)

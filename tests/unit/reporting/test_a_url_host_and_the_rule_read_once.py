@@ -21,7 +21,7 @@ from maljan.reporting.models import (
     NetworkURL,
 )
 from maljan.reporting.renderers import stix_renderer
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer, publishes
 
 CDN_URL = "https://www.googleapis.com/upload/x"
 
@@ -45,7 +45,7 @@ class TestAWellKnownHostOfAPublishedURL:
     def test_it_is_not_published_on_the_url_alone(self) -> None:
         report = _report(NetworkIOCs(urls=[NetworkURL(url=CDN_URL, source="sandbox")]))
 
-        assert _row(report, CDN_URL).published == "yes"
+        assert publishes(_row(report, CDN_URL).published)
         answer = _row(report, "www.googleapis.com").published
 
         assert answer == (
@@ -81,7 +81,7 @@ class TestAWellKnownHostOfAPublishedURL:
         report = self._listed()
         report.judge_indicators = [JudgeIndicator(kind="domain", value="www.googleapis.com")]
 
-        assert _row(report, "www.googleapis.com").published == "yes"
+        assert publishes(_row(report, "www.googleapis.com").published)
 
 
 class TestTheReportIsReadOnce:
@@ -151,7 +151,7 @@ class TestTheExportCarriesEveryPublishedRow:
             )
         )
         published = {
-            r.value for r in builder.build_consolidated_iocs(report) if r.published == "yes"
+            r.value for r in builder.build_consolidated_iocs(report) if publishes(r.published)
         }
 
         bundle = ExtendedSTIXRenderer().render(report)

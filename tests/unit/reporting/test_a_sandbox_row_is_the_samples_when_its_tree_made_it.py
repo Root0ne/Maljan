@@ -22,10 +22,11 @@ from typing import Any
 from maljan.providers.sandbox_tools import sandbox_network
 from maljan.reporting.ledger_projection import network_from_ledger
 from maljan.reporting.models import JudgeIndicator, MalwareReport, NetworkDomain, NetworkIOCs
-from maljan.reporting.renderers.stix_renderer import emulation_kwargs, publish_answer
+from maljan.reporting.renderers.stix_renderer import emulation_kwargs, publish_answer, publishes
 from maljan.schemas.evidence import build_entry
 from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence
 from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
+from tests.unit.reporting._sandbox_fact import answered_the_sandbox_fact
 
 DOC = "198.51.100.23"
 CONTACT = "185.199.108.153"
@@ -213,7 +214,7 @@ class TestThePublishRule:
             _ledger(tcp=[{"dst": CONTACT, "dport": 80, "sample_process_tree": True}])
         )
 
-        assert _answer(_report(network), "ip", CONTACT) == "yes"
+        assert publishes(_answer(_report(network), "ip", CONTACT))
 
     def test_the_resolver_fact_is_in_the_reason(self) -> None:
         network = network_from_ledger(
@@ -259,7 +260,7 @@ class TestThePublishRule:
             _ledger(tcp=[{"dst": CONTACT, "dport": 80, "sample_process_tree": True}]), isrs
         )
 
-        assert _answer(_report(network), "ip", CONTACT) == "yes"
+        assert publishes(_answer(_report(network), "ip", CONTACT))
 
     def test_a_resolver_an_artifact_lists_is_never_published(self) -> None:
         isrs = _network_analyst(artifact_rows=[["ip", RESOLVER]])
@@ -300,7 +301,7 @@ class TestThePublishRule:
         report = _report(network)
         report.judge_indicators = [JudgeIndicator(kind="ip", value=LISTED)]
 
-        assert _answer(report, "ip", LISTED, source="analyst") == "yes"
+        assert publishes(_answer(report, "ip", LISTED, source="analyst"))
 
     def test_a_value_a_tool_read_keeps_that_tool_s_standing_when_an_analyst_lists_it(
         self,
@@ -326,10 +327,17 @@ class TestThePublishRule:
 
     def test_the_judge_s_indicator_keeping_it_publishes_it(self) -> None:
         network = network_from_ledger(_ledger(tcp=[{"dst": CONTACT, "dport": 80}]))
+        report = _report(network, run_summary=answered_the_sandbox_fact(f"ip:{CONTACT}"))
+        report.judge_indicators = [JudgeIndicator(kind="ip", value=CONTACT)]
+
+        assert publishes(_answer(report, "ip", CONTACT))
+
+    def test_the_judge_s_indicator_kept_unasked_publishes_nothing(self) -> None:
+        network = network_from_ledger(_ledger(tcp=[{"dst": CONTACT, "dport": 80}]))
         report = _report(network)
         report.judge_indicators = [JudgeIndicator(kind="ip", value=CONTACT)]
 
-        assert _answer(report, "ip", CONTACT) == "yes"
+        assert not publishes(_answer(report, "ip", CONTACT))
 
     def test_an_address_is_one_address_in_any_case(self) -> None:
         upper = "2A00:1450:4001:82B::200E"
@@ -355,7 +363,7 @@ class TestThePublishRule:
             NetworkIOCs(domains=[NetworkDomain(fqdn="relay-alpha-7f3c.top", source="sandbox")])
         )
 
-        assert _answer(report, "domain", "relay-alpha-7f3c.top") == "yes"
+        assert publishes(_answer(report, "domain", "relay-alpha-7f3c.top"))
 
 
 class TestTheWholeReportIsRead:
