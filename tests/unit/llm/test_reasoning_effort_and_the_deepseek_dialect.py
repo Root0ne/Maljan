@@ -28,6 +28,8 @@ from maljan.core.config import Settings
 from maljan.core.token_ledger import TokenLedger, record_response_usage, turn_usage
 from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only
 
+from .streamed_wire import reply
+
 HOSTED = "https://api.deepseek.com"
 LOCAL = "http://127.0.0.1:8080/v1"
 
@@ -65,9 +67,9 @@ class _Wire:
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.bodies.append(json.loads(request.content))
-        return httpx.Response(
-            200,
-            json={
+        return reply(
+            request,
+            {
                 "id": "c1",
                 "object": "chat.completion",
                 "created": 0,

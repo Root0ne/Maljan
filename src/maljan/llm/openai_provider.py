@@ -385,6 +385,156 @@ def with_per_request_llama_cap(chat_class: Any) -> Any:
     return capped
 
 
+# One subclass per chat class seen, as for ``_TIMED_CLASSES``.
+_STREAMED_LLAMA_CLASSES: dict[type, type] = {}
+
+
+def _joined_answer(chunks: list[Any]) -> Any:
+    """The streamed chunks of one answer as the answer the server would have sent whole.
+
+    Joined as langchain joins a stream (each chunk's generation info in its
+    message's metadata, then the chunks added up), with one difference: the
+    tool calls. langchain reads a streamed call's arguments with a partial
+    JSON parser, which closes a call cut off mid-string as if it had ended
+    there. A whole answer's calls are read strictly, and a cut one is an
+    invalid call; the joined answer's calls are read the same way, from the
+    same text.
+    """
+    from langchain_core.messages import AIMessage
+    from langchain_core.output_parsers.openai_tools import (
+        make_invalid_tool_call,
+        parse_tool_call,
+    )
+    from langchain_core.outputs import ChatGeneration, ChatResult
+
+    if not chunks:
+        raise ValueError("No generations found in stream.")
+    for chunk in chunks:
+        chunk.message.response_metadata = {
+            **(chunk.generation_info or {}),
+            **chunk.message.response_metadata,
+        }
+    joined = chunks[0]
+    for chunk in chunks[1:]:
+        joined += chunk
+    merged = joined.message
+    tool_calls: list[Any] = []
+    invalid: list[Any] = []
+    for piece in getattr(merged, "tool_call_chunks", None) or []:
+        raw = {
+            "id": piece.get("id"),
+            "type": "function",
+            "function": {"name": piece.get("name") or "", "arguments": piece.get("args") or ""},
+        }
+        try:
+            parsed = parse_tool_call(raw, return_id=True)
+        except Exception as exc:  # noqa: BLE001 — exactly as a whole answer's call is read
+            invalid.append(make_invalid_tool_call(raw, str(exc)))
+            continue
+        if parsed is not None:
+            tool_calls.append(parsed)
+    message = AIMessage(
+        content=merged.content,
+        additional_kwargs=dict(merged.additional_kwargs),
+        response_metadata=dict(merged.response_metadata),
+        id=merged.id,
+        tool_calls=tool_calls,
+        invalid_tool_calls=invalid,
+        usage_metadata=merged.usage_metadata,
+    )
+    return ChatResult(
+        generations=[ChatGeneration(message=message, generation_info=joined.generation_info)]
+    )
+
+
+def with_streamed_llama_answers(chat_class: Any) -> Any:
+    """``chat_class`` reading a llama.cpp answer as a stream, joined into the whole answer.
+
+    llama.cpp sends nothing of a non-streamed answer until it has finished,
+    the headers included, so a call on a slow model was silent for its whole
+    life and nothing but the provider's request timeout could end it. Each
+    call is read as a stream instead (``_agenerate``/``_generate`` through the
+    model's own ``_astream``/``_stream``), so its pieces arrive as they are
+    made and the call's deadline reads its pace from them
+    (``generation_rate._CallDeadline``); the chunks are then joined into the
+    answer the server would have sent whole (:func:`_joined_answer`).
+
+    Two fields of llama.cpp's stream are not OpenAI's, and each chunk is
+    changed only in them:
+
+    * ``timings`` comes on the closing chunk; it is kept in that chunk's
+      metadata, as :func:`with_server_timings` keeps it on a whole answer, so
+      ``RateMeter`` reads the server's own reading and generation times;
+    * ik_llama.cpp puts ``usage`` on every chunk of the answer as a running
+      total, and the chunks' usages are added together when the chunks are
+      joined, which would count the answer's units many times over. A chunk
+      that carries a choice keeps none; the total the stream closes with, on
+      its chunk without choices, is the answer's usage, kept as
+      ``token_usage`` too, where a whole answer carries it.
+
+    Anything that is not a chat model class is returned as it is.
+    """
+    if not isinstance(chat_class, type) or not hasattr(
+        chat_class, "_convert_chunk_to_generation_chunk"
+    ):
+        return chat_class
+    cached = _STREAMED_LLAMA_CLASSES.get(chat_class)
+    if cached is not None:
+        return cached
+    base: Any = chat_class
+
+    def _convert_chunk_to_generation_chunk(self: Any, chunk: Any, *args: Any, **kwargs: Any) -> Any:
+        generation = base._convert_chunk_to_generation_chunk(self, chunk, *args, **kwargs)
+        if generation is None or not isinstance(chunk, dict):
+            return generation
+        message: Any = getattr(generation, "message", None)
+        if chunk.get("choices"):
+            if getattr(message, "usage_metadata", None) is not None:
+                message.usage_metadata = None
+        elif isinstance(chunk.get("usage"), dict):
+            generation.generation_info = {
+                **(generation.generation_info or {}),
+                "token_usage": chunk["usage"],
+            }
+        timings = server_timings_of(chunk)
+        if timings is not None:
+            generation.generation_info = {**(generation.generation_info or {}), "timings": timings}
+            metadata = getattr(message, "response_metadata", None)
+            if isinstance(metadata, dict):
+                metadata.setdefault("timings", timings)
+        return generation
+
+    async def _agenerate(
+        self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Any:
+        chunks = [
+            chunk
+            async for chunk in self._astream(messages, stop=stop, run_manager=run_manager, **kwargs)
+        ]
+        return _joined_answer(chunks)
+
+    def _generate(
+        self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Any:
+        return _joined_answer(
+            list(self._stream(messages, stop=stop, run_manager=run_manager, **kwargs))
+        )
+
+    streamed = type(
+        chat_class.__name__,
+        (chat_class,),
+        {
+            "_convert_chunk_to_generation_chunk": _convert_chunk_to_generation_chunk,
+            "_agenerate": _agenerate,
+            "_generate": _generate,
+        },
+    )
+    streamed.__module__ = __name__
+    streamed.__qualname__ = chat_class.__qualname__
+    _STREAMED_LLAMA_CLASSES[chat_class] = streamed
+    return streamed
+
+
 def with_reasoning_passback(chat_class: Any) -> Any:
     """``chat_class`` keeping DeepSeek's ``reasoning_content`` and sending it back.
 
@@ -552,6 +702,12 @@ class OpenAIProvider:
         local = not force_standard and sends_llama_cpp_extras(base_url, compat)
         if local:
             self._add_llama_cpp_extras(build_kwargs, base_url)
+            # Each answer is read as a stream (``with_streamed_llama_answers``):
+            # the usage comes on the closing chunk, and langchain's own 120 s
+            # limit between chunks is off, because before the first piece the
+            # silence is the provider's request timeout to bound.
+            build_kwargs.setdefault("stream_usage", True)
+            build_kwargs.setdefault("stream_chunk_timeout", None)
         elif compat == "deepseek":
             self._add_deepseek_fields(build_kwargs)
 
@@ -592,8 +748,9 @@ class OpenAIProvider:
             chat_class = with_reasoning_passback(chat_class)
         elif local:
             # llama.cpp reads its cap from the extras; a cap bound for one call
-            # reaches them the way the model's own does.
-            chat_class = with_per_request_llama_cap(chat_class)
+            # reaches them the way the model's own does. Its answer is read
+            # as a stream and joined into the one it would have sent whole.
+            chat_class = with_streamed_llama_answers(with_per_request_llama_cap(chat_class))
         # Last, over the dialect's own changes: no request sends a tool call
         # without its reply, whatever the history it was built from — the one
         # rule every provider applies (``maljan.llm.tool_replies``).

@@ -28,6 +28,8 @@ from maljan.core.config import Settings
 from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only
 from maljan.pipeline.run_state import RUN_STATE_END, without_run_state_tail
 
+from .streamed_wire import reply
+
 HOSTED = "https://api.deepseek.com"
 LOCAL = "http://127.0.0.1:8080/v1"
 THOUGHT = "The user wants a lookup first.\n  Then an answer — keep “this” exactly."
@@ -66,9 +68,9 @@ class _DeepSeek:
                     "function": {"name": "lookup", "arguments": json.dumps({"what": f"w{done}"})},
                 }
             ]
-        return httpx.Response(
-            200,
-            json={
+        return reply(
+            request,
+            {
                 "id": f"r{len(self.bodies)}",
                 "object": "chat.completion",
                 "created": 0,
