@@ -144,7 +144,10 @@ class Violation:
     # technique a credit names, the malware object's name. Two answers of one
     # judge number their objects afresh, and an answer to a credit question
     # renames the credited source — so "was this asked" is keyed on this where
-    # a check sets it, never on the words of the message.
+    # a check sets it, never on the words of the message. Every technique
+    # check sets it to the technique id it is about, and the report attaches
+    # the finding to that technique's row by it: a message can name other ids
+    # (an unknown id's names the closest real ones).
     subject: str = ""
 
     def __post_init__(self) -> None:
@@ -543,6 +546,7 @@ def validate_isr(
                         "downstream as a finding."
                     ),
                     path=path,
+                    subject=tid,
                 )
             )
         if not tid:
@@ -566,6 +570,10 @@ def validate_isr(
                         "Use one of them, or omit the technique id."
                     ),
                     path=path,
+                    # The id the claim carries: the message also names the
+                    # closest real techniques, and a reader matching on its
+                    # words attached this finding to them.
+                    subject=tid,
                 )
             )
             continue
@@ -580,7 +588,7 @@ def validate_isr(
             mismatch = platform_mismatch_message(tid, attck, scope)
             if mismatch:
                 violations.append(
-                    Violation(code=PLATFORM_MISMATCH_CODE, message=mismatch, path=path)
+                    Violation(code=PLATFORM_MISMATCH_CODE, message=mismatch, path=path, subject=tid)
                 )
             else:
                 # A claim that names the behaviour to say it is absent is asked
@@ -602,7 +610,9 @@ def validate_isr(
             challenge=weak_alignment_challenges and absence is None,
         )
         if weak:
-            violations.append(Violation(code=WEAK_ALIGNMENT_CODE, message=weak, path=path))
+            violations.append(
+                Violation(code=WEAK_ALIGNMENT_CODE, message=weak, path=path, subject=tid)
+            )
 
     return violations
 
@@ -896,6 +906,7 @@ def absence_claim_violation(
             "the technique and say what the sample does."
         ),
         path=path,
+        subject=str(technique_id).strip().upper(),
     )
 
 
@@ -1005,6 +1016,7 @@ def claim_does_not_describe_violation(
             "TECHNIQUE: NONE."
         ),
         path=path,
+        subject=str(technique_id).strip().upper(),
     )
 
 
@@ -1453,12 +1465,22 @@ def _technique_is_known(technique_id: str, attck: Any) -> bool:
 
 
 def _retired_note(technique_id: str, attck: Any) -> str:
-    """`` (retired in ATT&CK 19.2)`` when a previous vendored catalogue had the id."""
-    ask = getattr(attck, "attck_retired_in", None)
-    if ask is None:
-        return ""
+    """`` (retired in ATT&CK 19.2)`` when the vendored retired set carries the id.
+
+    The reason every surface gives (``attck_retired_reason``): the release
+    that retired it, the bundle's own revoked or deprecated mark, and the id
+    that revoked it. A knowledge object with only ``attck_retired_in`` answers
+    the release alone.
+    """
+    reason_of = getattr(attck, "attck_retired_reason", None)
+    release_of = getattr(attck, "attck_retired_in", None)
     try:
-        release = ask(technique_id)
+        if reason_of is not None:
+            reason = reason_of(technique_id)
+            return f" ({reason})" if reason else ""
+        if release_of is None:
+            return ""
+        release = release_of(technique_id)
     except Exception as exc:  # noqa: BLE001 — a note, not a check
         logger.debug("validation: the retired-id lookup for %s failed (%s).", technique_id, exc)
         return ""
@@ -4418,6 +4440,7 @@ def validate_verdict_bundle(
                             "drop the attack-pattern."
                         ),
                         path=where,
+                        subject=tid.upper(),
                     )
                 )
             elif attck is not None:
@@ -4428,6 +4451,7 @@ def validate_verdict_bundle(
                             code=PLATFORM_MISMATCH_CODE,
                             message=mismatch,
                             path=where,
+                            subject=tid.upper(),
                         )
                     )
 

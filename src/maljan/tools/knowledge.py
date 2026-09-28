@@ -259,6 +259,8 @@ def attck_lookup(technique_id: str) -> dict[str, Any]:
         domain_of,
         platforms_for,
         retired_in,
+        retired_reason,
+        revoked_by,
         technique_entry,
         valid_ids,
     )
@@ -283,14 +285,20 @@ def attck_lookup(technique_id: str) -> dict[str, Any]:
     }
     if technique is None:
         retired = retired_in(tid)
-        out["reason"] = (
-            f"retired in ATT&CK {retired}"
-            if retired
-            else "the ATT&CK catalogue has no entry for this id"
-        )
+        successor = revoked_by(tid)
+        out["reason"] = retired_reason(tid) or "the ATT&CK catalogue has no entry for this id"
         if retired:
             out["retired_in"] = retired
+        if successor:
+            out["revoked_by"] = successor
     return out
+
+
+def attck_retired_reason(technique_id: str) -> str | None:
+    """What happened to a retired id (``attck_loader.retired_reason``); ``None`` otherwise."""
+    from maljan.memory.attck_loader import retired_reason
+
+    return retired_reason(technique_id)
 
 
 def attck_retired_in(technique_id: str) -> str | None:

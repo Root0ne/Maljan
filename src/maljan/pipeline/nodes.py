@@ -483,6 +483,9 @@ def _violations_from_rows(rows: Any) -> list[Violation]:
                     # And an answered question stays one, rather than coming
                     # back as a finding left unfixed.
                     answered=bool(row.get("answered")),
+                    # And what it is about: the report attaches a technique
+                    # finding to the row of the technique it names here.
+                    subject=str(row.get("subject") or ""),
                 )
             )
     return out

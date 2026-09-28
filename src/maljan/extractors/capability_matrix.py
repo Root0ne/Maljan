@@ -170,7 +170,7 @@ def build_capability_matrix(
         asked = review is not None and tid in review.asked
         decided = review.decision_for(tid) if review is not None and asked else None
         if not valid:
-            not_published = "the ATT&CK catalogue has no entry for this id in any domain"
+            not_published = unknown_id_reason(tid)
         elif out_of_scope.get(tid):
             not_published = out_of_scope[tid]
         elif decided is not None and decided.decision == "drop":
@@ -680,6 +680,33 @@ def bundle_technique_ids(stix_output: dict[str, Any] | None) -> set[str]:
 # report does not publish it whatever the judge says.
 NOT_ASKED_UNKNOWN_ID = "not asked: the ATT&CK catalogue has no entry for this id in any domain"
 
+# Why an id the catalogue rejects is not published, when no retired row says more.
+NO_ENTRY_IN_ANY_DOMAIN = "the ATT&CK catalogue has no entry for this id in any domain"
+
+
+def unknown_id_reason(technique_id: str) -> str:
+    """Why an id the catalogue rejects is not published, retired or never catalogued.
+
+    A retired id says what happened to it (``attck_loader.retired_reason``):
+    the release that retired it, or the bundle's own revoked or deprecated
+    mark, and the id that revoked it. Only an id the vendored retired set does
+    not carry has "no entry in any domain".
+    """
+    try:
+        from maljan.memory.attck_loader import retired_reason
+
+        retired = retired_reason(technique_id)
+    except Exception:  # noqa: BLE001 — a reason unread is the plain one
+        retired = None
+    if retired:
+        return f"the ATT&CK catalogue has no current entry for this id: it was {retired}"
+    return NO_ENTRY_IN_ANY_DOMAIN
+
+
+def not_asked_unknown_id(technique_id: str) -> str:
+    """The not-asked note for an id the catalogue rejects (:func:`unknown_id_reason`)."""
+    return f"not asked: {unknown_id_reason(technique_id)}"
+
 
 def judge_questions(
     stix_output: dict[str, Any] | None,
@@ -739,7 +766,7 @@ def judge_questions(
     not_asked: dict[str, str] = {}
     for tid in ids:
         if tid in unknown:
-            not_asked[tid] = NOT_ASKED_UNKNOWN_ID
+            not_asked[tid] = not_asked_unknown_id(tid)
         elif out_of_scope.get(tid):
             not_asked[tid] = f"not asked: {out_of_scope[tid]}"
     return [q for tid, q in questions.items() if tid not in not_asked], not_asked

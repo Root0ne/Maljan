@@ -9,6 +9,7 @@ mapped technique at all.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -292,3 +293,75 @@ class TestRetiredIds:
         attck_loader.reset_caches()
         assert attck_loader.retired_ids() == {}
         attck_loader.reset_caches()
+
+
+class TestARetiredIdIsNamedForWhatHappenedToIt:
+    """The reason a report and a check give reads ``retired_in``, ``status`` and ``revoked_by``."""
+
+    @pytest.fixture
+    def retired_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+        import json
+
+        path = tmp_path / "retired.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "_meta": {"attck_version": "19.2"},
+                    "T1024": {"domain": "enterprise", "status": "revoked", "revoked_by": "T1041"},
+                    "T1103": {"domain": "enterprise", "status": "revoked"},
+                    "T1001": {"domain": "enterprise", "status": "deprecated"},
+                    "T1562.001": {
+                        "domain": "enterprise",
+                        "retired_in": "19.2",
+                        "revoked_by": "T1685",
+                    },
+                    "T1499": {"domain": "enterprise", "retired_in": "19.2"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(attck_loader, "RETIRED_IDS_FILE", path)
+        attck_loader.reset_caches()
+        yield path
+        attck_loader.reset_caches()
+
+    def test_each_row_answers_its_own_reason(self, retired_file: Path) -> None:
+        reason = attck_loader.retired_reason
+        assert reason("T1024") == "revoked by T1041 in the ATT&CK catalogue"
+        assert reason("t1103") == "revoked in the ATT&CK catalogue"
+        assert reason("T1001") == "deprecated in the ATT&CK catalogue"
+        assert reason("T1562.001") == "retired in ATT&CK 19.2 and revoked by T1685"
+        assert reason("T1499") == "retired in ATT&CK 19.2"
+        assert reason("T9999") is None
+
+    def test_a_row_with_no_release_names_no_release(self, retired_file: Path) -> None:
+        assert attck_loader.retired_in("T1024") is None
+        assert attck_loader.retired_status("T1024") == "revoked"
+        assert attck_loader.revoked_by("T1024") == "T1041"
+        assert attck_loader.retired_in("T1499") == "19.2"
+        assert attck_loader.retired_status("T1499") is None
+
+    def test_the_catalogue_s_reasons_read_the_same_rows(
+        self, retired_file: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.extractors import capability_matrix
+        from maljan.tools import knowledge
+
+        answer = knowledge.attck_lookup("T1024")
+        assert answer["valid"] is False
+        assert answer["reason"] == "revoked by T1041 in the ATT&CK catalogue"
+        assert answer["revoked_by"] == "T1041"
+        assert capability_matrix.unknown_id_reason("T1024") == (
+            "the ATT&CK catalogue has no current entry for this id: it was revoked by T1041 "
+            "in the ATT&CK catalogue"
+        )
+        assert capability_matrix.unknown_id_reason("T9999") == (
+            "the ATT&CK catalogue has no entry for this id in any domain"
+        )
+        assert capability_matrix.not_asked_unknown_id("T9999") == (
+            capability_matrix.NOT_ASKED_UNKNOWN_ID
+        )
+        assert capability_matrix.not_asked_unknown_id("T1103") == (
+            "not asked: the ATT&CK catalogue has no current entry for this id: it was revoked "
+            "in the ATT&CK catalogue"
+        )

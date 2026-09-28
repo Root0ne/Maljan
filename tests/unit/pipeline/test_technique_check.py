@@ -836,8 +836,8 @@ class TestARetiredId:
         violations = validate_isr(isr, attck=knowledge, sample=PE)
         assert [v.code for v in violations] == ["attck.unknown_id"]
         assert (
-            "TECHNIQUE T1562.001 is not in the MITRE ATT&CK catalogue (retired in ATT&CK 19.2)"
-            in (violations[0].message)
+            "TECHNIQUE T1562.001 is not in the MITRE ATT&CK catalogue (retired in ATT&CK 19.2 and "
+            "revoked by T1685)" in (violations[0].message)
         )
         assert isr.claims[0].technique_id == "T1562.001"
 
@@ -847,7 +847,9 @@ class TestARetiredId:
         row = knowledge.attck_validate(["T1562.001"])["invalid"][0]
         assert row["retired_in"] == "19.2"
         looked = knowledge.attck_lookup("T1562.001")
-        assert looked["valid"] is False and looked["reason"] == "retired in ATT&CK 19.2"
+        assert looked["valid"] is False
+        assert looked["reason"] == "retired in ATT&CK 19.2 and revoked by T1685"
+        assert looked["revoked_by"] == "T1685"
         assert knowledge.attck_retired_in("T1055") is None
 
     def test_an_invented_id_carries_no_such_note(self) -> None:

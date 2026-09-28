@@ -797,6 +797,7 @@ def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = Tru
                 answered=bool(row.get("answered")),
                 route=route,
                 sentence=sentence,
+                subject=str(row.get("subject") or ""),
             )
         )
     # The two counters are read-modify-write and this runs on an executor

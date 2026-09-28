@@ -84,7 +84,12 @@ from maljan.agents.tool_pinning import (
 )
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
 from maljan.analysis.pcap_summary import CaptureRead
-from maljan.extractors.capability_matrix import NOT_ASKED_UNKNOWN_ID, TechniqueQuestion
+from maljan.extractors.capability_matrix import (
+    NOT_ASKED_UNKNOWN_ID,
+    TechniqueQuestion,
+    not_asked_unknown_id,
+    unknown_id_reason,
+)
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.pipeline import triage_pack
 from maljan.pipeline.mediation_models import MediatorVerdict
@@ -620,6 +625,8 @@ PROMPTS: dict[str, str] = {
             TECHNIQUE_QUESTION_NOT_ASKED,
             TECHNIQUE_ANSWER_UNREAD,
             NOT_ASKED_UNKNOWN_ID,
+            not_asked_unknown_id("T1562.001"),
+            unknown_id_reason("T1562.001"),
         ]
     ),
     "analyst cut-at-cap question": analyst_cut_violation(
