@@ -122,6 +122,7 @@ from maljan.pipeline.validation import (
     claims_kept_under_disputes_finding,
     claims_under_disputes_violation,
     confidence_violation,
+    flow_voice_violations,
     gate_removed_note,
     malware_object_violations,
     misstated_entry_contents,
@@ -494,6 +495,31 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "judge technique answer form": TECHNIQUE_ANSWER_FORM,
+    "execution step questions for an observed step not watched whole": " ".join(
+        v.message
+        for v in flow_voice_violations(
+            {
+                "steps": [
+                    {"order": 1, "action": "a", "voice": "observed", "evidence_refs": []},
+                    {
+                        "order": 2,
+                        "action": "a",
+                        "voice": "observed",
+                        "evidence_refs": ["ev_0001", "ev_0002"],
+                    },
+                    {
+                        "order": 3,
+                        "action": "Reaches 192.0.2.1 and one.example.com.",
+                        "voice": "observed",
+                        "evidence_refs": ["ev_0001"],
+                    },
+                ]
+            },
+            ["ev_0001"],
+            tools={"ev_0002": "t"},
+            flow_fact=lambda kind, value: f"no flow ({kind})",
+        )
+    ),
     "evidence summary naming each id from the vendored table": summarise(
         {
             "a": AgentISR(

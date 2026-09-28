@@ -16,6 +16,7 @@ than fabricate — see other/docs/report-reference/ ("state absence explicitly")
 
 from __future__ import annotations
 
+import ipaddress
 from typing import Any
 
 from maljan.reporting.models import MalwareReport
@@ -479,6 +480,65 @@ def _answers_about_the_network(tool: str, section: Any) -> bool:
         return True
     name = str(getattr(section, "key", "") or "").removeprefix("sandbox_").lower()
     return tool == "sandbox_report_section" and name in _NETWORK_REPORT_SECTIONS
+
+
+def sample_flow_fact(report: MalwareReport) -> Any:
+    """``(kind, value) -> reason``: why the sandbox shows no flow of the sample to a value.
+
+    ``""`` when a flow to it came from the sample's process tree: an address
+    the tree reached, a name that resolved to one, a URL on either. Otherwise
+    the sandbox's own fact about the value, in the publish rule's words for a
+    row it recorded (``stix_renderer.sandbox_row_kwargs``), or that it
+    recorded no flow to it. A platform fact read from the network block,
+    right or absent; what a step marked observed is asked against.
+    """
+    from maljan.reporting.ledger_projection import value_key
+    from maljan.reporting.renderers.stix_renderer import sandbox_row_kwargs, url_host
+
+    network = report.network
+    ips = {value_key("ip", ip.address): ip for ip in (network.ips if network else [])}
+    names = {
+        value_key("domain", domain.fqdn): domain for domain in (network.domains if network else [])
+    }
+    reached = {key for key, ip in ips.items() if ip.sample_process_tree is True}
+
+    def _address(value: str) -> str:
+        key = value_key("ip", value)
+        if key in reached:
+            return ""
+        row = ips.get(key)
+        if row is not None and row.source == "sandbox":
+            said = sandbox_row_kwargs(report, "ip", value).get("unattributed")
+            if said:
+                return str(said)
+        return "the sandbox records no flow of the sample's process tree to it"
+
+    def _name(value: str) -> str:
+        row = names.get(value_key("domain", value))
+        resolved = [str(a) for a in (row.resolved_ips if row is not None else [])]
+        if any(value_key("ip", address) in reached for address in resolved):
+            return ""
+        if resolved:
+            return (
+                f"none of the addresses it resolved to ({', '.join(resolved)}) has a flow the "
+                "sandbox attributes to the sample's process tree"
+            )
+        return "the sandbox records no address it resolved to that the sample's tree reached"
+
+    def _fact(kind: str, value: str) -> str:
+        text = str(value or "").strip()
+        if kind == "url":
+            text = url_host(text)
+        text = text.strip("[]")
+        if not text:
+            return ""
+        try:
+            ipaddress.ip_address(text)
+        except ValueError:
+            return _name(text)
+        return _address(text)
+
+    return _fact
 
 
 def _sample_tree_made_a_flow(report: MalwareReport) -> bool:

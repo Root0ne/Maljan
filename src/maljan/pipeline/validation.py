@@ -2944,19 +2944,114 @@ def key_finding_citation_violations(payload: Any, known_ids: Iterable[str]) -> l
     return out
 
 
-def flow_voice_violations(payload: Any, sandbox_ids: Iterable[str]) -> list[Violation]:
-    """Execution-flow steps marked ``observed`` that cite no sandbox entry.
+_DOTTED_ADDRESS_RE = re.compile(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w.]*\w)")
+
+
+def _refanged(text: str) -> str:
+    """``text`` with the usual defanging undone: ``[.]``, ``[:]``, ``hxxp``."""
+    out = re.sub(r"\[(\.|:)\]|\((\.)\)", lambda m: m.group(1) or m.group(2), str(text or ""))
+    return re.sub(r"\bhxxp", "http", out, flags=re.IGNORECASE)
+
+
+def network_values_in(text: str) -> list[tuple[str, str]]:
+    """The addresses and hosts a sentence names, ``(kind, value)``, once each, in order.
+
+    A URL is read as its host. An address is any dotted quad that parses as
+    one; a host is what the string sweep's own reader takes for one
+    (``tools.strings.iocs_from_text``), so a file name is not a host.
+    """
+    from maljan.tools.strings import iocs_from_text
+
+    plain = _refanged(text)
+    found: list[tuple[str, str]] = []
+    for match in _DOTTED_ADDRESS_RE.finditer(plain):
+        try:
+            ipaddress.ip_address(match.group(0))
+        except ValueError:
+            continue
+        if ("ip", match.group(0)) not in found:
+            found.append(("ip", match.group(0)))
+    # A sentence's full stop is not part of the host it ends on.
+    for row in (
+        iocs_from_text(re.sub(r"[.,;:!?)]+(?=\s|$)", " ", plain), ["domain"]).get("iocs") or []
+    ):
+        value = str(row.get("value") or "").strip().lower().rstrip(".")
+        if value and ("domain", value) not in found:
+            found.append(("domain", value))
+    return found
+
+
+def flow_voice_violations(
+    payload: Any,
+    sandbox_ids: Iterable[str],
+    *,
+    tools: Mapping[str, str] | None = None,
+    flow_fact: Callable[[str, str], str] | None = None,
+) -> list[Violation]:
+    """Execution-flow steps marked ``observed`` that the sandbox did not watch whole.
 
     ``observed`` tells a reader a sandbox watched the step happen. A step read
     from the code is ``assessed``, and the mark is the model's to choose; this
-    only asks, once, when the mark and the citations disagree.
+    only asks, once, when the mark and the citations disagree: a step that
+    cites no sandbox entry; one that also cites an entry that is not a sandbox
+    observation (``tools`` names the tool behind each id), since every
+    statement of an observed step is one the sandbox watched; and one that
+    names an address or a host the sandbox attributes no flow of the sample
+    to (``flow_fact``, :func:`reporting.evidence_bundles.sample_flow_fact`),
+    since a network step is observed for its own value.
     """
     sandbox = {str(value) for value in sandbox_ids}
     out: list[Violation] = []
     for index, row in enumerate(_rows_of(payload, "steps")):
         if str(row.get("voice") or "").strip().lower() != "observed":
             continue
-        if any(value in sandbox for value in _cited(row, "evidence_refs")):
+        cited = _cited(row, "evidence_refs")
+        if any(value in sandbox for value in cited):
+            order = safe_finding_value(row.get("order", index + 1))
+            others = [value for value in cited if value not in sandbox]
+            if others:
+                named = _named_ids(
+                    f"{value} ({(tools or {}).get(value)})" if (tools or {}).get(value) else value
+                    for value in others
+                )
+                out.append(
+                    Violation(
+                        code=FLOW_VOICE_CODE,
+                        message=(
+                            f"step {order} is marked observed and also cites "
+                            f"{safe_finding_value(named)}, which record no sandbox observation "
+                            "of the sample. A step marked observed says the sandbox watched "
+                            "every part of it. Cite only the sandbox entries that show it and "
+                            "write what the other entries show as an assessed step of its own, "
+                            "or mark the step assessed."
+                        ),
+                        path=f"steps.{index}.voice",
+                    )
+                )
+                continue
+            unreached = [
+                (value, said)
+                for kind, value in network_values_in(str(row.get("action") or ""))
+                if flow_fact is not None and (said := flow_fact(kind, value))
+            ]
+            if unreached:
+                facts = "; ".join(
+                    f"{safe_finding_value(value)}: {safe_finding_value(said)}"
+                    for value, said in unreached
+                )
+                out.append(
+                    Violation(
+                        code=FLOW_VOICE_CODE,
+                        message=(
+                            f"step {order} is marked observed and names a network value the "
+                            f"sandbox attributes no flow of the sample to ({facts}). A network "
+                            "step is observed only for a value the sample's own process tree "
+                            "reached. Mark the step assessed, or leave the value out of the "
+                            "observed step."
+                        ),
+                        path=f"steps.{index}.voice",
+                    )
+                )
             continue
         where = (
             f"the sandbox answers that recorded something are {_named_ids(sorted(sandbox))}"

@@ -849,6 +849,17 @@ def network_from_ledger(
                 name = _first_str(row, "request", "hostname", "domain", "name")
                 _add("domain", name, "sandbox")
                 resolved.add(value_key("domain", name))
+                # The addresses the answer gave for it, as the record states them.
+                known_name = domains.get(value_key("domain", name)) if name else None
+                answers = row.get("answers") if isinstance(row, dict) else None
+                for answer in answers if isinstance(answers, list) else []:
+                    address = address_key(_first_str(answer, "data", "ip", "address"))
+                    if (
+                        known_name is not None
+                        and _parses_as_an_address(address)
+                        and address not in known_name.resolved_ips
+                    ):
+                        known_name.resolved_ips.append(address)
         # An address the sample really reached, labelled as one: the default
         # source is ``strings``, so every observed address was recorded as
         # though a string sweep had produced it, which is the weakest claim
