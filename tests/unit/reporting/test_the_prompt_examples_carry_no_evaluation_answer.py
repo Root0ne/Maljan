@@ -191,6 +191,7 @@ from maljan.reporting.renderers.stix_renderer import (
     named_only_reason,
     not_kept_reason,
     public_resolver_reason,
+    publish_answer,
     seen_in_reason,
     yes_because,
 )
@@ -597,6 +598,9 @@ PROMPTS: dict[str, str] = {
             JUDGE_QUESTION_NOT_RECORDED,
             judge_not_told(JUDGE_NOT_ASKED_IN_TIME, "its address 192.0.2.1"),
             yes_because("identity"),
+            publish_answer(
+                "url", "https://one.example.com/x", "strings", named_only_by="the judge's indicator"
+            ),
             yes_because("sandbox"),
         ]
     ),

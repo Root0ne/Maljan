@@ -45,6 +45,7 @@ SWEPT = "crl.example-authority.org"
 SHA256 = "a" * 64
 DROPPED = "b" * 64
 FOREIGN = "d" * 64
+JUDGE_ONLY = "no: named only by the judge's indicator, and no second source in this run records it"
 
 
 def _indicator(index: int, pattern: str) -> dict[str, Any]:
@@ -135,7 +136,26 @@ class TestAJudgeValueTheRuleRefuses:
 
         row = _row(report, "only-judge.example.net")
 
-        assert (row.source, row.published) == ("judge", "no: seen only in the file's strings")
+        # The file's strings do not hold it: the judge's indicator is its only source.
+        assert (row.source, row.published) == (
+            "judge",
+            JUDGE_ONLY,
+        )
+
+    def test_a_judge_value_the_file_s_strings_hold_is_said_to_be_seen_there(self) -> None:
+        from maljan.reporting.models import StaticAnalysis, StringIOC
+
+        judge = _judge("[domain-name:value = 'only-judge.example.net']")
+        report = _report(
+            judge,
+            static=StaticAnalysis(
+                interesting_strings=[StringIOC(kind="domain", value="only-judge.example.net")]
+            ),
+        )
+
+        assert _row(report, "only-judge.example.net").published == (
+            "no: seen only in the file's strings"
+        )
 
 
 class TestAJudgeValueTheRulePublishes:
@@ -159,7 +179,7 @@ class TestTheKindsTheRuleNowAnswers:
         exported, renderer = _export(report, judge)
 
         assert FOREIGN not in str(exported)
-        assert _row(report, FOREIGN).published == "no: seen only in the file's strings"
+        assert _row(report, FOREIGN).published == JUDGE_ONLY
 
     def test_a_hash_of_a_file_the_sandbox_saw_dropped_is(self) -> None:
         judge = _judge(f"[file:hashes.'SHA-256' = '{DROPPED}']")

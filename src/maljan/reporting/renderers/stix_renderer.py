@@ -3108,6 +3108,7 @@ def publish_answer(
     asked_in: str = "",
     untold: str = "",
     kept_address: str = "",
+    named_only_by: str = "",
 ) -> str:
     """The publish rule's answer for one row, as the report prints it.
 
@@ -3205,6 +3206,8 @@ def publish_answer(
         return "no: the export has no object for this kind"
     if seen_in:
         return seen_in_reason(seen_in, listed_by)
+    if named_only_by:
+        return f"no: named only by {named_only_by}, and no second source in this run records it"
     return "no: seen only in the file's strings"
 
 
@@ -3286,8 +3289,20 @@ def judge_value_answer(report: Any, kind: str, value: str, corroborating: str) -
         if text.lower() in own:
             return publish_answer("hash", text, "identity")
     reputation = _host_reputation(report, url_host(text)) if kind == "url" else None
+    # A value the file's strings do not hold was named by the judge alone,
+    # and the refusal says so rather than naming the strings as its source.
+    in_strings = any(
+        str(getattr(row, "value", "") or "").strip().lower() == text.lower()
+        for row in (getattr(getattr(report, "static", None), "interesting_strings", None) or [])
+    )
     return publish_answer(
-        kind, text, "strings", reputation, corroborating=corroborating, **emulated
+        kind,
+        text,
+        "strings",
+        reputation,
+        corroborating=corroborating,
+        named_only_by="" if in_strings else "the judge's indicator",
+        **emulated,
     )
 
 

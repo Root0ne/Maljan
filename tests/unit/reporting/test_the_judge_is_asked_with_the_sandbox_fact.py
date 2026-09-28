@@ -492,3 +492,16 @@ class TestAURLOnAnAddressSaysItsAddressWasKept:
         (answer,) = [a for _i, a in judge_indicator_rows(report)]
 
         assert publishes(answer), answer
+
+
+def test_a_judge_url_on_a_host_it_published_names_the_judge_as_its_only_source() -> None:
+    url = f"https://{TLS_ONLY}/gate"
+    report = _report(told=True)
+    report.judge_indicators = [JudgeIndicator(kind="url", value=url)]
+
+    rows = {row.value: row.published for row in build_consolidated_iocs(report)}
+
+    assert publishes(rows[TLS_ONLY])
+    assert rows[url] == (
+        "no: named only by the judge's indicator, and no second source in this run records it"
+    )
