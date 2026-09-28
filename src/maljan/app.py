@@ -28,6 +28,23 @@ from maljan.pipeline.state import AnalysisState
 from maljan.providers.cape_view import to_cape_shaped_dict
 
 
+def _remember_the_secrets_of(config: Settings) -> None:
+    """Register the secret values ``config`` holds with the scrub, under the ``app`` scope.
+
+    Replaced each time an app is built, so a secret no longer configured is not
+    masked by the next one. Never raises: the shape rules still run without it.
+    """
+    try:
+        from maljan.core.settings_catalog import configured_secret_values
+        from maljan.pipeline.events import remember_secret_values
+
+        remember_secret_values(configured_secret_values(config), scope="app")
+    except Exception as exc:  # noqa: BLE001 — never worth an app
+        logger.warning(
+            "The configured secrets were not handed to the scrub (%s).", type(exc).__name__
+        )
+
+
 class MaljanApp:
     """High-level application facade.
 
@@ -48,6 +65,10 @@ class MaljanApp:
         analyst_mode: Any = None,
     ) -> None:
         self.config = config or Settings()
+        # The secrets these settings hold are masked by value wherever the
+        # scrub runs in this process: on the command line this is the one
+        # place that knows them (the worker also registers its own).
+        _remember_the_secrets_of(self.config)
         self.container = ServiceContainer(
             config=self.config,
             mock=mock,
