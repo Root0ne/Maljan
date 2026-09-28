@@ -6355,19 +6355,22 @@ def unattributed_indicator_violations(
         for value in rule_values(str(getattr(obj, "pattern", "") or "")):
             if value.kind not in ("ip", "domain", "url"):
                 continue
-            said = facts(value.kind, value.value)
+            kind, about, host = value.kind, value.value, ""
+            said = facts(kind, about)
+            if kind == "url":
+                # A URL is kept for its host: the judge's URL keeps the address
+                # or the name it is on, and the question is about that host.
+                host = url_host(about).strip("[]")
+                try:
+                    ipaddress.ip_address(host)
+                except ValueError:
+                    kind = "domain"
+                else:
+                    kind = "ip"
+                about = host
+                said = said or (facts(kind, host) if host else "")
             if not said:
                 continue
-            kind, about = value.kind, value.value
-            host = url_host(about).strip("[]") if kind == "url" else ""
-            try:
-                ipaddress.ip_address(host)
-            except ValueError:
-                pass
-            else:
-                # A URL on an address takes the address's fact, and the
-                # answer is about the address.
-                kind, about = "ip", host
             subject = f"{kind}:{value_key(kind, about)}"
             if subject in seen:
                 continue
@@ -6376,8 +6379,9 @@ def unattributed_indicator_violations(
                 Violation(
                     code=UNATTRIBUTED_INDICATOR_CODE,
                     message=(
-                        f"the indicator {name!r} names {safe_finding_value(value.value)!r}, and "
-                        f"{safe_finding_value(said)}: the sandbox attributes no flow of the "
+                        f"the indicator {name!r} names {safe_finding_value(value.value)!r}"
+                        + (f", its host {safe_finding_value(host)!r}," if host else "")
+                        + f" and {safe_finding_value(said)}: the sandbox attributes no flow of the "
                         "sample to it, and without one it is the analysis machine's own "
                         "traffic. Keep the indicator only if this run's evidence shows the "
                         "sample itself reached it, and cite that entry in the indicator's "

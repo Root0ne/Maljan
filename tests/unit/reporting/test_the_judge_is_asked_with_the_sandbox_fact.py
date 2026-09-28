@@ -97,6 +97,29 @@ class TestTheQuestion:
             unattributed_indicator_violations(bundle, sandbox_facts_for_the_judge(_network())) == []
         )
 
+    def test_a_url_on_a_name_the_sample_did_not_reach_is_asked_about_its_host(self) -> None:
+        network = _network()
+        network.domains.append(NetworkDomain(fqdn=TLS_ONLY, source="sandbox", capture_only=True))
+        bundle = Bundle.model_validate(_judge(f"[url:value = 'https://{TLS_ONLY}/gate']"))
+
+        (found,) = unattributed_indicator_violations(bundle, sandbox_facts_for_the_judge(network))
+
+        assert found.subject == f"domain:{TLS_ONLY}"
+        # A URL in a finding row is cut to its scheme and host (safe_finding_value).
+        assert f"https://{TLS_ONLY}/" in found.message
+        assert f"its host {TLS_ONLY!r}" in found.message
+        assert "a TLS name only the capture recorded" in found.message
+
+    def test_a_url_on_an_address_no_row_carries_is_asked_about_the_address(self) -> None:
+        bundle = Bundle.model_validate(_judge(f"[url:value = 'http://{GUEST}/in']"))
+
+        (found,) = unattributed_indicator_violations(
+            bundle, sandbox_facts_for_the_judge(_network())
+        )
+
+        assert found.subject == f"ip:{GUEST}"
+        assert f"its host {GUEST!r}" in found.message
+
     def test_no_sandbox_record_asks_nothing(self) -> None:
         bundle = Bundle.model_validate(_judge(f"[ipv4-addr:value = '{GUEST}']"))
 
