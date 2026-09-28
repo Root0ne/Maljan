@@ -903,13 +903,22 @@ def _rebuild_configured_pattern() -> None:
     values = sorted(set().union(*_SECRET_SCOPES.values()), key=len, reverse=True)
     _CONFIGURED_PATTERN = (
         re.compile(
-            r"(?<![A-Za-z0-9_])(?:"
+            _SECRET_BOUNDARY_BEFORE
+            + "(?:"
             + "|".join(re.escape(value) for value in values)
             + r")(?![A-Za-z0-9_])"
         )
         if values
         else None
     )
+
+
+# In front of a configured value: no letter, digit or underscore — or the end of
+# an escape sequence. A tool answer carried as JSON text puts ``\n``, ``\t`` or
+# ``\u00a0`` against a value at the start of a line, and the escape's letter or
+# last hex digit is not part of the value. After the value an escape begins with
+# a backslash, which already counts as a boundary.
+_SECRET_BOUNDARY_BEFORE = r"(?:(?<![A-Za-z0-9_])|(?<=\\[A-Za-z])|(?<=\\u[0-9A-Fa-f]{4}))"
 
 
 def _hide_configured_secrets(line: str) -> str:

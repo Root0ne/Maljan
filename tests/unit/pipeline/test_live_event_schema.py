@@ -655,6 +655,16 @@ class TestAConfiguredSecretIsMaskedByValue:
         assert ev.scrub("user minioadmin, db maljan_dev.") == "user ***, db ***."
         assert ev.scrub("(minioadmin)") == "(***)"
 
+    def test_an_escape_sequence_is_a_boundary(self) -> None:
+        """A tool answer carried as JSON text puts ``\\n`` or ``\\t`` against a value."""
+        secret = self._passphrase()
+        ev.remember_secret_values([secret])
+        for escape in ("\\n", "\\t", "\\r", '\\"', "\\\\", "\\u00a0"):
+            text = '{"out":"line' + escape + secret + escape + 'next"}'
+            scrubbed = ev.scrub(text)
+            assert secret not in scrubbed, escape
+            assert scrubbed == '{"out":"line' + escape + "***" + escape + 'next"}', escape
+
     def test_a_scope_registered_again_replaces_what_it_held(self) -> None:
         first, second, own = password(16), password(16, variant=1), password(16, variant=2)
         ev.remember_secret_values([own], scope="process")
