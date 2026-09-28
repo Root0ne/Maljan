@@ -34,6 +34,10 @@ from maljan.analysis.corroboration import (
     published_count,
     technique_label,
 )
+from maljan.pipeline.mediation_models import (
+    CONTRADICTIONS_BLOCK_MISSING_NOTE,
+    CONTRADICTIONS_BLOCK_MIXED_NOTE,
+)
 
 # ---------------------------------------------------------------------------
 # Sub-components
@@ -83,6 +87,10 @@ class NegotiationMetrics:
     # One sentence per revision that stood with fewer claims than the answer
     # it replaced (``nodes.revision_replacement_sentence``).
     revision_replacements: list[str] = field(default_factory=list)
+    # The platform's sentences about the mediation rounds, once each: a
+    # mediation that gave no final ``CONTRADICTIONS:`` block when asked, and one
+    # whose block listed contradictions and also said none stands.
+    mediation_notes: list[str] = field(default_factory=list)
 
     @property
     def consensus_applicable(self) -> bool:
@@ -945,6 +953,9 @@ class RunSummary:
             lines += ["**Revisions that replaced an answer with fewer claims:**", ""]
             lines += [f"- {sentence}" for sentence in n.revision_replacements]
             lines.append("")
+        if n.mediation_notes:
+            lines += [f"- {sentence}" for sentence in n.mediation_notes]
+            lines.append("")
 
         # Agent ISR statistics
         lines += ["## Agent ISR Statistics", ""]
@@ -1218,6 +1229,7 @@ class RunSummary:
                     if n.revision_replacements
                     else {}
                 ),
+                **({"mediation_notes": list(n.mediation_notes)} if n.mediation_notes else {}),
             },
             "agent_stats": [
                 {
@@ -1737,7 +1749,7 @@ class RunSummaryBuilder:
             termination_reason = MEDIATION_FAILED
         elif is_consensus:
             termination_reason = "consensus"
-        elif len(confidence_history) >= 3:
+        elif len(confidence_history) >= 3 and not getattr(last_mediator, "contradictions", None):
             recent = confidence_history[-3:]
             std = _rolling_std(recent)
             termination_reason = "convergence" if std < 0.02 else "hard_limit"
@@ -1762,6 +1774,15 @@ class RunSummaryBuilder:
             revision_replacements=[
                 str(sentence) for sentence in (state.get("revision_replacements") or [])
             ],
+            mediation_notes=list(
+                dict.fromkeys(
+                    str(getattr(arg, "note", ""))
+                    for arg in discussion_history
+                    if getattr(arg, "agent_name", "") == "Mediator"
+                    and getattr(arg, "note", "")
+                    in (CONTRADICTIONS_BLOCK_MISSING_NOTE, CONTRADICTIONS_BLOCK_MIXED_NOTE)
+                )
+            ),
         )
         return self
 

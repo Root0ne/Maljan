@@ -515,3 +515,119 @@ class TestTheLoopStopsMidStream:
             "of 2 (not a limit; elapsed="
         )
         assert "budget" not in said[0]
+
+
+class TestAnEarlierChunksCallIsNotRunAgain:
+    """A later chunk's loop starts knowing the calls the earlier chunks made."""
+
+    def _tool(self, calls: list[str]) -> Any:
+        return TestTheGuardEndsTheLoop()._tool(calls, "decompile_function")
+
+    def _wrapped(self, guard: RepeatGuard, calls: list[str]) -> Any:
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from maljan.schemas.evidence import EvidenceCounter
+
+        recorder = EvidenceRecorder("static", counter=EvidenceCounter())
+        return record_tools([self._tool(calls)], recorder, guard)[0]
+
+    def test_a_seeded_call_is_answered_with_the_entry_that_holds_it(self) -> None:
+        from maljan.agents.evidence_recorder import repeat_notice
+
+        guard = RepeatGuard()
+        guard.seed("decompile_function", {"path": "0x3c7c"}, "ev_0003")
+        calls: list[str] = []
+        tool = self._wrapped(guard, calls)
+
+        answer = tool.invoke({"path": "0x3c7c"})
+
+        assert calls == [], "the earlier chunk's call is not run again"
+        assert answer.startswith(repeat_notice("decompile_function", "ev_0003").split(".")[0])
+        assert "[ev_0003]" in answer
+
+    def test_a_new_call_runs(self) -> None:
+        guard = RepeatGuard()
+        guard.seed("decompile_function", {"path": "0x3c7c"}, "ev_0003")
+        calls: list[str] = []
+        tool = self._wrapped(guard, calls)
+
+        tool.invoke({"path": "0x4000"})
+
+        assert calls == ["decompile_function"]
+
+    def test_a_seeded_failure_is_retried_and_its_retry_named_after(self) -> None:
+        guard = RepeatGuard()
+        guard.seed("decompile_function", {"path": "0x3c7c"}, "ev_0003", failed=True)
+        calls: list[str] = []
+        tool = self._wrapped(guard, calls)
+
+        retried = tool.invoke({"path": "0x3c7c"})
+        refused = tool.invoke({"path": "0x3c7c"})
+
+        assert calls == ["decompile_function"]
+        assert "[ev_0001]" in retried
+        assert "the result is in [ev_0001]" in refused
+
+    def test_a_replayed_conversation_keeps_the_seeds(self) -> None:
+        guard = RepeatGuard()
+        guard.seed("decompile_function", {"path": "0x3c7c"}, "ev_0003")
+        guard.reset()
+        calls: list[str] = []
+
+        self._wrapped(guard, calls).invoke({"path": "0x3c7c"})
+
+        assert calls == []
+
+
+class TestSeededRefusalsDoNotEndTheLoop:
+    """The chunk-2 shape: earlier calls asked once each, then new work."""
+
+    def _setup(self, seeds: list[tuple[str, bool]]) -> tuple[RepeatGuard, list[str], Any]:
+        guard = RepeatGuard()
+        for index, (address, failed) in enumerate(seeds, start=1):
+            guard.seed("decompile_function", {"path": address}, f"ev_{index:04d}", failed=failed)
+        calls: list[str] = []
+        tool = TestAnEarlierChunksCallIsNotRunAgain()._wrapped(guard, calls)
+        return guard, calls, tool
+
+    def test_three_seeded_calls_asked_once_each_leave_the_loop_running(self) -> None:
+        guard, calls, tool = self._setup([("0x1", False), ("0x2", False), ("0x3", False)])
+
+        for address in ("0x1", "0x2", "0x3"):
+            assert "[ev_" in tool.invoke({"path": address})
+        assert (guard.served_repeats, guard.ending_the_loop()) == (0, False)
+        assert calls == []
+
+        tool.invoke({"path": "0x4"})
+        tool.invoke({"path": "0x5"})
+        assert calls == ["decompile_function", "decompile_function"]
+        assert guard.ending_the_loop() is False
+
+    def test_a_seeded_call_asked_again_after_its_refusal_counts(self) -> None:
+        guard, calls, tool = self._setup([("0x1", False)])
+
+        tool.invoke({"path": "0x1"})
+        assert guard.served_repeats == 0
+        tool.invoke({"path": "0x1"})
+        assert guard.served_repeats == 1
+        assert calls == []
+
+    def test_a_failed_earlier_call_is_served_once_more(self) -> None:
+        guard, calls, tool = self._setup([("0x1", True)])
+
+        first = tool.invoke({"path": "0x1"})
+        assert calls == ["decompile_function"], "one retry of an earlier failure runs"
+        assert guard.served_repeats == 0
+        assert "A third will not be run" not in first
+        refused = tool.invoke({"path": "0x1"})
+        assert calls == ["decompile_function"]
+        assert "You already called decompile_function" in refused
+        assert guard.served_repeats == 1
+
+    def test_a_replay_forgets_what_the_loop_was_told(self) -> None:
+        guard, calls, tool = self._setup([("0x1", False)])
+        tool.invoke({"path": "0x1"})
+        guard.reset()
+
+        tool.invoke({"path": "0x1"})
+        assert guard.served_repeats == 0
+        assert calls == []

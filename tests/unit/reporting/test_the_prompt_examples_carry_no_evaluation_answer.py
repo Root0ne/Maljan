@@ -34,6 +34,7 @@ from maljan.agents.base_agent import (
     ClaimRead,
     claims_under_disputes_sentence,
     claims_unread_sentence,
+    earlier_chunks_block,
 )
 from maljan.agents.delegation import (
     SPEND_CEILING_REFUSAL,
@@ -43,8 +44,14 @@ from maljan.agents.delegation import (
 from maljan.agents.ghidra_http_client import no_program_as_error
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
+    CONTRADICTION_DEFINITION,
+    CONTRADICTIONS_BLOCK_QUESTION,
+    CONTRADICTIONS_BLOCK_RULE,
     EVIDENCE_SHORTENED_NOTICE,
     LOWERED_ENTRY_MARK,
+    MEDIATION_EXTRACTION_SYSTEM,
+    MEDIATOR_HUMAN_CLOSING,
+    MEDIATOR_SYSTEM_HEAD,
     NO_ENTRY_TEXT,
     PARTIAL_ENTRY_MARK,
     PROMPT_SHORTENED_NOTICE,
@@ -80,9 +87,19 @@ from maljan.agents.tool_pinning import (
 )
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
 from maljan.analysis.pcap_summary import CaptureRead
-from maljan.extractors.capability_matrix import NOT_ASKED_UNKNOWN_ID, TechniqueQuestion
+from maljan.extractors.capability_matrix import (
+    NOT_ASKED_UNKNOWN_ID,
+    TechniqueQuestion,
+    not_asked_unknown_id,
+    unknown_id_reason,
+)
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.pipeline import triage_pack
+from maljan.pipeline.mediation_models import (
+    CONTRADICTIONS_BLOCK_MISSING_NOTE,
+    CONTRADICTIONS_BLOCK_MIXED_NOTE,
+    MediatorVerdict,
+)
 from maljan.pipeline.nodes import (
     NO_SANDBOX_DATA_REASON,
     NO_STATIC_FIXTURE_NOTE,
@@ -96,6 +113,7 @@ from maljan.pipeline.validation import (
     _term_ids_said,
     absence_claim_violation,
     analyst_cut_violation,
+    chunk_cut_unread_sentence,
     claim_does_not_describe_violation,
     claims_kept_under_disputes_finding,
     claims_under_disputes_violation,
@@ -148,6 +166,7 @@ from maljan.reporting.renderers.stix_renderer import (
     public_resolver_reason,
     seen_in_reason,
 )
+from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
@@ -429,6 +448,24 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "judge technique answer form": TECHNIQUE_ANSWER_FORM,
+    "mediator contradiction definition, closing block rule and its one question": " ".join(
+        [CONTRADICTION_DEFINITION, CONTRADICTIONS_BLOCK_RULE, CONTRADICTIONS_BLOCK_QUESTION]
+    ),
+    "mediator system turn, its closing line and the missing-block note": " ".join(
+        [
+            MEDIATOR_SYSTEM_HEAD,
+            MEDIATOR_HUMAN_CLOSING,
+            CONTRADICTIONS_BLOCK_MISSING_NOTE,
+            CONTRADICTIONS_BLOCK_MIXED_NOTE,
+        ]
+    ),
+    "a chunk still cut after its question": chunk_cut_unread_sentence("chunk 1 of 2"),
+    "mediator structured extraction and its schema": " ".join(
+        [
+            MEDIATION_EXTRACTION_SYSTEM,
+            str(MediatorVerdict.model_fields["contradictions"].description or ""),
+        ]
+    ),
     "judge prompt shortened to its window": PROMPT_SHORTENED_NOTICE.format(
         cut=2, total=5, names="static report, evidence summary", width=900
     ),
@@ -606,10 +643,21 @@ PROMPTS: dict[str, str] = {
             TECHNIQUE_QUESTION_NOT_ASKED,
             TECHNIQUE_ANSWER_UNREAD,
             NOT_ASKED_UNKNOWN_ID,
+            not_asked_unknown_id("T1562.001"),
+            unknown_id_reason("T1562.001"),
         ]
     ),
     "analyst cut-at-cap question": analyst_cut_violation(
         4096, "CLAIM: The file opens a window.\nEVIDENCE: [ev_0001]\nCLAIM: The fi"
+    ).message,
+    "a later chunk's list of the earlier chunks' calls": earlier_chunks_block(
+        [
+            LedgerEntry(id="ev_0001", tool="a", args={"x": "1"}),
+            LedgerEntry(id="ev_0002", tool="b", args={}, ok=False),
+        ]
+    ),
+    "analyst cut-at-cap question naming a chunk": analyst_cut_violation(
+        4096, "CLAIM: The file opens a window.\nCLAIM: The fi", chunk="chunk 1 of 2"
     ).message,
     "judge cut-at-cap question naming where the room went": verdict_cut_violation(
         8192,

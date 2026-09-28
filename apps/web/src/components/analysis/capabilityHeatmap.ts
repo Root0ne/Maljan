@@ -253,14 +253,18 @@ export function corroborationLists(
   return { asserted_by: row.asserted_by ?? [], claimed_by: row.claimed_by ?? [] };
 }
 
-/** The ATT&CK release that retired the id, when the run's corroboration row says so. */
-export function retiredIn(
+/** What happened to a retired id, as the run's corroboration row says it.
+ *  The row's own reason (the release, the bundle's revoked or deprecated mark
+ *  and what replaced it) where it carries one, so a revoked-only id with no
+ *  release says so; a stored row with only the release names the release. */
+export function retiredNote(
   corroboration: Record<string, CorroborationRow | string[]> | null | undefined,
   techniqueId: string
 ): string | null {
   const row = corroboration?.[techniqueId];
   if (!row || Array.isArray(row)) return null;
-  return row.retired_in ?? null;
+  if (row.retired_reason) return row.retired_reason;
+  return row.retired_in ? `retired in ATT&CK ${row.retired_in}` : null;
 }
 
 /** The API catalogue's association for the id, shown apart from the sources. */

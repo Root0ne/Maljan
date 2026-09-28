@@ -836,8 +836,8 @@ class TestARetiredId:
         violations = validate_isr(isr, attck=knowledge, sample=PE)
         assert [v.code for v in violations] == ["attck.unknown_id"]
         assert (
-            "TECHNIQUE T1562.001 is not in the MITRE ATT&CK catalogue (retired in ATT&CK 19.2)"
-            in (violations[0].message)
+            "TECHNIQUE T1562.001 is not in the MITRE ATT&CK catalogue (retired in ATT&CK 19.2 and "
+            "revoked by T1685)" in (violations[0].message)
         )
         assert isr.claims[0].technique_id == "T1562.001"
 
@@ -847,7 +847,9 @@ class TestARetiredId:
         row = knowledge.attck_validate(["T1562.001"])["invalid"][0]
         assert row["retired_in"] == "19.2"
         looked = knowledge.attck_lookup("T1562.001")
-        assert looked["valid"] is False and looked["reason"] == "retired in ATT&CK 19.2"
+        assert looked["valid"] is False
+        assert looked["reason"] == "retired in ATT&CK 19.2 and revoked by T1685"
+        assert looked["revoked_by"] == "T1685"
         assert knowledge.attck_retired_in("T1055") is None
 
     def test_an_invented_id_carries_no_such_note(self) -> None:
@@ -875,7 +877,7 @@ class TestAssertionsFromYaraAndFromRetiredIds:
         assert rows["T1562.004"]["asserted_by"] == ["sigma"]
         assert rows["T1562.004"]["retired_in"] == "19.2"
         assert technique_label("T1562.004", rows["T1562.004"]) == (
-            "T1562.004 (retired in ATT&CK 19.2)"
+            "T1562.004 (retired in ATT&CK 19.2 and revoked by T1686)"
         )
         # A live id carries no such key.
         assert "retired_in" not in corroboration({"static": _isr(_claim("T1055"))}, [])["T1055"]
@@ -897,3 +899,45 @@ class TestACatalogueAssociationIsNeverASource:
             "associated_by": ["api_capability"],
         }
         assert corroboration_sources(rows["T1113"]) == []
+
+
+class TestEverySurfaceSaysWhatHappenedToARetiredId:
+    def test_the_validity_tool_gives_the_reason_and_the_successor(self) -> None:
+        from maljan.tools import knowledge
+
+        (row,) = knowledge.attck_validate(["T1024"])["invalid"]
+        assert row["reason"] == "revoked by T1573 in the ATT&CK catalogue"
+        assert row["revoked_by"] == "T1573"
+        assert "retired_in" not in row
+
+    def test_a_revoked_attack_pattern_is_not_said_to_have_no_entry(self) -> None:
+        from maljan.pipeline.validation import validate_verdict_bundle
+        from maljan.schemas.stix_models import AttackPattern, Bundle
+        from maljan.tools import knowledge
+
+        bundle = Bundle(
+            objects=[  # type: ignore[list-item]
+                AttackPattern(
+                    name="Custom Cryptographic Protocol",
+                    external_references=[{"source_name": "mitre-attack", "external_id": "T1024"}],
+                )
+            ]
+        )
+        (row,) = [
+            v
+            for v in validate_verdict_bundle(bundle, attck=knowledge)
+            if v.code == "stix.unknown_technique"
+        ]
+        assert "no entry" not in row.message
+        assert "no current entry for it: it was revoked by T1573" in row.message
+
+    def test_the_corroboration_row_carries_the_reason(self) -> None:
+        from maljan.analysis.corroboration import corroboration_row, technique_label
+        from maljan.pipeline.validation import _retired_release
+
+        assert _retired_release("T1024") is None
+        row = corroboration_row({"asserted_by": ["sigma"], "retired_reason": "revoked by T1573"})
+        assert row["retired_reason"] == "revoked by T1573"
+        assert technique_label("T1024", row) == "T1024 (revoked by T1573)"
+        stored = {"asserted_by": [], "retired_in": "19.2"}
+        assert technique_label("T1562.001", stored) == "T1562.001 (retired in ATT&CK 19.2)"

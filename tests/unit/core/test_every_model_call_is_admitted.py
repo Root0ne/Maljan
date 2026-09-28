@@ -320,6 +320,10 @@ class TestTheGuard:
         assert unadmitted_in(source) == []
 
 
+# A mediation that ends as its prompt asks: the closing block, then the number.
+MEDIATION = "CONTRADICTIONS: NONE\nagreement_confidence: 0.95"
+
+
 def _priced_judge(ceiling: float, answered: str = "agreement_confidence: 0.95"):
     llm, ledger = _model(answered), TokenLedger()
     meter = SpendMeter(ceiling, table={})
@@ -340,13 +344,20 @@ def _priced_judge(ceiling: float, answered: str = "agreement_confidence: 0.95"):
 
 class TestTheJudgesCallsAreAdmitted:
     def test_the_mediator_s_fast_path(self) -> None:
-        judge, llm, meter, kinds = _priced_judge(100.0)
+        judge, llm, meter, kinds = _priced_judge(100.0, MEDIATION)
         asyncio.run(judge.mediate(reports={"static": "text"}, history=[]))
         assert len(llm.asked) == 1 and kinds == ["mediation"]
         assert meter.committed() == meter.spent(), "nothing is left reserved"
 
+    def test_the_question_for_a_missing_contradictions_block(self) -> None:
+        judge, llm, meter, kinds = _priced_judge(100.0)
+        asyncio.run(judge.mediate(reports={"static": "text"}, history=[]))
+        assert len(llm.asked) == 2
+        assert kinds == ["mediation", "mediation block question"]
+        assert meter.committed() == meter.spent(), "nothing is left reserved"
+
     def test_the_structured_extraction(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        judge, llm, _meter, kinds = _priced_judge(100.0)
+        judge, llm, _meter, kinds = _priced_judge(100.0, MEDIATION)
         monkeypatch.setattr(judge, "_supports_structured_output", lambda: True)
         asyncio.run(judge.mediate(reports={"static": "text"}, history=[]))
         assert len(llm.asked) == 2

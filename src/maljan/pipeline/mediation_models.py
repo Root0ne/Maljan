@@ -17,6 +17,20 @@ from pydantic import BaseModel, Field
 # them there is nothing for it to measure, so no agreement value is recorded.
 MIN_ANALYSTS_FOR_CONSENSUS = 2
 
+# The platform's sentence on a mediation whose answer carried no final
+# ``CONTRADICTIONS:`` block even after it was asked once for one. Kept on the
+# mediator's argument (``AgentArgument.note``) and repeated by the run summary.
+CONTRADICTIONS_BLOCK_MISSING_NOTE = (
+    "The mediator wrote no final CONTRADICTIONS: block, also when asked once for it; "
+    "its agreement was read from its agreement_confidence alone."
+)
+# The sentence for a block that lists contradictions and also says none
+# stands: the contradictions are read, the "none" line is not.
+CONTRADICTIONS_BLOCK_MIXED_NOTE = (
+    "The mediator's final CONTRADICTIONS: block listed contradictions and also said none "
+    "stands; the contradictions it listed were read and the line saying none was not."
+)
+
 
 def analysts_with_claims(names: Iterable[str], isr_reports: Mapping[str, Any] | None) -> list[str]:
     """The debate's participants whose report carries at least one claim.
@@ -45,7 +59,11 @@ class MediatorVerdict(BaseModel):
 
     contradictions: list[str] = Field(
         default_factory=list,
-        description="Explicit contradictions found between expert reports.",
+        description=(
+            "The contradictions still standing, as the mediator's final CONTRADICTIONS: "
+            "block lists them; empty when that block says NONE. Contradictions the "
+            "reasoning drafted and then resolved are not in it."
+        ),
     )
     resolution_summary: str = Field(
         description="Brief summary of findings and any remaining disagreements.",

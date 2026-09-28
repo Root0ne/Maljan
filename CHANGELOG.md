@@ -2324,6 +2324,46 @@ change landed on `main`.
 
 ### Fixed
 
+- **A mediation that lists contradictions is not consensus.** The mediator
+  ends with a final `CONTRADICTIONS:` block, one line per contradiction still
+  standing, or `CONTRADICTIONS: NONE`; a claim a ledger entry contradicts is a
+  contradiction. Only that block is read, on the text and structured paths, and
+  a non-empty one is not consensus whatever `agreement_confidence` says (the
+  number is kept and shown), so the analysts revise. A missing block is asked
+  for once; still missing, `run_summary.negotiation.mediation_notes` says so
+  and the number decides as before. A run declared consensus at 1.0 over five
+  contradictions its mediator had listed. Each line of the block is one
+  contradiction, plain or bulleted; a "none" empties it only as its whole
+  content, so "None of the analysts …" is a contradiction.
+- **The cut-at-cap check uses the cap the call was built with.** The container
+  records the output cap on the model it builds, and the analysts' cut check,
+  their spend meter and the judge read it there instead of deriving it again,
+  which after the window cache expired gave 8,192 against calls built with
+  32,768: a false cut on one analyst, a real one named with the wrong number,
+  and a whole-cap answer accepted silently. A chunk's cut is now asked about
+  inside that chunk, over its own input, before the merge, and what comes back
+  replaces that chunk's contribution alone; a chunk still cut is recorded
+  unread, named by its chunk.
+- **A validation finding sits on the technique it is about.** Every technique
+  check sets the finding's `subject` to its technique id and the ATT&CK table
+  matches on it, so the closest real techniques an `attck.unknown_id` message
+  suggests no longer print "unresolved". An id the catalogue rejects says what
+  happened to it where the retired set knows (retired, revoked, deprecated, and
+  by what), and the retired-id generator records the bundle's own revoked and
+  deprecated attack-patterns, and the console's capability heatmap shows the
+  same reason. `data/attck_retired_ids.json` is regenerated
+  from the cached 19.2 bundles (205 revoked or deprecated ids added, every
+  existing row gains its `status`; the id catalogue and the technique table
+  are unchanged). **Upgrading:** to regenerate it offline, from a checkout,
+  run `PYTHONPATH=src python scripts/knowledge/prepare_attck_malware_fixtures.py
+  --no-labeled-sentences --cache-dir ~/.cache/maljan/attck`; without
+  `--cache-dir` the script downloads the current upstream release and may
+  rewrite all three catalogue files.
+- **A later chunk is told what the earlier chunks already called.** Its prompt
+  lists every earlier call as `tool(args) → ev_id` and its repeat guard is
+  seeded with them, so an identical call is answered with the entry that holds
+  it rather than run again. That first answer does not count toward the repeat
+  stop, and a failed earlier call is served once more.
 - **An analyst's table never enters a measured block.** An analyst artifact of
   imports, IOCs, processes or persistence was merged into the import table,
   the string table, the process tree and the persistence mechanisms, so one

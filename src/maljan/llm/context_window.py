@@ -129,6 +129,8 @@ __all__ = [
     "reply_reserve_tokens",
     "derived_reply",
     "output_cap_for",
+    "record_built_cap",
+    "built_output_cap",
     "table_window",
     "tool_definition_chars",
     "window_full_error",
@@ -1555,6 +1557,35 @@ class OutputCap:
 
     tokens: int
     sentence: str
+
+
+# Where a built model keeps the output cap it was built with.
+_BUILT_CAP_ATTR = "_maljan_output_cap"
+
+
+def record_built_cap(llm: Any, cap: OutputCap) -> Any:
+    """Keep on ``llm`` the output cap it was built with; returns ``llm``.
+
+    Recorded once, where the model is built (``ServiceContainer``), and read by
+    every consumer of the cap through :func:`built_output_cap`: the cut check,
+    the spend meter and the judge. A cap derived again later is derived from
+    whatever the window cache holds by then, and after the cache expired that
+    was the documented fallback rather than the cap the call carried. Never
+    raises: a model object that takes no attribute keeps no record.
+    """
+    if llm is None:
+        return llm
+    try:
+        object.__setattr__(llm, _BUILT_CAP_ATTR, cap)
+    except Exception:  # noqa: BLE001 — a record that cannot be kept is no record
+        logger.debug("output cap: %s keeps no record", type(llm).__name__)
+    return llm
+
+
+def built_output_cap(llm: Any) -> OutputCap | None:
+    """The output cap ``llm`` was built with, or ``None`` for a model built without one."""
+    cap = getattr(llm, "__dict__", {}).get(_BUILT_CAP_ATTR) if llm is not None else None
+    return cap if isinstance(cap, OutputCap) else None
 
 
 def output_cap_for(

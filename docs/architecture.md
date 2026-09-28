@@ -311,6 +311,41 @@ confidence and its `status` (`failed` or `timeout`); the run summary's
 loop goes to the judge. It used to record 0.0, which the run summary then
 published as the negotiation's final confidence.
 
+Consensus is decided by the mediator's final `CONTRADICTIONS:` block. After its
+reasoning the mediator writes that block, one line per contradiction still
+standing (the analyst, its claim, and what contradicts it: another analyst's
+claim or a ledger entry id), or `CONTRADICTIONS: NONE`, then its
+`agreement_confidence` line. A contradiction includes a claim an evidence
+ledger entry contradicts. Only that last block is read into the verdict's
+contradictions, on the text path and the structured one alike; contradictions
+the reasoning drafted and then resolved are not counted. A non-empty block is
+not consensus whatever number the mediator wrote: the number is kept and shown
+beside the list, and the router sends the analysts to revise, each told the
+block's lines. The block is one contradiction per line, bulleted, numbered or
+plain, the label line's own text included; a table's border and header rows
+and a summary line are not contradictions. A "none" empties the block only as
+its whole content, and only as a whole line from a closed vocabulary ("NONE",
+"(none)", "N/A", "No contradictions", optionally "still standing", "stands" or
+"remain(s)"): "None of the analysts cites ev_0015 …" is a contradiction. A
+"none" beside contradictions is not read, the contradictions stand, and the
+round's note and `negotiation.mediation_notes` say the block was mixed. A block
+of only table rows is unreadable and asked about once. So is a NONE whose
+other lines are all plain, most often the mediator's own closing sentence, and
+a lone label-line phrase opening with "none" outside the closed wording ("none
+that survive scrutiny"): answered with a NONE again, the round reads as the
+number says, and answered still mixed, the listed lines stand with the note.
+Label-line text ending in ":" introduces the list and is not a contradiction.
+On the structured path the block, when present, decides over the
+extractor's list. While the last mediation lists a contradiction, a stable
+agreement number does not end the debate as convergence; the round limit
+still does. An answer with no
+block is asked once for it, with no tools, after the mediator's own answer;
+still without one, the round's note and the run summary's
+`negotiation.mediation_notes` say so, and agreement is read from the number as
+before. A run's mediator listed five contradictions, one of them a claim the
+ledger contradicted, argued them away, wrote `agreement_confidence: 1.0`, and
+no analyst was asked to revise.
+
 A single local model server has one slot, and fanning out three analysts onto
 it produces queue thrash rather than speed; a hosted API serves each request on
 its own. `auto` tells them apart per job (`pipeline/analyst_mode.py`), on a
@@ -1386,6 +1421,39 @@ finding is recorded. The cap is the one in force: nothing raises it. A reference
 static analyst answered with 42 claims in exactly its 4,096 tokens, was asked
 fourteen questions over that answer, spent the whole cap again and returned no
 claim, and every question went unanswered.
+
+The cap the check reads is the one the call was built with. The container
+records it on the model it builds (`context_window.record_built_cap`), and the
+analysts' cut check, their spend-meter admissions and the judge's checks and
+timeouts all read it from there (`built_output_cap`); nothing derives it again
+after the build. Derived again, it was derived from whatever the window cache
+held by then, and after the cache's 900 seconds that was the documented
+fallback of 8,192 tokens while every call carried 32,768: an answer of about
+8,600 tokens was told it was cut at 8,192, and one that filled the whole
+32,768 was not told at all. Only a model the container did not build carries
+no record, and only then is the cap derived from settings.
+
+A chunked analysis answers each chunk's cut inside that chunk, before the
+merge: the cut is taken as the chunk ends (in a `finally`, so a chunk that
+raises leaves none for the next), and that chunk's own answer is asked once for
+a whole shorter one over that chunk's own input, the question naming it ("Your
+answer to chunk 1 of 2 stopped at the output limit …"). What comes back stands
+for that chunk alone in the merge; the merged answer is never replaced by one
+retry. A chunk still cut after its question is kept as it was cut and recorded
+as unread for that chunk. Before, a cut in chunk 1 was overwritten by a short
+chunk 2 and never asked about.
+
+A later chunk is told what the earlier chunks already called. Each chunk is a
+new conversation, so its prompt opens with the earlier chunks' tool calls,
+every one, as `tool(args) → ev_id` lines with the headline of what each
+returned, a failed call marked, and its loop's repeat guard is seeded with them
+(`seeded_repeat_guard`): an identical call is not run and is answered with the
+notice naming the entry that holds it. That first answer is not counted toward
+the loop's repeat stop, since the model has not been told in this conversation;
+asking again after it counts as any repeat does. A failed earlier call is served
+once more, as any retry after a failure is. A replayed conversation keeps the
+seeds. A run's second chunk re-ran ten
+decompiles the first had done.
 
 An analyst whose loop ended with nothing at all — no claim and no prose — is
 given a second loop over the same material only when what is left of its
@@ -3172,7 +3240,18 @@ is assembled from what the run gathered rather than recomputed beside it:
   names the producer of the number and is appended in step with it, so a
   relationship with no number never names the judge as the producer of an
   analyst's. An unresolved `stix.credit_without_claim` about a technique prints
-  beside its row, as the `attck.*` findings do.
+  beside its row, as the `attck.*` findings do. A finding is matched to a row
+  by what it is about: every technique check sets the violation's `subject`
+  to the technique id, and the row takes the findings whose `subject` is its
+  id. A stored row without one matches only the `TECHNIQUE <id>` its message
+  opens with. An `attck.unknown_id` message names the closest real techniques,
+  and matched on its words it printed "unresolved" on their valid rows.
+  An id the catalogue rejects is not published and says why: "no entry for
+  this id in any domain", or, for an id `data/attck_retired_ids.json` carries,
+  what happened to it (`attck_loader.retired_reason`: the release that retired
+  it, the bundle's own revoked or deprecated mark, the id that revoked it).
+  The generator records every attack-pattern the bundle carries as revoked or
+  deprecated, with that `status`, beside the ids a release diff saw go.
 * `qa/fp_linter.py` runs last and reports; it changes nothing. Its findings land
   in `run_summary.fp_warnings`, including C6 (a section or TTP row with nothing
   citable behind it) and C7 (a technique id the validation loop could not get

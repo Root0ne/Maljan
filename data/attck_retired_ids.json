@@ -2,89 +2,1102 @@
   "_meta": {
     "attck_version": "19.2"
   },
+  "T0803": {
+    "domain": "ics",
+    "status": "revoked",
+    "revoked_by": "T1691.001"
+  },
+  "T0804": {
+    "domain": "ics",
+    "status": "revoked",
+    "revoked_by": "T1691.002"
+  },
+  "T0805": {
+    "domain": "ics",
+    "status": "revoked",
+    "revoked_by": "T1695.001"
+  },
+  "T0812": {
+    "domain": "ics",
+    "status": "revoked",
+    "revoked_by": "T1694.001"
+  },
+  "T0839": {
+    "domain": "ics",
+    "status": "revoked",
+    "revoked_by": "T1693.002"
+  },
+  "T0855": {
+    "domain": "ics",
+    "status": "revoked",
+    "revoked_by": "T1692.001"
+  },
+  "T0856": {
+    "domain": "ics",
+    "status": "revoked",
+    "revoked_by": "T1692.002"
+  },
+  "T0857": {
+    "domain": "ics",
+    "status": "revoked",
+    "revoked_by": "T1693.001"
+  },
+  "T0891": {
+    "domain": "ics",
+    "status": "revoked",
+    "revoked_by": "T1694.002"
+  },
+  "T1002": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1560"
+  },
+  "T1004": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1547.004"
+  },
+  "T1009": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1027.001"
+  },
+  "T1013": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1547.010"
+  },
+  "T1015": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1546.008"
+  },
+  "T1017": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1072"
+  },
+  "T1019": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1542.001"
+  },
+  "T1022": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1560"
+  },
+  "T1023": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1547.009"
+  },
+  "T1024": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1573"
+  },
+  "T1026": {
+    "domain": "enterprise",
+    "status": "deprecated"
+  },
+  "T1028": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1021.006"
+  },
+  "T1031": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1543.003"
+  },
+  "T1032": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1573"
+  },
+  "T1034": {
+    "domain": "enterprise",
+    "status": "deprecated"
+  },
+  "T1035": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1569.002"
+  },
+  "T1038": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1574.001"
+  },
+  "T1042": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1546.001"
+  },
+  "T1043": {
+    "domain": "enterprise",
+    "status": "deprecated"
+  },
+  "T1044": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1574.010"
+  },
+  "T1045": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1027.002"
+  },
+  "T1050": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1543.003"
+  },
+  "T1051": {
+    "domain": "enterprise",
+    "status": "deprecated"
+  },
+  "T1053.001": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1053.002"
+  },
+  "T1053.004": {
+    "domain": "enterprise",
+    "status": "deprecated"
+  },
+  "T1054": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1685"
+  },
+  "T1058": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1574.011"
+  },
+  "T1060": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1547.001"
+  },
+  "T1061": {
+    "domain": "enterprise",
+    "status": "deprecated"
+  },
+  "T1062": {
+    "domain": "enterprise",
+    "status": "deprecated"
+  },
+  "T1063": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1518.001"
+  },
+  "T1064": {
+    "domain": "enterprise",
+    "status": "deprecated"
+  },
+  "T1065": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1571"
+  },
+  "T1066": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1027.005"
+  },
+  "T1067": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1542.003"
+  },
   "T1070.001": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1685.005"
+    "revoked_by": "T1685.005",
+    "status": "revoked"
   },
   "T1070.002": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1685.006"
+    "revoked_by": "T1685.006",
+    "status": "revoked"
+  },
+  "T1073": {
+    "domain": "enterprise",
+    "status": "revoked"
+  },
+  "T1075": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1550.002"
+  },
+  "T1076": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1021.001"
+  },
+  "T1077": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1021.002"
+  },
+  "T1079": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1573"
+  },
+  "T1081": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1552.001"
+  },
+  "T1084": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1546.003"
+  },
+  "T1085": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1218.011"
+  },
+  "T1086": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1059.001"
+  },
+  "T1088": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1548.002"
+  },
+  "T1089": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1685"
+  },
+  "T1093": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1055.012"
+  },
+  "T1094": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1095"
+  },
+  "T1096": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1564.004"
+  },
+  "T1097": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1550.003"
+  },
+  "T1099": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1070.006"
+  },
+  "T1100": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1505.003"
+  },
+  "T1101": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1547.005"
+  },
+  "T1103": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1546.010"
+  },
+  "T1107": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1070.004"
+  },
+  "T1108": {
+    "domain": "enterprise",
+    "status": "deprecated"
+  },
+  "T1109": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1542.002"
+  },
+  "T1116": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1553.002"
+  },
+  "T1117": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1218.010"
+  },
+  "T1118": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1218.004"
+  },
+  "T1121": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1218.009"
+  },
+  "T1122": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1546.015"
+  },
+  "T1126": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1070.005"
+  },
+  "T1128": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1546.007"
+  },
+  "T1130": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1553.004"
+  },
+  "T1131": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1547.002"
+  },
+  "T1138": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1546.011"
+  },
+  "T1139": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1552.003"
+  },
+  "T1141": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1056.002"
+  },
+  "T1142": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1555.001"
+  },
+  "T1143": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1564.003"
+  },
+  "T1144": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1553.001"
+  },
+  "T1145": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1552.004"
+  },
+  "T1146": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1070.003"
+  },
+  "T1147": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1564.002"
+  },
+  "T1148": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1690"
+  },
+  "T1149": {
+    "domain": "enterprise",
+    "status": "deprecated"
+  },
+  "T1150": {
+    "domain": "enterprise",
+    "status": "revoked"
+  },
+  "T1151": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1036.006"
+  },
+  "T1152": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1569.001"
+  },
+  "T1153": {
+    "domain": "enterprise",
+    "status": "deprecated"
+  },
+  "T1154": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1546.005"
+  },
+  "T1155": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1059.002"
+  },
+  "T1156": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1546.004"
+  },
+  "T1157": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1574.004"
+  },
+  "T1158": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1564.001"
+  },
+  "T1159": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1543.001"
+  },
+  "T1160": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1543.004"
+  },
+  "T1161": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1546.006"
+  },
+  "T1162": {
+    "domain": "enterprise",
+    "status": "revoked"
+  },
+  "T1163": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1037.004"
+  },
+  "T1164": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1547.007"
+  },
+  "T1165": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1037.005"
+  },
+  "T1166": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1548.001"
+  },
+  "T1167": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1555.002"
+  },
+  "T1168": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1053"
+  },
+  "T1169": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1548.003"
+  },
+  "T1170": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1218.005"
+  },
+  "T1171": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1557.001"
+  },
+  "T1172": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1090.004"
+  },
+  "T1173": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1559.002"
+  },
+  "T1174": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1556.002"
+  },
+  "T1175": {
+    "domain": "enterprise",
+    "status": "deprecated"
+  },
+  "T1177": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1547.008"
+  },
+  "T1178": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1134.005"
+  },
+  "T1179": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1056.004"
+  },
+  "T1180": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1546.002"
+  },
+  "T1181": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1055.011"
+  },
+  "T1182": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1546.009"
+  },
+  "T1183": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1546.012"
+  },
+  "T1184": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1563.001"
+  },
+  "T1186": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1055.013"
+  },
+  "T1188": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1090.003"
+  },
+  "T1191": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1218.003"
+  },
+  "T1192": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1566.002"
+  },
+  "T1193": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1566.001"
+  },
+  "T1194": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1566.003"
+  },
+  "T1196": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1218.002"
+  },
+  "T1198": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1553.003"
+  },
+  "T1206": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1548.003"
+  },
+  "T1208": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1558.003"
+  },
+  "T1209": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1547.003"
+  },
+  "T1214": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1552.002"
+  },
+  "T1215": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1547.006"
+  },
+  "T1223": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1218.001"
+  },
+  "T1399": {
+    "domain": "mobile",
+    "status": "deprecated"
+  },
+  "T1400": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1625.001"
+  },
+  "T1401": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1626.001"
+  },
+  "T1402": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1624.001"
+  },
+  "T1403": {
+    "domain": "mobile",
+    "status": "deprecated"
+  },
+  "T1405": {
+    "domain": "mobile",
+    "status": "deprecated"
+  },
+  "T1408": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1630.003"
+  },
+  "T1410": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1638"
+  },
+  "T1411": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1417.002"
+  },
+  "T1412": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1636.004"
+  },
+  "T1413": {
+    "domain": "mobile",
+    "status": "deprecated"
+  },
+  "T1415": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1635.001"
+  },
+  "T1416": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1635.001"
+  },
+  "T1419": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1426"
+  },
+  "T1427": {
+    "domain": "mobile",
+    "status": "deprecated"
+  },
+  "T1432": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1636.003"
+  },
+  "T1433": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1636.002"
+  },
+  "T1435": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1636.001"
+  },
+  "T1436": {
+    "domain": "mobile",
+    "status": "deprecated"
+  },
+  "T1438": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1644"
+  },
+  "T1439": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1638"
+  },
+  "T1444": {
+    "domain": "mobile",
+    "status": "deprecated"
+  },
+  "T1446": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1629.002"
+  },
+  "T1447": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1630.002"
+  },
+  "T1448": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1643"
+  },
+  "T1449": {
+    "domain": "mobile",
+    "status": "deprecated"
+  },
+  "T1450": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1430.002"
+  },
+  "T1452": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1643"
+  },
+  "T1454": {
+    "domain": "mobile",
+    "status": "revoked"
+  },
+  "T1463": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1638"
+  },
+  "T1465": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1638"
+  },
+  "T1466": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1638"
+  },
+  "T1467": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1638"
+  },
+  "T1468": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1430.001"
+  },
+  "T1469": {
+    "domain": "mobile",
+    "status": "deprecated"
+  },
+  "T1470": {
+    "domain": "mobile",
+    "status": "deprecated"
+  },
+  "T1472": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1643"
+  },
+  "T1475": {
+    "domain": "mobile",
+    "status": "deprecated"
+  },
+  "T1476": {
+    "domain": "mobile",
+    "status": "deprecated"
+  },
+  "T1477": {
+    "domain": "mobile",
+    "status": "deprecated"
+  },
+  "T1478": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1632.001"
+  },
+  "T1483": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1568.002"
+  },
+  "T1487": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1561.002"
+  },
+  "T1488": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1561.001"
+  },
+  "T1492": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1565.001"
+  },
+  "T1493": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1565.002"
+  },
+  "T1494": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1565.003"
+  },
+  "T1500": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1027.004"
+  },
+  "T1501": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1543.002"
+  },
+  "T1502": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1134.004"
+  },
+  "T1503": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1555.003"
+  },
+  "T1504": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1546.013"
+  },
+  "T1506": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1550.004"
+  },
+  "T1507": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1421"
+  },
+  "T1508": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1628.001"
+  },
+  "T1510": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1641.001"
+  },
+  "T1514": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1548.004"
+  },
+  "T1519": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1546.014"
+  },
+  "T1520": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1637.001"
+  },
+  "T1522": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1552.005"
+  },
+  "T1523": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1633.001"
+  },
+  "T1527": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1550.001"
+  },
+  "T1536": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1578.004"
+  },
+  "T1540": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1631.001"
+  },
+  "T1547.011": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1647"
   },
   "T1562": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1685"
+    "revoked_by": "T1685",
+    "status": "revoked"
   },
   "T1562.001": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1685"
+    "revoked_by": "T1685",
+    "status": "revoked"
   },
   "T1562.002": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1685.001"
+    "revoked_by": "T1685.001",
+    "status": "revoked"
   },
   "T1562.003": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1690"
+    "revoked_by": "T1690",
+    "status": "revoked"
   },
   "T1562.004": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1686"
+    "revoked_by": "T1686",
+    "status": "revoked"
   },
   "T1562.006": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1685"
+    "revoked_by": "T1685",
+    "status": "revoked"
   },
   "T1562.007": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1686.001"
+    "revoked_by": "T1686.001",
+    "status": "revoked"
   },
   "T1562.008": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1685.002"
+    "revoked_by": "T1685.002",
+    "status": "revoked"
   },
   "T1562.009": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1688"
+    "revoked_by": "T1688",
+    "status": "revoked"
   },
   "T1562.010": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1689"
+    "revoked_by": "T1689",
+    "status": "revoked"
   },
   "T1562.011": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1685.003"
+    "revoked_by": "T1685.003",
+    "status": "revoked"
   },
   "T1562.012": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1685.004"
+    "revoked_by": "T1685.004",
+    "status": "revoked"
   },
   "T1562.013": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1686.002"
+    "revoked_by": "T1686.002",
+    "status": "revoked"
+  },
+  "T1574.002": {
+    "domain": "enterprise",
+    "status": "revoked",
+    "revoked_by": "T1574.001"
+  },
+  "T1576": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1630.001"
+  },
+  "T1579": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1634.001"
+  },
+  "T1581": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1627.001"
+  },
+  "T1605": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1623.001"
+  },
+  "T1618": {
+    "domain": "mobile",
+    "status": "revoked",
+    "revoked_by": "T1628.002"
   },
   "T1656": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1684.001"
+    "revoked_by": "T1684.001",
+    "status": "revoked"
   },
   "T1672": {
     "domain": "enterprise",
     "retired_in": "19.2",
-    "revoked_by": "T1684.002"
+    "revoked_by": "T1684.002",
+    "status": "revoked"
   }
 }

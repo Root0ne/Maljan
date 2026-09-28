@@ -448,6 +448,7 @@ class TestAnUnconfirmedCreditSitsBesideItsTechnique:
                     "sources that named T1055 are static — the evidence summary lists who "
                     "named each technique."
                 ),
+                "subject": "T1055",
             }
         )
         attack = _section(_render(report), "## 8. MITRE ATT&CK mapping")
@@ -463,11 +464,62 @@ class TestAnUnconfirmedCreditSitsBesideItsTechnique:
                 "agent": "judge",
                 "code": "stix.credit_without_claim",
                 "message": "the relationship credits 'dynamic' with T1055.012",
+                "subject": "T1055.012",
             }
         )
         attack = _section(_render(report), "## 8. MITRE ATT&CK mapping")
         (injection,) = [line for line in attack.splitlines() if "| T1055 |" in line]
         assert "credit_without_claim" not in injection
+
+
+class TestAFindingSitsOnTheTechniqueItIsAbout:
+    """Matched on its ``subject``, never on another id its message names."""
+
+    UNKNOWN = (
+        "TECHNIQUE T1024 is not in the MITRE ATT&CK catalogue. The closest real techniques "
+        "are T1055, T1547.001. Use one of them, or omit the technique id."
+    )
+
+    def _rows(self, *rows: dict[str, str]) -> tuple[str, str]:
+        report = rich_report()
+        report.run_summary["validation"]["unresolved"].extend(rows)
+        attack = _section(_render(report), "## 8. MITRE ATT&CK mapping")
+        (injection,) = [line for line in attack.splitlines() if "| T1055 |" in line]
+        (run_key,) = [line for line in attack.splitlines() if "| T1547.001 |" in line]
+        return injection, run_key
+
+    def test_the_closest_real_techniques_a_message_names_take_no_finding(self) -> None:
+        row = {"agent": "static", "code": "attck.unknown_id", "message": self.UNKNOWN}
+        injection, run_key = self._rows({**row, "subject": "T1024"})
+
+        assert "attck.unknown_id" not in injection
+        assert "attck.unknown_id" not in run_key
+
+    def test_a_row_with_no_subject_is_matched_on_its_leading_technique_only(self) -> None:
+        injection, run_key = self._rows(
+            {"agent": "static", "code": "attck.unknown_id", "message": self.UNKNOWN},
+            {
+                "agent": "static",
+                "code": "attck.claim_does_not_describe",
+                "message": "TECHNIQUE T1055 and its claim share no term.",
+            },
+        )
+
+        assert "attck.unknown_id" not in injection + run_key
+        assert "unresolved: attck.claim_does_not_describe" in injection
+
+    def test_a_subject_attaches_the_finding_to_its_own_row(self) -> None:
+        injection, run_key = self._rows(
+            {
+                "agent": "static",
+                "code": "attck.claim_does_not_describe",
+                "message": "CLAIM 'x' carries TECHNIQUE T1547.001, and names T1055 too.",
+                "subject": "T1547.001",
+            }
+        )
+
+        assert "claim_does_not_describe" in run_key
+        assert "claim_does_not_describe" not in injection
 
 
 class TestTheSandboxStatusIsAStatementNotAnObservation:

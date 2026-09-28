@@ -45,6 +45,7 @@ from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger
 from maljan.core.truncation_ledger import TruncationLedger
+from maljan.llm.context_window import record_built_cap
 from maljan.llm.generation_rate import GenerationRates, attach_rate_meter
 from maljan.llm.registry import LLMProviderRegistry
 from maljan.loaders.file_loader import FileDataLoader
@@ -544,23 +545,29 @@ class ServiceContainer:
     # LLM accessors
     # ------------------------------------------------------------------
 
-    def _expert_token_cap(self, agent: str = "") -> dict[str, Any]:
-        """``max_tokens`` kwargs for an analyst-role model: the operator's cap, or derived.
+    def _expert_token_cap(self, agent: str = "") -> Any:
+        """The output cap an analyst-role model is built with: the operator's, or derived.
 
         The analyst path was the only unbounded LLM call in the system while
         judge/narrative/composer were all capped. MEASURED:
         a 19-tool-call static loop produced a forced-synthesis call that ran 19+
         minutes against its 25-minute wall clock. Mirrors ``get_judge_llm``.
         """
-        return {"max_tokens": self._output_cap("expert_max_tokens", agent or "expert")}
+        return self._built_cap("expert_max_tokens", agent or "expert")
 
     def _output_cap(self, setting: str, agent: str, *, role: str = "expert") -> int:
+        """The output cap one agent's model is built with, in tokens (``_built_cap``)."""
+        return int(self._built_cap(setting, agent, role=role).tokens)
+
+    def _built_cap(self, setting: str, agent: str, *, role: str = "expert") -> Any:
         """The output cap one agent's model is built with, its derivation logged and recorded.
 
         ``llm.expert_max_tokens`` / ``llm.judge_max_tokens`` above 0 are the
         operator's; at 0 the cap is derived from the window the agent's model
         serves (``context_window.output_cap_for``), learned once per endpoint.
-        A mock container asks no endpoint.
+        A mock container asks no endpoint. The builder keeps it on the model it
+        builds (``context_window.record_built_cap``), which is where every
+        consumer of the cap reads it from.
         """
         from maljan.llm.context_window import output_cap_for
 
@@ -570,7 +577,7 @@ class ServiceContainer:
         if rates is not None:
             rates.note_output_cap(agent, cap.tokens, cap.sentence)
         logger.info("Output cap for %s: %s.", agent, cap.sentence)
-        return cap.tokens
+        return cap
 
     def _report_output_cap(self) -> int:
         """The output cap the reporter's model is built with, its derivation logged and recorded.
@@ -620,7 +627,9 @@ class ServiceContainer:
         with self._lock:
             cached = self._expert_llm_cache.lookup(loop)
             if cached is None:
-                cached = self._llm_registry.build_model(role="expert", **self._expert_token_cap())
+                cap = self._expert_token_cap()
+                cached = self._llm_registry.build_model(role="expert", max_tokens=cap.tokens)
+                record_built_cap(cached, cap)
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._expert_llm_cache.put(loop, "", cached)
             return cached
@@ -634,9 +643,8 @@ class ServiceContainer:
             if cached is None:
                 # Bound the verdict generation so a degenerate decode can't
                 # consume the full wall-clock timeout (see LLMConfig.judge_max_tokens).
-                extra: dict[str, Any] = {
-                    "max_tokens": self._output_cap("judge_max_tokens", "judge", role="judge")
-                }
+                cap = self._built_cap("judge_max_tokens", "judge", role="judge")
+                extra: dict[str, Any] = {"max_tokens": cap.tokens}
                 # Through the per-agent path so a configured
                 # ``llm.agents.judge`` decides provider/model/temperature the
                 # same way it does for an analyst; with no such entry the
@@ -648,6 +656,7 @@ class ServiceContainer:
                 cached = self._llm_registry.build_model_for_agent(
                     "judge", fallback_role="judge", **extra
                 )
+                record_built_cap(cached, cap)
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._judge_llm_cache.put(loop, "", cached)
             return cached
@@ -706,9 +715,9 @@ class ServiceContainer:
                 # Analysts share the expert budget cap — this is the path the
                 # static/dynamic/network ReAct loops and their forced-synthesis
                 # fallback actually use.
-                cached = self._llm_registry.build_model_for_agent(
-                    agent_name, **self._expert_token_cap(agent_name)
-                )
+                cap = self._expert_token_cap(agent_name)
+                cached = self._llm_registry.build_model_for_agent(agent_name, max_tokens=cap.tokens)
+                record_built_cap(cached, cap)
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._agent_llm_cache.put(loop, agent_name, cached)
             return cached

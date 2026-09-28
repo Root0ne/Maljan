@@ -710,3 +710,54 @@ class TestAnAbsenceOverEvidenceTheRunKnowsIsPartial:
         message = self._message(self.URL, {"unrelated"}, tuple(f"tool_{i:03d}" for i in range(60)))
 
         assert len(message) < 800
+
+
+class TestATechniqueFindingNamesItsTechnique:
+    """``subject`` is the technique id, so a report attaches the row to it and no other."""
+
+    class _Named(_Attck):
+        def attck_lookup(self, tid: str) -> dict[str, object]:
+            return {"name": "Process Injection", "tactics": ["stealth"]}
+
+        def attck_scope(self, tid: str) -> dict[str, object]:
+            return {"domain": "mobile", "platforms": ["Android"]}
+
+    def test_an_unknown_id_names_itself_not_the_closest_real_ones(self) -> None:
+        (violation,) = validate_isr(_isr([_claim(technique_id="T9999")]), attck=_Attck())
+
+        assert "T1055" in violation.message
+        assert violation.subject == "T9999"
+        assert violation.to_dict()["subject"] == "T9999"
+
+    def test_a_technique_citing_no_entry_names_its_technique(self) -> None:
+        violations = validate_isr(
+            _isr([_claim(technique_id="T1055")]), attck=_Attck(), ledger_ids=["ev_0001"]
+        )
+
+        (ungrounded,) = [v for v in violations if v.code == "isr.ungrounded_technique"]
+        assert ungrounded.subject == "T1055"
+
+    def test_a_claim_that_does_not_describe_its_technique_names_it(self) -> None:
+        claim = _claim(technique_id="T1055", claim="The file opens a window.")
+        violations = validate_isr(_isr([claim]), attck=self._Named())
+
+        (undescribed,) = [v for v in violations if v.code == "attck.claim_does_not_describe"]
+        assert undescribed.subject == "T1055"
+
+    def test_a_platform_mismatch_names_its_technique(self) -> None:
+        violations = validate_isr(
+            _isr([_claim(technique_id="T1055")]),
+            attck=self._Named(),
+            sample={"platform": "windows", "file_type": "pe"},
+        )
+
+        (mismatch,) = [v for v in violations if v.code == "attck.platform_mismatch"]
+        assert mismatch.subject == "T1055"
+
+    def test_a_row_rebuilt_from_the_state_channel_keeps_its_subject(self) -> None:
+        from maljan.pipeline.nodes import _violations_from_rows
+
+        (violation,) = validate_isr(_isr([_claim(technique_id="T9999")]), attck=_Attck())
+        (rebuilt,) = _violations_from_rows([violation.to_dict()])
+
+        assert rebuilt.subject == "T9999"

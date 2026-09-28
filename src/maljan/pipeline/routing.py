@@ -200,8 +200,14 @@ class ConsensusRouter:
             logger.info("Genuine consensus reached at round %d.", iteration)
             return "judge"
 
-        # 4. Adaptive termination on the confidence series.
-        if is_confidence_stable(confidence_history):
+        # 4. Adaptive termination on the confidence series, unless the last
+        # mediation lists contradictions still standing: a number that stopped
+        # moving is not agreement while the mediator says what is disputed. The
+        # round limit above still bounds the debate.
+        standing = bool(getattr(last, "contradictions", None)) and (
+            getattr(last, "agent_name", "") == "Mediator"
+        )
+        if not standing and is_confidence_stable(confidence_history):
             logger.info(
                 "Adaptive termination triggered at round %d (stable confidence).", iteration
             )

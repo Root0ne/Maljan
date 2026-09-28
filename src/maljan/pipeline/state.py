@@ -25,6 +25,14 @@ class AgentArgument(BaseModel):
             "produced claims, so there was no agreement to measure."
         ),
     )
+    contradictions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "For the mediator: the contradictions its final CONTRADICTIONS: block "
+            "lists as still standing. While any stands, a stable agreement number "
+            "does not end the debate."
+        ),
+    )
     note: str = Field(
         default="",
         description=(

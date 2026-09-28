@@ -259,6 +259,8 @@ def attck_lookup(technique_id: str) -> dict[str, Any]:
         domain_of,
         platforms_for,
         retired_in,
+        retired_reason,
+        revoked_by,
         technique_entry,
         valid_ids,
     )
@@ -283,14 +285,20 @@ def attck_lookup(technique_id: str) -> dict[str, Any]:
     }
     if technique is None:
         retired = retired_in(tid)
-        out["reason"] = (
-            f"retired in ATT&CK {retired}"
-            if retired
-            else "the ATT&CK catalogue has no entry for this id"
-        )
+        successor = revoked_by(tid)
+        out["reason"] = retired_reason(tid) or "the ATT&CK catalogue has no entry for this id"
         if retired:
             out["retired_in"] = retired
+        if successor:
+            out["revoked_by"] = successor
     return out
+
+
+def attck_retired_reason(technique_id: str) -> str | None:
+    """What happened to a retired id (``attck_loader.retired_reason``); ``None`` otherwise."""
+    from maljan.memory.attck_loader import retired_reason
+
+    return retired_reason(technique_id)
 
 
 def attck_retired_in(technique_id: str) -> str | None:
@@ -324,7 +332,7 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
     which costs a file read. Nothing here loads a STIX bundle, so this is
     cheap enough to call inside an analyst's own loop.
     """
-    from maljan.memory.attck_loader import retired_in, valid_ids
+    from maljan.memory.attck_loader import retired_in, retired_reason, revoked_by, valid_ids
 
     known = valid_ids()
     unknown = [t for t in (str(raw).strip().upper() for raw in ids or []) if t and t not in known]
@@ -338,6 +346,14 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
         retired = retired_in(tid)
         if retired:
             row["retired_in"] = retired
+        # What happened to it, as every surface says it, and what replaced it
+        # where the bundle names a replacement.
+        reason = retired_reason(tid)
+        if reason:
+            row["reason"] = reason
+        successor = revoked_by(tid)
+        if successor:
+            row["revoked_by"] = successor
         # The parent of a bogus sub-technique is the single most likely intent,
         # and it is a string operation rather than a search — a suggestion that
         # cost an embedding model would be worse than no suggestion.

@@ -7,6 +7,7 @@ import {
   isCorroborated,
   orderedTactics,
   parseTechniques,
+  retiredNote,
   tacticHeaderCount,
   tacticOrder,
 } from "../capabilityHeatmap";
@@ -201,5 +202,43 @@ describe("a tactic column's header", () => {
   it("counts none published when the run published none", () => {
     const [tactic] = parseTechniques([row({ not_published: "outside the domain" })]);
     expect(tacticHeaderCount(tactic.techniques)).toBe("0 techniques · 1 claimed, not published");
+  });
+});
+
+describe("retiredNote", () => {
+  it("says what happened to a revoked-only id", () => {
+    const corroboration = {
+      T1024: {
+        asserted_by: ["sigma"],
+        claimed_by: [],
+        retired_reason: "revoked by T1573 in the ATT&CK catalogue",
+      },
+    };
+    expect(retiredNote(corroboration, "T1024")).toBe("revoked by T1573 in the ATT&CK catalogue");
+  });
+
+  it("prefers the reason over the bare release", () => {
+    const corroboration = {
+      "T1562.001": {
+        asserted_by: ["sigma"],
+        claimed_by: [],
+        retired_in: "19.2",
+        retired_reason: "retired in ATT&CK 19.2 and revoked by T1685",
+      },
+    };
+    expect(retiredNote(corroboration, "T1562.001")).toBe(
+      "retired in ATT&CK 19.2 and revoked by T1685"
+    );
+  });
+
+  it("reads a stored row that carries only the release", () => {
+    const corroboration = { T1499: { asserted_by: [], claimed_by: [], retired_in: "19.2" } };
+    expect(retiredNote(corroboration, "T1499")).toBe("retired in ATT&CK 19.2");
+  });
+
+  it("says nothing for a live id or an old list row", () => {
+    expect(retiredNote({ T1055: { asserted_by: [], claimed_by: [] } }, "T1055")).toBeNull();
+    expect(retiredNote({ T1055: ["static"] }, "T1055")).toBeNull();
+    expect(retiredNote(null, "T1055")).toBeNull();
   });
 });

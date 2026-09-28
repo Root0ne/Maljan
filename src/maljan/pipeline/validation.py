@@ -144,7 +144,10 @@ class Violation:
     # technique a credit names, the malware object's name. Two answers of one
     # judge number their objects afresh, and an answer to a credit question
     # renames the credited source — so "was this asked" is keyed on this where
-    # a check sets it, never on the words of the message.
+    # a check sets it, never on the words of the message. Every technique
+    # check sets it to the technique id it is about, and the report attaches
+    # the finding to that technique's row by it: a message can name other ids
+    # (an unknown id's names the closest real ones).
     subject: str = ""
 
     def __post_init__(self) -> None:
@@ -543,6 +546,7 @@ def validate_isr(
                         "downstream as a finding."
                     ),
                     path=path,
+                    subject=tid,
                 )
             )
         if not tid:
@@ -566,6 +570,10 @@ def validate_isr(
                         "Use one of them, or omit the technique id."
                     ),
                     path=path,
+                    # The id the claim carries: the message also names the
+                    # closest real techniques, and a reader matching on its
+                    # words attached this finding to them.
+                    subject=tid,
                 )
             )
             continue
@@ -580,7 +588,7 @@ def validate_isr(
             mismatch = platform_mismatch_message(tid, attck, scope)
             if mismatch:
                 violations.append(
-                    Violation(code=PLATFORM_MISMATCH_CODE, message=mismatch, path=path)
+                    Violation(code=PLATFORM_MISMATCH_CODE, message=mismatch, path=path, subject=tid)
                 )
             else:
                 # A claim that names the behaviour to say it is absent is asked
@@ -602,7 +610,9 @@ def validate_isr(
             challenge=weak_alignment_challenges and absence is None,
         )
         if weak:
-            violations.append(Violation(code=WEAK_ALIGNMENT_CODE, message=weak, path=path))
+            violations.append(
+                Violation(code=WEAK_ALIGNMENT_CODE, message=weak, path=path, subject=tid)
+            )
 
     return violations
 
@@ -896,6 +906,7 @@ def absence_claim_violation(
             "the technique and say what the sample does."
         ),
         path=path,
+        subject=str(technique_id).strip().upper(),
     )
 
 
@@ -1005,6 +1016,7 @@ def claim_does_not_describe_violation(
             "TECHNIQUE: NONE."
         ),
         path=path,
+        subject=str(technique_id).strip().upper(),
     )
 
 
@@ -1453,16 +1465,39 @@ def _technique_is_known(technique_id: str, attck: Any) -> bool:
 
 
 def _retired_note(technique_id: str, attck: Any) -> str:
-    """`` (retired in ATT&CK 19.2)`` when a previous vendored catalogue had the id."""
-    ask = getattr(attck, "attck_retired_in", None)
-    if ask is None:
-        return ""
+    """`` (retired in ATT&CK 19.2)`` when the vendored retired set carries the id.
+
+    The reason every surface gives (``attck_retired_reason``): the release
+    that retired it, the bundle's own revoked or deprecated mark, and the id
+    that revoked it. A knowledge object with only ``attck_retired_in`` answers
+    the release alone.
+    """
+    reason_of = getattr(attck, "attck_retired_reason", None)
+    release_of = getattr(attck, "attck_retired_in", None)
     try:
-        release = ask(technique_id)
+        if reason_of is not None:
+            reason = reason_of(technique_id)
+            return f" ({reason})" if reason else ""
+        if release_of is None:
+            return ""
+        release = release_of(technique_id)
     except Exception as exc:  # noqa: BLE001 — a note, not a check
         logger.debug("validation: the retired-id lookup for %s failed (%s).", technique_id, exc)
         return ""
     return f" (retired in ATT&CK {release})" if release else ""
+
+
+def _catalogue_rejection(technique_id: str, attck: Any) -> str:
+    """Why the catalogue rejects an id, as the clause after "which".
+
+    A retired id has an entry the catalogue no longer lists as current, so it
+    is said to have no current entry and what happened to it; only an id the
+    retired set does not carry has no entry in any domain.
+    """
+    note = _retired_note(technique_id, attck)
+    if note:
+        return f"the MITRE ATT&CK catalogue has no current entry for it: it was {note[2:-1]}"
+    return "the MITRE ATT&CK catalogue has no entry for in any domain"
 
 
 def _suggest_techniques(claim_text: str, attck: Any) -> list[str]:
@@ -2680,7 +2715,7 @@ SECTION_CUT_CODE = "composer.cut_at_output_cap"
 ANALYST_CUT_CODE = "isr.cut_at_output_cap"
 
 
-def analyst_cut_violation(cap: int, text: str = "") -> Violation:
+def analyst_cut_violation(cap: int, text: str = "", *, chunk: str = "") -> Violation:
     """What an analyst the cap cut is told: the cap, what was begun, and the bound.
 
     The cut answer is not sent back (``retry_with_feedback_sync``'s
@@ -2688,7 +2723,8 @@ def analyst_cut_violation(cap: int, text: str = "") -> Violation:
     began — and the length it was cut at is the bound the next answer stays
     under. It asks once for a whole shorter answer, never for fewer findings
     than the evidence holds, and the cap it names is the one in force: nothing
-    here raises it.
+    here raises it. ``chunk`` names the chunk whose answer was cut, as
+    "chunk 1 of 2", when the answer checked is a merge of chunks.
     """
     begun = count_claims_begun(text)
     size = (
@@ -2699,16 +2735,25 @@ def analyst_cut_violation(cap: int, text: str = "") -> Violation:
         if text
         else ""
     )
+    answer = f"answer to {chunk}" if chunk else "previous answer"
     return Violation(
         code=ANALYST_CUT_CODE,
         message=(
-            f"Your previous answer stopped at the output limit of {int(cap)} tokens before "
+            f"Your {answer} stopped at the output limit of {int(cap)} tokens before "
             f"it ended, so its last claim was cut off.{size} Any reasoning you write counts "
             f"against the same limit. Write the whole answer again so that it ends well inside "
             f"{int(cap)} tokens: the claims the evidence supports best, each written once, "
             "each one sentence with its EVIDENCE, CONFIDENCE and TECHNIQUE lines, and nothing "
             "between the blocks."
         ),
+    )
+
+
+def chunk_cut_unread_sentence(chunk: str) -> str:
+    """What a chunk's cut finding adds when the question did not get a whole answer."""
+    return (
+        f"The answer to {chunk} is kept as the limit cut it; what it did not reach of "
+        f"{chunk} is unread."
     )
 
 
@@ -4410,12 +4455,12 @@ def validate_verdict_bundle(
                     Violation(
                         code="stix.unknown_technique",
                         message=(
-                            f"the attack-pattern names {safe_finding_value(tid)}, which the "
-                            "MITRE ATT&CK catalogue has no entry for in any domain"
-                            f"{_retired_note(tid, attck)}. Use a real technique id or "
+                            f"the attack-pattern names {safe_finding_value(tid)}, which "
+                            f"{_catalogue_rejection(tid, attck)}. Use a real technique id or "
                             "drop the attack-pattern."
                         ),
                         path=where,
+                        subject=tid.upper(),
                     )
                 )
             elif attck is not None:
@@ -4426,6 +4471,7 @@ def validate_verdict_bundle(
                             code=PLATFORM_MISMATCH_CODE,
                             message=mismatch,
                             path=where,
+                            subject=tid.upper(),
                         )
                     )
 
@@ -5864,8 +5910,21 @@ def corroboration(
         retired = _retired_release(tid)
         if retired:
             row["retired_in"] = retired
+        reason = _retired_reason(tid)
+        if reason:
+            row["retired_reason"] = reason
         out[tid] = row
     return out
+
+
+def _retired_reason(technique_id: str) -> str | None:
+    """What happened to a retired id (``attck_loader.retired_reason``), or ``None``."""
+    try:
+        from maljan.memory.attck_loader import retired_reason
+
+        return retired_reason(technique_id)
+    except Exception:  # noqa: BLE001 — a note, not a check
+        return None
 
 
 def _retired_release(technique_id: str) -> str | None:

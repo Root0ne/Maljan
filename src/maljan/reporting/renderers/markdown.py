@@ -1880,6 +1880,8 @@ class MarkdownRenderer:
                     pass
             for sentence in negotiation.get("revision_replacements") or []:
                 lines.append(_item(str(sentence)))
+            for sentence in negotiation.get("mediation_notes") or []:
+                lines.append(_item(str(sentence)))
         for line in generation_lines(run_summary.get("generation")):
             lines.append(_item(line))
         ungrounded = run_summary.get("sections_without_evidence")
@@ -3071,6 +3073,22 @@ def _tactic_key(cell: CapabilityCell) -> tuple[int, str]:
 # The unresolved codes that are about one technique and print beside its row.
 _TECHNIQUE_FINDING_CODES = ("attck.", "stix.credit_without_claim")
 
+# The technique a finding row stored without a ``subject`` opens with.
+_LEADING_TECHNIQUE_RE = re.compile(r"^\s*TECHNIQUE\s+(T\d{4}(?:\.\d{3})?)\b", re.IGNORECASE)
+
+
+def _finding_technique(row: dict[str, Any]) -> str:
+    """The technique id an unresolved finding row is about, or ``""``.
+
+    Its ``subject`` where the check set one; otherwise only the id the message
+    opens with (``TECHNIQUE <id> …``), never an id named later in it.
+    """
+    subject = str(row.get("subject") or "").strip()
+    if subject:
+        return subject.upper()
+    match = _LEADING_TECHNIQUE_RE.match(str(row.get("message") or ""))
+    return match.group(1).upper() if match else ""
+
 
 def _stated(value: float | None, producer: str) -> str:
     """A stated confidence with its producer, or that the producer is not recorded.
@@ -3139,13 +3157,14 @@ def _attack_row(
             status += f"; {cell.note}"
     # The platform's unresolved findings about this technique, beside its
     # row: the ATT&CK checks, and the judge crediting a source that never
-    # named it.
-    names_it = re.compile(rf"(?<![\w.]){re.escape(cell.technique_id)}(?![\w.]\w)")
+    # named it. Matched on what the finding is about (``subject``), because
+    # its message can name other techniques — an unknown id's names the
+    # closest real ones — and those rows are not what it is about.
     notes = [
         str(r.get("code"))
         for r in ctx.unresolved
         if str(r.get("code", "")).startswith(_TECHNIQUE_FINDING_CODES)
-        and names_it.search(str(r.get("message") or ""))
+        and _finding_technique(r) == cell.technique_id.upper()
     ]
     if notes:
         status += "; unresolved: " + ", ".join(dict.fromkeys(notes))

@@ -116,9 +116,13 @@ def _models(ledger: TokenLedger, agent: str) -> dict[str, int]:
     return dict(ledger.snapshot()["agents"].get(agent, {}).get("models", {}))
 
 
+# A mediation that ends as its prompt asks: the closing block, then the number.
+MEDIATION = "CONTRADICTIONS: NONE\nagreement_confidence: 0.95"
+
+
 class TestTheJudge:
     def test_the_mediator_s_fast_path_is_counted_against_the_expert_model(self) -> None:
-        llm, ledger = _model(), TokenLedger()
+        llm, ledger = _model(MEDIATION), TokenLedger()
         judge = _judge(llm, ledger, runs_on="expert")
 
         asyncio.run(judge.mediate(reports={"static": "text"}, history=[]))
@@ -127,10 +131,19 @@ class TestTheJudge:
         assert _calls(ledger, "judge") == 1
         assert _models(ledger, "judge") == {global_model_label(SETTINGS, "expert"): 1}
 
+    def test_the_question_for_a_missing_contradictions_block_is_counted(self) -> None:
+        llm, ledger = _model(), TokenLedger()
+        judge = _judge(llm, ledger, runs_on="expert")
+
+        asyncio.run(judge.mediate(reports={"static": "text"}, history=[]))
+
+        assert len(llm.asked) == 2
+        assert _calls(ledger, "judge") == 2
+
     def test_the_mediator_s_structured_extraction_is_counted(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        llm, ledger = _model(), TokenLedger()
+        llm, ledger = _model(MEDIATION), TokenLedger()
         judge = _judge(llm, ledger, runs_on="expert")
         monkeypatch.setattr(judge, "_supports_structured_output", lambda: True)
 
