@@ -96,6 +96,7 @@ from maljan.extractors.capability_matrix import (
 )
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.pipeline import triage_pack
+from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
     CONTRADICTIONS_BLOCK_MIXED_NOTE,
@@ -175,6 +176,7 @@ from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
     JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
+    AgentISR,
     ClaimEvidence,
     judge_and_findings_note,
     judge_dropped_reason,
@@ -492,6 +494,19 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "judge technique answer form": TECHNIQUE_ANSWER_FORM,
+    "evidence summary naming each id from the vendored table": summarise(
+        {
+            "a": AgentISR(
+                agent_id="a",
+                domain="static",
+                claims=[
+                    ClaimEvidence(
+                        claim="x", evidence_ref="[ev_0001]", confidence=0.5, technique_id="T1112"
+                    )
+                ],
+            )
+        }
+    ),
     "mediator contradiction definition, closing block rule and its one question": " ".join(
         [CONTRADICTION_DEFINITION, CONTRADICTIONS_BLOCK_RULE, CONTRADICTIONS_BLOCK_QUESTION]
     ),

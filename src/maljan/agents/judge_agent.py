@@ -76,6 +76,7 @@ from maljan.llm.context_window import (
     window_full_error,
 )
 from maljan.llm.generation_rate import GenerationRates, ModelCallDeadline, model_name_of
+from maljan.memory.attck_loader import technique_label
 from maljan.memory.long_term_memory import a_past_case_technique
 from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
 from maljan.pipeline.mediation_models import (
@@ -921,7 +922,8 @@ def technique_question_head(reports_text: str, verdict: str, carried: Sequence[s
     return (
         f"{QUESTION_REPORTS_LABEL}\n{reports_text}\n\n"
         f"{QUESTION_VERDICT_LABEL} {verdict}\n"
-        f"{QUESTION_CARRIED_LABEL} {', '.join(carried) if carried else 'none'}\n\n"
+        f"{QUESTION_CARRIED_LABEL} "
+        f"{', '.join(technique_label(tid) for tid in carried) if carried else 'none'}\n\n"
     )
 
 
@@ -983,7 +985,7 @@ def technique_question_text(
             if question.kind == "claimed"
             else "named only on an analyst's finding"
         )
-        lines.append(f"{n}. {question.technique_id} — {where}")
+        lines.append(f"{n}. {technique_label(question.technique_id)} — {where}")
         for agent, text, ids in question.mentions:
             listed = ", ".join(ids) if ids else "none cited"
             lines.append(f"   - {agent}: {' '.join(str(text).split())} (evidence: {listed})")

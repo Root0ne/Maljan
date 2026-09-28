@@ -47,48 +47,18 @@ from maljan.reporting.dedupe import pattern_fingerprint
 if TYPE_CHECKING:
     from maljan.pipeline.validation import Violation
 
-# Curated technique ID → (display name, URL) map. Extend over time; the
-# back-fill is best-effort and falls back to a deterministic URL when the
-# technique isn't here.
-_MITRE_LOOKUP: dict[str, tuple[str, str]] = {
-    "T1006": ("Direct Volume Access", "https://attack.mitre.org/techniques/T1006/"),
-    "T1021.001": ("Remote Desktop Protocol", "https://attack.mitre.org/techniques/T1021/001/"),
-    "T1027": ("Obfuscated Files or Information", "https://attack.mitre.org/techniques/T1027/"),
-    "T1036.006": ("Space after Filename", "https://attack.mitre.org/techniques/T1036/006/"),
-    "T1055": ("Process Injection", "https://attack.mitre.org/techniques/T1055/"),
-    "T1059.001": ("PowerShell", "https://attack.mitre.org/techniques/T1059/001/"),
-    "T1071": ("Application Layer Protocol", "https://attack.mitre.org/techniques/T1071/"),
-    "T1078.004": ("Cloud Accounts", "https://attack.mitre.org/techniques/T1078/004/"),
-    "T1095": ("Non-Application Layer Protocol", "https://attack.mitre.org/techniques/T1095/"),
-    "T1106": ("Native API", "https://attack.mitre.org/techniques/T1106/"),
-    "T1140": (
-        "Deobfuscate/Decode Files or Information",
-        "https://attack.mitre.org/techniques/T1140/",
-    ),
-    "T1486": ("Data Encrypted for Impact", "https://attack.mitre.org/techniques/T1486/"),
-    "T1497": ("Virtualization/Sandbox Evasion", "https://attack.mitre.org/techniques/T1497/"),
-    "T1547": ("Boot or Logon Autostart Execution", "https://attack.mitre.org/techniques/T1547/"),
-}
-
 
 def _technique_display_name(tid: str) -> str | None:
-    """Friendly ATT&CK technique name from the already-built index, else None.
+    """The technique's name in the vendored ATT&CK table, or ``None`` when it has no such id.
 
-    Reuses the ATTCKValidator singleton ONLY when it is already initialized —
-    never forces an index build, so unit tests stay offline/fast. Fail-safe.
-    Lets the reference back-fill give correct names for all ~700 techniques,
-    not just the curated fallback table below.
+    The one source every technique name the platform writes comes from. A
+    short hand-written list and a search index that was not always built
+    answered here before, and either could disagree with the table.
     """
-    try:
-        from maljan.memory.attck_validator import ATTCKValidator
+    from maljan.memory.attck_loader import technique_entry
 
-        validator = ATTCKValidator.current_instance()
-        if validator is None:
-            return None
-        tech = validator.get_technique(tid)
-        return tech.name if tech is not None else None
-    except Exception:  # noqa: BLE001 — best-effort cosmetic back-fill
-        return None
+    entry = technique_entry(tid)
+    return entry.name if entry is not None and entry.name else None
 
 
 ASSESSMENT_RELOCATED_CODE = "verdict.assessment_relocated"
@@ -435,13 +405,8 @@ def postprocess_judge_bundle(
         # MITRE reference that links to a non-existent technique page.
         if not tid or tid in _CURATED_PLACEHOLDERS or not _VALID_TID_RE_LOCAL.match(tid):
             continue
-        if tid in _MITRE_LOOKUP:
-            name, url = _MITRE_LOOKUP[tid]
-        else:
-            # Beyond the curated table, pull the real name from the live ATT&CK
-            # index when it's loaded; fall back to the LLM name / bare ID.
-            name = _technique_display_name(tid) or obj.get("name") or tid
-            url = f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/"
+        name = _technique_display_name(tid) or obj.get("name") or tid
+        url = f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/"
         obj["external_references"] = [
             {"source_name": "mitre-attack", "external_id": tid, "url": url},
         ]

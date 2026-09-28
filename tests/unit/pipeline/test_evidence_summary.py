@@ -82,7 +82,7 @@ class TestSummarise:
             [LedgerEntry(id="ev_0001", tool="capa", structured={"attck": "T1055"})],
         )
 
-        assert "T1055: 3 source(s)" in block
+        assert "T1055 Process Injection: 3 source(s)" in block
         assert "static (0.90)" in block
         assert "dynamic (0.40)" in block
         assert "capa" in block
