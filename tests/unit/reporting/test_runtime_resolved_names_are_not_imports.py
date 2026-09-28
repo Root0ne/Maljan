@@ -192,7 +192,7 @@ class TestARuleMatchOnRuntimeNamesIsStatedAndNotCounted:
         # their words say.
         assert mapping.is_corroborated is True
         assert (
-            "published, corroborated (named by 2 analyst layers in independent statements; "
+            "published, corroborated (named by 2 analyst layers, each in a statement of its own; "
             "their statements are listed below the table)"
         ) in markdown
         assert "Techniques a rule matched only on names resolved at runtime" in markdown

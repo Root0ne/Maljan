@@ -352,12 +352,19 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
         for mapping in report.ttp_mappings:
             quote = " | ".join(q for q in mapping.evidence_quotes if q)
             layers = ",".join(mapping.contributing_layers) or "-"
+            # The layers that said something of their own: copies count once.
+            independent = (
+                f", independent={','.join(mapping.independent_layers)}"
+                if mapping.independent_layers
+                else ""
+            )
             rule_note = (
                 f" — {rule_only[mapping.technique_id]}" if mapping.technique_id in rule_only else ""
             )
             lines.append(
                 f"  - {mapping.technique_id} {mapping.technique_name} "
-                f"(conf={confidence_text(mapping.confidence)}, layers={layers}){rule_note}: "
+                f"(conf={confidence_text(mapping.confidence)}, layers={layers}{independent})"
+                f"{rule_note}: "
                 f"{quote}"
             )
         if any(m.technique_id in rule_only for m in report.ttp_mappings):

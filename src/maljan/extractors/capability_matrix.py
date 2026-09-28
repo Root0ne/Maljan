@@ -268,16 +268,44 @@ def normalised_statement(text: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).split())
 
 
+# The share of the shorter statement's words the longer one has to hold for the
+# two to count once (the overlap coefficient over their normalised word sets).
+# A copy cut short, or with a word put in or taken out, holds all or nearly all
+# of them; two analysts reading one tool's output in their own words hold far
+# fewer.
+REPEATED_WORDS_SHARE = 0.9
+
+
+def repeats(later: str, earlier: str) -> bool:
+    """Whether two normalised statements are one statement written twice.
+
+    The same text; one inside the other, word for word; or the overlap
+    coefficient over their word sets, ``|A∩B| / min(|A|, |B|)``, at least
+    :data:`REPEATED_WORDS_SHARE`.
+    """
+    if later == earlier:
+        return True
+    short, long = sorted((later, earlier), key=len)
+    if f" {short} " in f" {long} ":
+        return True
+    a, b = set(later.split()), set(earlier.split())
+    if not a or not b:
+        return False
+    return len(a & b) / min(len(a), len(b)) >= REPEATED_WORDS_SHARE
+
+
 def independent_statements(statements: Sequence[tuple[str, str]]) -> tuple[list[str], int]:
     """The layers that said something of their own, and how many statements repeated one.
 
     ``statements`` is ``(layer, text)`` in the order the layers wrote them.
-    Each distinct normalised text (:func:`normalised_statement`) is credited
-    to the first layer that wrote it; a statement whose text was already
-    written, by any layer, is counted as identical and credits nobody. The
-    judge is not a layer here: it read the analysts.
+    Each statement is compared by its normalised text
+    (:func:`normalised_statement`) with every one written before it; one that
+    :func:`repeats` an earlier statement, by any layer, is counted as
+    identical or near-identical and credits nobody, and every other is
+    credited to the layer that wrote it. The judge is not a layer here: it
+    read the analysts.
     """
-    seen: set[str] = set()
+    seen: list[str] = []
     credited: list[str] = []
     identical = 0
     for layer, text in statements:
@@ -286,10 +314,10 @@ def independent_statements(statements: Sequence[tuple[str, str]]) -> tuple[list[
         key = normalised_statement(text)
         if not key:
             continue
-        if key in seen:
+        if any(repeats(key, earlier) for earlier in seen):
             identical += 1
             continue
-        seen.add(key)
+        seen.append(key)
         if str(layer) not in credited:
             credited.append(str(layer))
     return credited, identical
@@ -517,7 +545,6 @@ def _collect_techniques(
             # and published nowhere; see ``FINDING_ONLY_REASON``.
             for finding in getattr(isr, "findings", None) or []:
                 stated = getattr(finding, "confidence", None)
-                title = str(getattr(finding, "title", "") or "")
                 layer = getattr(isr, "domain", None) or agent_name or "agent"
                 for raw in getattr(finding, "technique_ids", None) or []:
                     tid = str(raw or "").strip().upper()
@@ -534,14 +561,15 @@ def _collect_techniques(
                     named_by = str(getattr(isr, "agent_id", "") or agent_name or "")
                     if named_by and named_by not in row.setdefault("finding_named_by", []):
                         row["finding_named_by"].append(named_by)
-                    if title and title not in row["evidence"]:
-                        row["evidence"].append(title)
                     # A finding's title names it, and says nothing a second
-                    # layer could confirm: an analyst's one summary title was
-                    # listed as a statement under five techniques. What the
-                    # finding says is its detail.
+                    # layer could confirm or a reader could take as the
+                    # procedure: an analyst's one summary title was listed as a
+                    # statement under five techniques. What the finding says
+                    # is its detail.
                     detail = str(getattr(finding, "detail", "") or "").strip()
                     if detail:
+                        if detail not in row["evidence"]:
+                            row["evidence"].append(detail)
                         row.setdefault("statements", []).append((str(layer), detail))
 
     # The catalogue question, asked of every id still standing. A claim was

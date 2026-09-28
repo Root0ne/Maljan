@@ -3222,11 +3222,12 @@ def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     statements listed under the table; its row points there, so a reader of the
     row alone does not take the word for more than a count of layers.
 
-    The count is of independent statements: layers that wrote the same words
-    count once, and the row says how many statements were identical. A row
-    two or more layers named in one statement between them says it is not
-    corroborated and why. A row stored before statements were counted keeps
-    the count of layers it was stored with.
+    The count is of layers with a statement of their own: statements with the
+    same words, or with at least 90% of the shorter one's words in the other,
+    count once (``capability_matrix.repeats``), and the row says how many were
+    identical or near-identical. A row fewer than two layers stand behind that
+    way says it is not corroborated and why. A row stored before statements
+    were counted keeps the count of layers it was stored with.
     """
     if mapping is None:
         return ""
@@ -3236,8 +3237,8 @@ def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     independent = len(getattr(mapping, "independent_layers", None) or [])
     identical = int(getattr(mapping, "identical_statements", 0) or 0)
     repeated = (
-        f"{identical} statement{'' if identical == 1 else 's'} identical to another and "
-        "counted once"
+        f"{identical} statement{'' if identical == 1 else 's'} identical or near-identical "
+        "to another, counted once"
         if identical
         else ""
     )
@@ -3246,8 +3247,8 @@ def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
         if named < 2 or not (independent or identical):
             return ""
         return (
-            f", not corroborated ({named} analyst layers name it in {independent} independent "
-            f"statement{'' if independent == 1 else 's'}"
+            f", not corroborated ({named} analyst layers name it; {independent} of them in a "
+            "statement of its own"
             + (f"; {repeated}" if repeated else "")
             + ("; their statements are listed below the table" if listed else "")
             + ")"
@@ -3260,13 +3261,11 @@ def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
                 "below the table)"
             )
         return ", corroborated"
-    parts = [f"named by {independent} analyst layers in independent statements"]
+    parts = [f"named by {independent} analyst layers, each in a statement of its own"]
     if repeated:
         parts.append(repeated)
     if listed:
         parts.append("their statements are listed below the table")
-    if len(parts) == 1 and not listed:
-        return ", corroborated"
     return f", corroborated ({'; '.join(parts)})"
 
 

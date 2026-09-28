@@ -10,7 +10,11 @@ not a statement.
 
 from __future__ import annotations
 
-from maljan.extractors.capability_matrix import build_capability_matrix
+from maljan.extractors.capability_matrix import (
+    REPEATED_WORDS_SHARE,
+    build_capability_matrix,
+    independent_statements,
+)
 from maljan.reporting.renderers.markdown import _corroborated_words
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence, Finding
 
@@ -113,8 +117,8 @@ def test_the_row_says_how_many_statements_were_identical() -> None:
     said = _corroborated_words(mapping, [])
 
     assert said.startswith(", corroborated")
-    assert "2 analyst layers in independent statements" in said
-    assert "1 statement identical to another and counted once" in said
+    assert "named by 2 analyst layers, each in a statement of its own" in said
+    assert "1 statement identical or near-identical to another, counted once" in said
 
 
 def test_a_copied_row_says_it_is_not_corroborated_and_why() -> None:
@@ -128,5 +132,129 @@ def test_a_copied_row_says_it_is_not_corroborated_and_why() -> None:
 
     assert not said.startswith(", corroborated")
     assert "not corroborated" in said
-    assert "2 analyst layers name it in 1 independent statement" in said
-    assert "1 statement identical to another and counted once" in said
+    assert "2 analyst layers name it; 1 of them in a statement of its own" in said
+    assert "1 statement identical or near-identical to another, counted once" in said
+
+
+# Near-copies: a statement one layer cut short, one with a word put in, and one
+# written in the analyst's own words.
+LONG = (
+    "The sample establishes persistence by creating shortcuts in the Startup and Desktop "
+    "directories and potentially installing an Updater component."
+)
+TRUNCATED = "The sample establishes persistence by creating shortcuts in the Startup directories."
+INSERTED = (
+    "The sample establishes persistence by creating lnk shortcuts in the Startup and Desktop "
+    "directories and potentially installing an Updater component."
+)
+REORDERED = (
+    "The sample establishes persistence by creating shortcuts in the Desktop and Startup "
+    "directories and potentially installing an Updater component."
+)
+PARAPHRASE = "A .lnk file placed under the user's Startup folder relaunches it at logon."
+
+
+def test_a_truncated_copy_counts_once() -> None:
+    credited, repeated = independent_statements([("static", LONG), ("network", TRUNCATED)])
+
+    assert (credited, repeated) == (["static"], 1)
+
+
+def test_a_copy_with_a_word_put_in_counts_once() -> None:
+    credited, repeated = independent_statements([("static", LONG), ("dynamic", INSERTED)])
+
+    assert (credited, repeated) == (["static"], 1)
+
+
+def test_a_word_reordered_copy_counts_once() -> None:
+    credited, repeated = independent_statements([("static", LONG), ("dynamic", REORDERED)])
+
+    assert (credited, repeated) == (["static"], 1)
+
+
+def test_an_honest_paraphrase_is_its_own_statement() -> None:
+    credited, repeated = independent_statements([("static", LONG), ("dynamic", PARAPHRASE)])
+
+    assert (credited, repeated) == (["static", "dynamic"], 0)
+
+
+def test_the_share_is_of_the_shorter_statements_words() -> None:
+    assert REPEATED_WORDS_SHARE == 0.9
+
+
+def test_a_word_inside_another_word_is_not_a_substring_copy() -> None:
+    credited, _repeated = independent_statements(
+        [("static", "It hides its imports"), ("dynamic", "hides")]
+    )
+
+    assert credited == ["static"]
+    credited, _repeated = independent_statements(
+        [("static", "It unhides the window"), ("dynamic", "It hides")]
+    )
+    assert credited == ["static", "dynamic"]
+
+
+def test_three_sentences_of_one_layer_are_not_called_one_statement() -> None:
+    isrs = {
+        "static": _isr(
+            "static",
+            _claim(COPIED),
+            _claim("A registry value under Run launches the dropped copy at boot."),
+            _claim("The installer writes its payload beside the shortcut it creates."),
+        ),
+        "network": _isr("network", _claim(COPIED)),
+    }
+    _cell, mapping = _mapping(isrs)
+
+    said = _corroborated_words(mapping, [])
+
+    assert "not corroborated" in said
+    assert "2 analyst layers name it; 1 of them in a statement of its own" in said
+    assert "independent statement" not in said
+
+
+def test_a_corroborated_row_with_no_repeats_still_says_its_count() -> None:
+    isrs = {
+        "static": _isr("static", _claim(COPIED)),
+        "dynamic": _isr("dynamic", _claim(PARAPHRASE)),
+    }
+    _cell, mapping = _mapping(isrs)
+
+    assert _corroborated_words(mapping, []) == (
+        ", corroborated (named by 2 analyst layers, each in a statement of its own)"
+    )
+
+
+def test_a_findings_title_is_not_its_procedure() -> None:
+    title = "Example Persistence Heading"
+    isrs = {
+        "static": _isr(
+            "static", findings=[Finding(title=title, technique_ids=["T1547.001"], confidence=0.9)]
+        ),
+        "network": _isr("network", _claim(COPIED)),
+    }
+
+    cell, mapping = _mapping(isrs)
+
+    assert title not in cell.evidence
+    assert mapping is not None and title not in mapping.evidence_quotes
+
+
+def test_the_narrative_is_told_which_layers_said_something_of_their_own() -> None:
+    from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+    from maljan.reporting.narrative_agent import build_prompt_text
+
+    isrs = {
+        "static": _isr("static", _claim(COPIED)),
+        "dynamic": _isr("dynamic", _claim(COPIED)),
+        "network": _isr("network", _claim(PARAPHRASE)),
+    }
+    _cell, mapping = _mapping(isrs)
+    assert mapping is not None
+    report = MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)), ttp_mappings=[mapping]
+    )
+
+    text = build_prompt_text(report)
+
+    assert "layers=static,dynamic,network, independent=static,network" in text
