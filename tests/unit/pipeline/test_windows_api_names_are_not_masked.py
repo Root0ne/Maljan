@@ -21,7 +21,10 @@ value, whatever it spells.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
+import random
 from collections.abc import Iterator
 
 import pytest
@@ -36,6 +39,23 @@ from tests.unit.pipeline.test_live_event_schema import _every_key_shape
 CATALOGUE_NAME = "ZwSetInformationJobObject"
 ALGORITHMS = "ror13_module_add/fnv1a32_lower"
 RESOLVED_ONLY = "SyntheticResolvedExport32NameW"
+
+
+def _dotted_forms(key: str) -> list[str]:
+    """``key`` joined by each joiner to text that holds dots, on both sides and on one."""
+    forms: list[str] = []
+    for joiner in "/|+&":
+        forms += [
+            f"host.example{joiner}{key}{joiner}x.php",
+            f"host.example{joiner}{key}",
+            f"{key}{joiner}x.php",
+        ]
+    return [*forms, f"kernel32.dll!{key}", f"{key}!{CATALOGUE_NAME}"]
+
+
+def _fragment_of(key: str, text: str, length: int = 8) -> bool:
+    """Whether any run of ``length`` characters of ``key`` is in ``text``."""
+    return any(key[at : at + length] in text for at in range(len(key) - length + 1))
 
 
 @pytest.fixture(autouse=True)
@@ -92,18 +112,47 @@ class TestTheCatalogue:
             for joined in (f"djb2_lower/{shape}", f"{shape}/djb2_lower", f"{shape}|ror13"):
                 assert shape not in ev.scrub(joined), joined
 
-    def test_only_the_key_shaped_piece_of_a_joined_run_is_masked(self) -> None:
+    def test_a_key_is_masked_with_the_stretch_of_base64_characters_around_it(self) -> None:
         # A random segment of 24 or more characters: read as a key by its shape.
+        # Its stretch runs to the nearest character outside the base64
+        # alphabets; the dot and the percent sign end it.
         segment = "Q" * 26
         cases = {
-            f"example.com/gate/{segment}/x.php": "example.com/gate/***/x.php",
-            f"to %APPDATA%/Vendor/{segment}/svc.exe": "to %APPDATA%/Vendor/***/svc.exe",
-            f"samples/extracted/{segment}/payload.bin": "samples/extracted/***/payload.bin",
-            f"Assembly.GetCallingAssembly/{segment}": "Assembly.GetCallingAssembly/***",
+            f"example.com/gate/{segment}/x.php": "example.***.php",
+            f"to %APPDATA%/Vendor/{segment}/svc.exe": "to %APPDATA%***.exe",
+            f"samples/extracted/{segment}/payload.bin": "***.bin",
+            f"Assembly.GetCallingAssembly/{segment}": "Assembly.***",
+            f"host.example|{segment}|x.php": "host.example|***|x.php",
         }
         for text, said in cases.items():
             assert ev.scrub(text) == said, text
             assert ev.safe_finding_value(text) == said, text
+
+    def test_a_digest_after_a_directory_is_still_written_as_it_is(self) -> None:
+        digest = hashlib.sha256(b"synthetic").hexdigest()
+        assert ev.scrub(f"samples/{digest}.exe") == f"samples/{digest}.exe"
+
+    def test_no_fragment_of_a_key_survives_beside_dotted_text(self) -> None:
+        for shape in _every_key_shape():
+            for joined in _dotted_forms(shape):
+                for scrubbed in (
+                    ev.scrub(joined),
+                    ev.scrub_keeping_layout(joined),
+                    ev.safe_finding_value(joined),
+                ):
+                    assert not _fragment_of(shape, scrubbed), (joined, scrubbed)
+
+    def test_no_fragment_of_a_random_base64_key_survives(self) -> None:
+        draw = random.Random(20260928)
+        for _ in range(300):
+            raw = bytes(draw.getrandbits(8) for _ in range(32))
+            for key in (
+                base64.b64encode(raw).decode(),
+                base64.urlsafe_b64encode(raw).decode(),
+            ):
+                for joined in _dotted_forms(key):
+                    scrubbed = ev.scrub(joined)
+                    assert not _fragment_of(key, scrubbed), (joined, scrubbed)
 
     def test_every_key_shape_in_every_joined_form_is_masked(self) -> None:
         for shape in _every_key_shape():

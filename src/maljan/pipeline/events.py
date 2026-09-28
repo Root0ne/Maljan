@@ -993,20 +993,81 @@ def _shorten_path(found: re.Match[str]) -> str:
 
 
 def _hide_credentials(found: re.Match[str]) -> str:
-    """One value run, masked whole when it reads as a key as one run, and otherwise with
-    only its key-shaped pieces masked: the host, the directories and the file name
-    around a random segment stay as written."""
+    """One value run, with every key in it masked together with the base64 around it.
+
+    - A run that reads as a key as one run is masked whole.
+    - A run that ends where base64 padding (``=``) follows in the text ends in
+      a base64 value: its last stretch of base64 characters, when it is 24
+      characters or more and no digest or identifier, is masked, whatever it
+      begins with. A standard base64 key cut by its own ``/`` and ``+`` into
+      fragments shorter than the length rule, or beginning with a slash as a
+      path does, is caught here by its padding.
+    - A run that is a name the scrub keeps (a digest, an identifier, a MIME
+      type, a path, words, a catalogue name) is kept.
+    - Otherwise, when a piece of the run between ``/``, ``|``, ``+`` and ``&``
+      reads as a key, or a token sits inside it, the key is masked with the
+      whole stretch of base64 characters (``A-Za-z0-9+/_-``) around it. Any
+      character outside those alphabets (a dot, ``%``, ``|``, ``&``) bounds
+      the stretch: ``host.example/<key>/x.php`` reads ``host.***.php``.
+    """
     value = found.group(0)
-    if not _looks_like_a_credential(value):
-        return value
     if _looks_like_a_credential(value, whole=True):
         return _REDACTED
-    return "".join(
-        _REDACTED
-        if part and not _JOINS.fullmatch(part) and _looks_like_a_credential(part)
-        else part
-        for part in re.split(r"([/|+&])", value)
+    head = ""
+    if found.string.startswith("=", found.end()):
+        tail = _TRAILING_STRETCH.search(value)
+        if (
+            tail is not None
+            and len(tail.group(0)) >= 24
+            and not _DIGEST.match(tail.group(0))
+            and not _IDENTIFIER.match(tail.group(0))
+        ):
+            head, value = value[: tail.start()], ""
+    if not value:
+        return f"{_hide_in_run(head)}{_REDACTED}" if head else _REDACTED
+    return _hide_in_run(value)
+
+
+def _hide_in_run(value: str) -> str:
+    """The rest of ``_hide_credentials`` for a run with no padding after it."""
+    if not value or _readable(value) or not _looks_like_a_credential(value):
+        return value
+    # A token inside the run: its dots end every stretch, so it is found as
+    # itself first and masked with the stretches on either side of it.
+    value = _JWT_INSIDE.sub(
+        lambda token: _REDACTED if _is_a_token(token.group(0)) else token.group(0), value
     )
+    return _BASE64_STRETCH.sub(
+        lambda stretch: _REDACTED if _stretch_holds_a_key(stretch.group(0)) else stretch.group(0),
+        value,
+    )
+
+
+# A stretch of base64 or base64url characters, and one next to the mark a token
+# was masked with.
+_BASE64_STRETCH = re.compile(r"[A-Za-z0-9+/_\-]*\*\*\*[A-Za-z0-9+/_\-]*|[A-Za-z0-9+/_\-]+")
+# The stretch of base64 characters a run ends with.
+_TRAILING_STRETCH = re.compile(r"[A-Za-z0-9+/_\-]+\Z")
+# A token's shape anywhere in a run: three base64url segments with dots between.
+_JWT_INSIDE = re.compile(r"[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}")
+
+
+def _readable(token: str) -> bool:
+    """Whether the whole run is a name the scrub keeps: a digest, an identifier, one of
+    the platform's own variable names, a MIME type, a path, words, or a catalogue name."""
+    if _DIGEST.match(token) or _IDENTIFIER.match(token) or token in _OWN_VARIABLE_NAMES:
+        return True
+    if _MIME_TYPE.match(token) and not _looks_like_a_credential(token.split("/", 1)[1]):
+        return True
+    return bool(_PATH_SHAPED.match(token) or _is_words(token) or _is_api_name(token))
+
+
+def _stretch_holds_a_key(stretch: str) -> bool:
+    """Whether a stretch of base64 characters holds a key: a masked token, or a piece
+    of it between ``/`` and ``+`` that reads as a key."""
+    if _REDACTED in stretch:
+        return True
+    return any(_looks_like_a_credential(piece) for piece in re.split(r"[/+]", stretch) if piece)
 
 
 def scrub(text: Any) -> str:
