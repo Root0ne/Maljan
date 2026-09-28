@@ -2332,11 +2332,12 @@ change landed on `main`.
   floor, is words; every key shape the tests build is still masked. What that
   costs is a passphrase-shaped secret, which no shape tells from a phrase, so
   two rules stand in front of it: a run that begins with a known vendor prefix
-  (`glpat-`, `xoxp-`, `ghs_`, `hf_`, `key-`, `rk_live_` and more) with at least
-  20 characters after it is a key, and every secret value the worker holds —
-  the job's model, sandbox, Ghidra and tool-server credentials and its own
-  database, Redis and object-store ones — is masked by exact value wherever the
-  scrub runs. The scrub repeats its passes until they change nothing, and an
+  (`glpat-`, `xoxp-`, `ghs_`, `hf_`, `rk_live_` and more) with at least 20
+  characters after it is a key (Mailgun's `key-` only when its body is not
+  words), and every secret value the platform holds — the job's model, sandbox,
+  Ghidra and tool-server credentials, the worker's own database, Redis and
+  object-store ones, and the command line's settings — is masked by exact value
+  as a whole word wherever the scrub runs. The scrub repeats its passes until they change nothing, and an
   argument summary, the whole summary line, a result headline and a finding row
   are cut so that a second scrub changes nothing: a digest or an identifier is
   kept whole (a `<sha256>.exe` stays whole), and a cut inside a URL or after a
@@ -5681,14 +5682,16 @@ its `total_techniques` and `corroborated_count` count them, its search text
 lists only them, and a case with nothing corroborated and one published
 technique at most is not stored.
 
-**Configured secrets are masked by value.** Every secret value the worker
+**Configured secrets are masked by value.** Every secret value the platform
 holds (the job's model API keys, sandbox, Ghidra and tool-server tokens, a tool
-server's credential-named environment and header entries, and the worker's
-database, Redis and object-store credentials) of 8 characters or more is
-replaced by `***` wherever it appears in what the worker publishes and stores:
-events, finding rows and summaries. A secret that equals an ordinary word of 8
-characters or more takes that word out of every sentence as well; choose
-secrets that are not words.
+server's `env` and header entries whose key names a credential value, the
+worker's database, Redis and object-store credentials, and the command line's
+settings) of 8 characters or more is replaced by `***` wherever it appears as a
+whole word — no letter, digit or underscore touching it — in what is published
+and stored: events, finding rows and summaries. A job's secrets are masked for
+that job and replaced by the next job's; the worker's own stay for its life. A
+secret that equals an ordinary word of 8 characters or more takes that word out
+of every sentence as well; choose secrets that are not words.
 
 **Analysts run in parallel on a hosted API.** `llm.parallel_analysts` is `auto`
 by default. A deployment that never set it and calls a host resolving only to
