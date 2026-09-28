@@ -2073,10 +2073,16 @@ A key is still a key:
   other character (a dot, `%`, `|`, `&`, `!`, `:`, a space) ends the stretch:
   `example.com/gate/<key>/x.php` reads `example.***.php`, and
   `host.example|<key>|x.php` reads `host.example|***|x.php`;
-- followed by base64 padding (`=`): the stretch of base64 characters the run
-  ends with, when it is 24 characters or more and no digest or identifier, is
+- followed by base64 padding: the stretch of base64 characters the run ends
+  with, when it is 24 characters or more and no name the scrub keeps, is
   masked, even when the key's own `/` and `+` cut it into short fragments or it
-  begins with a slash as a path does;
+  begins with a slash as a path does. Padding is one or two `=` followed by the
+  end of the text or by a character no value starts with: whitespace, a closing
+  quote, bracket, brace or tag, `,`, `;`, `:`, `.`, or a joiner (`/`, `|`, `+`,
+  `&`, `!`). One or two `=` followed by anything else (a letter, a digit, `-`,
+  `_`, an opening quote) are an assignment, not padding, unless the stretch and
+  its `=` signs together are a multiple of 4 characters long, as a base64
+  value is;
 - after a word, in the shape of a MIME type. Only a registered top-level type
   (`application`, `text`, `image` and the rest, or an `x-` type) with a
   subtype that is no key is kept as a MIME type;
@@ -2097,6 +2103,14 @@ directory name:
   its shape, and is masked with its stretch.
 
 A run that reads as a key as a whole is masked whole, as before.
+
+The names the scrub keeps (words, catalogue names, the platform's own variable
+names, digests, identifiers and MIME types, alone or joined by `/` and `+`) are
+asked before the padding rule, so a kept name stays readable in front of an
+assignment: `ZwSetInformationJobObject=1`, `GHIDRA_CONTAINER_SAMPLES_PATH=/x`
+and an argument summary's `anti_debugging_techniques_seen=3` travel as written.
+A path's shape is not asked before the padding rule, because a key can begin
+with a slash; a path is still kept when no padding follows it.
 
 Nothing is lost but the name in that sentence. The identity fields a line is
 filed under — `speaker`, `agent`, `stage`, `label`, `display_name` — are

@@ -251,3 +251,58 @@ class TestNothingElseChanges:
         ev.remember_secret_values([CATALOGUE_NAME], scope="job")
         ev.remember_resolved_names(_resolution(CATALOGUE_NAME))
         assert CATALOGUE_NAME not in ev.scrub(f"calls {CATALOGUE_NAME}")
+
+
+class TestAnAssignmentIsNoPadding:
+    """``=`` is base64 padding only where it ends a value; ``Name=value`` is an assignment.
+
+    A name the scrub keeps stays readable in front of ``=``: the platform's own
+    variable name, a catalogue name, a pair of algorithm ids and words joined by
+    ``_``. A key followed by its padding and then the end of the text, a space
+    or a joiner is still masked.
+    """
+
+    NAMES = (
+        "GHIDRA_CONTAINER_SAMPLES_PATH",
+        CATALOGUE_NAME,
+        "crc32_utf16le_lower/fnv1a32_lower",
+        ALGORITHMS,
+        "a_long_snake_case_identifier_name",
+        "anti-debugging/environment-checks",
+    )
+
+    def test_a_kept_name_stays_readable_before_a_value(self) -> None:
+        for name in self.NAMES:
+            for value in ("/srv/x", "1", "12", "done", "0", '"quoted"'):
+                text = f"{name}={value}"
+                assert name in ev.scrub(text), text
+                assert name in ev.scrub_keeping_layout(text), text
+                assert name in ev.safe_finding_value(text), text
+
+    def test_a_kept_name_stays_readable_before_a_doubled_sign_and_at_the_end(self) -> None:
+        for text in (f"{CATALOGUE_NAME}==0", f"path/{CATALOGUE_NAME}=", f"{CATALOGUE_NAME}= next"):
+            assert CATALOGUE_NAME in ev.scrub(text), text
+
+    def test_a_long_argument_name_is_kept_in_the_argument_summary(self) -> None:
+        line = ev.summarize_args(
+            {"include_decompiled_listing": True, "anti_debugging_techniques_seen": 3}
+        )
+        assert "include_decompiled_listing=" in line, line
+        assert "anti_debugging_techniques_seen=3" in line, line
+
+    def test_a_stated_sentence_written_name_equals_value_is_publishable(self) -> None:
+        from app.worker.analysis_worker import is_publishable
+
+        sentence = "Set GHIDRA_CONTAINER_SAMPLES_PATH=/samples and retry."
+        assert is_publishable(sentence), sentence
+        assert is_publishable(f"The job called {CATALOGUE_NAME}=1 time."), CATALOGUE_NAME
+
+    def test_a_key_followed_by_padding_and_then_an_end_is_still_masked(self) -> None:
+        draw = random.Random(20260929)
+        for _ in range(100):
+            raw = bytes(draw.getrandbits(8) for _ in range(32))
+            key = base64.b64encode(raw).decode()
+            body = key.rstrip("=")
+            for text in (key, f"{key} next", f"{key}/x.php", f"left.x/{key}/x.php"):
+                scrubbed = ev.scrub(text)
+                assert not _fragment_of(body, scrubbed), (text, scrubbed)

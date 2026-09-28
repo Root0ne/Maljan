@@ -2390,10 +2390,15 @@ change landed on `main`.
 
   `!` now splits a value, so `kernel32.dll!<key>` masks the key. A key joined
   to other text by `/`, `|`, `+` or `&`, a token inside a run, and the base64
-  a run ends with before `=` padding are masked with the whole stretch of
-  base64 characters around them, so no fragment of a key travels; a dot or any
-  other character outside those alphabets ends the stretch
-  (`host.example/<key>/x.php` reads `host.***.php`). A MIME
+  a run ends with before padding are masked with the whole stretch of base64
+  characters around them, so no fragment of a key travels; a dot or any other
+  character outside those alphabets ends the stretch
+  (`host.example/<key>/x.php` reads `host.***.php`). Padding is one or two `=`
+  followed by the end of the text, whitespace, a closing quote, bracket or tag,
+  `,`, `;`, `:`, `.` or a joiner, or ending a stretch whose length with its
+  `=` signs is a multiple of 4; any other `=` is an assignment, and a kept name
+  (a word chain, a catalogue name, the platform's own variable name) stays
+  readable in front of it. A MIME
   type is kept only with a registered top-level type and a subtype that is no
   key. Vendor prefixes are still asked first, and configured values are still
   masked by value, so every credential shape stays masked.
