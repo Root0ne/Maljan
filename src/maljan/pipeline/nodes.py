@@ -1822,15 +1822,23 @@ def _corroboration_with_publication(report: Any, state: AnalysisState) -> dict[s
 
 
 def _remember_the_published_techniques(
-    container: Any, report: Any, isr_reports: Mapping[str, Any]
+    container: Any, report: Any, isr_reports: Mapping[str, Any], corroboration: Mapping[str, Any]
 ) -> None:
-    """Hand the case the judge held the techniques this run published. Never raises.
+    """Move the case the judge held to what this run published, or drop it. Never raises.
 
     The judge builds the case from the techniques claimed, before the report
     decides which are published; the case is written once the job completes,
-    so it is amended here, where both are known.
+    so it is moved here, where both are known: its techniques, its total, its
+    corroborated count and its search text. The thin-evidence gate the judge
+    applied to the claimed set is applied again to the published one, and a
+    case thin in what was published is not stored.
     """
-    from maljan.memory.long_term_memory import StoredCase, with_published_techniques
+    from maljan.analysis.corroboration import corroboration_sources
+    from maljan.memory.long_term_memory import (
+        StoredCase,
+        is_thin_case,
+        with_published_techniques,
+    )
 
     case = getattr(container, "pending_memory_case", None)
     if not isinstance(case, StoredCase):
@@ -1840,11 +1848,27 @@ def _remember_the_published_techniques(
             str(mapping.technique_id or "")
             for mapping in (getattr(report, "ttp_mappings", None) or [])
         ]
-        container.pending_memory_case = with_published_techniques(case, published, isr_reports)
+        corroborated = [
+            str(tid)
+            for tid, row in (corroboration or {}).items()
+            if len(corroboration_sources(row)) > 1
+        ]
+        moved = with_published_techniques(case, published, isr_reports, corroborated)
+        if is_thin_case(moved):
+            container.pending_memory_case = None
+            logger.info(
+                "LTM: skipping store for '%s' (reason: thin published evidence: "
+                "corroborated=%d, published techniques=%d).",
+                case.sample_id[:16],
+                moved.corroborated_count,
+                moved.total_techniques,
+            )
+            return
+        container.pending_memory_case = moved
         logger.info(
             "LTM: case '%s' holds %d published technique(s) of %d claimed.",
             case.sample_id,
-            len(container.pending_memory_case.technique_ids),
+            len(moved.technique_ids),
             len(case.technique_ids),
         )
     except Exception as exc:  # noqa: BLE001 — memory never costs a report
@@ -5304,7 +5328,14 @@ def make_report_node(
         # run whose report printed three enterprise-only ids on an Android
         # sample said nothing about their not being published anywhere.
         _published_summary = _corroboration_with_publication(report, state)
-        _remember_the_published_techniques(container, report, isr_reports)
+        _remember_the_published_techniques(
+            container,
+            report,
+            isr_reports,
+            (report.run_summary or {}).get("corroboration")
+            or (state.get("run_summary") or {}).get("corroboration")
+            or {},
+        )
         # The exported bundle's size, now that it exists: the judge's summary
         # counted the judge's own bundle, which the export extends. Only on a
         # summary the judge wrote, which keeps the mock-mode contract.

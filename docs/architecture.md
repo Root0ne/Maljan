@@ -2148,8 +2148,12 @@ the next run's few-shot prior block or its family matches. The judge builds
 the case from the techniques the analysts claimed, before the report decides
 which are published; the report node then hands it the published ids
 (`long_term_memory.with_published_techniques`, from `report.ttp_mappings`), so
-the case, §8, the export and `mitre.json` count one set, and its
-`total_techniques` follows. An id the case leaves out of memory (a claim kept
+the case, §8, the export and `mitre.json` count one set. Its
+`total_techniques`, its `corroborated_count` (the kept ids more than one
+source named) and its search text (the claims' own words and only the kept
+ids, which a later run's attribution reads) follow. The thin-evidence gate —
+nothing corroborated and one technique at most — is applied again to the
+published set, and a case thin in what was published is not stored. An id the case leaves out of memory (a claim kept
 after the absence question, an id the catalogue lacks) stays out although the
 run published it. The judge's log line and its thin-evidence gate count the
 claimed techniques and say so.

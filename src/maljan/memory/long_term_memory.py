@@ -220,21 +220,14 @@ def build_stored_case(
         StoredCase ready to pass to MemoryStore.store().
     """
     technique_ids: list[str] = []
-    text_parts: list[str] = []
-
-    for agent_name, isr in isr_reports.items():
-        text_parts.append(f"[{agent_name.upper()}]")
+    for isr in isr_reports.values():
         for claim in isr.claims:
-            text_parts.append(claim.claim)
-            if claim.evidence_ref:
-                text_parts.append(claim.evidence_ref)
             if not claim.technique_id or not a_past_case_technique(claim):
                 continue
-            text_parts.append(claim.technique_id)
             if claim.technique_id not in technique_ids:
                 technique_ids.append(claim.technique_id)
 
-    summary_text = " ".join(text_parts)
+    summary_text = _case_text(isr_reports, None)
 
     return StoredCase(
         sample_id=sample_id,
@@ -248,18 +241,43 @@ def build_stored_case(
     )
 
 
+def _case_text(isr_reports: Mapping[str, AgentISR], keep: set[str] | None) -> str:
+    """The case's search text: every claim, its evidence, and the ids the case keeps.
+
+    ``keep`` ``None`` keeps each id ``a_past_case_technique`` allows; a set
+    keeps only the ids in it. The claim's own words stay either way.
+    """
+    parts: list[str] = []
+    for agent_name, isr in isr_reports.items():
+        parts.append(f"[{agent_name.upper()}]")
+        for claim in isr.claims:
+            parts.append(claim.claim)
+            if claim.evidence_ref:
+                parts.append(claim.evidence_ref)
+            tid = str(claim.technique_id or "")
+            if not tid or not a_past_case_technique(claim):
+                continue
+            if keep is None or tid.strip().upper() in keep:
+                parts.append(tid)
+    return " ".join(parts)
+
+
 def with_published_techniques(
     case: StoredCase,
     published: Iterable[str],
     isr_reports: Mapping[str, AgentISR] | None = None,
+    corroborated: Iterable[str] = (),
 ) -> StoredCase:
-    """``case`` with the techniques the run published in place of the ones claimed.
+    """``case`` moved to the techniques the run published, in place of the ones claimed.
 
     The judge builds the case before the report decides what is published;
     the report node hands it the published ids once they are known, so the
     case, the report, the export and ``mitre.json`` count one set. An id every
     claim naming it left out of memory (``a_past_case_technique``) stays out
-    although the run published it. The total follows the ids kept.
+    although the run published it. The total follows the ids kept, the
+    corroborated count is the kept ids ``corroborated`` names (named by more
+    than one source), and the search text lists only the kept ids beside the
+    claims' own words — the text is what a later run's attribution reads.
     """
     withheld: set[str] = set()
     remembered: set[str] = set()
@@ -274,4 +292,21 @@ def with_published_techniques(
         tid = str(raw or "").strip().upper()
         if tid and tid not in kept and not (tid in withheld and tid not in remembered):
             kept.append(tid)
-    return replace(case, technique_ids=kept, total_techniques=len(kept))
+    agreed = {str(tid or "").strip().upper() for tid in corroborated}
+    return replace(
+        case,
+        technique_ids=kept,
+        total_techniques=len(kept),
+        corroborated_count=sum(1 for tid in kept if tid in agreed),
+        summary_text=(
+            _case_text(isr_reports, set(kept)) if isr_reports is not None else case.summary_text
+        ),
+    )
+
+
+def is_thin_case(case: StoredCase) -> bool:
+    """Whether a case is too thin to teach a later run.
+
+    Nothing corroborated, and one technique at most.
+    """
+    return case.corroborated_count == 0 and case.total_techniques <= 1

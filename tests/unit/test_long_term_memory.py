@@ -192,7 +192,7 @@ class TestTheCaseStoresThePublishedTechniques:
 
         assert case.technique_ids == ["T1055", "T1105"]
         assert case.total_techniques == 2
-        assert case.summary_text == claimed.summary_text
+        assert case.summary_text == "[STATIC] injects T1055 obfuscates"
         assert case.sample_id == "s1"
 
     def test_nothing_published_stores_no_technique(self) -> None:
@@ -214,6 +214,31 @@ class TestTheCaseStoresThePublishedTechniques:
 
         assert case.technique_ids == ["T1055"]
         assert case.total_techniques == 1
+
+    def test_the_corroborated_count_and_the_text_follow_the_publication(self) -> None:
+        isr = _make_isr(
+            [
+                {"claim": "injects", "evidence_ref": "ev_1", "technique_id": "T1055"},
+                {"claim": "obfuscates", "evidence_ref": "ev_2", "technique_id": "T1027"},
+            ]
+        )
+        claimed = build_stored_case("s1", {"static": isr}, corroborated_count=2)
+        assert "T1027" in claimed.summary_text.split()
+
+        case = with_published_techniques(
+            claimed, ["T1055"], {"static": isr}, corroborated={"T1055", "T1027"}
+        )
+
+        assert case.corroborated_count == 1
+        assert "T1055" in case.summary_text.split()
+        assert "T1027" not in case.summary_text.split()
+        # The analyst's own words stay: only the unpublished id is left out.
+        assert "obfuscates" in case.summary_text
+
+    def test_without_a_corroboration_record_none_is_counted(self) -> None:
+        claimed = build_stored_case("s1", {}, corroborated_count=3)
+        case = with_published_techniques(claimed, ["T1055"], {})
+        assert case.corroborated_count == 0
 
     def test_the_ids_are_read_once_each_in_upper_case(self) -> None:
         case = with_published_techniques(_make_case(), ["t1055", "T1055 ", "T1105"], {})
