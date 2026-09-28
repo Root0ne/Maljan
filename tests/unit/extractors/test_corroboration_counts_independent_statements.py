@@ -163,7 +163,8 @@ def test_a_truncated_copy_counts_once() -> None:
 def test_a_copy_with_a_word_put_in_counts_once() -> None:
     credited, repeated = independent_statements([("static", LONG), ("dynamic", INSERTED)])
 
-    assert (credited, repeated) == (["static"], 1)
+    # The copy with the word put in is the longer one, and the group is its.
+    assert (credited, repeated) == (["dynamic"], 1)
 
 
 def test_a_word_reordered_copy_counts_once() -> None:
@@ -258,3 +259,50 @@ def test_the_narrative_is_told_which_layers_said_something_of_their_own() -> Non
     text = build_prompt_text(report)
 
     assert "layers=static,dynamic,network, independent=static,network" in text
+
+
+# A short statement and two long ones that each hold its words and nothing of
+# each other's: the long ones are two voices, whatever order they were read in.
+HUB = "Writes a Run key."
+HUB_DYNAMIC = (
+    "The sample writes a Run key under HKCU for persistence, observed in the sandbox registry log."
+)
+HUB_REVERSER = "Decompiled code shows it writes a Run key via RegSetValueExW at startup."
+
+
+def test_a_short_statement_read_first_does_not_absorb_two_longer_ones() -> None:
+    first = independent_statements(
+        [("triage", HUB), ("dynamic", HUB_DYNAMIC), ("reverser", HUB_REVERSER)]
+    )
+    last = independent_statements(
+        [("dynamic", HUB_DYNAMIC), ("reverser", HUB_REVERSER), ("triage", HUB)]
+    )
+
+    assert sorted(first[0]) == sorted(last[0]) == ["dynamic", "reverser"]
+    assert first[1] == last[1] == 1
+
+
+def test_the_group_is_credited_to_its_longest_statement() -> None:
+    credited, repeated = independent_statements([("triage", TRUNCATED), ("static", LONG)])
+
+    assert (credited, repeated) == (["static"], 1)
+
+
+def test_the_count_does_not_depend_on_the_order_statements_are_read() -> None:
+    from itertools import permutations
+
+    statements = [
+        ("triage", HUB),
+        ("dynamic", HUB_DYNAMIC),
+        ("reverser", HUB_REVERSER),
+        ("static", LONG),
+        ("network", TRUNCATED),
+        ("qu1cksc0pe", PARAPHRASE),
+    ]
+    answers = {
+        (frozenset(credited), repeated)
+        for order in permutations(statements)
+        for credited, repeated in [independent_statements(list(order))]
+    }
+
+    assert answers == {(frozenset({"dynamic", "reverser", "static", "qu1cksc0pe"}), 2)}

@@ -298,29 +298,34 @@ def independent_statements(statements: Sequence[tuple[str, str]]) -> tuple[list[
     """The layers that said something of their own, and how many statements repeated one.
 
     ``statements`` is ``(layer, text)`` in the order the layers wrote them.
-    Each statement is compared by its normalised text
-    (:func:`normalised_statement`) with every one written before it; one that
-    :func:`repeats` an earlier statement, by any layer, is counted as
-    identical or near-identical and credits nobody, and every other is
-    credited to the layer that wrote it. The judge is not a layer here: it
+    A repeat is the shorter statement of a pair: the statements are read
+    longest first (normalised word count, ties in written order), and each is
+    compared by its normalised text (:func:`normalised_statement`) with the
+    ones already kept. One that :func:`repeats` a kept statement is counted as
+    identical or near-identical and credits nobody; every other is kept and
+    credits its layer. Each group of repeats is so credited to the layer of
+    its longest statement, and a short statement read first can no longer
+    absorb two longer ones that share only its words: the count does not
+    depend on the order the analysts are read in. The credited layers are
+    returned in the order they first wrote. The judge is not a layer here: it
     read the analysts.
     """
-    seen: list[str] = []
-    credited: list[str] = []
+    written = [
+        (index, str(layer), key)
+        for index, (layer, text) in enumerate(statements)
+        if str(layer) != _JUDGE_SOURCE and (key := normalised_statement(text))
+    ]
+    kept: list[str] = []
+    credited: set[str] = set()
     identical = 0
-    for layer, text in statements:
-        if str(layer) == _JUDGE_SOURCE:
-            continue
-        key = normalised_statement(text)
-        if not key:
-            continue
-        if any(repeats(key, earlier) for earlier in seen):
+    for _index, layer, key in sorted(written, key=lambda row: (-len(row[2].split()), row[0])):
+        if any(repeats(key, longer) for longer in kept):
             identical += 1
             continue
-        seen.append(key)
-        if str(layer) not in credited:
-            credited.append(str(layer))
-    return credited, identical
+        kept.append(key)
+        credited.add(layer)
+    order = list(dict.fromkeys(layer for _index, layer, _key in written))
+    return [layer for layer in order if layer in credited], identical
 
 
 # Why an id that reached the report on a finding alone is not published. A

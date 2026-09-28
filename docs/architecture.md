@@ -2613,14 +2613,18 @@ is assembled from what the run gathered rather than recomputed beside it:
   corroboration record lists them as its sources. **Corroboration counts
   independent statements** (`capability_matrix.independent_statements`): each
   analyst statement naming a technique is compared by its normalised text
-  (case, markup and punctuation out) with every statement written before it.
-  Two count once when they are the same text, when one is inside the other
-  word for word, or when at least 90% of the shorter one's words are in the
-  other (the overlap coefficient over their word sets,
-  `REPEATED_WORDS_SHARE`): a copy cut short or with a word put in or taken
-  out is one statement, and two analysts' own sentences about one tool's
-  output stay two. Every other statement is credited to the layer that wrote
-  it, and `is_corroborated` is two layers credited so (`independent_layers`).
+  (case, markup and punctuation out). Two count once when they are the same
+  text, when one is inside the other word for word, or when at least 90% of
+  the shorter one's words are in the other (the overlap coefficient over their
+  word sets, `REPEATED_WORDS_SHARE`): a copy cut short or with a word put in or
+  taken out is one statement, and two analysts' own sentences about one tool's
+  output stay two. The repeat is the shorter of a pair: statements are read
+  longest first (word count, ties in written order) and each is compared with
+  the ones already kept, so each group is credited to the layer of its
+  longest statement and a short statement can never absorb two longer ones
+  that share only its words; the count does not depend on the order the
+  analysts are read in. `is_corroborated` is two layers credited so
+  (`independent_layers`).
   The row says how many statements were identical or near-identical
   (`identical_statements`); a row fewer than two layers stand behind that way
   prints "not corroborated (N analyst layers name it; K of them in a
