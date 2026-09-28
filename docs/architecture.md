@@ -435,7 +435,7 @@ the file's import table puts in the slot a call or a jump thunk goes through,
 the function at a direct call's target, or the slot a runtime pointer is read
 from. A jump or return before the call, a byte the decoder cannot read, the
 function's end, a write to the argument register, another stack move for a
-pushed one, or a call through a register leave it absent. After that call, the walk follows to the next call in the same function that receives one of two things (`output_passed_to`, x64): the one frame slot whose address the call was given as another argument, else its return value in `rax`. It is said as a fact about the slot or the register ("the frame slot [rsp+0xa0], given to that call as argument 2, is then argument 2 of the call at …"; "that call's return value in rax is then …"), never as what the first call does with it, and nothing is followed past that later call. The walk tracks registers and frame slots, ends tracking of a slot any store overlaps (sized by the store's width, SSE and VEX stores included; within 16 bytes where the width cannot be read), follows unconditional jumps and falls through conditional ones (said), and is absent at a return, an undecodable byte, a jump back, the function's end or a stack or frame pointer write. Both state addresses as offsets from the image base and the function
+pushed one, or a call through a register leave it absent. After that call, the walk follows to the next call in the same function that receives one of two things (`output_passed_to`, x64): the one frame slot whose address the call was given as another argument, else its return value in `rax`. It is said as a fact about the slot or the register ("the frame slot [rsp+0xa0], given to that call as argument 2, is then argument 2 of the call at …"; "that call's return value in rax is then …"), never as what the first call does with it. One hop more, the same walk runs from that later call: its own `output_passed_to` names the next call that receives the frame slot the later call was given as another argument, else its return value, with the callee and the argument position, and nothing is followed past that call; each hop is absent on its own when the code does not show it. The walk tracks registers and frame slots, ends tracking of a slot any store overlaps (sized by the store's width, SSE and VEX stores included; within 16 bytes where the width cannot be read), follows unconditional jumps and falls through conditional ones (said), and is absent at a return, an undecodable byte, a jump back, the function's end or a stack or frame pointer write. Both state addresses as offsets from the image base and the function
 around each from the file's own function table (`tools.pe_image`), and neither
 guesses one. The decoder runs after FLOSS so it can read FLOSS's kept result;
 both run after every other step so no earlier id moves. Where the resolution names
@@ -1491,6 +1491,71 @@ field once its field lines have begun, so prose after the last claim is not
 counted as part of it. A chunk's answer is
 asked inside its chunk, as a cut one is. A local triage answer began 639 claims
 in 32,768 tokens, 85 of them distinct.
+
+Two more questions are asked of an analyst's answer in the same validation
+turn, each once, and what the analyst answers stands.
+
+- **Decompiled but not described** (`isr.decompiled_not_described`).
+  - *What counts as decompiled.* The functions come from the analyst's own
+    ledger entries: a tool whose name says it decompiles, and a call that
+    answered.
+  - *Reading a batch.* A batch answer is a JSON object every key of which is
+    an address: `0x…`, or at least four hex digits with a decimal digit among
+    them (a hex word such as `cafe` is no address). It gives one function per
+    key. A key whose listing begins with `Error` is left out. A cut answer is
+    read member by member from its opening brace, and keeps the functions its
+    text still shows. Any other answer is no batch, so a plain listing is one
+    function at the address the call was given, whatever quoted strings it
+    holds. A batch whose answer is not keyed takes the addresses in its
+    `functions` argument.
+  - *Reading a single call.* The address is the one the call was given, as hex
+    or as an integer, or the one a decompiler's generic name carries (`FUN_`,
+    `fcn.`, `sub_`). The names are the one the call was given and the one the
+    listing's signature prints. The signature is read line by line: a line
+    holding only the return type is passed over, and comments are skipped.
+  - *Merging.* A function asked for by name alone is the one asked for by
+    address that carries the same name.
+  - *How a claim names a function.* Its sentence or its evidence line writes
+    the address as `0x…`, as `…h`, as bare hex with a letter and a digit in
+    it, or inside a generic name. The address must be the same, or differ by
+    an image base the run read (`image_base` in the pack's answers, handed to
+    every agent, or in the analyst's own). With no base known, a difference of
+    a multiple of 64 KiB counts. A run of digits alone names a function only
+    when it is exactly the function's own hex spelling, leading zeros aside.
+  - *Reading an image base.* An unquoted number is the number. A quoted value
+    is hex when it says so (`0x…`, `…h`) or holds a hex letter. A quoted
+    string of decimal digits could be either, so it is no base, and neither
+    is a value off a 64 KiB boundary. With no base known, the 64 KiB rule
+    applies. A claim can also name the function by a name
+    the decompiler gave it. Citing the entry alone does not count.
+  - *The question and the finding.* The functions no claim names are listed in
+    one question, with their names and entries. The question says what was
+    read: a name the decompiler gave, or the address or its offset from the
+    image base written in hex, and that an offset written in decimal digits
+    alone is not read as one. The functions the kept answer
+    still names in no claim are recorded, and §13's validation list prints the
+    line naming them.
+  - *Why.* A reverser had decompiled two routines holding half of what the
+    analysis needed and described neither.
+- **Library-only claims** (`isr.library_only_claims`).
+  - *What counts.* A claim of one sentence whose subject (the sample, or none)
+    uses, imports, calls or loads libraries or their APIs. It may add a short
+    "for y" purpose: at most six words, with no comma, no second verb joined by
+    "and" or "or", and no quote, digit, address, host or path.
+  - *What does not count.* A claim whose object runs on with "to" states an
+    action and is not one of these.
+  - *Other conditions.* The claim names no code location in its sentence or
+    its evidence line. Its evidence line carries nothing beyond an import
+    listing: ledger ids, library and API names, counts, and the words that say
+    what a listing is.
+  - *The question.* It states what was read, not a judgement, and quotes every
+    such claim. It asks to merge them into the claims whose behaviour they
+    support, or to detail each.
+  - *What stands.* The answer stands. A retry with fewer claims is kept when it
+    has at least as many claims that are not library-only as the first answer
+    had. One that keeps the library-only claims is kept, with the finding
+    recorded.
+  - *Why.* One analyst's answer was mostly such claims.
 
 The cap the check reads is the one the call was built with. The container
 records it on the model it builds (`context_window.record_built_cap`), and the
@@ -2564,6 +2629,10 @@ and every string of every event — a message's text and its report, a
 correction, a cap's detail, a summary — is scrubbed once by the publisher, for
 all three sinks at once: anything shaped like a credential is replaced, a URL
 keeps its scheme and host only, and every path is cut to its file name. A
+Windows function name the vendored export-name catalogue holds, one this
+job's hash resolution on the analysis server read, or a hash-algorithm id of
+the vendored algorithm catalogue, is a name and travels as written, as it does in the
+report (`docs/configuration.md`, "Long agent keys in the conversation"). A
 producer may scrub as well; the publisher is what makes it a guarantee rather
 than a habit, and the transcript's copy is scrubbed as it is taken, so a
 replayed run reads exactly as the live one did.

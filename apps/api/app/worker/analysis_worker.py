@@ -677,8 +677,13 @@ def remember_configured_secrets(core_settings: Any) -> None:
     this process. Registered under the ``job`` scope, which the next job's
     settings replace: a secret no longer configured is not masked after it.
     The worker's own credentials are the ``process`` scope's
-    (``remember_process_secrets``). Never raises.
+    (``remember_process_secrets``). The Windows function names the previous
+    job's hash resolution read, which the scrub kept as written, are forgotten
+    here too: the job scope starts empty. Never raises.
     """
+    from maljan.pipeline.events import forget_resolved_names
+
+    forget_resolved_names()
     try:
         from maljan.core.settings_catalog import configured_secret_values
         from maljan.pipeline.events import remember_secret_values

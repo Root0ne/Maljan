@@ -212,7 +212,11 @@ address the call was given as another argument, else its return value in `rax`.
 It is said as a fact about the slot or the register ("the frame slot [rsp+0xa0],
 given to that call as argument 2, is then argument 2 of the call at …"; "that
 call's return value in rax is then …"), never as what the first call does with
-it, and nothing is followed past that later call. The walk tracks registers and
+it. One hop more, the same walk runs from that later call: its own
+`output_passed_to` names the next call that receives the frame slot the later
+call was given as another argument, else its return value, with the callee and
+the argument position, and nothing is followed past that call. Each hop is
+absent on its own when the code does not show it. The walk tracks registers and
 frame slots, ends tracking of a slot any store overlaps (sized by the store's
 width, SSE and VEX stores included; within 16 bytes where the width cannot be
 read), follows unconditional jumps and falls through conditional ones (said),

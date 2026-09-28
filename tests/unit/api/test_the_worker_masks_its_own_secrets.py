@@ -59,3 +59,14 @@ def test_a_job_s_settings_replace_the_previous_job_s(monkeypatch: Any) -> None:
     )
 
     assert ev.scrub(f"{old_key} {new_key} {store_secret}") == f"{old_key} *** ***"
+
+
+def test_a_job_starts_with_no_names_the_previous_job_resolved() -> None:
+    """The names one job's hash resolution read are kept as written for that job alone."""
+    name = "SyntheticResolvedExport32NameW"
+    ev.remember_resolved_names({"hits": [{"readings": [{"set": "exports", "name": name}]}]})
+    assert ev.scrub(name) == name
+
+    analysis_worker.remember_configured_secrets(Settings.model_validate({}))
+
+    assert ev.scrub(name) == "***"

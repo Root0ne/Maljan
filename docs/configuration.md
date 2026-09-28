@@ -2044,6 +2044,76 @@ whatever its shape (`events.remember_secret_values`, filled from
 A secret the platform does not hold — one a sample carries, or one a tool
 answer quotes from elsewhere — of passphrase shape is the remaining cost.
 
+A Windows function name is a name, not a key, though a long one has the
+length rule's shape (`ZwSetInformationJobObject`, `InternetGetSecurityInfoByURL`).
+So are hash-algorithm ids joined by a slash (`ror13_module_add/fnv1a32_lower`).
+
+Three sets of names travel as written:
+
+- every name the vendored export-name catalogue
+  (`data/windows_export_names_v1.json`) holds;
+- every hash-algorithm id of the vendored algorithm catalogue
+  (`data/api_hash_algorithms_v1.json`);
+- every name this job's hash resolution read. The resolution is the pack's
+  `resolve_api_hashes` call or the analysis server's tool; another server's
+  tool of that name adds nothing. A name is taken only when it is an
+  identifier with both cases in it, and the set is forgotten when the next job
+  installs its settings.
+
+A name travels alone, or joined to other such names by `/`, `|`, `+` or `&`. A
+module in front of a name (`kernel32.dll!Name`) is split off at the `!`, so the
+module and the name are read apart.
+
+A key is still a key:
+
+- after a module and a `!`;
+- joined to any text by `/`, `|`, `+` or `&`, or with a token inside the run:
+  the key is masked together with the whole stretch of base64 and base64url
+  characters (`A-Za-z0-9+/_-`) around it, so none of its fragments travels. Any
+  other character (a dot, `%`, `|`, `&`, `!`, `:`, a space) ends the stretch:
+  `example.com/gate/<key>/x.php` reads `example.***.php`, and
+  `host.example|<key>|x.php` reads `host.example|***|x.php`;
+- followed by base64 padding: the stretch of base64 characters the run ends
+  with, when it is 24 characters or more and no name the scrub keeps, is
+  masked, even when the key's own `/` and `+` cut it into short fragments or it
+  begins with a slash as a path does. Padding is one or two `=` followed by the
+  end of the text or by a character no value starts with: whitespace, a closing
+  quote, bracket, brace or tag, `,`, `;`, `:`, `.`, or a joiner (`/`, `|`, `+`,
+  `&`, `!`). One or two `=` followed by anything else (a letter, a digit, `-`,
+  `_`, an opening quote) are an assignment, not padding, unless the stretch and
+  its `=` signs together are a multiple of 4 characters long, as a base64
+  value is;
+- after a word, in the shape of a MIME type. Only a registered top-level type
+  (`application`, `text`, `image` and the rest, or an `x-` type) with a
+  subtype that is no key is kept as a MIME type;
+- after a vendor prefix, which is still asked first;
+- as a configured value, which is still masked by value before any rule is
+  read.
+
+None of these sets lets a credential through. Two costs follow from
+masking the stretch, and both are accepted, because the events and the
+transcript are not what the analysts read and a key fragment costs more than a
+directory name:
+
+- the readable text in the same stretch as a key is masked with it:
+  `samples/extracted/<key>/payload.bin` reads `***.bin`, and a directory or
+  host label next to the key goes too;
+- a readable segment of 24 or more characters that is no word and no catalogue
+  name (a random directory or file name, a long method name) reads as a key by
+  its shape, and is masked with its stretch.
+
+A run that reads as a key as a whole is masked whole, as before.
+
+The names the scrub keeps (words, catalogue names, the platform's own variable
+names, digests, identifiers and MIME types, alone or joined by `/`; catalogue
+names also joined by `|`, `+` or `&`) are asked before the padding rule, so a
+kept name stays readable in front of an assignment: `ZwSetInformationJobObject=1`,
+`GHIDRA_CONTAINER_SAMPLES_PATH=/x` and an argument summary's
+`anti_debugging_techniques_seen=3` travel as written. Words are never joined by
+`+`, so a key that `+` cuts into letter-only pieces is still masked.
+A path's shape is not asked before the padding rule, because a key can begin
+with a slash; a path is still kept when no padding follows it.
+
 Nothing is lost but the name in that sentence. The identity fields a line is
 filed under — `speaker`, `agent`, `stage`, `label`, `display_name` — are
 exempt by name in the publisher and travel whole, so the console still files

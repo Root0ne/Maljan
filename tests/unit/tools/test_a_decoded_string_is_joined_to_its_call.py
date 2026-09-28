@@ -476,3 +476,113 @@ class TestTheDecodersOutputIsFollowedToItsConsumer:
         answer = call_sites.passed_to(loaded, _site(loaded, site))
 
         assert answer is not None and "output_passed_to" not in answer
+
+
+SECOND = TEXT_RVA + 0x280
+
+
+class TestTheConsumersOutputIsFollowedOneHopMore:
+    """After the call that receives the decoder's output, that call's output is followed too."""
+
+    def _image(self) -> tuple[SyntheticPE, _Code]:
+        image = SyntheticPE(
+            functions=[
+                (TEXT_RVA, FUNCTION_END),
+                (DECODER, DECODER + 0x20),
+                (CONSUMER, CONSUMER + 0x20),
+                (SECOND, SECOND + 0x20),
+            ]
+        )
+        return image, _Code(image)
+
+    def test_the_consumer_s_return_value_goes_to_an_import(self, tmp_path: Path) -> None:
+        image, code = self._image()
+        slots = image.imports_at(0x100, {"KERNEL32.dll": ["CloseHandle"]})
+        site = code.lea("rcx", STRING)
+        code.call(DECODER)
+        code.raw(b"\x48\x8b\xc8")  # mov rcx, rax
+        code.call(CONSUMER)
+        code.raw(b"\x33\xc9")  # xor ecx, ecx
+        code.raw(b"\x48\x8b\xd0")  # mov rdx, rax
+        code.call_slot(slots["CloseHandle"])
+
+        loaded = _load(image, tmp_path)
+        answer = call_sites.passed_to(loaded, _site(loaded, site))
+
+        assert answer is not None
+        then = answer["output_passed_to"]
+        assert then["callee"] == {"function": hex(CONSUMER)}
+        second = then["output_passed_to"]
+        assert second["callee"]["import"] == "KERNEL32.dll!CloseHandle"
+        assert (second["argument"], second["register"]) == (2, "rdx")
+        assert second["followed"] == "that call's return value in rax"
+        said = call_sites.passed_to_words(answer)
+        assert (
+            "; that call's return value in rax is then argument 1 of the call at "
+            f"{then['call_at']} to the function at {hex(CONSUMER)}; that call's return value "
+            "in rax is then "
+            f"argument 2 of the call at {second['call_at']} to KERNEL32.dll!CloseHandle; it is "
+            "not followed past that call"
+        ) in said
+        assert said.count("it is not followed past that call") == 1
+
+    def test_the_consumer_s_out_buffer_goes_to_the_next_call(self, tmp_path: Path) -> None:
+        image, code = self._image()
+        code.raw(b"\x48\x8d\x54\x24\x40")  # lea rdx, [rsp+0x40]
+        site = code.lea("rcx", STRING)
+        code.call(DECODER)
+        code.raw(b"\x48\x8d\x4c\x24\x40")  # lea rcx, [rsp+0x40] (the decoded text)
+        code.raw(b"\x48\x8d\x54\x24\x60")  # lea rdx, [rsp+0x60] (the consumer's out slot)
+        code.call(CONSUMER)
+        code.raw(b"\x33\xc9")  # xor ecx, ecx
+        code.raw(b"\x33\xd2")  # xor edx, edx
+        code.raw(b"\x4c\x8d\x44\x24\x60")  # lea r8, [rsp+0x60]
+        code.call(SECOND)
+
+        loaded = _load(image, tmp_path)
+        answer = call_sites.passed_to(loaded, _site(loaded, site))
+
+        assert answer is not None
+        then = answer["output_passed_to"]
+        assert (then["callee"], then["argument"]) == ({"function": hex(CONSUMER)}, 1)
+        second = then["output_passed_to"]
+        assert second["callee"] == {"function": hex(SECOND)}
+        assert (second["argument"], second["register"]) == (3, "r8")
+        assert second["followed"] == "the frame slot [rsp+0x60], given to that call as argument 2,"
+
+    def test_nothing_after_the_consumer_states_no_second_hop(self, tmp_path: Path) -> None:
+        image, code = self._image()
+        site = code.lea("rcx", STRING)
+        code.call(DECODER)
+        code.raw(b"\x48\x8b\xc8")  # mov rcx, rax
+        code.call(CONSUMER)
+        code.raw(b"\xc3")  # ret
+
+        loaded = _load(image, tmp_path)
+        answer = call_sites.passed_to(loaded, _site(loaded, site))
+
+        assert answer is not None
+        then = answer["output_passed_to"]
+        assert "output_passed_to" not in then
+        said = call_sites.passed_to_words(answer)
+        assert said.endswith("; it is not followed past that call")
+        assert said.count("is then argument") == 1
+
+    def test_a_consumer_s_value_another_call_clobbers_states_no_second_hop(
+        self, tmp_path: Path
+    ) -> None:
+        image, code = self._image()
+        site = code.lea("rcx", STRING)
+        code.call(DECODER)
+        code.raw(b"\x48\x8b\xc8")  # mov rcx, rax
+        code.call(CONSUMER)
+        code.raw(b"\x33\xc9")  # xor ecx, ecx
+        code.call(SECOND)  # receives nothing of it
+        code.raw(b"\x48\x8b\xc8")  # mov rcx, rax (the later call's value now)
+        code.call(SECOND)
+
+        loaded = _load(image, tmp_path)
+        answer = call_sites.passed_to(loaded, _site(loaded, site))
+
+        assert answer is not None
+        assert "output_passed_to" not in answer["output_passed_to"]

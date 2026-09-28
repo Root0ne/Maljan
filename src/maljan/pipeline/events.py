@@ -550,8 +550,13 @@ _JWT_RUN = re.compile(r"\A[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]
 # name by the pass below, which is what a reader needs, and reading it as a
 # key would replace the file name too. A path here is one with a marker *and*
 # a second separator: ``/wJalrXUtnFEMIK7MDENG`` is a key that begins with a
-# slash, not a directory.
-_MIME_TYPE = re.compile(r"\A[a-z]+/[a-z0-9][a-z0-9.+_\-]*\Z")
+# slash, not a directory. The type is one of the registered top-level types
+# (or an ``x-`` one), and the subtype is exempt only when it is no key itself:
+# ``left/<key>`` has the shape of a MIME type and is a key after a word.
+_MIME_TYPE = re.compile(
+    r"\A(?:application|audio|chemical|font|image|inode|message|model|multipart|text|video"
+    r"|x-[a-z0-9.+\-]+)/[a-z0-9][a-z0-9.+_\-]*\Z"
+)
 # Words with separators between them, which the base64 alternative above reads
 # as a key by its length alone: a claim's ``anti-debugging/environment``, a
 # STIX property name and an analyst's roster key are all 24 characters and
@@ -607,8 +612,9 @@ _URL_RUN = re.compile(
 # and a dash or a quotation mark a model typed is the end of the value in
 # front of it. A colon is already outside the class, so a JWT's dots are the
 # one separator left inside it — which is what lets the whole token be seen as
-# one run.
-_VALUE_RUN = re.compile(r"[^\s\"'`<>;:{}\[\](),=\\\x80-\U0010ffff]+")
+# one run. ``!`` splits too: ``kernel32.dll!<key>`` is a module name and a key,
+# and read as one run neither rule saw the key.
+_VALUE_RUN = re.compile(r"[^\s\"'`<>;:{}\[\](),=!\\\x80-\U0010ffff]+")
 # A filesystem path, wherever it starts. A slash alone is not the signal: a
 # MIME type (``application/x-msdownload``), a sub-technique id
 # (``T1055/012``), a date (``2026/09/17``) and a ratio all carry one, and
@@ -737,7 +743,7 @@ def _is_a_token(run: str) -> bool:
     return decoded.lstrip().startswith(b"{")
 
 
-def _looks_like_a_credential(token: str) -> bool:
+def _looks_like_a_credential(token: str, *, whole: bool = False) -> bool:
     """Whether this run of characters is a key rather than a word or a digest.
 
     In this order, and the order is the argument. A digest and an identifier
@@ -783,9 +789,148 @@ def _looks_like_a_credential(token: str) -> bool:
         and not _is_words(token)
     ):
         return True
-    if _MIME_TYPE.match(token) or _PATH_SHAPED.match(token) or _is_words(token):
+    if _MIME_TYPE.match(token) and not _looks_like_a_credential(token.split("/", 1)[1]):
         return False
-    return bool(_CREDENTIAL_RUN.match(token)) or _is_a_token(token)
+    if _PATH_SHAPED.match(token) or _is_words(token):
+        return False
+    if _is_api_name(token):
+        return False
+    if _CREDENTIAL_RUN.match(token) or _is_a_token(token):
+        return True
+    if whole:
+        return False
+    # A key joined to other text by a slash, a bar, a plus or an ampersand is
+    # still a key: ``<jwt>/name`` failed every rule anchored to the whole run.
+    # ``whole`` asks only the rules that read the run as one.
+    pieces = [piece for piece in _JOINS.split(token) if piece]
+    return len(pieces) > 1 and any(_looks_like_a_credential(piece) for piece in pieces)
+
+
+# The Windows function names and hash-algorithm ids the scrub leaves as
+# written. The length rule reads ``ZwSetInformationJobObject`` as a key, and a
+# pair of algorithm ids joined by a slash as one; the live console and the
+# stored transcript printed ``***`` where the report printed the names. Three
+# sources, all exact: the vendored export-name catalogue and the vendored
+# hash-algorithm catalogue (``api_hashes``' data files, each read once), and
+# the names this job's hash resolution on the analysis server read
+# (``remember_resolved_names``), which the next job forgets. A vendor prefix is
+# asked before any of them, and a configured value is masked by value before any
+# rule is read, so none exempts a credential.
+_EXPORT_NAMES_FILE = "data/windows_export_names_v1.json"
+_ALGORITHMS_FILE = "data/api_hash_algorithms_v1.json"
+_RESOLVED_NAMES: set[str] = set()
+# The catalogues' names, read on first use.
+_CATALOGUE: frozenset[str] | None = None
+_ALGORITHM_IDS: frozenset[str] | None = None
+# What joins several names into one run: a slash, a bar, a plus, an ampersand.
+_JOINS = re.compile(r"[/|+&]")
+# A resolved name is taken only in the shape a Windows function name has: an
+# identifier with both cases in it. An all-lowercase run is what several key
+# formats are, and no catalogue name past the length floor is written that way
+# except words joined by underscores, which the word rule already keeps.
+_API_NAME_SHAPE = re.compile(r"\A[A-Za-z_?@$][A-Za-z0-9_?@$]*\Z")
+
+
+def _read_data(path: str) -> Any:
+    import json
+
+    from maljan.core.paths import resolve_data
+
+    return json.loads(resolve_data(path).read_text(encoding="utf-8"))
+
+
+def _catalogue_names() -> frozenset[str]:
+    """Every exported name the vendored catalogue holds; empty when it cannot be read."""
+    global _CATALOGUE
+    if _CATALOGUE is None:
+        try:
+            document = _read_data(_EXPORT_NAMES_FILE)
+            _CATALOGUE = frozenset(
+                str(name)
+                for exported in (document.get("dlls") or {}).values()
+                for name in exported or []
+            )
+        except Exception as exc:  # noqa: BLE001 — the shape rules still run
+            logger.warning(
+                "The export-name catalogue was not read for the scrub (%s).", type(exc).__name__
+            )
+            _CATALOGUE = frozenset()
+    return _CATALOGUE
+
+
+def _algorithm_ids() -> frozenset[str]:
+    """Every hash-algorithm id the vendored catalogue holds; empty when it cannot be read."""
+    global _ALGORITHM_IDS
+    if _ALGORITHM_IDS is None:
+        try:
+            document = _read_data(_ALGORITHMS_FILE)
+            _ALGORITHM_IDS = frozenset(
+                str(entry["id"])
+                for entry in document.get("algorithms") or []
+                if isinstance(entry, dict) and entry.get("id")
+            )
+        except Exception as exc:  # noqa: BLE001 — the shape rules still run
+            logger.warning(
+                "The hash-algorithm catalogue was not read for the scrub (%s).", type(exc).__name__
+            )
+            _ALGORITHM_IDS = frozenset()
+    return _ALGORITHM_IDS
+
+
+def _is_a_catalogue_name(name: str) -> bool:
+    return name in _RESOLVED_NAMES or name in _catalogue_names() or name in _algorithm_ids()
+
+
+def _is_api_name(token: str) -> bool:
+    """Whether ``token`` is a Windows function name or a hash-algorithm id, alone or
+    several joined by ``/``, ``|``, ``+`` or ``&``.
+
+    A module in front of a name (``kernel32.dll!Name``) is split off by the
+    value run itself, so the name is asked alone.
+    """
+    if _is_a_catalogue_name(token):
+        return True
+    pieces = [piece for piece in _JOINS.split(token) if piece]
+    return len(pieces) > 1 and all(_is_a_catalogue_name(piece) for piece in pieces)
+
+
+def remember_resolved_names(answer: Any) -> None:
+    """Add the function names a ``resolve_api_hashes`` answer read to the names kept as written.
+
+    ``answer`` is the tool's answer as a dict or as its JSON text; every
+    reading under ``hits`` and ``lone_hits`` is taken whose name has the shape
+    a Windows function name has (``_API_NAME_SHAPE`` and both cases). Held for
+    the job, in this process, until ``forget_resolved_names``. Never raises.
+    """
+    try:
+        if isinstance(answer, str):
+            import json
+
+            answer = json.loads(answer)
+        if not isinstance(answer, dict):
+            return
+        for key in ("hits", "lone_hits"):
+            for hit in answer.get(key) or []:
+                for reading in (hit.get("readings") or []) if isinstance(hit, dict) else []:
+                    name = str(reading.get("name") or "") if isinstance(reading, dict) else ""
+                    if (
+                        _API_NAME_SHAPE.match(name)
+                        and any(c.islower() for c in name)
+                        and any(c.isupper() for c in name)
+                    ):
+                        _RESOLVED_NAMES.add(name)
+    except Exception as exc:  # noqa: BLE001 — the shape rules still run
+        logger.debug("A hash resolution's names were not handed to the scrub (%s).", exc)
+
+
+def forget_resolved_names() -> None:
+    """Clear the names a job's hash resolution read: the next job starts with none."""
+    _RESOLVED_NAMES.clear()
+
+
+def resolved_names_held() -> int:
+    """How many resolved names the scrub keeps as written for this job."""
+    return len(_RESOLVED_NAMES)
 
 
 def _is_words(run: str) -> bool:
@@ -848,8 +993,137 @@ def _shorten_path(found: re.Match[str]) -> str:
 
 
 def _hide_credentials(found: re.Match[str]) -> str:
+    """One value run, with every key in it masked together with the base64 around it.
+
+    In this order:
+
+    - A run that reads as a key as one run is masked whole.
+    - A run that is a name the scrub keeps (a digest, an identifier, one of the
+      platform's own variable names, a MIME type, a path, words, a catalogue
+      name) is kept, whatever follows it: ``ZwSetInformationJobObject=1`` is an
+      assignment to a name.
+    - A run followed by base64 padding (``_PADDING``: one or two ``=`` that end
+      a value) ends in a base64 value: its last stretch of base64 characters,
+      when it is 24 characters or more and no name the scrub keeps, is masked,
+      whatever it begins with. A standard base64 key cut by its own ``/`` and
+      ``+`` into fragments shorter than the length rule, or beginning with a
+      slash as a path does, is caught here by its padding. An ``=`` that starts
+      a value is an assignment and not padding.
+    - Otherwise, when a piece of the run between ``/``, ``|``, ``+`` and ``&``
+      reads as a key, or a token sits inside it, the key is masked with the
+      whole stretch of base64 characters (``A-Za-z0-9+/_-``) around it. Any
+      character outside those alphabets (a dot, ``%``, ``|``, ``&``) bounds
+      the stretch: ``host.example/<key>/x.php`` reads ``host.***.php``.
+    """
     value = found.group(0)
-    return _REDACTED if _looks_like_a_credential(value) else value
+    if _names_only(value):
+        return value
+    if _looks_like_a_credential(value, whole=True):
+        return _REDACTED
+    head = ""
+    tail = _TRAILING_STRETCH.search(value)
+    padding = _PADDING.match(found.string, found.end())
+    if (
+        tail is not None
+        and padding is not None
+        and len(tail.group(0)) >= 24
+        and not _names_only(tail.group(0))
+        and (
+            padding.group("end") is not None
+            or (len(tail.group(0)) + len(padding.group("signs"))) % 4 == 0
+        )
+    ):
+        head, value = value[: tail.start()], ""
+    if not value:
+        return f"{_hide_in_run(head)}{_REDACTED}" if head else _REDACTED
+    return _hide_in_run(value)
+
+
+def _names_only(stretch: str) -> bool:
+    """Whether a run is a name the scrub keeps, or names joined by ``/``, with no
+    vendor prefix in it: ``path/ZwSetInformationJobObject`` is a word and a
+    catalogue name, and a random key is not written that way.
+
+    Split on ``/`` alone: ``+`` joins no words, and a key cut by its own ``+``
+    into letter-only pieces is a key. Catalogue names joined by ``+`` are kept
+    as one run by the catalogue rule (``_is_api_name``).
+
+    Asked before the padding rule, so a kept name stays readable in front of
+    ``=``. A path's shape is not asked here: a key that begins with a slash has
+    it, and padding after a run is what a path does not end with; the path rule
+    is asked in ``_hide_in_run``, for a run with no padding after it.
+    """
+    pieces = [piece for piece in stretch.split("/") if piece]
+    if _kept_name(stretch):
+        return True
+    return (
+        len(pieces) > 1
+        and all(_WORD_PIECE.match(piece) or _kept_name(piece) for piece in pieces)
+        and not any(_looks_like_a_credential(piece, whole=True) for piece in pieces)
+    )
+
+
+def _kept_name(token: str) -> bool:
+    """``_readable`` without the path rule, and never a run with a vendor prefix."""
+    return _readable(token, path=False) and not _looks_like_a_credential(token, whole=True)
+
+
+def _hide_in_run(value: str) -> str:
+    """The rest of ``_hide_credentials`` for a run with no padding after it."""
+    if not value or _readable(value) or not _looks_like_a_credential(value):
+        return value
+    # A token inside the run: its dots end every stretch, so it is found as
+    # itself first and masked with the stretches on either side of it.
+    value = _JWT_INSIDE.sub(
+        lambda token: _REDACTED if _is_a_token(token.group(0)) else token.group(0), value
+    )
+    return _BASE64_STRETCH.sub(
+        lambda stretch: _REDACTED if _stretch_holds_a_key(stretch.group(0)) else stretch.group(0),
+        value,
+    )
+
+
+# A stretch of base64 or base64url characters, and one next to the mark a token
+# was masked with.
+_BASE64_STRETCH = re.compile(r"[A-Za-z0-9+/_\-]*\*\*\*[A-Za-z0-9+/_\-]*|[A-Za-z0-9+/_\-]+")
+# The stretch of base64 characters a run ends with.
+_TRAILING_STRETCH = re.compile(r"[A-Za-z0-9+/_\-]+\Z")
+# Base64 padding after a run: one or two ``=`` that end the value. What may
+# follow them is the end of the text or a character no value starts with:
+# whitespace; a closing quote, bracket or brace, or ``</`` of a closing tag;
+# the separators ``,`` ``;`` ``:`` ``.``; and the scrub's joiners ``/`` ``|``
+# ``+`` ``&`` ``!``, which join a key to a path, a module name or a list. A
+# quote is closing when an end or one of those separators follows it, and a
+# backslash before a quote is the JSON escape of one. Any other follower (a
+# letter, a digit, ``-``, ``_``, an opening quote) starts a value, so that
+# ``=`` is an assignment; ``_hide_credentials`` still takes it for padding
+# when the stretch and its signs together are a multiple of 4 characters,
+# which is what a base64 value's length is.
+_PADDING = re.compile(
+    r"(?P<signs>={1,2})(?!=)"
+    r"(?P<end>\Z|(?=[\s)\]}>,;:.\/|+&!])|(?=</)|(?=\\?[\"'`](?:\Z|[\s)\]}>,;:.\/|&!])))?"
+)
+# A token's shape anywhere in a run: three base64url segments with dots between.
+_JWT_INSIDE = re.compile(r"[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}")
+
+
+def _readable(token: str, *, path: bool = True) -> bool:
+    """Whether the whole run is a name the scrub keeps: a digest, an identifier, one of
+    the platform's own variable names, a MIME type, a path (unless ``path`` is false),
+    words, or a catalogue name."""
+    if _DIGEST.match(token) or _IDENTIFIER.match(token) or token in _OWN_VARIABLE_NAMES:
+        return True
+    if _MIME_TYPE.match(token) and not _looks_like_a_credential(token.split("/", 1)[1]):
+        return True
+    return bool((path and _PATH_SHAPED.match(token)) or _is_words(token) or _is_api_name(token))
+
+
+def _stretch_holds_a_key(stretch: str) -> bool:
+    """Whether a stretch of base64 characters holds a key: a masked token, or a piece
+    of it between ``/`` and ``+`` that reads as a key."""
+    if _REDACTED in stretch:
+        return True
+    return any(_looks_like_a_credential(piece) for piece in re.split(r"[/+]", stretch) if piece)
 
 
 def scrub(text: Any) -> str:

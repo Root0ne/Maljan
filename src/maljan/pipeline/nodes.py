@@ -1534,6 +1534,13 @@ def pack_ledger_ids(state: AnalysisState) -> list[str]:
     return [entry.id for entry in pack_entries(state.get("evidence_ledger") or [])]
 
 
+def pack_image_bases(state: AnalysisState) -> tuple[int, ...]:
+    """The image bases the pack's entries state: what a claim's offset is read against."""
+    from maljan.pipeline.validation import image_bases_in
+
+    return image_bases_in(pack_entries(state.get("evidence_ledger") or []))
+
+
 def brief_agent(agent: Any, state: AnalysisState, container: ServiceContainer) -> None:
     """Hand an agent the run's two standing blocks and the ids it may cite.
 
@@ -1542,6 +1549,7 @@ def brief_agent(agent: Any, state: AnalysisState, container: ServiceContainer) -
     """
     agent.facts_block = pack_text(state, container)
     agent.pack_ledger_ids = pack_ledger_ids(state)
+    agent.pack_image_bases = pack_image_bases(state)
     agent.run_state_block = render_run_state(state)
     # The routed format, so the platform check compares the agent's
     # techniques against the sample it is looking at.

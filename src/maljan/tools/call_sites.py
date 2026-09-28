@@ -4,8 +4,9 @@
 string. At such a place the program loads the address of the string's encoded
 bytes, not the decoded text: what this module reads, without running
 anything, is which call that address is passed to (usually the program's own
-decoding routine), and then which later call receives the frame slot that
-call was given, or its return value in rax.
+decoding routine), then which later call receives the frame slot that call
+was given, or its return value in rax, and then, one hop more, which call
+receives that later call's frame slot or return value.
 
 What counts, and nothing else:
 
@@ -41,17 +42,21 @@ What counts, and nothing else:
   call), else its return value in ``rax``. What is stated is a fact about the
   slot or the register ("the frame slot [rsp+0xa0], given to that call as
   argument 2, is then argument 2 of the call at …"), never what the first call
-  does with it, and nothing is followed past that later call. The walk tracks
+  does with it. The walk tracks
   the registers and frame slots holding the slot's address or the value, ends
   tracking of a frame slot any store overlaps (by the store's width; within 16
   bytes where the width cannot be read), follows unconditional jumps and falls
   through conditional ones (and says so), and stops with nothing stated at a
   return, an undecodable byte, a jump back, the function's end, or a write to
   the stack or frame pointer.
+* **One hop more (x64).** From that later call the same walk runs once more
+  (its own ``output_passed_to``): the next call that receives the frame slot
+  the later call was given as another argument, else its return value, stated
+  with its callee and argument position the same way. Nothing is followed past
+  that call, and this hop is absent on its own where the code does not show it.
 
-A pointer passed on the x64 stack, a consumer in another function, or a second
-hop (the output of the consumer) are not read: the answer is absent rather
-than guessed.
+A pointer passed on the x64 stack, or a consumer in another function, are not
+read: the answer is absent rather than guessed.
 """
 
 from __future__ import annotations
@@ -64,6 +69,7 @@ from maljan.tools.pe_image import Image
 # The Windows x64 argument registers, by register number: rcx, rdx, r8, r9.
 _X64_ARGUMENTS = {1: 1, 2: 2, 8: 3, 9: 4}
 _X64_REGISTER_NAMES = {1: "rcx", 2: "rdx", 8: "r8", 9: "r9"}
+_X64_REGISTER_NUMBERS = {name: number for number, name in _X64_REGISTER_NAMES.items()}
 _LEGACY_PREFIXES = frozenset({0xF0, 0xF2, 0xF3, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65, 0x66, 0x67})
 # The stack pointer's register number.
 _SP = 4
@@ -487,7 +493,8 @@ def passed_to_words(joined: Any) -> str:
     as such; where a frame slot that call was given, or its return value, was
     followed to a later call, that call and what was followed, said as a fact
     about the slot or the register and never as what the first call does with
-    it; and that nothing is followed past that later call.
+    it; the hop after that later call the same way where it was followed; and
+    that nothing is followed past the last call stated.
     """
     said = _call_words(joined)
     if not said:
@@ -498,17 +505,19 @@ def passed_to_words(joined: Any) -> str:
         else "the address of its encoded bytes"
     )
     out = f"{what} is {said}"
+    hops = 0
     then = joined.get("output_passed_to")
-    then_said = _call_words(then)
-    if then_said and isinstance(then, dict):
+    while isinstance(then, dict) and _call_words(then):
         path = (
             ", on the path where every conditional jump falls through"
             if then.get("fall_through")
             else ""
         )
-        out += (
-            f"; {then.get('followed')} is then {then_said}{path}; it is not followed past that call"
-        )
+        out += f"; {then.get('followed')} is then {_call_words(then)}{path}"
+        hops += 1
+        then = then.get("output_passed_to")
+    if hops:
+        out += "; it is not followed past that call"
     return out
 
 
@@ -966,6 +975,13 @@ def passed_to(image: Image, site: int) -> dict[str, Any] | None:
                 answer["register"] = _X64_REGISTER_NAMES[argument]
                 then = output_passed_to(image, rva, argument)
                 if then is not None:
+                    # One hop more: what the call that received the output
+                    # gives on, read the same way from that call.
+                    after = output_passed_to(
+                        image, int(then["call_at"], 16), _X64_REGISTER_NUMBERS[then["register"]]
+                    )
+                    if after is not None:
+                        then["output_passed_to"] = after
                     answer["output_passed_to"] = then
             elif argument == "push":
                 answer["argument"] = pushes + 1

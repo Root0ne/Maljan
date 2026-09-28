@@ -8,6 +8,47 @@ change landed on `main`.
 
 ### Added
 
+- **A function an analyst decompiled and no claim describes is listed to it,
+  once.** The functions come from the analyst's own ledger entries that
+  decompiled something and answered:
+  - a batch answer keyed by address gives one function per key, its `Error`
+    keys left out;
+  - otherwise, the address the call was given (hex or an integer) and the names
+    the call and the listing's signature give.
+
+  A claim describes a function when its sentence or its evidence line names it
+  by address or by a name the decompiler gave it. The address may be written as
+  `0x…`, `…h` or bare hex. It must be the same, or differ by the image base the
+  run read; with no base known, a difference of a multiple of 64 KiB counts. A
+  run of digits alone counts only when it is exactly the function's own hex
+  spelling. A quoted image base of decimal digits alone is no base. Citing the
+  entry alone does not count.
+
+  A batch answer is an object keyed by addresses (`0x…`, or four hex digits or
+  more with a decimal digit among them). A plain listing is one function at its requested address, whatever
+  quoted strings it holds.
+
+  The functions no claim names are listed in one question
+  (`isr.decompiled_not_described`), with their names and entries. What the
+  analyst answers stands. The functions its kept answer still names in no claim
+  are the §13 validation line that names them.
+- **Claims that name only a library or its APIs and a short purpose are found
+  and asked about once.** Such a claim is one sentence whose subject uses,
+  imports, calls or loads libraries or their APIs, with at most a short
+  "for y" purpose. It has no code location in the sentence or the evidence
+  line, and no evidence detail beyond an import listing. A claim stating an
+  action ("to …", "and downloads …") is not one.
+
+  `isr.library_only_claims` quotes every such claim and asks once to merge them
+  into the claims they support or to detail each. The answer stands, including
+  a merge that folds them away, provided it keeps as many claims that are not
+  library-only as the first answer had.
+- **The decoded string's second hop.** `decode_string_blobs`'
+  `output_passed_to` now carries its own `output_passed_to`: from the call
+  that received the decoder's output, the next call that receives that call's
+  frame slot or return value, with its callee and argument position, absent on
+  its own when the code does not show it; nothing is followed past it. The
+  pack line and the indicator provenance name both hops.
 - **An analyst whose first answer called no tool is told so and asked once.**
   The loop states the fact and the tools the analyst has, and asks whether it
   wants to call any before its answer stands; KEEP keeps the answer as written,
@@ -2336,6 +2377,31 @@ change landed on `main`.
 
 ### Fixed
 
+- **Windows API names and hash-algorithm ids are no longer masked in the events
+  and the transcript.** The scrub's length rule read every long export name
+  (`ZwSetInformationJobObject`) as a key, and two algorithm ids joined by a
+  slash as one. These now travel as written, alone or joined to others of their
+  kind by `/`, `|`, `+` or `&`:
+  - a name the vendored export-name catalogue holds;
+  - an id of the vendored algorithm catalogue (`data/api_hash_algorithms_v1.json`);
+  - a name this job's hash resolution read, from the pack's call or the analysis
+    server's tool only. These names are forgotten when the next job installs
+    its settings.
+
+  `!` now splits a value, so `kernel32.dll!<key>` masks the key. A key joined
+  to other text by `/`, `|`, `+` or `&`, a token inside a run, and the base64
+  a run ends with before padding are masked with the whole stretch of base64
+  characters around them, so no fragment of a key travels; a dot or any other
+  character outside those alphabets ends the stretch
+  (`host.example/<key>/x.php` reads `host.***.php`). Padding is one or two `=`
+  followed by the end of the text, whitespace, a closing quote, bracket or tag,
+  `,`, `;`, `:`, `.` or a joiner, or ending a stretch whose length with its
+  `=` signs is a multiple of 4; any other `=` is an assignment, and a kept name
+  (a word chain, a catalogue name, the platform's own variable name) stays
+  readable in front of it. A MIME
+  type is kept only with a registered top-level type and a subtype that is no
+  key. Vendor prefixes are still asked first, and configured values are still
+  masked by value, so every credential shape stays masked.
 - **An answer that writes its claims again past a margin is asked once for a
   whole one.** Claims begun and distinct, each keyed by its whole block, are
   counted when the answer arrives; past the margin (the distinct count, or

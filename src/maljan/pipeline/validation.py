@@ -2899,6 +2899,574 @@ def chunk_cut_unread_sentence(chunk: str) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# A function the analyst decompiled that no claim describes
+# ---------------------------------------------------------------------------
+
+# A reverser decompiled two routines that held half of what the analysis
+# needed, kept both in its own ledger, and no claim of its answer described
+# either. The functions its ledger entries decompiled are listed to it, once.
+DECOMPILED_NOT_DESCRIBED_CODE = "isr.decompiled_not_described"
+
+# The argument names a decompile call gives its function under: an address, a
+# list of addresses (a batch), or a name.
+_ADDRESS_ARGUMENTS = ("address", "addr", "function_address", "ea", "va", "start")
+_ADDRESS_LIST_ARGUMENTS = ("functions", "addresses")
+_NAME_ARGUMENTS = ("name", "function_name", "function", "symbol")
+# A decompiler's own name for a function it was given no name for: the address
+# after a fixed prefix (Ghidra's ``FUN_``, radare2's ``fcn.``, IDA's ``sub_``).
+_GENERIC_FUNCTION_NAME = re.compile(
+    r"(?<![0-9A-Za-z_])(?:fun|fcn|sub|func|loc|lab)[_.]([0-9a-f]{1,16})(?![0-9a-z_])",
+    re.IGNORECASE,
+)
+# An address written in a claim: ``0x`` and hex digits.
+_HEX_ADDRESS = re.compile(r"(?<![0-9A-Za-z_])0x([0-9a-f]{1,16})(?![0-9a-z_])", re.IGNORECASE)
+# The same address in an assembler's spelling (``1230h``), and as bare hex
+# digits with at least one digit and one letter in them (``140004560``).
+_SUFFIXED_ADDRESS = re.compile(r"(?<![\w.])([0-9][0-9a-f]{0,15})h(?![\w])", re.IGNORECASE)
+_BARE_ADDRESS = re.compile(
+    r"(?<![\w.])(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])([0-9a-f]{4,16})(?![\w])", re.IGNORECASE
+)
+# A listing's signature: the identifier right before an opening parenthesis,
+# at the start of its line or after a space or a ``*``.
+_SIGNATURE_NAME = re.compile(r"(?:^|(?<=[\s*]))([A-Za-z_$?@][\w.$?@:]*)\s*\(")
+_NOT_A_NAME = frozenset({"if", "while", "for", "switch", "return", "sizeof", "do"})
+# One function of a batch decompile's answer as its text shows it, when the
+# answer is cut and no longer parses: the address key and its listing, which
+# may itself be cut.
+_BATCH_MEMBER = re.compile(r'\s*"([^"\\]*)"\s*:\s*"((?:[^"\\]|\\.)*)(")?')
+# A batch answer's key that is an address: ``0x`` and hex digits, or at least
+# four hex digits.
+_ADDRESS_KEY = re.compile(r"(?:0x([0-9a-fA-F]{1,16})|((?=[0-9a-fA-F]*\d)[0-9a-fA-F]{4,16}))")
+# An image base a tool stated: an unquoted number, or a quoted string.
+_IMAGE_BASE = re.compile(r'"image_base"\s*:\s*(?:(\d+)\b|"([^"]*)")')
+# A letterless run of digits a claim writes, read against a function's own hex
+# spelling exactly.
+_DIGIT_RUN = re.compile(r"(?<![\w.])(\d{1,20})(?![\w])")
+# Where a loaded image's base may sit: a multiple of 64 KiB. With no base
+# known, a claim's address and a decompiled one are one function when they
+# differ by a positive multiple of this (an offset from the image base against
+# the virtual address).
+_IMAGE_BASE_ALIGNMENT = 0x10000
+
+
+@dataclass(frozen=True)
+class DecompiledFunction:
+    """One function an analyst's ledger decompiled: its address, the names it was given, where."""
+
+    address: int | None
+    names: tuple[str, ...]
+    entries: tuple[str, ...]
+
+
+def _hex_value(text: str) -> int | None:
+    match = re.fullmatch(r"\s*(?:0x)?([0-9a-fA-F]{1,16})\s*", str(text or ""))
+    return int(match.group(1), 16) if match else None
+
+
+def _address_value(value: Any) -> int | None:
+    """An address argument: an integer as it is, a string as hex."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    return _hex_value(str(value))
+
+
+def _address_list(value: Any) -> list[int]:
+    """A batch's addresses: a list, or a string with commas between them."""
+    items = value if isinstance(value, list | tuple) else str(value or "").split(",")
+    found = [_address_value(item) for item in items]
+    return [address for address in found if address is not None]
+
+
+def _signature_name(output: str) -> str:
+    """The function name a decompiler's listing prints in its signature, or ``""``.
+
+    Read line by line, comments aside. A line that holds only the return type
+    is passed over; the first line with a parenthesis, a brace or a semicolon
+    decides.
+    """
+    for line in str(output or "").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("//", "/*", "*", "#")):
+            continue
+        found = _SIGNATURE_NAME.search(stripped)
+        if found is not None and found.group(1).lower() not in _NOT_A_NAME:
+            return found.group(1)
+        if any(mark in stripped for mark in "({;"):
+            return ""
+    return ""
+
+
+def _listing_text(output: str) -> str:
+    """The listing an answer carries: a JSON string's own text, the output as it is when
+    it is no JSON, and nothing when it is a JSON object or list whose listing is not
+    known."""
+    try:
+        parsed = json.loads(output)
+    except (ValueError, TypeError):
+        return output
+    if isinstance(parsed, str):
+        return parsed
+    return "" if isinstance(parsed, dict | list) else output
+
+
+def _address_key(key: str) -> int | None:
+    """A batch answer's key as an address: ``0x`` and hex digits, or four hex digits or more."""
+    match = _ADDRESS_KEY.fullmatch(str(key).strip())
+    return int(match.group(1) or match.group(2), 16) if match else None
+
+
+def _cut_batch_items(output: str) -> list[tuple[str, str]]:
+    """The keys and listings a cut batch answer still shows, read from its opening brace.
+
+    Only an answer that begins with ``{`` and a quoted key is read, one
+    member after another; a listing cut short ends the reading with what it
+    held.
+    """
+    opening = re.match(r"\s*\{", output)
+    if opening is None:
+        return []
+    items: list[tuple[str, str]] = []
+    at = opening.end()
+    while True:
+        member = _BATCH_MEMBER.match(output, at)
+        if member is None:
+            break
+        raw, closed = member.group(2), member.group(3)
+        try:
+            text = json.loads(f'"{raw}"')
+        except ValueError:
+            text = ""
+        items.append((member.group(1), str(text)))
+        if not closed:
+            break
+        comma = re.compile(r"\s*,").match(output, member.end())
+        if comma is None:
+            break
+        at = comma.end()
+    return items
+
+
+def _batch_listings(output: str) -> tuple[bool, dict[int, str]]:
+    """``(shown, listings)`` of an answer keyed by address, one function per key.
+
+    ``shown`` is whether the answer is an object every key of which reads as
+    an address (``_address_key``). A key whose listing begins with ``Error``
+    was not decompiled. An answer cut short keeps the functions its text still
+    shows (``_cut_batch_items``). Any other answer is no batch.
+    """
+    try:
+        parsed = json.loads(output)
+    except (ValueError, TypeError):
+        parsed = None
+    if isinstance(parsed, dict):
+        items = [(str(key), str(value)) for key, value in parsed.items()]
+    elif parsed is None:
+        items = _cut_batch_items(output)
+    else:
+        items = []
+    addresses = [_address_key(key) for key, _text in items]
+    if not items or any(address is None for address in addresses):
+        return False, {}
+    listings: dict[int, str] = {}
+    for address, (_key, text) in zip(addresses, items, strict=True):
+        if address is None or text.lstrip().lower().startswith("error"):
+            continue
+        listings[address] = text
+    return True, listings
+
+
+def _entry_functions(entry: Any) -> list[tuple[int | None, list[str]]]:
+    """The ``(address, names)`` of each function one decompile entry holds."""
+    args = getattr(entry, "args", None) or {}
+    output = str(getattr(entry, "output", "") or "")
+    shown, listings = _batch_listings(output)
+    if shown:
+        return [(address, _named(None, text, args={})) for address, text in listings.items()]
+    for argument in _ADDRESS_LIST_ARGUMENTS:
+        if argument in args:
+            addresses = _address_list(args[argument])
+            if len(addresses) > 1:
+                return [(address, []) for address in addresses]
+    address: int | None = None
+    for argument in _ADDRESS_ARGUMENTS:
+        if argument in args and address is None:
+            address = _address_value(args[argument])
+    for argument in _ADDRESS_LIST_ARGUMENTS:
+        if argument in args and address is None:
+            listed = _address_list(args[argument])
+            address = listed[0] if listed else None
+    names = _named(address, _listing_text(output), args=args)
+    if address is None:
+        for name in names:
+            generic = _GENERIC_FUNCTION_NAME.fullmatch(name)
+            if generic is not None:
+                address = int(generic.group(1), 16)
+                break
+    return [(address, names)]
+
+
+def _named(address: int | None, listing: str, *, args: Mapping[str, Any]) -> list[str]:
+    """The names a call gave a function and the name its listing prints."""
+    names: list[str] = []
+    for argument in _NAME_ARGUMENTS:
+        value = str(args.get(argument) or "").strip()
+        if value and _hex_value(value) is None:
+            names.append(value)
+    printed = _signature_name(listing)
+    if printed:
+        names.append(printed)
+    return list(dict.fromkeys(names))
+
+
+def decompiled_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
+    """The functions these ledger entries decompiled, once each, in the order first asked.
+
+    An entry counts when its tool's name says it decompiles and the call
+    answered. A batch answer keyed by address is one function per key, its
+    ``Error`` keys left out; a batch whose answer is not keyed takes the
+    addresses it was given. Otherwise the address is the one the call was
+    given (hex with or without ``0x``, or an integer), or the one a
+    decompiler's generic name carries. The names are the one the call was
+    given and the one the listing's signature prints. Entries for one address,
+    and a function asked for by a name that one asked for by address carries,
+    are one function.
+    """
+    found: dict[Any, DecompiledFunction] = {}
+    for entry in entries:
+        tool = str(getattr(entry, "tool", "") or "").lower()
+        if "decompil" not in tool or not getattr(entry, "ok", True):
+            continue
+        entry_id = str(getattr(entry, "id", "") or "")
+        for address, names in _entry_functions(entry):
+            if address is None and not names:
+                continue
+            key: Any = address if address is not None else names[0]
+            known = found.get(key)
+            found[key] = DecompiledFunction(
+                address=address,
+                names=tuple(dict.fromkeys([*(known.names if known else ()), *names])),
+                entries=tuple(
+                    dict.fromkeys(
+                        [*(known.entries if known else ()), *([entry_id] if entry_id else [])]
+                    )
+                ),
+            )
+    # A function asked for by name alone is the one asked for by address that
+    # carries the same name.
+    for key in [key for key in found if isinstance(key, str)]:
+        named = found[key]
+        into = next(
+            (
+                other
+                for other_key, other in found.items()
+                if not isinstance(other_key, str) and set(named.names) & set(other.names)
+            ),
+            None,
+        )
+        if into is None or into.address is None:
+            continue
+        found[into.address] = DecompiledFunction(
+            address=into.address,
+            names=tuple(dict.fromkeys([*into.names, *named.names])),
+            entries=tuple(dict.fromkeys([*into.entries, *named.entries])),
+        )
+        del found[key]
+    return list(found.values())
+
+
+def _base_value(number: str | None, text: str | None) -> int | None:
+    """One stated image base, or ``None`` when it cannot be read without a guess.
+
+    An unquoted number is the number. A quoted string is hex when it says so
+    (``0x…``, ``…h``) or holds a hex letter; a quoted string of decimal digits
+    alone could be either, and is no base.
+    """
+    if number is not None:
+        return int(number)
+    written = str(text or "").strip()
+    prefixed = re.fullmatch(r"0x([0-9a-fA-F]{1,16})", written, re.IGNORECASE)
+    if prefixed:
+        return int(prefixed.group(1), 16)
+    suffixed = re.fullmatch(r"([0-9a-fA-F]{1,16})h", written, re.IGNORECASE)
+    if suffixed:
+        return int(suffixed.group(1), 16)
+    if re.fullmatch(r"[0-9a-fA-F]{1,16}", written) and re.search(r"[a-fA-F]", written):
+        return int(written, 16)
+    return None
+
+
+def image_bases_in(entries: Iterable[Any]) -> tuple[int, ...]:
+    """The image bases these ledger entries' answers state (``"image_base"``), once each.
+
+    Read by ``_base_value``; a value that is not a positive multiple of 64 KiB,
+    where every image base sits, is no base.
+    """
+    bases: list[int] = []
+    for entry in entries:
+        for match in _IMAGE_BASE.finditer(str(getattr(entry, "output", "") or "")):
+            value = _base_value(match.group(1), match.group(2))
+            if value and value % _IMAGE_BASE_ALIGNMENT == 0 and value not in bases:
+                bases.append(value)
+    return tuple(bases)
+
+
+def _one_function(a: int, b: int, bases: Sequence[int] = ()) -> bool:
+    """Whether two addresses are one function.
+
+    Equal, or an offset and its virtual address: they differ by an image base
+    the run read, or, with none known, by a positive multiple of 64 KiB.
+    """
+    low, high = sorted((a, b))
+    if low == high:
+        return True
+    if bases:
+        return high - low in bases
+    return low > 0 and (high - low) % _IMAGE_BASE_ALIGNMENT == 0
+
+
+def _addresses_written(text: str) -> list[int]:
+    """Every address ``text`` writes: ``0x…``, ``…h``, bare hex, or in a generic name."""
+    return [
+        int(match.group(1), 16)
+        for pattern in (_HEX_ADDRESS, _GENERIC_FUNCTION_NAME, _SUFFIXED_ADDRESS, _BARE_ADDRESS)
+        for match in pattern.finditer(text)
+    ]
+
+
+def _named_by(text: str, function: DecompiledFunction, bases: Sequence[int] = ()) -> bool:
+    """Whether ``text`` names ``function`` by an address or by a name the decompiler gave it."""
+    if function.address is not None and any(
+        _one_function(function.address, address, bases) for address in _addresses_written(text)
+    ):
+        return True
+    # A run of digits alone names the function only when it is the function's
+    # own hex spelling, exactly, leading zeros aside.
+    if function.address is not None:
+        spelled = f"{function.address:x}"
+        if spelled.isdigit() and any(
+            run.group(1).lstrip("0") == spelled.lstrip("0") for run in _DIGIT_RUN.finditer(text)
+        ):
+            return True
+    for name in function.names:
+        if _GENERIC_FUNCTION_NAME.fullmatch(name):
+            continue
+        spellings = {name, name.rsplit(".", 1)[-1]} if "." in name else {name}
+        for spelling in spellings:
+            if len(spelling) >= 3 and re.search(
+                r"(?<![\w.])" + re.escape(spelling) + r"(?![\w])", text
+            ):
+                return True
+    return False
+
+
+def undescribed_decompiles(
+    isr: Any, functions: Sequence[DecompiledFunction], image_bases: Sequence[int] = ()
+) -> list[DecompiledFunction]:
+    """The decompiled functions no claim of ``isr`` names in its sentence or evidence line.
+
+    A claim names a function by an address written as ``0x…``, as ``…h``, as
+    bare hex or inside a decompiler's generic name (``FUN_``, ``fcn.``,
+    ``sub_``): the same address, or one that differs from it by an image base
+    the run read (``image_bases``), or, with none known, by a multiple of
+    64 KiB. Or it names it by a name the decompiler gave it. A citation of the
+    ledger entry alone does not name it.
+    """
+    texts = [
+        f"{getattr(claim, 'claim', '') or ''} {getattr(claim, 'evidence_ref', '') or ''}"
+        for claim in (getattr(isr, "claims", None) or [])
+    ]
+    return [f for f in functions if not any(_named_by(text, f, image_bases) for text in texts)]
+
+
+def _decompiled_words(function: DecompiledFunction) -> str:
+    """``0x140001000 (FUN_140001000; ev_0003)``: the address, the names, the entries."""
+    said = [*function.names, *function.entries]
+    head = hex(function.address) if function.address is not None else function.names[0]
+    if function.address is None:
+        said = [*function.names[1:], *function.entries]
+    return f"{head} ({'; '.join(said)})" if said else head
+
+
+def decompiled_not_described_violation(
+    functions: Sequence[DecompiledFunction],
+) -> Violation | None:
+    """The question for the decompiled functions no claim names, or ``None`` when none is left.
+
+    Every such function is listed, with its names and the entries that hold
+    its listing, in one question. What the analyst answers stands; the
+    functions its kept answer still names in no claim are the finding the
+    report prints.
+    """
+    if not functions:
+        return None
+    return Violation(
+        code=DECOMPILED_NOT_DESCRIBED_CODE,
+        message=(
+            f"You decompiled {len(functions)} function(s) that no claim of this answer names "
+            "by a name the decompiler gave it, or by its address or its offset from the "
+            "image base written in hex (with 0x, with a trailing h, as bare hex digits, or "
+            "inside a name such as FUN_); an offset written in decimal digits alone is not "
+            "read as one: "
+            f"{'; '.join(safe_finding_value(_decompiled_words(f)) for f in functions)}. For "
+            "each one that matters to this analysis, write a claim naming it by its address "
+            "and saying what its code does: the checks it makes, the calls it makes and "
+            "their arguments, and the decoded strings and resolved names it uses, citing the "
+            "entry that holds its listing. A function that does nothing this analysis needs "
+            "may stay undescribed."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# A claim that says only that a library or its APIs are used
+# ---------------------------------------------------------------------------
+
+# A reverser's answer was mostly one-line claims of the form "uses `x.dll`
+# APIs for y", each citing only the hash-resolution listing.
+LIBRARY_ONLY_CLAIMS_CODE = "isr.library_only_claims"
+
+_LIBRARY_SUBJECT = (
+    r"(?:(?:the|this)\s+)?(?:sample|binary|file|dll|executable|malware|program|payload|"
+    r"module|loader|it)\s+(?:also\s+)?"
+)
+_LIBRARY_VERB = (
+    r"(?:uses|imports|relies\s+on|calls|references|links\s+(?:to|against)|loads|employs|"
+    r"utili[sz]es|leverages|depends\s+on|makes\s+use\s+of)"
+)
+_LIBRARY_SENTENCE = re.compile(
+    r"\A\s*(?:" + _LIBRARY_SUBJECT + r")?" + _LIBRARY_VERB + r"\s+(?P<rest>.+?)\s*\.?\s*\Z",
+    re.IGNORECASE | re.DOTALL,
+)
+# Where a purpose phrase begins after the object: "for y". A "to" after the
+# object states an action, and such a claim is not one of these.
+_LIBRARY_PURPOSE = re.compile(r"\sfor\s", re.IGNORECASE)
+# A short purpose, and nothing more: at most this many words, no comma or
+# semicolon, no second verb joined by "and" or "or", no quote, digit, address,
+# host or path.
+_LIBRARY_PURPOSE_WORDS = 6
+_PURPOSE_SAYS_MORE = re.compile(
+    r"[,;\"'\d/\\]|\w\.\w|\b(?:and|or)\s+\w+(?:s|es|ed)\b", re.IGNORECASE
+)
+# One piece of the object: a module file name, or a name followed by a word
+# that says it is a library or its interface, or the Windows API itself.
+_LIBRARY_PIECE = re.compile(
+    r"\A(?:(?:the|various|several|multiple|standard|common)\s+)*"
+    r"(?:`?[\w.\-]+\.dll`?(?:\s+(?:apis?|api\s+functions|functions|library|imports|exports))?"
+    r"|`?[\w.\-]+`?\s+(?:apis?|api\s+functions|library|libraries|dlls?)"
+    r"|(?:windows|win32|native)\s+apis?)\Z",
+    re.IGNORECASE,
+)
+_LIBRARY_JOINS = re.compile(r"\s*(?:,\s*(?:and\s+)?|\s+and\s+|\s*&\s*|\s*/\s*)", re.IGNORECASE)
+# The words an import listing's detail may carry besides names: what the
+# listing is. Any other word is a detail beyond it.
+_LISTING_WORDS = frozenset(
+    "resolved resolve resolves resolution api apis import imports imported hash hashes hashed "
+    "name names function functions library libraries dll dlls module modules pe table listing "
+    "list including includes include from via and or the of in by with such as etc at runtime "
+    "run time dynamically dynamic e g eg entries entry".split()
+)
+
+
+def _is_an_import_listing_detail(text: str) -> bool:
+    """Whether ``text`` says nothing an import listing does not: names, counts, listing words."""
+    if '"' in text or "'" in text or _HEX_ADDRESS.search(text):
+        return False
+    for token in re.findall(r"[^\s,;:()\[\]{}`]+", _without_entry_ids(text)):
+        word = token.strip(".").lower()
+        if not word or word.isdigit() or word in _LISTING_WORDS:
+            continue
+        if "!" in token or word.endswith(".dll"):
+            continue
+        # An API name as written: an identifier with a capital after its first letter.
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", token) and re.search(r"[A-Z]", token[1:]):
+            continue
+        return False
+    return True
+
+
+def _without_entry_ids(text: str) -> str:
+    """``text`` with its ledger ids (``ev_0012``) taken out."""
+    return re.sub(r"\bev_\d+\b", " ", str(text or ""), flags=re.IGNORECASE)
+
+
+def _is_library_only(claim: Any) -> bool:
+    text = str(getattr(claim, "claim", "") or "").strip()
+    evidence = str(getattr(claim, "evidence_ref", "") or "")
+    if not text or re.search(r"[.!?]\s+\S", text.rstrip(".!? ")):
+        return False
+    if _HEX_ADDRESS.search(text) or _GENERIC_FUNCTION_NAME.search(text):
+        return False
+    if _HEX_ADDRESS.search(evidence) or _GENERIC_FUNCTION_NAME.search(evidence):
+        return False
+    sentence = _LIBRARY_SENTENCE.match(text)
+    if sentence is None:
+        return False
+    rest = sentence.group("rest")
+    purpose = _LIBRARY_PURPOSE.search(rest)
+    thing = rest[: purpose.start()] if purpose else rest
+    if purpose is not None:
+        said = rest[purpose.end() :]
+        if _PURPOSE_SAYS_MORE.search(said) or len(said.split()) > _LIBRARY_PURPOSE_WORDS:
+            return False
+    thing = re.sub(
+        r"\s*\(([^)]*)\)", lambda m: "" if _is_an_import_listing_detail(m.group(1)) else "|", thing
+    )
+    pieces = [piece for piece in _LIBRARY_JOINS.split(thing.strip()) if piece]
+    if not pieces or not all(_LIBRARY_PIECE.match(piece) for piece in pieces):
+        return False
+    return _is_an_import_listing_detail(evidence)
+
+
+def library_only_claims(isr: Any) -> list[int]:
+    """The positions of the claims that name only a library or its APIs and a short purpose.
+
+    Such a claim is one sentence whose subject (the sample, or none) uses,
+    imports, calls or loads one or more libraries or their APIs, optionally
+    followed by a short "for y" purpose. The purpose has at most six words,
+    and no comma, second verb, quote, digit, address, host or path. A claim
+    whose object runs on with "to" states an action and is not one.
+
+    It names no code location (no ``0x`` address, no decompiler's function
+    name) in its sentence or its evidence line. Its evidence line carries
+    nothing beyond an import listing: ledger ids, library and API names, counts
+    and the words that say what a listing is. A quoted string, an address or
+    any other word is a detail beyond it.
+    """
+    return [
+        index
+        for index, claim in enumerate(getattr(isr, "claims", None) or [])
+        if _is_library_only(claim)
+    ]
+
+
+def library_only_claims_violation(isr: Any) -> Violation | None:
+    """The one question for an answer's library-only claims, or ``None`` when it has none.
+
+    Every such claim is quoted. The analyst is asked once to merge them into
+    the claims whose behaviour they support, or to detail each; what it
+    answers stands, a merge that folds them away included.
+    """
+    claims = list(getattr(isr, "claims", None) or [])
+    found = [claims[index] for index in library_only_claims(isr)]
+    if not found:
+        return None
+    return Violation(
+        code=LIBRARY_ONLY_CLAIMS_CODE,
+        message=(
+            f"{len(found)} CLAIM block(s) name a library or its APIs and at most a purpose, "
+            "with no code location in the sentence or the evidence line and no evidence beyond "
+            "an import listing: "
+            f"{'; '.join(repr(safe_finding_value(getattr(c, 'claim', ''))) for c in found)}. "
+            "Merge them into the claims whose behaviour they support, or give each the code "
+            "location that makes the calls, what the sample does with them and the evidence "
+            "that shows it. What you answer stands."
+        ),
+    )
+
+
 # How much of a cut answer its question shows, as a sample of its shape, marked
 # with … where it is cut.
 SECTION_CUT_HEAD_CHARS = 160

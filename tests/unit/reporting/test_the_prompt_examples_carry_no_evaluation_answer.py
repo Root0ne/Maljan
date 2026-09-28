@@ -117,6 +117,7 @@ from maljan.pipeline.validation import (
     UNATTRIBUTED_INDICATOR_CODE,
     CapabilityGrounding,
     ClaimsRepeated,
+    DecompiledFunction,
     EntryTexts,
     Violation,
     _term_ids_said,
@@ -128,9 +129,11 @@ from maljan.pipeline.validation import (
     claims_kept_under_disputes_finding,
     claims_under_disputes_violation,
     confidence_violation,
+    decompiled_not_described_violation,
     flow_voice_violations,
     gate_removed_note,
     kept_after_the_sandbox_fact,
+    library_only_claims_violation,
     malware_object_violations,
     misstated_entry_contents,
     recommendation_indicator_violations,
@@ -415,6 +418,13 @@ _FLOW_FACTS_REPORT = MalwareReport(
         )
     ],
 )
+
+
+def _message_of(violation: Violation | None) -> str:
+    """A question's words, which the builder answers only when there is one to ask."""
+    assert violation is not None
+    return violation.message
+
 
 PROMPTS: dict[str, str] = {
     "example team document prompts": _TEAM_DOCUMENT_PROMPTS,
@@ -760,6 +770,13 @@ PROMPTS: dict[str, str] = {
                                             "argument": 1,
                                             "followed": "that call's return value in rax",
                                             "fall_through": False,
+                                            "output_passed_to": {
+                                                "call_at": "0xf",
+                                                "callee": {"function": "0x30"},
+                                                "argument": 2,
+                                                "followed": "that call's return value in rax",
+                                                "fall_through": False,
+                                            },
                                         },
                                     },
                                 },
@@ -1035,6 +1052,25 @@ PROMPTS: dict[str, str] = {
     "analyst repeated-claims question naming a chunk": analyst_repeated_violation(
         ClaimsRepeated(begun=15, distinct=3, margin=3, chars=900), chunk="chunk 1 of 2"
     ).message,
+    "decompiled functions no claim describes": _message_of(
+        decompiled_not_described_violation(
+            [
+                DecompiledFunction(address=0x10, names=("FUN_10",), entries=("ev_0001",)),
+                DecompiledFunction(address=None, names=("F",), entries=("ev_0002",)),
+            ]
+        )
+    ),
+    "claims that say only that a library is used": _message_of(
+        library_only_claims_violation(
+            AgentISR(
+                agent_id="a",
+                domain="static",
+                claims=[
+                    ClaimEvidence(claim="uses a.dll APIs", evidence_ref="[ev_0001]", confidence=0.5)
+                ],
+            )
+        )
+    ),
     "judge technique question's describe-check finding and its kind's label": (
         technique_question_text(
             [
