@@ -760,6 +760,13 @@ PROMPTS: dict[str, str] = {
                                             "argument": 1,
                                             "followed": "that call's return value in rax",
                                             "fall_through": False,
+                                            "output_passed_to": {
+                                                "call_at": "0xf",
+                                                "callee": {"function": "0x30"},
+                                                "argument": 2,
+                                                "followed": "that call's return value in rax",
+                                                "fall_through": False,
+                                            },
                                         },
                                     },
                                 },
