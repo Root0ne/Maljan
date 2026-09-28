@@ -38,7 +38,7 @@ from maljan.agents.claim_headings import (
     count_claims_after_disputes,
     count_claims_begun,
 )
-from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
+from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT, KEEP_REPLY
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
 from maljan.core.logger import logger
@@ -4191,23 +4191,110 @@ class BaseAnalyst(BudgetMeter, ABC):
                 # A replayed conversation starts without the question: it is
                 # asked again, if at all, of the replay's own answer.
                 tool_ask.clear()
-                start: list[Any] = list(messages)
-                while True:
-                    if not await _one_pass(start, spoken, pace) or tool_ask:
-                        return dict(latest)
-                    # The model answered. An analyst with tools whose first
-                    # answer called none is told so, with the tools it has,
-                    # and asked once in the same conversation; whatever it
-                    # answers next stands.
-                    conversation = list(latest.get("messages") or [])
-                    question = self._no_tool_call_question(
-                        conversation, budget, max_steps, recorded
+                if not await _one_pass(list(messages), spoken, pace):
+                    return dict(latest)
+                # The model answered. An analyst with tools whose first answer
+                # called none is told so, with the tools it has, and asked once
+                # in the same conversation: KEEP keeps that answer as written,
+                # and any other answer it writes next stands.
+                conversation = list(latest.get("messages") or [])
+                question = self._no_tool_call_question(
+                    conversation, budget, max_steps, recorded, pace
+                )
+                if question is None:
+                    return dict(latest)
+                tool_ask["question"] = question
+                tool_ask["first_answer"] = str(getattr(conversation[-1], "content", "") or "")
+                await _the_question_pass([*conversation, question], conversation, spoken, pace)
+                return dict(latest)
+
+            async def _the_question_pass(
+                start: list[Any], conversation: list[Any], spoken: set[str], pace: TurnPace
+            ) -> None:
+                """The pass after the no-tool-call question, and the first answer when none follows.
+
+                Held inside what is left of the loop's clock. A stop or a
+                failure that leaves no answer after the question — the spend
+                ceiling, a call's deadline, the clock, a full window, the step
+                cap — puts the conversation back as it stood before the
+                question and the first answer stands as written, with why on
+                the record; the flags that stop set are cleared, so nothing
+                downstream salvages or empties a loop whose answer arrived. A
+                model that called tools after the question goes on as any loop
+                that called tools does, and its first answer still stands if
+                nothing is written after them.
+                """
+                nonlocal time_capped, time_detail, final_reserve, spend_capped
+                nonlocal call_deadline_hit, spend_refusal, window_full
+                saved = (
+                    time_capped,
+                    time_detail,
+                    final_reserve,
+                    spend_capped,
+                    call_deadline_hit,
+                    spend_refusal,
+                    window_full,
+                )
+                latest["messages"] = list(start)
+                left = budget.seconds_left()
+                why = ""
+                finished = False
+                try:
+                    finished = await asyncio.wait_for(
+                        _one_pass(start, spoken, pace),
+                        timeout=None if left is None else max(0.0, left - 1.0),
                     )
-                    if question is None:
-                        return dict(latest)
-                    tool_ask["question"] = question
-                    start = [*conversation, question]
-                    latest["messages"] = start
+                except ModelCallDeadline as exc:
+                    why = f"model call deadline: {exc}"
+                except SpendCeilingStop as stop:
+                    why = f"the spend ceiling: {stop}"
+                except TimeoutError:
+                    why = "the loop's time ran out before an answer to the question"
+                except Exception as exc:  # noqa: BLE001 — the first answer stands on any failure
+                    why = (
+                        "the model server reported its context window full"
+                        if window_full_error(exc)
+                        else f"the question failed ({type(exc).__name__})"
+                    )
+                after = list(latest.get("messages") or [])[len(start) :]
+                answered = bool(after) and is_model_turn(after[-1])
+                called = any(getattr(m, "tool_calls", None) for m in after)
+                if finished and answered and not called:
+                    last = str(getattr(after[-1], "content", "") or "")
+                    if last.strip().strip(".").strip().upper() == KEEP_REPLY:
+                        tool_ask["followed"] = "kept_first_answer"
+                    return
+                if finished or (called and not why):
+                    return
+                why = why or self._why_the_pass_stopped(
+                    saved,
+                    time_capped,
+                    time_detail,
+                    spend_capped,
+                    spend_refusal,
+                    call_deadline_hit,
+                    window_full,
+                    repeats,
+                )
+                (
+                    time_capped,
+                    time_detail,
+                    final_reserve,
+                    spend_capped,
+                    call_deadline_hit,
+                    spend_refusal,
+                    window_full,
+                ) = saved
+                latest["messages"] = list(conversation)
+                tool_ask["dropped"] = after
+                tool_ask["followed"] = "no_answer"
+                tool_ask["why"] = why
+                self.logger.warning(
+                    "%s: no answer followed the question about its tools (%s); its first "
+                    "answer stands as written.",
+                    self.name,
+                    why,
+                )
 
             async def _one_pass(start: list[Any], spoken: set[str], pace: TurnPace) -> bool:
                 """One run of the graph from ``start``; whether the model ended it by answering.
@@ -4538,10 +4625,17 @@ class BaseAnalyst(BudgetMeter, ABC):
         # is a non-empty list. Counting them is cheap and the most useful
         # single metric for "did this analyst overspend on Ghidra".
         tool_call_count = sum(len(getattr(m, "tool_calls", None) or []) for m in msgs)
-        # Every loop's calls count toward the analyst's own: an analyst that
-        # called a tool in any loop is not asked why it called none.
-        self._tool_calls_made = int(getattr(self, "_tool_calls_made", 0) or 0) + tool_call_count
-        asked_about_tools = self._what_followed_the_tool_question(msgs, tool_ask.get("question"))
+        # The analyst's own loops' calls count toward its own: one that called
+        # a tool in any of them is not asked why it called none. A loop that
+        # answered another agent's ask is that agent's work, and is not counted.
+        if getattr(self, "_budget_ceiling", None) is None:
+            self._tool_calls_made = int(getattr(self, "_tool_calls_made", 0) or 0) + tool_call_count
+        # Turns the question's pass took and the first answer replaced: spent,
+        # and counted where every turn of the loop is.
+        dropped = [m for m in tool_ask.get("dropped") or [] if is_model_turn(m)]
+        self.steps_spent += steps_used(dropped)
+        for _m in dropped:
+            self._record_usage(_m, announce=False, call=TOOL_LOOP_TURN_CALL)
         # The ReAct tool-loop's LLM calls happen INSIDE
         # langgraph's ``create_react_agent`` executor, so they never passed
         # through ``_invoke_llm_with_timeout`` where token usage is tallied.
@@ -4600,6 +4694,10 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         final_message = msgs[-1]
         content = str(final_message.content)
+        # The first answer stands as written: the model replied KEEP to the
+        # question about its tools, or nothing answered the question.
+        if tool_ask.get("followed") in ("kept_first_answer", "no_answer"):
+            content = str(tool_ask.get("first_answer") or "")
         # Forced synthesis: a tool-using ReAct loop
         # that spends its whole step budget gathering evidence ends with
         # LangGraph's "need more steps" stop message (or an empty final turn),
@@ -4643,8 +4741,6 @@ class BaseAnalyst(BudgetMeter, ABC):
             why = f"{why}; {note}" if why else note
             self.logger.warning("%s: %s.", self.name, note)
         self._record_budget(budget, msgs, cap, detail=why)
-        if asked_about_tools is not None:
-            self._note_on_last_loop("tool_ask", asked_about_tools)
         self._budget_tick(budget, msgs, final=True, ledger_entries=len(recorder.entries))
         # Counted above, where it cost a step; not sent back to a model, which
         # would read the graph's sentence as its own last turn.
@@ -4677,6 +4773,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         # in the platform's own voice, not in the agent's.
         if cap is not None and not answered:
             content = ""
+        # Tools called after the question about them, and nothing written
+        # after: the first answer stands as written.
+        if tool_ask.get("question") is not None and not content.strip():
+            content = str(tool_ask.get("first_answer") or "")
+            tool_ask.setdefault("why", "no answer followed the tool calls made after the question")
+        asked_about_tools = self._what_followed_the_tool_question(msgs, tool_ask)
+        if asked_about_tools is not None:
+            self._note_on_last_loop("tool_ask", asked_about_tools)
         self.ended_out_of_room = cap == "no_room"
 
         # A final message that is neither a structured report nor a findings
@@ -4816,17 +4920,23 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.logger.debug("final-turn deadline not set (%s).", exc)
 
     def _no_tool_call_question(
-        self, conversation: list[Any], budget: LoopBudget, max_steps: int | None, tools: list[Any]
+        self,
+        conversation: list[Any],
+        budget: LoopBudget,
+        max_steps: int | None,
+        tools: list[Any],
+        pace: TurnPace | None = None,
     ) -> Any | None:
         """The question for an analyst whose first answer called no tool, or ``None``.
 
-        Asked once per analyst, of its first answer only: not in a loop that
-        called a tool, not after any earlier loop of this analyst called one or
-        was asked, and not inside an ask another agent made of it. Held to the
-        final-answer question's checks: a turn left in the step budget, more
-        than a second left on the clock, and a spend ceiling that admits it.
-        Nothing is decided for the model: the question states the fact and
-        the tools it has, and the model answers it.
+        Asked once per analyst, in its own loops: not after any of them called
+        a tool or was asked, not in a loop that called a tool, and not inside
+        an ask another agent made of it. Asked only when a whole answer after
+        it fits: two graph steps left (one complete model turn), the time the
+        loop keeps for a final answer at its own pace, the conversation and an
+        answer of the output cap inside the model's window, and a spend
+        ceiling that admits it. Nothing is decided for the model: the question
+        states the fact and the tools it has, and the model answers it.
         """
         from langchain_core.messages import HumanMessage
 
@@ -4846,16 +4956,30 @@ class BaseAnalyst(BudgetMeter, ABC):
         names = [str(getattr(tool, "name", "") or "") for tool in tools or ()]
         if not any(names):
             return None
-        turns = model_turns_left(max_steps, conversation)
-        if turns is not None and turns < 1:
+        if max_steps is not None and max_steps - steps_used(conversation) < 2:
             self.logger.info("%s: no step budget left to ask about its tools.", self.name)
             return None
         seconds = budget.seconds_left()
-        if seconds is not None and seconds <= 1.0:
-            self.logger.info("%s: no time budget left to ask about its tools.", self.name)
+        needs = pace.reserve() if pace is not None else float(_SYNTHESIS_MIN_SECONDS)
+        if seconds is not None and seconds < needs:
+            self.logger.info(
+                "%s: %.0fs left, and an answer needs %.0fs at this loop's pace; its tools "
+                "are not asked about.",
+                self.name,
+                seconds,
+                needs,
+            )
             return None
         question = HumanMessage(content=no_tool_call_question(names))
-        if self._spend_refuses("no-tool-call question", [*conversation, question]):
+        asked = [*conversation, question]
+        if not BaseAnalyst._fits_the_window(self, asked, int(self.output_cap_tokens() or 0)):
+            self.logger.info(
+                "%s: the conversation and a whole answer do not fit the window; its tools "
+                "are not asked about.",
+                self.name,
+            )
+            return None
+        if self._spend_refuses("no-tool-call question", asked):
             self.logger.info(
                 "%s: the spend ceiling leaves no room to ask about its tools.", self.name
             )
@@ -4868,16 +4992,44 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
         return question
 
+    @staticmethod
+    def _why_the_pass_stopped(
+        saved: tuple[Any, ...],
+        time_capped: bool,
+        time_detail: str,
+        spend_capped: bool,
+        spend_refusal: str,
+        call_deadline_hit: bool,
+        window_full: bool,
+        repeats: Any,
+    ) -> str:
+        """Which stop ended the question's pass, in the words its record uses."""
+        was_time, _detail, _reserve, was_spend, was_deadline, _refusal, was_full = saved
+        if window_full and not was_full:
+            return "the model server reported its context window full"
+        if spend_capped and not was_spend:
+            return f"the spend ceiling{': ' + spend_refusal if spend_refusal else ''}"
+        if call_deadline_hit and not was_deadline:
+            return time_detail or "a model call's deadline"
+        if time_capped and not was_time:
+            return f"the loop's time budget: {time_detail}" if time_detail else "the loop's time"
+        if getattr(repeats, "ending_the_loop", lambda: False)():
+            return "repeated tool calls"
+        return "the loop's step budget"
+
     def _what_followed_the_tool_question(
-        self, messages: list[Any], question: Any
+        self, messages: list[Any], asked: Mapping[str, Any]
     ) -> dict[str, Any] | None:
         """What the model did after the no-tool-call question, for the loop's record.
 
         ``tool_calls_after`` is the calls it made after the question, and
         ``followed`` says what came of it: ``called_tools``,
-        ``answered_without_tools`` or ``no_answer``. ``None`` when the
-        question was not asked in this loop.
+        ``answered_without_tools``, ``kept_first_answer`` (it replied KEEP) or
+        ``no_answer``. ``why`` says why its first answer stands when nothing
+        was written after the question. ``None`` when the question was not
+        asked in this loop.
         """
+        question = asked.get("question")
         if question is None:
             return None
         self._asked_about_tools = True
@@ -4899,19 +5051,25 @@ class BaseAnalyst(BudgetMeter, ABC):
         answered = bool(after) and (
             is_model_turn(after[-1]) and bool(str(getattr(after[-1], "content", "") or "").strip())
         )
-        if calls:
+        preset = str(asked.get("followed") or "")
+        if preset:
+            followed = preset
+        elif calls:
             followed = "called_tools"
         elif answered:
             followed = "answered_without_tools"
         else:
             followed = "no_answer"
+        record: dict[str, Any] = {"tool_calls_after": calls, "followed": followed}
+        if asked.get("why"):
+            record["why"] = str(asked["why"])
         self.logger.info(
             "%s: after the question about its tools it made %d tool call(s) (%s).",
             self.name,
             calls,
             followed,
         )
-        return {"tool_calls_after": calls, "followed": followed}
+        return record
 
     def _settle_final_answer(
         self,

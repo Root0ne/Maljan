@@ -354,19 +354,25 @@ def tool_names(tools: Sequence[object]) -> frozenset[str]:
     return frozenset(str(getattr(tool, "name", "")) for tool in offered(tools))
 
 
+# The one-word reply that keeps an answer as written, after the question below.
+KEEP_REPLY = "KEEP"
+
+
 def no_tool_call_question(names: Sequence[str]) -> str:
     """The question an analyst is asked once when its first answer called no tool.
 
     States the fact and the tools it has, by the names they are offered under,
-    and leaves the decision to the model: it may call any of them first, or
-    write its answer again, and whichever answer it writes next stands.
+    and leaves the decision to the model: it may call any of them first, keep
+    its answer as written with the one word :data:`KEEP_REPLY`, or write a new
+    final answer, which then stands.
     """
     listed = ", ".join(sorted({str(name) for name in names if str(name)}))
     return (
         "Your answer above was written without calling any tool. The tools you have in "
-        f"this loop are: {listed}. If you want to call any of them before your answer "
-        "stands, call them now and then write your final answer. If not, write your final "
-        "answer again, whole: the answer you write next is the one that stands."
+        f"this loop are: {listed}. If you want to call any of them, call them now and then "
+        "write your final answer. If you do not want to call any, reply with the single "
+        f"word {KEEP_REPLY} and your answer above stands as written; or write a new final "
+        "answer, which then stands."
     )
 
 
