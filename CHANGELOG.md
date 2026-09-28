@@ -19,8 +19,14 @@ change landed on `main`.
   A claim describes a function when its sentence or its evidence line names it
   by address or by a name the decompiler gave it. The address may be written as
   `0x…`, `…h` or bare hex. It must be the same, or differ by the image base the
-  run read; with no base known, a difference of a multiple of 64 KiB counts.
-  Citing the entry alone does not count.
+  run read; with no base known, a difference of a multiple of 64 KiB counts. A
+  run of digits alone counts only when it is exactly the function's own hex
+  spelling. A quoted image base of decimal digits alone is no base. Citing the
+  entry alone does not count.
+
+  A batch answer is an object keyed by addresses (`0x…`, or four hex digits or
+  more). A plain listing is one function at its requested address, whatever
+  quoted strings it holds.
 
   The functions no claim names are listed in one question
   (`isr.decompiled_not_described`), with their names and entries. What the
@@ -2383,9 +2389,11 @@ change landed on `main`.
     its settings.
 
   `!` now splits a value, so `kernel32.dll!<key>` masks the key. A key joined
-  to other text by `/`, `|`, `+` or `&` is masked too. Vendor prefixes are still
-  asked first, and configured values are still masked by value, so every
-  credential shape stays masked.
+  to other text by `/`, `|`, `+` or `&` is masked too, and only that piece: the
+  host, the directories and the file name around it stay as written. A MIME
+  type is kept only with a registered top-level type and a subtype that is no
+  key. Vendor prefixes are still asked first, and configured values are still
+  masked by value, so every credential shape stays masked.
 - **An answer that writes its claims again past a margin is asked once for a
   whole one.** Claims begun and distinct, each keyed by its whole block, are
   counted when the answer arrives; past the margin (the distinct count, or

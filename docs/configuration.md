@@ -2067,12 +2067,21 @@ module and the name are read apart.
 A key is still a key:
 
 - after a module and a `!`;
-- joined to any text by `/`, `|`, `+` or `&`;
+- joined to any text by `/`, `|`, `+` or `&`: only the key-shaped piece is
+  masked, and the rest of the run stays as written
+  (`example.com/gate/***/x.php`);
+- after a word, in the shape of a MIME type. Only a registered top-level type
+  (`application`, `text`, `image` and the rest, or an `x-` type) with a
+  subtype that is no key is kept as a MIME type;
 - after a vendor prefix, which is still asked first;
 - as a configured value, which is still masked by value before any rule is
   read.
 
-None of these sets lets a credential through.
+None of these sets lets a credential through. What the piece rule costs: a
+readable segment of 24 or more characters that is no word and no catalogue
+name (a random directory or file name in a path, a long method name) is shown
+as `***` in its run. A run that reads as a key as a whole, such as a base64
+value with `+` or `/` in it, is still masked whole.
 
 Nothing is lost but the name in that sentence. The identity fields a line is
 filed under — `speaker`, `agent`, `stage`, `label`, `display_name` — are

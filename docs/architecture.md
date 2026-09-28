@@ -1499,10 +1499,14 @@ turn, each once, and what the analyst answers stands.
   - *What counts as decompiled.* The functions come from the analyst's own
     ledger entries: a tool whose name says it decompiles, and a call that
     answered.
-  - *Reading a batch.* A batch answer keyed by address (`batch_decompile`)
-    gives one function per key. A key whose listing begins with `Error` is left
-    out, and a cut answer keeps the functions its text still shows. A batch
-    whose answer is not keyed takes the addresses in its `functions` argument.
+  - *Reading a batch.* A batch answer is a JSON object every key of which is
+    an address: `0x…`, or at least four hex digits. It gives one function per
+    key. A key whose listing begins with `Error` is left out. A cut answer is
+    read member by member from its opening brace, and keeps the functions its
+    text still shows. Any other answer is no batch, so a plain listing is one
+    function at the address the call was given, whatever quoted strings it
+    holds. A batch whose answer is not keyed takes the addresses in its
+    `functions` argument.
   - *Reading a single call.* The address is the one the call was given, as hex
     or as an integer, or the one a decompiler's generic name carries (`FUN_`,
     `fcn.`, `sub_`). The names are the one the call was given and the one the
@@ -1515,7 +1519,13 @@ turn, each once, and what the analyst answers stands.
     it, or inside a generic name. The address must be the same, or differ by
     an image base the run read (`image_base` in the pack's answers, handed to
     every agent, or in the analyst's own). With no base known, a difference of
-    a multiple of 64 KiB counts. A claim can also name the function by a name
+    a multiple of 64 KiB counts. A run of digits alone names a function only
+    when it is exactly the function's own hex spelling, leading zeros aside.
+  - *Reading an image base.* An unquoted number is the number. A quoted value
+    is hex when it says so (`0x…`, `…h`) or holds a hex letter. A quoted
+    string of decimal digits could be either, so it is no base, and neither
+    is a value off a 64 KiB boundary. With no base known, the 64 KiB rule
+    applies. A claim can also name the function by a name
     the decompiler gave it. Citing the entry alone does not count.
   - *The question and the finding.* The functions no claim names are listed in
     one question, with their names and entries. The functions the kept answer
