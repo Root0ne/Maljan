@@ -583,7 +583,6 @@ class TestAVendorPrefixIsAskedBeforeTheWords:
         "ghr_",
         "github_pat_",
         "hf_",
-        "key-",
         "rk_live_",
         "sk_live_",
         "pk_live_",
@@ -606,18 +605,32 @@ class TestAVendorPrefixIsAskedBeforeTheWords:
         for words in ("key-exchange", "key-derivation-step"):
             assert ev.scrub(words) == words
 
+    def test_key_dash_with_words_after_it_is_words(self) -> None:
+        """``key-`` begins ordinary phrases; only a body that is not words makes it a key."""
+        for words in ("key-derivation-function-parameters", "key-exchange-algorithm-negotiation"):
+            assert ev.scrub(words) == words
+            assert ev.scrub(f"the {words} step") == f"the {words} step"
+
+    def test_key_dash_with_a_mailgun_shaped_body_is_a_key(self) -> None:
+        body = hashlib.md5(b"a mailgun-shaped body").hexdigest()
+        assert len(body) == 32
+        assert ev.scrub("key-" + body) == "***"
+        assert ev.scrub(f"sent key-{body} once") == "sent *** once"
+
 
 class TestAConfiguredSecretIsMaskedByValue:
-    """A secret the platform holds is masked wherever it appears, whatever its shape."""
+    """A secret the platform holds is masked wherever it appears, whatever its shape.
+
+    The registry is reset around every test (``tests/conftest.py``).
+    """
 
     @staticmethod
     def _passphrase() -> str:
         letters = "".join(char for char in lowercase_body(72) if char.isalpha())
         return "-".join([letters[0:6], letters[6:11], letters[11:18], letters[18:24]])
 
-    def test_a_passphrase_shaped_secret_is_masked_once_remembered(self, monkeypatch: Any) -> None:
+    def test_a_passphrase_shaped_secret_is_masked_once_remembered(self) -> None:
         secret = self._passphrase()
-        monkeypatch.setattr(ev, "_CONFIGURED_SECRETS", ())
         assert ev.scrub(f"login with {secret} failed") == f"login with {secret} failed"
 
         ev.remember_secret_values([secret])
@@ -628,17 +641,33 @@ class TestAConfiguredSecretIsMaskedByValue:
         assert secret not in ev.summarize_args({"note": f"use {secret}"})
         assert secret not in ev.summarize_result(f"answer {secret}")
 
-    def test_a_value_below_the_floor_is_not_remembered(self, monkeypatch: Any) -> None:
-        monkeypatch.setattr(ev, "_CONFIGURED_SECRETS", ())
+    def test_a_value_below_the_floor_is_not_remembered(self) -> None:
         ev.remember_secret_values(["", "   ", "short"])
         assert ev.scrub("a short word") == "a short word"
 
-    def test_values_are_added_to_not_replaced(self, monkeypatch: Any) -> None:
-        monkeypatch.setattr(ev, "_CONFIGURED_SECRETS", ())
-        first, second = password(16), password(16, variant=1)
-        ev.remember_secret_values([first])
-        ev.remember_secret_values([second])
-        assert ev.scrub(f"{first} {second}") == "*** ***"
+    def test_a_value_is_masked_only_as_a_whole_word(self) -> None:
+        """No letter, digit or underscore may touch it: the value inside a longer word stays."""
+        ev.remember_secret_values(["minioadmin", "maljan_dev"])
+
+        assert ev.scrub("minioadministrator and maljan_development") == (
+            "minioadministrator and maljan_development"
+        )
+        assert ev.scrub("user minioadmin, db maljan_dev.") == "user ***, db ***."
+        assert ev.scrub("(minioadmin)") == "(***)"
+
+    def test_a_scope_registered_again_replaces_what_it_held(self) -> None:
+        first, second, own = password(16), password(16, variant=1), password(16, variant=2)
+        ev.remember_secret_values([own], scope="process")
+        ev.remember_secret_values([first], scope="job")
+        ev.remember_secret_values([second], scope="job")
+
+        assert ev.scrub(f"{first} {second} {own}") == f"{first} *** ***"
+
+    def test_forgetting_clears_every_scope(self) -> None:
+        secret = password(16)
+        ev.remember_secret_values([secret], scope="process")
+        ev.forget_secret_values()
+        assert ev.scrub(secret) == secret
 
 
 def _every_key_shape() -> list[str]:

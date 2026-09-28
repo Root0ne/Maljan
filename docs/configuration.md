@@ -1992,20 +1992,37 @@ grouped code (a base32 recovery code, a product key in letter groups) from
 words in capitals, so a secret of that shape is published as written unless
 something else catches it. Two things do. A run that begins with a known
 vendor prefix (`glpat-`, `xoxp-`, `xoxb-`, `xapp-`, `ghs_`, `ghp_`, `gho_`,
-`github_pat_`, `hf_`, `key-`, `rk_live_`, `sk_live_`, `pk_live_`, `npm_`,
-`gocspx-` and the rest of `events._PREFIXED_KEY_FORMATS`) with at least 20
-characters after it is a key whatever its body reads like. And every secret
-value the worker holds — the job's model API keys, sandbox, Ghidra and tool
-server tokens (and a tool server's credential-named `env` and header entries),
-and the worker's own database, Redis and object-store credentials — is masked
-by exact value wherever the scrub runs, whatever its shape
-(`events.remember_secret_values`, filled from
-`settings_catalog.configured_secret_values` when the worker starts and when a
-job installs its settings). A configured value shorter than 8 characters is
-not masked by value, because masking it everywhere would take the word it
-spells out of every sentence. A secret the platform does not hold — one a
-sample carries, or one a tool answer quotes from elsewhere — of passphrase
-shape is the remaining cost.
+`github_pat_`, `hf_`, `rk_live_`, `sk_live_`, `pk_live_`, `npm_`, `gocspx-` and
+the rest of `events._PREFIXED_KEY_FORMATS`) with at least 20 characters after
+it is a key whatever its body reads like. Mailgun's `key-` begins ordinary
+phrases, so a `key-` run is a key only when its body is not words: a 32-hex
+body is masked, `key-derivation-function-parameters` is not. And every secret
+value the platform holds is masked by exact value wherever the scrub runs,
+whatever its shape (`events.remember_secret_values`, filled from
+`settings_catalog.configured_secret_values`):
+
+- what is collected is a secret *value*: a `SecretStr` or a setting the
+  catalogue marks secret, the password inside a service URL, and an entry of a
+  mapping (a tool server's `env` or headers) whose key names a credential value
+  — `password`, `passwd`, `passphrase`, `secret`, `api_key`/`apikey`, `token`,
+  `bearer`, `private_key`, `credential(s)`, `authorization`. A key that only
+  mentions one (`AUTH_MODE`, `SESSION_DIR`) is not read, nor one whose last
+  word qualifies it (`TOKEN_LIMIT`, `PASSWORD_FILE`, `API_TOKEN_URL`: the last
+  word is one of mode, type, dir, file, path, limit, timeout, url, host, port,
+  name, id, enabled), nor the REST sandbox's JSONPath field maps;
+- a value is masked only where no letter, digit or underscore touches it:
+  `minioadmin` configured leaves `minioadministrator` as written;
+- the values are held per scope, and a scope registered again replaces what it
+  held. The worker registers its own database, Redis and object-store
+  credentials and its starting settings under `process` when it starts, and
+  each job's settings under `job` when the job installs them, so a secret
+  removed from the settings is not masked in the next job. The command line
+  registers its settings when it builds the app (`app`);
+- a configured value shorter than 8 characters is not masked by value, because
+  masking it everywhere would take the word it spells out of every sentence.
+
+A secret the platform does not hold — one a sample carries, or one a tool
+answer quotes from elsewhere — of passphrase shape is the remaining cost.
 
 Nothing is lost but the name in that sentence. The identity fields a line is
 filed under — `speaker`, `agent`, `stage`, `label`, `display_name` — are

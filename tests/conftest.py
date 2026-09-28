@@ -9,6 +9,21 @@ from maljan.app import MaljanApp
 
 
 @pytest.fixture(autouse=True)
+def no_configured_secret_outlives_its_test() -> Iterator[None]:
+    """The values the scrub masks by value are registered per test and forgotten after it.
+
+    The registry is module state, filled by whatever built a worker, an app or
+    a job's settings; left behind, one test's defaults masked words in every
+    later test's text.
+    """
+    from maljan.pipeline import events
+
+    events.forget_secret_values()
+    yield
+    events.forget_secret_values()
+
+
+@pytest.fixture(autouse=True)
 def reset_observability_state() -> None:
     """Resets observability counters and throttle state before each test.
 

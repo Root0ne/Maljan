@@ -65,3 +65,66 @@ def test_several_sources_are_read() -> None:
         _Settings(llm=_Section(api_key=SecretStr(second))),
     )
     assert {first, second} <= found
+
+
+def test_only_a_credential_value_is_collected_from_a_mapping() -> None:
+    """A key that names a credential value is collected; a key that mentions one is not."""
+    secret = password(20)
+    server = _Server(
+        env={
+            "AUTH_MODE": "disabled",
+            "AUTH_TYPE": "anonymous",
+            "SESSION_DIR": "/var/lib/sessions",
+            "TOKEN_LIMIT": "100000000",
+            "PASSWORD_FILE": "/run/secrets/db_password",
+            "API_TOKEN_URL": "https://auth.example/token",
+            "VT_API_KEY": secret,
+        },
+        headers={"X-Session-Mode": "stateless", "X-Auth-Timeout": "30"},
+    )
+
+    found = configured_secret_values(_Settings(servers=[server]))
+
+    assert found == {secret}
+
+
+def test_the_rest_sandbox_field_maps_are_not_read() -> None:
+    class _Rest(BaseModel):
+        field_names: dict[str, str] = {"token": "$.data.token_value"}
+        submit_fields: dict[str, str] = {"api_key": "$.request.api_key_field"}
+
+    class _Holder(BaseModel):
+        rest: _Rest = _Rest()
+
+    assert configured_secret_values(_Holder()) == set()
+
+
+def test_each_credential_key_is_collected() -> None:
+    names = (
+        "password",
+        "DB_PASSWD",
+        "client_secret",
+        "API_KEY",
+        "apikey",
+        "token",
+        "ACCESS_TOKEN",
+        "auth_token",
+        "bearer",
+        "private_key",
+        "credentials",
+        "Authorization",
+    )
+    values = {name: password(20, variant=index) for index, name in enumerate(names)}
+
+    found = configured_secret_values(_Settings(servers=[_Server(env=values)]))
+
+    assert set(values.values()) <= found
+
+
+def test_a_disabled_setting_leaves_the_word_in_a_report() -> None:
+    from maljan.pipeline import events as ev
+
+    ev.remember_secret_values(
+        configured_secret_values(_Settings(servers=[_Server(env={"AUTH_MODE": "disabled"})]))
+    )
+    assert ev.scrub("Defender is disabled.") == "Defender is disabled."

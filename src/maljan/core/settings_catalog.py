@@ -222,6 +222,59 @@ def core_catalog() -> list[CatalogEntry]:
 # An authorization scheme in front of a header's secret: the secret is what
 # follows it.
 _SCHEME_PREFIX = ("bearer ", "basic ", "token ")
+# The words of a mapping key that name a credential *value* — a tool server's
+# ``VT_API_KEY``, ``DB_PASSWORD``, ``Authorization`` header. A key that only
+# mentions one (``AUTH_MODE``, ``SESSION_DIR``) holds no secret, and a key whose
+# last word qualifies it (``TOKEN_LIMIT``, ``PASSWORD_FILE``, ``API_TOKEN_URL``)
+# holds a setting about the credential, not the credential.
+_CREDENTIAL_KEY_WORDS = frozenset(
+    {
+        "password",
+        "passwd",
+        "passphrase",
+        "secret",
+        "apikey",
+        "token",
+        "bearer",
+        "credential",
+        "credentials",
+        "authorization",
+    }
+)
+_CREDENTIAL_KEY_PAIRS = frozenset({("api", "key"), ("private", "key")})
+_QUALIFIER_WORDS = frozenset(
+    {
+        "mode",
+        "type",
+        "dir",
+        "file",
+        "path",
+        "limit",
+        "timeout",
+        "url",
+        "host",
+        "port",
+        "name",
+        "id",
+        "enabled",
+    }
+)
+# Mappings whose values are where a response keeps a field, not a field's
+# value: the generic REST sandbox's JSONPath maps. Never read for secrets.
+_FIELD_MAPS = frozenset({"field_names", "submit_fields", "extra_fields", "channels"})
+
+
+def names_a_credential_value(key: str) -> bool:
+    """Whether a mapping key names a credential value rather than a setting about one."""
+    import re
+
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(key))
+    words = [word for word in re.split(r"[^a-z0-9]+", spaced.lower()) if word]
+    if not words or words[-1] in _QUALIFIER_WORDS:
+        return False
+    if any(word in _CREDENTIAL_KEY_WORDS for word in words):
+        return True
+    return any(pair in _CREDENTIAL_KEY_PAIRS for pair in zip(words, words[1:], strict=False))
 
 
 def configured_secret_values(*sources: Any) -> set[str]:
@@ -232,13 +285,13 @@ def configured_secret_values(*sources: Any) -> set[str]:
     (``database_url``, ``redis_url``) and an entry of a mapping whose key names
     a credential (a tool server's ``env`` or ``headers``). A header value that
     begins with an authorization scheme contributes what follows the scheme as
-    well. Nothing else is collected: a field that merely mentions a token in
-    its name (``max_tokens``, a session directory) holds no secret. The scrub
-    masks these values by exact value (``pipeline.events.remember_secret_values``).
+    well. Nothing else is collected: a field or a key that merely mentions a
+    credential (``max_tokens``, ``AUTH_MODE``, ``TOKEN_LIMIT``) holds no secret
+    (``names_a_credential_value``), and the REST sandbox's JSONPath maps are not
+    read. The scrub masks these values by exact value
+    (``pipeline.events.remember_secret_values``).
     """
     from urllib.parse import urlsplit
-
-    from maljan.pipeline.events import is_secret_argument_name
 
     found: set[str] = set()
 
@@ -258,10 +311,12 @@ def configured_secret_values(*sources: Any) -> set[str]:
         elif isinstance(value, BaseModel):
             fields = dict(type(value).model_fields)
             for key in fields:
+                if key in _FIELD_MAPS:
+                    continue
                 _walk(getattr(value, key, None), key, key in _SECRET_NAMES)
         elif isinstance(value, dict):
             for key, item in value.items():
-                _walk(item, str(key), is_secret_argument_name(str(key)))
+                _walk(item, str(key), names_a_credential_value(str(key)))
         elif isinstance(value, list | tuple | set):
             for item in value:
                 _walk(item, name, named_secret)

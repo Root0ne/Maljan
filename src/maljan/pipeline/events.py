@@ -426,7 +426,9 @@ _CREDENTIAL_PREFIXES = ("sk-", "sk_", "nvapi-", "ghp_", "gho_", "xoxb-")
 # least ``PREFIXED_KEY_BODY_FLOOR`` characters after it is a key, asked before
 # the word rule: GitLab, Slack, GitHub, Hugging Face, Mailgun, Stripe, npm and
 # Google OAuth client secrets. Every real body of these formats is longer than
-# the floor; ``key-exchange`` is not.
+# the floor. Mailgun's ``key-`` is asked apart (``_MAILGUN_PREFIX``): it begins
+# ordinary phrases (``key-derivation-function-parameters``), so its body must
+# also not be words.
 _PREFIXED_KEY_FORMATS = (
     "glpat-",
     "xoxp-",
@@ -442,7 +444,6 @@ _PREFIXED_KEY_FORMATS = (
     "ghr_",
     "github_pat_",
     "hf_",
-    "key-",
     "rk_live_",
     "sk_live_",
     "pk_live_",
@@ -454,13 +455,21 @@ _PREFIXED_KEY_FORMATS = (
     *_CREDENTIAL_PREFIXES,
 )
 PREFIXED_KEY_BODY_FLOOR = 20
+_MAILGUN_PREFIX = "key-"
 # The secret values this process holds in its own settings — model API keys,
 # sandbox and Ghidra tokens, the VirusTotal key, the database, Redis and object
 # store passwords — masked by exact value wherever the scrub runs, whatever
 # their shape: a passphrase an operator configured reads as words to every
-# shape rule here, and this is what catches it. Longest first, so a secret
-# that contains another is masked whole. Filled by ``remember_secret_values``.
-_CONFIGURED_SECRETS: tuple[str, ...] = ()
+# shape rule here, and this is what catches it. Held per scope — ``process``
+# for what a worker or an app holds from its start, ``job`` for a job's own
+# settings — and a scope registered again replaces what it held, so a secret no
+# longer configured stops being masked. Filled by ``remember_secret_values``.
+_SECRET_SCOPES: dict[str, frozenset[str]] = {}
+# The union of every scope as one pattern, longest value first so a secret that
+# contains another is masked whole, and each value only where no letter, digit
+# or underscore touches it: ``minioadmin`` configured leaves ``minioadministrator``
+# as written. ``None`` when nothing is registered.
+_CONFIGURED_PATTERN: re.Pattern[str] | None = None
 # A configured value shorter than this is not masked by value: a four-letter
 # password masked everywhere would take every word it spells out of every
 # sentence. Such a value is still masked by name and by shape.
@@ -673,14 +682,6 @@ def _name_words(name: str) -> set[str]:
     return set(re.split(r"[^a-z0-9]+", spaced.lower())) - {""}
 
 
-def is_secret_argument_name(name: str) -> bool:
-    """Whether a name says its value is a credential.
-
-    An argument's, a header's or an environment variable's name alike.
-    """
-    return _is_secret_argument(name)
-
-
 def _is_secret_argument(name: str) -> bool:
     """Whether this argument's *name* says its value is a credential.
 
@@ -776,6 +777,12 @@ def _looks_like_a_credential(token: str) -> bool:
         for prefix in _PREFIXED_KEY_FORMATS
     ):
         return True
+    if (
+        lowered.startswith(_MAILGUN_PREFIX)
+        and len(token) - len(_MAILGUN_PREFIX) >= PREFIXED_KEY_BODY_FLOOR
+        and not _is_words(token)
+    ):
+        return True
     if _MIME_TYPE.match(token) or _PATH_SHAPED.match(token) or _is_words(token):
         return False
     return bool(_CREDENTIAL_RUN.match(token)) or _is_a_token(token)
@@ -866,27 +873,49 @@ def scrub(text: Any) -> str:
     return _scrub_line(" ".join(str(text or "").split()))
 
 
-def remember_secret_values(values: Iterable[str]) -> None:
-    """Add these values to the ones the scrub masks by exact value, in this process.
+def remember_secret_values(values: Iterable[str], *, scope: str = "job") -> None:
+    """Set the values the scrub masks by exact value under ``scope``, in this process.
 
-    Added to, never replaced: a secret rotated out may still be quoted by a
-    tool answer written before the rotation. A value shorter than
-    ``CONFIGURED_SECRET_FLOOR``, or blank, is not added.
+    A scope registered again replaces what it held: the worker registers each
+    job's settings under ``job``, so a secret the operator removed is not masked
+    in the next job, and its own startup secrets under ``process``, which stay.
+    A value shorter than ``CONFIGURED_SECRET_FLOOR``, or blank, is not kept.
+    Only the count is logged, never a value.
     """
-    global _CONFIGURED_SECRETS
-    kept = set(_CONFIGURED_SECRETS)
-    for value in values:
-        text = str(value or "")
-        if len(text) >= CONFIGURED_SECRET_FLOOR and text.strip():
-            kept.add(text)
-    _CONFIGURED_SECRETS = tuple(sorted(kept, key=len, reverse=True))
+    kept = frozenset(
+        text
+        for text in (str(value or "") for value in values)
+        if len(text) >= CONFIGURED_SECRET_FLOOR and text.strip()
+    )
+    _SECRET_SCOPES[scope] = kept
+    _rebuild_configured_pattern()
+    logger.debug("The scrub masks %d configured value(s) under %s.", len(kept), scope)
+
+
+def forget_secret_values() -> None:
+    """Clear every scope: nothing is masked by value afterwards."""
+    _SECRET_SCOPES.clear()
+    _rebuild_configured_pattern()
+
+
+def _rebuild_configured_pattern() -> None:
+    global _CONFIGURED_PATTERN
+    values = sorted(set().union(*_SECRET_SCOPES.values()), key=len, reverse=True)
+    _CONFIGURED_PATTERN = (
+        re.compile(
+            r"(?<![A-Za-z0-9_])(?:"
+            + "|".join(re.escape(value) for value in values)
+            + r")(?![A-Za-z0-9_])"
+        )
+        if values
+        else None
+    )
 
 
 def _hide_configured_secrets(line: str) -> str:
-    for secret in _CONFIGURED_SECRETS:
-        if secret in line:
-            line = line.replace(secret, _REDACTED)
-    return line
+    if _CONFIGURED_PATTERN is None:
+        return line
+    return _CONFIGURED_PATTERN.sub(_REDACTED, line)
 
 
 # How many times the passes are repeated at most before the text is taken as

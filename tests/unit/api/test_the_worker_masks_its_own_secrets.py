@@ -26,7 +26,6 @@ def _passphrase(variant: int) -> str:
 
 
 def test_the_job_s_secrets_and_the_worker_s_own_are_masked(monkeypatch: Any) -> None:
-    monkeypatch.setattr(ev, "_CONFIGURED_SECRETS", ())
     model_key, store_secret, db_password = _passphrase(0), _passphrase(1), password(18)
     core = Settings.model_validate({"llm": {"openai": {"api_key": model_key}}})
 
@@ -36,9 +35,27 @@ def test_the_job_s_secrets_and_the_worker_s_own_are_masked(monkeypatch: Any) -> 
     )
     monkeypatch.setattr(analysis_worker, "get_settings", lambda: api)
 
+    analysis_worker.remember_process_secrets()
     analysis_worker.remember_configured_secrets(core)
 
     published = analysis_worker.scrubbed(
         {"text": f"tried {model_key}, then {store_secret} and {db_password}"}
     )
     assert published == {"text": "tried ***, then *** and ***"}
+
+
+def test_a_job_s_settings_replace_the_previous_job_s(monkeypatch: Any) -> None:
+    """A secret no longer configured is not masked in a later job; the worker's own still is."""
+    old_key, new_key, store_secret = _passphrase(0), _passphrase(1), _passphrase(2)
+    api = ApiSettings(minio_secret_key=SecretStr(store_secret))
+    monkeypatch.setattr(analysis_worker, "get_settings", lambda: api)
+    analysis_worker.remember_process_secrets()
+
+    analysis_worker.remember_configured_secrets(
+        Settings.model_validate({"llm": {"openai": {"api_key": old_key}}})
+    )
+    analysis_worker.remember_configured_secrets(
+        Settings.model_validate({"llm": {"openai": {"api_key": new_key}}})
+    )
+
+    assert ev.scrub(f"{old_key} {new_key} {store_secret}") == f"{old_key} *** ***"
