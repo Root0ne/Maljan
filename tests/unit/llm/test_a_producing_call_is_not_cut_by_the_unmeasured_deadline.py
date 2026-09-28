@@ -7,11 +7,15 @@ was cut at 1800 s while it was still decoding, and the retry was given the same
 1800 s, because a cut call left no measurement behind.
 
 The rule now: before any generated piece arrives, silence is the only fact, and
-the provider's request timeout bounds it. Once pieces arrive, the call's own
-pieces over its wall clock (prompt read included) are a measured pace, and the
-deadline becomes the output cap at that pace by the same arithmetic as a
-measured model's. A call that stops producing is cut when that deadline passes,
-and its measurement is recorded for the model, so the retry is sized from it.
+the provider's request timeout bounds it. Once two pieces arrive, the call's
+pace from its first piece to its last is measured, and the deadline becomes the
+time to the first piece and the output cap at that pace, by the same arithmetic
+as a measured model's. A call with no output cap is sized from the room its
+model's window leaves after the prompt. A call that stops producing is cut when
+that deadline passes, and its pace is recorded for the model, so the retry is
+sized from it. Where nothing can be sized, a producing call is held only to the
+silence after its last piece. The prompt read is never counted as generating,
+and a call with a single piece records nothing.
 
 The calls run on an event loop whose clock jumps to the next timer, so an hour
 of a call takes milliseconds and nothing sleeps.
@@ -63,6 +67,8 @@ class _Slow(BaseChatModel):
     silent_for: float = 0.0
     stall_after: int | None = None
     streaming: bool = False
+    # A chunk naming only the role, sent when the silence ends, as llama.cpp's first.
+    opening: bool = False
 
     @property
     def _llm_type(self) -> str:
@@ -72,6 +78,8 @@ class _Slow(BaseChatModel):
         if math.isinf(self.silent_for):
             await asyncio.Event().wait()
         await asyncio.sleep(self.silent_for)
+        if self.opening:
+            yield ""
         for index in range(self.pieces):
             if self.stall_after is not None and index >= self.stall_after:
                 await asyncio.Event().wait()
@@ -114,8 +122,11 @@ def _ask(model: Any) -> Any:
     return model.ainvoke([HumanMessage(content="hi")])
 
 
-# The deadline a call producing steadily at 2.3 a second is given for its cap.
+# The deadline a model measured at 2.3 a second is given for its cap.
 _AT_PACE = _CAP / _PACE * TIMEOUT_MARGIN
+# The deadline a call sets itself by producing at 2.3 a second: its first piece
+# 1 / 2.3 s in, then its cap at that pace, times the margin.
+_STALL_CUT = (1 / _PACE + _CAP / _PACE) * TIMEOUT_MARGIN
 
 
 class TestASlowSteadyModelIsNotCut:
@@ -173,7 +184,7 @@ class TestAModelThatStallsIsCutByItsMeasuredDeadline:
             ModelCallDeadline, _ask(_model(pieces=5000, stall_after=100, streaming=streaming))
         )
 
-        assert took == pytest.approx(_AT_PACE, rel=1e-6)
+        assert took == pytest.approx(_STALL_CUT, rel=1e-6)
         said = str(exc)
         assert "pace measured in this call" in said
         assert "100 generated pieces" in said
@@ -188,13 +199,39 @@ class TestAModelThatStallsIsCutByItsMeasuredDeadline:
         assert rates.rate("slow") == pytest.approx(_PACE)
         assert rates.rate_source("slow") == [IN_CALL_SOURCE]
 
-    def test_a_call_with_no_output_cap_has_nothing_to_size_and_keeps_the_timeout(self) -> None:
+
+class TestACallWithNoOutputCap:
+    def test_with_no_known_window_it_is_held_to_the_silence_after_its_last_piece(
+        self,
+    ) -> None:
         exc, took = run_expecting(
             ModelCallDeadline, _ask(_model(pieces=5000, stall_after=100, max_tokens=None))
         )
 
-        assert took == pytest.approx(_CLIENT)
-        assert "no output cap" in str(exc)
+        assert took == pytest.approx(100 / _PACE + _CLIENT)
+        said = str(exc)
+        assert "silence after the last generated piece" in said
+        assert "no output cap" in said
+
+    def test_with_no_known_window_a_steady_producer_is_not_cut(self) -> None:
+        answer, took = run(_ask(_model(pieces=5000, max_tokens=None)))
+
+        assert took == pytest.approx(5000 / _PACE)
+        assert answer.content == "x" * 5000
+
+    def test_with_a_known_window_it_is_sized_from_the_room_the_window_leaves(self) -> None:
+        from maljan.llm.context_window import PROBED, WindowFact, record_built_window
+
+        model = record_built_window(
+            _model(pieces=5000, stall_after=100, max_tokens=None),
+            WindowFact(32768, PROBED, "the server said so"),
+        )
+
+        exc, took = run_expecting(ModelCallDeadline, _ask(model))
+
+        room = 32768 - 1  # "hi" is one unit at three characters a unit
+        assert took == pytest.approx((1 / _PACE + room / _PACE) * TIMEOUT_MARGIN, rel=1e-6)
+        assert "the 32767 output units its model's 32768-unit window leaves" in str(exc)
 
 
 class TestAfterACutTheRetryIsSizedFromTheMeasurement:
@@ -223,7 +260,58 @@ class TestAfterACutTheRetryIsSizedFromTheMeasurement:
 
         run_expecting(TimeoutError, main())
 
-        assert rates.rate("slow") == pytest.approx(_PACE, rel=1e-2)
+        assert rates.rate("slow") == pytest.approx(_PACE, rel=1e-6)
+
+    def test_a_call_ended_behind_a_long_prompt_read_records_its_generation_pace(self) -> None:
+        # 1,500 s of prompt read, then 100 s of generating at 2.3 a second,
+        # ended from outside: the pace is 2.3 a second, not 230 over 1,600 s.
+        rates = GenerationRates()
+        model = attach_rate_meter(_model(pieces=5000, silent_for=1500.0), rates, "slow")
+
+        async def main() -> Any:
+            return await asyncio.wait_for(_ask(model), 1600.0)
+
+        run_expecting(TimeoutError, main())
+
+        assert rates.rate("slow") == pytest.approx(_PACE, rel=1e-6)
+
+
+class TestACallTooShortToMeasureRecordsNothing:
+    """1,500 s of prompt read, one piece, then silence: one piece is not a pace."""
+
+    @pytest.mark.parametrize(
+        ("opening", "pieces", "ends_at", "rule"),
+        [
+            (True, 0, _CLIENT, "silence before the first generated piece"),
+            (False, 1, 1500 + 1 / _PACE + _CLIENT, "silence after the last generated piece"),
+        ],
+        ids=["a-role-chunk", "one-generated-piece"],
+    )
+    def test_the_next_call_keeps_the_bound_it_had(
+        self, opening: bool, pieces: int, ends_at: float, rule: str
+    ) -> None:
+        rates = GenerationRates()
+        model = attach_rate_meter(
+            _model(
+                pieces=5000,
+                stall_after=pieces,
+                silent_for=1500.0,
+                opening=opening,
+                streaming=True,
+            ),
+            rates,
+            "slow",
+        )
+
+        exc, took = run_expecting(ModelCallDeadline, _ask(model))
+
+        assert took == pytest.approx(ends_at)
+        assert rule in str(exc)
+        assert rates.rate("slow") is None
+        retry = attach_rate_meter(_model(silent_for=math.inf), rates, "slow")
+        assert call_deadline(retry, [], {}) == _CLIENT
+        _exc, took = run_expecting(ModelCallDeadline, _ask(retry))
+        assert took == pytest.approx(_CLIENT)
 
 
 class TestAFastHostedModelIsUnchanged:
@@ -278,7 +366,7 @@ class TestAClientThatStreamsThroughItself:
         exc, took = run_expecting(ModelCallDeadline, _ask(model))
 
         assert "100 generated pieces" in str(exc)
-        assert took == pytest.approx(_AT_PACE, rel=1e-6)
+        assert took == pytest.approx(_STALL_CUT, rel=1e-6)
 
 
 class _SyncStream(BaseChatModel):
@@ -319,3 +407,63 @@ class TestTheSynchronousStreamIsHeldToo:
 
         with pytest.raises(ModelCallDeadline, match="silence before the first generated piece"):
             model.invoke([HumanMessage(content="hi")])
+
+    def test_its_reader_stops_when_the_caller_is_done(self) -> None:
+        # The client's iterator runs in a reader thread. Once the caller stops
+        # reading, the reader closes it at its next piece, which ends the
+        # request, rather than reading the rest of the answer.
+        closed = threading.Event()
+        next_piece = threading.Event()
+
+        class _Endless(_SyncStream):
+            def _stream(
+                self, messages: Any, stop: Any = None, run_manager: Any = None, **_: Any
+            ) -> Any:
+                try:
+                    while True:
+                        yield ChatGenerationChunk(message=AIMessageChunk(content="y"))
+                        next_piece.wait()
+                finally:
+                    closed.set()
+
+        model = with_sized_request_timeout(_Endless)(streaming=True)
+        for _chunk in model.stream([HumanMessage(content="hi")]):
+            break
+        next_piece.set()
+
+        assert closed.wait(timeout=5.0)
+
+
+def _registry_settings(**openai: Any) -> Any:
+    from maljan.core.config import Settings
+
+    return Settings(
+        _env_file=None,
+        llm={
+            "provider": "openai",
+            "expert_model": "no-such-model-in-any-table",
+            "openai": {"api_key": "not-a-key", "base_url": "http://127.0.0.1:8080/v1", **openai},
+        },
+    )
+
+
+class TestTheBuiltModelCarriesItsKnownWindow:
+    def test_the_registry_records_the_declared_window(self) -> None:
+        from maljan.llm.context_window import built_window, forget_learned_windows
+        from maljan.llm.registry import LLMProviderRegistry
+
+        forget_learned_windows()
+        model = LLMProviderRegistry(_registry_settings(context_size=16384)).build_model()
+
+        fact = built_window(model)
+        assert fact is not None
+        assert fact.tokens == 16384
+
+    def test_no_window_is_recorded_where_none_is_declared_or_probed(self) -> None:
+        from maljan.llm.context_window import built_window, forget_learned_windows
+        from maljan.llm.registry import LLMProviderRegistry
+
+        forget_learned_windows()
+        model = LLMProviderRegistry(_registry_settings()).build_model()
+
+        assert built_window(model) is None

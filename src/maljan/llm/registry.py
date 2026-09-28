@@ -131,7 +131,8 @@ class LLMProviderRegistry:
         logger.info(f"Building {provider_name}/{model_name} (role={role}, temp={temp})")
         _cap_for_provider(kwargs, provider_name)
         provider = provider_cls(config=self._config)
-        return provider.build_model(model=model_name, temperature=temp, **kwargs)  # type: ignore[no-any-return]
+        built = provider.build_model(model=model_name, temperature=temp, **kwargs)
+        return self._with_window(built, provider_name, model_name, kwargs.get("base_url"))
 
     def build_model_for_agent(
         self,
@@ -249,11 +250,30 @@ class LLMProviderRegistry:
         # a None passed through would land in the model's own kwargs.
         if agent_base_url:
             kwargs["base_url"] = agent_base_url
-        return provider.build_model(  # type: ignore[no-any-return]
-            model=choice.model,
-            temperature=temp,
-            **kwargs,
-        )
+        built = provider.build_model(model=choice.model, temperature=temp, **kwargs)
+        return self._with_window(built, str(choice.provider), choice.model, agent_base_url)
+
+    def _with_window(
+        self, built: Any, provider: str, model: str, base_url: str | None
+    ) -> BaseChatModel:
+        """``built``, carrying the window its model serves where one is already known.
+
+        A call with no output cap is sized from the room that window leaves
+        after its prompt (``generation_rate._CallDeadline``). Only what is
+        known without a request: the window each agent's output cap was
+        derived from was learned before its model was built.
+        """
+        from maljan.core.model_assignments import endpoint_for
+        from maljan.llm.context_window import known_window, record_built_window
+
+        try:
+            endpoint = endpoint_for(self._config, provider, base_url)
+            record_built_window(
+                built, known_window(self._config, provider, endpoint, str(model or ""))
+            )
+        except Exception as exc:  # noqa: BLE001 — a window that cannot be read is not kept
+            logger.debug("No window kept for %s/%s (%s).", provider, model, exc)
+        return built  # type: ignore[no-any-return]
 
 
 def _cap_for_provider(kwargs: dict[str, Any], provider: str) -> None:
