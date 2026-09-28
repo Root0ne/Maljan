@@ -3031,6 +3031,12 @@ def recommendation_indicator_violations(
     return out
 
 
+def _step_order(row: Mapping[str, Any], index: int) -> str:
+    """A step's number as a question names it: its own ``order``, zero included."""
+    order = row.get("order")
+    return str(index + 1 if order is None or order == "" else order)
+
+
 def flow_voice_violations(
     payload: Any,
     sandbox_ids: Iterable[str],
@@ -3057,7 +3063,7 @@ def flow_voice_violations(
             continue
         cited = _cited(row, "evidence_refs")
         if any(value in sandbox for value in cited):
-            order = safe_finding_value(row.get("order", index + 1))
+            order = _step_order(row, index)
             others = [value for value in cited if value not in sandbox]
             if others:
                 named = _named_ids(
@@ -3068,7 +3074,7 @@ def flow_voice_violations(
                     Violation(
                         code=FLOW_VOICE_CODE,
                         message=(
-                            f"step {order} is marked observed and also cites "
+                            f"step {safe_finding_value(order)} is marked observed and also cites "
                             f"{safe_finding_value(named)}, which record no sandbox observation "
                             "of the sample. A step marked observed says the sandbox watched "
                             "every part of it. Cite only the sandbox entries that show it and "
@@ -3093,7 +3099,8 @@ def flow_voice_violations(
                     Violation(
                         code=FLOW_VOICE_CODE,
                         message=(
-                            f"step {order} is marked observed and names a network value the "
+                            f"step {safe_finding_value(order)} is marked observed and names a "
+                            "network value the "
                             f"sandbox attributes no flow of the sample to ({facts}). A network "
                             "step is observed only for a value the sample's own process tree "
                             "reached. Mark the step assessed, or leave the value out of the "
@@ -3112,7 +3119,7 @@ def flow_voice_violations(
             Violation(
                 code=FLOW_VOICE_CODE,
                 message=(
-                    f"step {safe_finding_value(row.get('order', index + 1))} is marked observed "
+                    f"step {safe_finding_value(_step_order(row, index))} is marked observed "
                     f"but cites no sandbox entry ({safe_finding_value(where)}). Cite the sandbox "
                     "entry that shows "
                     "it, or mark the step assessed."

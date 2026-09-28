@@ -3750,6 +3750,9 @@ def _with_the_publish_reason(objects: list[Any], report: Any) -> list[Any]:
             continue
         reason = f"{PUBLISHED_BECAUSE}: {'; '.join(said)}."
         before = str(obj.description or "").strip()
+        if before in said or before == "; ".join(said):
+            # The platform's own description was the reason alone: said once.
+            before = ""
         out.append(
             obj.model_copy(update={"description": f"{before} {reason}" if before else reason})
         )

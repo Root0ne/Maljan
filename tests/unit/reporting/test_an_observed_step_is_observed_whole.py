@@ -127,3 +127,16 @@ def test_the_projection_states_what_a_name_resolved_to() -> None:
     assert network is not None
     (domain,) = network.domains
     assert domain.resolved_ips == [REACHED]
+
+
+def test_a_step_numbered_zero_is_named_by_its_number() -> None:
+    step = _step("Loads through rundll32 and resolves by hash.", ["ev_0012", "ev_0020"])
+    step["steps"][0]["order"] = 0
+    uncited = _step("Loads through rundll32.", [])
+    uncited["steps"][0]["order"] = 0
+
+    (mixed,) = _asked(step, ["ev_0012"])
+    (bare,) = _asked(uncited, ["ev_0012"])
+
+    assert mixed.message.startswith("step 0 is marked observed")
+    assert bare.message.startswith("step 0 is marked observed")

@@ -218,7 +218,10 @@ class TestEveryPublishedRowSaysWhy:
 
         assert len(indicators) >= 3
         for obj in indicators:
-            assert "Published because" in (obj.get("description") or ""), obj["pattern"]
+            said = obj.get("description") or ""
+            assert "Published because" in said, obj["pattern"]
+            why = said.split("Published because: ", 1)[1].rstrip(".")
+            assert said.count(why) == 1, said
 
     def test_the_drafts_state_the_reason_beside_each_value(self) -> None:
         report = _report(told=True)
