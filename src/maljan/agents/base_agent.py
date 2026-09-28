@@ -38,7 +38,7 @@ from maljan.agents.claim_headings import (
     count_claims_after_disputes,
     count_claims_begun,
 )
-from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
+from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT, KEEP_REPLY
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
 from maljan.core.logger import logger
@@ -57,14 +57,18 @@ from maljan.pipeline.validation import (
     ABSENCE_CLAIM_CODE,
     ALIGNMENT_MARGIN,
     ANALYST_CUT_CODE,
+    ANALYST_REPEATED_CODE,
     CLAIM_DOES_NOT_DESCRIBE_CODE,
     CLAIMS_UNDER_DISPUTES_CODE,
     VALIDITY_CODE,
+    ClaimsRepeated,
     ValidationTally,
     Violation,
     analyst_cut_violation,
+    analyst_repeated_violation,
     chunk_cut_unread_sentence,
     claims_kept_under_disputes_finding,
+    claims_repeated,
     mark_invalid_technique_ids,
     parse_violations,
     retry_with_feedback_sync,
@@ -2824,13 +2828,15 @@ def answer_cut_at_cap(response: Any, cap: int) -> tuple[int, str] | None:
 
 # What a later chunk's prompt opens with: the calls the earlier chunks of the
 # same analysis made, each with the entry that holds its answer. Its loop
-# answers an identical call with that entry (``seeded_repeat_guard``).
+# answers an identical call with the result that entry recorded
+# (``seeded_repeat_guard``).
 EARLIER_CHUNKS_HEAD = (
     "Earlier chunks of this same input were already analysed. These are the tool calls "
     "made there, each with the ledger entry that holds its result and the opening of "
     "what it returned. Cite those entries instead of making the same call again: an "
-    "identical call is not run again, and is answered with the entry that holds it. A "
-    "call marked failed may be made once more."
+    "identical call is not run again, and is answered with the result its entry "
+    "recorded. A call marked failed, or marked as one whose result was not kept, may be "
+    "made once more."
 )
 
 
@@ -2851,7 +2857,14 @@ def earlier_chunks_block(entries: Sequence[Any]) -> str:
         except (TypeError, ValueError):
             shown = repr(args)
         ok = bool(getattr(entry, "ok", True))
-        failed = "" if ok else " (failed)"
+        # A result the run did not keep whole cannot answer the call again,
+        # which is then made once more, as a failed one may be.
+        kept = bool(str(getattr(entry, "output", "") or "")) and not bool(
+            getattr(entry, "truncated", False)
+        )
+        failed = (
+            " (failed)" if not ok else "" if kept else " (result not kept; may be made once more)"
+        )
         # What the call found, as the console's headline of it, on one line:
         # the entry's answer is in another conversation and no tool reads a
         # ledger entry by its id.
@@ -2880,14 +2893,20 @@ class _PriorAnswer:
     second copy that drifts.
     """
 
-    def __init__(self, isr: AgentISR) -> None:
+    def __init__(self, isr: AgentISR, shown: str | None = None) -> None:
         self.isr = isr
         # The answer as the model wrote it, CLAIM blocks and findings block
         # included: shown a summary of its parsed claims, a model answered
         # again in the summary's shape, and nothing in that shape is a claim.
         # The summary stands only for an ISR no single answer produced — a
-        # merge of chunks.
-        self.content = isr.answer_text or isr.unparsed_answer or isr.to_text_summary()
+        # merge of chunks. ``shown`` replaces it where only part of the answer
+        # is sent back: an answer that repeated its claims is shown up to the
+        # first claim that repeats.
+        self.content = (
+            shown
+            if shown is not None
+            else isr.answer_text or isr.unparsed_answer or isr.to_text_summary()
+        )
 
 
 def alignment_gate(knowledge: Any, cfg_validation: Any, log: Any, name: str) -> Any | None:
@@ -4129,6 +4148,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # the coroutine so a loop the hard cap stops still hands over the turns
         # it took: they were answered and spent.
         latest: dict = {"messages": list(messages)}
+        # The question asked when the model's first answer called no tool,
+        # once it is asked: what followed it is read after the loop.
+        tool_ask: dict[str, Any] = {}
 
         # Run the ReAct coroutine on the shared, never-closing agent
         # loop (see ``_get_agent_loop``) instead of a throwaway per-call loop.
@@ -4168,19 +4190,142 @@ class BaseAnalyst(BudgetMeter, ABC):
                 alive until the loop's finalizer gets to it, and on a box with
                 one llama-server slot a run that is still alive is not free.
                 """
-                nonlocal time_capped, time_detail, final_reserve, spend_capped
-                nonlocal call_deadline_hit, spend_refusal
-                stream: Any = agent_executor.astream(
-                    {"messages": messages},
-                    {"recursion_limit": recursion_limit(max_steps)},
-                    stream_mode="values",
-                )
                 spoken: set[str] = set()
                 pace = TurnPace(_rate_of_the_answering_model)
                 # Kept past the loop: what one turn and a final answer cost at
                 # this model's pace is what the stage asks before it gives
                 # this analyst a second loop.
                 self._last_pace = pace
+                # A replayed conversation starts without the question: it is
+                # asked again, if at all, of the replay's own answer.
+                tool_ask.clear()
+                if not await _one_pass(list(messages), spoken, pace):
+                    return dict(latest)
+                # The model answered. An analyst with tools whose first answer
+                # called none is told so, with the tools it has, and asked once
+                # in the same conversation: KEEP keeps that answer as written,
+                # and any other answer it writes next stands.
+                conversation = list(latest.get("messages") or [])
+                question = self._no_tool_call_question(
+                    conversation, budget, max_steps, recorded, pace
+                )
+                if question is None:
+                    return dict(latest)
+                tool_ask["question"] = question
+                tool_ask["first_answer"] = str(getattr(conversation[-1], "content", "") or "")
+                tool_ask["conversation"] = conversation
+                await _the_question_pass([*conversation, question], conversation, spoken, pace)
+                return dict(latest)
+
+            async def _the_question_pass(
+                start: list[Any], conversation: list[Any], spoken: set[str], pace: TurnPace
+            ) -> None:
+                """The pass after the no-tool-call question, and the first answer when none follows.
+
+                Held inside what is left of the loop's clock. A stop or a
+                failure that leaves no answer after the question — the spend
+                ceiling, a call's deadline, the clock, a full window, the step
+                cap — puts the conversation back as it stood before the
+                question and the first answer stands as written, with why on
+                the record; the flags that stop set are cleared, so nothing
+                downstream salvages or empties a loop whose answer arrived. A
+                model that called tools after the question goes on as any loop
+                that called tools does, and its first answer still stands if
+                nothing is written after them.
+                """
+                nonlocal time_capped, time_detail, final_reserve, spend_capped
+                nonlocal call_deadline_hit, spend_refusal, window_full
+                saved = (
+                    time_capped,
+                    time_detail,
+                    final_reserve,
+                    spend_capped,
+                    call_deadline_hit,
+                    spend_refusal,
+                    window_full,
+                )
+                latest["messages"] = list(start)
+                left = budget.seconds_left()
+                why = ""
+                finished = False
+                try:
+                    finished = await asyncio.wait_for(
+                        _one_pass(start, spoken, pace),
+                        timeout=None if left is None else max(0.0, left - 1.0),
+                    )
+                except ModelCallDeadline as exc:
+                    why = f"model call deadline: {exc}"
+                except SpendCeilingStop as stop:
+                    why = f"the spend ceiling: {stop}"
+                except TimeoutError:
+                    why = "the loop's time ran out before an answer to the question"
+                except Exception as exc:  # noqa: BLE001 — the first answer stands on any failure
+                    why = (
+                        "the model server reported its context window full"
+                        if window_full_error(exc)
+                        else f"the question failed ({type(exc).__name__})"
+                    )
+                after = list(latest.get("messages") or [])[len(start) :]
+                answered = bool(after) and is_model_turn(after[-1])
+                called = any(getattr(m, "tool_calls", None) for m in after)
+                if finished and answered and not called:
+                    last = str(getattr(after[-1], "content", "") or "")
+                    # Emphasis marks aside, as a claim's block is compared.
+                    bare = re.sub(r"[*_`]", "", last).strip().rstrip(".").strip()
+                    if bare.upper() == KEEP_REPLY:
+                        tool_ask["followed"] = "kept_first_answer"
+                    return
+                if finished or (called and not why):
+                    return
+                why = why or self._why_the_pass_stopped(
+                    saved,
+                    time_capped,
+                    time_detail,
+                    spend_capped,
+                    spend_refusal,
+                    call_deadline_hit,
+                    window_full,
+                    repeats,
+                )
+                (
+                    time_capped,
+                    time_detail,
+                    final_reserve,
+                    spend_capped,
+                    call_deadline_hit,
+                    spend_refusal,
+                    window_full,
+                ) = saved
+                latest["messages"] = list(conversation)
+                tool_ask["dropped"] = after
+                tool_ask["followed"] = "no_answer"
+                tool_ask["why"] = why
+                self.logger.warning(
+                    "%s: no answer followed the question about its tools (%s); its first "
+                    "answer stands as written.",
+                    self.name,
+                    why,
+                )
+
+            async def _one_pass(start: list[Any], spoken: set[str], pace: TurnPace) -> bool:
+                """One run of the graph from ``start``; whether the model ended it by answering.
+
+                ``False`` when a stop below ended it — the repeat guard, the
+                room, the spend ceiling, the clock, a call's deadline, the step
+                cap or a full window — and ``latest`` holds the conversation as
+                it stood.
+                """
+                nonlocal time_capped, time_detail, final_reserve, spend_capped
+                nonlocal call_deadline_hit, spend_refusal
+                # What the steps have left after the turns ``start`` already
+                # spent; the first pass has spent none.
+                steps = None if max_steps is None else max(1, max_steps - steps_used(start))
+                stream: Any = agent_executor.astream(
+                    {"messages": start},
+                    {"recursion_limit": recursion_limit(steps)},
+                    stream_mode="values",
+                )
+                finished = False
                 async with contextlib.aclosing(stream) as snapshots:
                     try:
                         async for snapshot in snapshots:
@@ -4251,6 +4396,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                                     time_detail,
                                 )
                                 break
+                        else:
+                            # The graph ran to its end: the model answered.
+                            finished = True
                     except ModelCallDeadline as exc:
                         # One model call ran past its whole-call deadline: a
                         # failed turn, not the loop's clock. The tool phase
@@ -4318,7 +4466,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                             self.name,
                             type(exc).__name__,
                         )
-                return dict(latest)
+                return finished
 
             last_conn_exc: Exception | None = None
             for _attempt in range(3):
@@ -4352,6 +4500,26 @@ class BaseAnalyst(BudgetMeter, ABC):
                     # the analyst; the salvage gets whatever time is left,
                     # which may be none. Any other timeout is not this one.
                     nonlocal time_capped, time_detail, budget_ran_out_empty
+                    # The loop's clock ended the pass after the question about
+                    # its tools — a call that blocks its thread outlives the
+                    # pass's own deadline: the first answer stands as written.
+                    if tool_ask.get("first_answer") is not None:
+                        if "followed" not in tool_ask:
+                            held = list(tool_ask.get("conversation") or [])
+                            tool_ask["dropped"] = list(latest.get("messages") or [])[
+                                len(held) + 1 :
+                            ]
+                            latest["messages"] = held
+                            tool_ask["followed"] = "no_answer"
+                            tool_ask["why"] = (
+                                "the loop's clock ran out before an answer to the question"
+                            )
+                            self.logger.warning(
+                                "%s: the loop's clock ended the pass after the question "
+                                "about its tools; its first answer stands as written.",
+                                self.name,
+                            )
+                        return dict(latest)
                     left_now = budget.seconds_left()
                     if left_now is None or left_now > 1.0:
                         raise
@@ -4488,6 +4656,17 @@ class BaseAnalyst(BudgetMeter, ABC):
         # is a non-empty list. Counting them is cheap and the most useful
         # single metric for "did this analyst overspend on Ghidra".
         tool_call_count = sum(len(getattr(m, "tool_calls", None) or []) for m in msgs)
+        # The analyst's own loops' calls count toward its own: one that called
+        # a tool in any of them is not asked why it called none. A loop that
+        # answered another agent's ask is that agent's work, and is not counted.
+        if getattr(self, "_budget_ceiling", None) is None:
+            self._tool_calls_made = int(getattr(self, "_tool_calls_made", 0) or 0) + tool_call_count
+        # Turns the question's pass took and the first answer replaced: spent,
+        # and counted where every turn of the loop is.
+        dropped = [m for m in tool_ask.get("dropped") or [] if is_model_turn(m)]
+        self.steps_spent += steps_used(dropped)
+        for _m in dropped:
+            self._record_usage(_m, announce=False, call=TOOL_LOOP_TURN_CALL)
         # The ReAct tool-loop's LLM calls happen INSIDE
         # langgraph's ``create_react_agent`` executor, so they never passed
         # through ``_invoke_llm_with_timeout`` where token usage is tallied.
@@ -4546,6 +4725,10 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         final_message = msgs[-1]
         content = str(final_message.content)
+        # The first answer stands as written: the model replied KEEP to the
+        # question about its tools, or nothing answered the question.
+        if tool_ask.get("followed") in ("kept_first_answer", "no_answer"):
+            content = str(tool_ask.get("first_answer") or "")
         # Forced synthesis: a tool-using ReAct loop
         # that spends its whole step budget gathering evidence ends with
         # LangGraph's "need more steps" stop message (or an empty final turn),
@@ -4621,6 +4804,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         # in the platform's own voice, not in the agent's.
         if cap is not None and not answered:
             content = ""
+        # Tools called after the question about them, and nothing written
+        # after: the first answer stands as written.
+        if tool_ask.get("question") is not None and not content.strip():
+            content = str(tool_ask.get("first_answer") or "")
+            tool_ask.setdefault("why", "no answer followed the tool calls made after the question")
+        asked_about_tools = self._what_followed_the_tool_question(msgs, tool_ask)
+        if asked_about_tools is not None:
+            self._note_on_last_loop("tool_ask", asked_about_tools)
         self.ended_out_of_room = cap == "no_room"
 
         # A final message that is neither a structured report nor a findings
@@ -4758,6 +4949,158 @@ class BaseAnalyst(BudgetMeter, ABC):
             enter(float(remaining), min(1.0, float(reserve) / float(remaining)))
         except Exception as exc:  # noqa: BLE001 — a deadline is never worth a turn
             self.logger.debug("final-turn deadline not set (%s).", exc)
+
+    def _no_tool_call_question(
+        self,
+        conversation: list[Any],
+        budget: LoopBudget,
+        max_steps: int | None,
+        tools: list[Any],
+        pace: TurnPace | None = None,
+    ) -> Any | None:
+        """The question for an analyst whose first answer called no tool, or ``None``.
+
+        Asked once per analyst, in its own loops: not after any of them called
+        a tool or was asked, not in a loop that called a tool, and not inside
+        an ask another agent made of it. Asked only when a whole answer after
+        it fits: two graph steps left (one complete model turn), the time the
+        loop keeps for a final answer at its own pace, the conversation and an
+        answer of the output cap inside the model's window, and a spend
+        ceiling that admits it. Nothing is decided for the model: the question
+        states the fact and the tools it has, and the model answers it.
+        """
+        from langchain_core.messages import HumanMessage
+
+        from maljan.agents.prompt_fragments import no_tool_call_question
+
+        if getattr(self, "_asked_about_tools", False):
+            return None
+        if getattr(self, "_budget_ceiling", None) is not None:
+            return None
+        if int(getattr(self, "_tool_calls_made", 0) or 0) > 0:
+            return None
+        if any(getattr(message, "tool_calls", None) for message in conversation):
+            return None
+        last = conversation[-1] if conversation else None
+        if not is_model_turn(last) or not str(getattr(last, "content", "") or "").strip():
+            return None
+        names = [str(getattr(tool, "name", "") or "") for tool in tools or ()]
+        if not any(names):
+            return None
+        if max_steps is not None and max_steps - steps_used(conversation) < 2:
+            self.logger.info("%s: no step budget left to ask about its tools.", self.name)
+            return None
+        seconds = budget.seconds_left()
+        needs = pace.reserve() if pace is not None else float(_SYNTHESIS_MIN_SECONDS)
+        if seconds is not None and seconds < needs:
+            self.logger.info(
+                "%s: %.0fs left, and an answer needs %.0fs at this loop's pace; its tools "
+                "are not asked about.",
+                self.name,
+                seconds,
+                needs,
+            )
+            return None
+        question = HumanMessage(content=no_tool_call_question(names))
+        asked = [*conversation, question]
+        if not BaseAnalyst._fits_the_window(self, asked, int(self.output_cap_tokens() or 0)):
+            self.logger.info(
+                "%s: the conversation and a whole answer do not fit the window; its tools "
+                "are not asked about.",
+                self.name,
+            )
+            return None
+        if self._spend_refuses("no-tool-call question", asked):
+            self.logger.info(
+                "%s: the spend ceiling leaves no room to ask about its tools.", self.name
+            )
+            return None
+        self.logger.warning(
+            "%s answered without calling any of its %d tool(s); asking once whether it "
+            "wants to call one before its answer stands.",
+            self.name,
+            len([name for name in names if name]),
+        )
+        return question
+
+    @staticmethod
+    def _why_the_pass_stopped(
+        saved: tuple[Any, ...],
+        time_capped: bool,
+        time_detail: str,
+        spend_capped: bool,
+        spend_refusal: str,
+        call_deadline_hit: bool,
+        window_full: bool,
+        repeats: Any,
+    ) -> str:
+        """Which stop ended the question's pass, in the words its record uses."""
+        was_time, _detail, _reserve, was_spend, was_deadline, _refusal, was_full = saved
+        if window_full and not was_full:
+            return "the model server reported its context window full"
+        if spend_capped and not was_spend:
+            return f"the spend ceiling{': ' + spend_refusal if spend_refusal else ''}"
+        if call_deadline_hit and not was_deadline:
+            return time_detail or "a model call's deadline"
+        if time_capped and not was_time:
+            return f"the loop's time budget: {time_detail}" if time_detail else "the loop's time"
+        if getattr(repeats, "ending_the_loop", lambda: False)():
+            return "repeated tool calls"
+        return "the loop's step budget"
+
+    def _what_followed_the_tool_question(
+        self, messages: list[Any], asked: Mapping[str, Any]
+    ) -> dict[str, Any] | None:
+        """What the model did after the no-tool-call question, for the loop's record.
+
+        ``tool_calls_after`` is the calls it made after the question, and
+        ``followed`` says what came of it: ``called_tools``,
+        ``answered_without_tools``, ``kept_first_answer`` (it replied KEEP) or
+        ``no_answer``. ``why`` says why its first answer stands when nothing
+        was written after the question. ``None`` when the question was not
+        asked in this loop.
+        """
+        question = asked.get("question")
+        if question is None:
+            return None
+        self._asked_about_tools = True
+        text = str(getattr(question, "content", "") or "")
+        at = next(
+            (
+                index
+                for index in range(len(messages) - 1, -1, -1)
+                if messages[index] is question
+                or (
+                    getattr(messages[index], "type", "") == "human"
+                    and str(getattr(messages[index], "content", "") or "") == text
+                )
+            ),
+            None,
+        )
+        after = [] if at is None else list(messages[at + 1 :])
+        calls = sum(len(getattr(m, "tool_calls", None) or []) for m in after)
+        answered = bool(after) and (
+            is_model_turn(after[-1]) and bool(str(getattr(after[-1], "content", "") or "").strip())
+        )
+        preset = str(asked.get("followed") or "")
+        if preset:
+            followed = preset
+        elif calls:
+            followed = "called_tools"
+        elif answered:
+            followed = "answered_without_tools"
+        else:
+            followed = "no_answer"
+        record: dict[str, Any] = {"tool_calls_after": calls, "followed": followed}
+        if asked.get("why"):
+            record["why"] = str(asked["why"])
+        self.logger.info(
+            "%s: after the question about its tools it made %d tool call(s) (%s).",
+            self.name,
+            calls,
+            followed,
+        )
+        return record
 
     def _settle_final_answer(
         self,
@@ -5723,8 +6066,16 @@ class BaseAnalyst(BudgetMeter, ABC):
                         # Taken whether the chunk answered or raised: a cut
                         # left here would be read as the next chunk's.
                         self._last_answer_cut = None
-                    if cut is not None:
-                        # A cut is answered inside the chunk it happened in:
+                    repeat_margin = getattr(
+                        getattr(get_settings(), "validation", None), "claim_repeat_margin", None
+                    )
+                    repeats = claims_repeated(
+                        isr.answer_text or isr.unparsed_answer or "",
+                        None if repeat_margin is None else int(repeat_margin),
+                    )
+                    if cut is not None or repeats is not None:
+                        # A cut, or an answer that repeated its claims, is
+                        # answered inside the chunk it happened in:
                         # this chunk's answer is asked for a whole one over
                         # this chunk's own input, and what comes back stands
                         # for this chunk alone in the merge.
@@ -6077,20 +6428,41 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Read once: the next model call records its own.
         self._last_answer_cut = None
 
+        # Whether the answer being checked wrote the same claims again past
+        # the margin, read off its own text (``validation.claims_repeated``).
+        # Asked the same whole-answer question as a cut answer, once, and not
+        # sent back; keyed by the parsed answer as the cuts are.
+        repeat_margin = getattr(cfg_validation, "claim_repeat_margin", None)
+        repeated_by: dict[int, ClaimsRepeated | None] = {}
+
+        def _repeated(candidate: AgentISR) -> ClaimsRepeated | None:
+            key = id(candidate)
+            if key not in repeated_by:
+                text = candidate.answer_text or candidate.unparsed_answer or ""
+                repeated_by[key] = claims_repeated(
+                    text, None if repeat_margin is None else int(repeat_margin)
+                )
+            return repeated_by[key]
+
+        def _whole_answer_questions(candidate: AgentISR) -> list[Violation]:
+            found = _repeated(candidate)
+            cut = cuts.get(id(candidate)) or []
+            if found is not None:
+                # One question for an answer that repeated, the cut folded in:
+                # the model sees its answer up to the first repeat, and the
+                # cut question's words say it sees none of it.
+                widest = max((cap for cap, _text, _named in cut), default=0)
+                return [analyst_repeated_violation(found, chunk=chunk, cut=widest or None)]
+            return [analyst_cut_violation(cap, text, chunk=named) for cap, text, named in cut]
+
         def _validator(candidate: AgentISR) -> list[Violation]:
             first = not asked
             asked.append(True)
             if only_cut:
-                return [
-                    analyst_cut_violation(cap, text, chunk=named)
-                    for cap, text, named in cuts.get(id(candidate)) or []
-                ]
+                return _whole_answer_questions(candidate)
             unread = [] if nudged else parse_violations(candidate)
             return [
-                *(
-                    analyst_cut_violation(cap, text, chunk=named)
-                    for cap, text, named in cuts.get(id(candidate)) or []
-                ),
+                *_whole_answer_questions(candidate),
                 *unread,
                 *validate_isr(
                     candidate,
@@ -6158,6 +6530,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     ABSENCE_CLAIM_CODE,
                     CLAIM_DOES_NOT_DESCRIBE_CODE,
                     ANALYST_CUT_CODE,
+                    ANALYST_REPEATED_CODE,
                     CLAIMS_UNDER_DISPUTES_CODE,
                 )
                 else v
@@ -6188,7 +6561,13 @@ class BaseAnalyst(BudgetMeter, ABC):
             run_state=str(getattr(self, "run_state_block", "") or ""),
         )
 
-        first: list[Any] = [_PriorAnswer(isr)]
+        # An answer that repeated its claims is sent back as written up to the
+        # first claim that repeats, whether or not it was also cut: the model
+        # rewrites its answer with what it wrote in front of it.
+        shown_repeat = _repeated(isr)
+        first: list[Any] = [
+            _PriorAnswer(isr, shown=shown_repeat.before if shown_repeat is not None else None)
+        ]
 
         # A retry that asks for a whole new answer is sent only when the
         # conversation it sends leaves the cap free in the window. Every other
@@ -6206,8 +6585,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         if isr.gate_removed and isr.answer_text:
             closing = f"{gate_removed_note(isr.gate_removed)}\n{closing}"
         sent = with_question(messages, feedback_text(initial, closing=closing))
+        loop_repeat = _repeated(isr)
         widest = max((cap for cap, _text, _chunk in loop_cuts), default=0)
-        if loop_cuts and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
+        if loop_repeat is not None:
+            # A whole answer is asked for, and one may take the whole cap.
+            widest = max(widest, int(self.output_cap_tokens() or 0))
+        if (loop_cuts or loop_repeat is not None) and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
             self, sent, widest
         ):
             detail = (
@@ -6224,7 +6607,21 @@ class BaseAnalyst(BudgetMeter, ABC):
                         asked=False,
                     )
                 )
+            if loop_repeat is not None:
+                unasked_repeat = analyst_repeated_violation(loop_repeat, chunk=chunk)
+                self.validation_findings.append(
+                    replace(
+                        unasked_repeat,
+                        message=f"{unasked_repeat.message} {detail[:1].upper()}{detail[1:]}.",
+                        asked=False,
+                    )
+                )
             cuts[id(isr)] = []
+            repeated_by[id(isr)] = None
+            # Not asked for a whole answer: the other questions ask for a fix
+            # to the answer, which is sent back whole.
+            shown_repeat = None
+            first[:] = [_PriorAnswer(isr)]
 
         def _run(turns: list[Any]) -> Any:
             if first:
@@ -6318,7 +6715,14 @@ class BaseAnalyst(BudgetMeter, ABC):
             # Asked for a whole shorter answer because the first was cut, and
             # given one that ended on its own: that answer is the analyst's,
             # fewer claims and all. The cut one it replaces was never whole.
-            if bool(cuts.get(id(first_answer))) and not cuts.get(id(retried)) and retried.claims:
+            # A first answer that was cut and also repeated is replaced only by
+            # one that does not repeat either.
+            if (
+                bool(cuts.get(id(first_answer)))
+                and not cuts.get(id(retried))
+                and retried.claims
+                and (_repeated(first_answer) is None or _repeated(retried) is None)
+            ):
                 self.logger.info(
                     "Validation: '%s' answered the cut-at-cap question whole; its %d claim(s) "
                     "replace the cut answer's %d.",
@@ -6327,6 +6731,35 @@ class BaseAnalyst(BudgetMeter, ABC):
                     len(first_answer.claims),
                 )
                 return retried
+            # Asked for a whole answer because the first repeated its claims,
+            # with the part written before the repetition in front of it, and
+            # given one that is whole and does not repeat: that answer is the
+            # analyst's, as a whole answer to the cut question is.
+            repeated_first = _repeated(first_answer)
+            if (
+                repeated_first is not None
+                and _repeated(retried) is None
+                and not cuts.get(id(retried))
+                and retried.claims
+            ):
+                self.logger.info(
+                    "Validation: '%s' answered the repeated-claims question whole; its %d "
+                    "claim(s) replace the %d the repeating answer began.",
+                    self.name,
+                    len(retried.claims),
+                    repeated_first.begun,
+                )
+                return retried
+            # Asked because the first answer repeated its claims, and answered
+            # with one that repeats as well: what was written first stays, cut
+            # or not, however many claims the retry began.
+            if repeated_first is not None and _repeated(retried) is not None:
+                self.logger.warning(
+                    "Validation: '%s' answered the repeated-claims question with an answer "
+                    "that repeats too; the first answer is kept as written.",
+                    self.name,
+                )
+                return first_answer
             if len(retried.claims) < len(first_answer.claims):
                 self.logger.warning(
                     "Validation: the retry for '%s' returned %d claim(s) against %d; "
@@ -6350,7 +6783,11 @@ class BaseAnalyst(BudgetMeter, ABC):
                 agent=str(self.name),
                 stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
                 keep=_keep,
-                drop_answer_for=frozenset({ANALYST_CUT_CODE}),
+                # A repeating answer is sent back up to its first repeat (the
+                # prior answer's own content), even when it was also cut.
+                drop_answer_for=(
+                    frozenset() if shown_repeat is not None else frozenset({ANALYST_CUT_CODE})
+                ),
                 closing=closing,
             )
         except Exception as exc:  # noqa: BLE001 — a retry that fails keeps the first answer

@@ -74,6 +74,14 @@ class OpenAIConfig(BaseModel):
     # ID-recall loops observed in live runs. Only applied when base_url is
     # set, so vanilla OpenAI (which would 400 on the param) stays untouched.
     repetition_penalty: Annotated[float, Field(ge=0)] = 1.0
+    # llama.cpp's DRY sampler ("don't repeat yourself"), forwarded the same way
+    # when set: it penalises a token that extends a sequence already repeated
+    # in the context. Each is sent only when set, and none is set by default;
+    # ``dry_penalty_last_n`` of -1 is the whole context, 0 turns it off.
+    dry_multiplier: Annotated[float, Field(ge=0)] | None = None
+    dry_base: Annotated[float, Field(ge=1)] | None = None
+    dry_allowed_length: Annotated[int, Field(ge=1)] | None = None
+    dry_penalty_last_n: Annotated[int, Field(ge=-1)] | None = None
     # Disable a local reasoning model's chain-of-thought (Qwen3 ``<think>``)
     # by forwarding ``chat_template_kwargs.enable_thinking=false`` via extra_body.
     # On constrained hosts the reasoning model otherwise spends the whole decode
@@ -3384,6 +3392,10 @@ class ValidationConfig(BaseModel):
     alignment_threshold: Annotated[float, Field(ge=0.0, le=1.0)] = 0.05
     alignment_margin: Annotated[float, Field(ge=0.0, le=1.0)] = 0.20
     weak_alignment: bool = False
+    # How many claim headings an analyst's answer may write again before it is
+    # asked once for a whole answer (``isr.claims_repeated``). ``None`` derives
+    # it from the answer: the number of distinct headings it wrote.
+    claim_repeat_margin: Annotated[int, Field(ge=0)] | None = None
 
 
 # ---------------------------------------------------------------------------

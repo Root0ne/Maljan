@@ -37,7 +37,7 @@ from maljan.agents.run_evidence_corpus import (
     state_of,
 )
 from maljan.analysis.corroboration import corroboration_row
-from maljan.analysis.run_summary import RunSummaryBuilder
+from maljan.analysis.run_summary import RunSummaryBuilder, tool_asks_of
 from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
@@ -4523,7 +4523,10 @@ def make_judge_node(
                     .set_truncation(_truncation_snapshot(container))
                     .set_triage(_triage_facts)
                     .set_sandbox(state.get("sandbox_report"))
-                    .set_nudge(state.get("nudge_retry_modes") or {})
+                    .set_nudge(
+                        state.get("nudge_retry_modes") or {},
+                        no_tool_call=tool_asks_of(state.get("budget_records") or {}),
+                    )
                     .set_budget(state.get("budget_records") or {})
                     .set_tool_latency(state.get("evidence_ledger") or [])
                     .build()

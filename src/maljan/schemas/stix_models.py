@@ -627,6 +627,10 @@ class TechniqueReview(_SpecConformantModel):
     # The notice the question carried when its evidence did not fit the
     # model's window whole, as the judge read it.
     shortened: str | None = None
+    # The techniques asked with the ATT&CK check's finding that no claim
+    # naming them describes them, each with that finding as the question
+    # showed it; the report prints it beside the judge's answer.
+    undescribed: dict[str, str] = Field(default_factory=dict)
 
     def decision_for(self, technique_id: str) -> TechniqueDecision | None:
         """What the answer said of ``technique_id``, or ``None`` when it said nothing."""

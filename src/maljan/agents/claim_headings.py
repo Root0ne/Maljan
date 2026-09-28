@@ -102,3 +102,61 @@ def claims_headed(text: str) -> str:
 def count_claims_begun(text: str) -> int:
     """How many claims ``text`` begins: every claim heading before its DISPUTES section."""
     return sum(1 for line in before_disputes(text).splitlines() if CLAIM_HEAD_RE.match(line))
+
+
+# A line that ends a claim's block: a ``---`` separator.
+_SEPARATOR_RE = re.compile(r"^[ \t]*-{3,}[ \t]*$")
+# The field lines a claim block writes under its heading.
+_FIELD_LABEL_RE = re.compile(
+    r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|TECHNIQUE|DISSENT)\b", re.IGNORECASE
+)
+
+
+def _block_key(lines: list[str]) -> str:
+    """A claim's block as compared: marks, case and spacing aside, blank lines left out."""
+    words = re.sub(r"[*_`#>]", " ", " ".join(lines)).lower().split()
+    return " ".join(words).rstrip(" .;:")
+
+
+def claim_blocks(text: str) -> list[tuple[int, str]]:
+    """``(offset, key)`` of each claim ``text`` begins, before its DISPUTES section.
+
+    A claim is its whole block: the sentence on its heading line and every
+    line after it up to the next heading, a ``---`` separator, or the first
+    line that is not a field once its field lines have begun (the prose after
+    the last claim is not part of it), blank lines aside; the claim's number
+    is not part of it. Two claims under one label
+    with different sentences or evidence are different claims, and a heading
+    that holds only its label is told apart by what follows it. ``offset`` is
+    where the heading line starts in ``text``.
+    """
+    body = before_disputes(text)
+    blocks: list[tuple[int, list[str]]] = []
+    current: list[str] | None = None
+    fields = False
+    offset = 0
+    for line in body.splitlines(keepends=True):
+        bare = line.rstrip("\r\n")
+        heading = CLAIM_HEAD_RE.match(bare)
+        if heading is not None:
+            current = [bare[heading.end() :]]
+            fields = False
+            blocks.append((offset, current))
+        elif _SEPARATOR_RE.match(bare):
+            current = None
+        elif current is not None and bare.strip():
+            if _FIELD_LABEL_RE.match(bare):
+                fields = True
+                current.append(bare)
+            elif fields:
+                current = None
+            else:
+                current.append(bare)
+        offset += len(line)
+    return [(start, _block_key(lines)) for start, lines in blocks]
+
+
+def claim_heading_counts(text: str) -> tuple[int, int]:
+    """``(claims begun, distinct claims)`` of an answer, each claim keyed by its block."""
+    blocks = claim_blocks(text)
+    return len(blocks), len({key for _start, key in blocks})

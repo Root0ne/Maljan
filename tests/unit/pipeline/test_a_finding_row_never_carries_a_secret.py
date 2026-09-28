@@ -293,6 +293,11 @@ CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
     # Which chunk of a chunked analysis was cut, as the pipeline numbers its
     # chunks ("chunk 1 of 2"), and the words this function picks around it.
     ("pipeline/validation.py", "analyst_cut_violation"): frozenset({"chunk", "answer"}),
+    # The same chunk wording, and the counts the platform read off the answer:
+    # numbers, never the answer's text.
+    ("pipeline/validation.py", "analyst_repeated_violation"): frozenset(
+        {"answer", "chars", "begun", "distinct", "repeated", "margin"}
+    ),
 }
 
 # A builtin that answers about its argument in this interpreter's own words: a

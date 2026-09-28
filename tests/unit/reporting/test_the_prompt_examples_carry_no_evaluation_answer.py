@@ -41,6 +41,7 @@ from maljan.agents.delegation import (
     WAITING_ON_EACH_OTHER_REFUSAL,
     _what_an_ask_gets_sentence,
 )
+from maljan.agents.evidence_recorder import earlier_chunk_answer
 from maljan.agents.ghidra_http_client import no_program_as_error
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
@@ -69,6 +70,7 @@ from maljan.agents.prompt_fragments import (
     ENDPOINTS_ROW_SHAPE,
     NO_TOOLS_STATEMENT,
     TOOL_FREE_TURN_STATEMENT,
+    no_tool_call_question,
     tools_statement,
 )
 from maljan.agents.prompts import (
@@ -114,11 +116,13 @@ from maljan.pipeline.validation import (
     MALWARE_TYPES,
     UNATTRIBUTED_INDICATOR_CODE,
     CapabilityGrounding,
+    ClaimsRepeated,
     EntryTexts,
     Violation,
     _term_ids_said,
     absence_claim_violation,
     analyst_cut_violation,
+    analyst_repeated_violation,
     chunk_cut_unread_sentence,
     claim_does_not_describe_violation,
     claims_kept_under_disputes_finding,
@@ -134,6 +138,7 @@ from maljan.pipeline.validation import (
     section_cut_violation,
     technique_line_violation,
     unattributed_indicator_violations,
+    undescribed_technique_finding,
     ungrounded_capabilities,
     validate_verdict_bundle,
 )
@@ -853,6 +858,9 @@ PROMPTS: dict[str, str] = {
             LedgerEntry(id="ev_0002", tool="b", args={}, ok=False),
         ]
     ),
+    "a later chunk's answer from an earlier chunk's recorded result": earlier_chunk_answer(
+        "a", "ev_0001", "a recorded result"
+    ),
     "analyst cut-at-cap question naming a chunk": analyst_cut_violation(
         4096, "CLAIM: The file opens a window.\nCLAIM: The fi", chunk="chunk 1 of 2"
     ).message,
@@ -1021,6 +1029,27 @@ PROMPTS: dict[str, str] = {
         "list_functions", "No file is currently open. Call open_file first."
     )["error"]["remediation"],
     "final-answer nudge": FINAL_ANSWER_NUDGE,
+    "analyst repeated-claims question with the cut folded in": analyst_repeated_violation(
+        ClaimsRepeated(begun=15, distinct=3, margin=3, chars=900, first_repeat=4), cut=4096
+    ).message,
+    "analyst repeated-claims question naming a chunk": analyst_repeated_violation(
+        ClaimsRepeated(begun=15, distinct=3, margin=3, chars=900), chunk="chunk 1 of 2"
+    ).message,
+    "judge technique question's describe-check finding and its kind's label": (
+        technique_question_text(
+            [
+                TechniqueQuestion(
+                    "T1112",
+                    "undescribed",
+                    [("static", "The file opens a window.", ["ev_0001"])],
+                    check=undescribed_technique_finding("T1112", knowledge, 1),
+                )
+            ]
+        )
+    ),
+    "question to an analyst whose first answer called no tool": no_tool_call_question(
+        ["lookup", "strings"]
+    ),
     "skipped-analyst degradation reason": skipped_analysts_reason(
         NO_SANDBOX_DATA_REASON, ["dynamic", "network"]
     ),

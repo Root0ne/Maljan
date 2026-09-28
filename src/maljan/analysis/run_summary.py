@@ -833,8 +833,12 @@ class RunSummary:
     # which a reader has to be able to tell from a pack that wrote nothing.
     triage: dict[str, Any] | None = None
     # How the final-answer nudge had to be sent, per analyst, when the plain
-    # way failed: ``{"retry_mode": {"static": "invalid_tool_calls_dropped"}}``.
-    # ``None`` when no analyst needed a different way.
+    # way failed: ``{"retry_mode": {"static": "invalid_tool_calls_dropped"}}``;
+    # and the analysts whose first answer called no tool and were asked once
+    # whether to call one, per loop the question was asked in, with what
+    # followed: ``{"no_tool_call": {"triage": [{"tool_calls_after": 0,
+    # "followed": "answered_without_tools"}]}}``. ``None`` when neither
+    # happened.
     nudge: dict[str, Any] | None = None
     # The budget meter, per agent: ``{loops, steps_used, max_steps,
     # elapsed_s, timeout_s, delegated_steps, caps}`` summed over the agent's
@@ -1352,6 +1356,28 @@ class RunSummary:
 # ---------------------------------------------------------------------------
 
 
+def tool_asks_of(
+    records: dict[str, list[dict[str, Any]]] | None,
+) -> dict[str, list[dict[str, Any]]]:
+    """The no-tool-call questions the budget records hold, per agent, in loop order.
+
+    ``records`` is the state channel the nodes write (``budget_records``): one
+    row per loop, and a loop whose analyst was asked whether to call a tool
+    carries ``tool_ask`` (``BaseAnalyst.execute_tool_loop``). Agents with none
+    are left out.
+    """
+    out: dict[str, list[dict[str, Any]]] = {}
+    for agent, rows in (records or {}).items():
+        asks = [
+            dict(row["tool_ask"])
+            for row in (rows or [])
+            if isinstance(row, dict) and isinstance(row.get("tool_ask"), dict)
+        ]
+        if asks:
+            out[str(agent)] = asks
+    return out
+
+
 class RunSummaryBuilder:
     """Constructs a RunSummary from pipeline state and phase-specific results.
 
@@ -1490,10 +1516,26 @@ class RunSummaryBuilder:
         self._tool_latency = rows or None
         return self
 
-    def set_nudge(self, retry_modes: dict[str, str] | None) -> RunSummaryBuilder:
-        """Which analysts needed the nudge sent another way, and which way."""
+    def set_nudge(
+        self,
+        retry_modes: dict[str, str] | None,
+        *,
+        no_tool_call: dict[str, list[dict[str, Any]]] | None = None,
+    ) -> RunSummaryBuilder:
+        """Which analysts needed the nudge sent another way, and which way.
+
+        ``no_tool_call`` is the question asked of an analyst whose first answer
+        called no tool, per agent (:func:`tool_asks_of`): that it was asked,
+        and what the model did next.
+        """
         modes = {str(k): str(v) for k, v in (retry_modes or {}).items() if v}
-        self._nudge = {"retry_mode": modes} if modes else None
+        asks = {str(k): [dict(row) for row in v] for k, v in (no_tool_call or {}).items() if v}
+        nudge: dict[str, Any] = {}
+        if modes:
+            nudge["retry_mode"] = modes
+        if asks:
+            nudge["no_tool_call"] = asks
+        self._nudge = nudge or None
         return self
 
     def set_triage(self, facts: dict[str, Any] | None) -> RunSummaryBuilder:

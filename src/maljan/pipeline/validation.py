@@ -29,7 +29,7 @@ from typing import Any, get_args, get_origin
 
 from pydantic import ValidationError
 
-from maljan.agents.claim_headings import count_claims_begun
+from maljan.agents.claim_headings import claim_blocks, count_claims_begun
 from maljan.agents.run_evidence_corpus import CorpusState, both_searched
 
 # The row helpers live with the shape (``analysis.corroboration``) and are
@@ -1018,6 +1018,47 @@ def claim_does_not_describe_violation(
         path=path,
         subject=str(technique_id).strip().upper(),
     )
+
+
+def undescribed_technique_finding(technique_id: str, attck: Any, claims: int) -> str:
+    """The check's finding on a technique no claim naming which uses the catalogue's terms for it.
+
+    The fact :func:`claim_does_not_describe_violation` raises on each claim,
+    said of the technique as a whole as the term match it is, for the judge's
+    question after its verdict and for the report row that shows its answer.
+    ``""`` without the catalogue's name for the id: nothing is stated that
+    cannot be checked.
+    """
+    name, _stems = _name_terms(technique_id, attck)
+    if not name:
+        return ""
+    tid = safe_finding_value(technique_id)
+    return (
+        "the ATT&CK check found that no claim naming it uses the catalogue's terms for it: "
+        f"none of the {int(claims)} claim sentence(s) naming {tid} {safe_finding_value(name)} "
+        "shares a term with that technique, not its name, its tactic or the words that "
+        "describe it"
+    )
+
+
+def claim_asked_whether_it_describes(
+    claim: Any, technique_id: str, attck: Any, sample: Mapping[str, Any] | None = None
+) -> bool:
+    """Whether the analysts' check asks ``claim`` the does-not-describe question.
+
+    The same order :func:`validate_isr` follows: an id the catalogue does not
+    know, a claim that reads as absence, and an id the sample's platform
+    cannot host are each asked their own question instead, and only a claim
+    past all three is asked this one, when its sentence shares no term.
+    """
+    tid = str(technique_id or "").strip()
+    if not tid or attck is None or not _technique_is_known(tid, attck):
+        return False
+    if absence_claim_violation(claim, tid, attck) is not None:
+        return False
+    if platform_mismatch_message(tid, attck, expected_technique_scope(sample)):
+        return False
+    return claim_does_not_describe_violation(claim, tid, attck) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -2745,6 +2786,107 @@ def analyst_cut_violation(cap: int, text: str = "", *, chunk: str = "") -> Viola
             f"{int(cap)} tokens: the claims the evidence supports best, each written once, "
             "each one sentence with its EVIDENCE, CONFIDENCE and TECHNIQUE lines, and nothing "
             "between the blocks."
+        ),
+    )
+
+
+# An analyst's answer that writes the same claims again and again: the same
+# whole-answer question is asked of it, once, with the part written before the
+# repetition shown back.
+ANALYST_REPEATED_CODE = "isr.claims_repeated"
+
+
+@dataclass(frozen=True)
+class ClaimsRepeated:
+    """What an answer's claims say: begun, distinct, the margin they passed, and where it began.
+
+    ``before`` is the answer as written up to the first claim that repeats an
+    earlier one, and ``first_repeat`` that claim's position, 1-based.
+    """
+
+    begun: int
+    distinct: int
+    margin: int
+    chars: int
+    before: str = ""
+    first_repeat: int = 0
+
+    @property
+    def repeated(self) -> int:
+        """The headings begun again after the first of each."""
+        return self.begun - self.distinct
+
+
+def claims_repeated(text: str, margin: int | None = None) -> ClaimsRepeated | None:
+    """The finding for an answer whose repeated claim headings exceed the margin, or ``None``.
+
+    Read off the answer as it arrived (``claim_headings.claim_blocks``): each
+    claim is its whole block, heading and lines, so claims under one label
+    with different sentences or evidence are different claims. The margin is
+    the number of distinct claims, so a second whole copy of the answer is
+    within it; ``margin`` is an operator's own number
+    (``validation.claim_repeat_margin``), and there is none by default.
+    """
+    written = text or ""
+    blocks = claim_blocks(written)
+    begun = len(blocks)
+    distinct = len({key for _start, key in blocks})
+    allowed = distinct if margin is None else max(0, int(margin))
+    if begun - distinct <= allowed:
+        return None
+    seen: set[str] = set()
+    before, first_repeat = written, 0
+    for position, (start, key) in enumerate(blocks, start=1):
+        if key in seen:
+            before, first_repeat = written[:start].rstrip(), position
+            break
+        seen.add(key)
+    return ClaimsRepeated(
+        begun=begun,
+        distinct=distinct,
+        margin=allowed,
+        chars=len(written),
+        before=before,
+        first_repeat=first_repeat,
+    )
+
+
+def analyst_repeated_violation(
+    found: ClaimsRepeated, *, chunk: str = "", cut: int | None = None
+) -> Violation:
+    """What an analyst whose answer repeated its claims is told, and the whole-answer question.
+
+    The same whole-answer question the cut-at-cap finding asks, with the fact
+    that raised it: the claims begun, the distinct claims among them and how
+    many were written again. The answer is shown back only up to the first
+    claim that repeats (``ClaimsRepeated.before``, sent as the assistant turn
+    in place of the whole answer), and any whole answer that does not repeat
+    stands. ``cut`` is the output cap an answer that also stopped at it was
+    cut at: the one question then states that fact too, because the model
+    sees the answer up to its first repeat and the cut question's own words
+    would say it sees none of it.
+    """
+    answer = f"answer to {chunk}" if chunk else "previous answer"
+    chars, begun, distinct = int(found.chars), int(found.begun), int(found.distinct)
+    repeated, margin = int(found.repeated), int(found.margin)
+    first = int(found.first_repeat)
+    limit = (
+        f" It also stopped at the output limit of {int(cut):,} tokens before it ended: the "
+        "whole answer has to end well inside that limit, and any reasoning you write "
+        "counts against it."
+        if cut
+        else ""
+    )
+    return Violation(
+        code=ANALYST_REPEATED_CODE,
+        message=(
+            f"Your {answer} ran to {chars:,} characters and began {begun} CLAIM block(s), "
+            f"{distinct} of them distinct: {repeated} repeat a claim already written, more "
+            f"than the {margin} allowed.{limit} It is shown above only up to CLAIM block {first}, "
+            "the first that repeats an earlier one; the rest is not shown to you again. Write "
+            "the whole answer again: the claims shown above and any other the evidence "
+            "supports, each written once, each one sentence with its EVIDENCE, CONFIDENCE and "
+            "TECHNIQUE lines, and nothing between the blocks."
         ),
     )
 
