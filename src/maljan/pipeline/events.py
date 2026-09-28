@@ -921,7 +921,8 @@ def _rebuild_configured_pattern() -> None:
 _SECRET_BOUNDARY_BEFORE = r"(?:(?<![A-Za-z0-9_])|(?<=\\[A-Za-z])|(?<=\\u[0-9A-Fa-f]{4}))"
 
 
-def _hide_configured_secrets(line: str) -> str:
+def _mask_configured_values(line: str) -> str:
+    """``line`` with every configured value replaced by the redaction mark."""
     if _CONFIGURED_PATTERN is None:
         return line
     return _CONFIGURED_PATTERN.sub(_REDACTED, line)
@@ -951,7 +952,7 @@ def _scrub_line(line: str) -> str:
 
 def _scrub_once(line: str) -> str:
     """The configured secrets by value, then the four passes, once."""
-    line = _hide_configured_secrets(line)
+    line = _mask_configured_values(line)
     line = _SCHEME_AND_SECRET.sub(lambda m: f"{m.group(1)} {_REDACTED}", line)
     line = _URL_RUN.sub(_shorten_url, line)
     line = _VALUE_RUN.sub(_hide_credentials, line)

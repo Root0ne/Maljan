@@ -663,7 +663,8 @@ def remember_process_secrets(core_settings: Any = None) -> None:
         remember_secret_values(configured_secret_values(*sources), scope="process")
     except Exception as exc:  # noqa: BLE001 — the shape rules still run
         logger.warning(
-            "The worker's secrets were not handed to the scrub (%s).", type(exc).__name__
+            "The worker's configured values were not handed to the scrub (%s).",
+            type(exc).__name__,
         )
 
 
@@ -684,7 +685,9 @@ def remember_configured_secrets(core_settings: Any) -> None:
 
         remember_secret_values(configured_secret_values(core_settings), scope="job")
     except Exception as exc:  # noqa: BLE001 — the shape rules still run
-        logger.warning("The job's secrets were not handed to the scrub (%s).", type(exc).__name__)
+        logger.warning(
+            "The job's configured values were not handed to the scrub (%s).", type(exc).__name__
+        )
 
 
 def scrubbed(value: Any, *, field: str = "") -> Any:
