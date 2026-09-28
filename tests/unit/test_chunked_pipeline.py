@@ -378,6 +378,66 @@ class TestSafeAnalyzeISRChunked:
 
         assert seen["chunk_cuts"] == [(32768, cut_text, "chunk 1 of 2")]
 
+    def test_a_later_chunk_is_told_what_the_earlier_ones_called(
+        self, analyst: _ConcreteAnalyst
+    ) -> None:
+        """Chunk 2 re-ran ten decompiles chunk 1 had done: it is now told, and they are not run."""
+        from maljan.agents.base_agent import EARLIER_CHUNKS_HEAD
+        from maljan.schemas.evidence import LedgerEntry
+
+        analyst._evidence_entries = []
+        prompts: list[str] = []
+        seeds: list[list[str]] = []
+        real_analyze = analyst.analyze_isr
+
+        def _analyze(data: str) -> AgentISR:
+            prompts.append(data)
+            seeds.append([e.id for e in getattr(analyst, "_prior_chunk_calls", None) or []])
+            n = len(analyst._evidence_entries) + 1
+            analyst._evidence_entries.append(
+                LedgerEntry(
+                    id=f"ev_{n:04d}",
+                    agent="static",
+                    tool="decompile_function",
+                    args={"address": f"0x{n:04x}"},
+                    ok=n != 2,
+                )
+            )
+            return real_analyze(data)
+
+        analyst.analyze_isr = _analyze  # type: ignore[method-assign]
+        analyst.safe_analyze_isr_chunked([_make_chunk(i, 3) for i in range(3)])
+
+        first_call = '- decompile_function({"address": "0x0001"}) \u2192 ev_0001'
+        failed_call = '- decompile_function({"address": "0x0002"}) \u2192 ev_0002 (failed)'
+        assert EARLIER_CHUNKS_HEAD not in prompts[0]
+        assert EARLIER_CHUNKS_HEAD in prompts[1]
+        assert first_call in prompts[1]
+        assert first_call in prompts[2]
+        assert failed_call in prompts[2]
+        assert seeds == [[], ["ev_0001"], ["ev_0001", "ev_0002"]]
+        # The calls of this analysis alone, and none left behind for a later loop.
+        assert getattr(analyst, "_prior_chunk_calls", None) in (None, [])
+
+    def test_the_loop_seeds_its_repeat_guard_with_them(self) -> None:
+        from maljan.agents.evidence_recorder import seeded_repeat_guard
+        from maljan.schemas.evidence import LedgerEntry
+
+        guard = seeded_repeat_guard(
+            [LedgerEntry(id="ev_0004", tool="decompile_function", args={"address": "0x1"})]
+        )
+
+        assert guard.answered_by("decompile_function", {"address": "0x1"}) == "ev_0004"
+        assert guard.answered_by("decompile_function", {"address": "0x2"}) is None
+
+    def test_the_analyst_loop_builds_its_guard_from_the_earlier_chunks(self) -> None:
+        import inspect
+
+        from maljan.agents import base_agent
+
+        source = inspect.getsource(base_agent.BaseAnalyst.execute_tool_loop)
+        assert 'seeded_repeat_guard(getattr(self, "_prior_chunk_calls", None))' in source
+
 
 # ---------------------------------------------------------------------------
 # ServiceContainer.load_chunked()

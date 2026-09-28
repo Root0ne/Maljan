@@ -515,3 +515,58 @@ class TestTheLoopStopsMidStream:
             "of 2 (not a limit; elapsed="
         )
         assert "budget" not in said[0]
+
+
+class TestAnEarlierChunksCallIsNotRunAgain:
+    """A later chunk's loop starts knowing the calls the earlier chunks made."""
+
+    def _tool(self, calls: list[str]) -> Any:
+        return TestTheGuardEndsTheLoop()._tool(calls, "decompile_function")
+
+    def _wrapped(self, guard: RepeatGuard, calls: list[str]) -> Any:
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from maljan.schemas.evidence import EvidenceCounter
+
+        recorder = EvidenceRecorder("static", counter=EvidenceCounter())
+        return record_tools([self._tool(calls)], recorder, guard)[0]
+
+    def test_a_seeded_call_is_answered_with_the_entry_that_holds_it(self) -> None:
+        from maljan.agents.evidence_recorder import repeat_notice
+
+        guard = RepeatGuard()
+        guard.seed("decompile_function", {"path": "0x3c7c"}, "ev_0003")
+        calls: list[str] = []
+        tool = self._wrapped(guard, calls)
+
+        answer = tool.invoke({"path": "0x3c7c"})
+
+        assert calls == [], "the earlier chunk's call is not run again"
+        assert answer.startswith(repeat_notice("decompile_function", "ev_0003").split(".")[0])
+        assert "[ev_0003]" in answer
+
+    def test_a_new_call_runs(self) -> None:
+        guard = RepeatGuard()
+        guard.seed("decompile_function", {"path": "0x3c7c"}, "ev_0003")
+        calls: list[str] = []
+        tool = self._wrapped(guard, calls)
+
+        tool.invoke({"path": "0x4000"})
+
+        assert calls == ["decompile_function"]
+
+    def test_a_seeded_failure_is_said_to_have_failed(self) -> None:
+        guard = RepeatGuard()
+        guard.seed("decompile_function", {"path": "0x3c7c"}, "ev_0003", failed=True)
+        answer = self._wrapped(guard, []).invoke({"path": "0x3c7c"})
+
+        assert "it failed, in [ev_0003]" in answer
+
+    def test_a_replayed_conversation_keeps_the_seeds(self) -> None:
+        guard = RepeatGuard()
+        guard.seed("decompile_function", {"path": "0x3c7c"}, "ev_0003")
+        guard.reset()
+        calls: list[str] = []
+
+        self._wrapped(guard, calls).invoke({"path": "0x3c7c"})
+
+        assert calls == []

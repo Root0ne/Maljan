@@ -2821,6 +2821,40 @@ def answer_cut_at_cap(response: Any, cap: int) -> tuple[int, str] | None:
     return None
 
 
+# What a later chunk's prompt opens with: the calls the earlier chunks of the
+# same analysis made, each with the entry that holds its answer. Its loop
+# answers an identical call with that entry (``seeded_repeat_guard``).
+EARLIER_CHUNKS_HEAD = (
+    "Earlier chunks of this same input were already analysed. These are the tool calls "
+    "made there, each with the ledger entry that holds its result. Cite those entries "
+    "instead of making the same call again: an identical call is not run again, and is "
+    "answered with the entry that holds it."
+)
+
+
+def earlier_chunks_block(entries: Sequence[Any]) -> str:
+    """The earlier chunks' tool calls as ``tool(args) → ev_id`` lines under their head, or ``""``.
+
+    Every call, in the order made; a call that failed says so.
+    """
+    lines: list[str] = []
+    for entry in entries or ():
+        tool = str(getattr(entry, "tool", "") or "")
+        entry_id = str(getattr(entry, "id", "") or "")
+        if not tool or not entry_id:
+            continue
+        args = getattr(entry, "args", None) or {}
+        try:
+            shown = json.dumps(args, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            shown = repr(args)
+        failed = "" if bool(getattr(entry, "ok", True)) else " (failed)"
+        lines.append(f"- {tool}({shown}) \u2192 {entry_id}{failed}")
+    if not lines:
+        return ""
+    return "\n".join([EARLIER_CHUNKS_HEAD, *lines])
+
+
 class _PriorAnswer:
     """The answer the analyst already gave, in the shape the retry loop reads.
 
@@ -3155,6 +3189,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # once at the end. The node drains it — reading without clearing is how
         # a revision that made no calls re-emits the analysis round's.
         self._evidence_entries: list[LedgerEntry] = []
+        # The calls the earlier chunks of a chunked analysis made, set while a
+        # later chunk's loop runs: its repeat guard is seeded with them.
+        self._prior_chunk_calls: list[LedgerEntry] = []
         # Bytes of tool output this agent has already kept. The budget is the
         # agent's, not the loop's: a chunked analysis re-enters the loop once
         # per chunk and would otherwise be handed the whole budget again on
@@ -3927,9 +3964,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         from maljan.agents.evidence_recorder import (
             ArgumentRepairs,
             EvidenceRecorder,
-            RepeatGuard,
             record_tools,
             repair_invalid_tool_calls,
+            seeded_repeat_guard,
         )
 
         # An agent built outside a container has no counter attached, and one
@@ -3950,9 +3987,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             # The model a call is filed under until a turn names another.
             model=self._model_label(),
         )
-        # The repeat guard is per loop, like the recorder: a second chunk is a
-        # new conversation and the model has not seen the first one's answers.
-        repeats = RepeatGuard()
+        # The repeat guard is per loop, like the recorder, and a later chunk's
+        # starts with the calls the earlier chunks of the same analysis made:
+        # an identical one is answered with the entry that holds it, as the
+        # chunk's prompt lists them (``earlier_chunks_block``).
+        repeats = seeded_repeat_guard(getattr(self, "_prior_chunk_calls", None))
         # The arguments this loop had to close off, so the ledger entry for
         # such a call says so and keeps what the model actually wrote.
         repairs = ArgumentRepairs()
@@ -5631,6 +5670,10 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         chunk_isrs: list[AgentISR] = []
         errors: list[str] = []
+        # Where this analysis's own ledger entries begin: a later chunk is told
+        # the calls the earlier ones made, and its loop does not make them again.
+        entries = getattr(self, "_evidence_entries", None)
+        first_entry = len(entries) if isinstance(entries, list) else 0
         # Each chunk's cut at the output cap, named: the next chunk's answers
         # record their own, and the merged answer is checked once.
         chunk_cuts: list[tuple[int, str, str]] = []
@@ -5641,13 +5684,22 @@ class BaseAnalyst(BudgetMeter, ABC):
             if spend_reached(self):
                 errors.append(f"chunk {chunk.index + 1}: not started, the spend ceiling is reached")
                 continue
-            prompt_text = f"{chunk.to_prompt_header()}\n\n{chunk.content}"
+            entries = getattr(self, "_evidence_entries", None)
+            earlier = list(entries[first_entry:]) if isinstance(entries, list) else []
+            block = earlier_chunks_block(earlier)
+            prompt_text = f"{chunk.to_prompt_header()}\n\n" + (
+                f"{block}\n\n{chunk.content}" if block else chunk.content
+            )
             try:
                 # Each chunk's loop under this agent's lock, so an ask of it
                 # cannot run inside one: an ask drives the same buffers, the
                 # same budget and the same call chain this loop is using.
                 with lock_for(self):
-                    isr = self.analyze_isr(prompt_text)
+                    self._prior_chunk_calls = earlier
+                    try:
+                        isr = self.analyze_isr(prompt_text)
+                    finally:
+                        self._prior_chunk_calls = []
                     cut = getattr(self, "_last_answer_cut", None)
                     self._last_answer_cut = None
                 if cut is not None:

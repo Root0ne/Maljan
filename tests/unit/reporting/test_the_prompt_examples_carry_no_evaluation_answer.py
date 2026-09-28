@@ -34,6 +34,7 @@ from maljan.agents.base_agent import (
     ClaimRead,
     claims_under_disputes_sentence,
     claims_unread_sentence,
+    earlier_chunks_block,
 )
 from maljan.agents.delegation import (
     SPEND_CEILING_REFUSAL,
@@ -158,6 +159,7 @@ from maljan.reporting.renderers.stix_renderer import (
     public_resolver_reason,
     seen_in_reason,
 )
+from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
@@ -632,6 +634,12 @@ PROMPTS: dict[str, str] = {
     "analyst cut-at-cap question": analyst_cut_violation(
         4096, "CLAIM: The file opens a window.\nEVIDENCE: [ev_0001]\nCLAIM: The fi"
     ).message,
+    "a later chunk's list of the earlier chunks' calls": earlier_chunks_block(
+        [
+            LedgerEntry(id="ev_0001", tool="a", args={"x": "1"}),
+            LedgerEntry(id="ev_0002", tool="b", args={}, ok=False),
+        ]
+    ),
     "analyst cut-at-cap question naming a chunk": analyst_cut_violation(
         4096, "CLAIM: The file opens a window.\nCLAIM: The fi", chunk="chunk 1 of 2"
     ).message,

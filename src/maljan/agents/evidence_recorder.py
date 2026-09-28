@@ -378,6 +378,31 @@ class RepeatGuard:
         # different answers twice each is in the same place as one that asks
         # for one answer three times.
         self.served_repeats = 0
+        # The calls earlier chunks of the same analysis made (``seed``), kept
+        # apart so a replayed conversation forgets its own calls and not these.
+        self._seeded: dict[str, str] = {}
+        self._seeded_failures: set[str] = set()
+
+    def seed(
+        self, tool: str, kwargs: dict[str, Any], entry_id: str, *, failed: bool = False
+    ) -> None:
+        """A call an earlier chunk made: an identical one is answered with its entry, not run.
+
+        A later chunk is a new conversation, and its loop re-ran the calls the
+        earlier chunks had made. Seeded as already asked the served number of
+        times, so the first identical call gets ``repeat_notice`` naming the
+        entry that holds the answer. ``failed`` says that entry is a failure.
+        """
+        key = self._key(tool, kwargs)
+        self._seeded.setdefault(key, str(entry_id))
+        if failed:
+            self._seeded_failures.add(str(entry_id))
+        self._first.setdefault(key, str(entry_id))
+        self._count[key] = max(self._count.get(key, 0), self.SERVED)
+
+    def seeded_failure(self, entry_id: str) -> bool:
+        """Whether a seeded entry recorded a failure."""
+        return str(entry_id) in self._seeded_failures
 
     @staticmethod
     def _key(tool: str, kwargs: dict[str, Any]) -> str:
@@ -434,8 +459,8 @@ class RepeatGuard:
         are not repeats: from the model's point of view it is asking for the
         first time, and counting them ended an analyst for a dropped socket.
         """
-        self._first = {}
-        self._count = {}
+        self._first = dict(self._seeded)
+        self._count = dict.fromkeys(self._seeded, self.SERVED)
         self.served_repeats = 0
 
     def ending_the_loop(self) -> bool:
@@ -451,6 +476,18 @@ class RepeatGuard:
         key = self._key(tool, kwargs)
         self._count[key] = self._count.get(key, 0) + 1
         self._first.setdefault(key, entry_id)
+
+
+def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
+    """A loop's repeat guard, seeded with the calls earlier chunks made (``RepeatGuard.seed``)."""
+    guard = RepeatGuard()
+    for entry in entries or ():
+        tool = str(getattr(entry, "tool", "") or "")
+        entry_id = str(getattr(entry, "id", "") or "")
+        args = getattr(entry, "args", None)
+        if tool and entry_id and isinstance(args, dict):
+            guard.seed(tool, args, entry_id, failed=not bool(getattr(entry, "ok", True)))
+    return guard
 
 
 # What the model is told when its call ran on arguments that were closed off.
@@ -771,7 +808,7 @@ def _record_tool(
             first,
             narrowing,
             last_warning=repeats.warning_of_the_end(),
-            failed=recorder.entry_failed(first),
+            failed=recorder.entry_failed(first) or repeats.seeded_failure(first),
         )
 
     def _note(kwargs: dict[str, Any], entry_id: str) -> None:
