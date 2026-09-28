@@ -2353,7 +2353,10 @@ change landed on `main`.
   is built, `stix_object_count` is its object count on the stored summary and
   the report's; the judge's is `judge_stix_object_count`. The case stores the
   published techniques, and its total, corroborated count and search text
-  follow them; a case thin in what was published is not stored. The judge's
+  follow them; a case thin in what was published is not stored, and that gate
+  decides alone (the claimed set no longer drops a case). A run with no report
+  node stores the judge's bundle's technique ids, or the claimed ones with a
+  log line saying so when the bundle cannot be read. The judge's
   log line says "claimed techniques", and the terminal's corroboration line
   says "technique(s) named".
 - **The judge is asked about its malware object.** `is_family: false` on an

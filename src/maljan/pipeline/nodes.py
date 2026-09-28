@@ -1821,6 +1821,67 @@ def _corroboration_with_publication(report: Any, state: AnalysisState) -> dict[s
     return mark_unpublished(rows, published, reasons)
 
 
+def a_report_node_follows(container: Any) -> bool:
+    """Whether this run's graph has a report node after the judge. Never raises.
+
+    ``reporting.enabled`` off drops the report stage (``topology.plan``), and a
+    profile may have none; anything that cannot be read counts as one following,
+    which is the default graph.
+    """
+    try:
+        if not bool(container.config.reporting.enabled):
+            return False
+    except Exception:  # noqa: BLE001 — the default graph has one
+        return True
+    try:
+        return any(
+            str(getattr(stage, "kind", "")) == "report"
+            for stage in container.active_profile().stages
+        )
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def case_for_the_judge_alone(
+    case: Any, bundle: Any, isr_reports: Mapping[str, Any], corroborated: Sequence[str]
+) -> tuple[Any, str]:
+    """The case to hold when no report node follows the judge, and what was done, in words.
+
+    With no report, what the run publishes is the judge's bundle: the case is
+    moved to its attack-patterns' technique ids, and the thin-evidence gate is
+    asked of them. A bundle that is not one leaves no published set; the case
+    keeps the claimed techniques, is asked the gate on them, and the sentence
+    says so.
+    """
+    from maljan.memory.long_term_memory import is_thin_case, with_published_techniques
+    from maljan.pipeline.validation import _attack_pattern_technique_id
+
+    if not isinstance(bundle, Bundle):
+        if is_thin_case(case):
+            return None, "not stored: no published technique set, and the claimed set is thin"
+        return case, (
+            "no published technique set (the judge's bundle could not be read); the case "
+            "holds the claimed techniques"
+        )
+    published = [
+        tid
+        for obj in bundle.objects
+        if str(getattr(obj, "type", "")) == "attack-pattern"
+        for tid in [_attack_pattern_technique_id(obj)]
+        if tid
+    ]
+    moved = with_published_techniques(case, published, isr_reports, corroborated)
+    if is_thin_case(moved):
+        return None, (
+            f"not stored: thin published evidence (corroborated={moved.corroborated_count}, "
+            f"published techniques={moved.total_techniques})"
+        )
+    return moved, (
+        f"holds the {moved.total_techniques} technique(s) the judge's bundle published, "
+        "and is stored when the job completes"
+    )
+
+
 def _remember_the_published_techniques(
     container: Any, report: Any, isr_reports: Mapping[str, Any], corroboration: Mapping[str, Any]
 ) -> None:
@@ -4446,17 +4507,14 @@ def make_judge_node(
                 logger.warning("RunSummary build failed (%s). Skipping.", exc)
 
             if memory_store is not None and isr_reports:
-                # Quality gate: skip the upsert
-                # when the run is clearly degraded (no corroboration, no
-                # techniques, failed analysts, etc.). A polluted entry
-                # poisons future analyses via the few-shot prior block.
+                # Quality gate: skip the upsert when the run is clearly
+                # degraded (failed analysts, no negotiation). A polluted entry
+                # poisons future analyses via the few-shot prior block. The
+                # thin-evidence gate is not asked here of what was claimed: it
+                # decides on what the run published, in the report node when
+                # one runs and below from the judge's own bundle when none does.
                 _ltm_skip_reason: str | None = None
-                if _corroborated == 0 and _technique_count <= 1:
-                    _ltm_skip_reason = (
-                        f"thin evidence: corroborated={_corroborated}, "
-                        f"claimed techniques={_technique_count}"
-                    )
-                elif _failed_analysts:
+                if _failed_analysts:
                     _ltm_skip_reason = f"analyst failures: {', '.join(_failed_analysts)}"
                 elif state.get("iteration_count", 0) == 0 and not state.get("is_consensus", False):
                     _ltm_skip_reason = "no negotiation rounds completed"
@@ -4487,14 +4545,25 @@ def make_judge_node(
                         # Held, not written: the case is stored once the
                         # job has completed (``remember_the_run``), so a job
                         # that fails after its judge leaves no entry behind.
-                        container.pending_memory_case = case
-                        logger.info(
-                            "LTM: case '%s' (category=%s, claimed techniques=%d) is stored "
-                            "with the published techniques when the job completes.",
-                            case.sample_id,
-                            case.malware_category,
-                            len(case.technique_ids),
-                        )
+                        if a_report_node_follows(container):
+                            container.pending_memory_case = case
+                            logger.info(
+                                "LTM: case '%s' (category=%s, claimed techniques=%d) is held "
+                                "for the report node, which moves it to the published "
+                                "techniques and decides whether it is stored.",
+                                case.sample_id,
+                                case.malware_category,
+                                len(case.technique_ids),
+                            )
+                        else:
+                            _agreed = [
+                                str(tid)
+                                for tid, row in _corroboration.items()
+                                if len(corroboration_sources(row)) > 1
+                            ]
+                            held, how = case_for_the_judge_alone(case, bundle, isr_reports, _agreed)
+                            container.pending_memory_case = held
+                            logger.info("LTM: case '%s': %s.", case.sample_id, how)
                     except Exception as e:
                         logger.warning(
                             "LTM case could not be built (%s). Analysis result is unaffected.",

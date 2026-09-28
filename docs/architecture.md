@@ -2152,11 +2152,18 @@ the case, §8, the export and `mitre.json` count one set. Its
 `total_techniques`, its `corroborated_count` (the kept ids more than one
 source named) and its search text (the claims' own words and only the kept
 ids, which a later run's attribution reads) follow. The thin-evidence gate —
-nothing corroborated and one technique at most — is applied again to the
-published set, and a case thin in what was published is not stored. An id the case leaves out of memory (a claim kept
-after the absence question, an id the catalogue lacks) stays out although the
-run published it. The judge's log line and its thin-evidence gate count the
-claimed techniques and say so.
+nothing corroborated and one technique at most — decides on the published set
+alone: the judge does not ask it of the claimed set when a report node follows
+(`nodes.a_report_node_follows`), and the report node drops a case thin in
+what was published. A run with no report node (`reporting.enabled` off, or a
+profile without a report stage) publishes the judge's bundle, so the judge
+moves the case to that bundle's attack-pattern ids and asks the gate of them
+(`nodes.case_for_the_judge_alone`); when the bundle cannot be read there is no
+published set, and the case keeps the claimed techniques and the log says so.
+The judge still skips a run with failed analysts or no negotiation round. An
+id the case leaves out of memory (a claim kept after the absence question, an
+id the catalogue lacks) stays out although the run published it. The judge's
+log line counts the claimed techniques and says so.
 
 The run summary's `stix_object_count` is the exported bundle's object count
 once the report node has built the export, on the state's summary and on

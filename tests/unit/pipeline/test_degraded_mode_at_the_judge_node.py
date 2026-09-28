@@ -223,3 +223,93 @@ class TestANoteOnPartOfAnAnswer:
         assert "degraded" not in note
         assert "claims it read standing" in note
         assert "missing tool" not in note
+
+
+class _RememberingContainer(_Container):
+    """A container with a memory store, and a report stage that runs or not."""
+
+    def __init__(self, counter: EvidenceCounter, *, reporting: bool) -> None:
+        super().__init__(counter)
+        from maljan.memory.in_memory_store import InMemoryStore
+
+        self._store = InMemoryStore()
+        self.pending_memory_case: Any = None
+        self.config.reporting.enabled = reporting
+
+    def get_memory_store(self) -> Any:
+        return self._store
+
+
+def _thin_in_claims() -> dict[str, Any]:
+    """One claimed technique, which no second source names."""
+    import json
+
+    state = _state([])
+    empty = {"capabilities": []}
+    entry = _capa_entry().model_copy(update={"output": json.dumps(empty), "structured": empty})
+    state["evidence_ledger"] = [entry]
+    return state
+
+
+def _judged(state: dict[str, Any], *, reporting: bool, objects: list[dict]) -> Any:
+    container = _RememberingContainer(EvidenceCounter(), reporting=reporting)
+    judge = container.get_judge_agent(role="judge")
+    judge.give_verdict = AsyncMock(
+        return_value=JudgeVerdict(
+            bundle=Bundle.model_validate({"objects": objects}),
+            violations=[],
+            retries=0,
+            fed_back={},
+        )
+    )
+    asyncio.run(make_judge_node(container)(state))
+    return container.pending_memory_case
+
+
+def _technique(tid: str) -> dict:
+    return {
+        "type": "attack-pattern",
+        "id": f"attack-pattern--{tid}",
+        "name": tid,
+        "external_references": [{"source_name": "mitre-attack", "external_id": tid}],
+    }
+
+
+class TestThePublishedGateDecides:
+    """The case is judged on what the run published, not on what was claimed."""
+
+    def test_a_run_thin_in_claims_is_held_for_the_report_node(self) -> None:
+        case = _judged(_thin_in_claims(), reporting=True, objects=[])
+
+        assert case is not None, "the report node's published gate decides"
+        assert case.technique_ids == ["T1055"]
+
+    def test_without_a_report_node_the_case_holds_the_published_ids(self) -> None:
+        case = _judged(
+            _thin_in_claims(),
+            reporting=False,
+            objects=[_technique("T1055"), _technique("T1027")],
+        )
+
+        assert case is not None
+        assert case.technique_ids == ["T1055", "T1027"]
+        assert case.total_techniques == 2
+
+    def test_without_a_report_node_a_thin_publication_is_not_stored(self) -> None:
+        case = _judged(_thin_in_claims(), reporting=False, objects=[_technique("T1055")])
+
+        assert case is None
+
+
+def test_a_bundle_that_could_not_be_read_keeps_the_claimed_ids_and_says_so() -> None:
+    from maljan.memory.long_term_memory import StoredCase
+    from maljan.pipeline.nodes import case_for_the_judge_alone
+
+    claimed = StoredCase(
+        sample_id="s", summary_text="t", technique_ids=["T1055", "T1027"], total_techniques=2
+    )
+
+    case, note = case_for_the_judge_alone(claimed, None, {}, [])
+
+    assert case is claimed
+    assert "claimed" in note
