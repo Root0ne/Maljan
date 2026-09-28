@@ -2680,7 +2680,7 @@ SECTION_CUT_CODE = "composer.cut_at_output_cap"
 ANALYST_CUT_CODE = "isr.cut_at_output_cap"
 
 
-def analyst_cut_violation(cap: int, text: str = "") -> Violation:
+def analyst_cut_violation(cap: int, text: str = "", *, chunk: str = "") -> Violation:
     """What an analyst the cap cut is told: the cap, what was begun, and the bound.
 
     The cut answer is not sent back (``retry_with_feedback_sync``'s
@@ -2688,7 +2688,8 @@ def analyst_cut_violation(cap: int, text: str = "") -> Violation:
     began — and the length it was cut at is the bound the next answer stays
     under. It asks once for a whole shorter answer, never for fewer findings
     than the evidence holds, and the cap it names is the one in force: nothing
-    here raises it.
+    here raises it. ``chunk`` names the chunk whose answer was cut, as
+    "chunk 1 of 2", when the answer checked is a merge of chunks.
     """
     begun = count_claims_begun(text)
     size = (
@@ -2699,10 +2700,11 @@ def analyst_cut_violation(cap: int, text: str = "") -> Violation:
         if text
         else ""
     )
+    answer = f"answer to {chunk}" if chunk else "previous answer"
     return Violation(
         code=ANALYST_CUT_CODE,
         message=(
-            f"Your previous answer stopped at the output limit of {int(cap)} tokens before "
+            f"Your {answer} stopped at the output limit of {int(cap)} tokens before "
             f"it ended, so its last claim was cut off.{size} Any reasoning you write counts "
             f"against the same limit. Write the whole answer again so that it ends well inside "
             f"{int(cap)} tokens: the claims the evidence supports best, each written once, "

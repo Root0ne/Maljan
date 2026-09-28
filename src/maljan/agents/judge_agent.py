@@ -137,10 +137,11 @@ _INDENTED_LINE_RE = re.compile(r"\n[ \t]+")
 
 
 def judge_output_cap() -> Any:
-    """The judge's output cap and how it was reached: ``llm.judge_max_tokens``, or derived.
+    """The judge's output cap as settings derive it, for a model built without a record.
 
-    Read from what the job has learned (``context_window.output_cap_for``,
-    no request), so it is the cap the container built the judge's model with.
+    A judge whose model the container built reads the cap that model was built
+    with (``JudgeAgent._output_cap``); this derivation answers only for a model
+    handed in by other means, which carries no record.
     """
     from maljan.llm.context_window import output_cap_for
 
@@ -1363,6 +1364,20 @@ class JudgeAgent(BudgetMeter):
         # request, for the budget record and the ticks; none before a loop.
         self._tool_definition_chars: int = 0
 
+    def _output_cap(self) -> Any:
+        """The output cap this judge's model was built with, and how it was reached.
+
+        Read from the record the container left on the model
+        (``context_window.built_output_cap``): the mediator's instance runs on
+        the expert model and carries its cap, the verdict's on the judge model.
+        Nothing derives it again after the build. A model the container did
+        not build carries no record, and only then is the cap derived from
+        settings (``judge_output_cap``).
+        """
+        from maljan.llm.context_window import built_output_cap
+
+        return built_output_cap(self.llm) or judge_output_cap()
+
     def _spend_admits(
         self,
         kind: str,
@@ -1396,7 +1411,7 @@ class JudgeAgent(BudgetMeter):
                 # counted with the text, and the tool definitions sent with it.
                 prompt_chars=sum(_message_chars(m) for m in messages)
                 + max(0, int(getattr(self, "_tool_definition_chars", 0) or 0)),
-                cap_tokens=int(judge_output_cap().tokens or 0),
+                cap_tokens=int(self._output_cap().tokens or 0),
                 slot=slot,
                 holdable=holdable,
                 # The call's own deadline where the caller has one, else the
@@ -1633,7 +1648,7 @@ class JudgeAgent(BudgetMeter):
                 # The cap this call was actually built with. Passed because the
                 # local server truncates silently — same token count, same
                 # ``finish_reason: "stop"`` — so the count is the only evidence.
-                cap=judge_output_cap().tokens,
+                cap=self._output_cap().tokens,
             )
             return str(response.content)
 
@@ -2451,7 +2466,7 @@ class JudgeAgent(BudgetMeter):
         # Built as messages rather than through ``ChatPromptTemplate``: the
         # system turn now contains a JSON skeleton, and a template would read
         # its braces as placeholders and refuse the prompt outright.
-        cap = judge_output_cap().tokens or None
+        cap = self._output_cap().tokens or None
         # The answer's own budget, said where the answer is asked for. Nothing
         # told the judge its bundle had to close inside it, and a bundle that
         # does not close cannot be read at all.
@@ -2893,7 +2908,7 @@ class JudgeAgent(BudgetMeter):
             dict.fromkeys(i.lower() for q in questions for _a, _t, ids in q.mentions for i in ids)
         )
         entries = {i: known.get(i, QuestionEvidence("")) for i in cited}
-        cap = judge_output_cap().tokens or None
+        cap = self._output_cap().tokens or None
         bare = technique_question_text(
             questions, {i: e._replace(text="") for i, e in entries.items()}
         )
@@ -3507,7 +3522,7 @@ class JudgeAgent(BudgetMeter):
         rates = getattr(self, "generation_rates", None)
         if rates is None:
             return configured
-        output = judge_output_cap()
+        output = self._output_cap()
         from maljan.llm.context_window import CHARS_PER_TOKEN
 
         seconds = rates.call_timeout(

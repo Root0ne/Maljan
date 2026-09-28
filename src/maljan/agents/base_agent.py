@@ -2786,12 +2786,14 @@ def revision_messages(
 
 
 def analyst_output_cap(agent: str = "") -> int:
-    """The output cap an analyst's calls are built with, in tokens.
+    """The output cap settings derive for an analyst, in tokens, for a model without a record.
 
     ``llm.expert_max_tokens`` when the operator set it, and otherwise the cap
-    derived from the window the analyst's model serves
-    (``context_window.output_cap_for``), as the container binds it. Read,
-    never raised: the cut question names the cap in force.
+    derived from what the job has learned of the window
+    (``context_window.output_cap_for``). An analyst whose model the container
+    built reads the cap that model was built with instead
+    (``BaseAnalyst.output_cap_tokens``); this answers only for a model handed
+    in by other means. Read, never raised.
     """
     try:
         from maljan.llm.context_window import output_cap_for
@@ -2927,11 +2929,25 @@ class BudgetMeter:
         )
         # Whether this answer ended at the output cap, kept for the validation
         # turn: the last model answer recorded is the one the turn checks.
-        self._last_answer_cut = answer_cut_at_cap(
-            response, analyst_output_cap(str(getattr(self, "name", "") or ""))
-        )
+        self._last_answer_cut = answer_cut_at_cap(response, self.output_cap_tokens())
         if announce:
             self._announce_fallback(response)
+
+    def output_cap_tokens(self) -> int:
+        """The output cap this analyst's model was built with, in tokens.
+
+        Read from the record the container left on the model
+        (``context_window.built_output_cap``), the one source the cut check
+        and the spend meter share; nothing derives it again after the build.
+        A model the container did not build carries no record, and only then
+        is it derived from settings (``analyst_output_cap``).
+        """
+        from maljan.llm.context_window import built_output_cap
+
+        built = built_output_cap(getattr(self, "llm", None))
+        if built is not None:
+            return int(built.tokens)
+        return analyst_output_cap(str(getattr(self, "name", "") or ""))
 
     def _record_turns_taken(self, latest: Mapping[str, Any], sent: int) -> None:
         """The model turns of a loop that did not come back, onto the run's ledger.
@@ -4617,7 +4633,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 kind=kind,
                 model=self._model_label() or _model_label(self.llm),
                 prompt_chars=sum(_message_chars(m) for m in messages) + self._definitions_sent(),
-                cap_tokens=analyst_output_cap(str(getattr(self, "name", "") or "")),
+                cap_tokens=self.output_cap_tokens(),
                 slot=slot,
                 holdable=accepts_output_bound(target) if holdable is None else holdable,
                 # The call's own deadline where the caller has one, else the
@@ -4645,7 +4661,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     model=self._model_label() or _model_label(self.llm),
                     prompt_chars=sum(_message_chars(m) for m in messages)
                     + self._definitions_sent(),
-                    cap_tokens=analyst_output_cap(str(getattr(self, "name", "") or "")),
+                    cap_tokens=self.output_cap_tokens(),
                 )
                 == 0
             )
@@ -5615,6 +5631,9 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         chunk_isrs: list[AgentISR] = []
         errors: list[str] = []
+        # Each chunk's cut at the output cap, named: the next chunk's answers
+        # record their own, and the merged answer is checked once.
+        chunk_cuts: list[tuple[int, str, str]] = []
 
         for chunk in chunks:
             # No new chunk once the job's spend ceiling is reached: what the
@@ -5629,6 +5648,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 # same budget and the same call chain this loop is using.
                 with lock_for(self):
                     isr = self.analyze_isr(prompt_text)
+                    cut = getattr(self, "_last_answer_cut", None)
+                    self._last_answer_cut = None
+                if cut is not None:
+                    chunk_cuts.append((*cut, f"chunk {chunk.index + 1} of {chunk.total}"))
                 chunk_isrs.append(isr)
                 self.logger.debug(
                     "Chunk %d/%d analyzed: %d claims.",
@@ -5667,7 +5690,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # and a delegated ask of this agent landing between the mark and the
         # slice would move its own findings onto this ISR, or these onto its.
         with lock_for(self):
-            return self._validate_isr(self._apply_consistency_gate(merged, evidence), evidence)
+            return self._validate_isr(
+                self._apply_consistency_gate(merged, evidence), evidence, chunk_cuts=chunk_cuts
+            )
 
     # ------------------------------------------------------------------
     # View-decomposition (findings-log §3.6) — text path only
@@ -5879,7 +5904,12 @@ class BaseAnalyst(BudgetMeter, ABC):
     # Inline consistency gate (findings-log §4 Item 4)
     # ------------------------------------------------------------------
 
-    def _validate_isr(self, isr: AgentISR, evidence: str) -> AgentISR:
+    def _validate_isr(
+        self,
+        isr: AgentISR,
+        evidence: str,
+        chunk_cuts: Sequence[tuple[int, str, str]] | None = None,
+    ) -> AgentISR:
         """Tell the analyst what is wrong with its own answer, once.
 
         The ATT&CK check that used to run in the judge node, as a pass that
@@ -5950,7 +5980,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         # the question describes it.
         # Keyed by the parsed answer, because the loop checks the kept answer
         # again after choosing it, and that may be the first one.
-        cuts: dict[int, tuple[int, str] | None] = {id(isr): getattr(self, "_last_answer_cut", None)}
+        # Each cut is ``(cap, text, chunk)``: a merge of chunks passes every
+        # chunk's cut, named, because each chunk's loop recorded its own and
+        # only the last of them would otherwise still be held.
+        loop_answer_cut = getattr(self, "_last_answer_cut", None)
+        cuts: dict[int, list[tuple[int, str, str]]] = {
+            id(isr): list(chunk_cuts)
+            if chunk_cuts is not None
+            else ([(*loop_answer_cut, "")] if loop_answer_cut is not None else [])
+        }
         # Read once: the next model call records its own.
         self._last_answer_cut = None
 
@@ -5958,9 +5996,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             first = not asked
             asked.append(True)
             unread = [] if nudged else parse_violations(candidate)
-            cut = cuts.get(id(candidate))
             return [
-                *([analyst_cut_violation(*cut)] if cut is not None else []),
+                *(
+                    analyst_cut_violation(cap, text, chunk=chunk)
+                    for cap, text, chunk in cuts.get(id(candidate)) or []
+                ),
                 *unread,
                 *validate_isr(
                     candidate,
@@ -6060,7 +6100,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # A retry that asks for a whole new answer is sent only when the
         # conversation it sends leaves the cap free in the window. Every other
         # question keeps the answer and asks for a fix to it, as it always did.
-        loop_cut = cuts.get(id(isr))
+        loop_cuts = cuts.get(id(isr)) or []
         # Measured with the turn that carries every question of this retry,
         # not the framed conversation alone: fourteen questions are not free.
         from maljan.pipeline.validation import (
@@ -6073,23 +6113,25 @@ class BaseAnalyst(BudgetMeter, ABC):
         if isr.gate_removed and isr.answer_text:
             closing = f"{gate_removed_note(isr.gate_removed)}\n{closing}"
         sent = with_question(messages, feedback_text(initial, closing=closing))
-        if loop_cut is not None and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
-            self, sent, loop_cut[0]
+        widest = max((cap for cap, _text, _chunk in loop_cuts), default=0)
+        if loop_cuts and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
+            self, sent, widest
         ):
             detail = (
                 "not asked: the conversation the question is sent in and the "
-                f"{loop_cut[0]}-token answer it asks for do not fit this model's window"
+                f"{widest}-token answer it asks for do not fit this model's window"
             )
             self.logger.warning("%s: the cut-at-cap question was %s.", self.name, detail)
-            unasked_cut = analyst_cut_violation(*loop_cut)
-            self.validation_findings.append(
-                replace(
-                    unasked_cut,
-                    message=f"{unasked_cut.message} {detail[:1].upper()}{detail[1:]}.",
-                    asked=False,
+            for cap, text, chunk in loop_cuts:
+                unasked_cut = analyst_cut_violation(cap, text, chunk=chunk)
+                self.validation_findings.append(
+                    replace(
+                        unasked_cut,
+                        message=f"{unasked_cut.message} {detail[:1].upper()}{detail[1:]}.",
+                        asked=False,
+                    )
                 )
-            )
-            cuts[id(isr)] = None
+            cuts[id(isr)] = []
 
         def _run(turns: list[Any]) -> Any:
             if first:
@@ -6127,7 +6169,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             if isinstance(artifacts, list):
                 parsed.artifacts = artifacts[a_mark:]
                 del artifacts[a_mark:]
-            cuts[id(parsed)] = getattr(self, "_last_answer_cut", None)
+            retry_cut = getattr(self, "_last_answer_cut", None)
+            cuts[id(parsed)] = [(*retry_cut, "")] if retry_cut is not None else []
             self._last_answer_cut = None
             return parsed
 
@@ -6182,11 +6225,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             # Asked for a whole shorter answer because the first was cut, and
             # given one that ended on its own: that answer is the analyst's,
             # fewer claims and all. The cut one it replaces was never whole.
-            if (
-                cuts.get(id(first_answer)) is not None
-                and cuts.get(id(retried)) is None
-                and retried.claims
-            ):
+            if bool(cuts.get(id(first_answer))) and not cuts.get(id(retried)) and retried.claims:
                 self.logger.info(
                     "Validation: '%s' answered the cut-at-cap question whole; its %d claim(s) "
                     "replace the cut answer's %d.",

@@ -332,7 +332,7 @@ class TestSafeAnalyzeISRChunked:
         order: list[str] = []
         validating = threading.Event()
 
-        def _validate(isr: AgentISR, evidence: str) -> AgentISR:
+        def _validate(isr: AgentISR, evidence: str, **_kw: object) -> AgentISR:
             order.append("validation starts")
             validating.set()
             time.sleep(0.3)
@@ -351,6 +351,32 @@ class TestSafeAnalyzeISRChunked:
         asker.join(5)
 
         assert order == ["validation starts", "validation ends", "ask"]
+
+    def test_a_cut_in_chunk_one_reaches_the_merged_check_after_a_short_chunk_two(
+        self, analyst: _ConcreteAnalyst
+    ) -> None:
+        """Each chunk's loop records its own answer; chunk 2's must not erase chunk 1's cut."""
+        cut_text = "CLAIM: one\nEVIDENCE: [ev_0001]\nCLAIM: tw"
+        answers = iter([(32768, cut_text), None])
+        real_analyze = analyst.analyze_isr
+
+        def _analyze(data: str) -> AgentISR:
+            isr = real_analyze(data)
+            # What ``_record_usage`` leaves after each chunk's last answer.
+            analyst._last_answer_cut = next(answers)
+            return isr
+
+        seen: dict[str, object] = {}
+
+        def _validate(isr: AgentISR, evidence: str, **kw: object) -> AgentISR:
+            seen.update(kw)
+            return isr
+
+        analyst.analyze_isr = _analyze  # type: ignore[method-assign]
+        analyst._validate_isr = _validate  # type: ignore[method-assign]
+        analyst.safe_analyze_isr_chunked([_make_chunk(i, 2) for i in range(2)])
+
+        assert seen["chunk_cuts"] == [(32768, cut_text, "chunk 1 of 2")]
 
 
 # ---------------------------------------------------------------------------

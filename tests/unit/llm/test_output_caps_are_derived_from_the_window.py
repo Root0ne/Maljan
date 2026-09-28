@@ -182,3 +182,42 @@ class TestItIsPrinted:
 
     def test_a_record_with_no_cap_noted_carries_no_key(self) -> None:
         assert "output_caps" not in GenerationRates().snapshot()
+
+
+class TestTheBuiltCapIsReadNotDerivedAgain:
+    def test_a_recorded_cap_is_read_back(self) -> None:
+        from maljan.llm.context_window import OutputCap, built_output_cap, record_built_cap
+
+        class _Model:
+            pass
+
+        model = record_built_cap(_Model(), OutputCap(32768, "derived"))
+
+        assert built_output_cap(model) == OutputCap(32768, "derived")
+
+    def test_a_model_built_without_one_has_none(self) -> None:
+        from unittest.mock import MagicMock
+
+        from maljan.llm.context_window import built_output_cap
+
+        assert built_output_cap(MagicMock()) is None
+        assert built_output_cap(None) is None
+
+    def test_the_record_outlives_the_window_cache(self) -> None:
+        """Derived again after the cache expired the cap is 8,192; the record is not."""
+        from maljan.llm.context_window import (
+            OutputCap,
+            built_output_cap,
+            forget_learned_windows,
+            record_built_cap,
+        )
+
+        class _Model:
+            pass
+
+        model = record_built_cap(_Model(), OutputCap(32768, "a quarter of 131072 (probed)"))
+        forget_learned_windows()
+
+        derived_again = output_cap_for(_settings(0, base_url=LOCAL), "expert_max_tokens", "static")
+        assert derived_again.tokens == DEFAULT_REPLY_TOKENS
+        assert built_output_cap(model).tokens == 32768

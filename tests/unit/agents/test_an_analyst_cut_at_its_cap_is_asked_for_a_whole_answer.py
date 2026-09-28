@@ -194,3 +194,97 @@ class TestTheWindow:
         analyst = _Analyst([])
         with patch.object(BaseAnalyst, "_context_budget", return_value=None):
             assert analyst._fits_the_window([SimpleNamespace(content="x" * 10**7)], CAP)
+
+
+BUILT = 32768
+
+
+def _local_settings() -> Any:
+    """Settings whose derivation, with no window learned, is the documented 8,192."""
+    from maljan.core.config import LLMConfig, Settings
+
+    settings = Settings(llm=LLMConfig(provider="openai"))
+    settings.llm.openai.context_size = 0
+    settings.llm.openai.expert_model = "local-model"
+    settings.llm.openai.judge_model = "local-model"
+    settings.llm.openai.base_url = "http://127.0.0.1:8080/v1"
+    return settings
+
+
+def _built_analyst(replies: list[tuple[str, int]]) -> _Analyst:
+    """An analyst whose model carries the cap the container built it with."""
+    from maljan.llm.context_window import OutputCap, record_built_cap
+
+    analyst = _Analyst(replies)
+    record_built_cap(analyst.llm, OutputCap(BUILT, "a quarter of 131072 (probed)"))
+    return analyst
+
+
+class TestTheCheckReadsTheCapTheCallWasBuiltWith:
+    """Not patched, and with the window cache expired: derived again it would say 8,192."""
+
+    def _expired(self) -> Any:
+        from maljan.llm.context_window import DEFAULT_REPLY_TOKENS, forget_learned_windows
+
+        forget_learned_windows()
+        settings = _local_settings()
+        from maljan.llm.context_window import output_cap_for
+
+        assert output_cap_for(settings, "expert_max_tokens", "static").tokens == (
+            DEFAULT_REPLY_TOKENS
+        )
+        return patch("maljan.agents.base_agent.get_settings", return_value=settings)
+
+    def test_an_answer_under_the_built_cap_is_not_cut(self) -> None:
+        analyst = _built_analyst([])
+        with self._expired():
+            analyst._record_usage(_message(FIRST, 8_600))
+
+        assert analyst._last_answer_cut is None
+
+    def test_an_answer_at_the_built_cap_is_cut_and_named_with_it(self) -> None:
+        analyst = _built_analyst([(WHOLE, 300)])
+        isr = analyst._text_to_isr(FIRST, 0)
+        with (
+            self._expired(),
+            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
+        ):
+            analyst._record_usage(_message(FIRST, BUILT))
+            analyst._validate_isr(isr, "evidence")
+
+        (turns,) = analyst.seen_turns
+        assert f"output limit of {BUILT} tokens" in str(turns[-1].content)
+
+    def test_the_spend_meter_is_given_the_built_cap(self) -> None:
+        analyst = _built_analyst([])
+        meter = MagicMock()
+        meter.admit.return_value = None
+        with self._expired(), patch.object(BaseAnalyst, "_spend_meter", return_value=meter):
+            analyst._spend_admits("loop turn", [])
+
+        assert meter.admit.call_args.kwargs["cap_tokens"] == BUILT
+
+    def test_the_judge_reads_the_cap_its_model_was_built_with(self) -> None:
+        from maljan.agents.judge_agent import JudgeAgent
+        from maljan.llm.context_window import OutputCap, record_built_cap
+
+        judge = JudgeAgent(llm=MagicMock())
+        record_built_cap(judge.llm, OutputCap(BUILT, "built"))
+        with self._expired():
+            assert judge._output_cap().tokens == BUILT
+
+
+class TestACutInAChunkIsNamed:
+    def test_the_question_names_the_chunk_whose_answer_was_cut(self) -> None:
+        analyst = _Analyst([])
+        isr = analyst._text_to_isr(WHOLE, 0)
+        with (
+            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch.object(BaseAnalyst, "_fits_the_window", return_value=False),
+        ):
+            analyst._validate_isr(isr, "evidence", chunk_cuts=[(CAP, FIRST, "chunk 1 of 2")])
+
+        (finding,) = [v for v in analyst.validation_findings if v.code == ANALYST_CUT_CODE]
+        assert finding.message.startswith("Your answer to chunk 1 of 2 stopped")
+        assert f"output limit of {CAP} tokens" in finding.message

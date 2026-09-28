@@ -249,6 +249,9 @@ CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
     # itself. The tool names beside it are wrapped, because a tool name comes
     # from a server rather than from this repository.
     ("pipeline/validation.py", "partial_evidence_note"): frozenset({"state"}),
+    # Which chunk of a chunked analysis was cut, as the pipeline numbers its
+    # chunks ("chunk 1 of 2"), and the words this function picks around it.
+    ("pipeline/validation.py", "analyst_cut_violation"): frozenset({"chunk", "answer"}),
 }
 
 # A builtin that answers about its argument in this interpreter's own words: a
