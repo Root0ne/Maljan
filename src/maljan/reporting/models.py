@@ -430,7 +430,10 @@ class NetworkURL(BaseModel):
     model_config = _STRICT_CONFIG
 
     url: str
-    method: str = "GET"
+    # The HTTP method the evidence records for the request, ``None`` when no
+    # record holds one: a URL read out of the file's bytes was made by no
+    # request anybody saw, and a default "GET" contradicted a POST beacon.
+    method: str | None = None
     status: int | None = None
     user_agent: str | None = None
     # Where the URL came from, with the same three answers and the same weight

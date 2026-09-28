@@ -132,7 +132,7 @@ export default function NetworkTab() {
               {net.urls.map((u, i) => (
                 <tr key={i} className="hover:bg-bg-hover">
                   <td className="px-4 py-2 text-[11px] uppercase tracking-wider text-text-muted">
-                    {u.method}
+                    {u.method ?? "-"}
                   </td>
                   <td className="px-4 py-2 text-xs font-mono text-text-secondary">
                     {u.status ?? "-"}

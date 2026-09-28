@@ -851,7 +851,7 @@ class MarkdownRenderer:
             for u in observed_urls[:20]:
                 measured.append(
                     _row(
-                        u.method,
+                        u.method or "-",
                         f"`{defang(_truncate(u.url, _CELL_LIMIT), 'url')}`",
                         u.status or "-",
                         _truncate(u.user_agent or "-", _CELL_LIMIT),
