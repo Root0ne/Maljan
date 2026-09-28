@@ -173,3 +173,26 @@ async def test_the_narrative_is_asked_once_and_its_answer_stands() -> None:
     assert out.defensive_recommendations[0].action == f"Block {PUBLISHED}."
     feedback = str(llm.ainvoke.await_args_list[1].args[0][-1].content)
     assert f"[{UNPUBLISHED_RECOMMENDATION_CODE}]" in feedback
+
+
+def test_a_reference_host_no_row_holds_is_not_asked_about() -> None:
+    payload = _recommendations("Apply the vendor's guidance at learn.microsoft.com.")
+
+    assert recommendation_indicator_violations(payload, published_answers(_report())) == []
+
+
+def test_a_reference_host_the_table_refuses_is_still_asked_about() -> None:
+    report = _report()
+    report.consolidated_iocs.append(
+        ConsolidatedIOC(
+            type="Domain",
+            kind="domain",
+            value="learn.microsoft.com",
+            source="sandbox",
+            published="no: a well-known benign name the sandbox's guest resolved",
+            is_network=True,
+        )
+    )
+    payload = _recommendations("Block learn.microsoft.com.")
+
+    assert recommendation_indicator_violations(payload, published_answers(report))

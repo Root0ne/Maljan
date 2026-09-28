@@ -3002,13 +3002,20 @@ def recommendation_indicator_violations(
     answer ``yes`` for is named with the table's reason, one question per
     recommendation. Nothing is removed: what the model answers stands.
     """
+    from maljan.extractors.network_extractor import is_well_known_benign_host
+    from maljan.reporting.renderers.stix_renderer import publishes
+
     out: list[Violation] = []
     for index, row in enumerate(_rows_of(payload, "defensive_recommendations")):
         text = " ".join(str(row.get(key) or "") for key in ("action", "rationale", "detection"))
         refused: list[str] = []
         for kind, value in network_values_in(text):
             answer = str(answers(kind, value) or "")
-            if answer.strip() == "yes" or answer.startswith("yes:"):
+            if publishes(answer):
+                continue
+            if not answer and kind == "domain" and is_well_known_benign_host(value):
+                # A reference or vendor host the run never recorded: a place to
+                # read, not an indicator to act on.
                 continue
             why = answer or f"no: {NO_TABLE_ROW}"
             said = f"{safe_finding_value(value)} ({safe_finding_value(why)})"
