@@ -631,6 +631,13 @@ class TechniqueReview(_SpecConformantModel):
     # naming them describes them, each with that finding as the question
     # showed it; the report prints it beside the judge's answer.
     undescribed: dict[str, str] = Field(default_factory=dict)
+    # The techniques asked with the technique card check's finding, each with
+    # that finding as the question showed it; printed beside the answer too.
+    card: dict[str, str] = Field(default_factory=dict)
+    # Every claimed technique no claim naming which cites an entry holding the
+    # behaviour, asked or not, with why; the report marks each and withholds
+    # nothing for it.
+    unanchored: dict[str, str] = Field(default_factory=dict)
 
     def decision_for(self, technique_id: str) -> TechniqueDecision | None:
         """What the answer said of ``technique_id``, or ``None`` when it said nothing."""

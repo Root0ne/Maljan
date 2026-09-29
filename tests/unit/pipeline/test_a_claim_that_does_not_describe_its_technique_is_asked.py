@@ -70,6 +70,28 @@ class TestTheNarrowCaseIsAsked:
         assert "Keep T1003 only if the sample does it" in violation.message
         assert violation.path == "claims[0]"
 
+    def test_the_question_shows_the_technique_s_card(self) -> None:
+        from maljan.memory.technique_cards import card_lines, technique_card
+
+        violation = claim_does_not_describe_violation(
+            _claim("The sample opens a window.", "T1003"), "T1003", knowledge
+        )
+
+        card = technique_card("T1003")
+        assert violation is not None and card is not None
+        assert violation.message.endswith(
+            "TECHNIQUE: NONE. The technique's card: " + " | ".join(card_lines(card, "T1003"))
+        )
+        assert "not T1497 Virtualization/Sandbox Evasion when" in violation.message
+
+    def test_a_technique_with_no_card_is_asked_as_before(self) -> None:
+        violation = claim_does_not_describe_violation(
+            _claim("The sample opens a window.", "T1112"), "T1112", knowledge
+        )
+
+        assert violation is not None
+        assert violation.message.endswith("write TECHNIQUE: NONE.")
+
 
 class TestASentenceThatSharesATermIsNotAsked:
     @pytest.mark.parametrize(

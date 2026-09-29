@@ -848,7 +848,13 @@ TECHNIQUE_QUESTION_SYSTEM = (
     "techniques that your bundle does not carry, some that appear only on an "
     "analyst's finding, which no check has asked about, and some for which the ATT&CK "
     "check found that no claim naming them uses the catalogue's terms for them; a "
-    "technique of that last kind carries the check's finding. You decide, for each one, whether the report "
+    "technique of that last kind carries the check's finding. Some your bundle carries "
+    "are asked because the claims naming them do not meet the technique's card. A "
+    "technique with a card shows it: what the evidence has to show, whether the action "
+    "alone is the technique or it needs a stated purpose, what to look for, and the "
+    "sibling techniques it is confused with, each with what tells them apart; a card "
+    "check, where there is one, states which of that the claims and the entries they "
+    "cite do not show. You decide, for each one, whether the report "
     "publishes it. You are shown the run state and the pack, the analysts' reports as "
     "your verdict call was shown them, your verdict and the techniques your bundle "
     "carries, and for each technique the claims or findings that name it with the "
@@ -965,6 +971,17 @@ def _as_evidence(value: Any) -> QuestionEvidence:
     return value if isinstance(value, QuestionEvidence) else QuestionEvidence(str(value or ""))
 
 
+def _card_lines_for(technique_id: str) -> list[str]:
+    """The technique's card as the question shows it (``memory.technique_cards``), or none."""
+    try:
+        from maljan.memory.technique_cards import card_lines, technique_card
+
+        card = technique_card(technique_id)
+        return card_lines(card, technique_id) if card is not None else []
+    except Exception:  # noqa: BLE001 — a card unread is a question without it
+        return []
+
+
 def technique_question_text(
     questions: Sequence[Any],
     evidence: Mapping[str, Any] | None = None,
@@ -975,7 +992,8 @@ def technique_question_text(
 
     ``questions`` are ``capability_matrix.TechniqueQuestion`` rows; each is
     listed with every claim or finding that names it, in the analyst's words,
-    and the evidence ids it cites. ``evidence`` is what is shown for each id
+    and the evidence ids it cites, then the checks' findings it carries and
+    the technique's card where it has one. ``evidence`` is what is shown for each id
     (text, or :class:`QuestionEvidence`), looked up whatever the case the id
     was cited in, and listed once under the techniques with the tool behind
     it and a mark when it is not the whole answer as stored; ``notice`` says
@@ -991,6 +1009,7 @@ def technique_question_text(
                 "in your bundle; the ATT&CK check found no claim naming it uses the "
                 "catalogue's terms for it"
             ),
+            "card": "in your bundle; its card's check found the claims naming it do not meet it",
         }.get(question.kind, "named only on an analyst's finding")
         lines.append(f"{n}. {technique_label(question.technique_id)} — {where}")
         for agent, text, ids in question.mentions:
@@ -1000,6 +1019,10 @@ def technique_question_text(
         check = str(getattr(question, "check", "") or "")
         if check:
             lines.append(f"   check: {check}")
+        card_check = str(getattr(question, "card_check", "") or "")
+        if card_check:
+            lines.append(f"   card check: {card_check}")
+        lines.extend(f"   {line}" for line in _card_lines_for(question.technique_id))
     if cited:
         lines += ["", "EVIDENCE CITED"]
         if notice:
@@ -3080,7 +3103,11 @@ class JudgeAgent(BudgetMeter):
         is asked for a JSON array and read tolerantly
         (:func:`read_technique_answer`).
         """
-        from maljan.extractors.capability_matrix import bundle_technique_ids, judge_questions
+        from maljan.extractors.capability_matrix import (
+            bundle_technique_ids,
+            judge_questions,
+            unanchored_techniques,
+        )
         from maljan.pipeline.outcome import decide_from_bundle
         from maljan.schemas.stix_models import TechniqueReview
 
@@ -3093,19 +3120,29 @@ class JudgeAgent(BudgetMeter):
                 attck = knowledge
             except Exception:  # noqa: BLE001 — no catalogue, no describe check
                 attck = None
-            questions, not_asked = judge_questions(dumped, isr_reports, routed, attck=attck)
+            questions, not_asked = judge_questions(
+                dumped, isr_reports, routed, attck=attck, evidence_texts=evidence_texts
+            )
+            # Every claimed technique no claim naming which is anchored to an
+            # entry holding it: marked in the report, asked or not.
+            unanchored = unanchored_techniques(isr_reports, evidence_texts, attck)
         except Exception as exc:  # noqa: BLE001 — a question not built is none asked
             self.logger.warning("Judge technique question not built (%s).", type(exc).__name__)
             return None
         if not questions:
-            return TechniqueReview(not_asked=not_asked) if not_asked else None
+            if not_asked or unanchored:
+                return TechniqueReview(not_asked=not_asked, unanchored=unanchored)
+            return None
         asked = [q.technique_id for q in questions]
-        # The check's finding each question carried, kept on the answer for the report.
+        # The checks' findings each question carried, kept on the answer for the report.
         undescribed = {q.technique_id: q.check for q in questions if q.check}
+        card_checks = {q.technique_id: q.card_check for q in questions if q.card_check}
         if verdict_timed_out:
             return TechniqueReview(
                 asked=asked,
                 undescribed=undescribed,
+                card=card_checks,
+                unanchored=unanchored,
                 unanswered=TECHNIQUE_QUESTION_NOT_ASKED,
                 not_asked=not_asked,
             )
@@ -3174,6 +3211,8 @@ class JudgeAgent(BudgetMeter):
             return TechniqueReview(
                 asked=asked,
                 undescribed=undescribed,
+                card=card_checks,
+                unanchored=unanchored,
                 unanswered=f"not asked: {stop}",
                 not_asked=not_asked,
             )
@@ -3234,6 +3273,8 @@ class JudgeAgent(BudgetMeter):
             return TechniqueReview(
                 asked=asked,
                 undescribed=undescribed,
+                card=card_checks,
+                unanchored=unanchored,
                 unanswered=reason,
                 not_asked=not_asked,
                 shortened=notice or None,
@@ -3269,6 +3310,8 @@ class JudgeAgent(BudgetMeter):
         return TechniqueReview(
             asked=asked,
             undescribed=undescribed,
+            card=card_checks,
+            unanchored=unanchored,
             decisions=decisions,
             not_asked=not_asked,
             shortened=notice or None,
