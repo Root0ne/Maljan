@@ -63,7 +63,7 @@ class TestTheCatalogueMatchesTheStandards:
         assert _set("sha384_init").values[0] == 0xCBBB9D5DC1059ED8
         md5 = _set("md5_t").values
         assert (md5[0], md5[63]) == (0xD76AA478, 0xEB86D391)
-        assert _set("md5_init").values == (0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476)
+        assert _set("md5_sha1_init").values == (0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476)
         assert _set("sha1_init").values[-1] == 0xC3D2E1F0
         assert _set("sha1_k").values == (0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xCA62C1D6)
 
@@ -132,7 +132,7 @@ def _md5(message: bytes) -> bytes:
     shifts = [7, 12, 17, 22] * 4 + [5, 9, 14, 20] * 4 + [4, 11, 16, 23] * 4 + [6, 10, 15, 21] * 4
     padded = message + b"\x80"
     padded += b"\0" * ((56 - len(padded)) % 64) + (len(message) * 8).to_bytes(8, "little")
-    state = list(_set("md5_init").values)
+    state = list(_set("md5_sha1_init").values)
     for start in range(0, len(padded), 64):
         m = struct.unpack("<16I", padded[start : start + 64])
         a, b, c, d = state
@@ -296,3 +296,77 @@ class TestTheScan:
     def test_a_missing_file_is_an_error(self, tmp_path: Path) -> None:
         answer = find_crypto_constants(str(tmp_path / "absent"))
         assert "error" in answer
+
+
+def _le(values: tuple[int, ...], width: int) -> bytes:
+    return b"".join(value.to_bytes(width, "little") for value in values)
+
+
+class TestOverlappingSetsAreNamedOnlyByWhatDistinguishesThem:
+    """The reviewer's buffers: one algorithm's constants alone, between random bytes."""
+
+    def _scan(self, tmp_path: Path, blob: bytes) -> tuple[dict[str, dict], list[str]]:
+        import os
+
+        target = tmp_path / "buffer.bin"
+        target.write_bytes(os.urandom(4096) + blob + os.urandom(4096))
+        answer = find_crypto_constants(str(target))
+        return _found(answer), [row["id"] for row in answer["lone"]]
+
+    def test_md5_alone_is_not_said_to_be_sha1(self, tmp_path: Path) -> None:
+        found, lone = self._scan(
+            tmp_path, _le(_set("md5_sha1_init").values, 4) + _le(_set("md5_t").values, 4)
+        )
+        assert set(found) == {"md5_t", "md5_sha1_init"}
+        assert found["md5_sha1_init"]["algorithm"] == "MD5/SHA-1 family"
+        assert "sha1_init" not in lone
+
+    def test_sha1_s_initial_values_name_sha1_and_not_md5(self, tmp_path: Path) -> None:
+        found, _ = self._scan(tmp_path, _le(_set("sha1_init").values, 4))
+        assert set(found) == {"sha1_init"}
+
+    def test_sha512_alone_is_not_said_to_be_sha256(self, tmp_path: Path) -> None:
+        found, lone = self._scan(
+            tmp_path, _le(_set("sha512_k").values, 8) + _le(_set("sha512_init").values, 8)
+        )
+        assert set(found) == {"sha512_k", "sha512_init"}
+        assert not {"sha256_k", "sha256_init"} & set(lone)
+
+    def test_sha384_alone_is_not_said_to_be_sha224(self, tmp_path: Path) -> None:
+        found, lone = self._scan(tmp_path, _le(_set("sha384_init").values, 8))
+        assert set(found) == {"sha384_init"}
+        assert "sha224_init" not in lone
+
+    def test_sha256_alone_is_sha256(self, tmp_path: Path) -> None:
+        found, _ = self._scan(tmp_path, _le(_set("sha256_init").values, 4))
+        assert set(found) == {"sha256_init"}
+        assert found["sha256_init"]["algorithm"] == "SHA-256"
+
+    def test_sha512_split_into_halves_is_the_sha2_family(self, tmp_path: Path) -> None:
+        """x86 code keeps a 64-bit constant as two 32-bit immediates, apart."""
+        k = _set("sha512_k").values
+        high = tuple(value >> 32 for value in k[:8])
+        low = tuple(value & 0xFFFFFFFF for value in k[:8])
+        found, _ = self._scan(tmp_path, _le(high, 4) + b"\x90" * 16 + _le(low, 4))
+        assert found["sha256_k"]["algorithm"] == "SHA-2 family"
+        assert "sha512_k" not in found
+
+
+class TestAGoldenRatioValueIsTheConstant:
+    def test_it_names_no_cipher(self) -> None:
+        for identifier in ("golden_ratio", "golden_ratio_negated"):
+            entry = _set(identifier)
+            assert entry.algorithm == "golden-ratio constant"
+
+
+class TestFunctionStartsFromElsewhere:
+    def test_an_x86_image_states_the_start_capa_listed_before_a_place(self, tmp_path: Path) -> None:
+        image = SyntheticPE(is64=False, image_base=0x400000)
+        k = _set("sha256_k").values
+        image.put("text", 0x110, b"\x05" + struct.pack("<I", k[0]))
+        image.put("text", 0x120, b"\x05" + struct.pack("<I", k[5]))
+        answer = find_crypto_constants(
+            _write(tmp_path, image), function_starts=[hex(TEXT_RVA + 0x100)]
+        )
+        place = _found(answer)["sha256_k"]["values"][0]["places"][0]
+        assert place["after_function_start"] == hex(TEXT_RVA + 0x100)

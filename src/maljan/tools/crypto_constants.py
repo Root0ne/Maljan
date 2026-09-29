@@ -71,6 +71,18 @@ class ConstantSet:
     values: tuple[Any, ...]
     # A values set also looked for whole, as a table.
     also_whole: bool = False
+    # The 64-bit set whose high or low 32-bit halves these values are
+    # (``half``: "high" or "low"), and the family the two share.
+    halves_of: str = ""
+    half: str = ""
+    family: str = ""
+    # Values one of which must stand for the set to be named; without one,
+    # its values are another set's and that set names them.
+    requires: tuple[Any, ...] = ()
+    # A set whose values are all in another set, dropped when that one is found.
+    yields_to: str = ""
+    # The capa namespaces (last segment) that name the same algorithm.
+    capa: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -201,17 +213,49 @@ def catalogue() -> tuple[ConstantSet, ...]:
     md5_init = (0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476)
     sha1_k = tuple(math.isqrt(n << 60) & 0xFFFFFFFF for n in (2, 3, 5, 10))
     return (
-        ConstantSet("aes_sbox", "AES", "forward substitution box", TABLE, 1, aes["sbox"]),
         ConstantSet(
-            "aes_inverse_sbox", "AES", "inverse substitution box", TABLE, 1, aes["inverse"]
+            "aes_sbox", "AES", "forward substitution box", TABLE, 1, aes["sbox"], capa=("aes",)
         ),
-        ConstantSet("aes_te0", "AES", "encryption round table", TABLE, 4, aes["te0"]),
-        ConstantSet("aes_td0", "AES", "decryption round table", TABLE, 4, aes["td0"]),
         ConstantSet(
-            "blowfish_p", "Blowfish", "initial subkey array", TABLE, 4, _pi_fraction_words(18)
+            "aes_inverse_sbox",
+            "AES",
+            "inverse substitution box",
+            TABLE,
+            1,
+            aes["inverse"],
+            capa=("aes",),
         ),
-        ConstantSet("crc32_table", "CRC-32", "lookup table", TABLE, 4, _crc32_table()),
-        ConstantSet("sha256_k", "SHA-256", "round constants", VALUES, 4, sha256_k, also_whole=True),
+        ConstantSet(
+            "aes_te0", "AES", "encryption round table", TABLE, 4, aes["te0"], capa=("aes",)
+        ),
+        ConstantSet(
+            "aes_td0", "AES", "decryption round table", TABLE, 4, aes["td0"], capa=("aes",)
+        ),
+        ConstantSet(
+            "blowfish_p",
+            "Blowfish",
+            "initial subkey array",
+            TABLE,
+            4,
+            _pi_fraction_words(18),
+            capa=("blowfish",),
+        ),
+        ConstantSet(
+            "crc32_table", "CRC-32", "lookup table", TABLE, 4, _crc32_table(), capa=("crc32",)
+        ),
+        ConstantSet(
+            "sha256_k",
+            "SHA-256",
+            "round constants",
+            VALUES,
+            4,
+            sha256_k,
+            also_whole=True,
+            halves_of="sha512_k",
+            half="high",
+            family="SHA-2 family",
+            capa=("sha256",),
+        ),
         ConstantSet(
             "sha256_init",
             "SHA-256",
@@ -219,6 +263,10 @@ def catalogue() -> tuple[ConstantSet, ...]:
             VALUES,
             4,
             tuple(_fraction_of_root(p, 32, cube=False) for p in primes[:8]),
+            halves_of="sha512_init",
+            half="high",
+            family="SHA-2 family",
+            capa=("sha256",),
         ),
         ConstantSet(
             "sha224_init",
@@ -227,33 +275,81 @@ def catalogue() -> tuple[ConstantSet, ...]:
             VALUES,
             4,
             tuple(value & 0xFFFFFFFF for value in sha384_init),
+            halves_of="sha384_init",
+            half="low",
+            family="SHA-2 family",
+            capa=("sha224",),
         ),
-        ConstantSet("sha512_k", "SHA-512", "round constants", VALUES, 8, sha512_k, also_whole=True),
-        ConstantSet("sha512_init", "SHA-512", "initial hash values", VALUES, 8, sha512_init),
-        ConstantSet("sha384_init", "SHA-384", "initial hash values", VALUES, 8, sha384_init),
-        ConstantSet("md5_t", "MD5", "sine table", VALUES, 4, md5_t, also_whole=True),
-        ConstantSet("md5_init", "MD5", "initial chaining values", VALUES, 4, md5_init),
         ConstantSet(
-            "sha1_init", "SHA-1", "initial hash values", VALUES, 4, (*md5_init, 0xC3D2E1F0)
+            "sha512_k",
+            "SHA-512",
+            "round constants",
+            VALUES,
+            8,
+            sha512_k,
+            also_whole=True,
+            capa=("sha512", "sha384"),
         ),
-        ConstantSet("sha1_k", "SHA-1", "round constants", VALUES, 4, sha1_k),
+        ConstantSet(
+            "sha512_init",
+            "SHA-512",
+            "initial hash values",
+            VALUES,
+            8,
+            sha512_init,
+            capa=("sha512",),
+        ),
+        ConstantSet(
+            "sha384_init",
+            "SHA-384",
+            "initial hash values",
+            VALUES,
+            8,
+            sha384_init,
+            capa=("sha384",),
+        ),
+        ConstantSet("md5_t", "MD5", "sine table", VALUES, 4, md5_t, also_whole=True, capa=("md5",)),
+        ConstantSet(
+            "md5_sha1_init",
+            "MD5/SHA-1 family",
+            "initial values MD5 and SHA-1 share",
+            VALUES,
+            4,
+            md5_init,
+            yields_to="sha1_init",
+            capa=("md5", "sha1"),
+        ),
+        ConstantSet(
+            "sha1_init",
+            "SHA-1",
+            "initial hash values",
+            VALUES,
+            4,
+            (*md5_init, 0xC3D2E1F0),
+            requires=(0xC3D2E1F0,),
+            capa=("sha1",),
+        ),
+        ConstantSet("sha1_k", "SHA-1", "round constants", VALUES, 4, sha1_k, capa=("sha1",)),
         ConstantSet(
             "golden_ratio",
-            "TEA, XTEA, RC5, RC6",
-            "golden-ratio constant (the TEA and XTEA delta, RC5 and RC6 Q32)",
+            "golden-ratio constant",
+            "0x9e3779b9, the fraction of the golden ratio in 32 bits, which ciphers and hash "
+            "tables both use",
             VALUES,
             4,
             (0x9E3779B9,),
         ),
         ConstantSet(
             "golden_ratio_negated",
-            "TEA, XTEA",
-            "golden-ratio constant negated (the delta subtracted instead of added)",
+            "golden-ratio constant",
+            "0x61c88647, the same constant negated",
             VALUES,
             4,
             ((-0x9E3779B9) & 0xFFFFFFFF,),
         ),
-        ConstantSet("rc5_p32", "RC5, RC6", "P32 magic constant", VALUES, 4, (0xB7E15163,)),
+        ConstantSet(
+            "rc5_p32", "RC5, RC6", "P32 magic constant", VALUES, 4, (0xB7E15163,), capa=("rc6",)
+        ),
         ConstantSet(
             "salsa_chacha_sigma",
             "Salsa20, ChaCha",
@@ -261,6 +357,7 @@ def catalogue() -> tuple[ConstantSet, ...]:
             VALUES,
             0,
             (b"expand 32-byte k",),
+            capa=("salsa20",),
         ),
         ConstantSet(
             "salsa_chacha_tau",
@@ -269,6 +366,7 @@ def catalogue() -> tuple[ConstantSet, ...]:
             VALUES,
             0,
             (b"expand 16-byte k",),
+            capa=("salsa20",),
         ),
         ConstantSet(
             "crc32_polynomial",
@@ -277,6 +375,7 @@ def catalogue() -> tuple[ConstantSet, ...]:
             VALUES,
             4,
             (_CRC32_POLYNOMIAL,),
+            capa=("crc32",),
         ),
         ConstantSet(
             "crc32_polynomial_reversed",
@@ -285,6 +384,7 @@ def catalogue() -> tuple[ConstantSet, ...]:
             VALUES,
             4,
             (_bit_reversed(_CRC32_POLYNOMIAL, 32),),
+            capa=("crc32",),
         ),
         ConstantSet(
             "fowler_noll_vo_32",
@@ -293,6 +393,7 @@ def catalogue() -> tuple[ConstantSet, ...]:
             VALUES,
             4,
             _fowler_noll_vo(32),
+            capa=("fnv",),
         ),
         ConstantSet(
             "fowler_noll_vo_64",
@@ -301,6 +402,7 @@ def catalogue() -> tuple[ConstantSet, ...]:
             VALUES,
             8,
             _fowler_noll_vo(64),
+            capa=("fnv",),
         ),
         ConstantSet(
             "murmur3_32",
@@ -309,6 +411,7 @@ def catalogue() -> tuple[ConstantSet, ...]:
             VALUES,
             4,
             (0xCC9E2D51, 0x1B873593, 0xE6546B64, 0x85EBCA6B, 0xC2B2AE35),
+            capa=("murmur",),
         ),
     )
 
@@ -393,22 +496,43 @@ def _tables(entry: ConstantSet, places: _Places) -> list[dict[str, Any]]:
     return found
 
 
-def _values(entry: ConstantSet, places: _Places) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    seen: set[Any] = set()
+def _value_offsets(entry: ConstantSet, data: bytes) -> dict[Any, list[int]]:
+    """Every distinct value of ``entry`` that stands in ``data``, with its offsets."""
+    found: dict[Any, list[int]] = {}
     for value in entry.values:
-        if value in seen:
+        if value in found:
             continue
-        seen.add(value)
-        offsets = _offsets(places.data, _value_bytes(value, entry.width))
+        offsets = _offsets(data, _value_bytes(value, entry.width))
         if offsets:
-            rows.append(
-                {
-                    "value": _said(value, entry.width),
-                    "places": [places.where(offset) for offset in offsets],
-                }
-            )
-    return rows
+            found[value] = offsets
+    return found
+
+
+def _outside_quadwords(
+    offsets: dict[Any, list[int]], quadwords: set[int], half: str
+) -> dict[Any, list[int]]:
+    """The 32-bit places that are not the ``half`` of a 64-bit value found at ``quadwords``."""
+    shift = 4 if half == "high" else 0
+    kept: dict[Any, list[int]] = {}
+    for value, places in offsets.items():
+        outside = [at for at in places if at - shift not in quadwords]
+        if outside:
+            kept[value] = outside
+    return kept
+
+
+def _other_halves_stand(wide: ConstantSet, data: bytes, quadwords: set[int], half: str) -> bool:
+    """Whether two or more of ``wide``'s other 32-bit halves stand apart from its 64-bit values."""
+    other = [(value & 0xFFFFFFFF) if half == "high" else (value >> 32) for value in wide.values]
+    shift = 0 if half == "high" else 4
+    standing = 0
+    for value in set(other):
+        places = _offsets(data, int(value).to_bytes(4, "little"))
+        if any(at - shift not in quadwords for at in places):
+            standing += 1
+            if standing >= 2:
+                return True
+    return False
 
 
 def _row(entry: ConstantSet, **found: Any) -> dict[str, Any]:
@@ -422,8 +546,16 @@ def _row(entry: ConstantSet, **found: Any) -> dict[str, Any]:
     }
 
 
-def find_crypto_constants(path: str) -> dict[str, Any]:
-    """Every published constant set of the catalogue that stands in the file at ``path``."""
+def find_crypto_constants(
+    path: str,
+    function_starts: Sequence[Any] | None = None,
+    function_source: str = "capa",
+) -> dict[str, Any]:
+    """Every published constant set of the catalogue that stands in the file at ``path``.
+
+    ``function_starts`` (offsets from the image base, from ``function_source``)
+    stand in for a function table a PE lacks (``pe_image``).
+    """
     try:
         with open(path, "rb") as handle:
             data = handle.read()
@@ -435,7 +567,16 @@ def find_crypto_constants(path: str) -> dict[str, Any]:
         image: pe_image.Image | None = pe_image.load(path)
     except (pe_image.NotAPortableExecutable, ValueError):
         image = None
+    if image is not None:
+        pe_image.take_function_starts(image, function_starts, function_source)
     places = _Places(data, image)
+    sets = {entry.id: entry for entry in catalogue()}
+    # Where each 64-bit set's values stand, for the sets that are their halves.
+    quadwords = {
+        entry.id: {at for offsets in _value_offsets(entry, data).values() for at in offsets}
+        for entry in sets.values()
+        if entry.width == 8
+    }
 
     found: list[dict[str, Any]] = []
     lone: list[dict[str, Any]] = []
@@ -445,17 +586,40 @@ def find_crypto_constants(path: str) -> dict[str, Any]:
             if tables:
                 found.append(_row(entry, matched=len(set(entry.values)), tables=tables))
             continue
-        tables = _tables(entry, places) if entry.also_whole else []
-        values = _values(entry, places)
-        if not values:
+        offsets = _value_offsets(entry, data)
+        algorithm = entry.algorithm
+        if entry.halves_of:
+            wide = quadwords.get(entry.halves_of, set())
+            offsets = _outside_quadwords(offsets, wide, entry.half)
+            if offsets and _other_halves_stand(sets[entry.halves_of], data, wide, entry.half):
+                algorithm = entry.family
+        if entry.requires and not any(value in offsets for value in entry.requires):
             continue
+        tables = _tables(entry, places) if entry.also_whole else []
+        if not offsets:
+            continue
+        values = [
+            {
+                "value": _said(value, entry.width),
+                "places": [places.where(at) for at in offsets[value]],
+            }
+            for value in entry.values
+            if value in offsets
+        ]
+        # A value listed twice in a set is one value.
+        values = list({row["value"]: row for row in values}.values())
         row = _row(entry, matched=len(values), values=values)
+        row["algorithm"] = algorithm
+        if algorithm != entry.algorithm:
+            row["shared_with"] = sets[entry.halves_of].algorithm
         if tables:
             row["tables"] = tables
         if len(values) >= 2 or row["of"] == 1 or tables:
             found.append(row)
         else:
             lone.append(row)
+    named = {row["id"] for row in found}
+    found = [row for row in found if sets[row["id"]].yields_to not in named]
 
     answer: dict[str, Any] = {
         "tool": TOOL,
