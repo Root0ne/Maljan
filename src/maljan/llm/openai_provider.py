@@ -424,8 +424,7 @@ def _joined_answer(chunks: list[Any]) -> Any:
 
     * the fields llama.cpp may repeat on every chunk are taken from the last
       chunk that carries them (:func:`_keep_last`);
-    * the reasoning pieces, kept on each chunk so that the call's deadline sees
-      them arrive, are not in the answer, as ``langchain-openai`` leaves them
+    * no reasoning piece is in the answer, as ``langchain-openai`` leaves them
       out of a whole one;
     * the tool calls. langchain reads a streamed call's arguments with a
       partial JSON parser, which closes a call cut off mid-string as if it had
@@ -482,6 +481,21 @@ def _joined_answer(chunks: list[Any]) -> Any:
     )
 
 
+def _without_reasoning(chunk: Any) -> Any:
+    """``chunk`` with the reasoning piece it carried for the call's deadline taken off.
+
+    The piece is kept on the chunk only until the deadline has counted it as
+    generated (``generation_rate``'s wrapper sees each chunk first); a caller
+    of the model gets the chunk as ``langchain-openai`` builds it, without the
+    reasoning, which a whole answer does not carry either.
+    """
+    message = getattr(chunk, "message", None)
+    extra = getattr(message, "additional_kwargs", None)
+    if isinstance(extra, dict):
+        extra.pop(REASONING_CONTENT_KEY, None)
+    return chunk
+
+
 def _as_status_error(exc: Any) -> Any:
     """A server error sent inside a stream, as the class the same error has when sent whole.
 
@@ -501,10 +515,16 @@ def _as_status_error(exc: Any) -> Any:
     body = exc.body if isinstance(exc.body, dict) else {}
     code = body.get("code")
     status = code if isinstance(code, int) and 400 <= code <= 599 else 500
-    # The SDK's own response type: it runs on httpx2.
-    import httpx2
+    # The SDK's own response type: it runs on httpx2. Where the status error
+    # cannot be built, the server's own error is what reaches the caller.
+    try:
+        import httpx2
 
-    response = httpx2.Response(status, request=getattr(exc, "request", None), json={"error": body})
+        response = httpx2.Response(
+            status, request=getattr(exc, "request", None), json={"error": body}
+        )
+    except Exception:  # noqa: BLE001 — never replace the server's error with this one
+        return exc
     classes: dict[int, type[Any]] = {
         400: openai.BadRequestError,
         401: openai.AuthenticationError,
@@ -545,9 +565,10 @@ def with_streamed_llama_answers(chat_class: Any) -> Any:
       as ``token_usage``, where a whole answer carries it; the join keeps the
       last of each, since ik_llama.cpp repeats a running usage total on every
       chunk;
-    * a reasoning piece (``reasoning_content``) is kept on its chunk, so the
-      call's deadline counts it as generated, and left out of the joined
-      answer;
+    * a reasoning piece (``reasoning_content``) is kept on its chunk until the
+      call's deadline has counted it as generated, and taken off before the
+      chunk leaves the model (:func:`_without_reasoning`), so neither a caller
+      streaming the model nor the joined answer carries it;
     * a server error sent inside the stream is raised as the status error the
       same error is on a whole answer (:func:`_as_status_error`).
 
@@ -588,7 +609,7 @@ def with_streamed_llama_answers(chat_class: Any) -> Any:
         stream = base._astream(self, messages, stop=stop, run_manager=run_manager, **kwargs)
         try:
             async for chunk in stream:
-                yield chunk
+                yield _without_reasoning(chunk)
         except Exception as exc:
             error = _as_status_error(exc)
             if error is exc:
@@ -602,7 +623,8 @@ def with_streamed_llama_answers(chat_class: Any) -> Any:
     ) -> Any:
         stream = base._stream(self, messages, stop=stop, run_manager=run_manager, **kwargs)
         try:
-            yield from stream
+            for chunk in stream:
+                yield _without_reasoning(chunk)
         except Exception as exc:
             error = _as_status_error(exc)
             if error is exc:

@@ -480,3 +480,42 @@ class TestASlowLocalModelEndToEnd:
 
         assert isinstance(streamed_error, openai.InternalServerError)
         assert type(streamed_error) is type(whole.value)
+
+
+class TestWhatADirectStreamSees:
+    def test_its_chunks_carry_no_reasoning(self) -> None:
+        # Reasoning pieces count towards the call's pace, and a caller that
+        # streams the model directly sees them as ``langchain-openai`` would:
+        # without the reasoning, which a whole answer does not carry either.
+        chunks = _stream(running_usage=False)
+        chunks.insert(1, _chunk({"reasoning_content": "thinking"}))
+        seen: list[dict[str, Any]] = []
+
+        pieces = list(_local(chunks, seen).stream([HumanMessage(content="hi")]))
+
+        assert pieces
+        assert all("reasoning_content" not in p.additional_kwargs for p in pieces)
+
+
+class TestAServerErrorAlwaysReachesTheCaller:
+    def test_a_status_error_that_cannot_be_built_leaves_the_server_s_own(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import builtins
+
+        import openai
+
+        from maljan.llm.openai_provider import _as_status_error
+
+        real_import = builtins.__import__
+
+        def _no_httpx2(name: str, *args: Any, **kwargs: Any) -> Any:
+            if name == "httpx2":
+                raise ImportError("no httpx2 here")
+            return real_import(name, *args, **kwargs)
+
+        request = httpx.Request("POST", "http://127.0.0.1:8080/v1/chat/completions")
+        error = openai.APIError("boom", request=request, body={"code": 500, "message": "boom"})
+        monkeypatch.setattr(builtins, "__import__", _no_httpx2)
+
+        assert _as_status_error(error) is error
