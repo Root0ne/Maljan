@@ -78,6 +78,7 @@ from maljan.analysis.ghidra_passes import (
     GhidraPasses,
     Routine,
     hash_routines,
+    mark_agreement,
     run_pass,
 )
 from maljan.analysis.pcap_summary import conversation_line
@@ -545,6 +546,10 @@ class _Pack:
         # capa's rules as it answered them, for the routines the emulation
         # pass runs; ``None`` when capa gave no answer.
         self.capa_rows: list[dict[str, Any]] | None = None
+        # The platform's own hash resolution and its ledger id, which the
+        # emulation pass's line says it agrees with rather than repeat.
+        self.resolved_answer: dict[str, Any] | None = None
+        self.resolved_entry_id = ""
         self.reputation_malicious: int | None = None
         # FLOSS, started beside the rest of the pack when it can be. Recorded
         # in its own place at the end, so every id keeps its value.
@@ -1062,6 +1067,9 @@ class _Pack:
             args,
             lambda: api_hashes.resolve_api_hashes(path, function_starts=starts),
         )
+        if resolved is not None:
+            self.resolved_answer = resolved
+            self.resolved_entry_id = self.recorder.entries[-1].id
         self.record(
             "decode_string_blobs",
             args,
@@ -1146,7 +1154,11 @@ class _Pack:
             EMULATION_TOOL,
             args,
             lambda: run_pass(
-                lambda: passes.emulate_api_hashes(path, routines, function_starts=starts),
+                lambda: mark_agreement(
+                    passes.emulate_api_hashes(path, routines, function_starts=starts),
+                    self.resolved_answer,
+                    self.resolved_entry_id,
+                ),
                 EMULATION_TOOL,
             ),
         )
@@ -2533,9 +2545,37 @@ def _emulated_item(row: dict[str, Any]) -> str:
 
 
 def _emulated(data: dict[str, Any], max_chars: int | None = None) -> str:
-    """The file's values that equal an output of the sample's own routines, emulated by Ghidra."""
-    rows = [r for r in (data.get("hits") or []) if isinstance(r, dict)]
-    lone = [r for r in (data.get("lone_hits") or []) if isinstance(r, dict)]
+    """The file's values that equal an output of the sample's own routines, emulated by Ghidra.
+
+    A value the platform's own resolution already names the same way is not
+    listed again: the line says how many there are, which entry names them and
+    which routine computes them, and lists only the values the emulation alone
+    names. Every value stays in the entry's full output.
+    """
+    every = [r for r in (data.get("hits") or []) if isinstance(r, dict)]
+    rows = [r for r in every if not r.get("also_named_by")]
+    agreeing = [r for r in every if r.get("also_named_by")]
+    lone = [
+        r
+        for r in (data.get("lone_hits") or [])
+        if isinstance(r, dict) and not r.get("also_named_by")
+    ]
+    agreement = ""
+    if agreeing:
+        entry = (data.get("agrees_with") or {}).get("entry") or agreeing[0].get("also_named_by")
+        starts = sorted(
+            {
+                str(reading.get("routine"))
+                for row in agreeing
+                for reading in row.get("readings") or []
+                if isinstance(reading, dict)
+            }
+        )
+        agreement = (
+            f"; {_n(len(agreeing))} of the {_n(len(every))} are values the platform's resolution "
+            f"[{entry}] names the same way, and the sample's routine {', '.join(starts)} gives "
+            "them too (not listed again; each is in this entry's full output)"
+        )
     routines = "; ".join(
         _routine_said(r) for r in data.get("routines") or [] if isinstance(r, dict)
     )
@@ -2556,7 +2596,7 @@ def _emulated(data: dict[str, Any], max_chars: int | None = None) -> str:
             return f"{said}: {', '.join(_emulated_item(r) for r in lone)}"
         return f"{said} (listed under lone_hits in this entry's full output)"
 
-    if not rows:
+    if not every:
         whole = (
             f"no: no value the file holds equals an output of the sample's own routines for "
             f"{catalogue}, emulated by Ghidra ({routines})"
@@ -2568,17 +2608,23 @@ def _emulated(data: dict[str, Any], max_chars: int | None = None) -> str:
     total = len(rows)
 
     def _head(listed: bool) -> str:
+        said = (
+            f"{_n(len(every))} values the file holds equal what the sample's own routine returns "
+            f"for a Windows function or module name, emulated by Ghidra on {catalogue} "
+            f"({routines}){agreement}{_lone(listed)}"
+        )
+        if not rows:
+            return said
         return (
-            f"{_n(total)} values the file holds equal what the sample's own routine returns for "
-            f"a Windows function or module name, emulated by Ghidra on {catalogue} ({routines})"
-            f"{_lone(listed)}; each as value = DLL!name or module name [routine] @ the offsets "
-            "from the image base where the value stands (in the function the file's table puts "
-            "around it)"
+            f"{said}; each as value = DLL!name or module name [routine] @ the offsets from the "
+            "image base where the value stands (in the function the file's table puts around it)"
         )
 
     def _line(shown: int, listed: bool) -> str:
+        if not total:
+            return _head(listed)
         said = (
-            f"all {_n(total)} shown"
+            f"all {_n(total)} the emulation alone names shown"
             if shown >= total
             else PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(total))
         )

@@ -575,6 +575,48 @@ def _catalogue_names(path: str) -> _Names:
     return _Names(exported_names, module_names)
 
 
+def mark_agreement(
+    answer: dict[str, Any], resolved: dict[str, Any] | None, entry_id: str
+) -> dict[str, Any]:
+    """``answer`` with each value the platform's own resolution names the same way marked.
+
+    ``resolved`` is the ``resolve_api_hashes`` answer of the same run and
+    ``entry_id`` its ledger id. A value is marked (``also_named_by``) when the
+    resolution read it and one of its names is a name the emulation read;
+    ``agrees_with`` counts the marked hits. The two are independent readings
+    of one value — arithmetic over published algorithms, and the sample's own
+    code run on the names — and the pack line says the second agrees with the
+    first rather than listing the value twice.
+    """
+    if not resolved or not entry_id:
+        return answer
+    named: dict[int, set[str]] = {}
+    for key in ("hits", "lone_hits"):
+        for hit in resolved.get(key) or []:
+            if not isinstance(hit, dict):
+                continue
+            value = _int(hit.get("value"))
+            if value is None:
+                continue
+            names = {str(r.get("name")) for r in hit.get("readings") or [] if isinstance(r, dict)}
+            named.setdefault(value, set()).update(names)
+    marked = dict(answer)
+    agreeing = 0
+    for key in ("hits", "lone_hits"):
+        rows = []
+        for hit in answer.get(key) or []:
+            row = dict(hit)
+            value = _int(row.get("value"))
+            names = {str(r.get("name")) for r in row.get("readings") or [] if isinstance(r, dict)}
+            if value is not None and names & named.get(value, set()):
+                row["also_named_by"] = entry_id
+                agreeing += key == "hits"
+            rows.append(row)
+        marked[key] = rows
+    marked["agrees_with"] = {"entry": entry_id, "tool": "resolve_api_hashes", "hits": agreeing}
+    return marked
+
+
 def run_pass(call: Callable[[], dict[str, Any]], what: str) -> dict[str, Any]:
     """``call()``, logging a failure before it is handed on."""
     try:

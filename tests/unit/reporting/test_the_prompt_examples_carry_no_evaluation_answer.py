@@ -451,7 +451,8 @@ def _deobfuscation_lines() -> str:
     module = {"routine": "0x1", "set": "modules", "name": "m", "encoding": "utf-16le"}
     hit = {"value": "0x00000001", "readings": [reading, module], "occurrences": [place]}
     emulated = {
-        "hits": [hit],
+        "hits": [hit, {**hit, "also_named_by": "ev_0009"}],
+        "agrees_with": {"entry": "ev_0009", "tool": "resolve_api_hashes", "hits": 1},
         "lone_hits": [hit],
         "routines": [routine, unused],
         "names": {"functions": 2, "modules": 1},

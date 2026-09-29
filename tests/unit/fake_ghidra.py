@@ -42,6 +42,7 @@ class FakeGhidra:
         load: dict[str, Any] | None = None,
         findings: list[dict[str, Any]] | None = None,
         constant_output: bool = False,
+        routine: Any = None,
         stall_after: int | None = None,
     ) -> None:
         self.image_base = image_base
@@ -49,6 +50,7 @@ class FakeGhidra:
         self.load = load if load is not None else {"success": True, "program": "s.exe"}
         self.findings = findings if findings is not None else []
         self.constant_output = constant_output
+        self.routine = routine or routine_output
         self.stall_after = stall_after
         self.requests: list[httpx.Request] = []
         self.emulations = 0
@@ -107,7 +109,7 @@ class FakeGhidra:
                 name.append(memory[pointer + len(name)])
         if int(body["address"], 16) != self.image_base + ROUTINE:
             return httpx.Response(200, json={"error": f"No function at address: {body['address']}"})
-        value = 0x1234 if self.constant_output else routine_output(bytes(name))
+        value = 0x1234 if self.constant_output else self.routine(bytes(name))
         return httpx.Response(
             200,
             json={

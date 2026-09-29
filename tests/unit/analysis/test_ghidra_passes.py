@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import struct
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -34,6 +35,7 @@ from maljan.analysis.ghidra_passes import (
     GhidraPassFailed,
     Routine,
     hash_routines,
+    mark_agreement,
 )
 
 
@@ -253,3 +255,33 @@ class TestTheAntiAnalysisScan:
         )
         assert [r.url.path for r in fake.requests].count("/load_program") == 1
         assert [r.url.path for r in fake.requests].count("/run_analysis") == 1
+
+
+class TestAgreementWithThePlatformsOwnResolution:
+    def _hit(self, value: str, name: str) -> dict[str, Any]:
+        return {"value": value, "readings": [{"routine": "0x1200", "name": name}]}
+
+    def test_a_value_the_resolution_names_the_same_way_is_marked(self) -> None:
+        answer = {
+            "hits": [self._hit("0x00000001", "A"), self._hit("0x00000002", "B")],
+            "lone_hits": [self._hit("0x00000003", "C")],
+        }
+        resolved = {
+            "hits": [
+                {"value": "0x00000001", "readings": [{"name": "A"}]},
+                {"value": "0x00000002", "readings": [{"name": "Other"}]},
+            ],
+            "lone_hits": [{"value": "0x00000003", "readings": [{"name": "C"}]}],
+        }
+        marked = mark_agreement(answer, resolved, "ev_0020")
+        assert [h.get("also_named_by") for h in marked["hits"]] == ["ev_0020", None]
+        assert marked["lone_hits"][0]["also_named_by"] == "ev_0020"
+        assert marked["agrees_with"] == {
+            "entry": "ev_0020",
+            "tool": "resolve_api_hashes",
+            "hits": 1,
+        }
+
+    def test_without_a_resolution_nothing_is_marked(self) -> None:
+        answer = {"hits": [self._hit("0x00000001", "A")], "lone_hits": []}
+        assert mark_agreement(answer, None, "") == answer

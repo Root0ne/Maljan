@@ -11,6 +11,7 @@ a missing line, and a pass that runs and finds nothing says so in one line.
 from __future__ import annotations
 
 import struct
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -204,7 +205,7 @@ class TestALineOutOfRoom:
             (triage_pack._emulated, hits, "listed under lone_hits in this entry"),
         ):
             whole = render(data)
-            assert "all 30 shown" in whole
+            assert "all 30 " in whole and " shown" in whole
             cut = render(data, max_chars=len(whole) // 2)
             assert cut and len(cut) <= len(whole) // 2
             assert "the rest are in this entry's full output" in cut
@@ -251,6 +252,29 @@ class TestGhidraAnswers:
         value = f"{routine_output(b'VirtualAlloc'):#010x}"
         assert f"{value} = kernel32.dll!VirtualAlloc [routine {hex(ROUTINE)}]" in line
         assert "hash data using a rotation" in line
+
+    def test_values_the_platform_already_names_are_said_to_agree_not_listed_twice(
+        self, tmp_path: Path
+    ) -> None:
+        image = SyntheticPE(
+            image_base=X64_BASE,
+            functions=[(TEXT_RVA, TEXT_RVA + 0x100), (ROUTINE, ROUTINE + 0x40)],
+        )
+        for index, name in enumerate((b"VirtualAlloc", b"CreateFileW")):
+            image.put("text", 0x20 + 0x10 * index, b"\x68" + struct.pack("<I", zlib.crc32(name)))
+        target = tmp_path / "crc.exe"
+        target.write_bytes(image.build())
+        fake = FakeGhidra(routine=zlib.crc32)
+        result = _pack(str(target), ghidra=_fake_passes(fake, tmp_path))
+
+        resolved = next(e for e in result.entries if e.tool == "resolve_api_hashes")
+        emulated = next(e for e in result.entries if e.tool == EMULATION_TOOL)
+        assert emulated.structured["agrees_with"]["entry"] == resolved.id
+        assert all(h["also_named_by"] == resolved.id for h in emulated.structured["hits"])
+        line = _line(result, EMULATION_TOOL)
+        assert f"2 of the 2 are values the platform's resolution [{resolved.id}] names" in line
+        assert f"routine {hex(ROUTINE)} gives them too" in line
+        assert "VirtualAlloc" not in line
 
     def test_the_names_the_emulation_read_are_kept_readable(self, tmp_path: Path) -> None:
         _pack(_sample(tmp_path), ghidra=_fake_passes(FakeGhidra(), tmp_path))
