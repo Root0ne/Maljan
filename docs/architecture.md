@@ -2175,7 +2175,14 @@ the model's pace is measured; then an OpenAI-compatible, Anthropic or Gemini
 request whose output cap takes longer at the measured pace carries that time
 as its own (`generation_rate.with_sized_request_timeout`; Gemini's fixed 90 s
 is gone). httpx reads a client's timeout as the longest silence, so it only
-ever ended an answer on a server that sends nothing until done. A 429
+ever ended an answer on a server that sends nothing until done. Maljan's own
+whole-call deadline starts from the same values; where nothing is measured it
+bounds only the silence before a call's first generated piece. A call whose
+pieces arrive is held to its output cap (or its window's room after the
+prompt) at the pace they show from the first to the last
+(`generation_rate._CallDeadline`), and that pace is recorded for the model if
+the call does not complete. A llama.cpp server's answer is read as a stream
+for this. A 429
 or 503 that asks, in `Retry-After` (seconds or an HTTP date), for at most thirty seconds is waited out on
 the same model once before the list moves on. The switch is **sticky for the
 loop**: the model that took over answers the rest of that loop, so a stalled

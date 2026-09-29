@@ -35,6 +35,8 @@ from maljan.llm.openai_provider import (
     forget_standard_only,
 )
 
+from .streamed_wire import reply
+
 HOSTED = "https://api.deepseek.com"
 LOCAL = "http://127.0.0.1:8080/v1"
 REPORT = "CLAIM: it reads a file\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.6\nTECHNIQUE: T1005\n"
@@ -99,9 +101,9 @@ class _Strict:
                     "function": {"name": "lookup", "arguments": '{"what": "b'},
                 },
             ]
-        return httpx.Response(
-            200,
-            json={
+        return reply(
+            request,
+            {
                 "id": f"r{len(self.bodies)}",
                 "object": "chat.completion",
                 "created": 0,

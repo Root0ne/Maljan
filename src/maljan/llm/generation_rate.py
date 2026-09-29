@@ -36,14 +36,17 @@ reading rate is known and nothing is sized from one.
 from __future__ import annotations
 
 import asyncio
+import queue
 import threading
 import time
+from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, overload
 from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
 
@@ -615,32 +618,354 @@ class ModelCallDeadline(TimeoutError):
 # The keywords and attributes a call's output cap is read from.
 _CAP_NAMES = ("max_tokens", "max_completion_tokens", "max_output_tokens", "num_predict")
 
+# Where a call's measurement is recorded from when the call itself produced
+# pieces and then did not complete: a cut, a failure, or a call ended from
+# outside. A generated piece is one streamed chunk that carries something the
+# model generated: text, reasoning or a tool call's name or arguments. The
+# opening chunk that names only the role, and a closing chunk that carries only
+# a finish reason or usage, are not. Pieces and generated units differ by a few
+# either way: a unit a server holds back sends no chunk, and a server may send
+# two chunks for one unit. The pace runs from the first piece to the last, so
+# the prompt read before the first is never counted as generating, and it needs
+# two pieces: one piece is a moment, not a pace.
+IN_CALL_SOURCE = "generated pieces from the first to the last, measured while the call ran"
+
+
+def generated_piece(chunk: Any) -> bool:
+    """Whether one streamed chunk (or message) carries something the model generated."""
+    message = getattr(chunk, "message", chunk)
+    if getattr(message, "content", None):
+        return True
+    if getattr(message, "tool_call_chunks", None):
+        return True
+    extra = getattr(message, "additional_kwargs", None)
+    return isinstance(extra, dict) and any(bool(value) for value in extra.values())
+
+
+def _cap_of(llm: Any, kwargs: dict[str, Any]) -> int:
+    """The output cap one call of ``llm`` is sent with, or 0 where it has none."""
+    for name in _CAP_NAMES:
+        value = kwargs.get(name)
+        if value is None:
+            value = getattr(llm, name, None)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+    return 0
+
 
 def call_deadline(llm: Any, messages: Any, kwargs: dict[str, Any]) -> float:
-    """The whole-call deadline of one request of ``llm``, in seconds.
+    """The whole-call deadline of one request of ``llm`` before any piece of it arrives.
 
-    The request timeout the call is sized for (:func:`sized_request_timeout`:
-    its output cap at the model's measured pace, prompt read included) where
-    that is longer than the client's own, and otherwise the client's own —
-    ``PROVIDER_REQUEST_TIMEOUT_SECONDS`` unless the client was built with
-    another. httpx reads a request timeout as the longest silence it waits
-    through, so a server that keeps a request alive with keep-alive bytes, or
-    answers slowly but steadily, was held by nothing but this. Never raises.
+    In seconds: the request timeout the call is sized for
+    (:func:`sized_request_timeout`: its output cap at the model's measured
+    pace, prompt read included) where that is longer than the client's own,
+    and otherwise the client's own — ``PROVIDER_REQUEST_TIMEOUT_SECONDS``
+    unless the client was built with another. httpx reads a request timeout
+    as the longest silence it waits through, so a server that keeps a request
+    alive with keep-alive bytes, or answers slowly but steadily, was held by
+    nothing but this. Once pieces of the answer arrive, the call's own pace
+    can lengthen it (:class:`_CallDeadline`). Never raises.
     """
     try:
-        cap = 0
-        for name in _CAP_NAMES:
-            value = kwargs.get(name)
-            if value is None:
-                value = getattr(llm, name, None)
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-                cap = value
-                break
-        chars = _content_chars(messages)
-        sized = sized_request_timeout(llm, cap, chars)
+        sized = sized_request_timeout(llm, _cap_of(llm, kwargs), _content_chars(messages))
         return float(sized if sized is not None else _client_timeout(llm))
     except Exception:  # noqa: BLE001 — a deadline that cannot be sized is the documented one
         return UNMEASURED_REQUEST_TIMEOUT_SECONDS
+
+
+class _CallProgress:
+    """The generated pieces one call has produced so far, and when they arrived."""
+
+    def __init__(self, clock: Any) -> None:
+        self._clock = clock
+        self._lock = threading.Lock()
+        self.started = float(clock())
+        self.pieces = 0
+        self.first_at: float | None = None
+        self.last_at: float | None = None
+        # Whether the pieces are seen as chunks of the client's own stream.
+        # From the first chunk on, those are the count, and the same pieces
+        # reported again through the run manager are not counted twice.
+        self.streamed = False
+
+    def _piece(self) -> None:
+        now = float(self._clock())
+        with self._lock:
+            self.pieces += 1
+            if self.first_at is None:
+                self.first_at = now
+            self.last_at = now
+
+    def streamed_chunk(self, chunk: Any) -> None:
+        self.streamed = True
+        if generated_piece(chunk):
+            self._piece()
+
+    def reported_piece(self, token: Any, chunk: Any = None) -> None:
+        if self.streamed:
+            return
+        if generated_piece(chunk) if chunk is not None else bool(token):
+            self._piece()
+
+    def generation(self) -> tuple[int, float] | None:
+        """``(units, seconds)`` from the first generated piece to the last, or ``None``.
+
+        The pieces after the first over the time since it: the prompt read and
+        whatever came before the first piece are not generating. ``None``
+        before two pieces have arrived.
+        """
+        with self._lock:
+            if self.pieces < 2 or self.first_at is None or self.last_at is None:
+                return None
+            seconds = self.last_at - self.first_at
+            return (self.pieces - 1, seconds) if seconds > 0 else None
+
+
+@dataclass(frozen=True)
+class _Bound:
+    """How long one call may take, counted from its request, and which rule said so."""
+
+    seconds: float
+    why: str
+
+
+class _CallDeadline:
+    """The deadline of one call, which the call's own pieces can lengthen.
+
+    Before any generated piece arrives it is :func:`call_deadline`: the output
+    cap at the model's measured pace where that is longer than the provider's
+    request timeout, and otherwise that timeout, which then bounds the silence
+    before the first piece. Once two pieces arrive the call has a pace of its
+    own, from its first piece to its last. The time to its first piece and its
+    output cap at that pace, times the same margin as a measured model's, is
+    then its deadline wherever that is the longer. A call with no output cap
+    is sized from the room its model's window leaves after the prompt. Where
+    the call has produced but nothing can be sized — one piece so far, or no
+    cap and no known window — it is held to the silence after its last piece,
+    the provider's request timeout. A call that keeps producing is therefore
+    never cut by the unmeasured value, and one that stops is cut when the
+    deadline its pace set passes. Never raises.
+    """
+
+    def __init__(self, llm: Any, messages: Any, kwargs: dict[str, Any], clock: Any) -> None:
+        self.progress = _CallProgress(clock)
+        self.meter = _meter_of(llm)
+        self.cap = 0
+        self.window = 0
+        self.room = 0
+        self.client = UNMEASURED_REQUEST_TIMEOUT_SECONDS
+        try:
+            self.cap = _cap_of(llm, kwargs)
+            self.client = _client_timeout(llm)
+            chars = _content_chars(messages)
+            if self.cap <= 0:
+                self._size_room(llm, chars)
+            sized = sized_request_timeout(llm, self.cap, chars)
+            self._before = (
+                _Bound(self.client, self._silence_why())
+                if sized is None
+                else _Bound(float(sized), self._measured_why(chars))
+            )
+        except Exception:  # noqa: BLE001 — a deadline that cannot be sized is the documented one
+            self._before = _Bound(self.client, self._silence_why())
+
+    def _size_room(self, llm: Any, chars: int) -> None:
+        """For a call with no output cap: what its model's known window leaves after the prompt."""
+        from maljan.llm.context_window import CHARS_PER_TOKEN, built_window
+
+        fact = built_window(llm)
+        if fact is None or int(fact.tokens) <= 0:
+            return
+        self.window = int(fact.tokens)
+        self.room = max(0, self.window - -(-max(0, int(chars)) // CHARS_PER_TOKEN))
+
+    def _silence_why(self) -> str:
+        return (
+            "silence before the first generated piece: none arrived within the provider's "
+            f"request timeout of {self.client:.0f} s"
+        )
+
+    def _measured_why(self, chars: int) -> str:
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+
+        prompt = -(-max(0, int(chars)) // CHARS_PER_TOKEN)
+        rate: float | None = None
+        read: float | None = None
+        if self.meter is not None:
+            _seconds, rate, read = self.meter.rates._derived(self.meter.model, self.cap, prompt)
+        if read is not None:
+            return (
+                f"its prompt of about {prompt} units at the model's measured reading pace of "
+                f"{read:.1f} a second and its output cap of {self.cap} output units at the "
+                f"model's measured pace of {rate or 0.0:.2f} a second, times {TIMEOUT_MARGIN:g}"
+            )
+        return (
+            f"its output cap of {self.cap} output units at the model's measured pace of "
+            f"{rate or 0.0:.2f} a second, prompt read included, times {TIMEOUT_MARGIN:g}"
+        )
+
+    @property
+    def started(self) -> float:
+        return self.progress.started
+
+    def _sized_output(self) -> tuple[int, str]:
+        """The output one call is sized for, and how it reads, or ``(0, why none)``."""
+        if self.cap > 0:
+            return self.cap, f"its output cap of {self.cap} output units"
+        if self.room > 0:
+            return self.room, (
+                f"about {self.room} output units, the room its model's {self.window}-unit "
+                "window leaves after the prompt counted at three characters a unit (it has "
+                "no output cap)"
+            )
+        return 0, "it has no output cap and its model's window is not known"
+
+    def bound(self) -> _Bound:
+        """The deadline as the pieces so far set it."""
+        progress = self.progress
+        if progress.pieces <= 0 or progress.first_at is None or progress.last_at is None:
+            return self._before
+        output, said = self._sized_output()
+        generation = progress.generation()
+        if generation is None or output <= 0:
+            silence = progress.last_at - self.started + self.client
+            if silence <= self._before.seconds:
+                return self._before
+            reason = said if output <= 0 else "one generated piece is not yet a pace"
+            return _Bound(
+                silence,
+                f"silence after the last generated piece: none arrived within the provider's "
+                f"request timeout of {self.client:.0f} s after piece {progress.pieces}, "
+                f"{progress.last_at - self.started:.0f} s into the call; {reason}",
+            )
+        units, seconds = generation
+        pace = units / seconds
+        read = progress.first_at - self.started
+        in_call = (read + output / pace) * TIMEOUT_MARGIN
+        if in_call > self._before.seconds:
+            return _Bound(
+                in_call,
+                f"{said} at the pace measured in this call: {progress.pieces} generated pieces, "
+                f"{pace:.2f} a second from the first to the last, after {read:.0f} s to the "
+                f"first, times {TIMEOUT_MARGIN:g}",
+            )
+        if self._before.seconds > self.client:
+            return self._before
+        return _Bound(
+            self.client,
+            f"the provider's request timeout, longer than {said} at the pace measured in this "
+            f"call ({in_call:.0f} s)",
+        )
+
+    def expired(self, bound: _Bound) -> ModelCallDeadline:
+        return ModelCallDeadline(
+            f"the model request did not finish within its {bound.seconds:.0f} s deadline "
+            f"({bound.why})"
+        )
+
+    def silence_ended(self, now: float, exc: BaseException) -> ModelCallDeadline:
+        """A transport read timeout after generated pieces, stated as the silence it was."""
+        last = self.progress.last_at if self.progress.last_at is not None else self.started
+        return ModelCallDeadline(
+            f"the model request ended in silence after its last generated piece: no piece for "
+            f"{now - last:.0f} s after piece {self.progress.pieces}, "
+            f"{last - self.started:.0f} s into the call, when the connection's read timeout "
+            f"ended it ({type(exc).__name__})"
+        )
+
+    def record_unfinished(self) -> None:
+        """The pace of a call that did not complete, recorded for its model.
+
+        A completed call is measured from its answer (:class:`RateMeter`); one
+        that was cut, failed or was ended from outside has no answer, and its
+        pieces are the only measurement it leaves. Recorded as a generation
+        rate only, from its first piece to its last, so the prompt read is not
+        counted as generating; a call with fewer than two pieces records
+        nothing, and the next call of the model keeps the rule it had.
+        """
+        if self.meter is None:
+            return
+        generation = self.progress.generation()
+        if generation is None:
+            return
+        units, seconds = generation
+        self.meter.rates.observe(self.meter.model, units, seconds, IN_CALL_SOURCE)
+
+
+# The call whose deadline the running code is inside, with the model making
+# it: a client that answers one call through another of its own methods (an
+# ``_agenerate`` that reads its ``_astream``) is held once, by the outer one,
+# and its pieces are counted there.
+_ACTIVE_CALL: ContextVar[tuple[Any, _CallDeadline] | None] = ContextVar(
+    "maljan_active_model_call", default=None
+)
+
+
+def _outer_call(llm: Any) -> _CallDeadline | None:
+    active = _ACTIVE_CALL.get()
+    if active is not None and active[0] is llm:
+        return active[1]
+    return None
+
+
+class _CountingRunManager:
+    """A run manager that counts each piece the client reports before passing it on.
+
+    A client that streams inside ``_agenerate`` (Ollama's) reports every piece
+    through ``on_llm_new_token``; the call's deadline reads its pace from them.
+    Everything else is the wrapped manager's own.
+    """
+
+    def __init__(self, inner: Any, progress: _CallProgress) -> None:
+        self._inner = inner
+        self._progress = progress
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+class _AsyncCountingRunManager(_CountingRunManager):
+    async def on_llm_new_token(self, token: Any, **kwargs: Any) -> None:
+        self._progress.reported_piece(token, kwargs.get("chunk"))
+        await self._inner.on_llm_new_token(token, **kwargs)
+
+
+class _SyncCountingRunManager(_CountingRunManager):
+    def on_llm_new_token(self, token: Any, **kwargs: Any) -> None:
+        self._progress.reported_piece(token, kwargs.get("chunk"))
+        self._inner.on_llm_new_token(token, **kwargs)
+
+
+def _uncounted(run_manager: Any) -> Any:
+    return run_manager._inner if isinstance(run_manager, _CountingRunManager) else run_manager
+
+
+def _provider_timeout(exc: BaseException) -> ModelCallDeadline:
+    """A timeout the client raised itself, before the call's deadline, as the deadline's class."""
+    return ModelCallDeadline(f"the model request timed out: {exc or type(exc).__name__}")
+
+
+def _transport_read_timeout(exc: BaseException) -> bool:
+    """Whether ``exc`` is, or was caused by, a connection's read timeout.
+
+    httpx's own ``TimeoutException`` (from ``httpx``, or ``httpx2``, the fork
+    the OpenAI SDK runs on), or the SDK's wrapper of it
+    (``openai.APITimeoutError``), anywhere in its cause chain.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        kind = type(current)
+        for klass in kind.__mro__:
+            if (klass.__module__, klass.__name__) in (
+                ("httpx", "TimeoutException"),
+                ("httpx2", "TimeoutException"),
+                ("openai", "APITimeoutError"),
+            ):
+                return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 # Where an answer carries the time its request was sent (seconds since the
@@ -662,30 +987,61 @@ def stamp_sent_at(result: Any, sent: float) -> Any:
 
 
 def _deadline_members(base: Any) -> dict[str, Any]:
-    """``_agenerate``, ``_generate`` and ``_astream`` held to :func:`call_deadline`."""
+    """The four ways a call is made, each held to its :class:`_CallDeadline`."""
     members: dict[str, Any] = {}
-
-    def _expired(seconds: float) -> ModelCallDeadline:
-        return ModelCallDeadline(
-            f"the model request did not finish within its {seconds:.0f} s deadline "
-            "(its output cap at the model's measured pace, or the provider's request "
-            "timeout where nothing is measured)"
-        )
 
     if hasattr(base, "_agenerate"):
 
         async def _agenerate(
             self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
         ) -> Any:
-            seconds = call_deadline(self, messages, kwargs)
-            sent = time.time()
-            try:
-                result = await asyncio.wait_for(
-                    base._agenerate(self, messages, stop=stop, run_manager=run_manager, **kwargs),
-                    seconds,
+            if _outer_call(self) is not None:
+                return await base._agenerate(
+                    self, messages, stop=stop, run_manager=run_manager, **kwargs
                 )
-            except TimeoutError as exc:
-                raise _expired(seconds) from exc
+            loop = asyncio.get_running_loop()
+            deadline = _CallDeadline(self, messages, kwargs, loop.time)
+            counted = (
+                None
+                if run_manager is None
+                else _AsyncCountingRunManager(run_manager, deadline.progress)
+            )
+            sent = time.time()
+            context = copy_context()
+            context.run(_ACTIVE_CALL.set, (self, deadline))
+            task = loop.create_task(
+                base._agenerate(self, messages, stop=stop, run_manager=counted, **kwargs),
+                context=context,
+            )
+            try:
+                while True:
+                    bound = deadline.bound()
+                    left = deadline.started + bound.seconds - loop.time()
+                    if left <= 0:
+                        raise deadline.expired(bound)
+                    # Woken at the deadline as it stands; pieces that arrived
+                    # meanwhile may have moved it, so it is read again.
+                    done, _pending = await asyncio.wait({task}, timeout=left)
+                    if done:
+                        try:
+                            result = task.result()
+                        except TimeoutError as exc:
+                            raise _provider_timeout(exc) from exc
+                        except Exception as exc:
+                            # As on the streamed path: a client that streams
+                            # inside this call (Ollama's) ends a stall after
+                            # its pieces in its own read timeout, which is the
+                            # silence after the last piece.
+                            if deadline.progress.pieces > 0 and _transport_read_timeout(exc):
+                                raise deadline.silence_ended(loop.time(), exc) from exc
+                            raise
+                        break
+            except BaseException:
+                if not task.done():
+                    task.cancel()
+                    await asyncio.wait({task})
+                deadline.record_unfinished()
+                raise
             return stamp_sent_at(result, sent)
 
         members["_agenerate"] = _agenerate
@@ -695,8 +1051,22 @@ def _deadline_members(base: Any) -> dict[str, Any]:
         async def _astream(
             self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
         ) -> Any:
-            seconds = call_deadline(self, messages, kwargs)
-            ends = time.monotonic() + seconds
+            outer = _outer_call(self)
+            if outer is not None:
+                # Held by the call around it; its pieces are counted here,
+                # once, rather than again through the run manager.
+                inner = base._astream(
+                    self, messages, stop=stop, run_manager=_uncounted(run_manager), **kwargs
+                )
+                try:
+                    async for chunk in inner:
+                        outer.progress.streamed_chunk(chunk)
+                        yield chunk
+                finally:
+                    await inner.aclose()
+                return
+            loop = asyncio.get_running_loop()
+            deadline = _CallDeadline(self, messages, kwargs, loop.time)
             sent: float | None = time.time()
             stream = base._astream(self, messages, stop=stop, run_manager=run_manager, **kwargs)
             try:
@@ -704,21 +1074,39 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                     # Each step against the time left, so the deadline never
                     # spans a ``yield``: a consumer between two chunks sees
                     # ``ModelCallDeadline`` and no task is left cancelling.
-                    left = ends - time.monotonic()
+                    bound = deadline.bound()
+                    left = deadline.started + bound.seconds - loop.time()
                     if left <= 0:
-                        raise _expired(seconds)
+                        raise deadline.expired(bound)
                     try:
                         chunk = await asyncio.wait_for(stream.__anext__(), left)
                     except StopAsyncIteration:
                         return
                     except TimeoutError as exc:
-                        raise _expired(seconds) from exc
+                        if loop.time() >= deadline.started + bound.seconds:
+                            raise deadline.expired(bound) from exc
+                        raise _provider_timeout(exc) from exc
+                    except Exception as exc:
+                        # The connection's own read timeout, after the call
+                        # had produced: the silence after its last piece,
+                        # stated as the deadline it is rather than as a
+                        # dropped connection. Before the first piece it is
+                        # raised as it came.
+                        if deadline.progress.pieces > 0 and _transport_read_timeout(exc):
+                            raise deadline.silence_ended(loop.time(), exc) from exc
+                        raise
+                    deadline.progress.streamed_chunk(chunk)
                     if sent is not None:
                         # On the first chunk only: the chunks are added up
                         # into one answer, and one stamp is what it carries.
                         _stamp_message(getattr(chunk, "message", None), sent)
                         sent = None
                     yield chunk
+            except GeneratorExit:
+                raise
+            except BaseException:
+                deadline.record_unfinished()
+                raise
             finally:
                 await stream.aclose()
 
@@ -729,29 +1117,125 @@ def _deadline_members(base: Any) -> dict[str, Any]:
         def _generate(
             self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
         ) -> Any:
-            seconds = call_deadline(self, messages, kwargs)
+            if _outer_call(self) is not None:
+                return base._generate(self, messages, stop=stop, run_manager=run_manager, **kwargs)
+            deadline = _CallDeadline(self, messages, kwargs, time.monotonic)
+            counted = (
+                None
+                if run_manager is None
+                else _SyncCountingRunManager(run_manager, deadline.progress)
+            )
             sent = time.time()
             outcome: dict[str, Any] = {}
             done = threading.Event()
+            context = copy_context()
+            context.run(_ACTIVE_CALL.set, (self, deadline))
 
             def _run() -> None:
                 try:
                     outcome["answer"] = base._generate(
-                        self, messages, stop=stop, run_manager=run_manager, **kwargs
+                        self, messages, stop=stop, run_manager=counted, **kwargs
                     )
                 except BaseException as exc:  # noqa: BLE001 — handed back to the caller
                     outcome["error"] = exc
                 finally:
                     done.set()
 
-            threading.Thread(target=_run, name="model-call", daemon=True).start()
-            if not done.wait(timeout=seconds):
-                raise _expired(seconds)
+            threading.Thread(
+                target=context.run, args=(_run,), name="model-call", daemon=True
+            ).start()
+            while not done.is_set():
+                bound = deadline.bound()
+                left = deadline.started + bound.seconds - time.monotonic()
+                if left <= 0:
+                    deadline.record_unfinished()
+                    raise deadline.expired(bound)
+                done.wait(timeout=left)
             if "error" in outcome:
-                raise outcome["error"]
+                deadline.record_unfinished()
+                error = outcome["error"]
+                if deadline.progress.pieces > 0 and _transport_read_timeout(error):
+                    raise deadline.silence_ended(time.monotonic(), error) from error
+                raise error
             return stamp_sent_at(outcome["answer"], sent)
 
         members["_generate"] = _generate
+
+    # Only where the client streams synchronously: a class whose ``_stream``
+    # is the base's own would otherwise be taken for one that streams.
+    if getattr(base, "_stream", None) is not BaseChatModel._stream:
+
+        def _stream(
+            self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+        ) -> Any:
+            outer = _outer_call(self)
+            if outer is not None:
+                for chunk in base._stream(
+                    self, messages, stop=stop, run_manager=_uncounted(run_manager), **kwargs
+                ):
+                    outer.progress.streamed_chunk(chunk)
+                    yield chunk
+                return
+            deadline = _CallDeadline(self, messages, kwargs, time.monotonic)
+            arrived: queue.Queue[tuple[str, Any]] = queue.Queue()
+            # Set when the caller is done with the stream: at its deadline, on
+            # an error, or when it stops reading. The reader stops at the next
+            # chunk and closes the client's iterator, which ends the request,
+            # rather than reading the rest of the answer into the queue.
+            finished = threading.Event()
+
+            def _pump() -> None:
+                source = base._stream(self, messages, stop=stop, run_manager=run_manager, **kwargs)
+                try:
+                    for chunk in source:
+                        if finished.is_set():
+                            return
+                        arrived.put(("chunk", chunk))
+                except BaseException as exc:  # noqa: BLE001 — handed back to the caller
+                    arrived.put(("error", exc))
+                else:
+                    arrived.put(("end", None))
+                finally:
+                    close = getattr(source, "close", None)
+                    if callable(close):
+                        close()
+
+            # The client's iterator runs in a thread of its own, so the wait
+            # for its next piece can end at the deadline, as ``_generate``'s does.
+            threading.Thread(
+                target=copy_context().run, args=(_pump,), name="model-stream", daemon=True
+            ).start()
+            sent: float | None = time.time()
+            try:
+                while True:
+                    bound = deadline.bound()
+                    left = deadline.started + bound.seconds - time.monotonic()
+                    if left <= 0:
+                        raise deadline.expired(bound)
+                    try:
+                        kind, item = arrived.get(timeout=left)
+                    except queue.Empty:
+                        continue
+                    if kind == "end":
+                        return
+                    if kind == "error":
+                        if deadline.progress.pieces > 0 and _transport_read_timeout(item):
+                            raise deadline.silence_ended(time.monotonic(), item) from item
+                        raise item
+                    deadline.progress.streamed_chunk(item)
+                    if sent is not None:
+                        _stamp_message(getattr(item, "message", None), sent)
+                        sent = None
+                    yield item
+            except GeneratorExit:
+                raise
+            except BaseException:
+                deadline.record_unfinished()
+                raise
+            finally:
+                finished.set()
+
+        members["_stream"] = _stream
     return members
 
 

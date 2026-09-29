@@ -1588,6 +1588,60 @@ def built_output_cap(llm: Any) -> OutputCap | None:
     return cap if isinstance(cap, OutputCap) else None
 
 
+# Where a built model keeps the window of the model it calls, where one is known.
+_BUILT_WINDOW_ATTR = "_maljan_window"
+
+# The sources of a window that are facts about the server that serves it.
+_SERVED = (DECLARED, PROBED)
+
+
+def record_built_window(llm: Any, fact: WindowFact | None) -> Any:
+    """Keep on ``llm`` the window its model serves, when it is a known fact; returns ``llm``.
+
+    The window the settings declare or the server reported, never the table's
+    figure for a model family or the fallback: neither is a fact about this
+    server. Read by a call with no output cap, whose deadline is sized from the
+    room the window leaves after its prompt (``generation_rate._CallDeadline``).
+    Never raises.
+    """
+    if llm is None or fact is None or fact.source not in _SERVED or int(fact.tokens) <= 0:
+        return llm
+    try:
+        object.__setattr__(llm, _BUILT_WINDOW_ATTR, fact)
+    except Exception:  # noqa: BLE001 — a record that cannot be kept is no record
+        logger.debug("context window: %s keeps no record", type(llm).__name__)
+    return llm
+
+
+def built_window(llm: Any) -> WindowFact | None:
+    """The known window ``llm``'s model serves, or ``None`` where none was recorded."""
+    fact = getattr(llm, "__dict__", {}).get(_BUILT_WINDOW_ATTR) if llm is not None else None
+    return fact if isinstance(fact, WindowFact) else None
+
+
+def known_window(settings: Any, provider: str, endpoint: object, model: str) -> WindowFact | None:
+    """The window already known for one model at one endpoint, without a request.
+
+    What the settings declare or what a probe learned, combined as every
+    window is (:func:`learn_window` with ``probe=False``); ``None`` where only
+    the vendored table or the fallback is left. Never raises.
+    """
+    try:
+        declared, is_default = declared_window(settings, provider)
+        fact = learn_window(
+            provider,
+            endpoint=endpoint,
+            model=model,
+            declared=declared,
+            declared_is_default=is_default,
+            probe=False,
+        )
+    except Exception as exc:  # noqa: BLE001 — an unreadable window is no window
+        logger.debug("context window: none known for %s (%s)", model, exc)
+        return None
+    return fact if fact.source in _SERVED else None
+
+
 def output_cap_for(
     settings: Any, setting: str, agent: str = "", *, role: str = "expert", probe: bool = False
 ) -> OutputCap:

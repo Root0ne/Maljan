@@ -23,9 +23,16 @@ from maljan.llm.generation_rate import ModelCallDeadline, call_deadline, with_si
 
 
 class _Trickling(BaseChatModel):
-    """Sends a piece every few milliseconds and never finishes before ``finishes_after``."""
+    """Sends a piece every few milliseconds and never finishes before ``finishes_after``.
+
+    With an output cap of a few units: its pieces, far past the cap, size no
+    deadline longer than the client's own. A call with no cap and no known
+    window is held only to the silence after its last piece, which a trickle
+    never reaches.
+    """
 
     request_timeout: float = 0.3
+    max_tokens: int = 5
     finishes_after: float = 30.0
 
     @property
