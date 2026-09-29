@@ -1610,15 +1610,18 @@ def _macho(data: dict[str, Any]) -> str:
 
 
 def _apk(data: dict[str, Any]) -> str:
+    # A fact androguard could not read is a ``no: <reason>`` string, not a
+    # list; the degraded note beside it already names what was not read.
     parts = []
-    if data.get("package"):
-        parts.append(f"package {data['package']}")
+    package = data.get("package")
+    if package and not str(package).startswith("no: "):
+        parts.append(f"package {package}")
     if data.get("degraded"):
         parts.append(str(data["degraded"]))
     for key in ("permissions", "activities", "services", "receivers", "providers"):
-        if data.get(key):
+        if isinstance(data.get(key), list) and data[key]:
             parts.append(f"{len(data[key])} {key}")
-    if data.get("permissions"):
+    if isinstance(data.get("permissions"), list) and data["permissions"]:
         parts.append(f"permissions {_names(data['permissions'])}")
     if data.get("dex_count") is not None:
         parts.append(f"{data['dex_count']} dex")

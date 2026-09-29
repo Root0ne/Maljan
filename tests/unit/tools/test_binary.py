@@ -397,6 +397,249 @@ class TestApkInfo:
         assert tool.apk_info(str(target))["error"] == "not a zip-based APK"
 
 
+# Every fact ``apk_info`` reads through androguard, by the argument that asks for it.
+_MANIFEST_FACTS = ("package", "version_name", "version_code", "min_sdk", "target_sdk")
+_COMPONENT_FACTS = ("activities", "services", "receivers", "providers")
+
+
+class _ParsedApk:
+    """An androguard ``APK`` stand-in whose manifest parsed, with every getter answering."""
+
+    def __init__(self, _path: str) -> None:
+        pass
+
+    def is_valid_APK(self) -> bool:
+        return True
+
+    def get_package(self) -> str:
+        return "org.example.app"
+
+    def get_androidversion_name(self) -> str:
+        return "1.0"
+
+    def get_androidversion_code(self) -> str:
+        return "1"
+
+    def get_min_sdk_version(self) -> str:
+        return "21"
+
+    def get_target_sdk_version(self) -> str:
+        return "33"
+
+    def get_permissions(self) -> list[str]:
+        return ["android.permission.INTERNET"]
+
+    def get_activities(self) -> list[str]:
+        return ["org.example.app.Main"]
+
+    def get_services(self) -> list[str]:
+        return []
+
+    def get_receivers(self) -> list[str]:
+        return []
+
+    def get_providers(self) -> list[str]:
+        return []
+
+    def is_signed_v1(self) -> bool:
+        return True
+
+    def is_signed_v2(self) -> bool:
+        return False
+
+    def is_signed_v3(self) -> bool:
+        return False
+
+    def get_certificates(self) -> list[object]:
+        return []
+
+    def get_all_dex(self) -> list[bytes]:
+        return []
+
+
+def _install_androguard(monkeypatch: pytest.MonkeyPatch, apk_class: type | None) -> None:
+    """``androguard.core.apk.APK`` as ``apk_class``, or not importable when ``None``."""
+    import sys
+    import types
+
+    if apk_class is None:
+        monkeypatch.setitem(sys.modules, "androguard.core.apk", None)
+        return
+    module = types.ModuleType("androguard.core.apk")
+    module.APK = apk_class  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "androguard", types.ModuleType("androguard"))
+    monkeypatch.setitem(sys.modules, "androguard.core", types.ModuleType("androguard.core"))
+    monkeypatch.setitem(sys.modules, "androguard.core.apk", module)
+
+
+class TestApkInfoContainsAndroguard:
+    """An APK whose manifest is not valid AXML made androguard raise from a
+    getter (``KeyError: 'Name'`` from ``get_androidversion_name``), outside the
+    one call the tool guarded, and the whole tool call failed. The zip-level
+    facts are always reported; each androguard fact is reported when androguard
+    reads it, and otherwise said as ``no: <reason>`` with the exception type only."""
+
+    def _apk(self, tmp_path: Path, manifest: bytes = b"\x03\x00\x08\x00binary manifest") -> Path:
+        apk = tmp_path / "app.apk"
+        with zipfile.ZipFile(apk, "w") as archive:
+            archive.writestr("AndroidManifest.xml", manifest)
+            archive.writestr("classes.dex", b"dex\n035\x00" + b"\x00" * 32)
+            archive.writestr("lib/arm64-v8a/libnative.so", _elf())
+            archive.writestr("META-INF/CERT.RSA", b"\x30\x82 fake pkcs7")
+        return apk
+
+    def _zip_facts_hold(self, result: dict[str, object]) -> None:
+        assert "error" not in result
+        assert result["manifest_present"] is True
+        assert result["dex_count"] == 1
+        assert result["abis"] == ["arm64-v8a"]
+        assert result["cert_files"] == ["META-INF/CERT.RSA"]
+
+    def test_the_installed_androguard_on_a_malformed_manifest_crashes_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        pytest.importorskip("androguard.core.apk")
+
+        result = tool.apk_info(str(self._apk(tmp_path)), dex_strings=True)
+
+        self._zip_facts_hold(result)
+        for key in (*_MANIFEST_FACTS, "permissions", *_COMPONENT_FACTS):
+            assert str(result[key]).startswith("no: the manifest could not be parsed"), key
+        assert "the manifest could not be parsed" in result["degraded"]
+
+    def test_a_parsed_manifest_reports_every_fact(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_androguard(monkeypatch, _ParsedApk)
+
+        result = tool.apk_info(str(self._apk(tmp_path)), dex_strings=True)
+
+        self._zip_facts_hold(result)
+        assert result["package"] == "org.example.app"
+        assert result["version_name"] == "1.0"
+        assert result["target_sdk"] == "33"
+        assert result["permissions"] == ["android.permission.INTERNET"]
+        assert result["activities"] == ["org.example.app.Main"]
+        assert result["signing_schemes"] == {"v1": True, "v2": False, "v3": False}
+        assert result["certificates"] == []
+        assert result["dex_strings"] == []
+        assert "degraded" not in result
+
+    def test_a_getter_that_raises_costs_its_own_fact_and_says_the_type_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class _NoVersionName(_ParsedApk):
+            def get_androidversion_name(self) -> str:
+                raise KeyError("Name")
+
+        _install_androguard(monkeypatch, _NoVersionName)
+
+        result = tool.apk_info(str(self._apk(tmp_path)))
+
+        self._zip_facts_hold(result)
+        assert result["version_name"] == "no: the manifest could not be parsed (KeyError)"
+        assert result["package"] == "org.example.app"
+        assert result["permissions"] == ["android.permission.INTERNET"]
+        assert "Name" not in result["version_name"]
+        assert "version_name" in result["degraded"]
+
+    def test_a_manifest_androguard_marks_invalid_yields_no_empty_lists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """androguard answers an unparsed manifest's lists as empty; an empty
+        list would say the APK declares nothing, which nobody read."""
+
+        class _Unparsed(_ParsedApk):
+            def is_valid_APK(self) -> bool:
+                return False
+
+            def get_permissions(self) -> list[str]:
+                return []
+
+        _install_androguard(monkeypatch, _Unparsed)
+
+        result = tool.apk_info(str(self._apk(tmp_path)))
+
+        self._zip_facts_hold(result)
+        for key in (*_MANIFEST_FACTS, "permissions", *_COMPONENT_FACTS):
+            assert result[key] == "no: the manifest could not be parsed", key
+        assert result["signing_schemes"]["v1"] is True
+
+    @pytest.mark.parametrize(
+        ("getter", "key", "reason"),
+        [
+            ("get_certificates", "certificates", "no: the certificates could not be read"),
+            ("is_signed_v2", "signing_schemes", "no: the signing block could not be read"),
+            ("get_all_dex", "dex_strings", "no: the dex files could not be read"),
+            ("get_services", "services", "no: the manifest could not be parsed"),
+        ],
+    )
+    def test_every_other_androguard_call_is_contained(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        getter: str,
+        key: str,
+        reason: str,
+    ) -> None:
+        def _raises(self: object) -> object:
+            raise ValueError("bytes from the sample")
+
+        _install_androguard(monkeypatch, type("_Raises", (_ParsedApk,), {getter: _raises}))
+
+        result = tool.apk_info(str(self._apk(tmp_path)), dex_strings=True)
+
+        self._zip_facts_hold(result)
+        said = result[key]["v2"] if key == "signing_schemes" else result[key]
+        assert said == f"{reason} (ValueError)"
+        assert "bytes from the sample" not in str(result)
+        assert result["package"] == "org.example.app"
+
+    def test_an_apk_androguard_cannot_open_says_so_for_each_fact(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class _Refuses:
+            def __init__(self, _path: str) -> None:
+                raise ValueError("bytes from the sample")
+
+        _install_androguard(monkeypatch, _Refuses)
+
+        result = tool.apk_info(str(self._apk(tmp_path)))
+
+        self._zip_facts_hold(result)
+        assert result["package"] == "no: androguard could not open the APK (ValueError)"
+        assert result["certificates"] == "no: androguard could not open the APK (ValueError)"
+        assert "bytes from the sample" not in str(result)
+
+    def test_without_androguard_importable_the_zip_facts_stand(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_androguard(monkeypatch, None)
+
+        result = tool.apk_info(str(self._apk(tmp_path)))
+
+        self._zip_facts_hold(result)
+        assert "androguard is not installed" in result["degraded"]
+        assert "uv sync --extra tools" in result["remediation"]
+
+    def test_an_archive_without_a_manifest_says_so(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class _NoManifest(_ParsedApk):
+            def is_valid_APK(self) -> bool:
+                return False
+
+        _install_androguard(monkeypatch, _NoManifest)
+        apk = tmp_path / "bare.apk"
+        with zipfile.ZipFile(apk, "w") as archive:
+            archive.writestr("classes.dex", b"dex\n035\x00" + b"\x00" * 32)
+
+        result = tool.apk_info(str(apk))
+
+        assert result["manifest_present"] is False
+        assert result["package"] == "no: the archive holds no AndroidManifest.xml"
+
+
 class TestArchiveList:
     def test_a_zip_member_carries_its_size_and_crc(self, tmp_path: Path) -> None:
         archive_path = tmp_path / "a.zip"

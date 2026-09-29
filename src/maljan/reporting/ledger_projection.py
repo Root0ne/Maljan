@@ -318,7 +318,11 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
         # An APK's declared permissions are its import table: the same
         # question — what did the author ask the platform for — answered in
         # the vocabulary Android uses.
-        static.exports.extend(str(name) for name in data.get("permissions") or [])
+        # A permission list androguard could not read is a ``no: <reason>``
+        # string, which lists no permission.
+        permissions = data.get("permissions")
+        if isinstance(permissions, list):
+            static.exports.extend(str(name) for name in permissions)
         if data.get("pdb_path"):
             static.pdb_path = str(data["pdb_path"])
         rows = [row for row in data.get("packer_signatures") or [] if row]

@@ -215,7 +215,7 @@ from maljan.schemas.isr_models import (
     judge_kept_note,
 )
 from maljan.schemas.stix_models import Bundle
-from maljan.tools import api_hashes, knowledge, string_blobs
+from maljan.tools import api_hashes, binary, knowledge, string_blobs
 from maljan.tools.errors import CAPTURES_REMEDIATION, NO_CAPTURE_REMEDIATION
 
 # The distinctive terms of the evaluation key: how the scored sample resolves its
@@ -799,6 +799,19 @@ PROMPTS: dict[str, str] = {
             ],
             "resolved_at_runtime_from_hashes": ["N"],
         }
+    ),
+    "the APK tool's unread facts and its degraded note": " ".join(
+        [
+            binary.APK_UNOPENED,
+            binary.MANIFEST_UNPARSED,
+            binary.MANIFEST_ABSENT,
+            binary.SIGNING_BLOCK_UNREAD,
+            binary.CERTIFICATES_UNREAD,
+            binary.DEX_UNREAD,
+            binary.DEX_READER_MISSING,
+            binary.APK_STILL_ANSWERED,
+            binary.apk_unread_note(["package", "permissions"], binary.MANIFEST_UNPARSED),
+        ]
     ),
     "the stated candidate scan and readability test": (
         f"{api_hashes.SCAN_HEURISTIC} {string_blobs.READABLE_TEST}"

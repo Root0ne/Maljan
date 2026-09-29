@@ -2377,6 +2377,16 @@ change landed on `main`.
 
 ### Fixed
 
+- **The APK tool survives a manifest androguard cannot parse.** On an APK whose
+  `AndroidManifest.xml` is not valid AXML, androguard raised from a getter
+  (`KeyError: 'Name'` from the version name), outside the one call `apk_info`
+  guarded, and the whole call failed. androguard also answers such a
+  manifest's permissions and components as empty lists, which read as an APK
+  declaring nothing. Every androguard call is now contained: the zip-level
+  facts are always reported, each androguard fact is reported when it is read,
+  and otherwise it is `no: <reason>` (for the manifest, "the manifest could not
+  be parsed", with the exception's type only), named in the `degraded` note.
+  The triage pack and the report read such a fact as no list.
 - **A cap handed to one call reaches a llama.cpp server whose model was built
   uncapped.** The cap was copied only into cap keys the llama.cpp extras
   already held, and a local model is built with no cap by default, so its

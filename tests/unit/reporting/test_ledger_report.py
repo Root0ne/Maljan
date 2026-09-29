@@ -91,6 +91,33 @@ class TestBinaryBuilders:
         assert "android.permission.READ_SMS" in sections["apk_permissions"].items
         assert ["service", "com.example.evil.Beacon"] in sections["apk_components"].rows
 
+    def test_an_apk_fact_androguard_could_not_read_is_no_list(self) -> None:
+        """``apk_info`` says an unread fact as ``no: <reason>``; a string is not
+        a list of permissions or components, one character a row."""
+        from maljan.reporting.ledger_projection import static_from_ledger
+        from maljan.schemas.evidence import LedgerEntry
+
+        unread = "no: the manifest could not be parsed (KeyError)"
+        answer = {
+            "manifest_present": True,
+            "dex_count": 1,
+            "package": "org.example.app",
+            "version_name": unread,
+            "permissions": unread,
+            "activities": ["org.example.app.Main"],
+            "services": unread,
+        }
+        sections = _by_key(build_sections([_entry("apk_info", answer)]))
+        assert "apk_permissions" not in sections
+        assert sections["apk_components"].rows == [["activitie", "org.example.app.Main"]]
+        assert ["version name", unread] in sections["apk_header"].rows
+
+        static = static_from_ledger(
+            [LedgerEntry(id="ev_0001", agent="static", tool="apk_info", structured=answer)]
+        )
+        assert static is not None
+        assert static.exports == []
+
     def test_two_calls_of_the_same_tool_merge_and_cite_both(self) -> None:
         sections = _by_key(build_sections([_entry("pe_info"), _entry("pe_info", seq=2)]))
         assert len(sections["pe_sections"].rows) == 2

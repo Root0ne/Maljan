@@ -1469,7 +1469,10 @@ with `uv sync --extra tools` (the backend image already does); without them
 `apk_info` falls back to the zip-level facts and `macho_info`, the OLE2 half of
 `document_info` and the 7z half of `archive_list` answer
 `{"error": "<module> is not installed"}`. Nothing else changes, and the server
-starts either way.
+starts either way. With androguard installed, an APK whose manifest it cannot
+parse still gets the zip-level facts: each fact androguard could not read is
+answered as `no: <reason>` (the manifest could not be parsed, with the
+exception's type only), and the answer's `degraded` note names them.
 
 `floss`, the emulating string decoder, runs FLOSS (Apache-2.0) as FLARE's
 pinned standalone Linux build, v3.1.1 (zip sha256
