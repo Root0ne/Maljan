@@ -969,8 +969,10 @@ hosted API refuses a request whose prompt and `max_tokens` pass the window.
 The call's cap is lowered for that call alone, under the field each server
 reads — `max_completion_tokens` for OpenAI, `max_tokens` for DeepSeek and
 Anthropic, `max_tokens` and `n_predict` in llama.cpp's request extras
-(whether or not the model was built with a cap, so an uncapped local model is
-held to it too),
+(whether or not the model was built with a cap: the models the container
+builds for a run carry a cap derived from the window and already sent these
+keys, and a model built without one — the function summarizer's, or the
+provider called directly — is now held to the call's cap too),
 `max_output_tokens` for Gemini — and the worker log says so. An Ollama model
 keeps the cap it was built with, since its client takes no per-call cap; a
 model the llama.cpp self-heal rebuilt without the extras is sent the cap only
@@ -1472,7 +1474,9 @@ with `uv sync --extra tools` (the backend image already does); without them
 starts either way. With androguard installed, an APK whose manifest it cannot
 parse still gets the zip-level facts: each fact androguard could not read is
 answered as `no: <reason>` (the manifest could not be parsed, with the
-exception's type only), and the answer's `degraded` note names them.
+exception's type only), and the answer's `degraded` note names them. A dex
+file androguard's reader refuses is listed under `dex_strings_unread`, beside
+the strings of the files it read.
 
 `floss`, the emulating string decoder, runs FLOSS (Apache-2.0) as FLARE's
 pinned standalone Linux build, v3.1.1 (zip sha256
