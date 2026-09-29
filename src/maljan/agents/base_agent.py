@@ -2834,6 +2834,29 @@ def answer_cut_at_cap(response: Any, cap: int) -> tuple[int, str] | None:
     return None
 
 
+def cap_in_force(built: int, held: int | None) -> int:
+    """The output cap one call was sent with: ``held`` where the call was held below ``built``.
+
+    A call the spend ceiling held is sent its held cap, which is never above
+    the model's own; a model built with no cap (0) is held to ``held`` alone.
+    """
+    built = max(0, int(built or 0))
+    if isinstance(held, int) and not isinstance(held, bool) and held > 0:
+        return held if built <= 0 else min(built, held)
+    return built
+
+
+def turn_held_cap(binding: Any, llm: Any) -> int | None:
+    """The cap a loop's binding holds its turns to now, or ``None`` when they go at the model's own."""
+    if binding is None or not isinstance(getattr(binding, "kwargs", None), dict):
+        return None
+    from maljan.llm.context_window import output_bound_kwargs
+
+    field = next(iter(output_bound_kwargs(llm, 1)), None)
+    value = binding.kwargs.get(field) if field is not None else None
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
 # What a later chunk's prompt opens with: the calls the earlier chunks of the
 # same analysis made, each with the entry that holds its answer. Its loop
 # answers an identical call with the result that entry recorded
@@ -2988,14 +3011,17 @@ class BudgetMeter:
         share = getattr(llm, "fallback_turn_share", None)
         return float(share) if isinstance(share, int | float) else None
 
-    def _record_usage(self, response: Any, *, announce: bool = True, call: str = "") -> None:
+    def _record_usage(
+        self, response: Any, *, announce: bool = True, call: str = "", held: int | None = None
+    ) -> None:
         """One model answer onto the run's ledger, under this agent and the model that gave it.
 
         ``announce`` publishes the switch when this answer is the one a
         fallback gave; the tool loop announces its turns as they happen and
         records them afterwards, so it passes ``False`` here. ``call`` names
         what the call was, which the ledger keeps for a call that reported no
-        usage.
+        usage. ``held`` is the cap the call was held to, when it was: the cut
+        check reads the cap the call was sent with (``cap_in_force``).
         """
         record_response_usage(
             getattr(self, "token_ledger", None),
@@ -3006,7 +3032,9 @@ class BudgetMeter:
         )
         # Whether this answer ended at the output cap, kept for the validation
         # turn: the last model answer recorded is the one the turn checks.
-        self._last_answer_cut = answer_cut_at_cap(response, self.output_cap_tokens())
+        self._last_answer_cut = answer_cut_at_cap(
+            response, cap_in_force(self.output_cap_tokens(), held)
+        )
         if announce:
             self._announce_fallback(response)
 
@@ -4105,6 +4133,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         loop_model = _model_that_closes_off_truncated_calls(
             self.llm, recorded, _close_off_truncated_calls
         )
+        # Where each turn's held cap is set, and read back for the last turn's cut check.
+        held_binding = _loop_binding(loop_model, self.llm)
         agent_executor = create_react_agent(
             loop_model,
             recorded,
@@ -4115,7 +4145,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 budget=budget,
                 recorder=recorder,
                 spend_slot=spend_key,
-                held_binding=_loop_binding(loop_model, self.llm),
+                held_binding=held_binding,
             ),
         )
 
@@ -4682,9 +4712,18 @@ class BaseAnalyst(BudgetMeter, ABC):
         # per-run TokenLedger reported ~1 call for a multi-call ReAct run.
         # Record every AI turn the executor produced (each carries its own
         # ``usage_metadata``) so the ledger reflects real LLM spend.
-        for _m in msgs:
-            if is_model_turn(_m):
-                self._record_usage(_m, announce=False, call=TOOL_LOOP_TURN_CALL)
+        # The last turn is the answer the validation turn checks for a cut, so
+        # it is checked against the cap it was sent with: the binding still
+        # holds the cap the spend ceiling set for that turn, or none.
+        turns = [m for m in msgs if is_model_turn(m)]
+        last_held = turn_held_cap(held_binding, self.llm)
+        for index, _m in enumerate(turns):
+            self._record_usage(
+                _m,
+                announce=False,
+                call=TOOL_LOOP_TURN_CALL,
+                held=last_held if index == len(turns) - 1 else None,
+            )
         if spend_meter is not None:
             spend_meter.forget_loop(spend_key)
         elapsed = _time.monotonic() - _t0
@@ -5210,7 +5249,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             async def _ask() -> Any:
                 answer = await asyncio.wait_for(model.ainvoke(messages, **held), timeout=budget)
                 # On the ledger before the reservation goes.
-                self._record_usage(answer, call="final-answer nudge")
+                self._record_usage(answer, call="final-answer nudge", held=bound if held else None)
                 return answer
 
             try:
@@ -5655,7 +5694,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             response = await asyncio.wait_for(
                 call, timeout=None if timeout is None else float(timeout)
             )
-            self._record_usage(response, call=what)
+            self._record_usage(response, call=what, held=bound if bound_kwargs else None)
             return str(response.content)
 
         _t0 = _time.monotonic()

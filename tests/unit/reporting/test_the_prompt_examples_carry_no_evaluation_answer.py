@@ -89,6 +89,7 @@ from maljan.agents.tool_pinning import (
     UNREADABLE_FILLED_CAPTURE_REMEDIATION,
 )
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
+from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE
 from maljan.analysis.pcap_summary import CaptureRead
 from maljan.extractors.capability_matrix import (
     NOT_ASKED_UNKNOWN_ID,
@@ -688,6 +689,7 @@ PROMPTS: dict[str, str] = {
     "a summariser prompt shortened to its window": SUMMARISER_SHORTENED_NOTE.format(
         shown=1000, total=9000
     ),
+    "a summary cut at its output limit": SUMMARY_CUT_NOTE.format(cap=4096),
     "an ask refused at the spend ceiling": SPEND_CEILING_REFUSAL.format(callee="'helper'"),
     "the spend ceiling's reason and a call it refused": _spend_sentences(),
     "an ask refused for a mutual wait": WAITING_ON_EACH_OTHER_REFUSAL.format(callee="'helper'"),
@@ -809,6 +811,7 @@ PROMPTS: dict[str, str] = {
             binary.CERTIFICATES_UNREAD,
             binary.DEX_UNREAD,
             binary.DEX_READER_MISSING,
+            binary.DEX_FILE_UNREAD.format(number=2),
             binary.APK_STILL_ANSWERED,
             binary.apk_unread_note(["package", "permissions"], binary.MANIFEST_UNPARSED),
         ]

@@ -1448,7 +1448,8 @@ recorded as unresolved and `run_summary.budget.<agent>.validation_not_asked`
 says why.
 
 An analyst answer that ended at its output cap (`llm.expert_max_tokens`, or the
-cap derived from the window when it is 0, by the
+cap derived from the window when it is 0; for a call the spend ceiling held to
+less, the held cap it was sent with; by the
 server's finish reason or by a generated count equal to the cap, since
 ik_llama.cpp reports `stop` for an answer it cut) is asked once for a whole
 shorter one, the way the judge's and a report section's are:
@@ -2460,7 +2461,9 @@ tool's own numbers that means something else. Nothing else is written into the
 tool's vocabulary. Anything that is not a JSON object — a decompilation, any
 plain text — goes to the `FunctionSummarizer` when
 `preprocessing.use_function_summarizer` is on and to the character cut
-otherwise, exactly as before.
+otherwise, exactly as before. A summary that ended at its output limit, by the
+analysts' rule, begins with a note saying its end is missing, and the cut is
+recorded with the run's shortened inputs.
 
 The shortening runs **before** the summariser, and for a JSON object it is the
 better of the two: the summariser answers in English prose, and prose is what
