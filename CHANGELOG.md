@@ -8,6 +8,31 @@ change landed on `main`.
 
 ### Added
 
+- **One reasoning card per ATT&CK technique, beside the vendored table.**
+  `data/attck_technique_cards.json` holds 98 cards, each written from the
+  table's row and naming the fields it was written from. A card gives the
+  required components, the kind (behaviour-focused or intent-critical), the
+  indicators, and the confusable sibling techniques with the criterion that
+  tells each apart. The cards cover every technique the capability terms list
+  and every technique named in the recorded benchmark runs. A test holds every
+  card's ids to the vendored table, and the leak test scans every card's shown
+  words.
+- **The technique check and the judge's technique question show the named
+  technique's card.** The does-not-describe question to an analyst ends with
+  the card. The judge's question shows the card under each technique it asks
+  about.
+- **The card check states where the claims do not meet the card, and the judge
+  is asked once.** It names the required components no claim and no cited
+  entry shows, a stated purpose no claim gives, and a sibling that every claim
+  sentence fits while neither the sentences nor the cited entries use the
+  card's own words. The finding goes to the judge's existing technique
+  question, and a technique named only on a finding is read the same way. The
+  answer stands, and the report row prints the finding beside it.
+- **A technique no claim anchors to an entry holding the behaviour is marked
+  `unanchored` in the report.** A claim is anchored when an entry it cites
+  holds a word of the card or the catalogue entry, or an identifier the claim
+  names. The technique is not dropped and no one is asked about it.
+
 - **A function an analyst decompiled and no claim describes is listed to it,
   once.** The functions come from the analyst's own ledger entries that
   decompiled something and answered:

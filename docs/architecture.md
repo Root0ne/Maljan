@@ -1139,7 +1139,44 @@ decides.
    sandboxing". On the stored claims of every benchmark run (123 claims with a
    technique id) it asks 18, three of them true claims whose sentences used
    none of the technique's words (Ingress Tool Transfer on "downloads and
-   writes a file", Native API on "the raw syscall() entry point").
+   writes a file", Native API on "the raw syscall() entry point"). The
+   question shows the named technique's card, where it has one.
+   **One reasoning card per technique** (`memory.technique_cards`, data in
+   `data/attck_technique_cards.json` beside the vendored table). A card holds
+   what the evidence has to show (its required components), its kind
+   (behaviour-focused: the action alone is the technique; intent-critical: the
+   action needs a stated adversarial purpose), the indicators to look for, and
+   the sibling techniques it is confused with, each with the criterion that
+   tells them apart (removing hooks from a security tool is T1685 Disable or
+   Modify Tools, the current id of the retired T1562, not T1070 Indicator
+   Removal). Each card is written from the vendored table's row and names the
+   fields it was written from, and renders to at most eight lines. The cards
+   cover every technique the capability terms list and every technique the
+   analysts named in the recorded runs; a sub-technique with no card of its
+   own is read by its parent's, and says so. A card also holds match words
+   that are never shown to a model: the words a requirement, a sibling or the
+   behaviour is recognised by, and the words only the card's own behaviour is
+   written with. A test holds every card's id, name and sibling ids to the
+   vendored table, and the leak test scans every card's shown words.
+   **The card check** (`validation.card_check_finding`) reads a technique's
+   card over every claim naming it and the text of each entry they cite, and
+   states two facts, never a decision: the required components no claim and
+   no cited entry shows (a stated purpose is read from the sentences alone),
+   and the sibling whose words every claim sentence carries while neither the
+   sentences nor the cited entries use the card's own. A component an entry of
+   unknown text might show is not called unmet, and a claim that reads as
+   absence is left to its own question. The finding goes to the judge's
+   technique question, once; the answer stands.
+   **Span anchoring** (`validation.unanchored_technique_finding`). A claim is
+   anchored when an entry it cites holds the behaviour: a word of the card, of
+   the vocabulary the describe check reads, or an identifier the claim's own
+   sentence names the behaviour's place with (an address, a function, an API,
+   a quoted value — a decompiled routine holds its code, not the technique's
+   words). A technique no claim naming which is anchored, with every cited
+   entry's text known, is marked `unanchored` in its report row with the ids
+   the claims cite; it is not dropped and no one is asked about it. The
+   existing `isr.ungrounded_technique` question, for a claim citing no id at
+   all, is unchanged.
 2. **Domain and platform consistency** (`attck.platform_mismatch`, exact). The
    catalogue's domain and platforms for the id against the routed sample —
    a Windows PE is `enterprise`/Windows, an APK `mobile`/Android, an ELF
@@ -2821,7 +2858,22 @@ is assembled from what the run gathered rather than recomputed beside it:
   whose id the catalogue does not know or the sample cannot host), and its
   finding is stated as the term match it is: no claim naming the technique uses
   the catalogue's terms for it. The review keeps each finding it asked with
-  (`undescribed`), and the row prints it beside the judge's answer and reason. Each id is named as the
+  (`undescribed`), and the row prints it beside the judge's answer and reason.
+  Given the text of the run's ledger entries, the question also asks, once,
+  about each technique whose card the claims naming it do not meet (the card
+  check): as a `card` question when the bundle carries it and nothing else asks
+  it, and on its other question when one does. Every asked technique with a
+  card shows the card under its claims, and the card check's finding where
+  there is one; the review keeps the findings (`card`) and the row prints them
+  beside the answer, or after "asked after" when the judge dropped it. The
+  review also keeps every claimed technique the anchor check marks
+  (`unanchored`), asked or not, and each row prints the mark. A technique
+  named only on a finding is asked already; the card check reads the
+  findings' text and evidence ids as it reads claims. On the claims of the
+  recorded local and hosted benchmark runs the card check adds one new
+  question (Indicator Removal from Tools on string encryption) and puts its
+  finding on eight questions already asked; each is an id the run's score
+  lists as wrong or mis-fit, or one the score does not list. Each id is named as the
   vendored ATT&CK table names it (`attck_loader.technique_label`), in the list,
   in the techniques the question says the bundle carries and in the evidence
   summary: asked about bare ids, a judge dropped a Winlogon Helper DLL id as
