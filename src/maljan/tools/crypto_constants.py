@@ -51,7 +51,8 @@ SCAN_RULE = (
     "a table set only whole, as bytes or as 32-bit words in either byte order; a values set "
     "value by value, each little-endian anywhere in the file, and the round-constant sets "
     "also whole; a set of several values is found when at least two of its distinct values "
-    "stand in the file and lone when exactly one does"
+    "stand in the file and lone when exactly one does; sets that share values are named only by "
+    "a value that tells them apart, standing within 64 bytes of the shared ones"
 )
 
 TABLE = "table"
@@ -76,8 +77,9 @@ class ConstantSet:
     halves_of: str = ""
     half: str = ""
     family: str = ""
-    # Values one of which must stand for the set to be named; without one,
-    # its values are another set's and that set names them.
+    # Values one of which must stand for the set to be named, within
+    # ``REQUIRED_NEAR`` bytes of one of the set's other values (the same run or
+    # table); without one, its values are another set's and that set names them.
     requires: tuple[Any, ...] = ()
     # A set whose values are all in another set, dropped when that one is found.
     yields_to: str = ""
@@ -535,6 +537,23 @@ def _other_halves_stand(wide: ConstantSet, data: bytes, quadwords: set[int], hal
     return False
 
 
+# How near a set's distinguishing value must stand to its other values: within
+# one table or one run of immediates, not anywhere in the file.
+REQUIRED_NEAR = 64
+
+
+def _required_beside(entry: ConstantSet, offsets: dict[Any, list[int]]) -> bool:
+    """Whether a distinguishing value stands within ``REQUIRED_NEAR`` bytes of another value."""
+    others = [
+        at for value, places in offsets.items() if value not in entry.requires for at in places
+    ]
+    for value in entry.requires:
+        for at in offsets.get(value, []):
+            if any(abs(at - other) <= REQUIRED_NEAR for other in others):
+                return True
+    return False
+
+
 def _row(entry: ConstantSet, **found: Any) -> dict[str, Any]:
     return {
         "id": entry.id,
@@ -593,7 +612,7 @@ def find_crypto_constants(
             offsets = _outside_quadwords(offsets, wide, entry.half)
             if offsets and _other_halves_stand(sets[entry.halves_of], data, wide, entry.half):
                 algorithm = entry.family
-        if entry.requires and not any(value in offsets for value in entry.requires):
+        if entry.requires and not _required_beside(entry, offsets):
             continue
         tables = _tables(entry, places) if entry.also_whole else []
         if not offsets:

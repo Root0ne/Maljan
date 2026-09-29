@@ -325,6 +325,14 @@ class TestOverlappingSetsAreNamedOnlyByWhatDistinguishesThem:
         found, _ = self._scan(tmp_path, _le(_set("sha1_init").values, 4))
         assert set(found) == {"sha1_init"}
 
+    def test_sha1_s_fifth_value_counts_only_beside_the_four_it_follows(
+        self, tmp_path: Path
+    ) -> None:
+        shared = _le(_set("md5_sha1_init").values, 4)
+        found, _ = self._scan(tmp_path, shared + b"\x90" * 3072 + _le((0xC3D2E1F0,), 4))
+        assert "sha1_init" not in found
+        assert found["md5_sha1_init"]["algorithm"] == "MD5/SHA-1 family"
+
     def test_sha512_alone_is_not_said_to_be_sha256(self, tmp_path: Path) -> None:
         found, lone = self._scan(
             tmp_path, _le(_set("sha512_k").values, 8) + _le(_set("sha512_init").values, 8)
