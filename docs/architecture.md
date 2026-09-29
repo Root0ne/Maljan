@@ -457,7 +457,7 @@ functions and checksums, each set computed from its definition, a table found
 whole and other sets by two of their values, each with the places it stands and
 the function around them. Sets that share values are named only by a value that
 tells them apart: MD5's initial values are SHA-1's first four, so a set needs
-SHA-1's fifth to be SHA-1 and is otherwise the MD5/SHA-1 family; SHA-256's and
+SHA-1's fifth, within 64 bytes of them, to be SHA-1 and is otherwise the MD5/SHA-1 family; SHA-256's and
 SHA-224's values are halves of SHA-512's and SHA-384's, so a half that sits
 inside a 64-bit value found is that value's, and halves standing beside the
 other halves are the SHA-2 family. A set whose algorithm capa's rules name at
@@ -471,9 +471,13 @@ auto-analysis). Ghidra's answer is kept whole, each address also as an offset
 from the image base Ghidra reports, and only its exact part is stated: an
 instruction that is the listed one (Ghidra matches mnemonics by prefix, so it
 files `INT3` under `INT 0x2d`), a read through `FS:[0x30]` or `FS:[0x18]`
-exactly, and a call to an API the platform's catalogue lists for the technique
-(the anti-debug APIs the behaviour catalogue treats as corroborating, and its
-T1497 rule's APIs) that the file imports. The rest are counted. A scan that
+exactly, and a call to an API the platform's data lists for the technique
+(the anti-debug APIs the behaviour catalogue treats as corroborating, its
+T1497 rule's APIs, and the APIs ATT&CK's T1622 description names, kept with
+its words in `data/anti_analysis_apis_v1.json`) that the file imports. An
+`INT3` counts only alone and not as the byte before a function, and a `CPUID`
+only where the code sets the hypervisor leaf or sets leaf 1 and tests ECX
+bit 31, read in the file's bytes. The rest are counted once per place. A scan that
 matched nothing says what it checks, never that the sample has no
 anti-analysis code. The node hands the pack the Ghidra it may call — switched
 on, over `http`, with the mirror the worker made for Ghidra — or the sentence
@@ -485,9 +489,17 @@ Ghidra's emulation is not run by the pack: Ghidra's `emulate_function`
 ignores its step limit and cannot be stopped, and one emulation took 130 to
 560 ms in a stored run. It stays a tool the reverser may call.
 
-The passes' lines take room from no other line: when the pack does not fit
-its room, the other lines are fitted as if the passes did not exist, and the
-passes' lines get what is left, whole, shortened or left out.
+When the pack does not fit its room, the passes' lines are split by novelty.
+A fact no other line carries — a constant set no capa rule agrees with, an
+exact instruction or TEB read at a function no capa anti-analysis rule
+matched — is fitted with the other lines. What the pack already carries (a set
+capa agrees with, an API call, every `no:` line) gets only the room the
+fitted lines leave. A line that cannot show one item is left out, and every
+pass entry left out is counted in the "N more pack entries not shown" line,
+which comes after the pass lines; when that line finds no room of its own,
+capa's addresses give it up first, else the longest line that can say less.
+On the stored benchmark runs no pass fact is new, so every earlier line is as
+dev renders it except that one line where the trailer needed room.
 
 The pack states facts and draws no conclusion, and it never fails a job: a
 tool that raises or answers with an error is an entry with `ok=False` and a
