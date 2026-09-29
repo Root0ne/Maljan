@@ -455,7 +455,9 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
     if any(isinstance(data.get(k), list) and data.get(k) for k in component_keys):
         table = acc.get("apk_components", "Declared components", "table", columns=["Kind", "Name"])
         for kind in component_keys:
-            for name in data.get(kind) or []:
+            # One kind androguard could not read is a ``no: <reason>`` string.
+            names = data.get(kind)
+            for name in names if isinstance(names, list) else []:
                 acc.add_row(table, [kind[:-1], _text(name)])
         acc.credit(table, entry)
 

@@ -88,6 +88,12 @@ SHORTENED_NOTE = (
 )
 SHORTENED_NOTE_ROOM = 200
 
+# Said at the head of a summary that ended at its output limit, by the rule an
+# analyst's answer is checked with (``base_agent.answer_cut_at_cap``).
+SUMMARY_CUT_NOTE = (
+    "NOTE: this summary ended at its {cap:,}-token output limit, so its end is missing."
+)
+
 
 class FunctionSummarizer:
     """Two-stage LLM-based token-cost optimisation.
@@ -153,7 +159,7 @@ class FunctionSummarizer:
         ]
 
         try:
-            response = self._ask(messages)
+            response, cut_at = self._ask(messages)
             summary: str = response.content  # type: ignore[assignment,union-attr]
             word_count = len(summary.split())
             logger.debug(
@@ -161,7 +167,7 @@ class FunctionSummarizer:
                 len(code_chunk),
                 word_count,
             )
-            return summary.strip()
+            return self._said_whole_or_cut(summary.strip(), cut_at)
         except Exception as exc:
             logger.warning(
                 "FunctionSummarizer.summarize_chunk failed: %s — returning raw chunk.", exc
@@ -205,7 +211,7 @@ class FunctionSummarizer:
                 logger.debug("FunctionSummarizer: the shortening was not recorded (%s).", exc)
         return f"{SHORTENED_NOTE.format(shown=len(shown), total=len(text))}\n{shown}"
 
-    def _ask(self, messages: list[Any]) -> Any:
+    def _ask(self, messages: list[Any]) -> tuple[Any, int | None]:
         """One summariser call, on the agent loop so a cancelled job cancels it in flight.
 
         Held to what the call's own request is given: the provider's request
@@ -220,6 +226,10 @@ class FunctionSummarizer:
         and recorded on the token ledger before the reservation goes. A call
         the ceiling refuses raises :class:`SpendCeilingStop`, and the caller
         keeps the raw text.
+
+        Returns the answer and the cap it was cut at, or ``None`` when it was
+        not cut: the server's ``length``, or a count that reached the cap the
+        call was sent with, held or the model's own (``answer_cut_at_cap``).
         """
         import inspect
 
@@ -255,7 +265,32 @@ class FunctionSummarizer:
                     label="function-summarizer",
                 )
             self._record(response)
-            return response
+            from maljan.agents.base_agent import answer_cut_at_cap, cap_in_force
+
+            cut = answer_cut_at_cap(response, cap_in_force(cap, bound if held else None))
+            return response, (cut[0] if cut is not None else None)
+
+    def _said_whole_or_cut(self, text: str, cut_at: int | None) -> str:
+        """``text``, headed by the cut note and recorded when its call ended at its output limit.
+
+        A cut summary kept as whole would reach the analyst as the chunk's
+        whole account, with its end missing and nothing saying so.
+        """
+        if cut_at is None or not text:
+            return text
+        logger.warning(
+            "FunctionSummarizer: the summary ended at its %d-token output limit.", cut_at
+        )
+        record = getattr(self._truncation_ledger, "record_input_shortened", None)
+        if callable(record):
+            try:
+                record(
+                    "A function summary ended at its "
+                    f"{cut_at:,}-token output limit; the analyst was told its end is missing."
+                )
+            except Exception as exc:  # noqa: BLE001 — a record never costs a summary
+                logger.debug("FunctionSummarizer: the cut was not recorded (%s).", exc)
+        return f"{SUMMARY_CUT_NOTE.format(cap=cut_at)}\n{text}"
 
     def summarize_chunks(self, chunks: list[str]) -> str:
         """Summarise multiple chunks and merge the results.
@@ -326,9 +361,9 @@ class FunctionSummarizer:
         ]
 
         try:
-            response = self._ask(messages)
+            response, cut_at = self._ask(messages)
             result: str = response.content  # type: ignore[assignment,union-attr]
-            return result.strip()
+            return self._said_whole_or_cut(result.strip(), cut_at)
         except Exception as exc:
             logger.warning(
                 "FunctionSummarizer._merge_summaries failed: %s — returning concatenated.", exc

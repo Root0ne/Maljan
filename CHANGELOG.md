@@ -2377,6 +2377,40 @@ change landed on `main`.
 
 ### Fixed
 
+- **The APK tool survives a manifest androguard cannot parse.** On an APK whose
+  `AndroidManifest.xml` is not valid AXML, androguard raised from a getter
+  (`KeyError: 'Name'` from the version name), outside the one call `apk_info`
+  guarded, and the whole call failed. androguard also answers such a
+  manifest's permissions and components as empty lists, which read as an APK
+  declaring nothing. Every androguard call is now contained: the zip-level
+  facts are always reported, each androguard fact is reported when it is read,
+  and otherwise it is `no: <reason>` (for the manifest, "the manifest could not
+  be parsed", with the exception's type only), named in the `degraded` note.
+  The triage pack and the report read such a fact as no list. A dex file
+  androguard's reader refuses is listed under `dex_strings_unread` as
+  `no: dex file <n> of the APK could not be read (<type>)`, beside the other
+  files' strings, where it used to be skipped with nothing said.
+- **An answer held to a smaller cap for one call is checked against that
+  cap.** ik_llama.cpp reports `stop` for an answer it cut at `n_predict`, so
+  a cut is read from the count reaching the cap. An analyst's answer was
+  checked against the model's built cap, so an ask, salvage, nudge or last
+  loop turn that the spend ceiling held to less read as whole when it was
+  cut; it is now checked against the cap the call was sent with. The function
+  summarizer had no such check: a summary cut at its limit, by the same rule,
+  now begins with a note saying its end is missing, and the cut is recorded
+  with the run's shortened inputs.
+- **A cap handed to one call reaches a llama.cpp server whose model was built
+  without a cap.** The per-call cap was copied only into cap keys the
+  llama.cpp extras already held. The container builds a run's models with a
+  cap derived from the window, so their extras held one and their per-call
+  caps already reached the server; nothing changes for them. A model built
+  without a cap held no such key, and the server never saw its per-call cap:
+  in a run that is the function summarizer's model, and outside one the
+  provider called directly. Measured on ik_llama.cpp with such a model: a call
+  held to 60 output units produced 3,732. On a llama.cpp endpoint a request's
+  own cap is now sent as `max_tokens` and `n_predict` in the extras whether or
+  not the model was built with a cap; a request with no cap sends none.
+  Hosted OpenAI and DeepSeek requests are unchanged.
 - **A model call that is still producing is no longer cut at 1,800 s because
   nothing was measured yet.** Until a model's pace was measured, every call's
   whole-call deadline was the provider's request timeout, 1,800 s. A dense

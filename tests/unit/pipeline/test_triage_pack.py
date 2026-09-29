@@ -909,3 +909,27 @@ class TestADegradedAnswerIsAnAnswer:
         from maljan.pipeline.triage_pack import run_is_degraded
 
         assert run_is_degraded(["triage.apk_info_degraded"]) is False
+
+
+class TestAnApkFactAndroguardCouldNotRead:
+    def test_is_not_counted_as_a_list(self) -> None:
+        """``apk_info`` says an unread fact as ``no: <reason>``; its length is
+        not a count of permissions, and the degraded note already says it."""
+        from maljan.pipeline.triage_pack import _apk as apk_line
+
+        unread = "no: the manifest could not be parsed"
+        line = apk_line(
+            {
+                "package": unread,
+                "permissions": unread,
+                "activities": ["org.example.app.Main"],
+                "degraded": "the manifest could not be parsed, so androguard could not read "
+                "package, permissions; answered the zip-level facts",
+                "dex_count": 1,
+            }
+        )
+        assert "package no:" not in line
+        assert f"{len(unread)} permissions" not in line
+        assert "permissions n, o" not in line
+        assert "1 activities" in line
+        assert "the manifest could not be parsed" in line
