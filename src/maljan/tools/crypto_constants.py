@@ -5,11 +5,15 @@ the substitution table of a block cipher, the round constants and initial
 values of a hash function, the table a checksum is computed with. A reader who
 finds them knows which algorithm the code around them implements, and where.
 
-Every set here is computed from its definition when first asked for, never
-typed in: the AES tables from the field arithmetic that defines them, the SHA
+Every set a standard derives is computed from that derivation when first asked
+for: the AES tables from the field arithmetic that defines them, the SHA
 constants from the roots of the primes, the MD5 table from the sine, the
-checksum table from its polynomial and Blowfish's initial array from the digits
-of pi. The tests check each against values the standards print.
+checksum table and polynomial from the polynomial's terms, the Fowler-Noll-Vo
+offset basis from its signature string and Blowfish's initial array from the
+digits of pi. The few a specification lists without a derivation (the MD5 and
+SHA-1 initial values, the MurmurHash3 constants, the Salsa20 and ChaCha key
+strings) are written as it prints them. The tests check each against values
+the standards print, and run the hash sets as their algorithms.
 
 How the file is searched, stated in every answer (``SCAN_RULE``):
 
@@ -266,7 +270,70 @@ def catalogue() -> tuple[ConstantSet, ...]:
             0,
             (b"expand 16-byte k",),
         ),
+        ConstantSet(
+            "crc32_polynomial",
+            "CRC-32",
+            "generator polynomial",
+            VALUES,
+            4,
+            (_CRC32_POLYNOMIAL,),
+        ),
+        ConstantSet(
+            "crc32_polynomial_reversed",
+            "CRC-32",
+            "generator polynomial, bit-reversed",
+            VALUES,
+            4,
+            (_bit_reversed(_CRC32_POLYNOMIAL, 32),),
+        ),
+        ConstantSet(
+            "fowler_noll_vo_32",
+            "Fowler-Noll-Vo 32-bit",
+            "offset basis and prime",
+            VALUES,
+            4,
+            _fowler_noll_vo(32),
+        ),
+        ConstantSet(
+            "fowler_noll_vo_64",
+            "Fowler-Noll-Vo 64-bit",
+            "offset basis and prime",
+            VALUES,
+            8,
+            _fowler_noll_vo(64),
+        ),
+        ConstantSet(
+            "murmur3_32",
+            "MurmurHash3 32-bit",
+            "multiplication and finalisation constants",
+            VALUES,
+            4,
+            (0xCC9E2D51, 0x1B873593, 0xE6546B64, 0x85EBCA6B, 0xC2B2AE35),
+        ),
     )
+
+
+# CRC-32's generator polynomial, x^32 + x^26 + x^23 + ... + 1, without its top term.
+_CRC32_POLYNOMIAL = sum(1 << power for power in (26, 23, 22, 16, 12, 11, 10, 8, 7, 5, 4, 2, 1, 0))
+
+
+def _bit_reversed(value: int, bits: int) -> int:
+    return int(f"{value:0{bits}b}"[::-1], 2)
+
+
+def _fowler_noll_vo(bits: int) -> tuple[int, int]:
+    """The offset basis and the prime of the Fowler-Noll-Vo hash of ``bits`` bits.
+
+    The prime is 2^24 + 2^8 + 0x93 for 32 bits and 2^40 + 2^8 + 0xb3 for 64;
+    the offset basis is the FNV-0 hash, basis zero, of the signature string
+    its authors define it by.
+    """
+    prime = (1 << 24) + 0x193 if bits == 32 else (1 << 40) + 0x1B3
+    mask = (1 << bits) - 1
+    basis = 0
+    for byte in b"chongo <Landon Curt Noll> /\\../\\":
+        basis = ((basis * prime) & mask) ^ byte
+    return basis, prime
 
 
 # ---------------------------------------------------------------------------

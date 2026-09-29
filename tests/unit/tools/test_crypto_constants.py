@@ -75,6 +75,13 @@ class TestTheCatalogueMatchesTheStandards:
         assert _set("rc5_p32").values == (0xB7E15163,)
         assert _set("salsa_chacha_sigma").values == (b"expand 32-byte k",)
         assert _set("salsa_chacha_tau").values == (b"expand 16-byte k",)
+        assert _set("crc32_polynomial").values == (0x04C11DB7,)
+        assert _set("crc32_polynomial_reversed").values == (0xEDB88320,)
+
+    def test_the_non_cryptographic_hash_constants(self) -> None:
+        assert _set("fowler_noll_vo_32").values == (0x811C9DC5, 0x01000193)
+        assert _set("fowler_noll_vo_64").values == (0xCBF29CE484222325, 0x100000001B3)
+        assert _set("murmur3_32").values[:2] == (0xCC9E2D51, 0x1B873593)
 
     def test_every_set_has_an_id_an_algorithm_and_says_what_it_is(self) -> None:
         ids = [entry.id for entry in catalogue()]
@@ -178,6 +185,24 @@ class TestTheSetsComputeTheAlgorithms:
         for byte in self.MESSAGE:
             value = table[(value ^ byte) & 0xFF] ^ (value >> 8)
         assert value ^ 0xFFFFFFFF == zlib.crc32(self.MESSAGE)
+
+    def test_the_reversed_polynomial_computes_the_checksum(self) -> None:
+        (polynomial,) = _set("crc32_polynomial_reversed").values
+        value = 0xFFFFFFFF
+        for byte in self.MESSAGE:
+            value ^= byte
+            for _ in range(8):
+                value = (value >> 1) ^ polynomial if value & 1 else value >> 1
+        assert value ^ 0xFFFFFFFF == zlib.crc32(self.MESSAGE)
+
+    def test_the_fowler_noll_vo_set_computes_the_platform_s_own_hash(self) -> None:
+        from maljan.tools import api_hashes
+
+        basis, prime = _set("fowler_noll_vo_32").values
+        value = basis
+        for byte in self.MESSAGE:
+            value = ((value ^ byte) * prime) & 0xFFFFFFFF
+        assert value == api_hashes.PRIMITIVES["fnv1a32"](self.MESSAGE)
 
 
 def _write(tmp_path: Path, image: SyntheticPE, name: str = "s.exe") -> str:

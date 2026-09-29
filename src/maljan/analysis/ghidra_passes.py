@@ -57,9 +57,10 @@ ROUTINE_RULE = (
 )
 
 CONVENTION_RULE = (
-    "the name's address is handed over as the first argument: in rcx on x64; on x86 on the "
-    "stack, else in ecx; a way is taken when two different names return two different values "
-    "through it"
+    "the name's address is handed over as the first argument and its length in bytes as the "
+    "second, which a routine that reads to the terminator does not read: in rcx and rdx on "
+    "x64; on x86 on the stack, else in ecx and edx; a way is taken when two different names "
+    "return two different values through it"
 )
 
 # Where the emulator is given the name and its stack; the addresses Ghidra's
@@ -83,17 +84,25 @@ class Routine:
 
 @dataclass(frozen=True)
 class Convention:
-    """One way of handing the name's address to a routine."""
+    """One way of handing a routine the name's address and its length.
+
+    ``pointer`` and ``length`` name the registers; with neither, the two go on
+    the stack as the first and second arguments.
+    """
 
     name: str
-    registers: dict[str, str] = field(default_factory=dict)
-    stack_argument: bool = False
+    pointer: str = ""
+    length: str = ""
+
+    @property
+    def on_the_stack(self) -> bool:
+        return not self.pointer
 
 
-X64_CONVENTIONS = (Convention("rcx", {"RCX": hex(SCRATCH)}),)
+X64_CONVENTIONS = (Convention("rcx, length in rdx", "RCX", "RDX"),)
 X86_CONVENTIONS = (
-    Convention("stack argument 1", stack_argument=True),
-    Convention("ecx", {"ECX": hex(SCRATCH)}),
+    Convention("stack arguments 1 and 2"),
+    Convention("ecx, length in edx", "ECX", "EDX"),
 )
 
 
@@ -440,22 +449,32 @@ class GhidraPasses:
     def _emulate(
         self, program: str, address: int, convention: Convention, name: _Name
     ) -> int | None:
-        """The routine's 32-bit result for one name, or ``None`` when it did not return cleanly."""
-        regions = [{"address": hex(SCRATCH), "hex": name.encoded().hex()}]
-        if convention.stack_argument:
-            regions.append({"address": hex(STACK + 4), "hex": SCRATCH.to_bytes(4, "little").hex()})
+        """The routine's 32-bit result for one name, or ``None`` when it did not return cleanly.
+
+        Addresses go as plain hex, the form Ghidra writes them in; register
+        values with ``0x``, which Ghidra reads as hex and a bare number as
+        decimal. The stack's return address is written eight bytes wide, so an
+        x64 return lands on the sentinel as an x86 one does.
+        """
+        length = name.length()
+        regions = [
+            {"address": f"{SCRATCH:x}", "hex": name.encoded().hex()},
+            {"address": f"{STACK:x}", "hex": RETURN_SENTINEL.to_bytes(8, "little").hex()},
+        ]
+        registers: dict[str, str] = {}
+        if convention.on_the_stack:
+            arguments = SCRATCH.to_bytes(4, "little") + length.to_bytes(4, "little")
+            regions.append({"address": f"{STACK + 4:x}", "hex": arguments.hex()})
         else:
-            regions.append(
-                {"address": hex(STACK), "hex": RETURN_SENTINEL.to_bytes(8, "little").hex()}
-            )
+            registers = {convention.pointer: hex(SCRATCH), convention.length: hex(length)}
         answer = self._request(
             "POST",
             f"/{GHIDRA_EMULATE}",
             f"the emulation of the routine at {hex(address)}",
             params={"program": program},
             json={
-                "address": hex(address),
-                "registers": dict(convention.registers),
+                "address": f"{address:x}",
+                "registers": registers,
                 "memory": regions,
                 "return_registers": "EAX",
             },
@@ -493,9 +512,14 @@ class _Name:
     dlls: tuple[str, ...] = ()
 
     def encoded(self) -> bytes:
+        """The name's bytes and its terminator."""
         if self.encoding == "utf-16le":
             return self.name.encode("utf-16-le") + b"\0\0"
         return self.name.encode("latin-1", errors="replace") + b"\0"
+
+    def length(self) -> int:
+        """The name's length in bytes, without its terminator."""
+        return len(self.encoded()) - (2 if self.encoding == "utf-16le" else 1)
 
     def reading(self) -> dict[str, Any]:
         said: dict[str, Any] = {"set": self.name_set, "name": self.name, "encoding": self.encoding}

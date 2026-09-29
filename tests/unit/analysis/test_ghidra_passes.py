@@ -130,10 +130,25 @@ class TestTheEmulation:
         place = answer["hits"][0]["occurrences"][0]
         assert (place["rva"], place["function"]) == (hex(TEXT_RVA + 0x21), hex(TEXT_RVA))
         routine = answer["routines"][0]
-        assert routine["convention"] == "rcx" and routine["address"] == hex(X64_BASE + ROUTINE)
+        assert routine["convention"] == "rcx, length in rdx" and routine["address"] == hex(
+            X64_BASE + ROUTINE
+        )
         # Four function names and one module name in two encodings, all emulated.
         assert (routine["names_emulated"], routine["names_returned"]) == (6, 6)
         assert answer["lone_hits"] == [] and answer["total"] == 2
+
+    def test_a_routine_that_reads_the_length_it_is_given_gets_the_name_s_length(
+        self, tmp_path: Path
+    ) -> None:
+        fake = FakeGhidra(convention="rcx and rdx")
+        path = _sample(tmp_path, values=(b"VirtualAlloc", b"CreateFileW"))
+        answer = _passes(fake).emulate_api_hashes(
+            path, [Routine(ROUTINE, ("r",))], names_path=_names(tmp_path)
+        )
+        assert [row["readings"][0]["name"] for row in answer["hits"]] == [
+            "VirtualAlloc",
+            "CreateFileW",
+        ]
 
     def test_one_value_alone_is_a_lone_hit(self, tmp_path: Path) -> None:
         path = _sample(tmp_path, values=(b"MessageBoxW",))
@@ -149,7 +164,7 @@ class TestTheEmulation:
         answer = _passes(fake).emulate_api_hashes(
             path, [Routine(ROUTINE, ("r",))], names_path=_names(tmp_path)
         )
-        assert answer["routines"][0]["convention"] == "stack argument 1"
+        assert answer["routines"][0]["convention"] == "stack arguments 1 and 2"
         assert answer["total"] == 2
 
     def test_an_x86_routine_that_reads_ecx_is_tried_second(self, tmp_path: Path) -> None:
@@ -158,8 +173,11 @@ class TestTheEmulation:
         answer = _passes(fake).emulate_api_hashes(
             path, [Routine(ROUTINE, ("r",))], names_path=_names(tmp_path)
         )
-        assert answer["routines"][0]["conventions_tried"] == ["stack argument 1", "ecx"]
-        assert answer["routines"][0]["convention"] == "ecx"
+        assert answer["routines"][0]["conventions_tried"] == [
+            "stack arguments 1 and 2",
+            "ecx, length in edx",
+        ]
+        assert answer["routines"][0]["convention"] == "ecx, length in edx"
 
     def test_a_routine_whose_output_does_not_follow_the_name_is_not_used(
         self, tmp_path: Path

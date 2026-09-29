@@ -11,12 +11,11 @@ it.
 from __future__ import annotations
 
 import json
-import struct
 from typing import Any
 
 import httpx
 
-from maljan.analysis.ghidra_passes import SCRATCH, STACK
+from maljan.analysis.ghidra_passes import STACK
 from tests.unit.tools.synthetic_pe import TEXT_RVA
 
 X64_BASE = 0x140000000
@@ -82,20 +81,33 @@ class FakeGhidra:
         self.emulations += 1
         if self.stall_after is not None and self.emulations > self.stall_after:
             raise httpx.ReadTimeout("no answer")
-        memory = {int(r["address"], 16): bytes.fromhex(r["hex"]) for r in body["memory"]}
-        registers = body.get("registers") or {}
-        if self.convention == "rcx":
-            pointer = int(registers.get("RCX", "0x0"), 16)
+        # Ghidra reads an address as plain hex; a register value as 0x-hex.
+        assert all(not r["address"].startswith("0x") for r in body["memory"])
+        assert not body["address"].startswith("0x")
+        memory: dict[int, int] = {}
+        for region in body["memory"]:
+            for index, byte in enumerate(bytes.fromhex(region["hex"])):
+                memory[int(region["address"], 16) + index] = byte
+        registers = {k: int(v, 16) for k, v in (body.get("registers") or {}).items()}
+        if self.convention in ("rcx", "rcx and rdx"):
+            pointer, length = registers.get("RCX", 0), registers.get("RDX", 0)
         elif self.convention == "stack":
-            argument = memory.get(STACK + 4, b"\0\0\0\0")
-            pointer = struct.unpack("<I", argument[:4])[0]
+            pointer = int.from_bytes(
+                bytes(memory.get(STACK + 4 + i, 0) for i in range(4)), "little"
+            )
+            length = int.from_bytes(bytes(memory.get(STACK + 8 + i, 0) for i in range(4)), "little")
         else:
-            pointer = int(registers.get("ECX", "0x0"), 16)
-        text = memory.get(pointer, b"\0") if pointer == SCRATCH else b"\0"
-        name = text.split(b"\0", 1)[0] if b"\0\0" not in text[:2] else b""
+            pointer, length = registers.get("ECX", 0), registers.get("EDX", 0)
+        if self.convention == "rcx and rdx":
+            # A routine that reads exactly the length it is given, terminator or not.
+            name = bytes(memory.get(pointer + i, 0) for i in range(length))
+        else:
+            name = bytearray()
+            while memory.get(pointer + len(name), 0):
+                name.append(memory[pointer + len(name)])
         if int(body["address"], 16) != self.image_base + ROUTINE:
             return httpx.Response(200, json={"error": f"No function at address: {body['address']}"})
-        value = 0x1234 if self.constant_output else routine_output(name)
+        value = 0x1234 if self.constant_output else routine_output(bytes(name))
         return httpx.Response(
             200,
             json={
