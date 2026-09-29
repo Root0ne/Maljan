@@ -228,8 +228,39 @@ end, and every join checked against `objdump -d` agrees. Measured on 54 benign P
 (launcher and runtime binaries, DirectX and Wine-built system DLLs, the five
 above): 6 results in all, none written by the program as encoded text.
 
-The triage pack runs both on every PE as its last two steps, and every agent
-reads their lines in the pack.
+The triage pack runs both on every PE, and every agent reads their lines in the
+pack.
+
+### Published constants
+
+| tool | arguments |
+| --- | --- |
+| `find_crypto_constants` | `path`, `carved_path=""` |
+
+The published constants of ciphers, hash functions and checksums, found in a
+file's bytes (`tools.crypto_constants`); nothing is run. Ghidra's own
+`detect_crypto_constants` answers "not yet implemented", so the platform scans
+for them itself. Every set a standard derives is computed from that
+derivation: the AES substitution boxes and round tables from the field
+arithmetic, the SHA-2 round constants and initial values from the roots of the
+primes, the MD5 sine table, the CRC-32 table and polynomial (both bit orders)
+from the polynomial's terms, Blowfish's initial subkey array from the digits of
+pi and the Fowler-Noll-Vo offset basis (32 and 64 bits) from its signature
+string. The MD5 and SHA-1 initial values, the SHA-1 round constants, the
+MurmurHash3 constants, the golden-ratio constant (TEA and XTEA delta, RC5 and
+RC6 Q32) and its negation, RC5's P32 and the Salsa20 and ChaCha key strings are
+the rest. The tests check each against values the standards print and run the
+hash sets as their algorithms against the standard library.
+
+A table set is found only whole, as bytes or as 32-bit words in either byte
+order (each order said). A values set is found value by value, little-endian
+anywhere in the file; the round-constant sets are also looked for whole. A set
+of several values is `found` when at least two of its distinct values stand in
+the file and `lone` when exactly one does, because one 32-bit value alone
+matches by chance in a large file; a set of one value is found when it stands.
+Every place of every value is listed: the file offset and, for a PE, the offset
+from the image base, the section and the function the file's own table puts
+around it. The triage pack runs it on every executable image (PE, ELF, Mach-O).
 
 ### Sample delivery
 
