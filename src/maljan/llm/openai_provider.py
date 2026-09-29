@@ -346,11 +346,14 @@ def with_per_request_llama_cap(chat_class: Any) -> Any:
     which the provider fills once, from the cap the model was built with. A
     cap bound for one call (``llm.ainvoke(…, max_tokens=n)``) therefore never
     reached the server. The subclass sends the request's own cap as both
-    extras, per request, whether or not the model was built with a cap: a
-    local model is built uncapped by default, so its extras hold no cap key to
-    copy into, and a cap copied only into keys already there left every such
-    call unbounded (measured on ik_llama.cpp: a call held to 60 produced
-    3,732 output units). A request without a cap is sent as it was.
+    extras, per request, whether or not the model was built with a cap. The
+    container builds a run's models with a cap derived from the window, so
+    their extras already held the keys and a cap copied into them reached the
+    server. A model built without a cap holds no such key, so a cap copied
+    only into keys already there never reached the server: in a run that is
+    the function summarizer's model, and outside one the provider called
+    directly (measured on ik_llama.cpp: a call held to 60 produced 3,732
+    output units). A request without a cap is sent as it was.
 
     Applied only where the llama.cpp extras are sent (``sends_llama_cpp_extras``).
     """

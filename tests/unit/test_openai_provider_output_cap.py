@@ -101,10 +101,11 @@ class TestItStaysOffTheWireWhereItWouldBeRejected:
 
 
 class TestACapForOneCallReachesAnUncappedLocalModel:
-    """A local model is built with no cap by default, so its extras hold no cap
-    key. A cap handed to one call was copied only into keys already there, and
-    so never reached the server: measured on ik_llama.cpp, a call held to 60
-    output units produced 3,732."""
+    """A model built without a cap (the function summarizer's in a run, or the
+    provider called directly) holds no cap key in its extras. A cap handed to
+    one call was copied only into keys already there, and so never reached the
+    server: measured on ik_llama.cpp, a call held to 60 output units produced
+    3,732. The container's other models carry a cap derived from the window."""
 
     ASK = "hi"
 
