@@ -2477,18 +2477,31 @@ def _constant_sets(data: dict[str, Any], max_chars: int | None = None) -> str:
     return _fit(lambda count: _line(count, False), shown, max_chars)
 
 
-def _anti_analysis_item(row: dict[str, Any]) -> str:
-    where = row.get("offset") or row.get("address")
-    function = f" (in {row.get('function')})" if row.get("function") else ""
-    return f"{row.get('category')}: {row.get('technique')} @ {where}{function}"
+def _anti_analysis_item(group: tuple[str, list[dict[str, Any]]]) -> str:
+    """``category: what @ 0x1010 (in F) 0x2020 (in G)``: one match of Ghidra's, every place."""
+    name, rows = group
+    places = []
+    for row in rows:
+        where = str(row.get("offset") or row.get("address"))
+        places.append(where + (f" (in {row.get('function')})" if row.get("function") else ""))
+    head = _detail().list_head
+    shown = places if head is None else places[:head]
+    said = " ".join(shown)
+    if len(shown) < len(places):
+        said += f" (+{len(places) - len(shown)} more places)"
+    return f"{name} @ {said}"
 
 
 def _anti_analysis(data: dict[str, Any], max_chars: int | None = None) -> str:
-    """Ghidra's anti-analysis findings as Ghidra named them, each where it stands."""
+    """Ghidra's anti-analysis findings as Ghidra named them, each match once with its places."""
     rows = [r for r in (data.get("findings") or []) if isinstance(r, dict)]
     total = max(int(data.get("total_findings") or 0), len(rows))
     if not rows:
         return "no: Ghidra's scan found no anti-analysis technique"
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(f"{row.get('category')}: {row.get('technique')}", []).append(row)
+    groups = list(grouped.items())
     counts = (data.get("summary") or {}).get("by_category") or {}
     by_category = ", ".join(f"{name} {_n(count)}" for name, count in counts.items())
     notes = [str(n) for n in data.get("notes") or [] if str(n).strip()]
@@ -2496,21 +2509,21 @@ def _anti_analysis(data: dict[str, Any], max_chars: int | None = None) -> str:
         f"Ghidra's scan found {_n(total)}"
         + (f" ({by_category})" if by_category else "")
         + (f"; Ghidra returned {_n(len(rows))} of them ({'; '.join(notes)})" if notes else "")
-        + "; each as Ghidra's category: what it matched @ the offset from the image base "
-        "(in Ghidra's function)"
+        + f", {_n(len(groups))} distinct; each as Ghidra's category: what it matched @ the "
+        "offsets from the image base where it stands (in Ghidra's function)"
     )
 
     def _line(shown: int) -> str:
         said = (
-            f"all {_n(len(rows))} shown"
-            if shown >= len(rows)
-            else PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(len(rows)))
+            f"all {_n(len(groups))} shown"
+            if shown >= len(groups)
+            else PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(len(groups)))
         )
-        items = "; ".join(_anti_analysis_item(row) for row in rows[:shown])
+        items = "; ".join(_anti_analysis_item(group) for group in groups[:shown])
         return f"{head}; {said}" + (f": {items}" if shown else "")
 
     head_count = _detail().list_head
-    shown = len(rows) if head_count is None else min(len(rows), head_count)
+    shown = len(groups) if head_count is None else min(len(groups), head_count)
     return _fit(_line, shown, max_chars)
 
 

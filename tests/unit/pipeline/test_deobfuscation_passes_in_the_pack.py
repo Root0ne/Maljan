@@ -213,6 +213,22 @@ class TestALineOutOfRoom:
                 assert lone in cut
 
 
+class TestTheAntiAnalysisLine:
+    def test_one_match_at_many_places_is_one_item_with_every_place(self) -> None:
+        line = triage_pack._anti_analysis(
+            {
+                "findings": [
+                    {"category": "c", "technique": "T", "offset": "0x10", "function": "F"},
+                    {"category": "c", "technique": "T", "offset": "0x20", "function": "G"},
+                    {"category": "d", "technique": "U", "offset": "0x30"},
+                ],
+                "total_findings": 3,
+            }
+        )
+        assert "found 3, 2 distinct" in line
+        assert "c: T @ 0x10 (in F) 0x20 (in G); d: U @ 0x30" in line
+
+
 class TestGhidraUnavailable:
     def test_each_pass_says_no_and_why_and_the_run_is_not_degraded(self, tmp_path: Path) -> None:
         passes = GhidraPasses(unavailable="Ghidra is switched off (core.static.ghidra.enabled)")
