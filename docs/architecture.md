@@ -451,36 +451,43 @@ source of its own" under the indicator rule).
 
 **The deobfuscation passes** come after all of that, last for the same reason,
 and run on every run rather than when a model asks. First
-`find_crypto_constants` (`tools.crypto_constants`) over an executable image:
-the published constants of ciphers, hash functions and checksums, each set
-computed from its definition, a table found whole and other sets by two of
-their values, each with the places it stands and the function around them.
-Ghidra's own `detect_crypto_constants` answers "not yet implemented", so the
-platform scans itself; the analysis server serves the same function. Then
-Ghidra's two passes (`analysis.ghidra_passes`), opened the way the sink
-pre-pass opens the sample (load, switch, auto-analysis) and once for both:
-`find_anti_analysis_techniques`, Ghidra's scan as Ghidra answered it, each
-address also as an offset from the image base Ghidra reports, and, for a PE,
-`emulate_api_hashes`: Ghidra's `emulate_function` runs each function capa
-matched with a rule of its `data-manipulation/hashing` or
-`data-manipulation/checksum` namespaces on every function and module name of
-the vendored catalogue, one name per call, inside Ghidra's P-code emulator
-(the sample never executes). The name's address goes in the first argument and
-its length in bytes in the second (rcx and rdx on x64; the stack, else ecx and
-edx, on x86), a way taken when two names give two values through it, and an
-output counts only when the emulation returned with no error. The file's
-candidate values (the scan `resolve_api_hashes` uses) that equal an output are
-hits when a routine names two or more of them. A value the platform's own
-resolution already names the same way is marked (`also_named_by`), and the
-pack line says how many agree and which routine computes them instead of
-listing them again. The names feed the run's
-resolved-name set, which the event scrub keeps readable. The node hands the
-pack the Ghidra it may call — switched on, over `http`, with the mirror the
-worker made for Ghidra — or the sentence saying why there is none; each pass
-that cannot run is an entry `not run: <reason>` whose pack line is
-`no: <reason>`, not a failure, and a pass that ran and found nothing is one
-`no:` line. A pass Ghidra did not complete is a failed entry
-(`no: the pass failed: …`); a request Ghidra did not answer stops the pass.
+`find_crypto_constants` (`tools.crypto_constants`) over an executable image,
+given capa's function starts: the published constants of ciphers, hash
+functions and checksums, each set computed from its definition, a table found
+whole and other sets by two of their values, each with the places it stands and
+the function around them. Sets that share values are named only by a value that
+tells them apart: MD5's initial values are SHA-1's first four, so a set needs
+SHA-1's fifth to be SHA-1 and is otherwise the MD5/SHA-1 family; SHA-256's and
+SHA-224's values are halves of SHA-512's and SHA-384's, so a half that sits
+inside a 64-bit value found is that value's, and halves standing beside the
+other halves are the SHA-2 family. A set whose algorithm capa's rules name at
+the function its place stands in is said to agree with capa there, not
+repeated. Ghidra's own `detect_crypto_constants` answers "not yet implemented",
+so the platform scans itself; the analysis server serves the same function.
+
+Then Ghidra's `find_anti_analysis_techniques` (`analysis.ghidra_passes`), the
+sample opened the way the sink pre-pass opens it (load, switch,
+auto-analysis). Ghidra's answer is kept whole, each address also as an offset
+from the image base Ghidra reports, and only its exact part is stated: an
+instruction that is the listed one (Ghidra matches mnemonics by prefix, so it
+files `INT3` under `INT 0x2d`), a read through `FS:[0x30]` or `FS:[0x18]`
+exactly, and a call to an API the platform's catalogue lists for the technique
+(the anti-debug APIs the behaviour catalogue treats as corroborating, and its
+T1497 rule's APIs) that the file imports. The rest are counted. A scan that
+matched nothing says what it checks, never that the sample has no
+anti-analysis code. The node hands the pack the Ghidra it may call — switched
+on, over `http`, with the mirror the worker made for Ghidra — or the sentence
+saying why there is none, which is one entry `not run: <reason>` whose pack
+line is `no: <reason>`, not a failure. A scan Ghidra did not complete is a
+failed entry with Ghidra's own words (`no: the pass failed: …`).
+
+Ghidra's emulation is not run by the pack: Ghidra's `emulate_function`
+ignores its step limit and cannot be stopped, and one emulation took 130 to
+560 ms in a stored run. It stays a tool the reverser may call.
+
+The passes' lines take room from no other line: when the pack does not fit
+its room, the other lines are fitted as if the passes did not exist, and the
+passes' lines get what is left, whole, shortened or left out.
 
 The pack states facts and draws no conclusion, and it never fails a job: a
 tool that raises or answers with an error is an entry with `ok=False` and a

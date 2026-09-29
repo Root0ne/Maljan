@@ -258,6 +258,12 @@ anywhere in the file; the round-constant sets are also looked for whole. A set
 of several values is `found` when at least two of its distinct values stand in
 the file and `lone` when exactly one does, because one 32-bit value alone
 matches by chance in a large file; a set of one value is found when it stands.
+Sets that share values are named only by a value that tells them apart:
+SHA-1's initial values hold MD5's four, so without SHA-1's fifth they are
+stated as the MD5/SHA-1 family; SHA-256's and SHA-224's values are the halves
+of SHA-512's and SHA-384's, so a half inside a 64-bit value found belongs to
+that value, and halves standing beside the other halves are the SHA-2 family.
+The golden-ratio value is stated as the constant, not as a cipher.
 Every place of every value is listed: the file offset and, for a PE, the offset
 from the image base, the section and the function the file's own table puts
 around it. The triage pack runs it on every executable image (PE, ELF, Mach-O).

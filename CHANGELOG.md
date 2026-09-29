@@ -10,25 +10,22 @@ change landed on `main`.
 
 - **The deobfuscation passes run on every run, and every analyst reads their
   results as facts in the pre-analysis pack.** After every earlier pack step,
-  so no earlier id moves:
+  so no earlier id moves, and in the room the earlier lines leave, so no
+  earlier line loses a character:
   - `find_crypto_constants`, the platform's scan of an executable for the
     published constants of ciphers, hash functions and checksums (Ghidra's
     `detect_crypto_constants` answers "not yet implemented"). Each set is
     computed from its definition; a table is found whole, other sets by two of
-    their values, each with its places and the function around them. The
-    analysis server serves it too.
-  - Ghidra's anti-analysis scan, as Ghidra answered it, each match once with
-    its places as offsets from the image base.
-  - Ghidra's emulation of the sample's own hashing routines: each function
-    capa's hashing or checksum rules name is run on every catalogue name,
-    given the name and its length. The file's values that equal an output are
-    stated with the routine; the ones the platform's own resolution already
-    names the same way are said to agree rather than listed twice. The names
-    are kept readable by the event scrub.
+    their values, and sets that share values are named only by a value that
+    tells them apart (else as their family). A set capa names in the same
+    function is said to agree with capa. The analysis server serves it too,
+    and the Ghidra workflow now points at it.
+  - Ghidra's anti-analysis scan, of which only the exact part is stated: the
+    listed instruction, the exact TEB/PEB operand, and calls to the APIs the
+    platform's catalogue lists for the technique that the file imports.
 
-  A pass that cannot run (Ghidra switched off, over stdio, or without a copy of
-  the sample; no routine capa named) is one `no: <reason>` line and not a
-  failure; a pass that found nothing is one `no:` line.
+  A Ghidra that cannot be asked (switched off, over stdio, or without a copy of
+  the sample) is one `no: <reason>` line and not a failure.
 
 - **A function an analyst decompiled and no claim describes is listed to it,
   once.** The functions come from the analyst's own ledger entries that
