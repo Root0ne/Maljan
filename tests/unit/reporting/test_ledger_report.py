@@ -94,9 +94,6 @@ class TestBinaryBuilders:
     def test_an_apk_fact_androguard_could_not_read_is_no_list(self) -> None:
         """``apk_info`` says an unread fact as ``no: <reason>``; a string is not
         a list of permissions or components, one character a row."""
-        from maljan.reporting.ledger_projection import static_from_ledger
-        from maljan.schemas.evidence import LedgerEntry
-
         unread = "no: the manifest could not be parsed (KeyError)"
         answer = {
             "manifest_present": True,
@@ -112,11 +109,24 @@ class TestBinaryBuilders:
         assert sections["apk_components"].rows == [["activitie", "org.example.app.Main"]]
         assert ["version name", unread] in sections["apk_header"].rows
 
-        static = static_from_ledger(
-            [LedgerEntry(id="ev_0001", agent="static", tool="apk_info", structured=answer)]
-        )
-        assert static is not None
-        assert static.exports == []
+    def test_the_static_projection_takes_an_unread_permission_list_as_no_permissions(
+        self,
+    ) -> None:
+        """An APK's permissions become the static block's exports; the string
+        ``no: <reason>`` iterated there would be one export per character."""
+        from maljan.reporting.ledger_projection import static_from_ledger
+        from maljan.schemas.evidence import LedgerEntry
+
+        def _static(permissions: object) -> list[str]:
+            answer = {"manifest_present": True, "permissions": permissions}
+            static = static_from_ledger(
+                [LedgerEntry(id="ev_0001", agent="static", tool="apk_info", structured=answer)]
+            )
+            assert static is not None
+            return list(static.exports)
+
+        assert _static("no: the manifest could not be parsed") == []
+        assert _static(["android.permission.INTERNET"]) == ["android.permission.INTERNET"]
 
     def test_two_calls_of_the_same_tool_merge_and_cite_both(self) -> None:
         sections = _by_key(build_sections([_entry("pe_info"), _entry("pe_info", seq=2)]))
