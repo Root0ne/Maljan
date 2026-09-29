@@ -2377,6 +2377,14 @@ change landed on `main`.
 
 ### Fixed
 
+- **A cap handed to one call reaches a llama.cpp server whose model was built
+  uncapped.** The cap was copied only into cap keys the llama.cpp extras
+  already held, and a local model is built with no cap by default, so its
+  extras held none and the server never saw the call's cap. Measured on
+  ik_llama.cpp: a call held to 60 output units produced 3,732. On a llama.cpp
+  endpoint a request's own cap is now sent as `max_tokens` and `n_predict` in
+  the extras whether or not the model was built with a cap; a request with no
+  cap sends none. Hosted OpenAI and DeepSeek requests are unchanged.
 - **A model call that is still producing is no longer cut at 1,800 s because
   nothing was measured yet.** Until a model's pace was measured, every call's
   whole-call deadline was the provider's request timeout, 1,800 s. A dense

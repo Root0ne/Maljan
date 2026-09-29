@@ -345,9 +345,14 @@ def with_per_request_llama_cap(chat_class: Any) -> Any:
     a cap under, and reads ``max_tokens``/``n_predict`` from ``extra_body``,
     which the provider fills once, from the cap the model was built with. A
     cap bound for one call (``llm.ainvoke(…, max_tokens=n)``) therefore never
-    reached the server. The subclass copies the request's own cap into those
-    extras, per request; a request without a cap, or a model without the
-    extras, is sent as it was.
+    reached the server. The subclass sends the request's own cap as both
+    extras, per request, whether or not the model was built with a cap: a
+    local model is built uncapped by default, so its extras hold no cap key to
+    copy into, and a cap copied only into keys already there left every such
+    call unbounded (measured on ik_llama.cpp: a call held to 60 produced
+    3,732 output units). A request without a cap is sent as it was.
+
+    Applied only where the llama.cpp extras are sent (``sends_llama_cpp_extras``).
     """
     if not isinstance(chat_class, type) or not hasattr(chat_class, "_get_request_payload"):
         return chat_class
@@ -361,18 +366,11 @@ def with_per_request_llama_cap(chat_class: Any) -> Any:
         if not isinstance(payload, dict):
             return payload
         cap = payload.get("max_completion_tokens", payload.get("max_tokens"))
-        extra = payload.get("extra_body")
-        if (
-            isinstance(cap, int)
-            and not isinstance(cap, bool)
-            and cap > 0
-            and isinstance(extra, dict)
-            and any(key in extra for key in _LLAMA_CAP_KEYS)
-        ):
-            extra = dict(extra)
+        if isinstance(cap, int) and not isinstance(cap, bool) and cap > 0:
+            extra = payload.get("extra_body")
+            extra = dict(extra) if isinstance(extra, dict) else {}
             for key in _LLAMA_CAP_KEYS:
-                if key in extra:
-                    extra[key] = cap
+                extra[key] = cap
             payload["extra_body"] = extra
         return payload
 

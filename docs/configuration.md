@@ -968,7 +968,9 @@ and each call is held to what the window leaves after that call's own prompt
 hosted API refuses a request whose prompt and `max_tokens` pass the window.
 The call's cap is lowered for that call alone, under the field each server
 reads — `max_completion_tokens` for OpenAI, `max_tokens` for DeepSeek and
-Anthropic, `max_tokens` and `n_predict` in llama.cpp's request extras,
+Anthropic, `max_tokens` and `n_predict` in llama.cpp's request extras
+(whether or not the model was built with a cap, so an uncapped local model is
+held to it too),
 `max_output_tokens` for Gemini — and the worker log says so. An Ollama model
 keeps the cap it was built with, since its client takes no per-call cap; a
 model the llama.cpp self-heal rebuilt without the extras is sent the cap only
