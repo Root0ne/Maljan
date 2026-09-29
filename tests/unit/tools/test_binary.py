@@ -595,6 +595,59 @@ class TestApkInfoContainsAndroguard:
         assert "bytes from the sample" not in str(result)
         assert result["package"] == "org.example.app"
 
+    def test_a_dex_file_that_cannot_be_read_is_said_not_skipped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One unreadable dex file used to cost its strings with nothing said,
+        so the list read as every dex file's strings."""
+        import sys
+        import types
+
+        class _TwoDex(_ParsedApk):
+            def get_all_dex(self) -> list[bytes]:
+                return [b"unreadable", b"readable"]
+
+        class _Dex:
+            def __init__(self, raw: bytes) -> None:
+                if raw == b"unreadable":
+                    raise ValueError("bytes from the sample")
+
+            def get_strings(self) -> list[str]:
+                return ["http://example.invalid/a"]
+
+        _install_androguard(monkeypatch, _TwoDex)
+        dex_module = types.ModuleType("androguard.core.dex")
+        dex_module.DEX = _Dex  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "androguard.core.dex", dex_module)
+
+        result = tool.apk_info(str(self._apk(tmp_path)), dex_strings=True)
+
+        assert result["dex_strings"] == ["http://example.invalid/a"]
+        assert result["dex_strings_unread"] == [
+            "no: dex file 1 of the APK could not be read (ValueError)"
+        ]
+        assert "dex_strings_unread" in result["degraded"]
+        assert "bytes from the sample" not in str(result)
+
+    def test_a_manifest_value_that_begins_like_a_reason_is_the_sample_s(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class _Named(_ParsedApk):
+            def get_androidversion_name(self) -> str:
+                return "no: a name the author chose"
+
+        _install_androguard(monkeypatch, _Named)
+        result = tool.apk_info(str(self._apk(tmp_path)))
+        assert result["version_name"] == "no: a name the author chose"
+        assert "degraded" not in result
+
+    def test_every_dex_file_read_says_nothing_unread(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_androguard(monkeypatch, _ParsedApk)
+        result = tool.apk_info(str(self._apk(tmp_path)), dex_strings=True)
+        assert "dex_strings_unread" not in result
+
     def test_an_apk_androguard_cannot_open_says_so_for_each_fact(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
