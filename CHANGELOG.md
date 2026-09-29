@@ -2398,9 +2398,10 @@ change landed on `main`.
   - the pace of a call that is cut, fails or is ended from outside is recorded
     for its model as a generation rate, so the next call is sized from it. A
     call with fewer than two pieces records nothing;
-  - on a streamed answer, the connection's read timeout after pieces have
-    arrived ends the call as a call deadline (the silence after its last
-    piece), so the loop salvages what it gathered rather than replaying it.
+  - on a streamed answer (Ollama's included), the connection's read timeout
+    after pieces have arrived ends the call as a call deadline (the silence
+    after its last piece), so the loop salvages what it gathered rather than
+    replaying it.
 
   A llama.cpp server's answer is now read as a stream, because a non-streamed
   answer sends nothing until it has finished. The chunks are joined into the

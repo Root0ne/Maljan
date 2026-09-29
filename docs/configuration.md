@@ -1134,10 +1134,11 @@ two chunks for one unit; the margin covers the difference.
 The pace of a call that is cut, fails or is ended from outside is recorded
 for its model as a generation rate, so a retry is sized from it. A call with
 fewer than two pieces records nothing, and the next call keeps the rule it
-had. On a streamed answer, the connection's own read timeout after pieces have
-arrived is the same deadline, the silence after the last piece, and ends the
-call as one (a failed turn the loop salvages from, not a dropped connection);
-before the first piece it is raised as it always was. The deadline message
+had. On a streamed answer (and Ollama's, which its client streams), the
+connection's own read timeout after pieces have arrived is the same deadline,
+the silence after the last piece, and ends the call as one (a failed turn the
+loop salvages from, not a dropped connection); before the first piece it is
+raised as it always was. The deadline message
 says which rule applied — the model's measured pace, the pace measured in this
 call, silence before the first generated piece, or silence after the last —
 and its numbers.
