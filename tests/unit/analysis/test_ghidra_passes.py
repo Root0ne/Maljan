@@ -1,41 +1,28 @@
-"""The Ghidra passes the triage pack makes once per job, against a Ghidra that answers in-process.
+"""Ghidra's anti-analysis scan, made once per job, against a Ghidra that answers in-process.
 
-The fake speaks the REST endpoints the passes use, with the shapes the Ghidra
-server answers in: a load, a switch, an analysis, the program's image base,
-the anti-analysis scan, and an emulation that runs a routine of the test's own
-(a rotate-and-add over the name's bytes, a scheme none of the platform's
-published algorithms is) when it is asked at the routine's address with the
-name's address where the test's convention puts it.
+The scan's answer is kept whole, as Ghidra gave it. What the pack states as a
+fact is only the part that is exact: an instruction that is the one Ghidra's
+list names (``INT3`` is not ``INT 0x2d``), a TEB/PEB read through the exact
+``FS:[0x30]`` or ``FS:[0x18]`` operand, and a call to an API the platform's own
+catalogue lists for the technique and the file imports. Every other match is
+counted, not stated.
 """
 
 from __future__ import annotations
 
-import json
-import struct
-from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
-from tests.unit.fake_ghidra import (
-    ROUTINE,
-    X64_BASE,
-    X86_BASE,
-    FakeGhidra,
-    routine_output,
-)
-from tests.unit.tools.synthetic_pe import TEXT_RVA, SyntheticPE
+from tests.unit.fake_ghidra import X64_BASE, FakeGhidra
 
 from maljan.analysis.ghidra_passes import (
     ANTI_ANALYSIS_TOOL,
-    CONVENTION_RULE,
-    EMULATION_TOOL,
-    ROUTINE_RULE,
+    SCAN_CHECKS,
     GhidraPasses,
     GhidraPassFailed,
-    Routine,
-    hash_routines,
-    mark_agreement,
+    anti_analysis_apis,
+    read_findings,
 )
 
 
@@ -48,240 +35,131 @@ def _passes(fake: FakeGhidra) -> GhidraPasses:
     )
 
 
-def _names(tmp_path: Path) -> str:
-    target = tmp_path / "names.json"
-    target.write_text(
-        json.dumps(
-            {
-                "dlls": {
-                    "kernel32.dll": ["VirtualAlloc", "CreateFileW", "GetTickCount"],
-                    "user32.dll": ["MessageBoxW"],
-                },
-                "modules": {"names": ["kernel32.dll"]},
-            }
-        ),
-        encoding="utf-8",
-    )
-    return str(target)
+def _instruction(technique: str, text: str, address: str = "140001010") -> dict[str, Any]:
+    return {
+        "category": "suspicious_instruction",
+        "technique": technique,
+        "address": address,
+        "offset": hex(int(address, 16) - X64_BASE),
+        "function": "F",
+        "instruction": text,
+    }
 
 
-def _sample(tmp_path: Path, *, is64: bool = True, values: tuple[bytes, ...] = ()) -> str:
-    base = X64_BASE if is64 else X86_BASE
-    functions = [(TEXT_RVA, TEXT_RVA + 0x100), (ROUTINE, ROUTINE + 0x40)] if is64 else []
-    image = SyntheticPE(is64=is64, image_base=base, functions=functions)
-    for index, name in enumerate(values):
-        image.put("text", 0x20 + 0x10 * index, b"\x68" + struct.pack("<I", routine_output(name)))
-    target = tmp_path / "s.exe"
-    target.write_bytes(image.build())
-    return str(target)
+def _call(category: str, technique: str, address: str = "140001020") -> dict[str, Any]:
+    return {
+        "category": category,
+        "technique": technique,
+        "address": address,
+        "offset": hex(int(address, 16) - X64_BASE),
+        "function": "G",
+    }
 
 
-class TestTheRoutinesComeFromCapa:
-    def test_a_hashing_or_checksum_rule_names_its_function(self) -> None:
-        rows = [
-            {
-                "namespace": "data-manipulation/hashing/djb2",
-                "rule": "hash data using djb2",
-                "addresses": ["0x1200"],
-            },
-            {
-                "namespace": "data-manipulation/checksum/crc32",
-                "rule": "checksum rule",
-                "addresses": ["0x1234"],
-            },
-            {"namespace": "host-interaction/process", "rule": "other", "addresses": ["0x1300"]},
+class TestTheCatalogueList:
+    def test_it_is_the_catalogue_s_specific_anti_analysis_apis(self) -> None:
+        apis = anti_analysis_apis()
+        assert {"CheckRemoteDebuggerPresent", "NtQueryInformationProcess"} <= apis
+        assert "GetSystemFirmwareTable" in apis
+        assert not {"CloseHandle", "GetTickCount", "OpenProcess", "VirtualQuery"} & apis
+
+
+class TestWhatIsStated:
+    def test_an_instruction_is_stated_only_when_it_is_the_listed_one(self) -> None:
+        read = read_findings(
+            [
+                _instruction("INT 3", "INT3"),
+                _instruction("INT 0x2d", "INT3"),
+                _instruction("INT 0x2d", "INT 0x2d", "140001030"),
+                _instruction("STR", "STRD R0", "140001040"),
+                _instruction("RDTSC", "RDTSC", "140001050"),
+            ],
+            imported=[],
+        )
+        assert [(f["what"], f["offset"]) for f in read["stated"]] == [
+            ("INT3", "0x1010"),
+            ("INT 0x2d", "0x1030"),
+            ("RDTSC", "0x1050"),
         ]
-        routines, why = hash_routines(rows, ["0x1000", "0x1200"])
-        assert why == ""
-        assert routines == [Routine(0x1200, ("hash data using djb2", "checksum rule"))]
+        assert read["not_stated"] == 2
 
-    def test_no_such_rule_says_so(self) -> None:
-        routines, why = hash_routines(
-            [{"namespace": "host-interaction", "rule": "x", "addresses": ["0x1"]}], []
+    def test_a_teb_read_is_stated_only_through_the_exact_operand(self) -> None:
+        peb = {"category": "peb_teb_access", "technique": "Direct PEB/TEB access"}
+        read = read_findings(
+            [
+                {**peb, "address": "140001060", "instruction": "MOV EAX,dword ptr FS:[0x30]"},
+                {**peb, "address": "140001070", "instruction": "MOV EAX,dword ptr FS:[EAX + 0x30]"},
+            ],
+            imported=[],
         )
-        assert routines == [] and "matched no rule" in why
+        assert [f["what"] for f in read["stated"]] == ["MOV EAX,dword ptr FS:[0x30]"]
+        assert read["not_stated"] == 1
 
-    def test_a_match_with_no_start_before_it_says_so(self) -> None:
-        rows = [{"namespace": "data-manipulation/hashing", "rule": "r", "addresses": ["0x10"]}]
-        routines, why = hash_routines(rows, ["0x1000"])
-        assert routines == [] and "no address with a function start" in why
-
-
-class TestTheEmulation:
-    def test_the_values_the_routine_returns_for_two_names_are_hits(self, tmp_path: Path) -> None:
-        fake = FakeGhidra()
-        path = _sample(tmp_path, values=(b"VirtualAlloc", b"CreateFileW"))
-        answer = _passes(fake).emulate_api_hashes(
-            path, [Routine(ROUTINE, ("hash data using djb2",))], names_path=_names(tmp_path)
+    def test_a_call_is_stated_only_for_a_catalogue_api_the_file_imports(self) -> None:
+        read = read_findings(
+            [
+                _call("debugger_detection", "CheckRemoteDebuggerPresent"),
+                _call("debugger_detection", "CloseHandle", "140001080"),
+                _call("vm_detection", "GetSystemFirmwareTable", "140001090"),
+            ],
+            imported=["CheckRemoteDebuggerPresent", "CloseHandle"],
         )
+        assert [f["what"] for f in read["stated"]] == ["call to CheckRemoteDebuggerPresent"]
+        assert read["not_stated"] == 2
 
-        assert answer["tool"] == EMULATION_TOOL
-        assert answer["how"] == ROUTINE_RULE and answer["conventions"] == CONVENTION_RULE
-        assert [row["readings"][0]["name"] for row in answer["hits"]] == [
-            "VirtualAlloc",
-            "CreateFileW",
-        ]
-        reading = answer["hits"][0]["readings"][0]
-        assert reading == {
-            "routine": hex(ROUTINE),
-            "set": "exports",
-            "name": "VirtualAlloc",
-            "encoding": "ascii",
-            "dlls": ["kernel32.dll"],
-        }
-        place = answer["hits"][0]["occurrences"][0]
-        assert (place["rva"], place["function"]) == (hex(TEXT_RVA + 0x21), hex(TEXT_RVA))
-        routine = answer["routines"][0]
-        assert routine["convention"] == "rcx, length in rdx" and routine["address"] == hex(
-            X64_BASE + ROUTINE
+    def test_ghidra_s_substring_match_is_stated_by_the_imported_name(self) -> None:
+        read = read_findings(
+            [_call("vm_detection", "EnumSystemFirmwareTable")],
+            imported=["EnumSystemFirmwareTables"],
         )
-        # Four function names and one module name in two encodings, all emulated.
-        assert (routine["names_emulated"], routine["names_returned"]) == (6, 6)
-        assert answer["lone_hits"] == [] and answer["total"] == 2
+        assert [f["what"] for f in read["stated"]] == ["call to EnumSystemFirmwareTables"]
 
-    def test_a_routine_that_reads_the_length_it_is_given_gets_the_name_s_length(
-        self, tmp_path: Path
-    ) -> None:
-        fake = FakeGhidra(convention="rcx and rdx")
-        path = _sample(tmp_path, values=(b"VirtualAlloc", b"CreateFileW"))
-        answer = _passes(fake).emulate_api_hashes(
-            path, [Routine(ROUTINE, ("r",))], names_path=_names(tmp_path)
+    def test_one_place_filed_twice_is_stated_once(self) -> None:
+        read = read_findings(
+            [_instruction("INT 3", "INT3"), _instruction("INT 3", "INT3")], imported=[]
         )
-        assert [row["readings"][0]["name"] for row in answer["hits"]] == [
-            "VirtualAlloc",
-            "CreateFileW",
-        ]
-
-    def test_one_value_alone_is_a_lone_hit(self, tmp_path: Path) -> None:
-        path = _sample(tmp_path, values=(b"MessageBoxW",))
-        answer = _passes(FakeGhidra()).emulate_api_hashes(
-            path, [Routine(ROUTINE, ("r",))], names_path=_names(tmp_path)
-        )
-        assert answer["hits"] == []
-        assert answer["lone_hits"][0]["readings"][0]["name"] == "MessageBoxW"
-
-    def test_an_x86_routine_takes_the_name_on_the_stack(self, tmp_path: Path) -> None:
-        fake = FakeGhidra(image_base=X86_BASE, convention="stack")
-        path = _sample(tmp_path, is64=False, values=(b"VirtualAlloc", b"GetTickCount"))
-        answer = _passes(fake).emulate_api_hashes(
-            path, [Routine(ROUTINE, ("r",))], names_path=_names(tmp_path)
-        )
-        assert answer["routines"][0]["convention"] == "stack arguments 1 and 2"
-        assert answer["total"] == 2
-
-    def test_an_x86_routine_that_reads_ecx_is_tried_second(self, tmp_path: Path) -> None:
-        fake = FakeGhidra(image_base=X86_BASE, convention="ecx")
-        path = _sample(tmp_path, is64=False, values=(b"VirtualAlloc", b"GetTickCount"))
-        answer = _passes(fake).emulate_api_hashes(
-            path, [Routine(ROUTINE, ("r",))], names_path=_names(tmp_path)
-        )
-        assert answer["routines"][0]["conventions_tried"] == [
-            "stack arguments 1 and 2",
-            "ecx, length in edx",
-        ]
-        assert answer["routines"][0]["convention"] == "ecx, length in edx"
-
-    def test_a_routine_whose_output_does_not_follow_the_name_is_not_used(
-        self, tmp_path: Path
-    ) -> None:
-        fake = FakeGhidra(constant_output=True)
-        path = _sample(tmp_path, values=(b"VirtualAlloc",))
-        answer = _passes(fake).emulate_api_hashes(
-            path, [Routine(ROUTINE, ("r",))], names_path=_names(tmp_path)
-        )
-        routine = answer["routines"][0]
-        assert routine["convention"] is None and "two different values" in routine["reason"]
-        assert answer["hits"] == [] and answer["lone_hits"] == []
-        # Two probes, and nothing past them.
-        assert fake.emulations == 2
-
-    def test_a_request_ghidra_does_not_answer_stops_the_pass(self, tmp_path: Path) -> None:
-        fake = FakeGhidra(stall_after=3)
-        path = _sample(tmp_path, values=(b"VirtualAlloc",))
-        with pytest.raises(GhidraPassFailed, match="did not answer the emulation"):
-            _passes(fake).emulate_api_hashes(
-                path, [Routine(ROUTINE, ("r",))], names_path=_names(tmp_path)
-            )
-        assert fake.emulations == 4
-
-    def test_every_request_names_the_program_and_carries_the_key(self, tmp_path: Path) -> None:
-        fake = FakeGhidra()
-        path = _sample(tmp_path, values=(b"VirtualAlloc",))
-        _passes(fake).emulate_api_hashes(
-            path, [Routine(ROUTINE, ("r",))], names_path=_names(tmp_path)
-        )
-        emulations = [r for r in fake.requests if r.url.path == "/emulate_function"]
-        assert emulations
-        assert all(r.url.params.get("program") == "s.exe" for r in emulations)
-        assert all(r.headers.get("authorization") == "Bearer t" for r in fake.requests)
+        assert len(read["stated"]) == 1
 
 
-class TestTheAntiAnalysisScan:
-    def test_ghidra_s_findings_are_kept_with_their_offsets(self) -> None:
+class TestTheScan:
+    def test_ghidra_s_answer_is_kept_and_the_exact_part_is_stated(self) -> None:
         findings = [
             {
-                "category": "c",
-                "technique": "T",
+                "category": "suspicious_instruction",
+                "technique": "INT 0x2d",
                 "address": "140001234",
                 "function": "FUN_1",
-                "severity": "high",
+                "instruction": "INT3",
+            },
+            {
+                "category": "debugger_detection",
+                "technique": "CloseHandle",
+                "address": "140001240",
+                "function": "FUN_1",
             },
             {"note": "3 additional findings truncated"},
         ]
-        answer = _passes(FakeGhidra(findings=findings)).anti_analysis()
+        answer = _passes(FakeGhidra(findings=findings)).anti_analysis(imported=["CloseHandle"])
         assert answer["tool"] == ANTI_ANALYSIS_TOOL
-        assert answer["findings"] == [{**findings[0], "offset": "0x1234"}]
+        assert answer["checks"] == SCAN_CHECKS
+        assert [f["offset"] for f in answer["findings"]] == ["0x1234", "0x1240"]
+        assert answer["stated"] == []
+        assert answer["not_stated"] == 2
         assert answer["notes"] == ["3 additional findings truncated"]
-        assert answer["image_base"] == hex(X64_BASE)
 
-    def test_a_sample_ghidra_did_not_open_fails_both_passes_with_its_words(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_sample_ghidra_did_not_open_fails_with_ghidra_s_words(self) -> None:
         fake = FakeGhidra(load={"error": "File not found: /data/samples/.work/s.exe"})
         passes = _passes(fake)
         with pytest.raises(GhidraPassFailed, match="File not found"):
-            passes.anti_analysis()
+            passes.anti_analysis(imported=[])
         asked = len(fake.requests)
         with pytest.raises(GhidraPassFailed, match="File not found"):
-            passes.emulate_api_hashes(_sample(tmp_path), [Routine(ROUTINE, ("r",))])
+            passes.anti_analysis(imported=[])
         assert len(fake.requests) == asked
 
-    def test_the_sample_is_opened_once_for_both_passes(self, tmp_path: Path) -> None:
+    def test_every_request_carries_the_key_and_the_key_is_not_in_the_repr(self) -> None:
         fake = FakeGhidra()
         passes = _passes(fake)
-        passes.anti_analysis()
-        passes.emulate_api_hashes(
-            _sample(tmp_path), [Routine(ROUTINE, ("r",))], names_path=_names(tmp_path)
-        )
-        assert [r.url.path for r in fake.requests].count("/load_program") == 1
-        assert [r.url.path for r in fake.requests].count("/run_analysis") == 1
-
-
-class TestAgreementWithThePlatformsOwnResolution:
-    def _hit(self, value: str, name: str) -> dict[str, Any]:
-        return {"value": value, "readings": [{"routine": "0x1200", "name": name}]}
-
-    def test_a_value_the_resolution_names_the_same_way_is_marked(self) -> None:
-        answer = {
-            "hits": [self._hit("0x00000001", "A"), self._hit("0x00000002", "B")],
-            "lone_hits": [self._hit("0x00000003", "C")],
-        }
-        resolved = {
-            "hits": [
-                {"value": "0x00000001", "readings": [{"name": "A"}]},
-                {"value": "0x00000002", "readings": [{"name": "Other"}]},
-            ],
-            "lone_hits": [{"value": "0x00000003", "readings": [{"name": "C"}]}],
-        }
-        marked = mark_agreement(answer, resolved, "ev_0020")
-        assert [h.get("also_named_by") for h in marked["hits"]] == ["ev_0020", None]
-        assert marked["lone_hits"][0]["also_named_by"] == "ev_0020"
-        assert marked["agrees_with"] == {
-            "entry": "ev_0020",
-            "tool": "resolve_api_hashes",
-            "hits": 1,
-        }
-
-    def test_without_a_resolution_nothing_is_marked(self) -> None:
-        answer = {"hits": [self._hit("0x00000001", "A")], "lone_hits": []}
-        assert mark_agreement(answer, None, "") == answer
+        passes.anti_analysis(imported=[])
+        assert all(r.headers.get("authorization") == "Bearer t" for r in fake.requests)
+        assert "'t'" not in repr(passes) and "token" not in repr(passes)

@@ -44,10 +44,6 @@ if TYPE_CHECKING:
 # The servers whose ``resolve_api_hashes`` is this platform's own: the triage
 # pack (recorded as ``pipeline``) and the analysis server.
 _RESOLVING_SERVERS = frozenset({"pipeline", "analysis"})
-# The platform's answers that read function names out of the file's values:
-# its own resolution, and the pack's emulation of the sample's own routines
-# (``analysis.ghidra_passes``), both answering in the same hits and readings.
-_RESOLVING_TOOLS = frozenset({"resolve_api_hashes", "emulate_api_hashes"})
 
 # The closers a repair may append, and nothing else. A repair that deleted a
 # character, changed one or inserted one anywhere but the end would be this
@@ -312,9 +308,9 @@ class EvidenceRecorder:
         self.entries.append(entry)
         # The function names a hash resolution read are names, and the event
         # and transcript scrub keeps them as written for the rest of the job.
-        # Only this platform's own readers answer them: the pack's calls and
+        # Only this platform's own resolver answers them: the pack's call and
         # the analysis server's tool. Another server's tool of that name is not.
-        if tool in _RESOLVING_TOOLS and entry.ok and server in _RESOLVING_SERVERS:
+        if tool == "resolve_api_hashes" and entry.ok and server in _RESOLVING_SERVERS:
             remember_resolved_names(output)
         # ``output``, the text the model was handed, and not ``entry.output``,
         # which the ledger has already trimmed and the byte budget may blank

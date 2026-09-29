@@ -601,25 +601,23 @@ class TestTheNode:
             "decode_string_blobs",
             "find_crypto_constants",
             "find_anti_analysis_techniques",
-            "emulate_api_hashes",
         ]
         assert [row["id"] for row in ledger][:2] == ["ev_0001", "ev_0002"]
         assert all(row["agent"] == PIPELINE and row["stage"] == "triage_pack" for row in ledger)
-        assert ledger[-7]["ok"] is False
-        # No build on a test host: the entry says so, and it is not a failure.
         assert ledger[-6]["ok"] is False
-        assert ledger[-6]["error"].startswith("not run: floss is not installed")
+        # No build on a test host: the entry says so, and it is not a failure.
+        assert ledger[-5]["ok"] is False
+        assert ledger[-5]["error"].startswith("not run: floss is not installed")
         # The platform's own readings of the bytes answer on any host.
-        assert ledger[-5]["ok"] is True
         assert ledger[-4]["ok"] is True
         assert ledger[-3]["ok"] is True
-        # Ghidra is switched off in the shipped settings: each pass says so.
-        for row in ledger[-2:]:
-            assert row["error"] == "not run: Ghidra is switched off (core.static.ghidra.enabled)"
+        assert ledger[-2]["ok"] is True
+        # Ghidra is switched off in the shipped settings: one entry says so.
+        assert ledger[-1]["error"] == "not run: Ghidra is switched off (core.static.ghidra.enabled)"
         assert "tool_evidence" not in update
 
         facts = update["triage_facts"]
-        assert facts["entries"] == 17
+        assert facts["entries"] == 16
         assert facts["failed"] == 0
         assert facts["has_signature"] is False
         assert facts["capa_hits"] == 1

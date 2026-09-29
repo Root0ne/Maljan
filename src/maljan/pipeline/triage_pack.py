@@ -47,12 +47,15 @@ After them, the deobfuscation passes, last for the same reason. The
 platform's scan of an executable's bytes for the published constants of
 ciphers, hash functions and checksums (``maljan.tools.crypto_constants``;
 Ghidra's ``detect_crypto_constants`` answers "not yet implemented"), then
-Ghidra's two passes over the sample (``maljan.analysis.ghidra_passes``): its
-anti-analysis scan, and its emulation of the sample's own hashing routines on
-the names of the vendored catalogue. The node hands the pack the Ghidra it
-may call, or the sentence saying why there is none; each pass that cannot run
-is an entry saying ``no:`` and why, and is not a failure. A call directly to
-``run_pack`` with no Ghidra handed over makes neither Ghidra entry.
+Ghidra's anti-analysis scan over the sample (``maljan.analysis.ghidra_passes``),
+of which only the exact part is stated. The node hands the pack the Ghidra it
+may call, or the sentence saying why there is none; a pass that cannot run is
+one entry saying ``no:`` and why, and is not a failure. A call directly to
+``run_pack`` with no Ghidra handed over makes no Ghidra entry.
+
+The passes' lines never cost an earlier line a character: when the pack does
+not fit its room, the earlier lines are fitted as if the passes did not exist,
+and the passes' lines get what room is left (``render_pack``).
 """
 
 from __future__ import annotations
@@ -71,14 +74,8 @@ from typing import Any, cast
 from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
 from maljan.analysis.ghidra_passes import (
     ANTI_ANALYSIS_TOOL,
-    EMULATED_FORMATS,
-    EMULATION_TOOL,
     GHIDRA_FORMATS,
-    NO_CAPA_ANSWER,
     GhidraPasses,
-    Routine,
-    hash_routines,
-    mark_agreement,
     run_pass,
 )
 from maljan.analysis.pcap_summary import conversation_line
@@ -543,13 +540,12 @@ class _Pack:
         # Where capa found functions, for the readers of an image with no
         # function table of its own.
         self.capa_function_starts: list[str] = []
-        # capa's rules as it answered them, for the routines the emulation
-        # pass runs; ``None`` when capa gave no answer.
-        self.capa_rows: list[dict[str, Any]] | None = None
-        # The platform's own hash resolution and its ledger id, which the
-        # emulation pass's line says it agrees with rather than repeat.
-        self.resolved_answer: dict[str, Any] | None = None
-        self.resolved_entry_id = ""
+        # capa's rules as it answered them, which the constant scan's answer
+        # is compared with; empty when capa gave no answer.
+        self.capa_rows: list[dict[str, Any]] = []
+        # The file's imported function names, which the anti-analysis pass
+        # states a call by.
+        self.imported: list[str] = []
         self.reputation_malicious: int | None = None
         # FLOSS, started beside the rest of the pack when it can be. Recorded
         # in its own place at the end, so every id keeps its value.
@@ -687,6 +683,7 @@ class _Pack:
         self._start_decoded_strings(routed)
         try:
             format_facts = self._format_facts(routed)
+            self.imported = _imported_names(format_facts)
             self._strings_and_iocs()
             self._rules()
             self._catalogue_lookups(format_facts, routed)
@@ -1067,9 +1064,6 @@ class _Pack:
             args,
             lambda: api_hashes.resolve_api_hashes(path, function_starts=starts),
         )
-        if resolved is not None:
-            self.resolved_answer = resolved
-            self.resolved_entry_id = self.recorder.entries[-1].id
         self.record(
             "decode_string_blobs",
             args,
@@ -1101,66 +1095,46 @@ class _Pack:
         logger.info("triage pack: %s %s", tool, message)
 
     def _crypto_constants(self, routed: str) -> None:
-        """The platform's scan of an executable for published constants, read from its bytes."""
+        """The platform's scan of an executable for published constants, read from its bytes.
+
+        Given capa's function starts, as the other readings of the bytes are,
+        and compared with capa's own rules afterwards (``_with_capa``).
+        """
         if routed not in CONSTANT_FORMATS:
             return
         path = self.inputs.sample_path
+        starts = list(self.capa_function_starts)
+        args: dict[str, Any] = {"path": path}
+        if starts:
+            args["function_starts"] = f"capa's {len(starts)} function starts"
+        rows = self.capa_rows
         self.record(
             crypto_constants.TOOL,
-            {"path": path},
-            lambda: crypto_constants.find_crypto_constants(path),
+            args,
+            lambda: _with_capa(
+                crypto_constants.find_crypto_constants(path, function_starts=starts), rows
+            ),
         )
 
     def _ghidra_passes(self, routed: str) -> None:
-        """Ghidra's anti-analysis scan, then its emulation of the sample's hashing routines.
+        """Ghidra's anti-analysis scan, or the one entry saying why there is none.
 
-        Only with a Ghidra handed over by the caller. One that cannot be asked
-        gives each pass an entry saying why; a pass Ghidra did not complete is
-        a failed entry with what happened. The emulation needs routines capa
-        named, and says so when there are none.
+        Only with a Ghidra handed over by the caller. A reason that holds for
+        the whole deployment is one entry; a scan Ghidra did not complete is a
+        failed entry with Ghidra's words.
         """
         passes = self.ghidra
         if passes is None or routed not in GHIDRA_FORMATS:
             return
-        emulated = routed in EMULATED_FORMATS
-        anti_args = {"program": passes.sample_path or "the job's sample"}
+        args = {"program": passes.sample_path or "the job's sample"}
         if passes.unavailable:
-            self._record_absent(ANTI_ANALYSIS_TOOL, anti_args, passes.unavailable)
-            if emulated:
-                self._record_absent(EMULATION_TOOL, anti_args, passes.unavailable)
+            self._record_absent(ANTI_ANALYSIS_TOOL, args, passes.unavailable)
             return
+        imported = list(self.imported)
         self.record(
             ANTI_ANALYSIS_TOOL,
-            anti_args,
-            lambda: run_pass(passes.anti_analysis, ANTI_ANALYSIS_TOOL),
-        )
-        if not emulated:
-            return
-        routines: list[Routine]
-        if self.capa_rows is None:
-            routines, why = [], NO_CAPA_ANSWER
-        else:
-            routines, why = hash_routines(self.capa_rows, self.capa_function_starts)
-        args: dict[str, Any] = {
-            "program": anti_args["program"],
-            "routines": [hex(routine.start) for routine in routines],
-        }
-        if not routines:
-            self._record_absent(EMULATION_TOOL, args, why)
-            return
-        path = self.inputs.sample_path
-        starts = list(self.capa_function_starts)
-        self.record(
-            EMULATION_TOOL,
             args,
-            lambda: run_pass(
-                lambda: mark_agreement(
-                    passes.emulate_api_hashes(path, routines, function_starts=starts),
-                    self.resolved_answer,
-                    self.resolved_entry_id,
-                ),
-                EMULATION_TOOL,
-            ),
+            lambda: run_pass(lambda: passes.anti_analysis(imported), ANTI_ANALYSIS_TOOL),
         )
 
 
@@ -1409,10 +1383,34 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
     not fit is an entry left out, and the block then ends with a line saying
     how many and that their full output is a tool call away. ``max_chars`` at
     or below zero means no bound.
+
+    The deobfuscation passes' lines (``PASS_TOOLS``) take no room from any
+    other line: when the whole does not fit, the other lines are fitted to
+    ``max_chars`` exactly as they would be without the passes, and each pass
+    line then gets what room is left, whole or shortened, or is left out.
     """
     whole = _render_lines(entries, WHOLE)
     if max_chars <= 0 or _joined_len(whole) <= max_chars:
         return "\n".join(whole)
+    passes = [entry for entry in entries if entry.tool in PASS_TOOLS]
+    if not passes:
+        return _render_fitted(entries, max_chars)
+    earlier = [entry for entry in entries if entry.tool not in PASS_TOOLS]
+    lines = [_render_fitted(earlier, max_chars)] if earlier else []
+    room = max_chars - _joined_len(lines) - (1 if lines else 0)
+    for entry in passes:
+        line: str | None = _pack_line(entry)
+        if line is not None and len(line) > room:
+            line = _within_room(entry, room)
+        if line is None or len(line) > room:
+            continue
+        lines.append(line)
+        room -= len(line) + 1
+    return "\n".join(lines)
+
+
+def _render_fitted(entries: list[LedgerEntry], max_chars: int) -> str:
+    """``entries`` fitted to ``max_chars``: the shared detail level, then capa's addresses."""
     # The shared level is fitted with no rule addresses at all: a capa result
     # with hundreds of matches would otherwise lower what every other line may
     # show. The addresses then take what room the fitted lines leave.
@@ -1566,6 +1564,8 @@ def _pack_line(entry: LedgerEntry) -> str:
         said = str(entry.error or entry.output or "")
         if _was_not_made(entry):
             return f"[{entry.id}] {label}: no: {_short(said[len(NOT_RUN_PREFIX) :].strip())}"
+        # The failure is Ghidra's own words; the class they travelled in is not.
+        said = said.removeprefix("GhidraPassFailed: ")
         return f"[{entry.id}] {label}: no: the pass failed: {_short(said)}"
     if not entry.ok:
         # A call the pipeline did not make — a lookup with no server to ask,
@@ -2376,14 +2376,53 @@ def _decoded_blobs(data: dict[str, Any], max_chars: int | None = None) -> str:
 # The deobfuscation passes' lines
 # ---------------------------------------------------------------------------
 
-PASS_TOOLS = frozenset({crypto_constants.TOOL, ANTI_ANALYSIS_TOOL, EMULATION_TOOL})
+PASS_TOOLS = frozenset({crypto_constants.TOOL, ANTI_ANALYSIS_TOOL})
 
 # What a pass line says when the room cut its list: how many it shows, and
 # where the rest are.
-PASS_ROOM_SENTENCE = (
-    "{shown} of {total} shown (every agent reads the pack, and this is what fits its room); "
-    "the rest are in this entry's full output"
-)
+PASS_ROOM_SENTENCE = "{shown} of {total} shown; the rest are in this entry's full output"
+
+# What Ghidra's scan looks at, as the pack line says it.
+SCAN_CHECKS_SHORT = "listed API calls, listed x86 instructions, FS:[0x30] and FS:[0x18]"
+
+
+def _with_capa(answer: dict[str, Any], capa_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """The constant scan's answer, each found set marked where capa names the same algorithm.
+
+    A set agrees with capa when a capa rule whose namespace ends in the set's
+    algorithm matched at the start of a function one of the set's places
+    stands in (``function``, or ``after_function_start`` for an image with no
+    table of its own). The mark is ``capa``: each rule and the address.
+    """
+    if not isinstance(answer, dict) or not capa_rows or "found" not in answer:
+        return answer
+    sets = {entry.id: entry for entry in crypto_constants.catalogue()}
+    marked = dict(answer)
+    rows: list[dict[str, Any]] = []
+    for row in answer.get("found") or []:
+        entry = sets.get(str(row.get("id")))
+        places = [t.get("place") or {} for t in row.get("tables") or []] + [
+            p for v in row.get("values") or [] for p in v.get("places") or []
+        ]
+        functions = {
+            str(p.get("function") or p.get("after_function_start") or "")
+            for p in places
+            if isinstance(p, dict)
+        } - {""}
+        agree: list[dict[str, str]] = []
+        for capa in capa_rows:
+            segment = str(capa.get("namespace") or "").rsplit("/", 1)[-1]
+            if entry is None or segment not in entry.capa:
+                continue
+            for address in capa.get("addresses") or []:
+                if str(address) in functions:
+                    agree.append({"rule": str(capa.get("rule") or ""), "at": str(address)})
+        row = dict(row)
+        if agree:
+            row["capa"] = agree
+        rows.append(row)
+    marked["found"] = rows
+    return marked
 
 
 def _place(place: dict[str, Any]) -> str:
@@ -2402,8 +2441,12 @@ def _places(places: list[dict[str, Any]]) -> str:
 
 
 def _constant_item(row: dict[str, Any]) -> str:
-    """``AES forward substitution box [table] @ 0x3100``, or ``… [2 of 64 values] @ …``."""
+    """``AES forward substitution box [table] @ 0x3100``; a set capa names too, in one clause."""
     name = f"{row.get('algorithm')} {row.get('what')}"
+    capa = [c for c in row.get("capa") or [] if isinstance(c, dict)]
+    if capa:
+        said = ", ".join(f"{c.get('at')} ({c.get('rule')})" for c in capa)
+        return f"{name}: agrees with capa at {said}"
     items: list[str] = []
     for table in row.get("tables") or []:
         if not isinstance(table, dict):
@@ -2416,8 +2459,7 @@ def _constant_item(row: dict[str, Any]) -> str:
         places = [p for v in values for p in v.get("places") or [] if isinstance(p, dict)]
         said = ", ".join(str(v.get("value")) for v in values)
         items.append(
-            f"{name} [{_n(row.get('matched'))} of {_n(row.get('of'))} values: {said}] "
-            f"@ {_places(places)}"
+            f"{name} [{_n(row.get('matched'))} of {_n(row.get('of'))}: {said}] @ {_places(places)}"
         )
     return "; ".join(items)
 
@@ -2427,230 +2469,81 @@ def _constant_sets(data: dict[str, Any], max_chars: int | None = None) -> str:
     rows = [r for r in (data.get("found") or []) if isinstance(r, dict)]
     lone = [r for r in (data.get("lone") or []) if isinstance(r, dict)]
     searched = _n(data.get("sets_searched"))
-
-    def _lone(listed: bool) -> str:
-        if not lone:
-            return ""
-        said = (
-            f"; {_n(len(lone))} more sets have one value only, which one value alone often "
-            "does by chance"
-        )
-        if listed:
-            return f"{said} ({'; '.join(_constant_item(r) for r in lone)})"
-        return f"{said} (listed under lone in this entry's full output)"
-
+    lone_said = f"; one value of {_n(len(lone))} more sets, often by chance (lone)" if lone else ""
     if not rows:
-        whole = (
-            f"no: none of the {searched} published constant sets of ciphers, hash functions and "
-            "checksums stands in the file whole or by two of its values"
-        )
-        listed = whole + _lone(True)
-        if max_chars is None or len(listed) <= max_chars:
-            return listed
-        return whole + _lone(False)
+        return f"no: none of the {searched} published constant sets stands in the file{lone_said}"
     total = len(rows)
+    head = f"{_n(total)} of {searched} published constant sets stand in the file{lone_said}"
 
-    def _head(listed: bool) -> str:
-        return (
-            f"{_n(total)} of {searched} published constant sets of ciphers, hash functions and "
-            "checksums stand in the file (a table whole, other sets by at least two of their "
-            f"values){_lone(listed)}; each as algorithm and what the set is [table, or how many "
-            "of its values] @ each place it stands (an offset from the image base, or file and "
-            "a file offset, and the function the file's table puts around it)"
-        )
-
-    def _line(shown: int, listed: bool) -> str:
+    def _line(shown: int) -> str:
         said = (
-            f"all {_n(total)} shown"
+            ""
             if shown >= total
-            else PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(total))
+            else f" ({PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(total))})"
         )
         items = "; ".join(_constant_item(row) for row in rows[:shown])
-        return f"{_head(listed)}; {said}" + (f": {items}" if shown else "")
+        return f"{head}{said}" + (f": {items}" if shown else "")
 
     head_count = _detail().list_head
     shown = total if head_count is None else min(total, head_count)
-    whole = _line(shown, True)
-    if max_chars is None or len(whole) <= max_chars:
-        return whole
-    # The lone sets are said as a count before any found set is left out.
-    return _fit(lambda count: _line(count, False), shown, max_chars)
+    return _fit(_line, shown, max_chars)
 
 
-def _anti_analysis_item(group: tuple[str, list[dict[str, Any]]]) -> str:
-    """``category: what @ 0x1010 (in F) 0x2020 (in G)``: one match of Ghidra's, every place."""
-    name, rows = group
-    places = []
-    for row in rows:
-        where = str(row.get("offset") or row.get("address"))
-        places.append(where + (f" (in {row.get('function')})" if row.get("function") else ""))
+def _anti_analysis_item(group: tuple[tuple[str, str], list[dict[str, Any]]]) -> str:
+    """``category: what @ 0x1010 (in F) 0x2020 (in G)``: one exact match, every place."""
+    (category, what), rows = group
+    places = [
+        str(row.get("offset")) + (f" (in {row.get('function')})" if row.get("function") else "")
+        for row in rows
+    ]
     head = _detail().list_head
     shown = places if head is None else places[:head]
     said = " ".join(shown)
     if len(shown) < len(places):
         said += f" (+{len(places) - len(shown)} more places)"
-    return f"{name} @ {said}"
+    return f"{category}: {what} @ {said}"
 
 
 def _anti_analysis(data: dict[str, Any], max_chars: int | None = None) -> str:
-    """Ghidra's anti-analysis findings as Ghidra named them, each match once with its places."""
-    rows = [r for r in (data.get("findings") or []) if isinstance(r, dict)]
-    total = max(int(data.get("total_findings") or 0), len(rows))
-    if not rows:
-        return "no: Ghidra's scan found no anti-analysis technique"
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        grouped.setdefault(f"{row.get('category')}: {row.get('technique')}", []).append(row)
-    groups = list(grouped.items())
-    counts = (data.get("summary") or {}).get("by_category") or {}
-    by_category = ", ".join(f"{name} {_n(count)}" for name, count in counts.items())
-    notes = [str(n) for n in data.get("notes") or [] if str(n).strip()]
-    head = (
-        f"Ghidra's scan found {_n(total)}"
-        + (f" ({by_category})" if by_category else "")
-        + (f"; Ghidra returned {_n(len(rows))} of them ({'; '.join(notes)})" if notes else "")
-        + f", {_n(len(groups))} distinct; each as Ghidra's category: what it matched @ the "
-        "offsets from the image base where it stands (in Ghidra's function)"
+    """The exact part of Ghidra's scan, each match once with its places; a ``no:`` without."""
+    rows = [r for r in (data.get("stated") or []) if isinstance(r, dict)]
+    not_stated = int(data.get("not_stated") or 0)
+    total = int(data.get("total_findings") or 0)
+    returned = int(data.get("returned") or total)
+    checks = f"Ghidra's scan ({SCAN_CHECKS_SHORT})"
+    rest = (
+        f"; {_n(not_stated)} more of its matches are not stated (an API the platform's catalogue "
+        "does not list for this, or not the listed instruction or operand)"
+        if not_stated
+        else ""
     )
+    cut = (
+        f"; Ghidra returned {_n(returned)} of its {_n(total)} matches, in its own order"
+        if returned < total
+        else ""
+    )
+    if not rows:
+        if not not_stated and not cut:
+            return f"no: {checks} matched nothing"
+        return f"no: nothing {checks} matched is stated as exact{rest}{cut}"
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault((str(row.get("category")), str(row.get("what"))), []).append(row)
+    groups = list(grouped.items())
+    head = f"{checks} matched, each as Ghidra's category: what @ offsets (in function){rest}{cut}"
 
     def _line(shown: int) -> str:
         said = (
-            f"all {_n(len(groups))} shown"
+            ""
             if shown >= len(groups)
-            else PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(len(groups)))
+            else f" ({PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(len(groups)))})"
         )
         items = "; ".join(_anti_analysis_item(group) for group in groups[:shown])
-        return f"{head}; {said}" + (f": {items}" if shown else "")
+        return f"{head}{said}" + (f": {items}" if shown else "")
 
     head_count = _detail().list_head
     shown = len(groups) if head_count is None else min(len(groups), head_count)
     return _fit(_line, shown, max_chars)
-
-
-def _routine_said(row: dict[str, Any]) -> str:
-    rules = ", ".join(str(rule) for rule in row.get("capa_rules") or [])
-    said = f"routine {row.get('start')} where capa matched {rules}"
-    if row.get("convention"):
-        return (
-            f"{said}, the name handed over in {row.get('convention')}, "
-            f"{_n(row.get('names_returned'))} of {_n(row.get('names_emulated'))} names returned"
-        )
-    return f"{said}: {row.get('reason') or 'not emulated'}"
-
-
-def _emulated_item(row: dict[str, Any]) -> str:
-    """``0x1a2b3c4d = kernel32.dll!Name [routine 0x1200] @ 0x1021 (in 0x1000)``."""
-    readings: list[str] = []
-    for reading in row.get("readings") or []:
-        if not isinstance(reading, dict):
-            continue
-        tag = f"routine {reading.get('routine')}"
-        if reading.get("encoding") and reading.get("encoding") != "ascii":
-            tag += f", {reading.get('encoding')}"
-        if reading.get("set") == "modules":
-            readings.append(f"module {reading.get('name')} [{tag}]")
-        else:
-            dlls = "/".join(str(d) for d in reading.get("dlls") or [])
-            readings.append(f"{dlls}!{reading.get('name')} [{tag}]")
-    places = [p for p in row.get("occurrences") or [] if isinstance(p, dict)]
-    where = _places(places)
-    return f"{row.get('value')} = {' | '.join(readings)}" + (f" @ {where}" if where else "")
-
-
-def _emulated(data: dict[str, Any], max_chars: int | None = None) -> str:
-    """The file's values that equal an output of the sample's own routines, emulated by Ghidra.
-
-    A value the platform's own resolution already names the same way is not
-    listed again: the line says how many there are, which entry names them and
-    which routine computes them, and lists only the values the emulation alone
-    names. Every value stays in the entry's full output.
-    """
-    every = [r for r in (data.get("hits") or []) if isinstance(r, dict)]
-    rows = [r for r in every if not r.get("also_named_by")]
-    agreeing = [r for r in every if r.get("also_named_by")]
-    lone = [
-        r
-        for r in (data.get("lone_hits") or [])
-        if isinstance(r, dict) and not r.get("also_named_by")
-    ]
-    agreement = ""
-    if agreeing:
-        entry = (data.get("agrees_with") or {}).get("entry") or agreeing[0].get("also_named_by")
-        starts = sorted(
-            {
-                str(reading.get("routine"))
-                for row in agreeing
-                for reading in row.get("readings") or []
-                if isinstance(reading, dict)
-            }
-        )
-        agreement = (
-            f"; {_n(len(agreeing))} of the {_n(len(every))} are values the platform's resolution "
-            f"[{entry}] names the same way, and the sample's routine {', '.join(starts)} gives "
-            "them too (not listed again; each is in this entry's full output)"
-        )
-    routines = "; ".join(
-        _routine_said(r) for r in data.get("routines") or [] if isinstance(r, dict)
-    )
-    names = data.get("names") or {}
-    catalogue = (
-        f"{_n(names.get('functions'))} Windows function names and {_n(names.get('modules'))} "
-        "module names"
-    )
-
-    def _lone(listed: bool) -> str:
-        if not lone:
-            return ""
-        said = (
-            f"; {_n(len(lone))} more equal an output of a routine that matches nothing else in "
-            "the file, most often a coincidence"
-        )
-        if listed:
-            return f"{said}: {', '.join(_emulated_item(r) for r in lone)}"
-        return f"{said} (listed under lone_hits in this entry's full output)"
-
-    if not every:
-        whole = (
-            f"no: no value the file holds equals an output of the sample's own routines for "
-            f"{catalogue}, emulated by Ghidra ({routines})"
-        )
-        listed = whole + _lone(True)
-        if max_chars is None or len(listed) <= max_chars:
-            return listed
-        return whole + _lone(False)
-    total = len(rows)
-
-    def _head(listed: bool) -> str:
-        said = (
-            f"{_n(len(every))} values the file holds equal what the sample's own routine returns "
-            f"for a Windows function or module name, emulated by Ghidra on {catalogue} "
-            f"({routines}){agreement}{_lone(listed)}"
-        )
-        if not rows:
-            return said
-        return (
-            f"{said}; each as value = DLL!name or module name [routine] @ the offsets from the "
-            "image base where the value stands (in the function the file's table puts around it)"
-        )
-
-    def _line(shown: int, listed: bool) -> str:
-        if not total:
-            return _head(listed)
-        said = (
-            f"all {_n(total)} the emulation alone names shown"
-            if shown >= total
-            else PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(total))
-        )
-        items = "; ".join(_emulated_item(row) for row in rows[:shown])
-        return f"{_head(listed)}; {said}" + (f": {items}" if shown else "")
-
-    head_count = _detail().list_head
-    shown = total if head_count is None else min(total, head_count)
-    whole_line = _line(shown, True)
-    if max_chars is None or len(whole_line) <= max_chars:
-        return whole_line
-    # The lone values are said as a count before any hit is left out.
-    return _fit(lambda count: _line(count, False), shown, max_chars)
 
 
 def _function_matches(data: dict[str, Any]) -> str:
@@ -2799,7 +2692,6 @@ _GROUP_LABELS: dict[str, str] = {
     "decode_string_blobs": "decoded blobs",
     crypto_constants.TOOL: "crypto constants",
     ANTI_ANALYSIS_TOOL: "anti-analysis (Ghidra)",
-    EMULATION_TOOL: "sample's own hashing routines (emulated)",
 }
 
 _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
@@ -2832,7 +2724,6 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "decode_string_blobs": _decoded_blobs,
     crypto_constants.TOOL: _constant_sets,
     ANTI_ANALYSIS_TOOL: _anti_analysis,
-    EMULATION_TOOL: _emulated,
 }
 
 # The lines that can say less and still say something, each given the room it
@@ -2845,5 +2736,4 @@ _SHORTER_RENDERERS: dict[str, Callable[[dict[str, Any], int], str]] = {
     "decode_string_blobs": lambda data, room: _decoded_blobs(data, max_chars=room),
     crypto_constants.TOOL: lambda data, room: _constant_sets(data, max_chars=room),
     ANTI_ANALYSIS_TOOL: lambda data, room: _anti_analysis(data, max_chars=room),
-    EMULATION_TOOL: lambda data, room: _emulated(data, max_chars=room),
 }

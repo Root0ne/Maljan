@@ -149,6 +149,7 @@ from maljan.pipeline.validation import (
 from maljan.providers.base import STATIC_EVIDENCE_INSTRUCTIONS, absent_provider_fragment
 from maljan.providers.static.ghidra import (
     GHIDRA_GUIDANCE,
+    GHIDRA_WORKFLOW,
     ghidra_not_answering,
     sample_not_opened,
 )
@@ -400,23 +401,20 @@ def _deobfuscation_sentences() -> str:
     return " ".join(
         [
             crypto_constants.SCAN_RULE,
-            ghidra_passes.ROUTINE_RULE,
-            ghidra_passes.CONVENTION_RULE,
-            ghidra_passes.NO_ROUTINE_RULE,
-            ghidra_passes.NO_ROUTINE_START,
-            ghidra_passes.NO_CAPA_ANSWER,
-            ghidra_passes.NO_CONVENTION,
+            ghidra_passes.SCAN_CHECKS,
+            ghidra_passes.STATED_RULE,
             ghidra_passes.GHIDRA_SWITCHED_OFF,
             ghidra_passes.GHIDRA_NOT_OVER_HTTP.format(transport="stdio"),
             ghidra_passes.GHIDRA_HAS_NO_COPY,
             triage_pack.PASS_ROOM_SENTENCE.format(shown=1, total=2),
+            triage_pack.SCAN_CHECKS_SHORT,
         ]
     )
 
 
 def _deobfuscation_lines() -> str:
-    """The three pass lines with and without a finding, and the lines of a pass not run."""
-    from maljan.analysis.ghidra_passes import ANTI_ANALYSIS_TOOL, EMULATION_TOOL
+    """The two pass lines with and without a finding, and the lines of a pass not run."""
+    from maljan.analysis.ghidra_passes import ANTI_ANALYSIS_TOOL
     from maljan.tools import crypto_constants
 
     place = {"offset": "0x1", "rva": "0x2", "function": "0x0"}
@@ -429,49 +427,31 @@ def _deobfuscation_lines() -> str:
                 "tables": [{"byte_order": "big-endian", "place": place}],
             },
             {"algorithm": "a", "what": "w", "matched": 2, "of": 3, "values": [value_row]},
+            {"algorithm": "a", "what": "w", "capa": [{"rule": "r", "at": "0x0"}]},
         ],
         "lone": [{"algorithm": "a", "what": "w", "matched": 1, "of": 3, "values": [value_row]}],
         "sets_searched": 3,
     }
     findings = {
-        "findings": [{"category": "c", "technique": "t", "offset": "0x1", "function": "f"}],
-        "total_findings": 2,
-        "summary": {"by_category": {"c": 2}},
-        "notes": ["n"],
-    }
-    routine = {
-        "start": "0x1",
-        "capa_rules": ["r"],
-        "convention": "rcx",
-        "names_emulated": 2,
-        "names_returned": 2,
-    }
-    unused = {"start": "0x2", "capa_rules": ["r"], "convention": None, "reason": "x"}
-    reading = {"routine": "0x1", "set": "exports", "name": "N", "dlls": ["d"]}
-    module = {"routine": "0x1", "set": "modules", "name": "m", "encoding": "utf-16le"}
-    hit = {"value": "0x00000001", "readings": [reading, module], "occurrences": [place]}
-    emulated = {
-        "hits": [hit, {**hit, "also_named_by": "ev_0009"}],
-        "agrees_with": {"entry": "ev_0009", "tool": "resolve_api_hashes", "hits": 1},
-        "lone_hits": [hit],
-        "routines": [routine, unused],
-        "names": {"functions": 2, "modules": 1},
+        "stated": [{"category": "c", "what": "t", "offset": "0x1", "function": "f"}],
+        "not_stated": 2,
+        "total_findings": 4,
+        "returned": 3,
     }
     not_run = [
         LedgerEntry(id=f"ev_000{i}", tool=tool, error="not run: x", ok=False, seq=i)
-        for i, tool in enumerate((crypto_constants.TOOL, ANTI_ANALYSIS_TOOL, EMULATION_TOOL), 1)
+        for i, tool in enumerate((crypto_constants.TOOL, ANTI_ANALYSIS_TOOL), 1)
     ]
-    failed = [
-        LedgerEntry(id="ev_0004", tool=ANTI_ANALYSIS_TOOL, error="x", ok=False, seq=4),
-    ]
+    failed = [LedgerEntry(id="ev_0004", tool=ANTI_ANALYSIS_TOOL, error="x", ok=False, seq=4)]
     return " ".join(
         [
             triage_pack._constant_sets(constants),
+            triage_pack._constant_sets(constants, max_chars=120),
             triage_pack._constant_sets({"found": [], "lone": [], "sets_searched": 3}),
             triage_pack._anti_analysis(findings),
-            triage_pack._anti_analysis({"findings": []}),
-            triage_pack._emulated(emulated),
-            triage_pack._emulated({**emulated, "hits": []}),
+            triage_pack._anti_analysis(findings, max_chars=200),
+            triage_pack._anti_analysis({"stated": [], "not_stated": 2, "total_findings": 2}),
+            triage_pack._anti_analysis({"stated": []}),
             triage_pack.pack_block([*not_run, *failed], 0),
         ]
     )
@@ -512,12 +492,8 @@ def _ghidra_pass_failures() -> str:
             ghidra(answers).anti_analysis()
         except GhidraPassFailed as failure:
             said.append(str(failure))
-    passes = ghidra({**opened, "/emulate_function": httpx.ReadTimeout("x")})
-    passes._program, passes._image_base = "p", 0x1000
-    from maljan.analysis.ghidra_passes import X64_CONVENTIONS, _Name
-
     try:
-        passes._emulate("p", 0x1200, X64_CONVENTIONS[0], _Name("N", "exports", "ascii"))
+        ghidra({**opened, "/find_anti_analysis_techniques": httpx.ReadTimeout("x")}).anti_analysis()
     except GhidraPassFailed as failure:
         said.append(str(failure))
     assert len(said) == len(cases) + 1
@@ -1018,6 +994,9 @@ PROMPTS: dict[str, str] = {
         "resolve_api_hashes", "decode_string_blobs"
     ),
     "the deobfuscation passes' rules and reasons": _deobfuscation_sentences(),
+    "the ghidra workflow's sentence on the constants": GHIDRA_WORKFLOW[
+        GHIDRA_WORKFLOW.index("- Suspected encryption") : GHIDRA_WORKFLOW.index("- Trace a key")
+    ],
     "the deobfuscation passes' pack lines": _deobfuscation_lines(),
     "what a Ghidra pass that stopped says": _ghidra_pass_failures(),
     "the constant sets as the pack line names them": _constant_set_names(),
