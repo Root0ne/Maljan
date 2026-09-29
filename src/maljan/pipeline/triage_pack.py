@@ -53,9 +53,10 @@ may call, or the sentence saying why there is none; a pass that cannot run is
 one entry saying ``no:`` and why, and is not a failure. A call directly to
 ``run_pack`` with no Ghidra handed over makes no Ghidra entry.
 
-The passes' lines never cost an earlier line a character: when the pack does
-not fit its room, the earlier lines are fitted as if the passes did not exist,
-and the passes' lines get what room is left (``render_pack``).
+When the pack does not fit its room, a pass fact no other line carries is
+fitted with the earlier lines, and what they already carry takes only the
+room they leave; a pass entry with no room is counted in the trailer
+(``render_pack``).
 """
 
 from __future__ import annotations
@@ -1131,10 +1132,17 @@ class _Pack:
             self._record_absent(ANTI_ANALYSIS_TOOL, args, passes.unavailable)
             return
         imported = list(self.imported)
+        path = self.inputs.sample_path
+        starts = list(self.capa_function_starts)
+        rows = self.capa_rows
         self.record(
             ANTI_ANALYSIS_TOOL,
             args,
-            lambda: run_pass(lambda: passes.anti_analysis(imported), ANTI_ANALYSIS_TOOL),
+            lambda: _anti_analysis_with_capa(
+                run_pass(lambda: passes.anti_analysis(imported, path, starts), ANTI_ANALYSIS_TOOL),
+                rows,
+                starts,
+            ),
         )
 
 
@@ -1384,10 +1392,15 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
     how many and that their full output is a tool call away. ``max_chars`` at
     or below zero means no bound.
 
-    The deobfuscation passes' lines (``PASS_TOOLS``) take no room from any
-    other line: when the whole does not fit, the other lines are fitted to
-    ``max_chars`` exactly as they would be without the passes, and each pass
-    line then gets what room is left, whole or shortened, or is left out.
+    The deobfuscation passes' lines (``PASS_TOOLS``) are split by novelty
+    (``_novel_view``). A fact no other line carries (a constant set no capa
+    rule agrees with, an exact instruction or TEB read at a function no capa
+    anti-analysis rule matched) is fitted with the other lines. What the pack
+    already carries, and every ``no:`` line, gets only the room the fitted
+    lines leave, whole or shortened. A line that cannot show one item is left
+    out, and every pass entry left out is counted in the trailer, which comes
+    after the pass lines. When the trailer finds no room of its own, capa's
+    addresses give it up first, else the longest line that can say less.
     """
     whole = _render_lines(entries, WHOLE)
     if max_chars <= 0 or _joined_len(whole) <= max_chars:
@@ -1396,17 +1409,171 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
     if not passes:
         return _render_fitted(entries, max_chars)
     earlier = [entry for entry in entries if entry.tool not in PASS_TOOLS]
-    lines = [_render_fitted(earlier, max_chars)] if earlier else []
-    room = max_chars - _joined_len(lines) - (1 if lines else 0)
+    novel: list[LedgerEntry] = []
+    leftover: list[LedgerEntry] = []
     for entry in passes:
+        view = _novel_view(entry)
+        if view is None:
+            leftover.append(entry)
+        else:
+            novel.append(view)
+    fitted = earlier + novel
+    kept, left_out = _fitted_parts(fitted, max_chars)
+    trailer = [_left_out(left_out)] if left_out else []
+    room = max_chars - _joined_len(kept + trailer) - 1
+    placed, dropped = _place_lines(leftover, room)
+    if not dropped:
+        return "\n".join(kept + placed + trailer)
+    # A pass line with no room is counted in the trailer, never left out
+    # unsaid. First within the room the fitted lines already leave, so they
+    # stay as they are; only when that room cannot hold the trailer do the
+    # fitted lines give it up, and then no pass line takes room an earlier
+    # entry was left out for.
+    bound = len(_left_out(left_out + len(leftover))) + 1
+    room = max_chars - _joined_len(kept) - bound - (1 if kept else 0)
+    if room >= -1:
+        placed, dropped = _place_lines(leftover, room)
+        return "\n".join(kept + placed + [_left_out(left_out + dropped)])
+    # capa's addresses are the part of the pack that takes what room is left,
+    # so they give up the trailer's room before any line is refitted.
+    shrunk = _without_rule_addresses_for(fitted, kept, max_chars, -room)
+    if shrunk is None:
+        shrunk = _longest_line_shortened(fitted, kept, max_chars, -room)
+    if shrunk is not None:
+        return "\n".join(shrunk + [_left_out(left_out + len(leftover))])
+    refitted, refit_left_out = _fitted_parts(fitted, max_chars - bound)
+    if refit_left_out > left_out:
+        placed, dropped = [], len(leftover)
+    else:
+        room = max_chars - _joined_len(refitted) - bound - (1 if refitted else 0)
+        placed, dropped = _place_lines(leftover, room)
+    return "\n".join(refitted + placed + [_left_out(refit_left_out + dropped)])
+
+
+def _without_rule_addresses_for(
+    entries: list[LedgerEntry], kept: list[str], max_chars: int, need: int
+) -> list[str] | None:
+    """``kept`` with capa's line showing fewer addresses, ``need`` characters shorter."""
+    capa = next((entry for entry in entries if entry.tool == "capa"), None)
+    if capa is None:
+        return None
+    index = next((i for i, line in enumerate(kept) if line.startswith(f"[{capa.id}] ")), None)
+    if index is None:
+        return None
+    addresses_token = _RULE_ADDRESSES.set(0)
+    try:
+        detail = _detail_for(entries, max_chars)
+    finally:
+        _RULE_ADDRESSES.reset(addresses_token)
+    token = _DETAIL.set(detail)
+    try:
+        target = len(kept[index]) - need
+        data = capa.structured if isinstance(capa.structured, dict) else {}
+        rows = [r for r in data.get("capabilities") or [] if isinstance(r, dict)]
+        low, high = 0, max((len(r.get("addresses") or []) for r in rows), default=0)
+        best: str | None = None
+        while low <= high:
+            middle = (low + high) // 2
+            line = _rule_line(capa, middle)
+            if len(line) <= target:
+                best, low = line, middle + 1
+            else:
+                high = middle - 1
+    finally:
+        _DETAIL.reset(token)
+    if best is None:
+        return None
+    return [*kept[:index], best, *kept[index + 1 :]]
+
+
+def _longest_line_shortened(
+    entries: list[LedgerEntry], kept: list[str], max_chars: int, need: int
+) -> list[str] | None:
+    """``kept`` with its longest shortenable line ``need`` characters shorter, or ``None``.
+
+    The line that says less is the one with the most to say: its list shows a
+    few items fewer, and says how many it shows.
+    """
+    by_id = {f"[{entry.id}] ": entry for entry in entries}
+    addresses_token = _RULE_ADDRESSES.set(0)
+    try:
+        detail = _detail_for(entries, max_chars)
+    finally:
+        _RULE_ADDRESSES.reset(addresses_token)
+    token = _DETAIL.set(detail)
+    try:
+        order = sorted(range(len(kept)), key=lambda i: -len(kept[i]))
+        for index in order:
+            head = kept[index].split("] ", 1)[0] + "] "
+            entry = by_id.get(head)
+            if entry is None or entry.tool not in _SHORTER_RENDERERS:
+                continue
+            line = _within_room(entry, len(kept[index]) - need)
+            if line is not None:
+                return [*kept[:index], line, *kept[index + 1 :]]
+    finally:
+        _DETAIL.reset(token)
+    return None
+
+
+_LEFT_OUT_LINE = re.compile(r"\A(\d+) more pack entr(?:y|ies) not shown here; ")
+
+
+def _fitted_parts(entries: list[LedgerEntry], max_chars: int) -> tuple[list[str], int]:
+    """``entries`` fitted as ``_render_fitted`` fits them: the lines, and how many were left out."""
+    if not entries:
+        return [], 0
+    lines = _render_fitted(entries, max_chars).split("\n")
+    said = _LEFT_OUT_LINE.match(lines[-1]) if lines else None
+    if said:
+        return lines[:-1], int(said.group(1))
+    return lines, 0
+
+
+def _place_lines(entries: list[LedgerEntry], room: int) -> tuple[list[str], int]:
+    """Each entry's line in what is left of ``room``, whole or shortened; how many had none."""
+    placed: list[str] = []
+    dropped = 0
+    for entry in entries:
         line: str | None = _pack_line(entry)
         if line is not None and len(line) > room:
             line = _within_room(entry, room)
         if line is None or len(line) > room:
+            dropped += 1
             continue
-        lines.append(line)
+        placed.append(line)
         room -= len(line) + 1
-    return "\n".join(lines)
+    return placed, dropped
+
+
+def _novel_view(entry: LedgerEntry) -> LedgerEntry | None:
+    """A pass entry narrowed to the facts no other line of the pack carries, or ``None``.
+
+    A constant set capa names in the same function, an API call (capa's rules
+    and the catalogue line already read the imports), a ``no:`` line: these
+    take only the room the other lines leave. A constant set no capa rule
+    agrees with, and an exact instruction or TEB read at a function no capa
+    anti-analysis rule matched, are new: the view keeps those and counts the
+    rest, and it is fitted with the other lines.
+    """
+    data = entry.structured if isinstance(entry.structured, dict) else None
+    if not entry.ok or data is None:
+        return None
+    if entry.tool == crypto_constants.TOOL:
+        rows = [r for r in data.get("found") or [] if isinstance(r, dict)]
+        new = [r for r in rows if not r.get("capa")]
+        if not new:
+            return None
+        view = {**data, "found": new, "agreeing": len(rows) - len(new)}
+    elif entry.tool == ANTI_ANALYSIS_TOOL:
+        rows = [r for r in data.get("stated") or [] if isinstance(r, dict)]
+        new = [r for r in rows if r.get("category") in _READ_IN_CODE and not r.get("capa")]
+        if not new:
+            return None
+        view = {**data, "stated": new, "also_stated": len(rows) - len(new)}
+    else:
+        return None
+    return entry.model_copy(update={"structured": view})
 
 
 def _render_fitted(entries: list[LedgerEntry], max_chars: int) -> str:
@@ -2425,6 +2592,55 @@ def _with_capa(answer: dict[str, Any], capa_rows: list[dict[str, Any]]) -> dict[
     return marked
 
 
+# The matches the anti-analysis pass reads in code rather than in the imports.
+_READ_IN_CODE = frozenset({"suspicious_instruction", "peb_teb_access"})
+
+
+def _anti_analysis_with_capa(
+    answer: dict[str, Any], capa_rows: list[dict[str, Any]], starts: list[str]
+) -> dict[str, Any]:
+    """The anti-analysis answer, each stated match marked where a capa rule agrees.
+
+    A match agrees with capa when a capa rule of its ``anti-analysis``
+    namespaces matched in the same function: the nearest capa function start
+    at or before the match is the nearest one at or before a capa address.
+    """
+    if not isinstance(answer, dict) or not capa_rows or not answer.get("stated"):
+        return answer
+    from bisect import bisect_right
+
+    points = sorted({int(str(s), 16) for s in starts if str(s).startswith("0x")})
+
+    def start_of(address: str) -> int | None:
+        try:
+            value = int(address, 16)
+        except ValueError:
+            return None
+        index = bisect_right(points, value) - 1
+        return points[index] if index >= 0 else None
+
+    by_start: dict[int, list[dict[str, str]]] = {}
+    for capa in capa_rows:
+        if not str(capa.get("namespace") or "").startswith("anti-analysis"):
+            continue
+        for address in capa.get("addresses") or []:
+            begin = start_of(str(address))
+            if begin is not None:
+                by_start.setdefault(begin, []).append(
+                    {"rule": str(capa.get("rule") or ""), "at": str(address)}
+                )
+    marked = dict(answer)
+    rows = []
+    for row in answer.get("stated") or []:
+        row = dict(row)
+        begin = start_of(str(row.get("offset") or ""))
+        if begin is not None and begin in by_start:
+            row["capa"] = by_start[begin]
+        rows.append(row)
+    marked["stated"] = rows
+    return marked
+
+
 def _place(place: dict[str, Any]) -> str:
     """``0x3100 (in 0x3000)``, or ``file 0x40`` for a place with no image address."""
     where = place.get("rva") or f"file {place.get('offset')}"
@@ -2470,10 +2686,19 @@ def _constant_sets(data: dict[str, Any], max_chars: int | None = None) -> str:
     lone = [r for r in (data.get("lone") or []) if isinstance(r, dict)]
     searched = _n(data.get("sets_searched"))
     lone_said = f"; one value of {_n(len(lone))} more sets, often by chance (lone)" if lone else ""
+    agreeing = int(data.get("agreeing") or 0)
     if not rows:
         return f"no: none of the {searched} published constant sets stands in the file{lone_said}"
     total = len(rows)
-    head = f"{_n(total)} of {searched} published constant sets stand in the file{lone_said}"
+    agree_said = (
+        f"; {_n(agreeing)} more agree with capa at their functions (in this entry)"
+        if agreeing
+        else ""
+    )
+    head = (
+        f"{_n(total + agreeing)} of {searched} published constant sets stand in the file"
+        f"{agree_said}{lone_said}"
+    )
 
     def _line(shown: int) -> str:
         said = (
@@ -2482,11 +2707,11 @@ def _constant_sets(data: dict[str, Any], max_chars: int | None = None) -> str:
             else f" ({PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(total))})"
         )
         items = "; ".join(_constant_item(row) for row in rows[:shown])
-        return f"{head}{said}" + (f": {items}" if shown else "")
+        return f"{head}{said}: {items}"
 
     head_count = _detail().list_head
     shown = total if head_count is None else min(total, head_count)
-    return _fit(_line, shown, max_chars)
+    return _fit_some(_line, shown, max_chars)
 
 
 def _anti_analysis_item(group: tuple[tuple[str, str], list[dict[str, Any]]]) -> str:
@@ -2530,7 +2755,17 @@ def _anti_analysis(data: dict[str, Any], max_chars: int | None = None) -> str:
     for row in rows:
         grouped.setdefault((str(row.get("category")), str(row.get("what"))), []).append(row)
     groups = list(grouped.items())
-    head = f"{checks} matched, each as Ghidra's category: what @ offsets (in function){rest}{cut}"
+    also = int(data.get("also_stated") or 0)
+    also_said = (
+        f"; {_n(also)} more stated in this entry (calls, and matches at a function a capa rule "
+        "names too)"
+        if also
+        else ""
+    )
+    head = (
+        f"{checks} matched, each as Ghidra's category: what @ offsets (in function)"
+        f"{also_said}{rest}{cut}"
+    )
 
     def _line(shown: int) -> str:
         said = (
@@ -2539,11 +2774,30 @@ def _anti_analysis(data: dict[str, Any], max_chars: int | None = None) -> str:
             else f" ({PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(len(groups)))})"
         )
         items = "; ".join(_anti_analysis_item(group) for group in groups[:shown])
-        return f"{head}{said}" + (f": {items}" if shown else "")
+        return f"{head}{said}: {items}"
 
     head_count = _detail().list_head
     shown = len(groups) if head_count is None else min(len(groups), head_count)
-    return _fit(_line, shown, max_chars)
+    return _fit_some(_line, shown, max_chars)
+
+
+def _fit_some(line: Callable[[int], str], shown: int, max_chars: int | None) -> str:
+    """``line(shown)``, or with fewer items until it fits; ``""`` when not even one item fits.
+
+    A pass line with no item says nothing a reader can use, so it is left out
+    rather than printed as a head.
+    """
+    text = line(shown)
+    if max_chars is None or len(text) <= max_chars:
+        return text
+    low, high, best = 1, shown, 0
+    while low <= high:
+        middle = (low + high) // 2
+        if len(line(middle)) <= max_chars:
+            best, low = middle, middle + 1
+        else:
+            high = middle - 1
+    return line(best) if best else ""
 
 
 def _function_matches(data: dict[str, Any]) -> str:

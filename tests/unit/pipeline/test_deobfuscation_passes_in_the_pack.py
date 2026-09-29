@@ -11,6 +11,7 @@ one line. Their lines take room from no earlier line at any budget.
 from __future__ import annotations
 
 import json
+import re
 import struct
 from pathlib import Path
 from typing import Any
@@ -212,6 +213,52 @@ class TestGhidraAnswers:
         assert "0x1020" not in line and "CloseHandle" not in line
         assert "2 more of its matches are not stated" in line
 
+    def test_a_match_in_a_function_capa_names_for_anti_analysis_is_marked(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            rules,
+            "capa",
+            lambda path, **_: {
+                "capabilities": [
+                    {
+                        "namespace": "anti-analysis/anti-debugging/debugger-detection",
+                        "rule": "check for time delay via RDTSC",
+                        "addresses": [hex(TEXT_RVA + 0x8)],
+                    }
+                ],
+                "function_starts": [hex(TEXT_RVA), hex(ROUTINE)],
+                "meta": {},
+            },
+        )
+        fake = FakeGhidra(
+            findings=[
+                {
+                    "category": "suspicious_instruction",
+                    "technique": "RDTSC",
+                    "address": "140001010",
+                    "function": "F",
+                    "instruction": "RDTSC",
+                },
+                {
+                    "category": "suspicious_instruction",
+                    "technique": "SIDT",
+                    "address": "140001210",
+                    "function": "G",
+                    "instruction": "SIDT [EAX]",
+                },
+            ]
+        )
+        result = _pack(_sample(tmp_path), ghidra=_fake_passes(fake))
+        entry = next(e for e in result.entries if e.tool == ANTI_ANALYSIS_TOOL)
+        by_what = {row["what"]: row for row in entry.structured["stated"]}
+        assert by_what["RDTSC"]["capa"][0]["rule"] == "check for time delay via RDTSC"
+        assert "capa" not in by_what["SIDT [EAX]"]
+        view = triage_pack._novel_view(entry)
+        assert view is not None
+        assert [row["what"] for row in view.structured["stated"]] == ["SIDT [EAX]"]
+        assert view.structured["also_stated"] == 1
+
     def test_a_scan_that_matched_nothing_says_what_it_checks(self, tmp_path: Path) -> None:
         result = _pack(_sample(tmp_path), ghidra=_fake_passes(FakeGhidra()))
         line = _line(result, ANTI_ANALYSIS_TOOL)
@@ -247,8 +294,12 @@ def _entry(seq: int, tool: str, payload: Any, ok: bool = True, error: str | None
     )
 
 
-def _synthetic_pack() -> list[Any]:
-    """A pack whose earlier lines far exceed every budget, and the two pass entries after it."""
+def _synthetic_pack(novel: bool = False) -> list[Any]:
+    """A pack whose earlier lines far exceed every budget, and the two pass entries after it.
+
+    The constant set agrees with capa, a fact the pack already carries, unless
+    ``novel``: then no capa rule names it and it is a fact of its own.
+    """
     hits = [
         {
             "value": f"{index:#010x}",
@@ -288,6 +339,7 @@ def _synthetic_pack() -> list[Any]:
                 "algorithm": "AES",
                 "what": "forward substitution box",
                 "tables": [{"byte_order": "", "place": place}],
+                **({} if novel else {"capa": [{"rule": "encrypt data using AES", "at": "0x1000"}]}),
             }
         ],
         "lone": [],
@@ -301,26 +353,70 @@ def _synthetic_pack() -> list[Any]:
     return earlier + passes
 
 
+_TRAILER = re.compile(r"\A(\d+) more pack entr(?:y|ies) not shown here; ")
+
+
+def _split(text: str) -> tuple[list[str], int]:
+    lines = text.splitlines()
+    said = _TRAILER.match(lines[-1]) if lines else None
+    return (lines[:-1], int(said.group(1))) if said else (lines, 0)
+
+
+def _ids(lines: list[str]) -> set[str]:
+    return {line.split("]", 1)[0].lstrip("[") for line in lines}
+
+
 class TestThePassLinesTakeNoRoomFromEarlierLines:
     @pytest.mark.parametrize("budget", [6_000, 18_432, 36_864])
-    def test_every_earlier_line_is_what_it_is_without_the_passes(self, budget: int) -> None:
+    def test_restated_facts_leave_every_earlier_line_as_it_is(self, budget: int) -> None:
         entries = _synthetic_pack()
         earlier = [e for e in entries if e.tool not in NEW]
-        without = render_pack(earlier, budget).splitlines()
-        with_passes = render_pack(entries, budget).splitlines()
+        without, left_without = _split(render_pack(earlier, budget))
+        text = render_pack(entries, budget)
+        lines, left = _split(text)
         assert len(render_pack(entries, 0)) > budget, "the pack does not fit whole"
-        assert with_passes[: len(without)] == without
-        assert len("\n".join(with_passes)) <= budget
+        assert len(text) <= budget
+        shown_passes = _ids(lines) & {"ev_0006", "ev_0007"}
+        if len(shown_passes) == 2:
+            assert lines[: len(without)] == without and left == left_without
+        # Every entry is shown or counted, never left out unsaid.
+        assert left == len(entries) - len(lines)
 
-    def test_the_pass_lines_take_the_room_that_is_left(self) -> None:
+    def test_a_pass_entry_with_no_room_is_counted_in_the_trailer(self) -> None:
         entries = _synthetic_pack()
         earlier = [e for e in entries if e.tool not in NEW]
-        fitted = render_pack(earlier, 36_864)
-        room = 36_864 - len(fitted)
+        budget = len(render_pack(earlier, 6_000))
+        text = render_pack(entries, budget)
+        lines, left = _split(text)
+        assert len(text) <= budget
+        assert left == len(entries) - len(lines)
+        assert left >= 1, "a pass line had no room and is counted"
+
+    def test_pass_lines_come_before_the_trailer(self) -> None:
+        entries = _synthetic_pack()
         text = render_pack(entries, 36_864)
-        added = text[len(fitted) :].splitlines()[1:]
-        assert sum(len(line) + 1 for line in added) <= room
-        assert all(line.startswith(("[ev_0006]", "[ev_0007]")) for line in added)
+        lines = text.splitlines()
+        assert not any(_TRAILER.match(line) for line in lines[:-1])
+
+    def test_a_new_fact_is_fitted_with_the_earlier_lines(self) -> None:
+        entries = _synthetic_pack(novel=True)
+        for budget in (6_000, 18_432):
+            text = render_pack(entries, budget)
+            assert len(text) <= budget
+            assert any(
+                line.startswith("[ev_0006] crypto constants: 1 of 26") and "AES" in line
+                for line in text.splitlines()
+            ), budget
+
+    def test_a_line_that_can_show_no_item_is_left_out(self) -> None:
+        place = {"offset": "0x10", "rva": "0x1010", "function": "0x1000"}
+        data = {
+            "found": [{"algorithm": "AES", "what": "box", "tables": [{"place": place}]}],
+            "sets_searched": 26,
+        }
+        assert triage_pack._constant_sets(data, max_chars=40) == ""
+        stated = {"stated": [{"category": "c", "what": "RDTSC", "offset": "0x1"}]}
+        assert triage_pack._anti_analysis(stated, max_chars=40) == ""
 
 
 class TestTheNodeSaysWhichGhidra:
