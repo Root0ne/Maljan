@@ -496,10 +496,16 @@ matched — is fitted with the other lines. What the pack already carries (a set
 capa agrees with, an API call, every `no:` line) gets only the room the
 fitted lines leave. A line that cannot show one item is left out, and every
 pass entry left out is counted in the "N more pack entries not shown" line,
-which comes after the pass lines; when that line finds no room of its own,
-capa's addresses give it up first, else the longest line that can say less.
-On the stored benchmark runs no pass fact is new, so every earlier line is as
-dev renders it except that one line where the trailer needed room.
+which comes after the pass lines. That line may take only room the other
+lines leave free, or room from capa's addresses; never a decoded string or any
+other fact line. **Decision:** when neither kind of room exists, the pack stays
+exactly as the other lines are, and the pass entries it lacks are recorded in
+the run summary's pack record instead (`run_summary.triage.pack_left_out`:
+their ids and tools, with the reason "no pack room"), read at the same bound
+every agent is shown the pack at. So a pass is never skipped unsaid, and no
+fact an earlier line states gives way to a pass. On the stored benchmark runs
+no pass fact is new, so the pack is as dev renders it except for capa's
+addresses where the trailer needed room.
 
 The pack states facts and draws no conclusion, and it never fails a job: a
 tool that raises or answers with an error is an entry with `ok=False` and a

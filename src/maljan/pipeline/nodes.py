@@ -44,6 +44,7 @@ from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop
 from maljan.memory.long_term_memory import build_stored_case
+from maljan.pipeline import triage_pack
 from maljan.pipeline.conditions import (
     ConditionError,
     StageContext,
@@ -1289,6 +1290,29 @@ def _ghidra_passes_step(container: ServiceContainer, state: AnalysisState) -> An
     return GhidraPasses(unavailable=reason)
 
 
+def _pack_left_out(entries: list[Any], container: ServiceContainer) -> dict[str, Any] | None:
+    """The pack record of the pass entries the pack neither shows nor counts, or ``None``.
+
+    Read at the bound every agent is shown the pack at (:func:`upstream_chars`).
+    The pack's trailer takes only room the other lines leave or room from
+    capa's addresses; when there is neither, the pack stays as the other lines
+    are, and the run summary's pack record says which entries it lacks and why.
+    Never raises.
+    """
+    try:
+        unsaid = triage_pack.pack_unsaid(pack_entries(entries), upstream_chars(container))
+    except Exception as exc:  # noqa: BLE001 — a record is never worth a lost stage
+        logger.debug("triage pack: the pack's room was not read (%s).", exc)
+        return None
+    if not unsaid:
+        return None
+    return {
+        "entries": [entry.id for entry in unsaid],
+        "tools": [entry.tool for entry in unsaid],
+        "reason": triage_pack.NO_PACK_ROOM,
+    }
+
+
 def _analysis_server_environ(container: ServiceContainer) -> dict[str, str]:
     """This process's environment with the analysis server's own ``env`` map over it.
 
@@ -1453,6 +1477,9 @@ def make_triage_node(
             "triage_facts": result.to_state(),
             **stage_record(stage, ran=True, duration_ms=_elapsed_ms()),
         }
+        left_out = _pack_left_out(result.entries, container)
+        if left_out:
+            update["triage_facts"]["pack_left_out"] = left_out
         if result.entries:
             update["evidence_ledger"] = [e.model_dump(mode="json") for e in result.entries]
         if stage.key in finishes:

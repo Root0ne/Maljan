@@ -294,7 +294,7 @@ def _entry(seq: int, tool: str, payload: Any, ok: bool = True, error: str | None
     )
 
 
-def _synthetic_pack(novel: bool = False) -> list[Any]:
+def _synthetic_pack(novel: bool = False, addresses: int = 12, rules: int = 60) -> list[Any]:
     """A pack whose earlier lines far exceed every budget, and the two pass entries after it.
 
     The constant set agrees with capa, a fact the pack already carries, unless
@@ -321,8 +321,8 @@ def _synthetic_pack(novel: bool = False) -> list[Any]:
         for index in range(400)
     ]
     capa = [
-        {"rule": f"rule {index}", "addresses": [hex(0x1000 + a) for a in range(12)]}
-        for index in range(60)
+        {"rule": f"rule {index}", "addresses": [hex(0x1000 + a) for a in range(addresses)]}
+        for index in range(rules)
     ]
     earlier = [
         _entry(1, "identify_file", {"file_type": "pe", "platform": "windows", "size": 1}),
@@ -379,8 +379,9 @@ class TestThePassLinesTakeNoRoomFromEarlierLines:
         shown_passes = _ids(lines) & {"ev_0006", "ev_0007"}
         if len(shown_passes) == 2:
             assert lines[: len(without)] == without and left == left_without
-        # Every entry is shown or counted, never left out unsaid.
-        assert left == len(entries) - len(lines)
+        # Every entry is shown, counted, or in the pack record.
+        unsaid = triage_pack.pack_unsaid(entries, budget)
+        assert left + len(unsaid) == len(entries) - len(lines)
 
     def test_a_pass_entry_with_no_room_is_counted_in_the_trailer(self) -> None:
         entries = _synthetic_pack()
@@ -417,6 +418,98 @@ class TestThePassLinesTakeNoRoomFromEarlierLines:
         assert triage_pack._constant_sets(data, max_chars=40) == ""
         stated = {"stated": [{"category": "c", "what": "RDTSC", "offset": "0x1"}]}
         assert triage_pack._anti_analysis(stated, max_chars=40) == ""
+
+
+def _full_budget(earlier: list[Any], start: int, with_addresses: bool = False) -> int:
+    """A budget near ``start`` at which the earlier lines leave no room for a trailer.
+
+    ``with_addresses``: one at which capa's line shows four addresses a rule or more.
+    """
+    trailer = len(triage_pack._left_out(2)) + 1
+    for budget in range(start, start - 400, -1):
+        text = render_pack(earlier, budget)
+        if budget - len(text) >= trailer:
+            continue
+        if with_addresses and "0x1003" not in text.splitlines()[1]:
+            continue
+        return budget
+    raise AssertionError("no full budget found")
+
+
+class TestATrailerTakesNoFactLine:
+    def test_with_no_free_room_and_no_capa_addresses_the_pack_is_as_dev_renders_it(
+        self,
+    ) -> None:
+        entries = _synthetic_pack(addresses=0)
+        earlier = [e for e in entries if e.tool not in NEW]
+        for start in (6_000, 18_432, 36_864):
+            budget = _full_budget(earlier, start)
+            assert render_pack(entries, budget) == render_pack(earlier, budget), start
+            unsaid = triage_pack.pack_unsaid(entries, budget)
+            assert [e.id for e in unsaid] == ["ev_0006", "ev_0007"]
+
+    def test_decoded_blobs_are_never_shortened_for_the_trailer(self) -> None:
+        entries = _synthetic_pack(addresses=0)
+        earlier = [e for e in entries if e.tool not in NEW]
+        for start in (6_000, 18_432, 36_864):
+            budget = _full_budget(earlier, start)
+            before = [x for x in render_pack(earlier, budget).splitlines() if "decoded blobs" in x]
+            after = [x for x in render_pack(entries, budget).splitlines() if "decoded blobs" in x]
+            assert after == before
+
+    def test_capa_s_addresses_still_give_the_trailer_its_room(self) -> None:
+        entries = _synthetic_pack(rules=5)
+        earlier = [e for e in entries if e.tool not in NEW]
+        budget = _full_budget(earlier, 6_000, with_addresses=True)
+        assert triage_pack.pack_unsaid(entries, budget) == []
+        assert "2 more pack entries not shown here" in render_pack(entries, budget)
+
+    def test_a_pack_that_fits_leaves_nothing_unsaid(self) -> None:
+        assert triage_pack.pack_unsaid(_synthetic_pack(), 0) == []
+        assert triage_pack.pack_unsaid(_synthetic_pack(), 10_000_000) == []
+
+
+class TestTheNodeRecordsWhatThePackLacks:
+    def test_the_pack_record_names_the_entries_and_the_reason(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asyncio
+
+        from maljan.core.config import Settings
+        from maljan.core.container import ServiceContainer
+        from maljan.pipeline.nodes import make_triage_node
+        from tests.unit.pipeline.test_stage_events import _state
+
+        monkeypatch.setattr(
+            triage_pack,
+            "pack_unsaid",
+            lambda entries, max_chars: [e for e in entries if e.tool in NEW],
+        )
+        settings = Settings(_env_file=None)
+        settings.mcp.servers["threatintel"].enabled = False
+        container = ServiceContainer(settings, mock=True)
+        node = make_triage_node(container, stage=container.active_profile().stage("triage_pack"))
+        update = asyncio.run(node(_state(sample_path=_sample(tmp_path), file_type="pe")))
+        record = update["triage_facts"]["pack_left_out"]
+        assert record["reason"] == "no pack room"
+        assert record["tools"] == ["find_crypto_constants", ANTI_ANALYSIS_TOOL]
+        ledger = {row["id"]: row["tool"] for row in update["evidence_ledger"]}
+        assert [ledger[i] for i in record["entries"]] == record["tools"]
+
+    def test_a_pack_with_room_has_no_such_record(self, tmp_path: Path) -> None:
+        import asyncio
+
+        from maljan.core.config import Settings
+        from maljan.core.container import ServiceContainer
+        from maljan.pipeline.nodes import make_triage_node
+        from tests.unit.pipeline.test_stage_events import _state
+
+        settings = Settings(_env_file=None)
+        settings.mcp.servers["threatintel"].enabled = False
+        container = ServiceContainer(settings, mock=True)
+        node = make_triage_node(container, stage=container.active_profile().stage("triage_pack"))
+        update = asyncio.run(node(_state(sample_path=_sample(tmp_path), file_type="pe")))
+        assert "pack_left_out" not in update["triage_facts"]
 
 
 class TestTheNodeSaysWhichGhidra:

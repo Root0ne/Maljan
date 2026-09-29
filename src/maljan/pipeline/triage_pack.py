@@ -55,8 +55,10 @@ one entry saying ``no:`` and why, and is not a failure. A call directly to
 
 When the pack does not fit its room, a pass fact no other line carries is
 fitted with the earlier lines, and what they already carry takes only the
-room they leave; a pass entry with no room is counted in the trailer
-(``render_pack``).
+room they leave; a pass entry with no room is counted in the trailer, which
+takes only free room or room from capa's addresses. With neither, the pack
+stays as it is and the triage node records the entry in its pack record,
+"no pack room" (``render_pack``, ``pack_unsaid``).
 """
 
 from __future__ import annotations
@@ -1399,8 +1401,10 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
     already carries, and every ``no:`` line, gets only the room the fitted
     lines leave, whole or shortened. A line that cannot show one item is left
     out, and every pass entry left out is counted in the trailer, which comes
-    after the pass lines. When the trailer finds no room of its own, capa's
-    addresses give it up first, else the longest line that can say less.
+    after the pass lines. The trailer takes only room the other lines leave,
+    or room from capa's addresses; with neither, the pack stays as the other
+    lines are and the uncounted entries are the triage node's to record
+    (``pack_unsaid``).
     """
     whole = _render_lines(entries, WHOLE)
     if max_chars <= 0 or _joined_len(whole) <= max_chars:
@@ -1408,10 +1412,37 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
     passes = [entry for entry in entries if entry.tool in PASS_TOOLS]
     if not passes:
         return _render_fitted(entries, max_chars)
+    return _render_with_passes(entries, max_chars)[0]
+
+
+# Why a pass entry is in neither the pack nor its trailer, as the pack record says it.
+NO_PACK_ROOM = "no pack room"
+
+
+def pack_unsaid(entries: list[LedgerEntry], max_chars: int) -> list[LedgerEntry]:
+    """The pass entries a pack of ``max_chars`` neither shows nor counts in its trailer.
+
+    They are the ones for which the trailer found no room of its own and capa's
+    addresses had none to give: the pack then stays as the earlier lines are,
+    and the triage node records them in its pack record (``NO_PACK_ROOM``).
+    """
+    if max_chars <= 0 or not any(entry.tool in PASS_TOOLS for entry in entries):
+        return []
+    if _joined_len(_render_lines(entries, WHOLE)) <= max_chars:
+        return []
+    return _render_with_passes(entries, max_chars)[1]
+
+
+def _render_with_passes(
+    entries: list[LedgerEntry], max_chars: int
+) -> tuple[str, list[LedgerEntry]]:
+    """The pack with its pass lines, and the pass entries it could neither show nor count."""
     earlier = [entry for entry in entries if entry.tool not in PASS_TOOLS]
     novel: list[LedgerEntry] = []
     leftover: list[LedgerEntry] = []
-    for entry in passes:
+    for entry in entries:
+        if entry.tool not in PASS_TOOLS:
+            continue
         view = _novel_view(entry)
         if view is None:
             leftover.append(entry)
@@ -1423,31 +1454,22 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
     room = max_chars - _joined_len(kept + trailer) - 1
     placed, dropped = _place_lines(leftover, room)
     if not dropped:
-        return "\n".join(kept + placed + trailer)
-    # A pass line with no room is counted in the trailer, never left out
-    # unsaid. First within the room the fitted lines already leave, so they
-    # stay as they are; only when that room cannot hold the trailer do the
-    # fitted lines give it up, and then no pass line takes room an earlier
-    # entry was left out for.
+        return "\n".join(kept + placed + trailer), []
+    # A pass line with no room is counted in the trailer. The trailer may take
+    # only room the fitted lines already leave, or room from capa's
+    # addresses, which are the part of the pack that takes what is left;
+    # never a fact line. With neither, the pack stays as it is and the entries
+    # are recorded in the pack record instead.
     bound = len(_left_out(left_out + len(leftover))) + 1
     room = max_chars - _joined_len(kept) - bound - (1 if kept else 0)
     if room >= -1:
         placed, dropped = _place_lines(leftover, room)
-        return "\n".join(kept + placed + [_left_out(left_out + dropped)])
-    # capa's addresses are the part of the pack that takes what room is left,
-    # so they give up the trailer's room before any line is refitted.
+        return "\n".join(kept + placed + [_left_out(left_out + len(dropped))]), []
     shrunk = _without_rule_addresses_for(fitted, kept, max_chars, -room)
-    if shrunk is None:
-        shrunk = _longest_line_shortened(fitted, kept, max_chars, -room)
     if shrunk is not None:
-        return "\n".join(shrunk + [_left_out(left_out + len(leftover))])
-    refitted, refit_left_out = _fitted_parts(fitted, max_chars - bound)
-    if refit_left_out > left_out:
-        placed, dropped = [], len(leftover)
-    else:
-        room = max_chars - _joined_len(refitted) - bound - (1 if refitted else 0)
-        placed, dropped = _place_lines(leftover, room)
-    return "\n".join(refitted + placed + [_left_out(refit_left_out + dropped)])
+        return "\n".join(shrunk + [_left_out(left_out + len(leftover))]), []
+    placed, dropped = _place_lines(leftover, max_chars - _joined_len(kept + trailer) - 1)
+    return "\n".join(kept + placed + trailer), dropped
 
 
 def _without_rule_addresses_for(
@@ -1486,36 +1508,6 @@ def _without_rule_addresses_for(
     return [*kept[:index], best, *kept[index + 1 :]]
 
 
-def _longest_line_shortened(
-    entries: list[LedgerEntry], kept: list[str], max_chars: int, need: int
-) -> list[str] | None:
-    """``kept`` with its longest shortenable line ``need`` characters shorter, or ``None``.
-
-    The line that says less is the one with the most to say: its list shows a
-    few items fewer, and says how many it shows.
-    """
-    by_id = {f"[{entry.id}] ": entry for entry in entries}
-    addresses_token = _RULE_ADDRESSES.set(0)
-    try:
-        detail = _detail_for(entries, max_chars)
-    finally:
-        _RULE_ADDRESSES.reset(addresses_token)
-    token = _DETAIL.set(detail)
-    try:
-        order = sorted(range(len(kept)), key=lambda i: -len(kept[i]))
-        for index in order:
-            head = kept[index].split("] ", 1)[0] + "] "
-            entry = by_id.get(head)
-            if entry is None or entry.tool not in _SHORTER_RENDERERS:
-                continue
-            line = _within_room(entry, len(kept[index]) - need)
-            if line is not None:
-                return [*kept[:index], line, *kept[index + 1 :]]
-    finally:
-        _DETAIL.reset(token)
-    return None
-
-
 _LEFT_OUT_LINE = re.compile(r"\A(\d+) more pack entr(?:y|ies) not shown here; ")
 
 
@@ -1530,16 +1522,16 @@ def _fitted_parts(entries: list[LedgerEntry], max_chars: int) -> tuple[list[str]
     return lines, 0
 
 
-def _place_lines(entries: list[LedgerEntry], room: int) -> tuple[list[str], int]:
-    """Each entry's line in what is left of ``room``, whole or shortened; how many had none."""
+def _place_lines(entries: list[LedgerEntry], room: int) -> tuple[list[str], list[LedgerEntry]]:
+    """Each entry's line in what is left of ``room``, whole or shortened; the ones with none."""
     placed: list[str] = []
-    dropped = 0
+    dropped: list[LedgerEntry] = []
     for entry in entries:
         line: str | None = _pack_line(entry)
         if line is not None and len(line) > room:
             line = _within_room(entry, room)
         if line is None or len(line) > room:
-            dropped += 1
+            dropped.append(entry)
             continue
         placed.append(line)
         room -= len(line) + 1

@@ -25,7 +25,10 @@ change landed on `main`.
     platform's catalogue lists for the technique that the file imports.
 
   A Ghidra that cannot be asked (switched off, over stdio, or without a copy of
-  the sample) is one `no: <reason>` line and not a failure.
+  the sample) is one `no: <reason>` line and not a failure. A pass line with no
+  room is counted in the "N more pack entries not shown" line, which takes only
+  free room or capa's addresses; with neither, the pack is unchanged and the
+  run summary's pack record lists the entry with the reason "no pack room".
 
 - **A function an analyst decompiled and no claim describes is listed to it,
   once.** The functions come from the analyst's own ledger entries that
