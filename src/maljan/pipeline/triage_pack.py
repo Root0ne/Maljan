@@ -42,6 +42,17 @@ values the file holds that are hashes of Windows function names
 (``maljan.tools.api_hashes``) and the text its data sections keep encoded
 under simple key schemes (``maljan.tools.string_blobs``), each with the
 addresses where it stands and the functions around them.
+
+After them, the deobfuscation passes, last for the same reason. The
+platform's scan of an executable's bytes for the published constants of
+ciphers, hash functions and checksums (``maljan.tools.crypto_constants``;
+Ghidra's ``detect_crypto_constants`` answers "not yet implemented"), then
+Ghidra's two passes over the sample (``maljan.analysis.ghidra_passes``): its
+anti-analysis scan, and its emulation of the sample's own hashing routines on
+the names of the vendored catalogue. The node hands the pack the Ghidra it
+may call, or the sentence saying why there is none; each pass that cannot run
+is an entry saying ``no:`` and why, and is not a failure. A call directly to
+``run_pack`` with no Ghidra handed over makes neither Ghidra entry.
 """
 
 from __future__ import annotations
@@ -58,6 +69,17 @@ from pathlib import Path
 from typing import Any, cast
 
 from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
+from maljan.analysis.ghidra_passes import (
+    ANTI_ANALYSIS_TOOL,
+    EMULATED_FORMATS,
+    EMULATION_TOOL,
+    GHIDRA_FORMATS,
+    NO_CAPA_ANSWER,
+    GhidraPasses,
+    Routine,
+    hash_routines,
+    run_pass,
+)
 from maljan.analysis.pcap_summary import conversation_line
 from maljan.analysis.technique_ids import technique_ids_in
 from maljan.core.logger import logger
@@ -74,6 +96,7 @@ from maljan.schemas.evidence import LedgerEntry, apply_budget
 from maljan.tools import (
     api_hashes,
     binary,
+    crypto_constants,
     emulated_strings,
     identify,
     knowledge,
@@ -503,11 +526,13 @@ class _Pack:
         *,
         reputation: ReputationLookup | None,
         function_matches: FunctionMatches | None,
+        ghidra: GhidraPasses | None = None,
     ) -> None:
         self.recorder = recorder
         self.inputs = inputs
         self.reputation = reputation
         self.function_matches = function_matches
+        self.ghidra = ghidra
         self.result = PackResult()
         self.started = time.monotonic()
         self.steps_run = 0
@@ -517,6 +542,9 @@ class _Pack:
         # Where capa found functions, for the readers of an image with no
         # function table of its own.
         self.capa_function_starts: list[str] = []
+        # capa's rules as it answered them, for the routines the emulation
+        # pass runs; ``None`` when capa gave no answer.
+        self.capa_rows: list[dict[str, Any]] | None = None
         self.reputation_malicious: int | None = None
         # FLOSS, started beside the rest of the pack when it can be. Recorded
         # in its own place at the end, so every id keeps its value.
@@ -662,9 +690,13 @@ class _Pack:
             self._function_matches()
             self._decoded_strings(routed)
             self._resolved_values(routed, format_facts)
+            self._crypto_constants(routed)
+            self._ghidra_passes(routed)
         finally:
             if self._floss_pool is not None:
                 self._floss_pool.shutdown(wait=False)
+            if self.ghidra is not None:
+                self.ghidra.close()
 
         # The recorder holds every entry in the order the ids were issued,
         # the reputation call's included, so it is the one list to publish.
@@ -730,6 +762,9 @@ class _Pack:
         if found is not None:
             self.capa_hits = len(found.get("capabilities") or [])
             self.capa_function_starts = list(found.get("function_starts") or [])
+            self.capa_rows = [
+                row for row in found.get("capabilities") or [] if isinstance(row, dict)
+            ]
         report = observed_report(self.inputs.sandbox_report)
         if report:
             self.record(
@@ -1041,6 +1076,85 @@ class _Pack:
                 lambda: knowledge.api_capability([], platform=platform, resolved_names=names),
             )
 
+    # -- the deobfuscation passes -------------------------------------------
+
+    def _record_absent(self, tool: str, args: dict[str, Any], reason: str) -> None:
+        """The entry for a pass that could not run: why, with no call made and no failure."""
+        message = f"{NOT_RUN_PREFIX} {reason}"
+        self.recorder.record(
+            tool=tool,
+            args=args,
+            server=PIPELINE,
+            output=message,
+            ok=False,
+            error=message,
+            started_at=time.time(),
+        )
+        logger.info("triage pack: %s %s", tool, message)
+
+    def _crypto_constants(self, routed: str) -> None:
+        """The platform's scan of an executable for published constants, read from its bytes."""
+        if routed not in CONSTANT_FORMATS:
+            return
+        path = self.inputs.sample_path
+        self.record(
+            crypto_constants.TOOL,
+            {"path": path},
+            lambda: crypto_constants.find_crypto_constants(path),
+        )
+
+    def _ghidra_passes(self, routed: str) -> None:
+        """Ghidra's anti-analysis scan, then its emulation of the sample's hashing routines.
+
+        Only with a Ghidra handed over by the caller. One that cannot be asked
+        gives each pass an entry saying why; a pass Ghidra did not complete is
+        a failed entry with what happened. The emulation needs routines capa
+        named, and says so when there are none.
+        """
+        passes = self.ghidra
+        if passes is None or routed not in GHIDRA_FORMATS:
+            return
+        emulated = routed in EMULATED_FORMATS
+        anti_args = {"program": passes.sample_path or "the job's sample"}
+        if passes.unavailable:
+            self._record_absent(ANTI_ANALYSIS_TOOL, anti_args, passes.unavailable)
+            if emulated:
+                self._record_absent(EMULATION_TOOL, anti_args, passes.unavailable)
+            return
+        self.record(
+            ANTI_ANALYSIS_TOOL,
+            anti_args,
+            lambda: run_pass(passes.anti_analysis, ANTI_ANALYSIS_TOOL),
+        )
+        if not emulated:
+            return
+        routines: list[Routine]
+        if self.capa_rows is None:
+            routines, why = [], NO_CAPA_ANSWER
+        else:
+            routines, why = hash_routines(self.capa_rows, self.capa_function_starts)
+        args: dict[str, Any] = {
+            "program": anti_args["program"],
+            "routines": [hex(routine.start) for routine in routines],
+        }
+        if not routines:
+            self._record_absent(EMULATION_TOOL, args, why)
+            return
+        path = self.inputs.sample_path
+        starts = list(self.capa_function_starts)
+        self.record(
+            EMULATION_TOOL,
+            args,
+            lambda: run_pass(
+                lambda: passes.emulate_api_hashes(path, routines, function_starts=starts),
+                EMULATION_TOOL,
+            ),
+        )
+
+
+# The formats the constant scan reads: the executable images.
+CONSTANT_FORMATS = frozenset({"pe", "elf", "macho"})
+
 
 def run_pack(
     recorder: EvidenceRecorder,
@@ -1048,6 +1162,7 @@ def run_pack(
     *,
     reputation: ReputationLookup | None = None,
     function_matches: FunctionMatches | None = None,
+    ghidra: GhidraPasses | None = None,
 ) -> PackResult:
     """Run the whole pack over ``inputs``, recording every step on ``recorder``.
 
@@ -1055,7 +1170,13 @@ def run_pack(
     spawns a subprocess, so the node runs this on a worker thread the way the
     report node runs the evidence-only provider.
     """
-    result = _Pack(recorder, inputs, reputation=reputation, function_matches=function_matches).run()
+    result = _Pack(
+        recorder,
+        inputs,
+        reputation=reputation,
+        function_matches=function_matches,
+        ghidra=ghidra,
+    ).run()
     budget = int(inputs.evidence_budget_bytes or 0)
     trimmed, _ = apply_budget(result.entries, budget)
     if trimmed:
@@ -1427,6 +1548,13 @@ def pack_block(entries: list[LedgerEntry], max_chars: int) -> str:
 def _pack_line(entry: LedgerEntry) -> str:
     """One entry as one line. Never raises: an unreadable answer is named as such."""
     label = _GROUP_LABELS.get(entry.tool, entry.tool)
+    if not entry.ok and entry.tool in PASS_TOOLS:
+        # A deobfuscation pass that did not run, or ran and broke, is one
+        # ``no:`` line with the reason, as a pass that found nothing is.
+        said = str(entry.error or entry.output or "")
+        if _was_not_made(entry):
+            return f"[{entry.id}] {label}: no: {_short(said[len(NOT_RUN_PREFIX) :].strip())}"
+        return f"[{entry.id}] {label}: no: the pass failed: {_short(said)}"
     if not entry.ok:
         # A call the pipeline did not make — a lookup with no server to ask,
         # a step after the budget — is not a failure and is not called one;
@@ -2232,6 +2360,240 @@ def _decoded_blobs(data: dict[str, Any], max_chars: int | None = None) -> str:
     return _fit(_line, shown, max_chars)
 
 
+# ---------------------------------------------------------------------------
+# The deobfuscation passes' lines
+# ---------------------------------------------------------------------------
+
+PASS_TOOLS = frozenset({crypto_constants.TOOL, ANTI_ANALYSIS_TOOL, EMULATION_TOOL})
+
+# What a pass line says when the room cut its list: how many it shows, and
+# where the rest are.
+PASS_ROOM_SENTENCE = (
+    "{shown} of {total} shown (every agent reads the pack, and this is what fits its room); "
+    "the rest are in this entry's full output"
+)
+
+
+def _place(place: dict[str, Any]) -> str:
+    """``0x3100 (in 0x3000)``, or ``file 0x40`` for a place with no image address."""
+    where = place.get("rva") or f"file {place.get('offset')}"
+    return f"{where}{_around(place)}"
+
+
+def _places(places: list[dict[str, Any]]) -> str:
+    head = _detail().list_head
+    shown = places if head is None else places[:head]
+    said = " ".join(_place(p) for p in shown)
+    if len(shown) < len(places):
+        said += f" (+{len(places) - len(shown)} more places)"
+    return said
+
+
+def _constant_item(row: dict[str, Any]) -> str:
+    """``AES forward substitution box [table] @ 0x3100``, or ``… [2 of 64 values] @ …``."""
+    name = f"{row.get('algorithm')} {row.get('what')}"
+    items: list[str] = []
+    for table in row.get("tables") or []:
+        if not isinstance(table, dict):
+            continue
+        order = str(table.get("byte_order") or "")
+        form = f"table, {order}" if order and order != "little-endian" else "table"
+        items.append(f"{name} [{form}] @ {_places([table.get('place') or {}])}")
+    values = [v for v in row.get("values") or [] if isinstance(v, dict)]
+    if values and not items:
+        places = [p for v in values for p in v.get("places") or [] if isinstance(p, dict)]
+        said = ", ".join(str(v.get("value")) for v in values)
+        items.append(
+            f"{name} [{_n(row.get('matched'))} of {_n(row.get('of'))} values: {said}] "
+            f"@ {_places(places)}"
+        )
+    return "; ".join(items)
+
+
+def _constant_sets(data: dict[str, Any], max_chars: int | None = None) -> str:
+    """The published constant sets the file holds, each where it stands; one ``no:`` without."""
+    rows = [r for r in (data.get("found") or []) if isinstance(r, dict)]
+    lone = [r for r in (data.get("lone") or []) if isinstance(r, dict)]
+    searched = _n(data.get("sets_searched"))
+
+    def _lone(listed: bool) -> str:
+        if not lone:
+            return ""
+        said = (
+            f"; {_n(len(lone))} more sets have one value only, which one value alone often "
+            "does by chance"
+        )
+        if listed:
+            return f"{said} ({'; '.join(_constant_item(r) for r in lone)})"
+        return f"{said} (listed under lone in this entry's full output)"
+
+    if not rows:
+        whole = (
+            f"no: none of the {searched} published constant sets of ciphers, hash functions and "
+            "checksums stands in the file whole or by two of its values"
+        )
+        listed = whole + _lone(True)
+        if max_chars is None or len(listed) <= max_chars:
+            return listed
+        return whole + _lone(False)
+    total = len(rows)
+
+    def _head(listed: bool) -> str:
+        return (
+            f"{_n(total)} of {searched} published constant sets of ciphers, hash functions and "
+            "checksums stand in the file (a table whole, other sets by at least two of their "
+            f"values){_lone(listed)}; each as algorithm and what the set is [table, or how many "
+            "of its values] @ each place it stands (an offset from the image base, or file and "
+            "a file offset, and the function the file's table puts around it)"
+        )
+
+    def _line(shown: int, listed: bool) -> str:
+        said = (
+            f"all {_n(total)} shown"
+            if shown >= total
+            else PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(total))
+        )
+        items = "; ".join(_constant_item(row) for row in rows[:shown])
+        return f"{_head(listed)}; {said}" + (f": {items}" if shown else "")
+
+    head_count = _detail().list_head
+    shown = total if head_count is None else min(total, head_count)
+    whole = _line(shown, True)
+    if max_chars is None or len(whole) <= max_chars:
+        return whole
+    # The lone sets are said as a count before any found set is left out.
+    return _fit(lambda count: _line(count, False), shown, max_chars)
+
+
+def _anti_analysis_item(row: dict[str, Any]) -> str:
+    where = row.get("offset") or row.get("address")
+    function = f" (in {row.get('function')})" if row.get("function") else ""
+    return f"{row.get('category')}: {row.get('technique')} @ {where}{function}"
+
+
+def _anti_analysis(data: dict[str, Any], max_chars: int | None = None) -> str:
+    """Ghidra's anti-analysis findings as Ghidra named them, each where it stands."""
+    rows = [r for r in (data.get("findings") or []) if isinstance(r, dict)]
+    total = max(int(data.get("total_findings") or 0), len(rows))
+    if not rows:
+        return "no: Ghidra's scan found no anti-analysis technique"
+    counts = (data.get("summary") or {}).get("by_category") or {}
+    by_category = ", ".join(f"{name} {_n(count)}" for name, count in counts.items())
+    notes = [str(n) for n in data.get("notes") or [] if str(n).strip()]
+    head = (
+        f"Ghidra's scan found {_n(total)}"
+        + (f" ({by_category})" if by_category else "")
+        + (f"; Ghidra returned {_n(len(rows))} of them ({'; '.join(notes)})" if notes else "")
+        + "; each as Ghidra's category: what it matched @ the offset from the image base "
+        "(in Ghidra's function)"
+    )
+
+    def _line(shown: int) -> str:
+        said = (
+            f"all {_n(len(rows))} shown"
+            if shown >= len(rows)
+            else PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(len(rows)))
+        )
+        items = "; ".join(_anti_analysis_item(row) for row in rows[:shown])
+        return f"{head}; {said}" + (f": {items}" if shown else "")
+
+    head_count = _detail().list_head
+    shown = len(rows) if head_count is None else min(len(rows), head_count)
+    return _fit(_line, shown, max_chars)
+
+
+def _routine_said(row: dict[str, Any]) -> str:
+    rules = ", ".join(str(rule) for rule in row.get("capa_rules") or [])
+    said = f"routine {row.get('start')} where capa matched {rules}"
+    if row.get("convention"):
+        return (
+            f"{said}, the name handed over in {row.get('convention')}, "
+            f"{_n(row.get('names_returned'))} of {_n(row.get('names_emulated'))} names returned"
+        )
+    return f"{said}: {row.get('reason') or 'not emulated'}"
+
+
+def _emulated_item(row: dict[str, Any]) -> str:
+    """``0x1a2b3c4d = kernel32.dll!Name [routine 0x1200] @ 0x1021 (in 0x1000)``."""
+    readings: list[str] = []
+    for reading in row.get("readings") or []:
+        if not isinstance(reading, dict):
+            continue
+        tag = f"routine {reading.get('routine')}"
+        if reading.get("encoding") and reading.get("encoding") != "ascii":
+            tag += f", {reading.get('encoding')}"
+        if reading.get("set") == "modules":
+            readings.append(f"module {reading.get('name')} [{tag}]")
+        else:
+            dlls = "/".join(str(d) for d in reading.get("dlls") or [])
+            readings.append(f"{dlls}!{reading.get('name')} [{tag}]")
+    places = [p for p in row.get("occurrences") or [] if isinstance(p, dict)]
+    where = _places(places)
+    return f"{row.get('value')} = {' | '.join(readings)}" + (f" @ {where}" if where else "")
+
+
+def _emulated(data: dict[str, Any], max_chars: int | None = None) -> str:
+    """The file's values that equal an output of the sample's own routines, emulated by Ghidra."""
+    rows = [r for r in (data.get("hits") or []) if isinstance(r, dict)]
+    lone = [r for r in (data.get("lone_hits") or []) if isinstance(r, dict)]
+    routines = "; ".join(
+        _routine_said(r) for r in data.get("routines") or [] if isinstance(r, dict)
+    )
+    names = data.get("names") or {}
+    catalogue = (
+        f"{_n(names.get('functions'))} Windows function names and {_n(names.get('modules'))} "
+        "module names"
+    )
+
+    def _lone(listed: bool) -> str:
+        if not lone:
+            return ""
+        said = (
+            f"; {_n(len(lone))} more equal an output of a routine that matches nothing else in "
+            "the file, most often a coincidence"
+        )
+        if listed:
+            return f"{said}: {', '.join(_emulated_item(r) for r in lone)}"
+        return f"{said} (listed under lone_hits in this entry's full output)"
+
+    if not rows:
+        whole = (
+            f"no: no value the file holds equals an output of the sample's own routines for "
+            f"{catalogue}, emulated by Ghidra ({routines})"
+        )
+        listed = whole + _lone(True)
+        if max_chars is None or len(listed) <= max_chars:
+            return listed
+        return whole + _lone(False)
+    total = len(rows)
+
+    def _head(listed: bool) -> str:
+        return (
+            f"{_n(total)} values the file holds equal what the sample's own routine returns for "
+            f"a Windows function or module name, emulated by Ghidra on {catalogue} ({routines})"
+            f"{_lone(listed)}; each as value = DLL!name or module name [routine] @ the offsets "
+            "from the image base where the value stands (in the function the file's table puts "
+            "around it)"
+        )
+
+    def _line(shown: int, listed: bool) -> str:
+        said = (
+            f"all {_n(total)} shown"
+            if shown >= total
+            else PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(total))
+        )
+        items = "; ".join(_emulated_item(row) for row in rows[:shown])
+        return f"{_head(listed)}; {said}" + (f": {items}" if shown else "")
+
+    head_count = _detail().list_head
+    shown = total if head_count is None else min(total, head_count)
+    whole_line = _line(shown, True)
+    if max_chars is None or len(whole_line) <= max_chars:
+        return whole_line
+    # The lone values are said as a count before any hit is left out.
+    return _fit(lambda count: _line(count, False), shown, max_chars)
+
+
 def _function_matches(data: dict[str, Any]) -> str:
     rows = [r for r in (data.get("matches") or []) if isinstance(r, dict)]
     families = sorted({str(r.get("family") or "") for r in rows if r.get("family")})
@@ -2376,6 +2738,9 @@ _GROUP_LABELS: dict[str, str] = {
     "floss": "decoded strings",
     "resolve_api_hashes": "resolved hashes",
     "decode_string_blobs": "decoded blobs",
+    crypto_constants.TOOL: "crypto constants",
+    ANTI_ANALYSIS_TOOL: "anti-analysis (Ghidra)",
+    EMULATION_TOOL: "sample's own hashing routines (emulated)",
 }
 
 _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
@@ -2406,6 +2771,9 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "floss": _decoded_strings,
     "resolve_api_hashes": _resolved_hashes,
     "decode_string_blobs": _decoded_blobs,
+    crypto_constants.TOOL: _constant_sets,
+    ANTI_ANALYSIS_TOOL: _anti_analysis,
+    EMULATION_TOOL: _emulated,
 }
 
 # The lines that can say less and still say something, each given the room it
@@ -2416,4 +2784,7 @@ _SHORTER_RENDERERS: dict[str, Callable[[dict[str, Any], int], str]] = {
     "pcap_summary": lambda data, room: _pcap(data, max_chars=room),
     "resolve_api_hashes": lambda data, room: _resolved_hashes(data, max_chars=room),
     "decode_string_blobs": lambda data, room: _decoded_blobs(data, max_chars=room),
+    crypto_constants.TOOL: lambda data, room: _constant_sets(data, max_chars=room),
+    ANTI_ANALYSIS_TOOL: lambda data, room: _anti_analysis(data, max_chars=room),
+    EMULATION_TOOL: lambda data, room: _emulated(data, max_chars=room),
 }

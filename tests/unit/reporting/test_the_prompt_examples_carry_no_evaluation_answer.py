@@ -392,6 +392,113 @@ def _analysis_tool_descriptions(*names: str) -> str:
     return " ".join(str(getattr(module, name).__doc__ or "") for name in names)
 
 
+def _deobfuscation_sentences() -> str:
+    """Every sentence the deobfuscation passes put in front of a model, filled in."""
+    from maljan.analysis import ghidra_passes
+    from maljan.tools import crypto_constants
+
+    return " ".join(
+        [
+            crypto_constants.SCAN_RULE,
+            ghidra_passes.ROUTINE_RULE,
+            ghidra_passes.CONVENTION_RULE,
+            ghidra_passes.NO_ROUTINE_RULE,
+            ghidra_passes.NO_ROUTINE_START,
+            ghidra_passes.NO_CAPA_ANSWER,
+            ghidra_passes.NO_CONVENTION,
+            ghidra_passes.GHIDRA_SWITCHED_OFF,
+            ghidra_passes.GHIDRA_NOT_OVER_HTTP.format(transport="stdio"),
+            ghidra_passes.GHIDRA_HAS_NO_COPY,
+            triage_pack.PASS_ROOM_SENTENCE.format(shown=1, total=2),
+        ]
+    )
+
+
+def _deobfuscation_lines() -> str:
+    """The three pass lines with and without a finding, and the lines of a pass not run."""
+    from maljan.analysis.ghidra_passes import ANTI_ANALYSIS_TOOL, EMULATION_TOOL
+    from maljan.tools import crypto_constants
+
+    place = {"offset": "0x1", "rva": "0x2", "function": "0x0"}
+    value_row = {"value": "0x1", "places": [place]}
+    constants = {
+        "found": [
+            {
+                "algorithm": "a",
+                "what": "w",
+                "tables": [{"byte_order": "big-endian", "place": place}],
+            },
+            {"algorithm": "a", "what": "w", "matched": 2, "of": 3, "values": [value_row]},
+        ],
+        "lone": [{"algorithm": "a", "what": "w", "matched": 1, "of": 3, "values": [value_row]}],
+        "sets_searched": 3,
+    }
+    findings = {
+        "findings": [{"category": "c", "technique": "t", "offset": "0x1", "function": "f"}],
+        "total_findings": 2,
+        "summary": {"by_category": {"c": 2}},
+        "notes": ["n"],
+    }
+    routine = {
+        "start": "0x1",
+        "capa_rules": ["r"],
+        "convention": "rcx",
+        "names_emulated": 2,
+        "names_returned": 2,
+    }
+    unused = {"start": "0x2", "capa_rules": ["r"], "convention": None, "reason": "x"}
+    reading = {"routine": "0x1", "set": "exports", "name": "N", "dlls": ["d"]}
+    module = {"routine": "0x1", "set": "modules", "name": "m", "encoding": "utf-16le"}
+    hit = {"value": "0x00000001", "readings": [reading, module], "occurrences": [place]}
+    emulated = {
+        "hits": [hit],
+        "lone_hits": [hit],
+        "routines": [routine, unused],
+        "names": {"functions": 2, "modules": 1},
+    }
+    not_run = [
+        LedgerEntry(id=f"ev_000{i}", tool=tool, error="not run: x", ok=False, seq=i)
+        for i, tool in enumerate((crypto_constants.TOOL, ANTI_ANALYSIS_TOOL, EMULATION_TOOL), 1)
+    ]
+    failed = [
+        LedgerEntry(id="ev_0004", tool=ANTI_ANALYSIS_TOOL, error="x", ok=False, seq=4),
+    ]
+    return " ".join(
+        [
+            triage_pack._constant_sets(constants),
+            triage_pack._constant_sets({"found": [], "lone": [], "sets_searched": 3}),
+            triage_pack._anti_analysis(findings),
+            triage_pack._anti_analysis({"findings": []}),
+            triage_pack._emulated(emulated),
+            triage_pack._emulated({**emulated, "hits": []}),
+            triage_pack.pack_block([*not_run, *failed], 0),
+        ]
+    )
+
+
+def _constant_set_names() -> str:
+    """Each catalogue set as the constants line names it: algorithm, what it is, a value."""
+    from maljan.tools import crypto_constants
+
+    place = {"offset": "0x1"}
+    rows = [
+        {
+            "algorithm": entry.algorithm,
+            "what": entry.what,
+            "matched": 1,
+            "of": 1,
+            "values": [{"value": str(entry.values[0]), "places": [place]}],
+        }
+        for entry in crypto_constants.catalogue()
+        if entry.kind == crypto_constants.VALUES
+    ] + [
+        {"algorithm": entry.algorithm, "what": entry.what, "tables": [{"place": place}]}
+        for entry in crypto_constants.catalogue()
+        if entry.kind == crypto_constants.TABLE
+    ]
+    return triage_pack._constant_sets({"found": rows, "sets_searched": len(rows)})
+
+
 # Everything else a report model is shown on every run, as plain text.
 # A network block with one address the sample reached, one the sandbox
 # recorded and does not attribute, a name that resolved to the second, a name
@@ -862,6 +969,10 @@ PROMPTS: dict[str, str] = {
     "the two resolving tools' descriptions": _analysis_tool_descriptions(
         "resolve_api_hashes", "decode_string_blobs"
     ),
+    "the deobfuscation passes' rules and reasons": _deobfuscation_sentences(),
+    "the deobfuscation passes' pack lines": _deobfuscation_lines(),
+    "the constant sets as the pack line names them": _constant_set_names(),
+    "the constant scan's description": _analysis_tool_descriptions("find_crypto_constants"),
     "a term's example ids and how many more": _term_ids_said(["T1000", "T1001", "T1002"]),
     "run-state budget line of a loop with no limit": budget_line(NO_LIMIT, NO_LIMIT),
     "ask tool budget sentence with no limit": _what_an_ask_gets_sentence("lead", None, None),

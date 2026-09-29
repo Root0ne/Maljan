@@ -1249,6 +1249,46 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
     return step
 
 
+def _ghidra_passes_step(container: ServiceContainer, state: AnalysisState) -> Any:
+    """The Ghidra the pack's passes call, or the sentence saying why there is none.
+
+    Ghidra has to be switched on, reached over its REST API (``http``: Ghidra
+    over stdio serves no endpoint the pack can call), and holding a copy of
+    this job's sample where it reads: the mirror the worker made for Ghidra as
+    a static provider of the run's profile. Each request waits what one tool
+    call of this deployment may take, as the sink pre-pass's do.
+    """
+    from maljan.analysis.ghidra_passes import (
+        GHIDRA_HAS_NO_COPY,
+        GHIDRA_NOT_OVER_HTTP,
+        GHIDRA_SWITCHED_OFF,
+        GhidraPasses,
+    )
+    from maljan.providers.server_guard import deployment_call_budget
+
+    cfg = container.config
+    ghidra = cfg.static.ghidra
+    paths = state.get("static_sample_paths") or {}
+    path = paths.get("ghidra") or (
+        state.get("static_sample_path") if cfg.static.provider == "ghidra" else None
+    )
+    if not bool(getattr(ghidra, "enabled", True)):
+        reason = GHIDRA_SWITCHED_OFF
+    elif ghidra.transport != "http":
+        reason = GHIDRA_NOT_OVER_HTTP.format(transport=ghidra.transport)
+    elif not path:
+        reason = GHIDRA_HAS_NO_COPY
+    else:
+        budget = deployment_call_budget(cfg)
+        return GhidraPasses(
+            base_url=str(ghidra.url),
+            token=ghidra.auth_token.get_secret_value(),
+            sample_path=str(path),
+            call_timeout=budget if budget > 0 else None,
+        )
+    return GhidraPasses(unavailable=reason)
+
+
 def _analysis_server_environ(container: ServiceContainer) -> dict[str, str]:
     """This process's environment with the analysis server's own ``env`` map over it.
 
@@ -1361,6 +1401,7 @@ def make_triage_node(
                 inputs,
                 reputation=_reputation_lookup(container, inputs.sha256),
                 function_matches=_function_matches_step(container, state),
+                ghidra=_ghidra_passes_step(container, state),
             )
         except Exception as exc:  # noqa: BLE001 — the pack never fails the job
             logger.warning(

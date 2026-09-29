@@ -812,8 +812,9 @@ def _looks_like_a_credential(token: str, *, whole: bool = False) -> bool:
 # stored transcript printed ``***`` where the report printed the names. Three
 # sources, all exact: the vendored export-name catalogue and the vendored
 # hash-algorithm catalogue (``api_hashes``' data files, each read once), and
-# the names this job's hash resolution on the analysis server read
-# (``remember_resolved_names``), which the next job forgets. A vendor prefix is
+# the names this job's hash resolution on the analysis server and the pack's
+# emulation of the sample's routines read (``remember_resolved_names``), which
+# the next job forgets. A vendor prefix is
 # asked before any of them, and a configured value is masked by value before any
 # rule is read, so none exempts a credential.
 _EXPORT_NAMES_FILE = "data/windows_export_names_v1.json"
@@ -897,6 +898,8 @@ def _is_api_name(token: str) -> bool:
 def remember_resolved_names(answer: Any) -> None:
     """Add the function names a ``resolve_api_hashes`` answer read to the names kept as written.
 
+    The pack's ``emulate_api_hashes`` answer is read the same way: the names
+    the sample's own routines, emulated, were found to give.
     ``answer`` is the tool's answer as a dict or as its JSON text; every
     reading under ``hits`` and ``lone_hits`` is taken whose name has the shape
     a Windows function name has (``_API_NAME_SHAPE`` and both cases). Held for
