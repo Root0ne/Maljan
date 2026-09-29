@@ -553,10 +553,18 @@ class _Names:
 
 
 def _catalogue_names(path: str) -> _Names:
-    """Every function name of the catalogue once, with its DLLs, then every module name."""
+    """Every function name of the catalogue once, with its DLLs, then every module name.
+
+    The vendored catalogue comes from ``api_hashes``' own cache; another one is
+    read on its own, so it never pushes the vendored one out of that cache.
+    """
+    from maljan.core.paths import resolve_data
     from maljan.tools import api_hashes
 
-    document = api_hashes.load_export_names(path)
+    if path == api_hashes.DEFAULT_EXPORT_NAMES:
+        document = api_hashes.load_export_names(path)
+    else:
+        document = dict(json.loads(resolve_data(path).read_text(encoding="utf-8")))
     by_name: dict[str, list[str]] = {}
     for dll, exported in (document.get("dlls") or {}).items():
         for name in exported:
