@@ -44,6 +44,10 @@
       "carved_path",
       "path"
     ],
+    "find_crypto_constants": [
+      "carved_path",
+      "path"
+    ],
     "floss": [
       "carved_path",
       "kinds",
@@ -154,6 +158,7 @@
     "decode_string_blobs",
     "document_info",
     "elf_info",
+    "find_crypto_constants",
     "floss",
     "hashes",
     "identify_file",
