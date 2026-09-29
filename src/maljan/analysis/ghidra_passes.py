@@ -13,19 +13,27 @@ only the part of it that is exact (``read_findings``):
 * an instruction match, when the instruction Ghidra returns is the one its
   list names: the same mnemonic and, where the list gives one, the same
   operand. Ghidra matches mnemonics by prefix, so it files ``INT3`` under
-  ``INT 0x2d`` as well;
+  ``INT 0x2d`` as well. Two instructions ordinary builds carry are read in the
+  file's bytes first: an ``INT3`` counts only alone, not in a run of them and
+  not as the byte before a function (compilers pad and align with them), and
+  a ``CPUID`` only where the code sets the hypervisor leaf (0x40000000 to
+  0x400000ff) in ``eax`` just before it, or sets leaf 1 and tests ECX's bit 31
+  within 32 bytes after it (a runtime's feature probe asks other leaves);
 * a TEB/PEB read, when the instruction reads through ``FS:[0x30]`` or
   ``FS:[0x18]`` exactly;
-* an API call, when the API is on the platform's own short list of APIs whose
-  documented purpose is the technique (``anti_analysis_apis``: the anti-debug
-  APIs the vendored behaviour catalogue treats as corroborating, and the APIs
-  its T1497 rule names) and the file imports it. Ghidra matches symbol names
-  by substring over a broad list, so it files ``CloseHandle`` under debugger
-  detection; the call is stated by the imported name.
+* an API call, when the API is on the platform's short list of APIs whose
+  documented purpose is the technique (``anti_analysis_apis``, all data: the
+  anti-debug APIs the vendored behaviour catalogue treats as corroborating,
+  the APIs its T1497 rule names, and the APIs ATT&CK's T1622 description
+  names, held with its words in ``data/anti_analysis_apis_v1.json``) and the
+  file imports it. Ghidra matches symbol names by substring over a broad
+  list, so it files ``CloseHandle`` under debugger detection; the call is
+  stated by the imported name.
 
-Every other match is counted, not stated. The scan checks what
-``SCAN_CHECKS`` says and nothing else, so an empty result is said as that list
-matching nothing, never as the sample having no anti-analysis code.
+Every other match is counted, once per place and match, not stated. The scan
+checks what ``SCAN_CHECKS`` says and nothing else, so an empty result is said
+as that list matching nothing, never as the sample having no anti-analysis
+code.
 
 A pass that cannot run says why: the pack records that sentence rather than
 leaving the pass out. A request Ghidra did not answer, or answered with an
@@ -56,9 +64,11 @@ SCAN_CHECKS = (
 
 # How the stated part is chosen, said in every answer.
 STATED_RULE = (
-    "stated: an instruction that is the listed one (the same mnemonic and operand), a read "
-    "through FS:[0x30] or FS:[0x18] exactly, and a call to an API the platform's catalogue lists "
-    "for the technique that the file imports; every other match is counted, not stated"
+    "stated: an instruction that is the listed one (the same mnemonic and operand), an INT3 only "
+    "alone and not as padding before a function, a CPUID only where the code sets the "
+    "hypervisor leaf or sets leaf 1 and tests ECX bit 31, a read through FS:[0x30] or FS:[0x18] "
+    "exactly, and a call to an API the platform's data lists for the technique that the file "
+    "imports; every other distinct match is counted, not stated"
 )
 
 GHIDRA_SWITCHED_OFF = "Ghidra is switched off (core.static.ghidra.enabled)"
@@ -73,6 +83,7 @@ GHIDRA_HAS_NO_COPY = (
 
 _BEHAVIOUR_MAP = "data/api_behaviour_map_v1.json"
 _ATTCK_MAP = "data/api_attck_map_v1.json"
+_DESCRIBED_APIS = "data/anti_analysis_apis_v1.json"
 
 
 class GhidraPassFailed(RuntimeError):
@@ -81,12 +92,15 @@ class GhidraPassFailed(RuntimeError):
 
 @lru_cache(maxsize=1)
 def anti_analysis_apis() -> frozenset[str]:
-    """The APIs whose documented purpose is an anti-analysis technique, from the catalogue.
+    """The APIs whose documented purpose is an anti-analysis technique, from the vendored data.
 
-    The vendored behaviour catalogue's anti-debug block lists, beside its broad
-    set, the few APIs it treats as corroborating (the ones ordinary software
-    rarely calls); its ATT&CK map's T1497 rule names the firmware, device and
-    idle-user APIs of sandbox evasion. The union of the two, nothing added.
+    Three sources, all data: the behaviour catalogue's anti-debug block lists,
+    beside its broad set, the few APIs it treats as corroborating (the ones
+    ordinary software rarely calls); its ATT&CK map's T1497 rule names the
+    firmware, device and idle-user APIs of sandbox evasion; and
+    ``data/anti_analysis_apis_v1.json`` holds the APIs ATT&CK's own technique
+    descriptions name (T1622), each with the words it is taken from. The union,
+    nothing added in code.
     """
     from maljan.core.paths import resolve_data
 
@@ -98,12 +112,36 @@ def anti_analysis_apis() -> frozenset[str]:
     for technique in attck.get("techniques") or []:
         if str(technique.get("technique_id") or "").startswith("T1497"):
             names.update(str(n) for n in technique.get("apis") or [])
+    described = json.loads(resolve_data(_DESCRIBED_APIS).read_text(encoding="utf-8"))
+    for technique in described.get("techniques") or []:
+        names.update(str(n) for n in technique.get("apis") or [])
     return frozenset(names)
+
+
+def _folded(name: str) -> str:
+    """An API name with its ANSI or wide suffix folded, as the catalogue compares them."""
+    from maljan.analysis.api_capability_db import canonical_name
+
+    return canonical_name(name)
 
 
 _INSTRUCTION_CATEGORY = "suspicious_instruction"
 _TEB_CATEGORY = "peb_teb_access"
 _TEB_OPERAND = re.compile(r"\bFS:\[0x(?:30|18)\]", re.IGNORECASE)
+
+# The CPUID leaves a hypervisor answers, and the bytes around a CPUID read.
+_HYPERVISOR_LEAVES = range(0x40000000, 0x40000100)
+_CLEAR_ECX = (b"\x31\xc9", b"\x33\xc9")
+# bt ecx, 31; test ecx, 0x80000000; and ecx, 0x80000000; test ecx, ecx then js.
+_ECX_BIT_31 = (
+    b"\x0f\xba\xe1\x1f",
+    b"\xf7\xc1\x00\x00\x00\x80",
+    b"\x81\xe1\x00\x00\x00\x80",
+    b"\x85\xc9\x78",
+    b"\x85\xc9\x0f\x88",
+)
+# How far past a CPUID the test of ECX's bit 31 is looked for.
+_BIT_TEST_WINDOW = 32
 
 
 def _operand_value(text: str) -> int | None:
@@ -131,42 +169,123 @@ def _is_the_listed_instruction(technique: str, instruction: str) -> bool:
     return True
 
 
-def read_findings(findings: Iterable[dict[str, Any]], imported: Sequence[str]) -> dict[str, Any]:
-    """The exact part of Ghidra's findings as facts, and how many others there were."""
-    apis = anti_analysis_apis()
+class _Code:
+    """The file's bytes around an instruction Ghidra named, when the file is a PE image."""
+
+    def __init__(self, image: Any, function_starts: Iterable[int]) -> None:
+        self.image = image
+        starts = set(function_starts)
+        if image is not None:
+            starts.update(int(start) for start in image.function_starts)
+        self.starts = starts
+
+    def at(self, offset: str) -> int | None:
+        """The file offset of an offset from the image base, or ``None``."""
+        if self.image is None:
+            return None
+        try:
+            found = self.image.offset_of_rva(int(offset, 16))
+        except (TypeError, ValueError):
+            return None
+        return int(found) if found is not None else None
+
+    def byte(self, at: int) -> int | None:
+        data: bytes = self.image.data
+        return data[at] if 0 <= at < len(data) else None
+
+
+def _int3_is_a_trap(code: _Code, offset: str) -> bool:
+    """A one-byte ``INT3`` that is neither in a run of them nor the byte before a function."""
+    at = code.at(offset)
+    if at is None or code.byte(at) != 0xCC:
+        return False
+    if code.byte(at - 1) == 0xCC or code.byte(at + 1) == 0xCC:
+        return False
+    return int(offset, 16) + 1 not in code.starts
+
+
+def _cpuid_leaf_said(code: _Code, offset: str) -> str:
+    """What the code around a CPUID shows it asks, when it shows the hypervisor question."""
+    at = code.at(offset)
+    if at is None:
+        return ""
+    data = code.image.data
+    if data[at : at + 2] != b"\x0f\xa2":
+        return ""
+    before = at
+    if data[before - 2 : before] in _CLEAR_ECX:
+        before -= 2
+    if before < 5 or data[before - 5] != 0xB8:
+        return ""
+    leaf = int.from_bytes(data[before - 4 : before], "little")
+    if leaf in _HYPERVISOR_LEAVES:
+        return f"CPUID (leaf {leaf:#x})"
+    after = data[at + 2 : at + 2 + _BIT_TEST_WINDOW]
+    if leaf == 1 and any(pattern in after for pattern in _ECX_BIT_31):
+        return "CPUID (leaf 1, then ECX bit 31 tested)"
+    return ""
+
+
+def read_findings(
+    findings: Iterable[dict[str, Any]],
+    imported: Sequence[str],
+    image: Any = None,
+    function_starts: Iterable[int] = (),
+) -> dict[str, Any]:
+    """The exact part of Ghidra's findings as facts, and how many distinct others there were.
+
+    ``image`` is the sample as ``tools.pe_image`` maps it, for the two
+    instructions whose meaning the bytes around them decide: an ``INT3`` is a
+    trap only alone and not as the padding before a function, and a ``CPUID``
+    is the hypervisor question only when the code sets the hypervisor leaf, or
+    sets leaf 1 and then tests ECX's bit 31. Without the bytes neither is
+    stated. ``function_starts`` (offsets from the image base) add to the
+    image's own table. Ghidra's rows are read once per place and match.
+    """
+    apis = {_folded(name): name for name in anti_analysis_apis()}
     held = [str(name) for name in imported if str(name)]
+    code = _Code(image, function_starts)
     stated: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-    not_stated = 0
+    stated_keys: set[tuple[str, str]] = set()
+    unstated_keys: set[tuple[str, str]] = set()
     for row in findings:
         if not isinstance(row, dict):
             continue
         category = str(row.get("category") or "")
         technique = str(row.get("technique") or "")
-        instruction = str(row.get("instruction") or "")
+        instruction = str(row.get("instruction") or "").strip()
+        where = str(row.get("offset") or row.get("address") or "")
+        key = (where, instruction.upper() if instruction else f"call {technique}")
         what = ""
         if category == _INSTRUCTION_CATEGORY:
             if _is_the_listed_instruction(technique, instruction):
-                what = instruction.strip()
+                mnemonic = instruction.upper().split(None, 1)[0]
+                if mnemonic == "INT3":
+                    what = instruction if _int3_is_a_trap(code, where) else ""
+                elif mnemonic == "CPUID":
+                    what = _cpuid_leaf_said(code, where)
+                else:
+                    what = instruction
         elif category == _TEB_CATEGORY:
             if _TEB_OPERAND.search(instruction):
-                what = instruction.strip()
+                what = instruction
         else:
-            named = [name for name in held if technique and technique in name and name in apis]
+            named = [
+                name for name in held if technique and technique in name and _folded(name) in apis
+            ]
             if len(named) == 1:
                 what = f"call to {named[0]}"
         if not what:
-            not_stated += 1
+            unstated_keys.add(key)
             continue
-        where = str(row.get("offset") or row.get("address") or "")
-        if (where, what) in seen:
+        if key in stated_keys:
             continue
-        seen.add((where, what))
+        stated_keys.add(key)
         fact = {"category": category, "what": what, "offset": where}
         if row.get("function"):
             fact["function"] = str(row["function"])
         stated.append(fact)
-    return {"stated": stated, "not_stated": not_stated}
+    return {"stated": stated, "not_stated": len(unstated_keys - stated_keys)}
 
 
 @dataclass
@@ -287,8 +406,17 @@ class GhidraPasses:
 
     # -- the anti-analysis scan -------------------------------------------
 
-    def anti_analysis(self, imported: Sequence[str] = ()) -> dict[str, Any]:
-        """Ghidra's scan, whole, with the exact part of it stated (``read_findings``)."""
+    def anti_analysis(
+        self,
+        imported: Sequence[str] = (),
+        host_path: str = "",
+        function_starts: Sequence[Any] = (),
+    ) -> dict[str, Any]:
+        """Ghidra's scan, whole, with the exact part of it stated (``read_findings``).
+
+        ``host_path`` is this process's copy of the sample, read for the bytes
+        around an ``INT3`` or a ``CPUID``; ``function_starts`` are capa's.
+        """
         program = self.open()
         answer = self._request(
             "GET",
@@ -322,7 +450,7 @@ class GhidraPasses:
             "total_findings": int(answer.get("total_findings") or len(findings)),
             "returned": len(findings),
             "notes": notes,
-            **read_findings(findings, imported),
+            **read_findings(findings, imported, _image_of(host_path), _starts(function_starts)),
             "findings": findings,
         }
 
@@ -334,6 +462,28 @@ class GhidraPasses:
             return None
         base = self._image_base or 0
         return value - base if value >= base else None
+
+
+def _image_of(path: str) -> Any:
+    """The PE image at ``path`` as ``tools.pe_image`` maps it, or ``None``."""
+    if not path:
+        return None
+    from maljan.tools import pe_image
+
+    try:
+        return pe_image.load(path)
+    except (OSError, ValueError):
+        return None
+
+
+def _starts(values: Sequence[Any]) -> list[int]:
+    starts: list[int] = []
+    for value in values:
+        try:
+            starts.append(int(str(value), 16))
+        except ValueError:
+            continue
+    return starts
 
 
 def _raise_on_error(answer: Any, what: str) -> None:
