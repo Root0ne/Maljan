@@ -477,6 +477,53 @@ def _deobfuscation_lines() -> str:
     )
 
 
+def _ghidra_pass_failures() -> str:
+    """What each way a Ghidra pass can stop says, from the passes' own code."""
+    import httpx
+
+    from maljan.analysis.ghidra_passes import GhidraPasses, GhidraPassFailed
+
+    def ghidra(answers: dict[str, Any]) -> GhidraPasses:
+        def handler(request: httpx.Request) -> httpx.Response:
+            answer = answers.get(request.url.path, {"success": True, "program": "p"})
+            if isinstance(answer, Exception):
+                raise answer
+            if isinstance(answer, int):
+                return httpx.Response(answer)
+            return httpx.Response(200, json=answer)
+
+        return GhidraPasses(base_url="http://g.invalid", transport=httpx.MockTransport(handler))
+
+    opened = {"/get_current_program_info": {"image_base": "1000"}}
+    cases = [
+        {"/load_program": {"error": "e"}},
+        {"/load_program": 500},
+        {"/load_program": httpx.ConnectError("x")},
+        {"/switch_program": 500},
+        {"/run_analysis": {"error": "e"}},
+        {"/get_current_program_info": {"image_base": None}},
+        {"/get_current_program_info": {"error": "e"}},
+        {**opened, "/find_anti_analysis_techniques": {"error": "e"}},
+        {**opened, "/find_anti_analysis_techniques": ["x"]},
+    ]
+    said: list[str] = []
+    for answers in cases:
+        try:
+            ghidra(answers).anti_analysis()
+        except GhidraPassFailed as failure:
+            said.append(str(failure))
+    passes = ghidra({**opened, "/emulate_function": httpx.ReadTimeout("x")})
+    passes._program, passes._image_base = "p", 0x1000
+    from maljan.analysis.ghidra_passes import X64_CONVENTIONS, _Name
+
+    try:
+        passes._emulate("p", 0x1200, X64_CONVENTIONS[0], _Name("N", "exports", "ascii"))
+    except GhidraPassFailed as failure:
+        said.append(str(failure))
+    assert len(said) == len(cases) + 1
+    return " ".join(said)
+
+
 def _constant_set_names() -> str:
     """Each catalogue set as the constants line names it: algorithm, what it is, a value."""
     from maljan.tools import crypto_constants
@@ -972,6 +1019,7 @@ PROMPTS: dict[str, str] = {
     ),
     "the deobfuscation passes' rules and reasons": _deobfuscation_sentences(),
     "the deobfuscation passes' pack lines": _deobfuscation_lines(),
+    "what a Ghidra pass that stopped says": _ghidra_pass_failures(),
     "the constant sets as the pack line names them": _constant_set_names(),
     "the constant scan's description": _analysis_tool_descriptions("find_crypto_constants"),
     "a term's example ids and how many more": _term_ids_said(["T1000", "T1001", "T1002"]),
