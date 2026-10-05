@@ -8,6 +8,7 @@ no per-agent branching exists.
 from __future__ import annotations
 
 import asyncio
+import functools
 import inspect
 import json
 import os
@@ -44,6 +45,12 @@ from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop
 from maljan.memory.long_term_memory import build_stored_case
+from maljan.pipeline.claim_drops import (
+    dropped_claim_sentence,
+    dropped_claims,
+    revision_changed,
+    without_withdrawals,
+)
 from maljan.pipeline.conditions import (
     ConditionError,
     StageContext,
@@ -51,6 +58,7 @@ from maljan.pipeline.conditions import (
     TriageFacts,
     evaluate,
 )
+from maljan.pipeline.debate_settlement import settle_contradictions, with_platform_settlement
 from maljan.pipeline.events import (
     claims_to_payload,
     describe_exception,
@@ -3054,7 +3062,9 @@ def _debate_record(stage: Any, started: float, *, reason: str = "") -> dict[str,
     """One round's contribution to the debate stage's result.
 
     The reducer adds the durations up, so a debate of four rounds records the
-    time all four of them took rather than the time the last one did.
+    time all four of them took rather than the time the last one did. Both the
+    mediation and the revision node write one, so the debate's duration is the
+    time it took: the mediations alone were a third of it.
 
     The only reason this stage ever gives is a mediation that failed or timed
     out, and that is the stage's own — it belongs to the round, not to a member
@@ -3063,13 +3073,18 @@ def _debate_record(stage: Any, started: float, *, reason: str = "") -> dict[str,
     """
     if stage is None:
         return {}
-    return stage_record(
+    record = stage_record(
         stage,
         ran=True,
         reason=reason,
         failure=bool(reason),
         duration_ms=int((time.monotonic() - started) * 1000),
     )
+    # A debate's mediations and revision rounds follow one another, whatever
+    # mode the stage carries for its revisions: their times add up.
+    for entry in record["stage_results"].values():
+        entry["mode"] = "sequential"
+    return record
 
 
 def _agents_that_ran(container: ServiceContainer, state: AnalysisState) -> list[str]:
@@ -3183,6 +3198,18 @@ _NO_CONSENSUS_MEASURED: dict[str, Any] = {
     "consensus_applicable": False,
     "confidence_history": [],
 }
+
+
+def _settler(state: AnalysisState, agent_names: Sequence[str]) -> Any:
+    """The mediation's reader of its block's lines, over this state's answers and ledger."""
+    isr_reports = dict(state.get("isr_reports") or {})
+    ledger = list(state.get("evidence_ledger") or [])
+    names = list(agent_names)
+
+    def settle(lines: list[str]) -> Any:
+        return settle_contradictions(lines, isr_reports, ledger, names)
+
+    return settle
 
 
 def make_negotiation_node(
@@ -3369,6 +3396,11 @@ def make_negotiation_node(
                     # against each other alone.
                     facts_block=pack_text(state, container),
                     run_state=render_run_state(state),
+                    # The platform's reading of the block's lines: a line
+                    # about a claim no analyst's answer in force still holds
+                    # is closed, one disputing a count a ledger entry states
+                    # is settled by stating it, and only the rest stand.
+                    settle_contradictions=_settler(state, agent_names),
                 ),
                 hard_timeout=mediation_timeout,
                 label="mediation",
@@ -3397,6 +3429,21 @@ def make_negotiation_node(
                 # the team, so it is a notice that names itself.
                 kind="system",
             )
+            platform_said = [
+                *(getattr(argument, "closed", None) or []),
+                *(getattr(argument, "settled", None) or []),
+            ]
+            if platform_said:
+                emit_agent_message(
+                    container.event_sink,
+                    speaker=ROOM_SPEAKER,
+                    role="system",
+                    text="\n".join(str(sentence) for sentence in platform_said),
+                    round_index=iteration + 1,
+                    status="complete",
+                    stage=stage_key_of(stage, "debate"),
+                    kind="system",
+                )
             if syco:
                 emit_agent_message(
                     container.event_sink,
@@ -3521,20 +3568,39 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
     """Factory: creates the revision node where all agents revise concurrently."""
 
     async def node_fn(state: AnalysisState) -> dict[str, Any]:
+        started = time.monotonic()
         agent_names = _debate_participants(container, stage, state)
         iteration = state.get("iteration_count", 0)
 
         history = state.get("discussion_history") or []
         mediator_feedback = ""
+        platform_said: list[str] = []
         for arg in reversed(history):
             if arg.agent_name == "Mediator":
                 mediator_feedback = arg.finding
+                platform_said = [
+                    *(getattr(arg, "closed", None) or []),
+                    *(getattr(arg, "settled", None) or []),
+                ]
                 break
 
         syco_detected = state.get("sycophancy_detected", False)
-        revision_directive = build_revision_directive(syco_detected, mediator_feedback)
+        revision_directive = with_platform_settlement(
+            build_revision_directive(syco_detected, mediator_feedback), platform_said
+        )
 
         original_reports = state.get("reports") or {}
+        # The answer each analyst has in force before this round: its last
+        # revision that stood, or its first answer. A revision revises that
+        # answer, beside its peers' answers in force: those are what the
+        # mediator read, and a round shown the first answers again rewrote
+        # them from the start every round.
+        kept_isrs = state.get("isr_reports") or {}
+        kept_texts = state.get("revised_reports") or {}
+        reports_in_force = {
+            name: kept_texts.get(name) or original_reports.get(name, "")
+            for name in dict.fromkeys([*original_reports, *kept_texts])
+        }
 
         if container.is_mock:
             mock_isrs: dict[str, AgentISR] = {
@@ -3545,6 +3611,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     name: f"MOCK REVISED: {name} analysis updated." for name in agent_names
                 },
                 "isr_reports": mock_isrs,
+                **_debate_record(stage, started),
             }
 
         async def _revise_one(name: str) -> tuple[str, AgentISR]:
@@ -3589,10 +3656,10 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             data = _build_revision_context(state, container, name)
             agent = container.get_agent(name)
             brief_agent(agent, state, container)
-            own_report = original_reports.get(name, "")
-            peer_reports = {k: v for k, v in original_reports.items() if k != name}
+            own_report = reports_in_force.get(name, "")
+            peer_reports = {k: v for k, v in reports_in_force.items() if k != name}
             return await asyncio.to_thread(
-                agent.safe_revise_isr,
+                functools.partial(agent.safe_revise_isr, in_force=kept_isrs.get(name)),
                 data,
                 own_report,
                 peer_reports,
@@ -3649,11 +3716,12 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         # A revision that stands with fewer claims than the answer it replaces,
         # said: the model decided, and the run summary states the replacement.
         revision_replacements: list[str] = []
-
-        # The answer each analyst has in force before this round: its last
-        # revision that stood, or its first answer.
-        kept_isrs = state.get("isr_reports") or {}
-        kept_texts = state.get("revised_reports") or {}
+        # Each claim a revision that stood no longer carries, per analyst.
+        dropped_rows: list[dict[str, Any]] = []
+        # How many revisions stood, and whether any of them changed a claim, a
+        # technique or a finding: the router's convergence test.
+        made = 0
+        changed = False
 
         def _keep_the_answer_in_force(
             name: str, why: str, status: str = "", report: str = ""
@@ -3749,8 +3817,29 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                         name, "its answer carried no structured report", report=revised_text
                     )
                     continue
+                # A WITHDRAWN: line is the analyst's own claim taken back, not a
+                # peer's claim disputed.
+                kept_dissent = without_withdrawals(isr.dissent_items or [])
+                if kept_dissent != list(isr.dissent_items or []):
+                    isr.dissent_items = kept_dissent
                 revised[name] = revised_text
                 revised_isrs[name] = isr
+                made += 1
+                changed = changed or revision_changed(kept_isrs.get(name), isr)
+                for dropped in dropped_claims(kept_isrs.get(name), isr):
+                    sentence = dropped_claim_sentence(name, iteration, dropped)
+                    logger.info("%s", sentence)
+                    dropped_rows.append(
+                        {
+                            "agent": name,
+                            "round": int(iteration),
+                            "claim": dropped.claim,
+                            "values": list(dropped.values),
+                            "missing": list(dropped.missing),
+                            "reason": dropped.reason,
+                            "sentence": sentence,
+                        }
+                    )
                 replaced = revision_replacement_sentence(name, iteration, kept_isrs.get(name), isr)
                 if replaced:
                     logger.warning("%s", replaced)
@@ -3787,6 +3876,21 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         out.update(revision_validation)
         if revision_replacements:
             out["revision_replacements"] = revision_replacements
+        if dropped_rows:
+            out["dropped_claims"] = dropped_rows
+        # What this round did, for the router: whether a revision stood and
+        # changed anything, and how many ledger entries it added.
+        out["revision_rounds"] = [
+            {
+                "round": int(iteration),
+                "made": made,
+                "changed": changed,
+                "new_evidence": len(revision_ledger),
+            }
+        ]
+        # The round's own time, added to the debate stage's: the mediations
+        # alone were a third of the time a debate took.
+        out.update(_debate_record(stage, started))
         return out
 
     node_fn.__name__ = "revision_node"
@@ -3796,6 +3900,28 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
 # ---------------------------------------------------------------------------
 # Judge node
 # ---------------------------------------------------------------------------
+
+
+def debate_options(container: Any) -> tuple[int, bool]:
+    """The round limit and the sycophancy switch the debate's router read.
+
+    The last debate stage of the active profile, the one that hands over to
+    the verdict; the global negotiation settings where the profile has none,
+    which is what a router built without a stage reads.
+    """
+    max_rounds = int(container.config.negotiation.max_iterations)
+    try:
+        stages = list(getattr(container.active_profile(), "stages", None) or [])
+    except Exception:  # noqa: BLE001 — a double without a profile keeps the global
+        return max_rounds, True
+    for candidate in reversed(stages):
+        options = getattr(candidate, "debate", None)
+        if getattr(candidate, "kind", "") == "debate" and options is not None:
+            rounds = getattr(options, "max_rounds", None)
+            check = getattr(options, "sycophancy_check", True)
+            if isinstance(rounds, int) and not isinstance(rounds, bool):
+                return rounds, check if isinstance(check, bool) else True
+    return max_rounds, True
 
 
 def _verdict_record(stage: Any, started: float, *, ran: bool, reason: str = "") -> dict[str, Any]:
@@ -4498,7 +4624,7 @@ def make_judge_node(
 
             run_summary_dict = None
             try:
-                max_iters = container.config.negotiation.max_iterations
+                max_iters, sycophancy_check = debate_options(container)
                 negotiation_state = {
                     "confidence_history": state.get("confidence_history") or [],
                     "iteration_count": state.get("iteration_count", 0),
@@ -4506,12 +4632,18 @@ def make_judge_node(
                     "consensus_applicable": state.get("consensus_applicable", True),
                     "sycophancy_detected": state.get("sycophancy_detected", False),
                     "discussion_history": state.get("discussion_history") or [],
+                    "revision_rounds": state.get("revision_rounds") or [],
+                    "dropped_claims": state.get("dropped_claims") or [],
                 }
                 summary = (
                     RunSummaryBuilder(start_time=start_time)
                     .set_sample(state.get("file_hash", ""), state.get("file_name"))
                     .set_verdict(decision, len(bundle.objects) if isinstance(bundle, Bundle) else 0)
-                    .set_negotiation(negotiation_state, max_iterations=max_iters)
+                    .set_negotiation(
+                        negotiation_state,
+                        max_iterations=max_iters,
+                        sycophancy_check=sycophancy_check,
+                    )
                     .set_isr_stats(isr_reports, no_data=_no_data_analysts)
                     .set_validation(
                         validation_metrics(

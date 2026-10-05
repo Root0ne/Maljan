@@ -52,6 +52,11 @@ from maljan.llm.context_window import (
 )
 from maljan.llm.generation_rate import ModelCallDeadline
 from maljan.llm.stream_watch import StopRule, current_rule, ended_while_streaming, watching
+from maljan.pipeline.claim_drops import (
+    CLAIMS_DROPPED_CODE,
+    claims_dropped_violation,
+    dropped_claims,
+)
 from maljan.pipeline.run_state import NO_LIMIT, NoLimit, budget_line
 from maljan.pipeline.turns import with_question
 from maljan.pipeline.validation import (
@@ -6534,6 +6539,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         *,
         chunk: str = "",
         only_cut: bool = False,
+        in_force: AgentISR | None = None,
     ) -> AgentISR:
         """Tell the analyst what is wrong with its own answer, once.
 
@@ -6551,6 +6557,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         chunked analysis gets when its own answer was cut, before the merge,
         whose other questions the merged answer is asked. ``chunk`` names the
         chunk ("chunk 1 of 2") in the question and in what is recorded.
+
+        ``in_force`` is the analyst's answer in force when the answer checked
+        is a revision of it: a claim of it that states a value the revision no
+        longer carries, and that the revision did not withdraw with a reason,
+        is asked about in the same turn (``pipeline.claim_drops``).
         """
         try:
             from maljan.tools import knowledge
@@ -6680,11 +6691,13 @@ class BaseAnalyst(BudgetMeter, ABC):
                 undescribed_decompiles(candidate, decompiled, image_bases)
             )
             library_only = library_only_claims_violation(candidate)
+            dropped = claims_dropped_violation(dropped_claims(in_force, candidate))
             return [
                 *_whole_answer_questions(candidate),
                 *unread,
                 *([undescribed] if undescribed is not None else []),
                 *([library_only] if library_only is not None else []),
+                *([dropped] if dropped is not None else []),
                 *validate_isr(
                     candidate,
                     attck=knowledge,
@@ -6755,6 +6768,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     CLAIMS_UNDER_DISPUTES_CODE,
                     DECOMPILED_NOT_DESCRIBED_CODE,
                     LIBRARY_ONLY_CLAIMS_CODE,
+                    CLAIMS_DROPPED_CODE,
                 )
                 else v
                 for v in initial
@@ -7187,6 +7201,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         peer_reports: dict[str, str],
         mediator_feedback: str,
         revision_round: int = 1,
+        *,
+        in_force: AgentISR | None = None,
     ) -> tuple[str, AgentISR]:
         """Wrapper around revise_isr() with error handling, checked like a first answer.
 
@@ -7198,6 +7214,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         confidence questions among them. The revision's own call decides what
         the turn reads: the round-0 loop's deadline and whether its answer was
         nudged are not this answer's, so they are cleared before it is made.
+
+        ``in_force`` is the answer this revision replaces: a claim of it the
+        revision drops is asked about once in the same validation turn.
         """
         self.current_round = int(revision_round)
         with lock_for(self):
@@ -7212,7 +7231,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 if not isr.answer_text:
                     isr.note_answer_text(strip_tool_call_scaffolding(str(text or "")))
                 checked = self._validate_isr(
-                    self._apply_consistency_gate(isr, truncated), truncated
+                    self._apply_consistency_gate(isr, truncated), truncated, in_force=in_force
                 )
                 return text, self._drain_findings(checked)
             except AnalystError:
