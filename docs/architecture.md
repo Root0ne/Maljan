@@ -986,7 +986,11 @@ as written), or a `malware_types` value outside STIX 2.1's `malware-type-ov`
 vocabulary, which the question lists (`validation.MALWARE_TYPES`). The judge's
 prompt says an object named after the attributed family stands for it and that
 its kind goes under `malware_types` from that vocabulary. Nothing is rewritten:
-what the judge keeps is published as written.
+what the judge keeps is published as written. When the run states a family and
+no malware object is named for it, the export adds the family's object
+(`is_family: true`, the family's ledger ids) and relates the judge's object to
+it as `variant-of`; the platform's own object, minted when the judge wrote
+none, says `is_family: true` when it is named for the family.
 
 A judge malware object the export declines for a property the standard
 requires does not take the judge's relationships with it. The platform's own
@@ -1099,9 +1103,10 @@ decides.
    a category phrase only ("discovery mechanisms"; Stealth and Defense
    Impairment also by their pre-19 name, Defense Evasion). The reading is
    stricter than the capability check's about which cue governs a mention: no
-   comma and no coordinator ("and", "instead", "only", "but") between them,
-   and not a cue that opens an assertion ("no longer", "not merely", "never
-   stops"). Two more readings of absence do not need the cue next to the
+   comma, no dash (an em dash, or a spaced en dash) and no coordinator ("and",
+   "instead", "only", "but") between them, and not a cue that opens an
+   assertion ("no longer", "not merely", "never stops") nor a hyphenated
+   "never-" adjective ("a never-exercised web C2"). Two more readings of absence do not need the cue next to the
    mention: an item of a noun list a cue in the clause negates, the list
    joined by commas and a final "or"/"and" and ending at its head noun ("does
    not contain persistence, lateral movement, or exfiltration mechanisms"), and
@@ -1129,7 +1134,9 @@ decides.
    (`attck.claim_does_not_describe`). A claim whose sentence shares no term
    with the technique it carries — no capability term listing the id, no word
    of its catalogue name or its parent's (compared with common endings off:
-   "obfuscation" and "Obfuscated Files or Information" share one), no tactic
+   "obfuscation" and "Obfuscated Files or Information" share one; a name word
+   ending in a silent "e" also by its regular inflections, so "deobfuscates"
+   and "decoded" share one with Deobfuscate/Decode Files or Information), no tactic
    as a category phrase — is asked once to keep the technique only if the
    sample does it, and then to say what it does. Decided only where the
    catalogue gives the id's name, and not asked of an absence claim or a
@@ -1438,9 +1445,13 @@ paragraph (`nodes.run_quality_note`) says a run that is not degraded is not,
 and adds only the sentences that fit its limitations: that a missing tool is an
 absence of evidence when a reason other than such a note is listed, and that a
 note on part of an answer leaves the claims it read standing when one is. A TECHNIQUE line is one
-id, or `NONE` or a dash for none; any other line (a qualifier, a negation,
-several ids) claims no id, is kept on the claim as `technique_line`, and the
-validation turn asks once for one id per claim (`isr.technique_line_unread`).
+id, a list of ids separated by commas or "and" (read as one claim per id, each
+with the claim's sentence, evidence and confidence, and each checked as a
+technique), or `NONE` or a dash for none; a closing block separator (`· ---`)
+is no part of it. Any other line (a qualifier, a negation, ids joined by
+another word) claims no id, is kept on the claim as `technique_line`, and the
+validation turn asks once for the ids alone (`isr.technique_line_unread`).
+The claims begun are counted against the blocks read, not the claims.
 Every validation turn after a loop gets what that loop left of its time, not
 a fresh budget, and is not asked when that cannot hold one answer at the pace
 the loop measured (its final-answer reserve); what it would have asked is then
@@ -2604,7 +2615,7 @@ and the console draws the running analysis from them.
 | `model_fallback` | an agent, on the turn its model list moved on — published whether or not deltas stream | `stage`, `agent`, `model` (the model that answers from here), `reason` |
 | `tool_call_started` | the evidence recorder | `stage`, `agent`, `tool`, `server`, `args_summary` |
 | `tool_call_finished` | the evidence recorder, as each entry is written | `stage`, `agent`, `tool`, `server`, `evidence_id`, `ok`, `duration_ms`, `summary` |
-| `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index`, `state`, `path` |
+| `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index`, `state`, `path`; `answer_kept` on an unread answer's question: one sentence saying where the answer is kept (`run_summary.validation.unparsed_answers`, one masked row per answer with its analyst and round), never the answer |
 | `judge_question` | the judge's ReAct loop | `stage`, `text`, `addressed_to` |
 | `budget_tick` / `stage_ended_at_cap` | the budget meter | see *The evidence ledger* |
 | `tool_server_rested` | a tool server's guard, when its breaker opens | `server`, `failures`, `cooldown_s`, `reason` |
@@ -3103,7 +3114,11 @@ is assembled from what the run gathered rather than recomputed beside it:
   mutex, a pipe, a user agent and a command come back unchanged, so
   `update_data.dat` is never bracketed. The same rule reaches model prose and
   the evidence dump through `ProseDefanger`, which touches exactly the values
-  the run's network block and IOC table hold, as whole tokens. The JSON report,
+  the run's network block and IOC table hold, as whole tokens. Strings of note,
+  a file or host indicator, the platform's findings (section 13, the verdict,
+  the export decisions), a tool failure's error and a draft rule's source line
+  defang every URL, mailbox, address and host they hold; a draft rule's body is
+  printed as it compiles. The JSON report,
   the STIX bundle, MISP and `/reports/{id}/iocs` carry every value live, and
   the indicator section says so under its tables. A §7 string is printed as
   the file's bytes are, and says it is not an observed endpoint.

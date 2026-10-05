@@ -2384,6 +2384,11 @@ change landed on `main`.
 
 ### Fixed
 
+- **A TECHNIQUE line listing ids separated by commas or "and" is read as one claim per id**, each checked as a technique; a closing `· ---` is read past, the claim format says several ids are separated by commas, and only a line with words beside an id is asked about.
+- **A catalogue name word ending in a silent "e" is matched by its inflections**, so "deobfuscates" and "decoded" describe Deobfuscate/Decode Files or Information; and on the absence question a dash ends a negation's reach and a "never-" adjective negates nothing.
+- **The STIX bundle holds a malware object for the family the run states** (`is_family: true`), the judge's sample object kept as written and related to it as `variant-of`.
+- **Every network value the report prints for reading is defanged**: Strings of note, file and host indicators, the platform's findings, tool failures and a draft rule's source line.
+- **An analyst answer no claim could be read from is kept, whole and masked, in `run_summary.validation.unparsed_answers`**; its feedback event says only where.
 - **A table row's whole value is in an entry it cites** (`report.value_not_in_cited_entry`): a host identifier or a configuration value no cited entry holds whole, a number in decimal or hex included, is asked once and marked beside its evidence if kept.
 - **Technical prose names an unpublished value only beside its state** (`report.unpublished_value`): one question per section lists the values of its prose the IOC table does not publish, kept sentences are marked with their values' states, and a table cell carries the state beside the value without a question.
 - **The event scrub's shape rules never reach report text, and no operator credential does:** with configured values registered, a finding row keeps the evidence's words and loses configured values, URL userinfo and credential-named query values; otherwise it is scrubbed as before. In events an exact ATT&CK name such as "Access Token Manipulation" and a slash-joined family name away from a credential label are kept.
