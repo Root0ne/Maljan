@@ -200,6 +200,25 @@ def test_the_pack_s_artefacts_join_the_function_the_analyst_read() -> None:
     assert "reaches 1 resolved name (ev_0000)" in after
 
 
+def test_an_agent_that_read_no_function_is_sent_no_map_whatever_the_pack_tied() -> None:
+    """A network or a dynamic analyst never reads code; the pack's artefacts alone are no map."""
+    hashes = LedgerEntry(
+        id="ev_0000",
+        tool="resolve_api_hashes",
+        server="pipeline",
+        output=json.dumps(
+            {"hits": [{"readings": [{"name": "OpenThing"}], "occurrences": [{"function": "0x1"}]}]}
+        ),
+    )
+    calls: list[dict[str, Any]] = []
+    analyst, model = _analyst([], calls)
+    analyst.pack_function_artefacts = function_artefacts([hashes])
+
+    _run(analyst)
+
+    assert all(FUNCTION_MAP_HEAD not in str(m.content) for sent in model.seen for m in sent)
+
+
 def test_an_agent_with_no_run_state_block_is_sent_no_map() -> None:
     calls: list[dict[str, Any]] = []
     analyst, model = _analyst(["0x1360bc0904c"], calls)

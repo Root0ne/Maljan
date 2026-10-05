@@ -3817,14 +3817,15 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         try:
             _rows, claims = self._function_map_sources()
-            return function_map_block(
-                build_function_map(
-                    self._function_map_entries(),
-                    getattr(self, "pack_function_artefacts", None),
-                    list(claims),
-                    tuple(getattr(self, "pack_image_bases", None) or ()),
-                )
+            found = build_function_map(
+                self._function_map_entries(),
+                getattr(self, "pack_function_artefacts", None),
+                list(claims),
+                tuple(getattr(self, "pack_image_bases", None) or ()),
             )
+            # Only an agent that has read a function is shown the map: the
+            # pack's artefacts alone are already in the pack it reads.
+            return function_map_block(found) if found.visited else ""
         except Exception as exc:  # noqa: BLE001 — the map never costs a turn
             self.logger.debug("%s: function map left out (%s).", self.name, exc)
             return ""
