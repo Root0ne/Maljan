@@ -1611,11 +1611,22 @@ only, and the model does not write to it. It lists:
 
 Each artefact is counted once per function, as a distinct value. A text
 referred to from two places counts once. So does an answer that two entries
-recorded, and every entry that holds it is cited. An offset and its virtual
-address are one function only through an image base the run read; this is the
-decompiled-not-described check's rule when a base is known. With no base, both
-are kept as written. A visited function with neither an artefact nor a summary
-appears only by address, on one "also visited" line.
+recorded, and every entry that holds it is cited. A call-site fact is one text,
+argument position, call and callee, so one text passed to two calls is two
+facts. An offset and its virtual address are one function only through an
+image base the run read: exactly one of the two is below the base, and they are
+apart by it. Two virtual addresses a base apart stay two functions. With no
+base, both are kept as written. A claim gives a function its summary by the
+decompiled-not-described check's reading when a base is known. With none, it
+needs the same address written out, or a name the decompiler gave the function.
+No address is guessed. A visited function with neither an artefact nor a
+summary appears on one "also visited" line, by address. Names other than a
+decompiler's generic `FUN_`, `sub_` or `fcn.` name are kept beside it, such as
+an export name.
+
+The block has no size limit, by the rule that no limit is set by default. It
+grows with the functions visited and the functions reaching artefacts. On a
+recorded run that decompiled 89 functions it was about 5 KB per turn.
 
 A coverage line counts the functions visited against the functions reaching
 artefacts, and one line names those not yet visited. The sources are the
