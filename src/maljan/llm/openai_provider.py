@@ -386,8 +386,8 @@ def with_per_request_llama_cap(chat_class: Any) -> Any:
     return capped
 
 
-# One subclass per chat class seen, as for ``_TIMED_CLASSES``.
-_STREAMED_LLAMA_CLASSES: dict[type, type] = {}
+# One subclass per chat class seen and reasoning rule, as for ``_TIMED_CLASSES``.
+_STREAMED_LLAMA_CLASSES: dict[tuple[type, bool], type] = {}
 
 
 def _keep_last(chunks: list[Any]) -> None:
@@ -417,7 +417,7 @@ def _keep_last(chunks: list[Any]) -> None:
                 chunk.generation_info = {k: v for k, v in info.items() if k != key} or None
 
 
-def _joined_answer(chunks: list[Any]) -> Any:
+def _joined_answer(chunks: list[Any], *, keep_reasoning: bool = False) -> Any:
     """The streamed chunks of one answer as the answer the server would have sent whole.
 
     Joined as langchain joins a stream (each chunk's generation info in its
@@ -426,7 +426,9 @@ def _joined_answer(chunks: list[Any]) -> Any:
     * the fields llama.cpp may repeat on every chunk are taken from the last
       chunk that carries them (:func:`_keep_last`);
     * no reasoning piece is in the answer, as ``langchain-openai`` leaves them
-      out of a whole one;
+      out of a whole one — unless ``keep_reasoning``: DeepSeek's reasoning is
+      kept on its answer (:func:`with_reasoning_passback`), and its pieces are
+      joined into the one ``reasoning_content`` a whole answer carries;
     * the tool calls. langchain reads a streamed call's arguments with a
       partial JSON parser, which closes a call cut off mid-string as if it had
       ended there. A whole answer's calls are read strictly, and a cut one is
@@ -444,7 +446,8 @@ def _joined_answer(chunks: list[Any]) -> Any:
         raise ValueError("No generations found in stream.")
     _keep_last(chunks)
     for chunk in chunks:
-        chunk.message.additional_kwargs.pop(REASONING_CONTENT_KEY, None)
+        if not keep_reasoning:
+            chunk.message.additional_kwargs.pop(REASONING_CONTENT_KEY, None)
         chunk.message.response_metadata = {
             **(chunk.generation_info or {}),
             **chunk.message.response_metadata,
@@ -549,7 +552,26 @@ def _as_status_error(exc: Any) -> Any:
 
 
 def with_streamed_llama_answers(chat_class: Any) -> Any:
-    """``chat_class`` reading a llama.cpp answer as a stream, joined into the whole answer.
+    """``chat_class`` reading a llama.cpp answer as a stream (:func:`with_streamed_answers`)."""
+    return with_streamed_answers(chat_class)
+
+
+def with_streamed_deepseek_answers(chat_class: Any) -> Any:
+    """``chat_class`` reading a DeepSeek answer as a stream, its reasoning kept.
+
+    A hosted answer read whole is billed whole before anything of it is seen:
+    one that writes the same claims again runs to its cap, which on a hosted
+    model can be hours of output. Read as a stream, the rule its caller names
+    (``llm.stream_watch``) can end it once the rule is crossed. The reasoning
+    pieces stay on the chunks and are joined into the answer's
+    ``reasoning_content``, which ``with_reasoning_passback`` sends back on the
+    next request.
+    """
+    return with_streamed_answers(chat_class, keep_reasoning=True)
+
+
+def with_streamed_answers(chat_class: Any, *, keep_reasoning: bool = False) -> Any:
+    """``chat_class`` reading an answer as a stream, joined into the whole answer.
 
     llama.cpp sends nothing of a non-streamed answer until it has finished,
     the headers included, so a call on a slow model was silent for its whole
@@ -573,16 +595,28 @@ def with_streamed_llama_answers(chat_class: Any) -> Any:
     * a server error sent inside the stream is raised as the status error the
       same error is on a whole answer (:func:`_as_status_error`).
 
+    Each answer is read under the rule its caller named for the call
+    (``llm.stream_watch.watching``): once the rule says to end it, no further
+    chunk is read, the stream is closed, which ends the request, and the
+    answer is the chunks read up to there. Without a rule every chunk is read.
+
+    ``keep_reasoning`` leaves each reasoning piece on its chunk and in the
+    joined answer, for a dialect whose reasoning is sent back (DeepSeek's).
+
     Anything that is not a chat model class is returned as it is.
     """
     if not isinstance(chat_class, type) or not hasattr(
         chat_class, "_convert_chunk_to_generation_chunk"
     ):
         return chat_class
-    cached = _STREAMED_LLAMA_CLASSES.get(chat_class)
+    cached = _STREAMED_LLAMA_CLASSES.get((chat_class, keep_reasoning))
     if cached is not None:
         return cached
     base: Any = chat_class
+    from maljan.llm.stream_watch import awatched, watched
+
+    def _leaving(chunk: Any) -> Any:
+        return chunk if keep_reasoning else _without_reasoning(chunk)
 
     def _convert_chunk_to_generation_chunk(self: Any, chunk: Any, *args: Any, **kwargs: Any) -> Any:
         generation = base._convert_chunk_to_generation_chunk(self, chunk, *args, **kwargs)
@@ -609,8 +643,8 @@ def with_streamed_llama_answers(chat_class: Any) -> Any:
     ) -> Any:
         stream = base._astream(self, messages, stop=stop, run_manager=run_manager, **kwargs)
         try:
-            async for chunk in stream:
-                yield _without_reasoning(chunk)
+            async for chunk in awatched(stream):
+                yield _leaving(chunk)
         except Exception as exc:
             error = _as_status_error(exc)
             if error is exc:
@@ -624,8 +658,8 @@ def with_streamed_llama_answers(chat_class: Any) -> Any:
     ) -> Any:
         stream = base._stream(self, messages, stop=stop, run_manager=run_manager, **kwargs)
         try:
-            for chunk in stream:
-                yield _without_reasoning(chunk)
+            for chunk in watched(stream):
+                yield _leaving(chunk)
         except Exception as exc:
             error = _as_status_error(exc)
             if error is exc:
@@ -641,13 +675,14 @@ def with_streamed_llama_answers(chat_class: Any) -> Any:
             chunk
             async for chunk in self._astream(messages, stop=stop, run_manager=run_manager, **kwargs)
         ]
-        return _joined_answer(chunks)
+        return _joined_answer(chunks, keep_reasoning=keep_reasoning)
 
     def _generate(
         self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
     ) -> Any:
         return _joined_answer(
-            list(self._stream(messages, stop=stop, run_manager=run_manager, **kwargs))
+            list(self._stream(messages, stop=stop, run_manager=run_manager, **kwargs)),
+            keep_reasoning=keep_reasoning,
         )
 
     streamed = type(
@@ -663,7 +698,7 @@ def with_streamed_llama_answers(chat_class: Any) -> Any:
     )
     streamed.__module__ = __name__
     streamed.__qualname__ = chat_class.__qualname__
-    _STREAMED_LLAMA_CLASSES[chat_class] = streamed
+    _STREAMED_LLAMA_CLASSES[(chat_class, keep_reasoning)] = streamed
     return streamed
 
 
@@ -842,6 +877,12 @@ class OpenAIProvider:
             build_kwargs.setdefault("stream_chunk_timeout", None)
         elif compat == "deepseek":
             self._add_deepseek_fields(build_kwargs)
+            # Read as a stream (``with_streamed_deepseek_answers``), as the
+            # local server's answer is, and with the same two settings: the
+            # usage comes on the closing chunk, and before the first piece the
+            # silence is the provider's request timeout to bound.
+            build_kwargs.setdefault("stream_usage", True)
+            build_kwargs.setdefault("stream_chunk_timeout", None)
 
         # Explicit ``request_timeout`` and ``max_retries`` so the openai SDK
         # can't silently retry a stalled request three times (3 x default
@@ -877,7 +918,8 @@ class OpenAIProvider:
         if compat == "deepseek":
             # DeepSeek's reasoning is kept and sent back on its assistant turn;
             # every other dialect's request is left as langchain builds it.
-            chat_class = with_reasoning_passback(chat_class)
+            # Its answer is read as a stream and joined, the reasoning kept.
+            chat_class = with_streamed_deepseek_answers(with_reasoning_passback(chat_class))
         elif local:
             # llama.cpp reads its cap from the extras; a cap bound for one call
             # reaches them the way the model's own does. Its answer is read

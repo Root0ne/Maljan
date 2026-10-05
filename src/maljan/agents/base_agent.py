@@ -51,6 +51,7 @@ from maljan.llm.context_window import (
     window_full_error,
 )
 from maljan.llm.generation_rate import ModelCallDeadline
+from maljan.llm.stream_watch import StopRule, current_rule, watching
 from maljan.pipeline.run_state import NO_LIMIT, NoLimit, budget_line
 from maljan.pipeline.turns import with_question
 from maljan.pipeline.validation import (
@@ -2361,14 +2362,44 @@ def _submit_to_agent_loop(
     hold one: the wrapper records itself before awaiting.
     """
     running: list[asyncio.Task[Any]] = []
+    # The rule the caller's streamed answers are read under
+    # (``llm.stream_watch``), carried to the loop's task: the task runs in the
+    # loop thread's context, not the caller's.
+    rule = current_rule()
 
     async def _tracked() -> Any:
         task = asyncio.current_task()
         if task is not None:
             running.append(task)
-        return await coro
+        with watching(rule):
+            return await coro
 
     return asyncio.run_coroutine_threadsafe(_tracked(), loop), running
+
+
+def claims_repeat_rule(margin: int | None) -> StopRule:
+    """The repeated-claims check, read over an answer while it streams.
+
+    The rule the check on a finished answer applies
+    (``pipeline.validation.claims_repeated``, ``margin`` the operator's
+    ``validation.claim_repeat_margin`` or ``None``): once the answer so far
+    holds more repeated claims than the margin allows, the call is ended
+    (``llm.stream_watch``) and the answer is what was written up to there. The
+    check on that answer then finds the same and asks its one whole-answer
+    question, as it does after any answer.
+    """
+
+    def _ends(text: str) -> str | None:
+        found = claims_repeated(text, margin)
+        if found is None:
+            return None
+        return (
+            f"{found.begun} CLAIM block(s) begun, {found.distinct} distinct, "
+            f"{found.repeated} of them repeating an earlier one, more than the "
+            f"{found.margin} allowed"
+        )
+
+    return _ends
 
 
 def _cancel_and_watch(
@@ -4685,9 +4716,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         hard_timeout = hard_cap(timeout, getattr(self, "_budget_ceiling", None))
         try:
             try:
-                thread_result: dict | None = _run_coro_blocking(
-                    _invoke(), hard_timeout, label=f"react:{self.name}"
-                )
+                with BaseAnalyst._claims_watched(self):  # type: ignore[arg-type]
+                    thread_result: dict | None = _run_coro_blocking(
+                        _invoke(), hard_timeout, label=f"react:{self.name}"
+                    )
             except ModelCallDeadline as exc:
                 detail = f"model call deadline: {exc}"
                 self.logger.error("%s ReAct agent failed: %s.", self.name, detail)
@@ -5325,9 +5357,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return answer
 
             try:
-                return _run_coro_blocking(
-                    _ask(), None if budget is None else budget + 5, label=label
-                )
+                with BaseAnalyst._claims_watched(self):  # type: ignore[arg-type]
+                    return _run_coro_blocking(
+                        _ask(), None if budget is None else budget + 5, label=label
+                    )
             finally:
                 self._spend_release(slot)
 
@@ -5707,6 +5740,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         timeout, _steps = loop_limits(self.name, getattr(self, "_budget_ceiling", None))
         return self._invoke_llm_with_timeout(messages, timeout, model=model, what=what)
 
+    def _claims_watched(self) -> Any:
+        """A block whose model calls are read under the repeated-claims rule as they stream.
+
+        The margin is the one the check on the finished answer reads,
+        ``validation.claim_repeat_margin``; there is none by default.
+        """
+        margin = getattr(getattr(get_settings(), "validation", None), "claim_repeat_margin", None)
+        return watching(claims_repeat_rule(None if margin is None else int(margin)))
+
     def _invoke_llm_with_timeout(
         self,
         messages: list,
@@ -5776,7 +5818,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         hard_timeout = hard_cap(timeout, getattr(self, "_budget_ceiling", None))
         try:
             try:
-                content = _run_coro_blocking(_invoke(), hard_timeout, label=f"llm:{self.name}")
+                with BaseAnalyst._claims_watched(self):  # type: ignore[arg-type]
+                    content = _run_coro_blocking(_invoke(), hard_timeout, label=f"llm:{self.name}")
             finally:
                 # Returned or failed, the call is no longer in flight.
                 self._spend_release(spend_slot)

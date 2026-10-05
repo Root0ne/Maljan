@@ -7,6 +7,51 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from maljan.core.config import Settings
 from maljan.llm.registry import register_provider
 
+# One subclass per chat class seen, so pydantic builds each schema once.
+_WATCHED_CLASSES: dict[type, type] = {}
+
+
+def with_watched_streams(chat_class: Any) -> Any:
+    """``chat_class`` reading each streamed answer under its caller's rule (``llm.stream_watch``).
+
+    ``ChatOllama`` reads every answer as a stream, through
+    ``_iterate_over_stream`` and ``_aiterate_over_stream``, whether it is
+    invoked or streamed. Each piece is read under the rule the caller named for
+    the call; once the rule says to end the answer, no further piece is read
+    and the stream is closed, which ends the request, and the answer is the
+    pieces read up to there. Without a rule every piece is read. Anything that
+    is not such a class is returned as it is.
+    """
+    if not isinstance(chat_class, type) or not hasattr(chat_class, "_aiterate_over_stream"):
+        return chat_class
+    cached = _WATCHED_CLASSES.get(chat_class)
+    if cached is not None:
+        return cached
+    base: Any = chat_class
+    from maljan.llm.stream_watch import awatched, watched
+
+    def _iterate_over_stream(self: Any, messages: Any, stop: Any = None, **kwargs: Any) -> Any:
+        yield from watched(base._iterate_over_stream(self, messages, stop, **kwargs))
+
+    async def _aiterate_over_stream(
+        self: Any, messages: Any, stop: Any = None, **kwargs: Any
+    ) -> Any:
+        async for chunk in awatched(base._aiterate_over_stream(self, messages, stop, **kwargs)):
+            yield chunk
+
+    watched_class = type(
+        chat_class.__name__,
+        (chat_class,),
+        {
+            "_iterate_over_stream": _iterate_over_stream,
+            "_aiterate_over_stream": _aiterate_over_stream,
+        },
+    )
+    watched_class.__module__ = __name__
+    watched_class.__qualname__ = chat_class.__qualname__
+    _WATCHED_CLASSES[chat_class] = watched_class
+    return watched_class
+
 
 @register_provider("ollama")
 class OllamaProvider:
@@ -64,7 +109,9 @@ class OllamaProvider:
         # whatever the history it was built from (``maljan.llm.tool_replies``).
         from maljan.llm.tool_replies import with_answered_tool_calls
 
-        chat_class = with_answered_tool_calls(with_sized_request_timeout(ChatOllama), "ollama")
+        chat_class = with_answered_tool_calls(
+            with_sized_request_timeout(with_watched_streams(ChatOllama)), "ollama"
+        )
         return chat_class(  # type: ignore[no-any-return]
             model=model,
             client_kwargs=client_kwargs,
