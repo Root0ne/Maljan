@@ -1448,6 +1448,34 @@ def _bound_whole(text: str, limit: int) -> str:
     return text[:cut] + CUT_MARK
 
 
+# Where the run record keeps an analyst answer no claim could be read from.
+UNPARSED_ANSWERS_RECORD = "run_summary.validation.unparsed_answers"
+
+
+def unparsed_answer_kept_sentence(answer: str) -> str:
+    """What an event says of an answer no claim could be read from: never the answer."""
+    return (
+        f"The answer ({len(str(answer or '')):,} characters) could not be read as claims; "
+        f"it is kept whole in the run record ({UNPARSED_ANSWERS_RECORD})."
+    )
+
+
+def safe_answer_text(value: Any) -> str:
+    """A whole model answer, made fit to keep in the run record.
+
+    The masking a finding row gets (:func:`safe_finding_value`) — every
+    configured value, a URL's userinfo and a credential-named query value; the
+    whole event scrub where no values are registered — with the answer's own
+    lines kept and no bound: the answer is as long as it is, and kept to be
+    read for why it could not be parsed.
+    """
+    text = str(value or "")
+    if not _rows_kept_as_written():
+        return scrub_keeping_layout(text)
+    kept = _mask_short_secrets(_mask_configured_values(text))
+    return _URL_RUN.sub(_without_credentials, kept)
+
+
 def scrub_keeping_layout(text: Any) -> str:
     """The same four passes, with the text's own lines and indentation kept.
 
@@ -1677,7 +1705,7 @@ def emit_validation_feedback(
     retry_index: int,
     state: str = VALIDATION_RETRIED,
     path: str = "",
-    answer: str = "",
+    answer_kept: str = "",
 ) -> None:
     """One violation, and what became of it.
 
@@ -1701,9 +1729,12 @@ def emit_validation_feedback(
     different claims; it is ``""`` for a violation about the answer as a whole,
     where ``(agent, code)`` is already the whole key.
 
-    ``answer`` is the producer's answer as written, for a violation that says
-    none of it could be read: the event is where the run keeps it, whole, so
-    the cause can be read later. Left out when empty.
+    ``answer_kept`` is one short sentence, for a violation that says none of
+    the producer's answer could be read: that it could not, how long it was,
+    and where the run record keeps it (``unparsed_answer_kept_sentence``). The
+    answer itself never rides on an event: events reach every connected
+    browser, the Redis stream and ``job_events``, and each field on them is
+    bounded. Left out when empty.
     """
     emit(
         sink,
@@ -1716,7 +1747,7 @@ def emit_validation_feedback(
             "retry_index": max(0, int(retry_index)),
             "state": str(state),
             "path": str(path),
-            **({"answer": str(answer)} if answer else {}),
+            **({"answer_kept": str(answer_kept)} if answer_kept else {}),
         },
     )
 

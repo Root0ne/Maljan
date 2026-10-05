@@ -812,6 +812,15 @@ def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = Tru
     for code in not_run:
         if code not in caller.validation_not_run:
             caller.validation_not_run.append(code)
+    # The callee's answers no claim could be read from, each naming the
+    # callee, for the run record the caller's stage hands on.
+    drain_unparsed = getattr(callee, "drain_unparsed_answers", None)
+    unparsed = list(drain_unparsed() or []) if callable(drain_unparsed) else []
+    if unparsed:
+        with _the_caller_s_lock(caller):
+            kept = getattr(caller, "validation_unparsed_answers", None)
+            if isinstance(kept, list):
+                kept.extend(unparsed)
 
 
 def _the_caller_s_lock(caller: Any) -> Any:
@@ -838,6 +847,9 @@ def _drop_the_callee_s_validation_state(callee: Any) -> None:
     try:
         callee.drain_validation_findings()
         callee.drain_validation_not_run()
+        drain_unparsed = getattr(callee, "drain_unparsed_answers", None)
+        if callable(drain_unparsed):
+            drain_unparsed()
     except Exception as exc:  # noqa: BLE001
         logger.debug("delegation: the callee's validation state could not be read (%s).", exc)
 

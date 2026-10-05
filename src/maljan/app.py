@@ -498,6 +498,7 @@ class MaljanApp:
             "validation_fed_back": {},
             "revision_replacements": [],
             "validation_not_run": [],
+            "validation_unparsed_answers": [],
             "triage_facts": {},
             "nudge_retry_modes": {},
             "budget_records": {},

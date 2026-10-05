@@ -81,6 +81,7 @@ from maljan.pipeline.validation import (
     parse_violations,
     retry_with_feedback_sync,
     undescribed_decompiles,
+    unparsed_answer_rows,
     validate_isr,
     validity_check_available,
 )
@@ -3440,6 +3441,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # retry fixed leaves no other trace, and a run summary that counts only
         # the leftovers cannot say what the retry was for.
         self.validation_fed_back: dict[str, int] = {}
+        # Every answer of this analyst no claim could be read from, whole and
+        # masked, for the run record (``validation.unparsed_answer_rows``).
+        self.validation_unparsed_answers: list[dict[str, str]] = []
         # Whether the last tool loop ended on something that was not a report,
         # after its one nudge. Read by ``_text_to_isr`` so the ISR says why it
         # is empty instead of leaving the reader to infer it from a claim list.
@@ -6729,7 +6733,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             ]
 
         if nudged and not only_cut:
-            self.validation_findings.extend(parse_violations(isr))
+            unasked = parse_violations(isr)
+            self.validation_findings.extend(unasked)
+            self._keep_unparsed_answers(unasked, isr.revision_round)
 
         # The findings and artifacts the answer being checked carried are its
         # own from here on: a retry's are kept apart (``_parse``) and go with
@@ -7054,12 +7060,19 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         try:
             tally = ValidationTally()
+
+            def _shown(shown: Sequence[Violation]) -> None:
+                tally.count(shown)
+                # An answer no claim could be read from goes to the run
+                # record whole; its event says only that it did.
+                self._keep_unparsed_answers(shown, isr.revision_round)
+
             revised, violations, retries = retry_with_feedback_sync(
                 _run,
                 messages,
                 [_validator],
                 parse=_parse,
-                on_feedback=tally.count,
+                on_feedback=_shown,
                 sink=self._event_sink(),
                 agent=str(self.name),
                 stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
@@ -7076,6 +7089,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             return isr
 
         self.validation_retries += retries
+        # A retry still unread is kept too, where it is not the answer kept
+        # above already.
+        self._keep_unparsed_answers(violations, isr.revision_round)
         for code, count in tally.by_code.items():
             self.validation_fed_back[code] = self.validation_fed_back.get(code, 0) + count
 
@@ -7149,6 +7165,22 @@ class BaseAnalyst(BudgetMeter, ABC):
         mode = getattr(self, "_nudge_retry_mode", None)
         self._nudge_retry_mode = None
         return str(mode) if mode else None
+
+    def _keep_unparsed_answers(self, violations: Sequence[Violation], revision_round: int) -> None:
+        """Keep each answer no claim could be read from for the run record, once."""
+        kept = getattr(self, "validation_unparsed_answers", None)
+        if not isinstance(kept, list):
+            kept = []
+            self.validation_unparsed_answers = kept
+        for row in unparsed_answer_rows(str(self.name), int(revision_round or 0), violations):
+            if row not in kept:
+                kept.append(row)
+
+    def drain_unparsed_answers(self) -> list[dict[str, str]]:
+        """The answers no claim could be read from, handed over once."""
+        rows = list(getattr(self, "validation_unparsed_answers", None) or [])
+        self.validation_unparsed_answers = []
+        return rows
 
     def drain_validation_not_run(self) -> list[str]:
         """The checks that could not run, handed over once."""

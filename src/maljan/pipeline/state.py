@@ -328,6 +328,12 @@ class AnalysisState(TypedDict):
     # add across the analysts that ran in parallel.
     validation_fed_back: Annotated[dict[str, int], _merge_counts]
 
+    # Every analyst answer no claim could be read from, whole and masked, one
+    # row per answer (``validation.unparsed_answer_rows``). Append-only; the
+    # judge reads them into ``run_summary.validation.unparsed_answers``. Never
+    # on an event: the event that asks says only where the answer is kept.
+    validation_unparsed_answers: Annotated[list[dict[str, str]], operator.add]
+
     # A revision that stood with fewer claims than the answer it replaced, one
     # sentence each (``nodes.revision_replacement_sentence``). Append-only:
     # every round adds its own; the judge reads them into

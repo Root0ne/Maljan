@@ -45,7 +45,9 @@ from maljan.pipeline.events import (
     VALIDATION_SURVIVED,
     EventSink,
     emit_validation_feedback,
+    safe_answer_text,
     safe_finding_value,
+    unparsed_answer_kept_sentence,
 )
 from maljan.schemas.evidence import answer_not_shown, entry_ids_in
 from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
@@ -7097,10 +7099,15 @@ class _FeedbackFeed:
             # fold together and two violations of one code on different claims
             # do not.
             path=str(violation.path),
-            # The answer that could not be read, on the line that asks about
-            # it and on the line that says it survived; the line that says it
-            # was resolved is about the same answer, kept once already.
-            answer=str(violation.answer) if state != VALIDATION_RESOLVED else "",
+            # Of an answer that could not be read, one sentence saying so and
+            # where the run record keeps it, on the line that asks and the line
+            # that says it survived. Never the answer: the event goes to every
+            # connected browser, the Redis stream and ``job_events``.
+            answer_kept=(
+                unparsed_answer_kept_sentence(violation.answer)
+                if violation.answer and state != VALIDATION_RESOLVED
+                else ""
+            ),
         )
 
 
@@ -7292,11 +7299,32 @@ def retry_with_feedback_sync[T](
 # ---------------------------------------------------------------------------
 
 
+def unparsed_answer_rows(
+    agent: str, revision_round: int, violations: Sequence[Violation]
+) -> list[dict[str, str]]:
+    """The answers no claim could be read from, as the run record keeps them.
+
+    One row per such question, naming the analyst and its round, with the
+    answer whole and masked as model text in the record is
+    (``events.safe_answer_text``). Bounded only by the answer itself.
+    """
+    return [
+        {
+            "agent": str(agent),
+            "round": str(int(revision_round or 0)),
+            "answer": safe_answer_text(violation.answer),
+        }
+        for violation in violations
+        if violation.code == UNPARSED_ANSWER_CODE and violation.answer
+    ]
+
+
 def validation_metrics(
     retries: int,
     unresolved: Sequence[tuple[str, Violation]],
     fed_back: Mapping[str, int] | None = None,
     not_run: Sequence[str] | None = None,
+    unparsed_answers: Sequence[Mapping[str, str]] | None = None,
 ) -> dict[str, Any]:
     """``run_summary.validation`` from the run's retries, corrections and leftovers.
 
@@ -7330,12 +7358,18 @@ def validation_metrics(
                 **({"subject": violation.subject} if violation.subject else {}),
             }
         )
-    return {
+    out: dict[str, Any] = {
         "retries": int(retries),
         "by_code": dict(sorted(by_code.items())),
         "unresolved": rows,
         "not_run": sorted({str(code) for code in (not_run or []) if str(code).strip()}),
     }
+    # The answers no claim could be read from, whole, so why can be read
+    # later (``unparsed_answer_rows``). Left out when there were none.
+    kept = [dict(row) for row in (unparsed_answers or []) if isinstance(row, Mapping)]
+    if kept:
+        out["unparsed_answers"] = kept
+    return out
 
 
 def corroboration(
