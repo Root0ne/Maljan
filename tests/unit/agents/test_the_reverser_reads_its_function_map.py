@@ -128,7 +128,7 @@ def test_every_call_runs_and_the_map_rides_the_latest_answer() -> None:
     last = [str(m.content) for m in model.seen[2] if isinstance(m, ToolMessage)][-1]
     assert last.startswith(f"[ev_0002]\n{LISTING}")
     assert FUNCTION_MAP_HEAD in last
-    assert "- 0x1360bc0904c (FUN_1360bc0904c): decompiled in ev_0001, ev_0002" in last
+    assert "also visited: 0x1360bc0904c" in last
     assert "ledger_answers" not in analyst.drain_budget_records()[0]
 
 

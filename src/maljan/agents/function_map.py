@@ -250,9 +250,11 @@ def _floss_artefacts(found: FunctionArtefacts, data: Mapping[str, Any], entry_id
             address = _hex(row.get("function"))
             if address is None:
                 continue
-            base = next((b for b in found.image_bases if address > b), None)
-            if base is not None:
-                address -= base
+            # Made an offset only by the one image base the run read; with no
+            # base, or with several, it is kept as FLOSS wrote it.
+            bases = found.image_bases
+            if len(bases) == 1 and address > bases[0]:
+                address -= bases[0]
             else:
                 virtual = True
         found.add(address, Artefact("decoded", str(row["string"]), entry_id), virtual=virtual)
@@ -314,7 +316,34 @@ def _merged(pack: FunctionArtefacts | None, own: FunctionArtefacts) -> FunctionA
 
 
 def _same(a: int | None, b: int | None, bases: Sequence[int]) -> bool:
-    return a is not None and b is not None and _one_function(a, b, bases)
+    """Whether two addresses are one function: equal, or apart by an image base the run read.
+
+    With a base known this is the decompiled-not-described check's own rule
+    (``_one_function``). With none known, only equal addresses are one
+    function: the check's 64 KiB fallback is a guess, and the map does not
+    guess.
+    """
+    if a is None or b is None:
+        return False
+    if a == b:
+        return True
+    return bool(bases) and _one_function(a, b, bases)
+
+
+def _fold_spellings(visited: list[MapEntry], bases: Sequence[int]) -> list[MapEntry]:
+    """``visited`` with an offset and its virtual address made one entry, at the larger address."""
+    out: list[MapEntry] = []
+    for entry in visited:
+        into = next((e for e in out if _same(e.address, entry.address, bases)), None)
+        if into is None:
+            out.append(entry)
+            continue
+        if entry.address is not None and into.address is not None:
+            into.address = max(into.address, entry.address)
+        into.names = tuple(dict.fromkeys([*into.names, *entry.names]))
+        into.decompiled = tuple(dict.fromkeys([*into.decompiled, *entry.decompiled]))
+        into.listed = tuple(dict.fromkeys([*into.listed, *entry.listed]))
+    return out
 
 
 def _first_sentence(text: str) -> str:
@@ -335,15 +364,20 @@ def build_function_map(
     entries. A listed one is a disassembly call of a whole function, or one at
     an address that is a function the map already knows. Artefacts join a
     visited function when its address and the artefact's offset are one
-    function (``_one_function``: equal, or apart by a stated image base).
+    function (``_same``: equal, or apart by an image base the run read). An
+    offset and its virtual address are one visited function the same way; with
+    no base known, both are kept as written.
     """
     entries = [e for e in own if getattr(e, "ok", True)]
     found = _merged(artefacts, function_artefacts(entries))
     bases = tuple(dict.fromkeys([*image_bases, *found.image_bases, *image_bases_in(entries)]))
-    visited: list[MapEntry] = [
-        MapEntry(address=f.address, names=f.names, decompiled=f.entries)
-        for f in decompiled_functions(entries)
-    ]
+    visited: list[MapEntry] = _fold_spellings(
+        [
+            MapEntry(address=f.address, names=f.names, decompiled=f.entries)
+            for f in decompiled_functions(entries)
+        ],
+        bases,
+    )
     known = [e.address for e in visited if e.address is not None] + list(found.by_function)
     for entry in entries:
         tool = str(getattr(entry, "tool", "") or "")
@@ -400,12 +434,18 @@ def build_function_map(
 
 
 def _kinds(artefacts: Sequence[Artefact]) -> list[tuple[str, int, list[str]]]:
-    """``(kind, count, entry ids)`` in a fixed order of kinds, for the kinds present."""
+    """``(kind, count, entry ids)`` in a fixed order of kinds, for the kinds present.
+
+    The count is of distinct values: a text referred to from two places of a
+    function, or an answer two entries recorded, is one artefact, and every
+    entry that holds it is cited.
+    """
     out: list[tuple[str, int, list[str]]] = []
     for kind in _KIND_ORDER:
         of = [a for a in artefacts if a.kind == kind]
         if of:
-            out.append((kind, len(of), list(dict.fromkeys(a.entry for a in of if a.entry))))
+            distinct = len({a.value for a in of})
+            out.append((kind, distinct, list(dict.fromkeys(a.entry for a in of if a.entry))))
     return out
 
 
@@ -450,13 +490,25 @@ def _unvisited_item(found: FunctionMap, address: int, artefacts: Sequence[Artefa
 def function_map_block(found: FunctionMap) -> str:
     """The map as the model reads it, or ``""`` when nothing is visited or tied.
 
-    A head, the coverage line, one line per visited function, and one line of
-    the functions reaching artefacts that were not visited.
+    A head, the coverage line, one line per visited function that reaches an
+    artefact or has a summary, one line of the other visited addresses, and one
+    line of the functions reaching artefacts that were not visited.
     """
     if found.empty():
         return ""
     lines = [FUNCTION_MAP_HEAD, f"coverage: {found.coverage()}"]
-    lines.extend(_visited_line(entry) for entry in found.visited)
+    said = [e for e in found.visited if e.artefacts or e.summary]
+    bare = [e for e in found.visited if not (e.artefacts or e.summary)]
+    lines.extend(_visited_line(entry) for entry in said)
+    if bare:
+        # A visit with nothing but its entry id: the transcript already
+        # stamps the id on the listing, so the address is enough here.
+        lines.append(
+            "also visited: "
+            + ", ".join(
+                hex(e.address) if e.address is not None else _where(None, e.names) for e in bare
+            )
+        )
     if found.unvisited:
         lines.append(
             "not visited, reaching artefacts: "

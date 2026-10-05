@@ -254,7 +254,7 @@ class TestTheBlockTheModelReads:
             "- 0x1360bc0904c (FUN_1360bc0904c): decompiled in ev_0031; reaches 2 resolved "
             "names (ev_0020); summary: FUN_1360bc0904c opens the thing."
         )
-        assert lines[3] == "- 0x1360bc0b344: listed in ev_0050"
+        assert lines[3] == "also visited: 0x1360bc0b344"
 
     def test_the_unvisited_ones_are_one_line_by_address(self) -> None:
         last = function_map_block(self._map()).splitlines()[-1]
@@ -280,3 +280,96 @@ class TestTheBlockTheModelReads:
         found = build_function_map([], function_artefacts([_floss()]), [], ())
 
         assert "offset 0x9484 (1 string FLOSS decoded; ev_0019)" in function_map_block(found)
+
+
+class TestCountsAndAddresses:
+    def test_a_text_referred_to_twice_from_one_function_is_one_decoded_text(self) -> None:
+        output = {
+            "image_base": hex(BASE),
+            "results": [
+                {
+                    "text": "same text",
+                    "references": [
+                        {"function": "0x2200", "passed_to": {"call_at": "0x2281"}},
+                        {"function": "0x2200", "passed_to": {"call_at": "0x2301"}},
+                    ],
+                }
+            ],
+        }
+        blobs = _entry("ev_0021", "decode_string_blobs", {}, json.dumps(output))
+        found = build_function_map(
+            [_decompiled("ev_0031", "0x1360bc02200")], function_artefacts([blobs]), [], (BASE,)
+        )
+
+        assert "reaches 1 decoded text (ev_0021), 1 call-site fact (ev_0021)" in (
+            function_map_block(found)
+        )
+
+    def test_the_same_answer_recorded_twice_is_counted_once_and_cited_twice(self) -> None:
+        pack = function_artefacts([_hashes("ev_0020")])
+        own = [_decompiled("ev_0031", "0x1360bc0904c"), _hashes("ev_0040")]
+
+        block = function_map_block(build_function_map(own, pack, [], (BASE,)))
+
+        assert "reaches 2 resolved names (ev_0020, ev_0040)" in block
+
+    def test_an_offset_and_its_virtual_address_are_one_function_through_a_stated_base(
+        self,
+    ) -> None:
+        own = [_decompiled("ev_0031", "0x3c7c"), _decompiled("ev_0032", "0x1360bc03c7c")]
+
+        found = build_function_map(own, None, [], (BASE,))
+
+        assert [(e.address, e.decompiled) for e in found.visited] == [
+            (BASE + 0x3C7C, ("ev_0031", "ev_0032"))
+        ]
+
+    def test_with_no_base_known_two_spellings_stay_as_written(self) -> None:
+        own = [_decompiled("ev_0031", "0x3c7c"), _decompiled("ev_0032", "0x1360bc03c7c")]
+
+        found = build_function_map(own, None, [], ())
+
+        assert [e.address for e in found.visited] == [0x3C7C, BASE + 0x3C7C]
+
+    def test_with_no_base_known_a_listing_64_kib_away_is_another_function(self) -> None:
+        own = [
+            _decompiled("ev_0001", "0x401230"),
+            _entry("ev_0002", "disassemble_function", {"address": "0x411230"}, "nop"),
+        ]
+
+        found = build_function_map(own, None, [], ())
+
+        assert [(e.address, e.decompiled, e.listed) for e in found.visited] == [
+            (0x401230, ("ev_0001",), ()),
+            (0x411230, (), ("ev_0002",)),
+        ]
+
+    def test_a_floss_virtual_address_with_two_bases_known_is_kept_as_written(self) -> None:
+        other = 0x7FF600000000
+        hashes = _hashes()
+        payload = _entry(
+            "ev_0022",
+            "resolve_api_hashes",
+            {},
+            json.dumps({"image_base": hex(other), "hits": []}),
+        )
+        floss = _entry(
+            "ev_0019",
+            "floss",
+            {},
+            json.dumps(
+                {"strings": [{"kind": "decoded", "string": "a", "function": hex(other + 0x10)}]}
+            ),
+        )
+
+        found = function_artefacts([hashes, payload, floss])
+
+        assert other + 0x10 in found.by_function
+        assert other + 0x10 in found.virtual
+
+    def test_bare_visits_are_folded_into_one_line(self) -> None:
+        own = [_decompiled("ev_0001", "0x1360bc03c7c"), _decompiled("ev_0002", "0x1360bc03ce4")]
+
+        lines = function_map_block(build_function_map(own, None, [], (BASE,))).splitlines()
+
+        assert lines[2:] == ["also visited: 0x1360bc03c7c, 0x1360bc03ce4"]

@@ -249,6 +249,18 @@ class TestOtherToolBuilders:
             "the analysis server tied to them, 1 of them visited."
         )
 
+    def test_the_coverage_line_counts_one_function_once_whatever_the_spelling(self) -> None:
+        program = {"image_base": "0x400000", "name": "a.exe"}
+        entries = [
+            _entry("get_current_program_info", program, agent="reverser"),
+            _entry("decompile_function", "void f() { }", seq=2, args={"address": "0x1310"}),
+            _entry("decompile_function", "void f() { }", seq=3, args={"address": "0x401310"}),
+        ]
+
+        text = _by_key(build_sections(entries))["functions_examined"].text
+
+        assert text.startswith("Function map: 1 function visited (1 decompiled);")
+
     def test_a_run_that_read_no_function_has_no_coverage_line(self) -> None:
         sections = _by_key(build_sections([_entry("list_functions", "a\nb")]))
 
