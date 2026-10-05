@@ -236,3 +236,17 @@ def test_every_line_is_kept_in_one_of_the_three_lists() -> None:
     assert result.standing == [lines[2]]
     assert len(result.closed) == 1
     assert len(result.settled) == 1
+
+
+def test_each_cited_entry_that_states_a_number_of_the_line_is_named() -> None:
+    line = "BETA_REVERSER Claim 2 counts 41 [ev_0007]; GAMMA Claim 1 counts 40 [ev_0008]."
+    result = settle_contradictions(
+        [line],
+        {"beta_reverser": _isr("beta_reverser", 3), "gamma": _isr("gamma", 2)},
+        [_count_entry(), _count_entry("ev_0008", 40)],
+        AGENTS,
+    )
+
+    assert result.standing == []
+    assert "ev_0007" in result.settled[0] and "total = 41" in result.settled[0]
+    assert "ev_0008" in result.settled[0] and "total = 40" in result.settled[0]

@@ -158,6 +158,10 @@ def _settled_by_a_count(
             if 1 <= number <= len(claims):
                 ref = str(getattr(claims[number - 1], "evidence_ref", "") or "")
                 cited.extend(i for i in _ENTRY_ID.findall(ref) if i not in cited)
+    # Every cited entry that states one of the line's numbers is named: two
+    # calls of one tool with other arguments can count differently, and the
+    # platform states each count rather than choosing between them.
+    statements: list[str] = []
     for entry_id in cited:
         if entry_id not in entries:
             continue
@@ -165,11 +169,10 @@ def _settled_by_a_count(
         stated = [(key, value) for key, value in _counts_of(structured) if value in numbers]
         if stated:
             said = ", ".join(f"{key} = {value}" for key, value in stated)
-            return (
-                f"Settled from the ledger: entry {entry_id}"
-                f"{f' ({tool})' if tool else ''} states {said}. Line: {line}"
-            )
-    return ""
+            statements.append(f"entry {entry_id}{f' ({tool})' if tool else ''} states {said}")
+    if not statements:
+        return ""
+    return f"Settled from the ledger: {'; '.join(statements)}. Line: {line}"
 
 
 def settle_contradictions(
