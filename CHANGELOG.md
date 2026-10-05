@@ -2390,7 +2390,12 @@ change landed on `main`.
 - **An analyst's answer that repeats its claims past the margin is ended while
   it streams** (llama.cpp, Ollama and DeepSeek, which is now read as a stream),
   and the whole-answer question is asked of what it wrote; a path that does not
-  stream keeps the check after the answer.
+  stream keeps the check after the answer. The rule is read line by line at a
+  flat cost; the ended answer's question says it was ended, its in-call pace is
+  recorded, and the spend ceiling is charged a stated estimate of its usage.
+- **A connection that drops while an answer streams is an `APIConnectionError`**
+  (llama.cpp, DeepSeek, Ollama), as on a whole answer, so the loop's replay and
+  the connection retry read it again.
 - **A tool answer the conversation had no room for is recorded as cut**
   (`truncated`, with a statement of the cut), never as an ok and empty answer,
   so the decompiled-not-described check, the function map and the report's

@@ -1155,10 +1155,14 @@ answer the server would have sent whole: the same text, finish reason,
 ik_llama.cpp repeats a running total on every chunk), and tool calls read as
 strictly as a whole answer's, so a call cut mid-argument stays an invalid
 call. A server error sent inside the stream is raised as the status error it
-is on a whole answer. Ollama's client streams every answer. A hosted API's
-answer is read whole, as before, and its first piece is its whole answer, so
-there the provider's timeout still bounds the call until the model's pace is
-measured.
+is on a whole answer, and a connection that drops while the answer streams as
+the `APIConnectionError` it is on a whole answer. Ollama's client streams every
+answer. DeepSeek (`compat: deepseek`) is read as a stream too, its reasoning
+kept and sent back, so its calls take the streamed deadline: the pace of the
+call's own pieces, silence before the first piece and after the last. Another
+hosted API's answer is read whole, as before, and its first piece is its whole
+answer, so there the provider's timeout still bounds the call until the model's
+pace is measured.
 
 The other fixed limits were decided one by one: `core.negotiation.max_iterations`
 stays an explicit setting (5), the runaway stop on a negotiation that never
