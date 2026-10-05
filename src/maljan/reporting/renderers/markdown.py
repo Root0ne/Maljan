@@ -1881,6 +1881,12 @@ class MarkdownRenderer:
                 lines.append(_item(str(sentence)))
             for sentence in negotiation.get("mediation_notes") or []:
                 lines.append(_item(str(sentence)))
+            # What the platform recorded of the debate: values a revision
+            # states nowhere, the lines the mediator marked not blocking and the
+            # ledger counts put to it. Each sentence is written defanged.
+            for key in ("dropped_claims", "not_blocking", "ledger_facts"):
+                for sentence in negotiation.get(key) or []:
+                    lines.append(_item(str(sentence)))
         for line in generation_lines(run_summary.get("generation")):
             lines.append(_item(line))
         ungrounded = run_summary.get("sections_without_evidence")

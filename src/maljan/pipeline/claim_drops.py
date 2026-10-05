@@ -1,183 +1,158 @@
-"""Claims a revision dropped, and whether a revision changed anything at all.
+"""Values a revision no longer states, and whether a revision is the answer in force again.
 
-A revision replaces the analyst's answer in force. What it no longer says was
-gone without a trace, and a mapping a reverser had read in one round was in no
-final answer. This module reads a claim's content as the values it states:
+A revision replaces the analyst's answer in force, and what it no longer said
+was gone without a trace. The platform records, per analyst, round and claim,
+the values of the answer in force that appear nowhere in the revision's whole
+text: its answer as written, its claims, their evidence and techniques, its
+findings and its disputes. Nothing is asked; the model decides what its
+answer is, and the record says what left it.
 
-- an address or a constant written in hex (``0x…``), compared by value;
+A claim's values:
+
+- a number in hex (``0x…``) or in decimal, compared as one number, so ``0xf``
+  and ``15`` are the same value;
 - an ATT&CK technique id, in the claim text or on its technique line;
-- a quoted value, in backticks or double quotes.
+- a quoted value with no space inside (in backticks or double quotes); quoted
+  prose is words, not a value.
 
-These are the kinds of fact the report carries: a mapping, a command id, a
-configuration value. A claim of the answer in force with at least one value is
-**dropped** when a value it states is in no claim and no finding of the
-revision. A dropped claim is withdrawn when the revision's answer has a
-``WITHDRAWN:`` line naming one of its values and a reason after a dash; any
-other is asked about once (``claims_dropped_violation``), and what the analyst
-answers stands. A claim that states no value is not tracked: rewording it is
-not a drop the platform can tell from a change of words.
+The search is generous about spelling, because the record must be right
+whenever it says a value is gone: a decompiler's name (``FUN_``, ``sub_``,
+``fcn.``, ``LAB_``, ``loc_``) carries its address under any image base aligned
+to 64 KiB, and a defanged host or URL is the value it defangs.
 
-``revision_changed`` is the debate's convergence test: a revision that wrote
-the same claims (by their values and technique, or by their words where they
-state no value), the same techniques and the same findings changed nothing.
+``answer_unchanged`` is the debate's convergence test, a fact of the same
+kind: a revision whose text is the answer in force again after whitespace
+changed nothing.
 """
 
 from __future__ import annotations
 
 import re
-from collections import Counter
-from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from maljan.pipeline.events import safe_finding_value
-from maljan.pipeline.validation import Violation
-
-CLAIMS_DROPPED_CODE = "isr.claims_dropped"
-
-# The label of the line a revision withdraws a claim on.
-WITHDRAWN_LABEL = "WITHDRAWN:"
-
 _HEX = re.compile(r"(?<![0-9A-Za-z_])0x([0-9a-fA-F]+)(?![0-9A-Za-z_])")
+_DECIMAL = re.compile(r"(?<![\w.%-])(\d+)(?![\w%]|\.\d)")
 _TECHNIQUE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
-_QUOTED = re.compile(r"`([^`\n]{2,})`|\"([^\"\n]{2,})\"")
-# A withdrawal line: the label, with any list marker or emphasis around it.
-_WITHDRAWN_LINE = re.compile(
-    r"^[\s>*_`#-]*(?:\d+[.)]\s*)?[*_`]*withdrawn[*_`]*\s*:[*_`]*\s*(.*)$", re.IGNORECASE
+_QUOTED = re.compile(r"`([^`\s]{2,})`|\"([^\"\s]{2,})\"")
+# A decompiler's own name for a function or a label: a fixed prefix and the
+# address in hex.
+_DECOMPILER_NAME = re.compile(
+    r"(?<![0-9A-Za-z_])(?:fun|sub|fcn|lab|loc|func)[_.]([0-9a-fA-F]{1,16})(?![0-9A-Za-z_])",
+    re.IGNORECASE,
 )
-# What separates a withdrawal's claim from its reason.
-_REASON_SEPARATOR = re.compile(r"\s+(?:—|–|--|-)\s+|\s+because\s+", re.IGNORECASE)
+# Where a loaded image's base may sit: a multiple of 64 KiB. A decompiler's
+# name and a claim's address are one address when they differ by a positive
+# multiple of it.
+_IMAGE_BASE_ALIGNMENT = 0x10000
 
 
-def _hex_values(text: str) -> set[str]:
-    return {f"0x{int(m.group(1), 16):x}" for m in _HEX.finditer(text)}
+def _refanged(text: str) -> str:
+    """``text`` with the usual defanging undone: ``[.]``, ``(.)``, ``[:]``, ``hxxp``."""
+    out = re.sub(r"\[(\.|:)\]|\((\.)\)", lambda m: m.group(1) or m.group(2), str(text or ""))
+    return re.sub(r"\bhxxp", "http", out, flags=re.IGNORECASE)
+
+
+def _without_hex_and_ids(text: str) -> str:
+    text = _HEX.sub(" ", text)
+    text = _DECOMPILER_NAME.sub(" ", text)
+    text = _TECHNIQUE.sub(" ", text)
+    return re.sub(r"\bev_\d+\b", " ", text)
 
 
 def claim_values(text: str, technique_id: str | None = "") -> frozenset[str]:
-    """The values a claim states: hex values by value, technique ids, quoted values casefolded."""
-    values: set[str] = set(_hex_values(text))
-    values.update(_TECHNIQUE.findall(text))
+    """The values a claim states: numbers (hex as ``0x…``), technique ids, quoted values."""
+    plain = _refanged(text)
+    values: set[str] = {f"0x{int(m.group(1), 16):x}" for m in _HEX.finditer(plain)}
+    values.update(_TECHNIQUE.findall(plain))
     if technique_id and _TECHNIQUE.fullmatch(str(technique_id).strip()):
         values.add(str(technique_id).strip())
-    for match in _QUOTED.finditer(text):
+    for match in _QUOTED.finditer(plain):
         quoted = (match.group(1) or match.group(2) or "").strip().casefold()
         if len(quoted) >= 2:
             values.add(quoted)
+    values.update(str(int(n)) for n in _DECIMAL.findall(_without_hex_and_ids(plain)))
     return frozenset(values)
 
 
-def _values_of_claim(claim: Any) -> frozenset[str]:
-    return claim_values(
-        str(getattr(claim, "claim", "") or ""), getattr(claim, "technique_id", None) or ""
+@dataclass(frozen=True)
+class _Searched:
+    numbers: set[int]
+    names: set[int]
+    techniques: set[str]
+    folded: str
+
+
+def _searched(text: str) -> _Searched:
+    plain = _refanged(text)
+    numbers = {int(m.group(1), 16) for m in _HEX.finditer(plain)}
+    names = {int(m.group(1), 16) for m in _DECOMPILER_NAME.finditer(plain)}
+    numbers.update(int(n) for n in _DECIMAL.findall(_without_hex_and_ids(plain)))
+    return _Searched(
+        numbers=numbers | names,
+        names=names,
+        techniques=set(_TECHNIQUE.findall(plain)),
+        folded=plain.casefold(),
     )
 
 
-def _carried_text(isr: Any) -> str:
-    """Everything a revision states: its claims, their techniques and its findings."""
-    parts: list[str] = []
-    for claim in getattr(isr, "claims", None) or []:
+def _is_stated(value: str, searched: _Searched) -> bool:
+    if _TECHNIQUE.fullmatch(value):
+        return value in searched.techniques
+    number: int | None = None
+    if re.fullmatch(r"0x[0-9a-f]+", value):
+        number = int(value, 16)
+    elif value.isdigit():
+        number = int(value)
+    if number is not None:
+        if number in searched.numbers:
+            return True
+        return any(
+            name > number and (name - number) % _IMAGE_BASE_ALIGNMENT == 0
+            for name in searched.names
+        )
+    return value in searched.folded
+
+
+def _whole_text(revision: Any, answer: str) -> str:
+    """Everything a revision states: answer, claims, evidence, techniques, findings, disputes."""
+    parts: list[str] = [str(answer or ""), str(getattr(revision, "answer_text", "") or "")]
+    for claim in getattr(revision, "claims", None) or []:
         parts.append(str(getattr(claim, "claim", "") or ""))
+        parts.append(str(getattr(claim, "evidence_ref", "") or ""))
         parts.append(str(getattr(claim, "technique_id", "") or ""))
-    for finding in getattr(isr, "findings", None) or []:
+    for finding in getattr(revision, "findings", None) or []:
         parts.append(str(getattr(finding, "title", "") or ""))
         parts.append(str(getattr(finding, "detail", "") or ""))
         parts.extend(str(t) for t in getattr(finding, "technique_ids", None) or [])
+    parts.extend(str(item) for item in getattr(revision, "dissent_items", None) or [])
     return "\n".join(parts)
 
 
-def _is_carried(value: str, hexes: set[str], techniques: set[str], folded: str) -> bool:
-    if value.startswith("0x") and _HEX.fullmatch(value):
-        return value in hexes
-    if _TECHNIQUE.fullmatch(value):
-        return value in techniques
-    return value in folded
-
-
-def _withdrawals(answer: str) -> list[tuple[frozenset[str], str]]:
-    """``(values named, reason)`` of each ``WITHDRAWN:`` line of an answer."""
-    found: list[tuple[frozenset[str], str]] = []
-    for line in str(answer or "").splitlines():
-        match = _WITHDRAWN_LINE.match(line)
-        if match is None:
-            continue
-        rest = match.group(1).strip()
-        parts = _REASON_SEPARATOR.split(rest, maxsplit=1)
-        named, reason = (parts[0], parts[1].strip()) if len(parts) == 2 else (rest, "")
-        if not re.search(r"[A-Za-z]", reason):
-            reason = ""
-        found.append((claim_values(named) | claim_values(rest), reason))
-    return found
-
-
 @dataclass(frozen=True)
-class DroppedClaim:
-    """One claim of the answer in force a revision no longer carries."""
+class DroppedValues:
+    """The values of one claim of the answer in force a revision states nowhere."""
 
     claim: str
-    values: tuple[str, ...]
     missing: tuple[str, ...]
-    # The reason the revision withdrew it with, or ``""`` when it did not.
-    reason: str = ""
 
 
-def dropped_claims(in_force: Any, revision: Any) -> list[DroppedClaim]:
-    """The claims of ``in_force`` with a value ``revision`` no longer carries, in order."""
+def dropped_values(in_force: Any, revision: Any, answer: str = "") -> list[DroppedValues]:
+    """Each claim of ``in_force`` with values ``revision`` states nowhere, in order."""
     if in_force is None or revision is None:
         return []
-    carried = _carried_text(revision)
-    hexes = _hex_values(carried)
-    techniques = set(_TECHNIQUE.findall(carried))
-    folded = carried.casefold()
-    withdrawals = _withdrawals(
-        str(getattr(revision, "answer_text", "") or "")
-        + "\n"
-        + "\n".join(str(item) for item in getattr(revision, "dissent_items", None) or [])
-    )
-    dropped: list[DroppedClaim] = []
+    searched = _searched(_whole_text(revision, answer))
+    dropped: list[DroppedValues] = []
     for claim in getattr(in_force, "claims", None) or []:
-        values = _values_of_claim(claim)
-        if not values:
-            continue
-        missing = sorted(v for v in values if not _is_carried(v, hexes, techniques, folded))
-        if not missing:
-            continue
-        reason = next(
-            (why for named, why in withdrawals if why and named & values),
-            "",
+        values = claim_values(
+            str(getattr(claim, "claim", "") or ""), getattr(claim, "technique_id", None) or ""
         )
-        dropped.append(
-            DroppedClaim(
-                claim=str(getattr(claim, "claim", "") or ""),
-                values=tuple(sorted(values)),
-                missing=tuple(missing),
-                reason=reason,
+        missing = tuple(sorted(v for v in values if not _is_stated(v, searched)))
+        if missing:
+            dropped.append(
+                DroppedValues(claim=str(getattr(claim, "claim", "") or ""), missing=missing)
             )
-        )
     return dropped
-
-
-def _dropped_words(dropped: DroppedClaim) -> str:
-    """One dropped claim as the question quotes it: the claim and the values no longer stated."""
-    return f'"{dropped.claim}" (no longer stated: {", ".join(dropped.missing)})'
-
-
-def claims_dropped_violation(dropped: Sequence[DroppedClaim]) -> Violation | None:
-    """The question for the dropped claims not withdrawn with a reason, or ``None``."""
-    unexplained = [d for d in dropped if not d.reason]
-    if not unexplained:
-        return None
-    return Violation(
-        code=CLAIMS_DROPPED_CODE,
-        message=(
-            f"Your revision no longer carries {len(unexplained)} claim(s) of your answer in "
-            "force, each stating a value this analysis reports: "
-            f"{'; '.join(safe_finding_value(_dropped_words(d)) for d in unexplained)}. "
-            "For each one, either keep it, written again as a claim block (revised where "
-            "you have reason), or withdraw it on a line of your DISPUTES section reading "
-            f"'{WITHDRAWN_LABEL} <the values it states> — <the reason>'. A claim neither "
-            "kept nor withdrawn stays out of your answer."
-        ),
-    )
 
 
 def defanged(text: str) -> str:
@@ -188,43 +163,17 @@ def defanged(text: str) -> str:
     return defang_text(text, [(value, kind) for kind, value in network_values_in(text)])
 
 
-def dropped_claim_sentence(name: str, revision_round: int, dropped: DroppedClaim) -> str:
-    """The run summary's sentence for one dropped claim, its network values defanged."""
-    how = f"withdrawn: {dropped.reason}" if dropped.reason else "not withdrawn with a reason"
+def dropped_values_sentence(name: str, revision_round: int, dropped: DroppedValues) -> str:
+    """The run summary's sentence for one claim's values, its network values defanged."""
     return defanged(
-        f"The {name} analyst's round-{int(revision_round)} revision dropped the claim "
-        f'"{dropped.claim}" ({how}).'
+        f"The {name} analyst's round-{int(revision_round)} revision states nowhere "
+        f"{', '.join(dropped.missing)}, which its answer in force stated in the claim "
+        f'"{dropped.claim}".'
     )
 
 
-def without_withdrawals(items: Iterable[str]) -> list[str]:
-    """Dispute items without the analyst's own ``WITHDRAWN:`` lines: those dispute no peer."""
-    return [str(item) for item in items if _WITHDRAWN_LINE.match(str(item)) is None]
-
-
-def _claim_key(claim: Any) -> tuple[str, frozenset[str] | str]:
-    technique = str(getattr(claim, "technique_id", "") or "")
-    values = _values_of_claim(claim)
-    if values:
-        return (technique, values)
-    return (technique, " ".join(str(getattr(claim, "claim", "") or "").lower().split()))
-
-
-def _finding_key(finding: Any) -> tuple[str, tuple[str, ...]]:
-    return (
-        " ".join(str(getattr(finding, "title", "") or "").lower().split()),
-        tuple(sorted(str(t) for t in getattr(finding, "technique_ids", None) or [])),
-    )
-
-
-def revision_changed(in_force: Any, revision: Any) -> bool:
-    """Whether ``revision`` changed a claim, a technique or a finding of ``in_force``."""
-    if in_force is None:
-        return bool(getattr(revision, "claims", None) or getattr(revision, "findings", None))
-    before = Counter(_claim_key(c) for c in getattr(in_force, "claims", None) or [])
-    after = Counter(_claim_key(c) for c in getattr(revision, "claims", None) or [])
-    if before != after:
-        return True
-    found_before = Counter(_finding_key(f) for f in getattr(in_force, "findings", None) or [])
-    found_after = Counter(_finding_key(f) for f in getattr(revision, "findings", None) or [])
-    return found_before != found_after
+def answer_unchanged(in_force: str, revision: str) -> bool:
+    """Whether a revision's text is the answer in force again, whitespace aside."""
+    before = " ".join(str(in_force or "").split())
+    after = " ".join(str(revision or "").split())
+    return bool(before) and before == after

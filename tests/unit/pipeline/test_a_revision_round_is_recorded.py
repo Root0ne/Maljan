@@ -91,32 +91,29 @@ def _run(outcomes: dict[str, tuple[str, AgentISR]], ledger: dict[str, int] | Non
 
 
 class TestTheRoundRecord:
-    def test_a_round_that_wrote_the_same_answers_changed_nothing(self) -> None:
+    def test_answers_identical_after_whitespace_are_recorded_as_identical(self) -> None:
         update, _ = _run(
             {
-                "static": ("t", _isr("static", "Opens a key at 0x40 (reworded).", "Prose claim.")),
-                "dynamic": ("t", _isr("dynamic", "Writes a file.")),
+                "static": ("static  in\nforce", IN_FORCE["static"]),
+                "dynamic": ("dynamic in force", IN_FORCE["dynamic"]),
             }
         )
 
         assert update["revision_rounds"] == [
-            {"round": 2, "made": 2, "changed": False, "new_evidence": 0}
+            {"round": 2, "stage": "debate", "made": 2, "identical": True}
         ]
 
-    def test_a_new_claim_and_new_entries_are_recorded(self) -> None:
+    def test_one_reworded_answer_is_not_identical(self) -> None:
         update, _ = _run(
             {
-                "static": (
-                    "t",
-                    _isr("static", "Opens a key at 0x40.", "Prose claim.", "New 0x99."),
-                ),
-                "dynamic": ("t", _isr("dynamic", "Writes a file.")),
+                "static": ("static in force, reworded", IN_FORCE["static"]),
+                "dynamic": ("dynamic in force", IN_FORCE["dynamic"]),
             },
             ledger={"static": 3},
         )
 
         assert update["revision_rounds"] == [
-            {"round": 2, "made": 2, "changed": True, "new_evidence": 3}
+            {"round": 2, "stage": "debate", "made": 2, "identical": False}
         ]
 
 
@@ -132,36 +129,39 @@ class TestTheAnswerInForceIsRevised:
         args, kwargs = agents["static"].safe_revise_isr.call_args
         assert args[1] == "static in force"
         assert args[2] == {"dynamic": "dynamic in force"}
-        assert kwargs["in_force"] is IN_FORCE["static"]
+        assert kwargs == {}
 
 
-class TestDroppedClaims:
-    def test_a_dropped_claim_is_recorded_with_its_sentence(self) -> None:
+class TestDroppedValues:
+    def test_a_value_stated_nowhere_is_recorded_with_its_sentence(self) -> None:
         update, _ = _run(
             {
-                "static": ("t", _isr("static", "Prose claim.")),
-                "dynamic": ("t", IN_FORCE["dynamic"]),
+                "static": ("Prose claim.", _isr("static", "Prose claim.")),
+                "dynamic": ("Writes a file.", IN_FORCE["dynamic"]),
             }
         )
 
         rows = update["dropped_claims"]
-        assert [(r["agent"], r["round"], r["claim"]) for r in rows] == [
-            ("static", 2, "Opens a key at 0x40.")
+        assert [(r["agent"], r["round"], r["claim"], r["missing"]) for r in rows] == [
+            ("static", 2, "Opens a key at 0x40.", ["0x40"])
         ]
-        assert "not withdrawn" in rows[0]["sentence"]
+        assert "states nowhere 0x40" in rows[0]["sentence"]
 
-    def test_a_withdrawal_line_is_no_dispute(self) -> None:
-        answer = "CLAIM: Prose claim.\nDISPUTES:\n- WITHDRAWN: 0x40 — it was a stack offset.\n"
-        revision = _isr(
-            "static",
-            "Prose claim.",
-            dissent=["WITHDRAWN: 0x40 — it was a stack offset.", "dynamic overstates it"],
-            answer=answer,
+    def test_a_value_the_revision_s_text_still_states_is_not_recorded(self) -> None:
+        update, _ = _run(
+            {
+                "static": ("The key at 64 is opened.", _isr("static", "Prose claim.")),
+                "dynamic": ("Writes a file.", IN_FORCE["dynamic"]),
+            }
         )
+
+        assert "dropped_claims" not in update
+
+    def test_disputes_are_left_as_the_analyst_wrote_them(self) -> None:
+        revision = _isr("static", "Opens a key at 0x40.", dissent=["WITHDRAWN: x — y"])
         update, _ = _run({"static": ("t", revision), "dynamic": ("t", IN_FORCE["dynamic"])})
 
-        assert update["isr_reports"]["static"].dissent_items == ["dynamic overstates it"]
-        assert update["dropped_claims"][0]["reason"] == "it was a stack offset."
+        assert update["isr_reports"]["static"].dissent_items == ["WITHDRAWN: x — y"]
 
 
 class TestTheDebateDuration:
@@ -179,15 +179,17 @@ class TestTheDebateDuration:
 
         record = update["stage_results"][debate.key]
         assert record["ran"] is True
-        assert record["mode"] == "sequential"
-        mediation = {debate.key: {**record, "duration_ms": 1000}}
-        revision = {debate.key: {**record, "duration_ms": 3000}}
+        assert record["mode"] == str(debate.mode)
+        assert record["rounds_add_up"] is True
+        # A debate whose revisions run in parallel still adds its rounds up.
+        mediation = {debate.key: {**record, "mode": "parallel", "duration_ms": 1000}}
+        revision = {debate.key: {**record, "mode": "parallel", "duration_ms": 3000}}
         merged = _merge_stage_results(mediation, revision)
         assert merged[debate.key]["duration_ms"] == 4000
 
 
-class TestTheMediationIsHandedTheSettler:
-    def test_the_negotiation_node_passes_a_settler_over_the_answers_in_force(self) -> None:
+class TestTheMediationIsHandedTheLedgerCounts:
+    def test_the_negotiation_node_passes_a_count_reader_over_the_answers_in_force(self) -> None:
         notices: list[dict[str, Any]] = []
         container = MagicMock()
         container.is_mock = False
@@ -198,7 +200,7 @@ class TestTheMediationIsHandedTheSettler:
             agent_name="Mediator",
             finding="ok",
             confidence_score=0.9,
-            closed=["Closed: dynamic claim(s) 9 are not in its answer in force."],
+            ledger_facts=['For the line "x": entry ev_0007 (t) states total = 41.'],
         )
         judge.mediate = AsyncMock(return_value=(argument, True))
         container.get_judge_agent.return_value = judge
@@ -214,10 +216,29 @@ class TestTheMediationIsHandedTheSettler:
             mp.setattr("maljan.pipeline.nodes.render_run_state", lambda *a: "")
             asyncio.run(make_negotiation_node(container)(state))
 
-        settle = judge.mediate.call_args.kwargs["settle_contradictions"]
-        result = settle(["DYNAMIC Claim 9 — contradicted by STATIC Claim 1."])
-        assert result.standing == [] and len(result.closed) == 1
-        assert any("Closed: dynamic claim(s) 9" in str(n.get("text")) for n in notices)
+        counts = judge.mediate.call_args.kwargs["ledger_counts"]
+        facts = counts(["DYNAMIC Claim 9 counts 41 [ev_0007]; STATIC Claim 1 counts 40."])
+        assert len(facts) == 1 and "total = 41" in facts[0]
+        assert any("entry ev_0007 (t) states total = 41" in str(n.get("text")) for n in notices)
+
+    def test_a_revision_round_is_told_the_ledger_counts(self) -> None:
+        argument = AgentArgument(
+            agent_name="Mediator",
+            finding="revise",
+            ledger_facts=['For the line "x": entry ev_0007 (t) states total = 41.'],
+        )
+        container, agents = _container(
+            {"static": ("t", IN_FORCE["static"]), "dynamic": ("t", IN_FORCE["dynamic"])}, {}
+        )
+        state = {**_state(), "discussion_history": [argument]}
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("maljan.pipeline.nodes._revision_input_is_absent", lambda *a: False)
+            mp.setattr("maljan.pipeline.nodes._build_revision_context", lambda *a: "data")
+            asyncio.run(make_revision_node(container)(state))
+
+        directive = agents["static"].safe_revise_isr.call_args.args[3]
+        assert directive.startswith("revise")
+        assert "entry ev_0007 (t) states total = 41" in directive
 
 
 class TestTheSummaryReadsTheDebatesOwnOptions:

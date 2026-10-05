@@ -1,17 +1,16 @@
 """The debate ends when nothing is left to settle, and runs while something is.
 
-Rounds that settled nothing were the largest cost of a hosted run. The rules,
-in the order the router applies them:
+The rules, in the order the router applies them:
 
 - the hard round limit still ends every debate;
 - a mediation that failed, or a debate where consensus does not apply, goes
   to the judge;
-- a revision round whose revisions changed no claim, no technique and no
-  finding means the debate converged: it ends;
-- the sycophancy check asks for another revision only when the agreement
-  arose without new evidence: the revision round before it added no ledger
-  entry;
-- consensus ends it, as does a stable agreement with no contradiction standing;
+- a revision round whose every revision is the answer in force again,
+  whitespace aside, means the debate converged: it ends;
+- the sycophancy check sends an agreement it flags back to revise, as it did;
+- consensus ends it: the confidence meets the threshold and no listed line is
+  one the mediator marked blocking or left unmarked;
+- a stable agreement with no line standing ends it;
 - anything else is another revision round.
 
 The run summary's termination reason is read from the same rules, so it says
@@ -31,7 +30,6 @@ from langchain_core.runnables import RunnableLambda
 from maljan.agents.judge_agent import JudgeAgent
 from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.core.config import Settings
-from maljan.pipeline.debate_settlement import Settlement
 from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.pipeline.routing import ConsensusRouter, debate_route
 from maljan.pipeline.state import AgentArgument
@@ -47,6 +45,10 @@ def _mediator(contradictions: list[str] | None = None, confidence: float = 0.9) 
     )
 
 
+def _round(identical: bool, made: int = 3, round_: int = 1) -> dict[str, Any]:
+    return {"round": round_, "stage": "debate", "made": made, "identical": identical}
+
+
 def _state(**over: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "iteration_count": 2,
@@ -55,7 +57,7 @@ def _state(**over: Any) -> dict[str, Any]:
         "confidence_history": [0.6, 0.9],
         "discussion_history": [_mediator(["a: x — ev_0001"])],
         "isr_reports": {},
-        "revision_rounds": [{"round": 1, "made": 3, "changed": True, "new_evidence": 2}],
+        "revision_rounds": [_round(identical=False)],
     }
     base.update(over)
     return base
@@ -67,11 +69,9 @@ def _router(max_rounds: int = 5) -> ConsensusRouter:
     return ConsensusRouter(settings)
 
 
-class TestARoundThatChangedNothing:
+class TestARoundOfIdenticalAnswers:
     def test_ends_the_debate_as_converged(self) -> None:
-        state = _state(
-            revision_rounds=[{"round": 1, "made": 3, "changed": False, "new_evidence": 0}]
-        )
+        state = _state(revision_rounds=[_round(identical=True)])
 
         assert debate_route(state, max_rounds=5) == ("judge", "converged")
         assert _router().should_continue(state) == "judge"
@@ -79,68 +79,53 @@ class TestARoundThatChangedNothing:
     def test_ends_it_even_with_a_contradiction_still_listed(self) -> None:
         state = _state(
             discussion_history=[_mediator(["a: x — b: y"])],
-            revision_rounds=[{"round": 1, "made": 2, "changed": False, "new_evidence": 0}],
+            revision_rounds=[_round(identical=True, made=2)],
         )
 
         assert debate_route(state, max_rounds=5)[1] == "converged"
 
     def test_a_round_whose_every_revision_failed_is_not_convergence(self) -> None:
-        state = _state(
-            revision_rounds=[{"round": 1, "made": 0, "changed": False, "new_evidence": 0}]
-        )
+        state = _state(revision_rounds=[_round(identical=False, made=0)])
 
         assert debate_route(state, max_rounds=5)[0] == "revision"
 
-    def test_a_round_that_changed_something_goes_on_while_a_contradiction_stands(self) -> None:
+    def test_a_round_with_a_changed_answer_goes_on_while_a_line_stands(self) -> None:
         assert debate_route(_state(), max_rounds=5)[0] == "revision"
 
-    def test_only_the_last_round_counts(self) -> None:
-        state = _state(
-            revision_rounds=[
-                {"round": 1, "made": 3, "changed": False, "new_evidence": 0},
-                {"round": 2, "made": 3, "changed": True, "new_evidence": 0},
-            ]
-        )
+    def test_a_record_of_an_earlier_round_is_not_this_round_s(self) -> None:
+        # The last record belongs to a debate stage that ended before this one.
+        state = _state(iteration_count=4, revision_rounds=[_round(identical=True, round_=2)])
 
-        assert debate_route(state, max_rounds=5)[0] == "revision"
+        assert debate_route(state, max_rounds=9)[0] == "revision"
 
 
-class TestTheSycophancyCheck:
-    def _agreed(self, new_evidence: int, changed: bool = True) -> dict[str, Any]:
+class TestTheSycophancyCheckIsAsItWas:
+    def _agreed(self, **over: Any) -> dict[str, Any]:
         return _state(
             is_consensus=True,
             sycophancy_detected=True,
             discussion_history=[_mediator([])],
-            revision_rounds=[
-                {"round": 1, "made": 3, "changed": changed, "new_evidence": new_evidence}
-            ],
+            **over,
         )
 
-    def test_agreement_without_new_evidence_is_sent_back_once_more(self) -> None:
-        assert debate_route(self._agreed(new_evidence=0), max_rounds=5) == (
-            "revision",
-            "sycophancy",
-        )
+    def test_flagged_agreement_is_sent_back(self) -> None:
+        assert debate_route(self._agreed(), max_rounds=5) == ("revision", "sycophancy")
 
-    def test_agreement_that_new_evidence_brought_ends_the_debate(self) -> None:
-        assert debate_route(self._agreed(new_evidence=4), max_rounds=5) == ("judge", "consensus")
+    def test_whatever_the_round_before_added_to_the_ledger(self) -> None:
+        state = self._agreed(revision_rounds=[{**_round(identical=False), "new_evidence": 40}])
 
-    def test_a_forced_revision_that_changed_nothing_is_not_forced_again(self) -> None:
-        state = self._agreed(new_evidence=0, changed=False)
+        assert debate_route(state, max_rounds=5) == ("revision", "sycophancy")
+
+    def test_a_forced_revision_that_returned_the_same_answers_is_not_forced_again(self) -> None:
+        state = self._agreed(revision_rounds=[_round(identical=True)])
 
         assert debate_route(state, max_rounds=5) == ("judge", "converged")
 
     def test_switched_off_it_asks_nothing(self) -> None:
-        assert debate_route(self._agreed(new_evidence=0), max_rounds=5, sycophancy_check=False) == (
+        assert debate_route(self._agreed(), max_rounds=5, sycophancy_check=False) == (
             "judge",
             "consensus",
         )
-
-    def test_a_state_with_no_round_record_keeps_the_check_as_it_was(self) -> None:
-        state = self._agreed(new_evidence=0)
-        state.pop("revision_rounds")
-
-        assert debate_route(state, max_rounds=5)[0] == "revision"
 
 
 class TestTheHardLimit:
@@ -161,10 +146,25 @@ class TestTheHardLimit:
             is_consensus=True,
             sycophancy_detected=True,
             discussion_history=[_mediator([])],
-            revision_rounds=[{"round": 4, "made": 3, "changed": True, "new_evidence": 0}],
         )
 
         assert debate_route(state, max_rounds=5) == ("judge", "hard_limit")
+
+    def test_at_the_limit_only_the_limit_is_logged(self, caplog: Any) -> None:
+        import logging
+
+        state = _state(
+            iteration_count=5,
+            is_consensus=True,
+            sycophancy_detected=True,
+            discussion_history=[_mediator([])],
+        )
+        with caplog.at_level(logging.INFO, logger="maljan"):
+            debate_route(state, max_rounds=5)
+
+        said = " ".join(r.getMessage() for r in caplog.records)
+        assert "Hard iteration limit" in said
+        assert "Sycophancy override" not in said
 
 
 class TestTheRunSummarySaysWhatEndedIt:
@@ -177,9 +177,7 @@ class TestTheRunSummarySaysWhatEndedIt:
         )
 
     def test_a_converged_debate_says_converged_and_early(self) -> None:
-        negotiation = self._negotiation(
-            _state(revision_rounds=[{"round": 1, "made": 3, "changed": False, "new_evidence": 0}])
-        )
+        negotiation = self._negotiation(_state(revision_rounds=[_round(identical=True)]))
 
         assert negotiation.termination_reason == "converged"
         assert negotiation.converged_early is True
@@ -199,7 +197,6 @@ class TestTheRunSummarySaysWhatEndedIt:
                 is_consensus=True,
                 sycophancy_detected=True,
                 discussion_history=[_mediator([])],
-                revision_rounds=[{"round": 4, "made": 3, "changed": True, "new_evidence": 0}],
             )
         )
 
@@ -212,7 +209,6 @@ class TestTheRunSummarySaysWhatEndedIt:
             is_consensus=True,
             sycophancy_detected=True,
             discussion_history=[_mediator([])],
-            revision_rounds=[{"round": 4, "made": 3, "changed": True, "new_evidence": 0}],
         )
         negotiation = (
             RunSummaryBuilder(start_time=0.0)
@@ -223,65 +219,56 @@ class TestTheRunSummarySaysWhatEndedIt:
 
         assert negotiation.termination_reason == "consensus"
 
-    def test_closed_and_settled_lines_and_dropped_claims_are_recorded(self) -> None:
+    def test_marks_facts_and_dropped_values_are_recorded(self) -> None:
         argument = _mediator([])
-        argument.closed.append("Closed: gamma claim(s) 9 are not in its answer in force.")
-        argument.settled.append("Settled from the ledger: entry ev_0007 states total = 41.")
-        negotiation = self._negotiation(
-            _state(
-                is_consensus=True,
-                discussion_history=[argument],
-                dropped_claims=[
-                    {"agent": "beta", "round": 2, "sentence": "The beta analyst dropped X."}
-                ],
-            )
+        argument.not_blocking.append("a vs b on a count [not blocking: a tally]")
+        argument.ledger_facts.append('For the line "a vs b": entry ev_0007 states total = 41.')
+        state = _state(
+            is_consensus=True,
+            discussion_history=[argument],
+            dropped_claims=[{"agent": "beta", "round": 2, "sentence": "beta states nowhere 0x10."}],
         )
 
-        assert negotiation.settled_contradictions == [
-            "Closed: gamma claim(s) 9 are not in its answer in force.",
-            "Settled from the ledger: entry ev_0007 states total = 41.",
-        ]
-        assert negotiation.dropped_claims == ["The beta analyst dropped X."]
+        negotiation = self._negotiation(state)
+
+        assert negotiation.not_blocking == ["a vs b on a count [not blocking: a tally]"]
+        assert len(negotiation.ledger_facts) == 1
+        assert negotiation.dropped_claims == ["beta states nowhere 0x10."]
         as_dict = (
             RunSummaryBuilder(start_time=0.0)
-            .set_negotiation(
-                _state(
-                    is_consensus=True,
-                    discussion_history=[argument],
-                    dropped_claims=[{"sentence": "The beta analyst dropped X."}],
-                ),
-                max_iterations=5,
-            )
+            .set_negotiation(state, max_iterations=5)
             .build()
             .to_dict()["negotiation"]
         )
-        assert as_dict["dropped_claims"] == ["The beta analyst dropped X."]
-        assert len(as_dict["settled_contradictions"]) == 2
+        assert as_dict["dropped_claims"] == ["beta states nowhere 0x10."]
+        assert as_dict["not_blocking"] and as_dict["ledger_facts"]
 
 
 # ---------------------------------------------------------------------------
-# The mediation hands its lines to the platform before deciding consensus
+# The mediation reads the mediator's marks, and puts the ledger's counts to it
 # ---------------------------------------------------------------------------
 
-LISTED = (
-    "The analysts agree on the core record.\n\n"
-    "CONTRADICTIONS:\n"
-    "- GAMMA Claim 30 (an old reading) — contradicted by BETA Claim 2.\n"
-    "agreement_confidence: 0.9"
-)
+
+def _block(*lines: str) -> str:
+    return (
+        "The analysts agree on the core record.\n\nCONTRADICTIONS:\n"
+        + "".join(f"- {line}\n" for line in lines)
+        + "agreement_confidence: 0.9"
+    )
 
 
 class _Model:
-    async def ainvoke(self, _messages: Any, **_kw: Any) -> AIMessage:
-        return AIMessage(content=LISTED)
+    def __init__(self, *answers: str) -> None:
+        self.answers = list(answers)
+        self.sent: list[Any] = []
+
+    async def ainvoke(self, messages: Any, **_kw: Any) -> AIMessage:
+        self.sent.append(messages)
+        return AIMessage(content=self.answers.pop(0))
 
     def with_structured_output(self, _schema: Any) -> Any:
         return RunnableLambda(
-            lambda _in: MediatorVerdict(
-                contradictions=["GAMMA Claim 30 (an old reading) — contradicted by BETA Claim 2."],
-                resolution_summary="one line stands",
-                confidence=0.9,
-            )
+            lambda _in: MediatorVerdict(contradictions=[], resolution_summary="", confidence=0.9)
         )
 
 
@@ -296,8 +283,8 @@ def _isrs() -> dict[str, AgentISR]:
     }
 
 
-def _mediate(settle: Any) -> tuple[AgentArgument, bool | None]:
-    judge = JudgeAgent(llm=_Model())  # type: ignore[arg-type]
+def _mediate(model: _Model, counts: Any = None) -> tuple[AgentArgument, bool | None]:
+    judge = JudgeAgent(llm=model)  # type: ignore[arg-type]
     with patch.object(judge, "_supports_structured_output", return_value=False):
         return asyncio.run(
             judge.mediate(
@@ -305,46 +292,81 @@ def _mediate(settle: Any) -> tuple[AgentArgument, bool | None]:
                 [],
                 isr_reports=_isrs(),
                 consensus_threshold=0.85,
-                settle_contradictions=settle,
+                ledger_counts=counts,
             )
         )
 
 
-class TestTheMediationAsksThePlatform:
-    def test_a_line_the_platform_closes_leaves_consensus(self) -> None:
-        def settle(lines: list[str]) -> Settlement:
-            return Settlement(standing=[], closed=[f"Closed: {lines[0]}"], settled=[])
+COUNT_LINE = "GAMMA Claim 2 counts 41 [ev_0007]; BETA Claim 1 counts 40"
+TECHNIQUE_LINE = "GAMMA Claim 1 says T1055; BETA Claim 2 says it does not"
 
-        argument, is_consensus = _mediate(settle)
+
+class TestTheMediatorDecides:
+    def test_an_unmarked_line_blocks_as_before(self) -> None:
+        argument, is_consensus = _mediate(_Model(_block(COUNT_LINE)))
+
+        assert is_consensus is False
+        assert argument.contradictions == [COUNT_LINE]
+        assert argument.not_blocking == []
+
+    def test_a_line_marked_not_blocking_leaves_consensus(self) -> None:
+        line = f"{COUNT_LINE} [not blocking: a tally, no reported fact]"
+        argument, is_consensus = _mediate(_Model(_block(line)))
 
         assert is_consensus is True
         assert argument.contradictions == []
-        assert argument.closed == [
-            "Closed: GAMMA Claim 30 (an old reading) — contradicted by BETA Claim 2."
+        assert argument.not_blocking == [line]
+        assert line in argument.finding
+
+    def test_a_technique_line_the_mediator_marks_not_blocking_is_not_overridden(self) -> None:
+        line = f"{TECHNIQUE_LINE} [not blocking: both now call it a lead]"
+        _argument, is_consensus = _mediate(_Model(_block(line)))
+
+        assert is_consensus is True
+
+    def test_one_blocking_line_beside_a_non_blocking_one_keeps_the_round_open(self) -> None:
+        lines = [
+            f"{COUNT_LINE} [not blocking: a tally]",
+            f"{TECHNIQUE_LINE} [blocking: the technique is published]",
         ]
-        assert "Contradictions: None" in argument.finding
-
-    def test_a_line_that_stands_keeps_the_round_open(self) -> None:
-        def settle(lines: list[str]) -> Settlement:
-            return Settlement(standing=list(lines))
-
-        argument, is_consensus = _mediate(settle)
+        argument, is_consensus = _mediate(_Model(_block(*lines)))
 
         assert is_consensus is False
-        assert len(argument.contradictions) == 1
-        assert argument.closed == [] and argument.settled == []
+        assert argument.contradictions == [lines[1]]
 
-    def test_a_mediation_with_no_settler_reads_the_block_as_before(self) -> None:
-        argument, is_consensus = _mediate(None)
 
+class TestTheLedgerCountsArePutToTheMediatorOnce:
+    def test_the_counts_are_asked_about_and_the_new_block_is_read(self) -> None:
+        model = _Model(
+            _block(COUNT_LINE),
+            _block(f"{COUNT_LINE} [not blocking: the entries state both counts]"),
+        )
+
+        argument, is_consensus = _mediate(
+            model,
+            counts=lambda lines: [f"For the line {lines[0]!r}: entry ev_0007 states total = 41."],
+        )
+
+        assert len(model.sent) == 2
+        question = str(model.sent[1][-1].content)
+        assert "entry ev_0007 states total = 41" in question
+        assert "[not blocking:" in question
+        assert is_consensus is True
+        assert argument.ledger_facts and "ev_0007" in argument.ledger_facts[0]
+
+    def test_no_counts_ask_nothing(self) -> None:
+        model = _Model(_block(COUNT_LINE))
+
+        _argument, is_consensus = _mediate(model, counts=lambda lines: [])
+
+        assert len(model.sent) == 1
         assert is_consensus is False
-        assert len(argument.contradictions) == 1
 
-    def test_a_settler_that_raises_leaves_the_lines_standing(self) -> None:
-        def settle(_lines: list[str]) -> Settlement:
+    def test_a_count_reader_that_raises_asks_nothing(self) -> None:
+        def counts(_lines: list[str]) -> list[str]:
             raise RuntimeError("boom")
 
-        argument, is_consensus = _mediate(settle)
+        model = _Model(_block(COUNT_LINE))
+        _argument, is_consensus = _mediate(model, counts=counts)
 
-        assert is_consensus is False
-        assert len(argument.contradictions) == 1
+        assert len(model.sent) == 1 and is_consensus is False

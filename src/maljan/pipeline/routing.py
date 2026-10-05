@@ -5,11 +5,12 @@ Determines whether to continue iterating (revision) or proceed to the judge.
 Decision priority (highest to lowest), in ``debate_route``:
   1. Hard iteration limit — unconditional judge.
   2. A mediation that failed, or consensus that does not apply — judge.
-  3. Convergence — the last revision round changed no claim, no technique and
-     no finding: another round would argue over the same answers. Judge.
-  4. Sycophancy override — agreement that arose without new evidence (the
-     revision round before it added no ledger entry) is sent back to revise.
-  5. Genuine LLM consensus — judge.
+  3. Convergence — every revision of the round right before this mediation is
+     the answer in force again, whitespace aside: another round would argue
+     over the same answers. Judge.
+  4. Sycophancy override — if sycophancy AND consensus, force revision.
+  5. Genuine LLM consensus (no listed line the mediator marked blocking, or
+     left unmarked) — judge.
   6. Adaptive termination — statistical confidence convergence, with no
      contradiction standing → judge.
   7. Default → revision.
@@ -116,11 +117,20 @@ def _quiet(*_args: Any, **_kwargs: Any) -> None:
     """A log call that says nothing."""
 
 
-def _last_revision_round(state: Any) -> dict[str, Any] | None:
-    """The record of the latest revision round, or ``None`` when none was recorded."""
+def _round_before(state: Any) -> dict[str, Any] | None:
+    """The record of the revision round right before this mediation, or ``None``.
+
+    That round recorded the mediation count it followed, one less than now. A
+    record of any other round — the last round of an earlier debate stage of
+    the same run — is not this debate's.
+    """
     rounds = state.get("revision_rounds") or []
     last = rounds[-1] if rounds else None
-    return last if isinstance(last, dict) else None
+    if not isinstance(last, dict):
+        return None
+    if int(last.get("round", -1)) != int(state.get("iteration_count", 0)) - 1:
+        return None
+    return last
 
 
 def route_within_limit(
@@ -163,28 +173,24 @@ def route_within_limit(
         say("Consensus not applicable at round %d. Proceeding to judge.", iteration)
         return "judge", NOT_APPLICABLE
 
-    # The last revision round changed no claim, no technique and no finding:
-    # the answers the next mediation would read are the ones this one read.
-    # A round in which no revision stood at all (every one failed or was not
-    # made) is not convergence: nothing was revised.
-    revised = _last_revision_round(state)
-    if revised is not None and int(revised.get("made") or 0) > 0 and not revised.get("changed"):
+    # Every revision of the round before is the answer in force again,
+    # whitespace aside: the answers the next mediation would read are the
+    # ones this one read. A fact, not a reading of meaning. A round in which
+    # no revision stood (every one failed or was not made) is not convergence.
+    revised = _round_before(state)
+    if revised is not None and int(revised.get("made") or 0) > 0 and revised.get("identical"):
         say(
-            "Debate converged at round %d: the last revision round changed no claim, "
-            "technique or finding.",
+            "Debate converged at round %d: every revision of the last round is the "
+            "answer in force again.",
             iteration,
         )
         return "judge", CONVERGED
 
-    # A "consensus" that comes with sycophancy, where the revision round
-    # before it added no ledger entry: agreement without new evidence, sent
-    # back once more. Agreement that new evidence brought is consensus. A
-    # state with no round record keeps the check as it always was.
-    without_new_evidence = revised is None or not int(revised.get("new_evidence") or 0)
-    if syco and consensus and sycophancy_check and without_new_evidence:
+    # A "consensus" that comes with sycophancy is treated as premature: force
+    # another revision.
+    if syco and consensus and sycophancy_check:
         say(
-            "Sycophancy override: consensus at round %d arose without new evidence. "
-            "Forcing revision.",
+            "Sycophancy override: consensus premature at round %d. Forcing revision.",
             iteration,
         )
         return "revision", SYCOPHANCY
@@ -215,8 +221,10 @@ def debate_route(state: Any, *, max_rounds: int, sycophancy_check: bool = True) 
     ended the debate there anyway, and ``hard_limit`` when it would have gone
     on.
     """
-    route, reason = route_within_limit(state, sycophancy_check=sycophancy_check)
-    if state.get("iteration_count", 0) >= max_rounds:
+    at_limit = state.get("iteration_count", 0) >= max_rounds
+    # At the limit the decision is read quietly: the limit is what is logged.
+    route, reason = route_within_limit(state, sycophancy_check=sycophancy_check, log=not at_limit)
+    if at_limit:
         logger.info("Hard iteration limit (%d) reached. Proceeding to judge.", max_rounds)
         return "judge", reason if route == "judge" else HARD_LIMIT
     return route, reason

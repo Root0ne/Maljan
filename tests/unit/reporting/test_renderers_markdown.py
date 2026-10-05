@@ -444,3 +444,24 @@ class TestAnUnverifiedTechniqueIdIsPrintedWithItsMarker:
 
         assert "T1055" in markdown
         assert UNVERIFIED_TECHNIQUE_MARKER not in markdown
+
+
+def test_the_run_appendix_says_what_the_platform_recorded_of_the_debate() -> None:
+    report = _build(
+        run_summary={
+            "elapsed_seconds": 1.0,
+            "final_decision": "Malware",
+            "negotiation": {
+                "rounds_completed": 2,
+                "termination_reason": "consensus",
+                "dropped_claims": ["The beta analyst's round-1 revision states nowhere 0x40."],
+                "not_blocking": ["a vs b on a tally [not blocking: a count]"],
+                "ledger_facts": ['For the line "a vs b": entry ev_0007 (t) states total = 41.'],
+            },
+        }
+    )
+    md = MarkdownRenderer().render(MalwareReportBuilder.apply_fallback_narrative(report))
+
+    assert "states nowhere 0x40" in md
+    assert "[not blocking: a count]" in md
+    assert "entry ev_0007 (t) states total = 41" in md

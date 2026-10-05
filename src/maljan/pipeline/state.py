@@ -33,19 +33,19 @@ class AgentArgument(BaseModel):
             "does not end the debate."
         ),
     )
-    closed: list[str] = Field(
+    not_blocking: list[str] = Field(
         default_factory=list,
         description=(
-            "For the mediator: the platform's sentence for each line of its block that "
-            "is about a claim no analyst still holds. Closed, it opens no round."
+            "For the mediator: the lines of its block it marked [not blocking: <reason>], "
+            "as it wrote them. They do not stand against consensus; ``contradictions`` "
+            "holds the lines that do."
         ),
     )
-    settled: list[str] = Field(
+    ledger_facts: list[str] = Field(
         default_factory=list,
         description=(
-            "For the mediator: the platform's sentence for each line of its block that "
-            "disputes a count a ledger entry states, with the entry and its number. "
-            "Settled, it opens no round."
+            "For the mediator: the counts the evidence ledger states for the entries its "
+            "listed lines cite, every one of them, as the platform put them to it."
         ),
     )
     note: str = Field(
@@ -141,6 +141,8 @@ def _merge_stage_results(
             "duration_ms": (
                 max(int(existing.get("duration_ms") or 0), int(entry.get("duration_ms") or 0))
                 if str(entry.get("mode") or existing.get("mode") or "") == "parallel"
+                # A debate's rounds follow one another whatever its mode.
+                and not (entry.get("rounds_add_up") or existing.get("rounds_add_up"))
                 else int(existing.get("duration_ms") or 0) + int(entry.get("duration_ms") or 0)
             ),
             "agents": agents,
@@ -349,16 +351,14 @@ class AnalysisState(TypedDict):
     # ``run_summary.negotiation.revision_replacements``.
     revision_replacements: Annotated[list[str], operator.add]
 
-    # What each revision round did, one record per round: how many revisions
-    # stood (``made``), whether any changed a claim, a technique or a finding
-    # (``changed``) and how many ledger entries the round added
-    # (``new_evidence``). Append-only; the router reads the last record: a
-    # round that changed nothing ends the debate, and agreement after a round
-    # that added no entry is what the sycophancy check may question.
+    # What each revision round did, one record per round: its round, its
+    # debate stage, how many revisions stood (``made``) and whether every one
+    # of them is the answer in force again after whitespace (``identical``).
+    # Append-only; the router reads the record of the round right before the
+    # mediation it routes, and a round of identical answers ends the debate.
     revision_rounds: Annotated[list[dict[str, Any]], operator.add]
 
-    # Each claim a revision dropped, per analyst and round
-    # (``pipeline.claim_drops``): the claim, its values, the ones the revision
-    # no longer states, the reason it was withdrawn with (or ``""``) and the
-    # run summary's sentence. Append-only.
+    # The values of the answer in force a revision states nowhere any more,
+    # per analyst, round and claim (``pipeline.claim_drops``), with the run
+    # summary's sentence. Recorded, never asked. Append-only.
     dropped_claims: Annotated[list[dict[str, Any]], operator.add]

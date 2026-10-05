@@ -92,10 +92,14 @@ class NegotiationMetrics:
     # mediation that gave no final ``CONTRADICTIONS:`` block when asked, and one
     # whose block listed contradictions and also said none stands.
     mediation_notes: list[str] = field(default_factory=list)
-    # The platform's sentences for the mediator's lines it closed (about a
-    # claim no analyst still holds) or settled from the ledger, in order.
-    settled_contradictions: list[str] = field(default_factory=list)
-    # One sentence per claim a revision dropped (``pipeline.claim_drops``).
+    # The lines the mediator marked [not blocking: <reason>], round by round,
+    # as it wrote them: they did not stand against consensus.
+    not_blocking: list[str] = field(default_factory=list)
+    # The counts the evidence ledger states for the lines the mediator listed,
+    # as the platform put them to it.
+    ledger_facts: list[str] = field(default_factory=list)
+    # One sentence per claim whose values a revision states nowhere
+    # (``pipeline.claim_drops``): recorded, never asked.
     dropped_claims: list[str] = field(default_factory=list)
 
     @property
@@ -987,12 +991,16 @@ class RunSummary:
             lines += [f"- {sentence}" for sentence in n.revision_replacements]
             lines.append("")
         if n.dropped_claims:
-            lines += ["**Claims a revision dropped:**", ""]
+            lines += ["**Values a revision states nowhere:**", ""]
             lines += [f"- {sentence}" for sentence in n.dropped_claims]
             lines.append("")
-        if n.settled_contradictions:
-            lines += ["**Contradictions the platform closed or settled:**", ""]
-            lines += [f"- {sentence}" for sentence in n.settled_contradictions]
+        if n.not_blocking:
+            lines += ["**Listed lines the mediator marked not blocking:**", ""]
+            lines += [f"- {sentence}" for sentence in n.not_blocking]
+            lines.append("")
+        if n.ledger_facts:
+            lines += ["**Ledger counts put to the mediator:**", ""]
+            lines += [f"- {sentence}" for sentence in n.ledger_facts]
             lines.append("")
         if n.mediation_notes:
             lines += [f"- {sentence}" for sentence in n.mediation_notes]
@@ -1272,11 +1280,8 @@ class RunSummary:
                     else {}
                 ),
                 **({"mediation_notes": list(n.mediation_notes)} if n.mediation_notes else {}),
-                **(
-                    {"settled_contradictions": list(n.settled_contradictions)}
-                    if n.settled_contradictions
-                    else {}
-                ),
+                **({"not_blocking": list(n.not_blocking)} if n.not_blocking else {}),
+                **({"ledger_facts": list(n.ledger_facts)} if n.ledger_facts else {}),
                 **({"dropped_claims": list(n.dropped_claims)} if n.dropped_claims else {}),
             },
             "agent_stats": [
@@ -1836,6 +1841,7 @@ class RunSummaryBuilder:
         # The state the router last read is this one: the judge runs right
         # after it. The same rules give the reason; a decision to revise at
         # the end means the round limit ended the debate.
+        from maljan.pipeline.claim_drops import defanged
         from maljan.pipeline.routing import HARD_LIMIT, route_within_limit
 
         route, termination_reason = route_within_limit(
@@ -1871,15 +1877,20 @@ class RunSummaryBuilder:
                     in (CONTRADICTIONS_BLOCK_MISSING_NOTE, CONTRADICTIONS_BLOCK_MIXED_NOTE)
                 )
             ),
-            settled_contradictions=[
-                str(sentence)
+            not_blocking=[
+                defanged(str(line))
                 for arg in discussion_history
                 if getattr(arg, "agent_name", "") == "Mediator"
-                for sentence in [
-                    *(getattr(arg, "closed", None) or []),
-                    *(getattr(arg, "settled", None) or []),
-                ]
+                for line in getattr(arg, "not_blocking", None) or []
             ],
+            ledger_facts=list(
+                dict.fromkeys(
+                    defanged(str(fact))
+                    for arg in discussion_history
+                    if getattr(arg, "agent_name", "") == "Mediator"
+                    for fact in getattr(arg, "ledger_facts", None) or []
+                )
+            ),
             dropped_claims=[
                 str(row.get("sentence") or "")
                 for row in (state.get("dropped_claims") or [])

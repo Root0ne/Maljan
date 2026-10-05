@@ -78,6 +78,7 @@ from maljan.llm.context_window import (
 from maljan.llm.generation_rate import GenerationRates, ModelCallDeadline, model_name_of
 from maljan.memory.attck_loader import technique_label
 from maljan.memory.long_term_memory import a_past_case_technique
+from maljan.pipeline.debate_facts import ledger_facts_question, read_marks
 from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
@@ -462,8 +463,10 @@ CONTRADICTIONS_BLOCK_RULE = (
     "own: the analyst, its claim, and what contradicts it (another analyst's claim, or the "
     "id of the ledger entry). When none stands, write the single line "
     "'CONTRADICTIONS: NONE'. Only this final block is counted: a contradiction you drafted "
-    "above it and then resolved is left out of it, and any line in it sends the analysts "
-    "to revise, whatever agreement_confidence you write."
+    "above it and then resolved is left out of it. End each line with "
+    "[blocking: <one-line reason>] when the analysts must revise over it, or "
+    "[not blocking: <one-line reason>] when it need not hold up agreement; a line you do "
+    "not mark sends the analysts to revise, whatever agreement_confidence you write."
 )
 
 # The one question asked when the mediator's answer carried no such block. The
@@ -472,8 +475,9 @@ CONTRADICTIONS_BLOCK_QUESTION = (
     "Your answer has no final 'CONTRADICTIONS:' block. Write it now: a line reading "
     "exactly 'CONTRADICTIONS:' followed by one line per contradiction still standing (the "
     "analyst, its claim, and what contradicts it: another analyst's claim or the id of the "
-    "ledger entry), or the single line 'CONTRADICTIONS: NONE'; then the line "
-    "'agreement_confidence: <number>'. This turn carries no tools."
+    "ledger entry), each ending in [blocking: <one-line reason>] or "
+    "[not blocking: <one-line reason>], or the single line 'CONTRADICTIONS: NONE'; then the "
+    "line 'agreement_confidence: <number>'. This turn carries no tools."
 )
 
 # What the structured extraction is told: the contradictions are the final
@@ -482,7 +486,8 @@ MEDIATION_EXTRACTION_SYSTEM = (
     "Extract the final structured verdict from the mediator's reasoning log.\n"
     "You MUST produce a structured response with:\n"
     "- contradictions: the lines of the log's final 'CONTRADICTIONS:' block, one item "
-    "per line, and an empty list when that block reads 'CONTRADICTIONS: NONE'. A "
+    "per line written whole with its [blocking: …] or [not blocking: …] mark, and an empty "
+    "list when that block reads 'CONTRADICTIONS: NONE'. A "
     "contradiction the log drafted above that block and then resolved is not one.\n"
     "- resolution_summary: what was resolved and what remains\n"
     "- confidence: the log's last agreement_confidence, a float 0.0-1.0"
@@ -2262,7 +2267,7 @@ class JudgeAgent(BudgetMeter):
         sample: Any = None,
         facts_block: str = "",
         run_state: str = "",
-        settle_contradictions: Callable[[list[str]], Any] | None = None,
+        ledger_counts: Callable[[list[str]], list[str]] | None = None,
     ) -> tuple[AgentArgument, bool | None]:
         """Find contradictions between expert reports and determine consensus.
 
@@ -2280,13 +2285,10 @@ class JudgeAgent(BudgetMeter):
             isr_reports: Optional structured ISR objects. When provided, their
                 summaries are appended to give the judge per-claim confidence
                 scores and explicit dissent signals.
-            settle_contradictions: The platform's reading of the final block's
-                lines (``pipeline.debate_settlement``): it returns which lines
-                stand, which are closed (about a claim no analyst still holds)
-                and which the ledger settles. Only standing lines count
-                against consensus; the other two are carried on the argument
-                as the platform's sentences. ``None`` reads every line as
-                standing, as before.
+            ledger_counts: The counts the evidence ledger states for the
+                entries the block's lines cite (``pipeline.debate_facts``).
+                When it returns any, they are put to the mediator once, with
+                no tools, and its block is read again. ``None`` asks nothing.
 
         Returns:
             Tuple of (AgentArgument with mediator findings, bool indicating
@@ -2476,6 +2478,26 @@ class JudgeAgent(BudgetMeter):
                 )
             elif answered and reading.ambiguous == "none_beside_plain_lines":
                 reading = ContradictionsBlock([])
+        # The ledger's counts for the entries the listed lines cite, every one
+        # of them, put to the mediator once: the mediator decides what they
+        # mean for each line, and marks it.
+        ledger_facts: list[str] = []
+        if ledger_counts is not None and reading.items:
+            try:
+                ledger_facts = [str(f) for f in ledger_counts(list(reading.items)) or []]
+            except Exception as exc:  # noqa: BLE001 — no fact is stated, nothing is asked
+                self.logger.warning("Mediator: the ledger counts were not read (%s).", exc)
+            if ledger_facts:
+                asked_text = await self._ask_for_contradictions_block(
+                    prompt_messages,
+                    reasoning_text,
+                    question=ledger_facts_question(ledger_facts),
+                    what="mediation ledger counts",
+                )
+                reread = read_contradictions_block(asked_text)
+                reasoning_text = asked_text
+                if reread.items is not None and not reread.ambiguous:
+                    reading = reread
         stated_block = reading.items
 
         # Now extract the final structured output from the detailed reasoning.
@@ -2517,58 +2539,47 @@ class JudgeAgent(BudgetMeter):
             )
             verdict = verdict.model_copy(update={"contradictions": stated})
 
-        # The platform reads the lines next: one about a claim no analyst
-        # still holds is closed, one disputing a count a ledger entry states
-        # is settled by stating it, and only the rest stand. A settler that
-        # fails leaves every line standing.
-        closed: list[str] = []
-        settled: list[str] = []
-        if settle_contradictions is not None and verdict.contradictions:
-            try:
-                settlement = settle_contradictions(list(verdict.contradictions))
-                closed = [str(s) for s in getattr(settlement, "closed", None) or []]
-                settled = [str(s) for s in getattr(settlement, "settled", None) or []]
-                standing = [str(s) for s in getattr(settlement, "standing", None) or []]
-            except Exception as exc:  # noqa: BLE001 — the block as the mediator wrote it
-                self.logger.warning("Mediator: the platform could not read the block (%s).", exc)
-            else:
-                if closed or settled:
-                    self.logger.info(
-                        "Mediator: %d line(s) closed and %d settled from the ledger by the "
-                        "platform; %d stand.",
-                        len(closed),
-                        len(settled),
-                        len(standing),
-                    )
-                    verdict = verdict.model_copy(update={"contradictions": standing})
+        # The mediator's own mark on each line decides whether it stands: a
+        # line it marked [not blocking: <reason>] does not, and an unmarked
+        # line does, as every line did before marks existed. The platform
+        # overrides a mark in neither direction.
+        listed = list(verdict.contradictions)
+        marks = read_marks(listed)
+        blocking = [m.line for m in marks if m.blocking]
+        not_blocking = [m.line for m in marks if not m.blocking]
 
         # A contradiction still standing is not consensus, whatever number the
         # mediator wrote; the number is kept and shown beside the list.
         reached = verdict.confidence >= self._consensus_threshold(consensus_threshold)
-        is_consensus = reached and not verdict.contradictions
-        if reached and verdict.contradictions:
+        is_consensus = reached and not blocking
+        if reached and blocking:
             self.logger.info(
                 "No consensus: the mediator lists %d contradiction(s) still standing "
                 "(confidence=%.2f).",
-                len(verdict.contradictions),
+                len(blocking),
                 verdict.confidence,
             )
         else:
             log_msg = "Consensus reached" if is_consensus else "No consensus yet"
             self.logger.info("%s (confidence=%.2f)", log_msg, verdict.confidence)
+        if not_blocking:
+            self.logger.info(
+                "Mediator: %d listed line(s) marked not blocking by the mediator.",
+                len(not_blocking),
+            )
 
         finding = (
             f"{verdict.resolution_summary}\n\n"
-            f"Contradictions: {'; '.join(verdict.contradictions) or 'None'}\n"
+            f"Contradictions: {'; '.join(listed) or 'None'}\n"
             f"Confidence: {verdict.confidence:.2f}"
         )
         argument = AgentArgument(
             agent_name="Mediator",
             finding=finding,
             confidence_score=verdict.confidence,
-            contradictions=list(verdict.contradictions),
-            closed=closed,
-            settled=settled,
+            contradictions=blocking,
+            not_blocking=not_blocking,
+            ledger_facts=ledger_facts,
             note=(
                 CONTRADICTIONS_BLOCK_MISSING_NOTE
                 if block_missing
@@ -2580,14 +2591,20 @@ class JudgeAgent(BudgetMeter):
         return argument, is_consensus
 
     async def _ask_for_contradictions_block(
-        self, prompt_messages: list[tuple[str, str]], reasoning_text: str
+        self,
+        prompt_messages: list[tuple[str, str]],
+        reasoning_text: str,
+        *,
+        question: str = CONTRADICTIONS_BLOCK_QUESTION,
+        what: str = "mediation block question",
     ) -> str:
-        """The mediation with the answer to one question for its missing block.
+        """The mediation with the answer to one question about its block.
 
         One turn with no tools, after the mediator's own answer in the
-        conversation that produced it. What comes back is appended to the
-        answer, so its last agreement line is the one read; a question that is
-        not made or fails leaves the answer as it was.
+        conversation that produced it: the block it left out, or the ledger
+        counts for the lines it listed. What comes back is appended to the
+        answer, so its last block and agreement line are the ones read; a
+        question that is not made or fails leaves the answer as it was.
         """
         from langchain_core.messages import AIMessage, BaseMessage
 
@@ -2599,14 +2616,12 @@ class JudgeAgent(BudgetMeter):
         ]
         turns += [
             AIMessage(content=reasoning_text),
-            HumanMessage(content=CONTRADICTIONS_BLOCK_QUESTION),
+            HumanMessage(content=question),
         ]
         timeout = _seconds_or_none(loop_limits("judge")[0])
         slot = object()
         try:
-            bound = self._spend_admits(
-                "mediation block question", turns, slot=slot, deadline_s=timeout
-            )
+            bound = self._spend_admits(what, turns, slot=slot, deadline_s=timeout)
         except SpendCeilingStop as stop:
             self.logger.warning("Mediator block question not asked: %s.", stop)
             return reasoning_text
@@ -2622,7 +2637,7 @@ class JudgeAgent(BudgetMeter):
                 ),
                 timeout,
             )
-            self._record_usage(response, call="mediation block question")
+            self._record_usage(response, call=what)
             record_judge_response(
                 getattr(self, "truncation_ledger", None), response, cap=self._output_cap().tokens
             )
