@@ -286,8 +286,9 @@ UNGROUNDED_TECHNIQUE_CODE = "isr.ungrounded_technique"
 # is still unread after it is recorded.
 UNPARSED_ANSWER_CODE = "isr.unparsed_answer"
 CLAIM_WITHOUT_CONFIDENCE_CODE = "isr.claim_without_confidence"
-# A claim whose TECHNIQUE line is more than one id or NONE. No id is read
-# from it, and the analyst is asked once for one id per claim.
+# A claim whose TECHNIQUE line is more than ids or NONE. No id is read from
+# it, and the analyst is asked once for ids alone. A list of ids separated by
+# commas or "and" is read (``base_agent.read_technique_line``) and not asked.
 TECHNIQUE_LINE_UNREAD_CODE = "isr.technique_line_unread"
 # Claim headings under the DISPUTES section, beside the analyst's own claims.
 # Not read as its own: they may be a peer's claims it quotes, or its own
@@ -326,15 +327,16 @@ def claims_kept_under_disputes_finding(count: int) -> Violation:
 
 
 def technique_line_violation(lines: list[str]) -> Violation:
-    """What an analyst is asked about TECHNIQUE lines no single id could be read from."""
+    """What an analyst is asked about TECHNIQUE lines no technique id could be read from."""
     shown = "; ".join(f'"{safe_finding_value(line)}"' for line in lines)
     return Violation(
         code=TECHNIQUE_LINE_UNREAD_CODE,
         message=(
-            f"{len(lines)} claim(s) have a TECHNIQUE line that is not one technique id or "
-            f"NONE, so no technique is read from them: {shown}. Give each claim one "
-            "technique id, or NONE when it claims none; a claim that holds several "
-            "techniques is written as one claim per technique."
+            f"{len(lines)} claim(s) have a TECHNIQUE line that is not technique ids or "
+            f"NONE, so no technique is read from them: {shown}. Write each claim's "
+            "technique ids alone, several separated by commas, or NONE when it claims "
+            "none; a word beside an id (a qualifier, a doubt, a negation) is said in the "
+            "claim, not on its TECHNIQUE line."
         ),
     )
 

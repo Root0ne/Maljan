@@ -1510,25 +1510,37 @@ def _field(
 _ONE_TECHNIQUE_RE = re.compile(r"T\d{4}(?:\.\d{3})?", re.IGNORECASE)
 # What a TECHNIQUE line says to claim none.
 _NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
+# What separates the ids of a list on one TECHNIQUE line: a comma, "and", or
+# both ("T1027, T1140, and T1106"). No other word: "T1027 or T1140" and
+# "T1027 / T1140" say something about the ids the reader would have to decide.
+_TECHNIQUE_LIST_SEPARATOR_RE = re.compile(r"\s*,\s*(?:and\s+)?|\s+and\s+", re.IGNORECASE)
 
 
-def read_technique_line(line: str) -> tuple[str | None, str | None]:
-    """``(technique_id, unread line)`` for one claim's TECHNIQUE line as written.
+def _bare_technique(text: str) -> str:
+    """One id as written, without the emphasis or code marks and the full stop around it."""
+    return text.strip().strip("*`_ ").rstrip(".").strip().strip("*`_ ")
 
-    Exactly one id, and nothing else, is the claimed technique; ``NONE`` or a
-    dash claims none. Anything else — words after an id ("T1027.002 not
-    supported"), a qualifier ("T1055 (unproven)"), several ids ("T1055,
-    T1106") — claims no technique the reader could name without deciding what
-    the words mean, so no id is read and the line is returned as written, for
-    the validation turn to ask about (``isr.technique_line_unread``).
+
+def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
+    """``(technique ids, unread line)`` for one claim's TECHNIQUE line as written.
+
+    One id, or a list of ids separated by commas or "and" ("T1027, T1140"),
+    and nothing else, is the claimed techniques, each once, in the order
+    written; ``NONE`` or a dash claims none. Anything else — words after an id
+    ("T1027.002 not supported"), a qualifier ("T1055 (unproven)"), a list
+    joined by another word ("T1027 or T1140") — claims no technique the
+    reader could name without deciding what the words mean, so no id is read
+    and the line is returned as written, for the validation turn to ask about
+    (``isr.technique_line_unread``).
     """
     text = str(line or "").strip()
-    bare = text.strip("*`_ ").rstrip(".").strip()
+    bare = _bare_technique(text)
     if bare.upper() in _NO_TECHNIQUE:
-        return None, None
-    if _ONE_TECHNIQUE_RE.fullmatch(bare):
-        return bare.upper(), None
-    return None, text
+        return (), None
+    parts = [_bare_technique(part) for part in _TECHNIQUE_LIST_SEPARATOR_RE.split(bare)]
+    if parts and all(_ONE_TECHNIQUE_RE.fullmatch(part) for part in parts):
+        return tuple(dict.fromkeys(part.upper() for part in parts)), None
+    return (), text
 
 
 # Model tool-call scaffolding, which is not prose and is never a finding.
@@ -1686,6 +1698,11 @@ class ClaimRead:
     section, which are not the analyst's own and are not read. They count as
     unread only when none of the answer's own claims was read: then they may
     be the answer's only claims, and saying nothing would lose them silently.
+
+    ``blocks_read`` is the blocks the claims were read from. A block whose
+    TECHNIQUE line lists several ids is one claim per id, so it is the blocks,
+    not the claims, that are counted against the claims begun. ``None`` (a
+    read built by hand) counts one block per claim.
     """
 
     claims: list[ClaimEvidence]
@@ -1693,13 +1710,19 @@ class ClaimRead:
     begun: int
     after_disputes: int = 0
     confidence_unreadable: tuple[str, ...] = ()
+    blocks_read: int | None = None
+
+    @property
+    def read(self) -> int:
+        """The claim blocks read, each once however many techniques it lists."""
+        return len(self.claims) if self.blocks_read is None else int(self.blocks_read)
 
     @property
     def unread(self) -> int:
         """Claims begun that are neither read nor counted as stating no confidence."""
         own = max(
             len(self.confidence_unreadable),
-            self.begun - len(self.claims) - self.without_confidence,
+            self.begun - self.read - self.without_confidence,
             0,
         )
         return own + (self.after_disputes if not self.claims else 0)
@@ -1711,8 +1734,9 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
     The answer is split at every claim heading where a block can begin
     (``claim_headings.claims_headed``: plain, numbered or marked, with or
     without a ``---`` line between claims) and at the model's own ``---``
-    lines. Each block yields at most one claim; the heading count says how
-    many the model began, so a block the reader could not split is visible.
+    lines. Each block yields one claim, or one per id its TECHNIQUE line
+    lists; the heading count says how many the model began, so a block the
+    reader could not split is visible.
 
     ``require_evidence`` is the static, dynamic and network analysts'
     stricter reading: a block without an ``EVIDENCE:`` line, or with one that
@@ -1725,6 +1749,7 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
     claims: list[ClaimEvidence] = []
     without_confidence = 0
     unreadable: list[str] = []
+    blocks_read = 0
     # Stripped per field rather than over the whole text: removing a block
     # that sat between ``CLAIM:`` and ``EVIDENCE:`` would leave the claim
     # marker with nothing after it, and the next line would slide up into the
@@ -1762,32 +1787,38 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
             unreadable.append(_confidence_as_written(stated))
             continue
 
-        # One id is kept as written. Whether it is real, retired or a
+        # Each id is kept as written. Whether it is real, retired or a
         # placeholder is ``attck.unknown_id``'s question, asked with feedback
-        # and recorded; a line that is more than one id is kept whole and
-        # asked about, never cut to its first id.
+        # and recorded; a line that is more than ids is kept whole and asked
+        # about, never cut to its first id. A list of ids is one claim per id,
+        # each the analyst's sentence, evidence and confidence as written —
+        # what the analyst was asked to rewrite it as — so each id is checked
+        # as a technique on its own claim.
         technique_match = _field(tail, _LINE_TECHNIQUE_RE, _BLOCK_TECHNIQUE_LINE_RE)
-        technique_id, technique_line = read_technique_line(
+        technique_ids, technique_line = read_technique_line(
             technique_match.group(1) if technique_match else ""
         )
 
-        claims.append(
-            ClaimEvidence(
-                # Whole, as written: a claim stored at a fixed width was
-                # checked, retried and published as the cut text.
-                claim=claim_text,
-                evidence_ref=evidence_ref_text(evidence_text),
-                confidence=confidence,
-                technique_id=technique_id,
-                technique_line=technique_line,
+        blocks_read += 1
+        for technique_id in technique_ids or (None,):
+            claims.append(
+                ClaimEvidence(
+                    # Whole, as written: a claim stored at a fixed width was
+                    # checked, retried and published as the cut text.
+                    claim=claim_text,
+                    evidence_ref=evidence_ref_text(evidence_text),
+                    confidence=confidence,
+                    technique_id=technique_id,
+                    technique_line=technique_line,
+                )
             )
-        )
     return ClaimRead(
         claims=claims,
         without_confidence=without_confidence,
         begun=count_claims_begun(text or ""),
         after_disputes=count_claims_after_disputes(text or ""),
         confidence_unreadable=tuple(unreadable),
+        blocks_read=blocks_read,
     )
 
 
@@ -1809,7 +1840,7 @@ def claims_unread_sentence(agent: str, read: ClaimRead, revision_round: int = 0)
     )
     return (
         f"The {agent} analyst's answer{stage} began {read.begun} claim(s){quoted}, and "
-        f"{len(read.claims)} were read{declined}; {read.unread} could not be read as a "
+        f"{read.read} were read{declined}; {read.unread} could not be read as a "
         f"claim and are not in its findings.{unreadable}"
     )
 

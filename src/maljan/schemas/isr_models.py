@@ -94,14 +94,15 @@ class ClaimEvidence(BaseModel):
         description="MITRE ATT&CK technique ID if applicable, e.g. 'T1055.001'.",
         pattern=r"^T\d{4}(\.\d{3})?$",
     )
-    # The claim's TECHNIQUE line as written, when it is more than one id or
-    # NONE: a qualifier, a negation, several ids. No id is read from it —
-    # "T1027.002 not supported" is not a claim of T1027.002 — and the
-    # validation turn asks the analyst for one id per claim
-    # (``pipeline.validation.TECHNIQUE_LINE_UNREAD_CODE``).
+    # The claim's TECHNIQUE line as written, when it is more than ids or
+    # NONE: a qualifier, a negation, a list joined by "or". No id is read from
+    # it — "T1027.002 not supported" is not a claim of T1027.002 — and the
+    # validation turn asks the analyst for the ids alone
+    # (``pipeline.validation.TECHNIQUE_LINE_UNREAD_CODE``). A list of ids
+    # separated by commas or "and" is read as one claim per id.
     technique_line: str | None = Field(
         default=None,
-        description="The claim's TECHNIQUE line as written, when no single id could be read.",
+        description="The claim's TECHNIQUE line as written, when no technique id could be read.",
     )
     # Whether that id survived validation. ``pipeline.validation`` sets this
     # ``False`` when the analyst kept an id the ATT&CK catalogue does not have,
