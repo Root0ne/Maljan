@@ -3116,10 +3116,12 @@ is assembled from what the run gathered rather than recomputed beside it:
   `update_data.dat` is never bracketed. The same rule reaches model prose and
   the evidence dump through `ProseDefanger`, which touches exactly the values
   the run's network block and IOC table hold, as whole tokens. Strings of note,
-  a file or host indicator, the platform's findings (section 13, the verdict,
-  the export decisions), a tool failure's error and a draft rule's source line
-  defang every URL, mailbox, address and host they hold; a draft rule's body is
-  printed as it compiles. The JSON report,
+  every indicator column, the platform's findings (section 13, the verdict,
+  the export decisions), a tool failure's error, a draft rule's source line and
+  compile error, and model prose and cells beyond the run's own values defang
+  every URL, mailbox, address and host they hold, a host in capitals and an
+  `.onion` name included; a draft rule's body is printed as it compiles, and
+  the references and the configured model endpoint stay links. The JSON report,
   the STIX bundle, MISP and `/reports/{id}/iocs` carry every value live, and
   the indicator section says so under its tables. A §7 string is printed as
   the file's bytes are, and says it is not an observed endpoint.

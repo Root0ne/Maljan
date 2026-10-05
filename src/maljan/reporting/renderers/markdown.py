@@ -1373,7 +1373,7 @@ class MarkdownRenderer:
                         # ("//relay.example.net/live/" read as a path) holds
                         # it defanged; any other is printed as it is.
                         _code_span(_defanged_text(row.value)),
-                        row.context or "-",
+                        _defanged_text(row.context) if row.context else "-",
                         row.source or "-",
                         ctx.plain(row.published or "-"),
                     )
@@ -1405,7 +1405,8 @@ class MarkdownRenderer:
                     "; ".join(
                         part
                         for part in (
-                            row.context,
+                            # "the host of <url>": the URL is defanged too.
+                            _defanged_text(row.context) if row.context else "",
                             f"recovered by {row.recovered_by}" if row.recovered_by else "",
                         )
                         if part
@@ -1468,7 +1469,7 @@ class MarkdownRenderer:
             body.append("")
             for rule in report.detection_signatures:
                 status = (
-                    f"compile error: {_one_line(rule.compile_error)}"
+                    f"compile error: {_defanged_text(_one_line(rule.compile_error))}"
                     if rule.compile_error
                     else "compiled"
                 )
@@ -2155,7 +2156,11 @@ class _Context:
         for key in recovered.recovered_by if recovered is not None else {}:
             indicators += [(value, kind) for kind, value in cell_network_values(key, None)]
         self.indicators = indicators
-        self._defang = ProseDefanger(indicators)
+        run_values = ProseDefanger(indicators)
+        # The run's own values first, then every other URL, mailbox, address
+        # and host the text names: a model's prose can name one the run never
+        # recorded, and it is printed for reading like any other.
+        self._defang = lambda text: _defanged_text(run_values(text)) if text else text
         self.reputations = _reputations(report)
         # The report model's sentences a check asked about and the retry left
         # standing, each with the mark printed after it. Longest first, so a
@@ -2577,7 +2582,18 @@ def _defanged_text(text: str) -> str:
     indicators = [(found.group(0), "url") for found in _URL_IN_TEXT.finditer(text)]
     indicators += [(found.group(0), "email") for found in _EMAIL_IN_TEXT.finditer(text)]
     indicators += [(value, kind) for kind, value in network_values_in(text)]
+    # A host written in capitals ("EVIL.COM") is read as the host it spells;
+    # the string sweep's reader takes an inner capital for a type name.
+    for found in _SHOUTED_HOST.finditer(text):
+        indicators += [(value, kind) for kind, value in network_values_in(found.group(0).lower())]
+    # An onion service's name, whatever its length.
+    indicators += [(found.group(0), "domain") for found in _ONION_HOST.finditer(text)]
     return defang_text(text, indicators)
+
+
+# A dotted name written wholly in capitals, and a name under ``.onion``.
+_SHOUTED_HOST = re.compile(r"(?<![\w.-])[A-Z0-9-]+(?:\.[A-Z0-9-]+)+(?![\w-])")
+_ONION_HOST = re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+onion(?![\w-])")
 
 
 def _inline_safe(text: Any, *, pipes: bool = True) -> str:
@@ -3328,14 +3344,14 @@ def _attack_row(
     if not cell.technique_id_valid:
         status = f"unverified id ({UNVERIFIED_TECHNIQUE_MARKER})"
     elif cell.not_published:
-        status = f"claimed, not published: {_truncate(cell.not_published, 200)}"
+        status = f"claimed, not published: {_truncate(_defanged_text(cell.not_published), 200)}"
     else:
         status = "published" + _corroborated_words(mapping, rules)
         rule_only = ctx.rule_only.get(cell.technique_id)
         if rule_only:
             status += f"; {rule_only}"
         if cell.note:
-            status += f"; {cell.note}"
+            status += f"; {_defanged_text(cell.note)}"
     # The platform's unresolved findings about this technique, beside its
     # row: the ATT&CK checks, and the judge crediting a source that never
     # named it. Matched on what the finding is about (``subject``), because

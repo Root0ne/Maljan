@@ -155,3 +155,56 @@ def test_a_tool_failure_prints_a_network_value_in_its_error_defanged() -> None:
 
     assert "see hxxps://relay[.]example[.]net/live/ for the error" in markdown
     assert _live_in(markdown) == []
+
+
+def test_the_indicator_context_cells_print_their_urls_defanged() -> None:
+    report = _report(
+        static=StaticAnalysis(
+            interesting_strings=[
+                StringIOC(value=f"//{HOST}/a C", kind="path", notes=f"decoded next to {URL}"),
+                StringIOC(value=URL, kind="url"),
+            ]
+        )
+    )
+    section = MarkdownRenderer().render(report).split("## 9.", 1)[1].split("\n## ", 1)[0]
+
+    assert "decoded next to hxxps://relay[.]example[.]net/live/" in section
+    assert _live_in(section) == []
+
+
+def test_a_host_in_capitals_and_an_onion_name_print_defanged() -> None:
+    report = _report(
+        static=StaticAnalysis(
+            interesting_strings=[
+                StringIOC(value="RELAY.EXAMPLE.NET", kind="domain"),
+                StringIOC(value="x.onion", kind="domain"),
+                StringIOC(value="KERNEL32.DLL", kind="other"),
+            ]
+        )
+    )
+    table = MarkdownRenderer().render(report).split("Strings of note", 1)[1].split("\n\n", 3)[2]
+
+    assert "RELAY[.]EXAMPLE[.]NET" in table
+    assert "x[.]onion" in table
+    assert "`KERNEL32.DLL`" in table
+
+
+def test_a_draft_rule_s_compile_error_prints_defanged() -> None:
+    from maljan.reporting.models import DetectionRule
+
+    report = _report(
+        detection_signatures=[
+            DetectionRule(
+                kind="yara",
+                name="Example",
+                body="rule Example { condition: true }",
+                compile_error=f'syntax error near "{URL}"',
+            )
+        ]
+    )
+    (line,) = [
+        line for line in MarkdownRenderer().render(report).splitlines() if "compile error" in line
+    ]
+
+    assert "hxxps://relay[.]example[.]net/live/" in line
+    assert _live_in(line) == []
