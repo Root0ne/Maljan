@@ -713,13 +713,57 @@ _CATEGORY_NOUN = (
 # "Without encryption, the sample exfiltrates data"; a comma splice), or a
 # coordinator that joins a second statement ("No persistence exists and
 # process injection is used", "lacks persistence and instead injects"). A dash
-# is read as the comma it stands for ("loops instead of exiting — sandbox
-# evasion via system checks"): an em dash however it is spaced, an en dash
-# only with a space on each side, since "0–7" is a range.
+# is read before any of this (``_read_dashes``).
 _ASSERTION_BETWEEN_RE = re.compile(
-    r",|—|\s–\s|\b(?:and|instead|only|but|yet|so|then|rather|while)\b",
+    r",|\b(?:and|instead|only|but|yet|so|then|rather|while)\b", re.IGNORECASE
+)
+# A dash: an em dash however it is spaced, an en dash only with a space on
+# each side, since "0–7" is a range.
+_DASH_RE = re.compile(r"—|(?<=\s)–(?=\s)")
+# A verb of its own, by its auxiliary or copula: what makes the words after a
+# dash a new statement ("— process injection was not observed") rather than
+# the rest of the phrase before it ("— not a single HTTP request").
+_OWN_VERB_RE = re.compile(
+    r"\b(?:is|are|was|were|be|been|being|has|have|had|does|do|did|can|could|will|would"
+    r"|may|might|must|should|shall|exists?|existed|appears?|appeared|occurs?|occurred)\b",
     re.IGNORECASE,
 )
+# A cue that sets aside only the phrase right after it: a dash ends its reach
+# whatever follows ("loops instead of exiting visibly — sandbox evasion").
+_SET_ASIDE_CUE_RE = re.compile(r"\b(?:instead\s+of|rather\s+than)\b[^.;:!?\n]*$", re.IGNORECASE)
+
+
+def _read_dashes(text: str) -> str:
+    """``text`` with its dashes read, every character kept in place.
+
+    A pair of dashes in one clause around an aside ("does not — in any run —
+    inject") is read as if the aside were not there: dashes and aside become
+    spaces, so the negation keeps its verb. A single dash becomes a clause
+    break (";") where a clause with its own verb follows it, or where the cue
+    before it sets aside only its own phrase; any other dash is left as it is,
+    and the reading is the one a dash always had.
+    """
+    chars = list(text)
+    dashes = [found.start() for found in _DASH_RE.finditer(text)]
+    paired: set[int] = set()
+    for first, second in zip(dashes, dashes[1:], strict=False):
+        if first in paired:
+            continue
+        if not _CLAUSE_BREAK_RE.search(text[first + 1 : second]):
+            for at in range(first, second + 1):
+                chars[at] = " "
+            paired.update({first, second})
+    for at in dashes:
+        if at in paired:
+            continue
+        rest = text[at + 1 :]
+        stop = _CLAUSE_BREAK_RE.search(rest)
+        after = rest[: stop.start()] if stop else rest
+        if _OWN_VERB_RE.search(after) or _SET_ASIDE_CUE_RE.search(text[:at]):
+            chars[at] = ";"
+    return "".join(chars)
+
+
 # A cue that opens a phrase asserting the verb after it: "no longer checks",
 # "not merely reads", "never stops beaconing", "not just", "not only".
 _CUE_THAT_ASSERTS_RE = re.compile(
@@ -892,6 +936,7 @@ def states_absence(text: str, pattern: re.Pattern[str] | None) -> bool:
     """
     if not text or pattern is None:
         return False
+    text = _read_dashes(text)
     matches = list(pattern.finditer(text))
     if not matches:
         return False
@@ -2158,10 +2203,12 @@ _NEGATION_RE = re.compile(
 # The phrases that open with a cue and assert the opposite of one. "There is no
 # doubt that the sample exfiltrates data" is a claim, and "not only does it
 # persist" is two. Checked at the cue's own position, so a real cue elsewhere
-# in the window still counts. A hyphenated "never-" opens an adjective ("a
-# complete, never-exercised web C2"), which says how the thing it describes
-# was used and asserts the thing itself.
-_NOT_A_NEGATION = ("no doubt", "not only", "never-")
+# in the window still counts. "never-" before one of the listed past
+# participles opens an adjective ("a complete, never-exercised web C2"), which
+# says how the thing it describes was used and asserts the thing itself; any
+# other "never-" ("never-contacted", "never-ever") is the negation it reads as.
+_NEVER_ADJECTIVES = ("exercised", "executed", "used", "called", "invoked", "triggered")
+_NOT_A_NEGATION = ("no doubt", "not only", *(f"never-{word}" for word in _NEVER_ADJECTIVES))
 
 # How far back a cue is allowed to reach. A negation governs the words next to
 # it, not the whole paragraph: "no persistence was observed and the sample

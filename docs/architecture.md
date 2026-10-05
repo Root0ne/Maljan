@@ -1104,10 +1104,12 @@ decides.
    a category phrase only ("discovery mechanisms"; Stealth and Defense
    Impairment also by their pre-19 name, Defense Evasion). The reading is
    stricter than the capability check's about which cue governs a mention: no
-   comma, no dash (an em dash, or a spaced en dash) and no coordinator ("and",
-   "instead", "only", "but") between them, and not a cue that opens an
-   assertion ("no longer", "not merely", "never stops") nor a hyphenated
-   "never-" adjective ("a never-exercised web C2"). Two more readings of absence do not need the cue next to the
+   comma and no coordinator ("and", "instead", "only", "but") between them,
+   and not a cue that opens an assertion ("no longer", "not merely", "never
+   stops") nor "never-" before a listed past participle ("a never-exercised
+   web C2"). A pair of dashes around an aside is read as if the aside were not
+   there; a single dash is a clause break where a clause with its own verb
+   follows it or the cue before it is "instead of" or "rather than". Two more readings of absence do not need the cue next to the
    mention: an item of a noun list a cue in the clause negates, the list
    joined by commas and a final "or"/"and" and ending at its head noun ("does
    not contain persistence, lateral movement, or exfiltration mechanisms"), and
