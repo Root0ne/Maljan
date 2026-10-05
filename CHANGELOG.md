@@ -2394,6 +2394,8 @@ change landed on `main`.
   flat cost; the ended answer's question says it was ended, its in-call pace is
   recorded, and the spend ceiling is charged a stated estimate of its usage.
   The reader keeps no text: a claim is a 16-byte hash, and no line is buffered.
+- **A fenced JSON block nested past the parser's depth is kept as text** by the
+  tool-call strip, as invalid JSON is, rather than raising and losing the answer.
 - **A connection that drops while an answer streams is an `APIConnectionError`**
   (llama.cpp, DeepSeek, Ollama), as on a whole answer, so the loop's replay and
   the connection retry read it again.

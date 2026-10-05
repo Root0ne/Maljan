@@ -366,3 +366,10 @@ def test_the_automata_are_built_from_the_patterns_the_check_reads() -> None:
         "|^#+[ \\t]*\\**[ \\t]*DISPUTES\\b(?P<heading_rest>.*)$"
     )
     assert claim_headings._NO_DISPUTE == frozenset({"NONE", "N/A", "\u2014", "\u2013", "-"})
+
+
+def test_a_fence_nested_past_the_parser_s_depth_agrees_and_is_kept() -> None:
+    depth = 20_000
+    fence = '```json\n{"name": "x", "arguments": ' + "[" * depth + "]" * depth + "}\n```\n"
+    text = "CLAIM: it reads a key\n" + fence + "CLAIM: it reads a key\n" * 3
+    _agree_in_pieces_of(text, 4096, None)

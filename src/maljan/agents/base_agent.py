@@ -1555,7 +1555,9 @@ _INVOCATION_KEYS = ({"name", "arguments"}, {"name", "parameters"}, {"tool", "arg
 def _is_tool_invocation(payload: str) -> bool:
     try:
         parsed = json.loads(payload)
-    except ValueError:
+    except (ValueError, RecursionError):
+        # Not JSON, or nested past the parser's depth: text that is not
+        # stripped, and never an error that loses the whole answer.
         return False
     if not isinstance(parsed, dict):
         return False
