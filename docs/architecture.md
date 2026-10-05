@@ -3414,11 +3414,16 @@ is assembled from what the run gathered rather than recomputed beside it:
   observed cites no entry), `report.identifier_uncited` (a host identifier
   cites no entry of the run), `report.value_not_in_cited_entry` (a host
   identifier's or a configuration value's whole value is in none of the entries
-  it cites, a number held in decimal or hex; rows citing the same entries are
-  one question, a kept row marked beside its evidence) and
-  `report.unpublished_value` (a composer sentence names a network value the IOC
-  table does not publish without its `no: <reason>`; one question per sentence,
-  a kept sentence marked in place with the state). A field a model did not supply is absent from
+  it cites; a configuration number is held in decimal or hex, or by its number
+  beside a known time or size unit; rows citing the same entries are one
+  question, a kept row marked beside its evidence) and
+  `report.unpublished_value` (a section's prose — a body, the introduction, a
+  flow step — names a network value the IOC table does not publish with no
+  `no: <reason>` beside that value; one question per section, each state said
+  once with its values and sentences; each kept sentence marked in place with
+  its own values' states). A configuration, identifier or endpoint cell is not
+  asked about: the report prints the IOC table's state beside an unpublished
+  value in it. A field a model did not supply is absent from
   the report. The recommendation's category is the model's own. The Markdown
   prints the host identifiers in §9 under the report model's voice, unpublished,
   and the console draws them in the technical-analysis panel.
@@ -3940,11 +3945,18 @@ somebody can.
 
 Every model-written value on this path — a URL echoed into a decline, the
 judge's own verdict word, the category it invented, the type of an object the
-bundle cannot hold — goes through `pipeline.events.safe_finding_value`: the
-value as written, on one line, with a length bound, and with the operator's
-configured secrets kept out by value. A validation row, a degradation reason
-and an export decline are report text, so the event scrub never rewrites them;
-the event that carries one is scrubbed by the publisher like every other.
+bundle cannot hold — goes through `pipeline.events.safe_finding_value`. A
+validation row, a degradation reason and an export decline are report text.
+With the operator's configured values registered (the worker registers them
+per job), a row keeps the evidence's words and loses every operator
+credential: each configured value by value (a short one as a whole word), a
+URL's userinfo and each credential-named query value. Registration reads a
+configured URL's password of any length, a token in its username slot and its
+`api_key`, `apikey`, `access_token`, `token` and `key` values. With nothing
+registered, or a scope whose values could not be read, a row is held to the
+whole event scrub. The bound never leaves the head of a value the scrub masks,
+and the event that carries a row is scrubbed by the publisher like every
+other.
 
 No count bounds the indicators the export carries: it carries every value the
 one publish rule publishes, which is every `yes` row of the IOC table, and no

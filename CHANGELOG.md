@@ -2385,8 +2385,8 @@ change landed on `main`.
 ### Fixed
 
 - **A table row's whole value is in an entry it cites** (`report.value_not_in_cited_entry`): a host identifier or a configuration value no cited entry holds whole, a number in decimal or hex included, is asked once and marked beside its evidence if kept.
-- **Technical prose names an unpublished value only beside its state** (`report.unpublished_value`): a composer sentence naming a network value the IOC table does not publish, without its `no: <reason>`, is asked once and marked with the state if kept.
-- **The event scrub never reaches report text:** a finding row keeps what it quotes (only configured secrets are kept out by value); in events the label rule is unchanged, and a slash-joined family name with a capitalised compound piece is kept unless a credential label stands before it.
+- **Technical prose names an unpublished value only beside its state** (`report.unpublished_value`): one question per section lists the values of its prose the IOC table does not publish, kept sentences are marked with their values' states, and a table cell carries the state beside the value without a question.
+- **The event scrub's shape rules never reach report text, and no operator credential does:** with configured values registered, a finding row keeps the evidence's words and loses configured values, URL userinfo and credential-named query values; otherwise it is scrubbed as before. In events an exact ATT&CK name such as "Access Token Manipulation" and a slash-joined family name away from a credential label are kept.
 
 - **The APK tool survives a manifest androguard cannot parse.** On an APK whose
   `AndroidManifest.xml` is not valid AXML, androguard raised from a getter
