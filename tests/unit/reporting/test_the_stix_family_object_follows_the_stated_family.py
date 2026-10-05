@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport
 from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
@@ -55,7 +57,7 @@ def _relationships(bundle: Bundle) -> list[Any]:
 
 def _sample_object(**over: Any) -> Malware:
     fields: dict[str, Any] = {
-        "id": "malware--b2c3d4e5-f6a7-8901-bcde-f12345678901",
+        "id": "malware--2b6d1c4e-8f3a-4d5b-9c7e-1a2b3c4d5e6f",
         "name": "loader.dll sample",
         "malware_types": ["downloader"],
         "is_family": False,
@@ -117,6 +119,33 @@ def test_with_no_family_stated_nothing_is_said_to_be_a_family() -> None:
 
     fallback = ExtendedSTIXRenderer().render(_report(family=None), base_bundle=None)
     assert [m.is_family for m in _malware(fallback)] == [False]
+
+
+@pytest.mark.parametrize("placeholder", ["Unknown", "unknown", "none", "n/a", "", "  "])
+def test_a_placeholder_family_is_no_family(placeholder: str) -> None:
+    judge = _sample_object()
+    bundle = ExtendedSTIXRenderer().render(
+        _report(family=placeholder or None), base_bundle=Bundle(objects=[judge])
+    )
+    assert [(m.name, m.is_family) for m in _malware(bundle)] == [("loader.dll sample", False)]
+    assert not [r for r in _relationships(bundle) if r.relationship_type == "variant-of"]
+
+    report = _report(family=None)
+    report.attribution.family = placeholder
+    fallback = ExtendedSTIXRenderer().render(report, base_bundle=None)
+    assert [m.is_family for m in _malware(fallback)] == [False]
+
+
+def test_the_report_and_the_export_read_a_family_with_one_reader() -> None:
+    from maljan.reporting.models import stated_family
+
+    assert [stated_family(f) for f in ("Unknown", "N/A", "none", None, " Examplefamily ")] == [
+        "",
+        "",
+        "",
+        "",
+        FAMILY,
+    ]
 
 
 def test_a_benign_verdict_carries_no_family_object() -> None:

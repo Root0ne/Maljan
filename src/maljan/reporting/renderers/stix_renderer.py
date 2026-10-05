@@ -61,6 +61,7 @@ from maljan.reporting.models import (
     ProcessNode,
     RecoveredValue,
     StringIOC,
+    stated_family,
 )
 from maljan.schemas.judgement import indicator_type_for
 from maljan.schemas.stix_models import (
@@ -1008,7 +1009,9 @@ class ExtendedSTIXRenderer:
         #    run, so the object a Benign export declines above was replaced by
         #    an identical one two steps later.
         malware_id = None if benign else self._find_malware_id(objects)
-        family = str(report.attribution.family or "").strip()
+        # The family the run states (the judge's, else the sandbox's), or none
+        # for a placeholder: "Unknown" is no family to export an object for.
+        family = stated_family(report.attribution.family)
         if malware_id is None and not benign:
             malware_name = family or report.malware_category or "unknown"
             malware_obj = Malware(
@@ -1022,12 +1025,12 @@ class ExtendedSTIXRenderer:
                 # this object's; a name from the category or ``unknown`` has
                 # none in the record.
                 x_maljan_evidence_refs=(
-                    self._family_refs(report, ledger_order) if report.attribution.family else None
+                    self._family_refs(report, ledger_order) if family else None
                 ),
             )
             objects.append(malware_obj)
             malware_id = malware_obj.id
-            if report.attribution.family:
+            if family:
                 minted_family_id = malware_obj.id
         elif malware_id is not None and family and not _names_the_family(objects, family):
             # The judge's malware objects stand for this one sample, and the

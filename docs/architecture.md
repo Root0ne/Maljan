@@ -986,7 +986,8 @@ as written), or a `malware_types` value outside STIX 2.1's `malware-type-ov`
 vocabulary, which the question lists (`validation.MALWARE_TYPES`). The judge's
 prompt says an object named after the attributed family stands for it and that
 its kind goes under `malware_types` from that vocabulary. Nothing is rewritten:
-what the judge keeps is published as written. When the run states a family and
+what the judge keeps is published as written. When the run states a family (the
+judge's, else the sandbox's; "Unknown", "none", "n/a" or empty is none) and
 no malware object is named for it, the export adds the family's object
 (`is_family: true`, the family's ledger ids) and relates the judge's object to
 it as `variant-of`; the platform's own object, minted when the judge wrote

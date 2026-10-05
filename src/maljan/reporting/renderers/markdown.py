@@ -64,6 +64,7 @@ from maljan.reporting.models import (
     RegistryMod,
     SandboxSignature,
     TechnicalSubsection,
+    stated_family,
 )
 from maljan.schemas.isr_models import UNVERIFIED_TECHNIQUE_MARKER
 
@@ -2656,7 +2657,7 @@ def _findings_beside(rows: list[dict[str, str]]) -> list[str]:
 def _family_voice(report: MalwareReport) -> str:
     """Who named the family: the judge, the sandbox's own classification, or a model unnamed."""
     attr = report.attribution
-    if not attr.family or attr.family.lower() == "unknown":
+    if not stated_family(attr.family):
         return JUDGE
     if attr.family_source == "sandbox":
         return MEASURED
@@ -3033,9 +3034,9 @@ def report_title(report: MalwareReport) -> str:
     does one only a sandbox's classification named.
     """
     attr = report.attribution
-    family = _one_line(attr.family).strip()
+    family = stated_family(_one_line(attr.family))
     named = attr.family_source != "sandbox" and bool(attr.family_evidence_ids)
-    if family and family.lower() != "unknown" and named:
+    if family and named:
         category = _one_line(report.malware_category).strip()
         if category and category.lower() != "unknown":
             return f"{family} {category} analysis"
