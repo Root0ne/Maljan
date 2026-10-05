@@ -2384,6 +2384,11 @@ change landed on `main`.
 
 ### Fixed
 
+- **A listed contradiction about a claim no analyst still holds is closed, and one disputing a count a cited ledger entry states is settled by stating it:** neither opens a revision round, and a line naming a technique, a network value or a hash is left to the analysts.
+- **A debate whose last revision round changed no claim, technique or finding ends as `converged`,** and the round limit stays the backstop.
+- **The sycophancy check sends agreement back only when the revision round before it added no ledger entry,** so a forced revision that changed nothing is never forced again.
+- **A revision is made against the analyst's answer in force and its peers', and a dropped claim stating a reported value is asked about once** (`isr.claims_dropped`): kept, or withdrawn on a `WITHDRAWN:` line with a reason; each drop is recorded in `run_summary.negotiation.dropped_claims`.
+- **The debate stage's duration counts its revision rounds, and `termination_reason` is read from the router's own rules:** `converged_early` is true only for a debate that ended before its limit for another reason.
 - **A table row's whole value is in an entry it cites** (`report.value_not_in_cited_entry`): a host identifier or a configuration value no cited entry holds whole, a number in decimal or hex included, is asked once and marked beside its evidence if kept.
 - **Technical prose names an unpublished value only beside its state** (`report.unpublished_value`): one question per section lists the values of its prose the IOC table does not publish, kept sentences are marked with their values' states, and a table cell carries the state beside the value without a question.
 - **The event scrub's shape rules never reach report text, and no operator credential does:** with configured values registered, a finding row keeps the evidence's words and loses configured values, URL userinfo and credential-named query values; otherwise it is scrubbed as before. In events an exact ATT&CK name such as "Access Token Manipulation" and a slash-joined family name away from a credential label are kept.

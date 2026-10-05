@@ -346,6 +346,15 @@ before. A run's mediator listed five contradictions, one of them a claim the
 ledger contradicted, argued them away, wrote `agreement_confidence: 1.0`, and
 no analyst was asked to revise.
 
+The debate ends when nothing is left to settle (`pipeline/debate_settlement.py`,
+`pipeline/claim_drops.py`, `pipeline/routing.py`):
+
+- A block line whose first-named analyst holds none of the claim numbers it names is closed, and a count dispute whose cited entry states one of its numbers in a count field is settled by stating that field; neither stands, both are told to a revision round, and a line naming a technique, a network value or a hash always stands.
+- A revision round whose revisions changed no claim (by its values and technique, or its words where it states no value), technique or finding ends the debate as `converged`.
+- The sycophancy check sends agreement back only when the revision round before it added no ledger entry.
+- A revision is made against the analyst's answer in force and its peers'; a claim of that answer stating a value the revision no longer carries, not withdrawn on a `WITHDRAWN:` line with a reason, is asked about once (`isr.claims_dropped`), and every drop is recorded in `run_summary.negotiation.dropped_claims`.
+- The debate stage's duration adds the revision rounds' time to the mediations', and `termination_reason` comes from the router's own rules, `hard_limit` only when the debate would have gone on.
+
 A single local model server has one slot, and fanning out three analysts onto
 it produces queue thrash rather than speed; a hosted API serves each request on
 its own. `auto` tells them apart per job (`pipeline/analyst_mode.py`), on a
