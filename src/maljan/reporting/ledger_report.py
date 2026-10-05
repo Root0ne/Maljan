@@ -40,6 +40,7 @@ from maljan.reporting.dedupe import (
     merge_cell,
 )
 from maljan.reporting.models import EvidenceSection
+from maljan.schemas.evidence import answer_not_shown
 from maljan.utils.marked_cut import marked_cut
 
 if TYPE_CHECKING:
@@ -821,10 +822,17 @@ _FUNCTION_TOOLS = frozenset(
 _FUNCTION_LIST_TOOLS = frozenset({"list_functions", "get_functions", "afl", "list_methods"})
 
 
+# What a function's line says when the conversation had no room for the answer.
+FUNCTION_NOT_SHOWN = "answer not shown: no room left in the conversation"
+
+
 def _functions_examined(acc: _Sections, entry: LedgerEntry, _data: Any) -> None:
     section = acc.get("functions_examined", "Functions examined", "list")
     label = entry.symbol or entry.tool
-    acc.add_item(section, f"{label} ({entry.tool})")
+    if answer_not_shown(entry):
+        acc.add_item(section, f"{label} ({entry.tool}; {FUNCTION_NOT_SHOWN})")
+    else:
+        acc.add_item(section, f"{label} ({entry.tool})")
     acc.credit(section, entry)
 
 

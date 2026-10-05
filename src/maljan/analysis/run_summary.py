@@ -685,6 +685,13 @@ def spend_lines(spend: Any) -> list[str]:
             else ""
         )
     ]
+    estimated = int(spend.get("estimated_calls") or 0)
+    if estimated:
+        lines.append(
+            f"Of it, {float(spend.get('estimated_usd') or 0.0):.4f} USD is estimated for "
+            f"{estimated} call(s) ({spend.get('estimated_source') or 'estimated'}): the "
+            "prompt as uncached input and the generated pieces as output"
+        )
     for model, source in sorted((spend.get("prices_from") or {}).items()):
         if source == "llm.model_prices":
             lines.append(f"Prices of `{model}`: the operator's (llm.model_prices)")

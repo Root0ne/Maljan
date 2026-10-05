@@ -2387,6 +2387,27 @@ change landed on `main`.
 - **A table row's whole value is in an entry it cites** (`report.value_not_in_cited_entry`): a host identifier or a configuration value no cited entry holds whole, a number in decimal or hex included, is asked once and marked beside its evidence if kept.
 - **Technical prose names an unpublished value only beside its state** (`report.unpublished_value`): one question per section lists the values of its prose the IOC table does not publish, kept sentences are marked with their values' states, and a table cell carries the state beside the value without a question.
 - **The event scrub's shape rules never reach report text, and no operator credential does:** with configured values registered, a finding row keeps the evidence's words and loses configured values, URL userinfo and credential-named query values; otherwise it is scrubbed as before. In events an exact ATT&CK name such as "Access Token Manipulation" and a slash-joined family name away from a credential label are kept.
+- **An analyst's answer that repeats its claims past the margin is ended while
+  it streams** (llama.cpp, Ollama and DeepSeek, which is now read as a stream),
+  and the whole-answer question is asked of what it wrote; a path that does not
+  stream keeps the check after the answer. The rule is read line by line at a
+  flat cost; the ended answer's question says it was ended, its in-call pace is
+  recorded, and the spend ceiling is charged a stated estimate of its usage.
+  The reader keeps no text: a claim is a 16-byte hash, and no line is buffered.
+  A block still open is read as kept as it arrives and cut back only if it
+  resolves as removed; a tag's closing is read only after its own `>`.
+- **A streamed answer is joined as it arrives, holding no chunk** (llama.cpp,
+  DeepSeek, Ollama): 400,000 chunks join in about 11 s and 12 MB, where adding
+  the chunks took about 141 s and 990 MB; the joined answer is unchanged.
+- **A fenced JSON block nested past the parser's depth is kept as text** by the
+  tool-call strip, as invalid JSON is, rather than raising and losing the answer.
+- **A connection that drops while an answer streams is an `APIConnectionError`**
+  (llama.cpp, DeepSeek, Ollama), as on a whole answer, so the loop's replay and
+  the connection retry read it again.
+- **A tool answer the conversation had no room for is recorded as cut**
+  (`truncated`, with a statement of the cut), never as an ok and empty answer,
+  so the decompiled-not-described check, the function map and the report's
+  functions list do not count it as read.
 
 - **The APK tool survives a manifest androguard cannot parse.** On an APK whose
   `AndroidManifest.xml` is not valid AXML, androguard raised from a getter

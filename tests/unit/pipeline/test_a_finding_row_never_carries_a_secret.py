@@ -299,9 +299,10 @@ CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
     # chunks ("chunk 1 of 2"), and the words this function picks around it.
     ("pipeline/validation.py", "analyst_cut_violation"): frozenset({"chunk", "answer"}),
     # The same chunk wording, and the counts the platform read off the answer:
-    # numbers, never the answer's text.
+    # numbers, never the answer's text; ``streamed`` is this module's own
+    # sentence saying the answer was ended while it streamed, or nothing.
     ("pipeline/validation.py", "analyst_repeated_violation"): frozenset(
-        {"answer", "chars", "begun", "distinct", "repeated", "margin"}
+        {"answer", "chars", "begun", "distinct", "repeated", "margin", "streamed"}
     ),
 }
 

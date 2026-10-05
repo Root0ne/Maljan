@@ -945,6 +945,42 @@ def _provider_timeout(exc: BaseException) -> ModelCallDeadline:
     return ModelCallDeadline(f"the model request timed out: {exc or type(exc).__name__}")
 
 
+def _transport_failure(exc: BaseException) -> bool:
+    """Whether ``exc`` is a connection failing that is not a timeout.
+
+    httpx's ``TransportError`` family (from ``httpx`` or ``httpx2``) bar its
+    ``TimeoutException`` branch, or a socket's own ``ConnectionError``.
+    """
+    names = {(klass.__module__.split(".", 1)[0], klass.__name__) for klass in type(exc).__mro__}
+    for package in ("httpx", "httpx2"):
+        if (package, "TimeoutException") in names:
+            return False
+        if (package, "TransportError") in names:
+            return True
+    return isinstance(exc, ConnectionError) and not isinstance(exc, TimeoutError)
+
+
+def as_connection_error(exc: BaseException) -> BaseException:
+    """``exc`` as ``openai.APIConnectionError`` where it is a connection failing, else ``exc``.
+
+    The SDK reads a whole answer inside its request and states a transport
+    failure as ``APIConnectionError``, which the callers that replay or retry
+    a dropped connection read. A streamed answer is read after the request
+    returned, and the same failure comes out as the transport's own class. The
+    caller raises the result from ``exc``, so the failure stays its cause. A
+    timeout is left as it is: the call's deadline reads it.
+    """
+    if not _transport_failure(exc):
+        return exc
+    import openai
+
+    try:
+        request = getattr(exc, "request", None)
+    except Exception:  # noqa: BLE001 — httpx raises when no request was attached
+        request = None
+    return openai.APIConnectionError(request=request)  # type: ignore[arg-type]
+
+
 def _transport_read_timeout(exc: BaseException) -> bool:
     """Whether ``exc`` is, or was caused by, a connection's read timeout.
 
@@ -984,6 +1020,16 @@ def stamp_sent_at(result: Any, sent: float) -> Any:
     for generation in getattr(result, "generations", None) or []:
         _stamp_message(getattr(generation, "message", None), sent)
     return result
+
+
+def _ended_by_the_watch(result: Any) -> bool:
+    """Whether an answer was ended while it streamed (``llm.stream_watch``): it did not finish."""
+    from maljan.llm.stream_watch import ended_while_streaming
+
+    return any(
+        ended_while_streaming(getattr(generation, "message", None)) is not None
+        for generation in getattr(result, "generations", None) or []
+    )
 
 
 def _deadline_members(base: Any) -> dict[str, Any]:
@@ -1042,6 +1088,8 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                     await asyncio.wait({task})
                 deadline.record_unfinished()
                 raise
+            if _ended_by_the_watch(result):
+                deadline.record_unfinished()
             return stamp_sent_at(result, sent)
 
         members["_agenerate"] = _agenerate
@@ -1103,6 +1151,10 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                         sent = None
                     yield chunk
             except GeneratorExit:
+                # Closed before its end — by the watch that ended the answer
+                # (``llm.stream_watch``) or by a caller that stopped reading:
+                # its pieces are the call's only measurement.
+                deadline.record_unfinished()
                 raise
             except BaseException:
                 deadline.record_unfinished()
@@ -1157,6 +1209,8 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                 if deadline.progress.pieces > 0 and _transport_read_timeout(error):
                     raise deadline.silence_ended(time.monotonic(), error) from error
                 raise error
+            if _ended_by_the_watch(outcome["answer"]):
+                deadline.record_unfinished()
             return stamp_sent_at(outcome["answer"], sent)
 
         members["_generate"] = _generate
@@ -1228,6 +1282,8 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                         sent = None
                     yield item
             except GeneratorExit:
+                # As on the async path: closed before its end.
+                deadline.record_unfinished()
                 raise
             except BaseException:
                 deadline.record_unfinished()

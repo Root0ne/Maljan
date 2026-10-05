@@ -1491,7 +1491,16 @@ claims it began. A claim's block also ends at the first line that is not a
 field once its field lines have begun, so prose after the last claim is not
 counted as part of it. A chunk's answer is
 asked inside its chunk, as a cut one is. A local triage answer began 639 claims
-in 32,768 tokens, 85 of them distinct.
+in 32,768 tokens, 85 of them distinct. Where the answer streams (llama.cpp,
+Ollama, and DeepSeek, which is read as a stream for this), the same rule is read
+at each line's end and ends the call once the margin is crossed
+(`llm.stream_watch`): the stream is closed and the answer is what was written up
+to there, which the check then asks about as above. The reader
+(`agents.repeat_watch`) gives the check's verdict for every prefix and keeps no
+text: a claim is kept as a 16-byte hash and a line is read by automata built
+from the heading patterns, so its memory grows only with the distinct claims. A
+tool-call tag or a JSON fence still open is read as kept, as the check keeps it,
+and cut back to the reading before it only if it resolves as removed.
 
 Two more questions are asked of an analyst's answer in the same validation
 turn, each once, and what the analyst answers stands.
@@ -1499,7 +1508,9 @@ turn, each once, and what the analyst answers stands.
 - **Decompiled but not described** (`isr.decompiled_not_described`).
   - *What counts as decompiled.* The functions come from the analyst's own
     ledger entries: a tool whose name says it decompiles, and a call that
-    answered.
+    answered. A call whose answer the conversation had no room for is recorded
+    as cut (`truncated`, its output a statement of the cut) and counts as no
+    function read, here, in the function map and in "Functions examined".
   - *Reading a batch.* A batch answer is a JSON object every key of which is
     an address: `0x…`, or at least four hex digits with a decimal digit among
     them (a hex word such as `cafe` is no address). It gives one function per

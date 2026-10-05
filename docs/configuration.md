@@ -1149,16 +1149,21 @@ and its numbers.
 
 Pieces are seen only where the answer is streamed. A llama.cpp server's answer
 is read as a stream for this reason, with its usage on the closing chunk and
-`langchain-openai`'s own 120 s gap limit off. The chunks are joined into the
+`langchain-openai`'s own 120 s gap limit off. The chunks are joined, as they
+arrive and holding none of them, into the
 answer the server would have sent whole: the same text, finish reason,
 `timings` and usage (the last the stream sent, wherever it came, since
 ik_llama.cpp repeats a running total on every chunk), and tool calls read as
 strictly as a whole answer's, so a call cut mid-argument stays an invalid
 call. A server error sent inside the stream is raised as the status error it
-is on a whole answer. Ollama's client streams every answer. A hosted API's
-answer is read whole, as before, and its first piece is its whole answer, so
-there the provider's timeout still bounds the call until the model's pace is
-measured.
+is on a whole answer, and a connection that drops while the answer streams as
+the `APIConnectionError` it is on a whole answer. Ollama's client streams every
+answer. DeepSeek (`compat: deepseek`) is read as a stream too, its reasoning
+kept and sent back, so its calls take the streamed deadline: the pace of the
+call's own pieces, silence before the first piece and after the last. Another
+hosted API's answer is read whole, as before, and its first piece is its whole
+answer, so there the provider's timeout still bounds the call until the model's
+pace is measured.
 
 The other fixed limits were decided one by one: `core.negotiation.max_iterations`
 stays an explicit setting (5), the runaway stop on a negotiation that never
@@ -1794,7 +1799,8 @@ answer may write again before it is asked once for a whole answer
 (`isr.claims_repeated`), with the answer shown back up to its first repeated
 claim. Empty derives the margin from the answer itself: the number of distinct
 claims it wrote. A whole answer that does not repeat replaces the repeating
-one; otherwise the answer stands as written.
+one; otherwise the answer stands as written. On a streamed path (llama.cpp,
+Ollama, DeepSeek) the same margin ends the answer while it streams.
 
 `mobile` and `deep_static` are built from three seeded generic agent
 definitions — `triage`, `android_static` and `reverser` — whose prompts live in

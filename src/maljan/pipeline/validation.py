@@ -47,7 +47,7 @@ from maljan.pipeline.events import (
     emit_validation_feedback,
     safe_finding_value,
 )
-from maljan.schemas.evidence import entry_ids_in
+from maljan.schemas.evidence import answer_not_shown, entry_ids_in
 from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
 from maljan.schemas.stix_pattern import read_comparisons
 from maljan.utils.marked_cut import marked_cut
@@ -2859,8 +2859,15 @@ def claims_repeated(text: str, margin: int | None = None) -> ClaimsRepeated | No
     )
 
 
+# What the repeated-claims question adds when the answer was ended while it streamed.
+ENDED_WHILE_STREAMING_SENTENCE = (
+    " It was ended while it streamed, once its repeats passed that margin; what it wrote "
+    "up to there is kept."
+)
+
+
 def analyst_repeated_violation(
-    found: ClaimsRepeated, *, chunk: str = "", cut: int | None = None
+    found: ClaimsRepeated, *, chunk: str = "", cut: int | None = None, ended: bool = False
 ) -> Violation:
     """What an analyst whose answer repeated its claims is told, and the whole-answer question.
 
@@ -2872,12 +2879,15 @@ def analyst_repeated_violation(
     stands. ``cut`` is the output cap an answer that also stopped at it was
     cut at: the one question then states that fact too, because the model
     sees the answer up to its first repeat and the cut question's own words
-    would say it sees none of it.
+    would say it sees none of it. ``ended`` says the answer was ended while it
+    streamed (``agents.base_agent.claims_repeat_rule``), so the finding and
+    the events that carry it state it.
     """
     answer = f"answer to {chunk}" if chunk else "previous answer"
     chars, begun, distinct = int(found.chars), int(found.begun), int(found.distinct)
     repeated, margin = int(found.repeated), int(found.margin)
     first = int(found.first_repeat)
+    streamed = ENDED_WHILE_STREAMING_SENTENCE if ended else ""
     limit = (
         f" It also stopped at the output limit of {int(cut):,} tokens before it ended: the "
         "whole answer has to end well inside that limit, and any reasoning you write "
@@ -2890,7 +2900,8 @@ def analyst_repeated_violation(
         message=(
             f"Your {answer} ran to {chars:,} characters and began {begun} CLAIM block(s), "
             f"{distinct} of them distinct: {repeated} repeat a claim already written, more "
-            f"than the {margin} allowed.{limit} It is shown above only up to CLAIM block {first}, "
+            f"than the {margin} allowed.{streamed}{limit} It is shown above only up to CLAIM "
+            f"block {first}, "
             "the first that repeats an earlier one; the rest is not shown to you again. Write "
             "the whole answer again: the claims shown above and any other the evidence "
             "supports, each written once, each one sentence with its EVIDENCE, CONFIDENCE and "
@@ -3133,8 +3144,10 @@ def decompiled_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
     """The functions these ledger entries decompiled, once each, in the order first asked.
 
     An entry counts when its tool's name says it decompiles and the call
-    answered. A batch answer keyed by address is one function per key, its
-    ``Error`` keys left out; a batch whose answer is not keyed takes the
+    answered with something the model read: an answer the conversation had no
+    room for (``schemas.evidence.answer_not_shown``) is no listing read. A
+    batch answer keyed by address is one function per key, its ``Error`` keys
+    left out; a batch whose answer is not keyed takes the
     addresses it was given. Otherwise the address is the one the call was
     given (hex with or without ``0x``, or an integer), or the one a
     decompiler's generic name carries. The names are the one the call was
@@ -3145,7 +3158,7 @@ def decompiled_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
     found: dict[Any, DecompiledFunction] = {}
     for entry in entries:
         tool = str(getattr(entry, "tool", "") or "").lower()
-        if "decompil" not in tool or not getattr(entry, "ok", True):
+        if "decompil" not in tool or not getattr(entry, "ok", True) or answer_not_shown(entry):
             continue
         entry_id = str(getattr(entry, "id", "") or "")
         for address, names in _entry_functions(entry):

@@ -97,6 +97,7 @@ from maljan.extractors.capability_matrix import (
     not_asked_unknown_id,
     unknown_id_reason,
 )
+from maljan.llm.context_window import no_room_sentence
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.pipeline import triage_pack
 from maljan.pipeline.evidence_summary import summarise
@@ -169,6 +170,7 @@ from maljan.reporting.composer import (
     section_contract,
 )
 from maljan.reporting.evidence_bundles import sample_flow_fact
+from maljan.reporting.ledger_report import FUNCTION_NOT_SHOWN
 from maljan.reporting.models import (
     FileHashes,
     MalwareReport,
@@ -206,7 +208,7 @@ from maljan.reporting.renderers.stix_renderer import (
     seen_in_reason,
     yes_because,
 )
-from maljan.schemas.evidence import LedgerEntry
+from maljan.schemas.evidence import LedgerEntry, not_shown_record
 from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
@@ -945,6 +947,9 @@ PROMPTS: dict[str, str] = {
         "a", "ev_0001", "a recorded result"
     ),
     "the function map block": _function_map_text(),
+    "a tool answer the conversation had no room for, as told and as recorded": " ".join(
+        [no_room_sentence(12_345), not_shown_record(12_345), FUNCTION_NOT_SHOWN]
+    ),
     "analyst cut-at-cap question naming a chunk": analyst_cut_violation(
         4096, "CLAIM: The file opens a window.\nCLAIM: The fi", chunk="chunk 1 of 2"
     ).message,
@@ -1119,6 +1124,11 @@ PROMPTS: dict[str, str] = {
     "analyst repeated-claims question naming a chunk": analyst_repeated_violation(
         ClaimsRepeated(begun=15, distinct=3, margin=3, chars=900), chunk="chunk 1 of 2"
     ).message,
+    "analyst repeated-claims question of an answer ended while it streamed": (
+        analyst_repeated_violation(
+            ClaimsRepeated(begun=7, distinct=3, margin=3, chars=600, first_repeat=4), ended=True
+        ).message
+    ),
     "decompiled functions no claim describes": _message_of(
         decompiled_not_described_violation(
             [

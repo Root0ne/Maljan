@@ -38,6 +38,7 @@ from maljan.pipeline.validation import (
     decompiled_functions,
     image_bases_in,
 )
+from maljan.schemas.evidence import answer_not_shown
 
 __all__ = [
     "FUNCTION_MAP_HEAD",
@@ -389,7 +390,8 @@ def build_function_map(
     offset and its virtual address are one visited function the same way; with
     no base known, both are kept as written.
     """
-    entries = [e for e in own if getattr(e, "ok", True)]
+    # A call whose answer the conversation had no room for was not read.
+    entries = [e for e in own if getattr(e, "ok", True) and not answer_not_shown(e)]
     found = _merged(artefacts, function_artefacts(entries))
     bases = tuple(dict.fromkeys([*image_bases, *found.image_bases, *image_bases_in(entries)]))
     visited: list[MapEntry] = _fold_spellings(
