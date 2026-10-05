@@ -346,13 +346,13 @@ before. A run's mediator listed five contradictions, one of them a claim the
 ledger contradicted, argued them away, wrote `agreement_confidence: 1.0`, and
 no analyst was asked to revise.
 
-The debate ends when nothing is left to settle (`pipeline/debate_settlement.py`,
+The debate ends when nothing is left to settle (`pipeline/debate_facts.py`,
 `pipeline/claim_drops.py`, `pipeline/routing.py`):
 
-- A block line whose first-named analyst holds none of the claim numbers it names is closed, and a count dispute whose cited entry states one of its numbers in a count field is settled by stating that field; neither stands, both are told to a revision round, and a line naming a technique, a network value or a hash always stands.
-- A revision round whose revisions changed no claim (by its values and technique, or its words where it states no value), technique or finding ends the debate as `converged`.
-- The sycophancy check sends agreement back only when the revision round before it added no ledger entry.
-- A revision is made against the analyst's answer in force and its peers'; a claim of that answer stating a value the revision no longer carries, not withdrawn on a `WITHDRAWN:` line with a reason, is asked about once (`isr.claims_dropped`), and every drop is recorded in `run_summary.negotiation.dropped_claims`.
+- The mediator ends each line of its block with `[blocking: <reason>]` or `[not blocking: <reason>]`; consensus is its confidence at the threshold with no line marked blocking, an unmarked line blocks, and the platform overrides a mark in neither direction.
+- For a listed line whose cited entries (cited by the line or by a claim it names) hold a number in a count or total field, every such entry's value is put to the mediator once, with no tools, and its block is read again; a size or a time is not a count.
+- A revision round whose every revision is the answer in force again, whitespace aside, ends the debate as `converged`; the router reads only the record of the round right before the mediation it routes.
+- A revision is made against the analyst's answer in force and its peers'; each value of the answer in force it states nowhere is recorded in `run_summary.negotiation.dropped_claims`, and nothing is asked.
 - The debate stage's duration adds the revision rounds' time to the mediations', and `termination_reason` comes from the router's own rules, `hard_limit` only when the debate would have gone on.
 
 A single local model server has one slot, and fanning out three analysts onto
