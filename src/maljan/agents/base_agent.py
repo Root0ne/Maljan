@@ -1815,19 +1815,20 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
             technique_match.group(1) if technique_match else ""
         )
 
-        blocks_read += 1
         for technique_id in technique_ids or (None,):
-            claims.append(
-                ClaimEvidence(
-                    # Whole, as written: a claim stored at a fixed width was
-                    # checked, retried and published as the cut text.
-                    claim=claim_text,
-                    evidence_ref=evidence_ref_text(evidence_text),
-                    confidence=confidence,
-                    technique_id=technique_id,
-                    technique_line=technique_line,
-                )
+            read_claim = ClaimEvidence(
+                # Whole, as written: a claim stored at a fixed width was
+                # checked, retried and published as the cut text.
+                claim=claim_text,
+                evidence_ref=evidence_ref_text(evidence_text),
+                confidence=confidence,
+                technique_id=technique_id,
+                technique_line=technique_line,
             )
+            # The block it was read from, so blocks are counted as written.
+            read_claim.note_block(blocks_read)
+            claims.append(read_claim)
+        blocks_read += 1
     return ClaimRead(
         claims=claims,
         without_confidence=without_confidence,

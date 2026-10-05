@@ -170,3 +170,35 @@ def test_an_unknown_id_in_a_list_marks_only_its_own_claim() -> None:
         ("T1055", True),
         ("T9999", False),
     ]
+
+
+def test_two_blocks_written_alike_are_two_blocks() -> None:
+    """The block is recorded where the claim is read, not inferred from its words."""
+    from maljan.pipeline.validation import count_claim_blocks
+
+    sentence = "The loader injects code into a remote process."
+    read = read_claim_blocks(_block(sentence, "T1055") + "\n---\n" + _block(sentence, "T1620"))
+
+    assert read.read == 2
+    assert [c.block for c in read.claims] == [0, 1]
+    assert claim_block_indexes(read.claims) == [0, 1]
+    assert count_claim_blocks(read.claims) == 2
+
+
+def test_a_list_is_one_recorded_block() -> None:
+    claims = read_claim_blocks(_block("The loader injects code.", "T1055, T1620")).claims
+
+    assert [c.block for c in claims] == [0, 0]
+    assert claim_block_indexes(claims) == [0, 0]
+
+
+def test_claims_built_without_a_read_fall_back_to_their_words() -> None:
+    listed = [
+        ClaimEvidence(
+            claim="The loader injects code.", evidence_ref="[ev_1]", confidence=0.7, technique_id=t
+        )
+        for t in ("T1055", "T1620")
+    ]
+
+    assert all(c.block is None for c in listed)
+    assert claim_block_indexes(listed) == [0, 0]

@@ -1739,12 +1739,16 @@ def claim_block_indexes(claims: Sequence[Any]) -> list[int]:
 
     A block whose TECHNIQUE line listed several ids is read as one claim per
     id, each with the block's sentence, evidence and confidence, one after
-    another (``base_agent.read_claim_blocks``). Such a run of claims, each
-    with a different id, is one block; every other claim is its own.
+    another (``base_agent.read_claim_blocks``), and the reader records the
+    block on each (``ClaimEvidence.block``). Two adjacent claims the reader
+    recorded are one block when it recorded one block for both. Only for a
+    claim built without the reader is the block read from its words: a run of
+    claims written alike, each with a different id, is one block.
     """
     out: list[int] = []
     block = -1
     previous: tuple[Any, ...] | None = None
+    previous_block: int | None = None
     ids: set[str] = set()
     for claim in claims:
         written = (
@@ -1754,7 +1758,13 @@ def claim_block_indexes(claims: Sequence[Any]) -> list[int]:
             getattr(claim, "technique_line", None),
         )
         tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
-        if tid and ids and written == previous and tid not in ids:
+        recorded = getattr(claim, "block", None)
+        if recorded is not None and previous_block is not None:
+            same = recorded == previous_block and written == previous
+        else:
+            same = bool(tid and ids and written == previous and tid not in ids)
+        previous_block = recorded
+        if same:
             ids.add(tid)
         else:
             block += 1

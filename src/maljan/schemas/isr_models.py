@@ -134,6 +134,22 @@ class ClaimEvidence(BaseModel):
         default=None,
         description="The index's gate score for the claimed id and its top candidates.",
     )
+    # The ordinal of the claim block the reader read this claim from
+    # (``base_agent.read_claim_blocks``): a block whose TECHNIQUE line listed
+    # several ids is one claim per id, all with the block's ordinal. Recorded
+    # where the claim is read, never serialised; ``None`` for a claim built any
+    # other way, whose block is then read from its words
+    # (``validation.claim_block_indexes``).
+    _block: int | None = PrivateAttr(default=None)
+
+    @property
+    def block(self) -> int | None:
+        """The ordinal of the block this claim was read from, or ``None``."""
+        return self._block
+
+    def note_block(self, ordinal: int) -> None:
+        """Record the ordinal of the block this claim was read from."""
+        self._block = int(ordinal)
 
 
 class Artifact(BaseModel):
