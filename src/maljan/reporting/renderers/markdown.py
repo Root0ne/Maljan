@@ -676,7 +676,8 @@ class MarkdownRenderer:
                 cited = ", ".join(item.evidence_refs) or "no evidence cited"
                 if index + 1 in ctx.config_unheld:
                     cited += " (unresolved: report.value_not_in_cited_entry)"
-                body.append(_row(ctx.cell(item.key), ctx.cell(item.value), how, cited))
+                value = ctx.cell(item.value) + ctx.publish_state(item.value)
+                body.append(_row(ctx.cell(item.key), value, how, cited))
             blocks.append("\n".join(body))
         else:
             blocks.append(
@@ -834,7 +835,7 @@ class MarkdownRenderer:
                     _row(
                         ctx.cell(ch.name),
                         ctx.cell(ch.protocol or "-"),
-                        "; ".join(_endpoint(e) for e in ch.endpoints) or "-",
+                        "; ".join(_endpoint_with_state(e, ctx) for e in ch.endpoints) or "-",
                         ctx.cell(ch.encryption or "-"),
                         ctx.cell(fmt or "-"),
                         ", ".join(dict.fromkeys(refs)) or "no evidence cited",
@@ -2155,6 +2156,8 @@ class _Context:
                 mark = _flag_mark(row.code, row.label, asked=row.asked)
                 if mark not in marks.setdefault(row.sentence, []):
                     marks[row.sentence].append(mark)
+        # The IOC table's answers, read on first use by ``publish_state``.
+        self._answers: Any = None
         self.flagged = sorted(
             ((sentence, " ".join(found)) for sentence, found in marks.items()),
             key=lambda pair: -len(pair[0]),
@@ -2231,6 +2234,37 @@ class _Context:
         for end, mark in sorted(inserts, reverse=True):
             text = f"{text[:end]} {mark}{text[end:]}"
         return text
+
+    def publish_state(self, text: Any) -> str:
+        """`` (no: <why>)`` for each value of a table cell this run does not publish, or ``""``.
+
+        The platform states the IOC table's answer beside the value; nothing
+        is asked. A reference host no row holds is no indicator and gets
+        nothing. The state is the answer's first clause, as the prose marks
+        print it; one value alone is not named again.
+        """
+        from maljan.pipeline.validation import _unstated_values
+
+        if self._answers is None:
+            try:
+                from maljan.reporting.narrative_agent import published_answers
+
+                self._answers = published_answers(self.report)
+            except Exception as exc:  # noqa: BLE001 — a missing table states nothing
+                logger.debug("markdown: the IOC table was not read (%s).", exc)
+                self._answers = lambda kind, value: "yes"
+        found = _unstated_values(str(text or ""), self._answers)
+        if not found:
+            return ""
+        if len(found) == 1:
+            return f" ({found[0][2]})"
+        from maljan.reporting.defang import defang
+
+        return (
+            " ("
+            + "; ".join(f"{defang(value, kind)}: {state}" for kind, value, state in found)
+            + ")"
+        )
 
     def plain(self, text: str) -> str:
         """A value with the run's network indicators defanged and nothing else changed."""
@@ -3012,6 +3046,16 @@ def _names_any(text: str, words: tuple[str, ...]) -> bool:
     return any(word in lowered for word in words)
 
 
+def _endpoint_with_state(value: str, ctx: _Context) -> str:
+    """An endpoint as :func:`_endpoint` writes it, with the IOC table's state where it adds one.
+
+    An endpoint already marked as no host outside could answer keeps that
+    mark alone.
+    """
+    written = _endpoint(value)
+    return written + ctx.publish_state(value) if written.endswith("`") else written
+
+
 def _endpoint(value: str) -> str:
     """One model-written endpoint, defanged, and marked when no host outside could answer."""
     from maljan.extractors.network_extractor import (
@@ -3066,7 +3110,7 @@ def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
         lines.append(
             _row(
                 ctx.cell(item.kind),
-                f"`{_one_line(item.value)}`",
+                f"`{_one_line(item.value)}`" + ctx.publish_state(item.value),
                 ctx.cell(item.purpose) if item.purpose.strip() else PURPOSE_NOT_STATED,
                 cited,
             )

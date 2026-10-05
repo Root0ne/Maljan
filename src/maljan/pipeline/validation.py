@@ -149,6 +149,10 @@ class Violation:
     # the finding to that technique's row by it: a message can name other ids
     # (an unknown id's names the closest real ones).
     subject: str = ""
+    # What a renderer prints after each of ``quoted``, in the same order, where
+    # each sentence carries its own label (a value and its publish state).
+    # Never shown to the producer and never stored on the channel.
+    labels: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         # A row written by a validator has no route, and its message is its
@@ -2487,14 +2491,12 @@ def record_flagged_statements(
         for violation in violations:
             if violation.code not in MARKED_IN_PLACE:
                 continue
-            # A value's publish state is its label as written; every other
-            # label is a term or a technique named by the finding's path.
-            label = (
-                violation.subject
-                if violation.code == UNPUBLISHED_VALUE_CODE
-                else violation.path.replace("_", " ")
-            )
-            for sentence in violation.quoted:
+            # A sentence with a label of its own (its values and their publish
+            # states) carries that; every other label is a term or a technique
+            # named by the finding's path.
+            default = violation.path.replace("_", " ")
+            for position, sentence in enumerate(violation.quoted):
+                label = violation.labels[position] if position < len(violation.labels) else default
                 key = (sentence, violation.code, label, asked)
                 if key not in seen:
                     seen.add(key)
@@ -3771,95 +3773,136 @@ def recommendation_indicator_violations(
 _PUBLISH_STATE_RE = re.compile(r"(?<![\w-])no:\s*\S", re.IGNORECASE)
 
 
-def _strings_with_places(node: Any, depth: int = 0) -> list[str]:
-    """Every string an answer carries outside its citing fields, as written."""
-    if depth > 4:
-        return []
-    if isinstance(node, str):
-        return [node]
-    if isinstance(node, dict):
-        return [
-            text
-            for key, value in node.items()
-            if key not in _CITING_FIELDS
-            for text in _strings_with_places(value, depth + 1)
-        ]
-    if isinstance(node, list | tuple):
-        return [text for item in node for text in _strings_with_places(item, depth + 1)]
-    return []
+def _prose_of_a_section(payload: Any) -> list[str]:
+    """A composer answer's prose, in order: a body or a text, then each step's action.
+
+    Only prose: a table cell (a configuration value, an identifier, an
+    endpoint) is a value, and the report prints its publish state beside it.
+    """
+    data = payload if isinstance(payload, dict) else {}
+    texts = [data.get(key) for key in ("body", "text")]
+    for step in data.get("steps") or []:
+        if isinstance(step, dict):
+            texts.append(step.get("action"))
+    return [text for text in texts if isinstance(text, str) and text.strip()]
+
+
+def _named_numbers(numbers: Sequence[int]) -> str:
+    """``sentence 3``, ``sentences 1, 3`` or ``sentences 1–19``, a run of three as a range."""
+    parts: list[str] = []
+    run: list[int] = []
+    for number in [*sorted(set(numbers)), None]:
+        if number is not None and run and number == run[-1] + 1:
+            run.append(number)
+            continue
+        if run:
+            parts.extend([f"{run[0]}–{run[-1]}"] if len(run) >= 3 else [str(item) for item in run])
+        run = [] if number is None else [number]
+    return f"sentence{'s' if len(numbers) > 1 else ''} {', '.join(parts)}"
+
+
+def _unstated_values(
+    sentence: str, answers: Callable[[str, str], str]
+) -> list[tuple[str, str, str]]:
+    """``(kind, value, state)`` for each value of ``sentence`` the table does not publish,
+    written without a ``no: <reason>`` between it and the next value the sentence names."""
+    from maljan.extractors.network_extractor import is_well_known_benign_host
+    from maljan.reporting.renderers.stix_renderer import publishes
+
+    plain = _refanged(sentence).lower()
+    values = network_values_in(sentence)
+    places = sorted((plain.find(value.lower()), kind, value) for kind, value in values if value)
+    out: list[tuple[str, str, str]] = []
+    for position, (start, kind, value) in enumerate(places):
+        end = places[position + 1][0] if position + 1 < len(places) else len(plain)
+        if start >= 0 and _PUBLISH_STATE_RE.search(plain[start + len(value) : max(end, start)]):
+            continue
+        try:
+            answer = str(answers(kind, value) or "")
+        except Exception as exc:  # noqa: BLE001 — a value the table cannot answer is not asked
+            logger.debug("validation: no publish answer for a value (%s).", exc)
+            continue
+        if publishes(answer):
+            continue
+        if not answer and kind == "domain" and is_well_known_benign_host(value):
+            continue
+        out.append((kind, value, (answer or f"no: {NO_TABLE_ROW}").split(";", 1)[0].strip()))
+    return out
 
 
 def unpublished_value_violations(
     payload: Any, answers: Callable[[str, str], str]
 ) -> list[Violation]:
-    """Report-model text naming an address or a host this run does not publish, without its state.
+    """Report-model prose naming an address or a host this run does not publish, without its state.
 
     ``answers`` is ``(kind, value) -> the IOC table's answer``, ``""`` for a
-    value no row holds (``narrative_agent.published_answers``). Every string
-    of the answer is read sentence by sentence; the values the table does not
-    answer ``yes`` for, in a sentence that does not write a ``no: <reason>``
-    beside them, are one question per sentence naming each value with its
-    state. The state is the answer's first clause, the one that says why the
-    value is not published; the IOC table prints the whole answer. A
-    reference host no row holds is a place to read, not an indicator, and
-    raises nothing. Nothing is removed: what the model answers stands, and a
-    sentence it keeps is marked where it stands with each value's state
-    (``MARKED_IN_PLACE``).
+    value no row holds (``narrative_agent.published_answers``). The section's
+    prose (:func:`_prose_of_a_section`) is read sentence by sentence; a value
+    the table does not answer ``yes`` for, with no ``no: <reason>`` between it
+    and the next value its sentence names, is listed. One question per
+    section names each value with its state — the answer's first clause, the
+    one that says why — and the sentences that name it, numbered in the
+    section's order. A reference host no row holds is a place to read, not an
+    indicator, and raises nothing. Nothing is removed: what the model answers
+    stands, and each sentence it keeps is marked where it stands with its own
+    values' states (``labels``, ``MARKED_IN_PLACE``).
     """
-    from maljan.extractors.network_extractor import is_well_known_benign_host
     from maljan.reporting.defang import defang
-    from maljan.reporting.renderers.stix_renderer import publishes
 
-    out: list[Violation] = []
-    asked: set[str] = set()
-    for text in _strings_with_places(payload):
+    # (state, value) -> sentence numbers, in the order first met.
+    named: dict[tuple[str, str], list[int]] = {}
+    quoted: list[str] = []
+    labels: list[str] = []
+    number = 0
+    for text in _prose_of_a_section(payload):
         for sentence in _SENTENCE_END_RE.split(text):
             written = sentence.strip()
-            if not written or written in asked or _PUBLISH_STATE_RE.search(written):
+            if not written:
                 continue
-            # Each state, in the order first met, with the values it is said of.
-            states: dict[str, list[tuple[str, str]]] = {}
-            for kind, value in network_values_in(written):
-                try:
-                    answer = str(answers(kind, value) or "")
-                except Exception as exc:  # noqa: BLE001 — a value the table cannot answer is not asked
-                    logger.debug("validation: no publish answer for a value (%s).", exc)
-                    continue
-                if publishes(answer):
-                    continue
-                if not answer and kind == "domain" and is_well_known_benign_host(value):
-                    continue
-                state = (answer or f"no: {NO_TABLE_ROW}").split(";", 1)[0].strip()
-                states.setdefault(state, []).append((kind, value))
-            if not states:
+            number += 1
+            found = _unstated_values(written, answers)
+            if not found:
                 continue
-            asked.add(written)
-            said = "; ".join(
-                f"{', '.join(safe_finding_value(value) for _kind, value in values)} "
-                f"({safe_finding_value(state)})"
-                for state, values in states.items()
-            )
-            out.append(
-                Violation(
-                    code=UNPUBLISHED_VALUE_CODE,
-                    message=(
-                        f"the text names {said}, which this run does not publish, without "
-                        "that state. A value this run does not publish is written only with "
-                        "its publish state beside it. Write the state beside each value, or "
-                        "write the text without the value."
-                    ),
-                    path="values:"
-                    + ",".join(
-                        f"{kind}:{value}" for values in states.values() for kind, value in values
-                    ),
-                    quoted=(written,),
-                    subject="; ".join(
-                        f"{', '.join(defang(value, kind) for kind, value in values)} ({state})"
-                        for state, values in states.items()
-                    ),
+            by_state: dict[str, list[str]] = {}
+            for kind, value, state in found:
+                named.setdefault((state, value), []).append(number)
+                said = defang(value, kind)
+                if said not in by_state.setdefault(state, []):
+                    by_state[state].append(said)
+            if written not in quoted:
+                quoted.append(written)
+                labels.append(
+                    "; ".join(
+                        f"{', '.join(values)} ({state})" for state, values in by_state.items()
+                    )
                 )
-            )
-    return out
+    if not named:
+        return []
+    # Each state once, with every value it refuses and the sentences naming them.
+    grouped: dict[str, tuple[list[str], set[int]]] = {}
+    for (state, value), numbers in named.items():
+        values, sentences = grouped.setdefault(state, ([], set()))
+        values.append(value)
+        sentences.update(numbers)
+    said = "; ".join(
+        f"{', '.join(safe_finding_value(value) for value in values)} "
+        f"({safe_finding_value(state)}) in {_named_numbers(sorted(sentences))}"
+        for state, (values, sentences) in grouped.items()
+    )
+    return [
+        Violation(
+            code=UNPUBLISHED_VALUE_CODE,
+            message=(
+                f"the text names values this run does not publish, without their state: "
+                f"{said}. A value this run does not publish is written only with its publish "
+                "state beside it. Write the state beside each value, or write the text "
+                "without the value."
+            ),
+            path="unpublished values",
+            quoted=tuple(quoted),
+            labels=tuple(labels),
+        )
+    ]
 
 
 def _step_order(row: Mapping[str, Any], index: int) -> str:

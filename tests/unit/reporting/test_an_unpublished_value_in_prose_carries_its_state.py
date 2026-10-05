@@ -4,10 +4,14 @@ A local run's command-and-control subsection called an address C2
 infrastructure that the IOC table refused ("no: …"). The publish check read
 only the recommendations, in the narrative round, so the composer was never
 told; the one finding on the subsection was about a citation and said nothing
-of the address. Each composer section is now checked against the IOC table's
-own answers: a value it does not publish, named without its ``no: <reason>``,
-is asked about once, the model's answer stands, and a sentence kept after it
-is marked where it stands with the value's publish state.
+of the address. Each composer section's prose — a subsection's body, the
+introduction, the execution flow's steps — is now checked against the IOC
+table's own answers: a value it does not publish, named without its
+``no: <reason>`` beside it, is listed in one question per section, grouped by
+state with the sentences that name it. The model's answer stands, and each
+sentence kept after it is marked where it stands with its own values' states.
+A table cell is never asked about: the report prints the IOC table's state
+beside an unpublished value in a configuration, identifier or endpoint cell.
 """
 
 from __future__ import annotations
@@ -84,16 +88,15 @@ class TestTheCheck:
         (found,) = unpublished_value_violations(_body(sentence), _answers())
 
         assert found.code == UNPUBLISHED_VALUE_CODE
-        assert REFUSAL in found.message
+        assert f"{REFUSED} ({REFUSAL}) in sentence 1" in found.message
         assert found.quoted == (sentence,)
-        assert found.path == f"values:ip:{REFUSED}"
 
     def test_a_defanged_address_is_read_as_the_address(self) -> None:
         defanged = REFUSED.replace(".", "[.]")
 
         (found,) = unpublished_value_violations(_body(f"It reaches {defanged}."), _answers())
 
-        assert found.path == f"values:ip:{REFUSED}"
+        assert REFUSED in found.message
 
     def test_a_published_value_raises_nothing(self) -> None:
         assert unpublished_value_violations(_body(f"It posts to {PUBLISHED}."), _answers()) == []
@@ -102,6 +105,15 @@ class TestTheCheck:
         body = f"The sandbox recorded {REFUSED} ({REFUSAL})."
 
         assert unpublished_value_violations(_body(body), _answers()) == []
+
+    def test_a_state_exempts_only_the_value_it_stands_beside(self) -> None:
+        other = "203.0.113.9"
+        body = f"It recorded {REFUSED} ({REFUSAL}) and C2 {other}."
+
+        (found,) = unpublished_value_violations(_body(body), _answers())
+
+        assert other in found.message and f"{REFUSED} (" not in found.message
+        assert found.labels == (f"{other.replace('.', '[.]')} (no: {NO_TABLE_ROW})",)
 
     def test_a_value_no_table_row_holds_is_asked_with_that_state(self) -> None:
         (found,) = unpublished_value_violations(_body("It also reaches 203.0.113.9."), _answers())
@@ -113,23 +125,60 @@ class TestTheCheck:
 
         assert unpublished_value_violations(_body(body), _answers()) == []
 
-    def test_a_record_field_is_read_as_well(self) -> None:
-        payload = {"channels": [{"name": "fallback", "endpoints": [REFUSED, PUBLISHED]}]}
+    def test_a_table_cell_is_never_asked_about(self) -> None:
+        for payload in (
+            {"channels": [{"name": "fallback", "endpoints": [REFUSED, PUBLISHED]}]},
+            {"items": [{"key": "C2", "value": REFUSED, "evidence_refs": ["ev_0019"]}]},
+            {"identifiers": [{"kind": "Address", "value": REFUSED, "evidence_refs": []}]},
+        ):
+            assert unpublished_value_violations(payload, _answers()) == []
+
+    def test_a_flow_step_is_prose(self) -> None:
+        payload = {"steps": [{"order": 1, "action": f"It beacons to {REFUSED}.", "voice": "x"}]}
 
         (found,) = unpublished_value_violations(payload, _answers())
 
-        assert found.quoted == (REFUSED,)
+        assert found.quoted == (f"It beacons to {REFUSED}.",)
 
-    def test_each_sentence_is_one_question_naming_its_values_by_state(self) -> None:
+    def test_one_question_per_section_groups_values_by_state_and_names_sentences(self) -> None:
         other = "203.0.113.9"
-        body = f"It reaches {REFUSED} and {other} on 443. Later it reaches {REFUSED} again."
+        body = (
+            f"It reaches {REFUSED} and {other} on 443. It writes a file. "
+            f"Later it reaches {REFUSED} again. Then {other} once more."
+        )
 
-        first, second = unpublished_value_violations(_body(body), _answers())
+        (found,) = unpublished_value_violations(_body(body), _answers())
 
-        assert first.quoted == (f"It reaches {REFUSED} and {other} on 443.",)
-        assert f"{REFUSED} ({REFUSAL})" in first.message
-        assert f"{other} (no: {NO_TABLE_ROW})" in first.message
-        assert second.quoted == (f"Later it reaches {REFUSED} again.",)
+        assert f"{REFUSED} ({REFUSAL}) in sentences 1, 3;" in found.message
+        assert f"{other} (no: {NO_TABLE_ROW}) in sentences 1, 4" in found.message
+        assert found.quoted == (
+            f"It reaches {REFUSED} and {other} on 443.",
+            f"Later it reaches {REFUSED} again.",
+            f"Then {other} once more.",
+        )
+        refused, other_said = REFUSED.replace(".", "[.]"), other.replace(".", "[.]")
+        assert found.labels == (
+            f"{refused} ({REFUSAL}); {other_said} (no: {NO_TABLE_ROW})",
+            f"{refused} ({REFUSAL})",
+            f"{other_said} (no: {NO_TABLE_ROW})",
+        )
+
+    def test_a_state_is_said_once_for_every_value_it_refuses(self) -> None:
+        others = ["203.0.113.9", "203.0.113.10", "203.0.113.11"]
+        body = " ".join(f"It connects to {value}." for value in others)
+
+        (found,) = unpublished_value_violations(_body(body), _answers())
+
+        assert found.message.count(NO_TABLE_ROW) == 1
+        assert f"{', '.join(others)} (no: {NO_TABLE_ROW}) in sentences 1–3" in found.message
+
+    def test_a_run_of_sentences_is_named_as_a_range(self) -> None:
+        body = " ".join(f"It connects to {REFUSED} on port {n}." for n in range(1, 20))
+
+        (found,) = unpublished_value_violations(_body(body), _answers())
+
+        assert "in sentences 1–19" in found.message
+        assert len(found.message) < 600
 
     def test_the_state_is_the_answer_s_first_clause(self) -> None:
         def _long(kind: str, value: str) -> str:
@@ -138,7 +187,7 @@ class TestTheCheck:
         (found,) = unpublished_value_violations(_body(f"It reaches {REFUSED}."), _long)
 
         assert REFUSAL in found.message and "artifact" not in found.message
-        assert found.subject == f"{REFUSED.replace('.', '[.]')} ({REFUSAL})"
+        assert found.labels == (f"{REFUSED.replace('.', '[.]')} ({REFUSAL})",)
 
     def test_the_finding_is_kept_and_marked_in_place(self) -> None:
         assert UNPUBLISHED_VALUE_CODE in KEPT_WITH_A_FINDING
@@ -196,12 +245,26 @@ class TestTheComposerAsksOnce:
         assert row.sentence == sentence and row.code == UNPUBLISHED_VALUE_CODE
         assert REFUSAL in row.label and REFUSED.replace(".", "[.]") in row.label
 
-    def test_a_record_section_is_checked_too(self) -> None:
-        wrong = json.dumps({"channels": [{"name": "fallback", "endpoints": [REFUSED]}]})
+    def test_a_record_section_costs_no_question(self) -> None:
+        answer = json.dumps({"channels": [{"name": "fallback", "endpoints": [REFUSED]}]})
 
-        _result, llm, _comp, _report_ = _invoke(_C2Out, wrong, wrong)
+        _result, llm, _comp, report = _invoke(_C2Out, answer)
+
+        assert len(llm.sent) == 1
+        assert report.flagged_statements == []
+
+    def test_each_kept_sentence_is_marked_with_its_own_values(self) -> None:
+        other = "203.0.113.9"
+        body = f"It uses {REFUSED} as C2. It falls back to {other}."
+        wrong = json.dumps(_body(body))
+
+        _result, llm, _comp, report = _invoke(_ProseOut, wrong, wrong)
 
         assert len(llm.sent) == 2
+        marks = {row.sentence: row.label for row in report.flagged_statements}
+        assert REFUSAL in marks[f"It uses {REFUSED} as C2."]
+        assert other not in marks[f"It uses {REFUSED} as C2."]
+        assert NO_TABLE_ROW in marks[f"It falls back to {other}."]
 
     def test_compose_reads_the_ioc_table(self) -> None:
         captured: dict[str, Any] = {}
@@ -235,13 +298,57 @@ class TestTheReportStatesTheState:
         assert REFUSAL in line
         assert f"not published by this run: {REFUSED.replace('.', '[.]')} ({REFUSAL})" in line
 
+    def test_a_table_cell_carries_the_state_beside_the_value(self) -> None:
+        from maljan.reporting.models import C2Channel, ConfigItem, HostIdentifier
+
+        report = _report(
+            technical_analysis=TechnicalAnalysis(
+                configuration=[
+                    ConfigItem(key="Fallback", value=REFUSED, how_obtained="decrypted"),
+                    ConfigItem(key="Gate", value=PUBLISHED, how_obtained="decrypted"),
+                ],
+                host_identifiers=[HostIdentifier(kind="Address", value=REFUSED)],
+            ),
+            c2_channels=[C2Channel(name="fallback", endpoints=[REFUSED, PUBLISHED])],
+        )
+
+        text = MarkdownRenderer().render(report)
+
+        fallback = next(line for line in text.splitlines() if line.startswith("| Fallback"))
+        assert f"({REFUSAL})" in fallback
+        gate = next(line for line in text.splitlines() if line.startswith("| Gate"))
+        assert "no:" not in gate
+        address = next(line for line in text.splitlines() if line.startswith("| Address"))
+        assert f"({REFUSAL})" in address
+        channel = next(line for line in text.splitlines() if line.startswith("| fallback"))
+        # An endpoint already marked as no address the run may publish keeps
+        # that mark alone; a documentation address is one.
+        assert "(not an address this run may publish)" in channel
+        assert "no:" not in channel
+
+    def test_an_endpoint_with_no_mark_of_its_own_carries_the_table_s_state(self) -> None:
+        from maljan.reporting.models import C2Channel
+
+        refused_host = "relay.example.net"
+        report = _report(c2_channels=[C2Channel(name="relay", endpoints=[refused_host])])
+        report.consolidated_iocs.append(
+            report.consolidated_iocs[1].model_copy(
+                update={"type": "Domain", "kind": "domain", "value": refused_host}
+            )
+        )
+
+        text = MarkdownRenderer().render(report)
+
+        channel = next(line for line in text.splitlines() if line.startswith("| relay"))
+        assert f"({REFUSAL})" in channel
+
 
 class TestOddAndLargeInput:
     def test_odd_input_raises_nothing(self) -> None:
         def _broken(kind: str, value: str) -> str:
             raise ValueError("no table")
 
-        payload: dict[str, Any] = {"body": None, "rows": [None, 7, {"x": ["\u202e" * 100]}]}
+        payload: dict[str, Any] = {"body": None, "steps": [None, 7, {"action": "\u202e" * 100}]}
 
         assert unpublished_value_violations(payload, _answers()) == []
         assert unpublished_value_violations(_body(f"It reaches {REFUSED}."), _broken) == []
@@ -258,5 +365,6 @@ class TestOddAndLargeInput:
         found = unpublished_value_violations(_body(body), _answers())
         elapsed = time.monotonic() - started
 
-        assert found and all(v.code == UNPUBLISHED_VALUE_CODE for v in found)
+        (asked,) = found
+        assert asked.code == UNPUBLISHED_VALUE_CODE
         assert elapsed < 10, elapsed
