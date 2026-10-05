@@ -265,7 +265,7 @@ class MarkdownRenderer:
         lines.append(_verdict_line(report))
         for row in ctx.verdict_findings:
             lines.append(
-                f"  \n_Unresolved on the verdict: `{row['code']}`: {_one_line(row['message'])}_"
+                f"  \n_Unresolved on the verdict: `{row['code']}`: {_one_line(_finding_text(row))}_"
             )
 
         if report.overall_confidence is None:
@@ -504,7 +504,7 @@ class MarkdownRenderer:
         if ctx.verdict_findings:
             lines.extend(["", "**Unresolved findings on the verdict:**", ""])
             lines.extend(
-                _item(f"`{row['code']}`: {row['message']}") for row in ctx.verdict_findings
+                _item(f"`{row['code']}`: {_finding_text(row)}") for row in ctx.verdict_findings
             )
         return "\n".join(lines)
 
@@ -1197,8 +1197,8 @@ class MarkdownRenderer:
         if static.interesting_strings:
             lines.extend([_plain_heading("Strings of note"), ""])
             lines.append(
-                "_Values extracted from the file's bytes, printed as they are. A "
-                "network-looking string is not an observed endpoint._"
+                "_Values extracted from the file's bytes, printed as they are, network "
+                "values defanged. A network-looking string is not an observed endpoint._"
             )
             lines.append("")
             answers = {(row.kind, row.value.lower()): row.published for row in ctx.iocs}
@@ -1206,11 +1206,14 @@ class MarkdownRenderer:
             lines.append(_divider(4))
             for ioc in static.interesting_strings[:60]:
                 published = ctx.plain(answers.get((ioc.kind, ioc.value.strip().lower())) or "-")
+                # Defanged whole, then cut: a value cut first could leave a
+                # host the defanger no longer reads as one.
+                value = _truncate(_defanged_text(ctx.plain(ioc.value)), _CELL_LIMIT)
                 lines.append(
                     _row(
-                        f"`{_truncate(ioc.value, _CELL_LIMIT)}`",
+                        _code_span(value),
                         ioc.kind,
-                        ioc.notes or "-",
+                        _defanged_text(ctx.plain(ioc.notes)) if ioc.notes else "-",
                         published,
                     )
                 )
@@ -1365,7 +1368,10 @@ class MarkdownRenderer:
                 lines.append(
                     _row(
                         row.type,
-                        f"`{row.value}`",
+                        # A file or host value that holds a network value
+                        # ("//relay.example.net/live/" read as a path) holds
+                        # it defanged; any other is printed as it is.
+                        _code_span(_defanged_text(row.value)),
                         row.context or "-",
                         row.source or "-",
                         ctx.plain(row.published or "-"),
@@ -1465,8 +1471,11 @@ class MarkdownRenderer:
                     if rule.compile_error
                     else "compiled"
                 )
+                # The line naming the values a rule was drafted from is read
+                # as prose and defanged; the rule's body is the rule to deploy
+                # and is printed as it compiles.
                 source = (
-                    f"; auto-generated from {_ids(rule.source_evidence)}"
+                    f"; auto-generated from {_defanged_text(_ids(rule.source_evidence))}"
                     if rule.source_evidence
                     else ""
                 )
@@ -1724,7 +1733,7 @@ class MarkdownRenderer:
                 server = f" ({row['server']})" if row.get("server") else ""
                 count = int(row.get("count") or 1)
                 times = f" ×{count}" if count > 1 else ""
-                message = str(row.get("error") or "").strip() or "failed"
+                message = _defanged_text(str(row.get("error") or "").strip()) or "failed"
                 remedy = str(row.get("remediation") or "").strip()
                 lines.append(
                     _item(
@@ -1782,7 +1791,7 @@ class MarkdownRenderer:
         if exports:
             lines.extend(["**Export decisions:**", ""])
             for row in exports:
-                lines.append(_item(f"`{row.get('code', '')}`: {row.get('message') or ''}"))
+                lines.append(_item(f"`{row.get('code', '')}`: {_finding_text(row)}"))
             lines.append("")
         lines.append(
             "Values in Measured sections come from tools and are reported as the tools "
@@ -2608,11 +2617,16 @@ def _code_span(text: str) -> str:
 
 
 def _finding_text(row: dict[str, Any]) -> str:
-    """A finding's message as the report prints it: the value findings defanged and escaped."""
+    """A finding's message as the report prints it, every network value in it defanged.
+
+    The value findings are escaped too. Every other message is defanged and
+    left as written: it quotes the claim or the object it is about, and a
+    claim's URL was printed live in the list of findings.
+    """
     message = str(row.get("message") or "")
-    if row.get("code") not in _VALUE_FINDING_CODES:
-        return message
     try:
+        if row.get("code") not in _VALUE_FINDING_CODES:
+            return _defanged_text(message)
         return _inline_safe(message)
     except Exception as exc:  # noqa: BLE001 — never the raw values
         logger.debug("markdown: a finding was not written (%s).", exc)
