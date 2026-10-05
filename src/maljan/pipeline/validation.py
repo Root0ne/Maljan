@@ -960,10 +960,34 @@ def _stem(word: str) -> str:
     return stem
 
 
+# The regular inflections of a word that ends in a silent "e", by what replaces
+# that "e": "decode" is written "decodes", "decoded", "decoder", "decoding";
+# "deobfuscate" is written "deobfuscation". ``_stem`` keeps such a word whole —
+# no ending of its own comes off it — so without these its inflections never
+# met it.
+_SILENT_E_INFLECTIONS = ("es", "ed", "er", "ers", "ing", "ings", "ion", "ions")
+
+
+def _inflected_stems(word: str) -> set[str]:
+    """The stems of ``word``'s regular inflections, where ``_stem`` would not reach them.
+
+    Only a word ending in a silent "e" with at least four letters before it,
+    the floor ``_stem`` keeps: a shorter word ("use", "code") has inflections
+    that are words of their own ("user", "coder").
+    """
+    lowered = word.lower()
+    if not lowered.endswith("e") or len(lowered) < 5:
+        return set()
+    base = lowered[:-1]
+    return {_stem(base + ending) for ending in _SILENT_E_INFLECTIONS}
+
+
 def _name_terms(technique_id: str, attck: Any) -> tuple[str, set[str]]:
     """The catalogue name of a technique and the stems of its words, parent's included.
 
-    ``("", set())`` when the catalogue gives no name.
+    With the stems of each word's regular inflections (:func:`_inflected_stems`),
+    so "deobfuscates" and "decoded" share a term with Deobfuscate/Decode Files
+    or Information. ``("", set())`` when the catalogue gives no name.
     """
     answer = _catalogue_answer(str(technique_id), attck, "attck_lookup")
     name = str(answer.get("name") or "").strip()
@@ -973,12 +997,15 @@ def _name_terms(technique_id: str, attck: Any) -> tuple[str, set[str]]:
     if "." in str(technique_id):
         parent = _catalogue_answer(str(technique_id).split(".")[0], attck, "attck_lookup")
         names.append(str(parent.get("name") or ""))
-    stems = {
-        _stem(word)
+    words = [
+        word
         for text in names
         for word in re.findall(r"[A-Za-z0-9]+", text)
         if len(word) >= 3 and word.lower() not in _NAME_FILLER_WORDS
-    }
+    ]
+    stems = {_stem(word) for word in words}
+    for word in words:
+        stems |= _inflected_stems(word)
     return name, stems
 
 
