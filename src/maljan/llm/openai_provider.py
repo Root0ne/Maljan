@@ -392,75 +392,168 @@ def with_per_request_llama_cap(chat_class: Any) -> Any:
 _STREAMED_LLAMA_CLASSES: dict[tuple[type, bool], type] = {}
 
 
-def _keep_last(chunks: list[Any]) -> None:
-    """Each field llama.cpp may repeat, kept on the last chunk that carries it only.
-
-    ik_llama.cpp puts ``usage`` on every chunk of an answer as a running total,
-    and a server asked for ``timings_per_token`` puts ``timings`` on every
-    chunk; the chunks' values are added together when the chunks are joined,
-    which would count the answer many times over (and cannot add two
-    ``timings`` at all). The last one a stream sends is the answer's.
-    """
-    last_usage = max(
-        (i for i, c in enumerate(chunks) if getattr(c.message, "usage_metadata", None)),
-        default=None,
-    )
-    for index, chunk in enumerate(chunks):
-        if index != last_usage and getattr(chunk.message, "usage_metadata", None):
-            chunk.message.usage_metadata = None
-    for key in ("token_usage", "timings"):
-        last = max(
-            (i for i, c in enumerate(chunks) if key in (c.generation_info or {})),
-            default=None,
-        )
-        for index, chunk in enumerate(chunks):
-            info = chunk.generation_info
-            if index != last and info and key in info:
-                chunk.generation_info = {k: v for k, v in info.items() if k != key} or None
+# The fields llama.cpp may repeat on every chunk of an answer: ik_llama.cpp
+# puts ``usage`` on each as a running total, and a server asked for
+# ``timings_per_token`` puts ``timings`` on each. Adding the chunks together
+# would count the answer many times over (and cannot add two ``timings``), so
+# the last one a stream sends is the answer's.
+_LAST_ONLY = ("token_usage", "timings")
 
 
-def _joined_answer(chunks: list[Any], *, keep_reasoning: bool = False) -> Any:
-    """The streamed chunks of one answer as the answer the server would have sent whole.
+class _Join:
+    """The streamed chunks of one answer, joined into the answer the server would have sent whole.
 
-    Joined as langchain joins a stream (each chunk's generation info in its
-    message's metadata, then the chunks added up), with three differences:
+    Joined as langchain joins a stream — each chunk's generation info in its
+    message's metadata, then the chunks added up — but as they arrive, holding
+    no chunk: the text, the reasoning and each tool call's arguments are kept
+    as pieces and joined once at the end, and the rest of each chunk, which is
+    small, is added to the join as it comes. Adding the whole chunks rebuilt
+    the joined text and reasoning on every chunk, which is the square of the
+    answer's length. With four differences from langchain's join:
 
-    * the fields llama.cpp may repeat on every chunk are taken from the last
-      chunk that carries them (:func:`_keep_last`);
+    * the fields llama.cpp may repeat on every chunk are the last one sent
+      (``_LAST_ONLY``, and the usage);
     * no reasoning piece is in the answer, as ``langchain-openai`` leaves them
       out of a whole one — unless ``keep_reasoning``: DeepSeek's reasoning is
-      kept on its answer (:func:`with_reasoning_passback`), and its pieces are
-      joined into the one ``reasoning_content`` a whole answer carries;
+      kept on its answer (:func:`with_reasoning_passback`), its pieces joined
+      into the one ``reasoning_content`` a whole answer carries;
     * the tool calls. langchain reads a streamed call's arguments with a
       partial JSON parser, which closes a call cut off mid-string as if it had
       ended there. A whole answer's calls are read strictly, and a cut one is
       an invalid call; the joined answer's calls are read the same way, from
       the same text.
     """
-    from langchain_core.messages import AIMessage
-    from langchain_core.output_parsers.openai_tools import (
-        make_invalid_tool_call,
-        parse_tool_call,
-    )
-    from langchain_core.outputs import ChatGeneration, ChatResult
 
-    if not chunks:
-        raise ValueError("No generations found in stream.")
-    _keep_last(chunks)
+    def __init__(self, *, keep_reasoning: bool = False) -> None:
+        self.keep_reasoning = keep_reasoning
+        self.joined: Any = None
+        self.text: list[str] = []
+        self.reasoning: list[str] = []
+        self.arguments: dict[int, list[str]] = {}
+        self.raw_arguments: dict[int, list[str]] = {}
+        self.usage: Any = None
+        self.last: dict[str, Any] = {}
+
+    def add(self, chunk: Any) -> None:
+        message = chunk.message
+        if getattr(message, "usage_metadata", None):
+            self.usage = message.usage_metadata
+            message.usage_metadata = None
+        info = dict(chunk.generation_info or {})
+        for key in _LAST_ONLY:
+            if key in info:
+                self.last[key] = info.pop(key)
+        chunk.generation_info = info or None
+        extra = message.additional_kwargs
+        piece = extra.pop(REASONING_CONTENT_KEY, None)
+        if self.keep_reasoning and piece is not None:
+            if isinstance(piece, str):
+                self.reasoning.append(piece)
+            else:
+                extra[REASONING_CONTENT_KEY] = piece
+        if isinstance(message.content, str) and message.content:
+            self.text.append(message.content)
+            message.content = ""
+        for call in getattr(message, "tool_call_chunks", None) or []:
+            index = call.get("index")
+            if isinstance(index, int) and isinstance(call.get("args"), str):
+                self.arguments.setdefault(index, []).append(call["args"])
+                call["args"] = None
+        for call in extra.get("tool_calls") or []:
+            function = call.get("function") if isinstance(call, dict) else None
+            index = call.get("index") if isinstance(call, dict) else None
+            if (
+                isinstance(index, int)
+                and isinstance(function, dict)
+                and isinstance(function.get("arguments"), str)
+            ):
+                self.raw_arguments.setdefault(index, []).append(function["arguments"])
+                call["function"] = {**function, "arguments": None}
+        message.response_metadata = {**info, **message.response_metadata}
+        self.joined = chunk if self.joined is None else self.joined + chunk
+
+    def result(self) -> Any:
+        from langchain_core.messages import AIMessage
+        from langchain_core.output_parsers.openai_tools import (
+            make_invalid_tool_call,
+            parse_tool_call,
+        )
+        from langchain_core.outputs import ChatGeneration, ChatResult
+
+        if self.joined is None:
+            raise ValueError("No generations found in stream.")
+        joined = self.joined
+        merged = joined.message
+        content = merged.content
+        if self.text:
+            content = "".join(self.text) if content == "" else content
+        extra = dict(merged.additional_kwargs)
+        if self.reasoning:
+            extra[REASONING_CONTENT_KEY] = "".join(self.reasoning)
+        if self.raw_arguments and isinstance(extra.get("tool_calls"), list):
+            calls = []
+            for call in extra["tool_calls"]:
+                index = call.get("index") if isinstance(call, dict) else None
+                if isinstance(index, int) and index in self.raw_arguments:
+                    function = dict(call.get("function") or {})
+                    function["arguments"] = "".join(self.raw_arguments[index])
+                    call = {**call, "function": function}
+                calls.append(call)
+            extra["tool_calls"] = calls
+        chunks_of_calls = []
+        for piece in getattr(merged, "tool_call_chunks", None) or []:
+            index = piece.get("index")
+            if isinstance(index, int) and index in self.arguments:
+                piece = {**piece, "args": "".join(self.arguments[index])}
+            chunks_of_calls.append(piece)
+        metadata = dict(merged.response_metadata)
+        for key, value in self.last.items():
+            metadata.setdefault(key, value)
+        generation_info = joined.generation_info
+        if self.last:
+            generation_info = {**(generation_info or {}), **self.last}
+        return _strict_answer(
+            merged,
+            content,
+            extra,
+            chunks_of_calls,
+            metadata,
+            self.usage,
+            generation_info,
+            AIMessage,
+            ChatGeneration,
+            ChatResult,
+            parse_tool_call,
+            make_invalid_tool_call,
+        )
+
+
+def _joined_answer(chunks: list[Any], *, keep_reasoning: bool = False) -> Any:
+    """The streamed chunks of one answer, joined (:class:`_Join`)."""
+    join = _Join(keep_reasoning=keep_reasoning)
     for chunk in chunks:
-        if not keep_reasoning:
-            chunk.message.additional_kwargs.pop(REASONING_CONTENT_KEY, None)
-        chunk.message.response_metadata = {
-            **(chunk.generation_info or {}),
-            **chunk.message.response_metadata,
-        }
-    joined = chunks[0]
-    for chunk in chunks[1:]:
-        joined += chunk
-    merged = joined.message
+        join.add(chunk)
+    return join.result()
+
+
+def _strict_answer(
+    merged: Any,
+    content: Any,
+    extra: dict[str, Any],
+    chunks_of_calls: list[Any],
+    metadata: dict[str, Any],
+    usage: Any,
+    generation_info: Any,
+    AIMessage: Any,  # noqa: N803
+    ChatGeneration: Any,  # noqa: N803
+    ChatResult: Any,  # noqa: N803
+    parse_tool_call: Any,
+    make_invalid_tool_call: Any,
+) -> Any:
+    """The joined answer, its tool calls read strictly, as a whole answer's are."""
     tool_calls: list[Any] = []
     invalid: list[Any] = []
-    for piece in getattr(merged, "tool_call_chunks", None) or []:
+    for piece in chunks_of_calls:
         raw = {
             "id": piece.get("id"),
             "type": "function",
@@ -474,16 +567,16 @@ def _joined_answer(chunks: list[Any], *, keep_reasoning: bool = False) -> Any:
         if parsed is not None:
             tool_calls.append(parsed)
     message = AIMessage(
-        content=merged.content,
-        additional_kwargs=dict(merged.additional_kwargs),
-        response_metadata=dict(merged.response_metadata),
+        content=content,
+        additional_kwargs=extra,
+        response_metadata=metadata,
         id=merged.id,
         tool_calls=tool_calls,
         invalid_tool_calls=invalid,
-        usage_metadata=merged.usage_metadata,
+        usage_metadata=usage,
     )
     return ChatResult(
-        generations=[ChatGeneration(message=message, generation_info=joined.generation_info)]
+        generations=[ChatGeneration(message=message, generation_info=generation_info)]
     )
 
 
@@ -743,33 +836,30 @@ def with_streamed_answers(chat_class: Any, *, keep_reasoning: bool = False) -> A
     ) -> Any:
         counter = [0]
         token = _PIECES.set(counter)
+        join = _Join(keep_reasoning=keep_reasoning)
         try:
             with ends_recorded() as ended:
-                chunks = [
-                    chunk
-                    async for chunk in self._astream(
-                        messages, stop=stop, run_manager=run_manager, **kwargs
-                    )
-                ]
+                async for chunk in self._astream(
+                    messages, stop=stop, run_manager=run_manager, **kwargs
+                ):
+                    join.add(chunk)
         finally:
             _PIECES.reset(token)
-        return _ended_answer(
-            _joined_answer(chunks, keep_reasoning=keep_reasoning), ended, counter, messages, kwargs
-        )
+        return _ended_answer(join.result(), ended, counter, messages, kwargs)
 
     def _generate(
         self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
     ) -> Any:
         counter = [0]
         token = _PIECES.set(counter)
+        join = _Join(keep_reasoning=keep_reasoning)
         try:
             with ends_recorded() as ended:
-                chunks = list(self._stream(messages, stop=stop, run_manager=run_manager, **kwargs))
+                for chunk in self._stream(messages, stop=stop, run_manager=run_manager, **kwargs):
+                    join.add(chunk)
         finally:
             _PIECES.reset(token)
-        return _ended_answer(
-            _joined_answer(chunks, keep_reasoning=keep_reasoning), ended, counter, messages, kwargs
-        )
+        return _ended_answer(join.result(), ended, counter, messages, kwargs)
 
     def _ended_answer(
         result: Any, ended: list[str], counter: list[int], messages: Any, kwargs: dict[str, Any]

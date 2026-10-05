@@ -183,8 +183,10 @@ def watched[T](chunks: Iterator[T]) -> Iterator[T]:
     reader = _Reader(rule)
     try:
         for chunk in chunks:
-            yield chunk
+            # Read before it is handed on: the reader of the stream may take
+            # the chunk's text out as it joins it.
             why = reader.ends_after(chunk)
+            yield chunk
             if why is not None:
                 _ended(why)
                 return
@@ -200,8 +202,8 @@ async def awatched[T](chunks: AsyncIterator[T]) -> AsyncIterator[T]:
     reader = _Reader(rule) if rule is not None else None
     try:
         async for chunk in chunks:
-            yield chunk
             why = reader.ends_after(chunk) if reader is not None else None
+            yield chunk
             if why is not None:
                 _ended(why)
                 return

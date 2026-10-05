@@ -11,6 +11,50 @@ from maljan.llm.registry import register_provider
 _WATCHED_CLASSES: dict[type, type] = {}
 
 
+class _OllamaJoin:
+    """``ChatOllama``'s own join of a stream (``final_chunk += chunk``), holding no chunk.
+
+    Adding the whole chunks rebuilt the joined text and reasoning on every
+    chunk, the square of the answer's length. The text and the reasoning are
+    kept as pieces and joined once; the rest of each chunk, which is small, is
+    added as it comes, and the joined chunk is the one langchain's join gives.
+    """
+
+    def __init__(self) -> None:
+        self.joined: Any = None
+        self.text: list[str] = []
+        self.reasoning: list[str] = []
+
+    def add(self, chunk: Any) -> None:
+        message = chunk.message
+        if isinstance(message.content, str) and message.content:
+            self.text.append(message.content)
+            message.content = ""
+        piece = message.additional_kwargs.get("reasoning_content")
+        if isinstance(piece, str):
+            self.reasoning.append(piece)
+            del message.additional_kwargs["reasoning_content"]
+        self.joined = chunk if self.joined is None else self.joined + chunk
+
+    def result(self) -> Any:
+        from langchain_core.outputs import ChatGenerationChunk
+
+        if self.joined is None:
+            raise ValueError("No data received from Ollama stream.")
+        message = self.joined.message
+        update: dict[str, Any] = {}
+        if self.text:
+            update["content"] = "".join(self.text)
+        if self.reasoning:
+            update["additional_kwargs"] = {
+                **message.additional_kwargs,
+                "reasoning_content": "".join(self.reasoning),
+            }
+        if update:
+            message = message.model_copy(update=update)
+        return ChatGenerationChunk(message=message, generation_info=self.joined.generation_info)
+
+
 def with_watched_streams(chat_class: Any) -> Any:
     """``chat_class`` reading each streamed answer under its caller's rule (``llm.stream_watch``).
 
@@ -19,7 +63,8 @@ def with_watched_streams(chat_class: Any) -> Any:
     invoked or streamed. Each piece is read under the rule the caller named for
     the call; once the rule says to end the answer, no further piece is read
     and the stream is closed, which ends the request, and the answer is the
-    pieces read up to there, saying why (``stream_watch.ENDED_KEY``). Without
+    pieces read up to there, saying why (``stream_watch.ENDED_KEY``). The
+    pieces are joined as they arrive, holding no chunk (:class:`_OllamaJoin`). Without
     a rule every piece is read. A transport failure while the answer streams,
     or before it, is raised as ``openai.APIConnectionError``
     (``generation_rate.as_connection_error``), as on the other streamed paths.
@@ -71,12 +116,44 @@ def with_watched_streams(chat_class: Any) -> Any:
             )
         return mark_ended(result, ended[0]) if ended else result
 
+    def _chat_stream_with_aggregation(
+        self: Any,
+        messages: Any,
+        stop: Any = None,
+        run_manager: Any = None,
+        verbose: bool = False,  # noqa: FBT002
+        **kwargs: Any,
+    ) -> Any:
+        join = _OllamaJoin()
+        for chunk in self._iterate_over_stream(messages, stop, **kwargs):
+            if run_manager:
+                run_manager.on_llm_new_token(chunk.text, chunk=chunk, verbose=verbose)
+            join.add(chunk)
+        return join.result()
+
+    async def _achat_stream_with_aggregation(
+        self: Any,
+        messages: Any,
+        stop: Any = None,
+        run_manager: Any = None,
+        verbose: bool = False,  # noqa: FBT002
+        **kwargs: Any,
+    ) -> Any:
+        join = _OllamaJoin()
+        async for chunk in self._aiterate_over_stream(messages, stop, **kwargs):
+            if run_manager:
+                await run_manager.on_llm_new_token(chunk.text, chunk=chunk, verbose=verbose)
+            join.add(chunk)
+        return join.result()
+
     watched_class = type(
         chat_class.__name__,
         (chat_class,),
         {
             "_iterate_over_stream": _iterate_over_stream,
             "_aiterate_over_stream": _aiterate_over_stream,
+            "_chat_stream_with_aggregation": _chat_stream_with_aggregation,
+            "_achat_stream_with_aggregation": _achat_stream_with_aggregation,
             "_generate": _generate,
             "_agenerate": _agenerate,
         },
