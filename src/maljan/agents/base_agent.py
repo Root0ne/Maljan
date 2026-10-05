@@ -1519,14 +1519,15 @@ def _field(
 _ONE_TECHNIQUE_RE = re.compile(r"T\d{4}(?:\.\d{3})?", re.IGNORECASE)
 # What a TECHNIQUE line says to claim none.
 _NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
-# What separates the ids of a list on one TECHNIQUE line: a comma, "and", or
-# both ("T1027, T1140, and T1106"). No other word: "T1027 or T1140" and
-# "T1027 / T1140" say something about the ids the reader would have to decide.
-_TECHNIQUE_LIST_SEPARATOR_RE = re.compile(r"\s*,\s*(?:and\s+)?|\s+and\s+", re.IGNORECASE)
-# The block separator a model writes after a claim's last field when it puts
-# the next claim on the same line ("TECHNIQUE: T1027 · --- CLAIM: …"): the
-# claim format's own "---", with a dot or bar before it. It ends the line and
-# is no part of what the line claims.
+# What separates the ids of a list on one TECHNIQUE line: a comma, "and", both
+# ("T1027, T1140, and T1106"), or a slash ("T1027 / T1140"). Every part must be
+# an id and nothing else; "or", "and/or", a doubled or trailing slash, or any
+# word beside an id leaves the line whole and asked about.
+_TECHNIQUE_LIST_SEPARATOR_RE = re.compile(r"\s*,\s*(?:and\s+)?|\s+and\s+|\s*/\s*", re.IGNORECASE)
+# The claim format's own block separator, "---", written at the end of a
+# TECHNIQUE line with a dot or bar before it ("TECHNIQUE: T1027 · ---", the
+# next claim on the line after). It is no part of what the line claims. A
+# next claim written on the same line after it is not read by this.
 _TRAILING_BLOCK_SEPARATOR_RE = re.compile(r"[\s·•|]*-{3,}\s*$")
 
 
@@ -1538,7 +1539,7 @@ def _bare_technique(text: str) -> str:
 def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     """``(technique ids, unread line)`` for one claim's TECHNIQUE line as written.
 
-    One id, or a list of ids separated by commas or "and" ("T1027, T1140"),
+    One id, or a list of ids separated by commas, "and" or slashes ("T1027, T1140"),
     and nothing else, is the claimed techniques, each once, in the order
     written; ``NONE`` or a dash claims none. A block separator closing the
     line (``· ---``) is not part of it. Anything else — words after an id

@@ -1446,13 +1446,17 @@ paragraph (`nodes.run_quality_note`) says a run that is not degraded is not,
 and adds only the sentences that fit its limitations: that a missing tool is an
 absence of evidence when a reason other than such a note is listed, and that a
 note on part of an answer leaves the claims it read standing when one is. A TECHNIQUE line is one
-id, a list of ids separated by commas or "and" (read as one claim per id, each
+id, a list of ids separated by commas, "and" or slashes (read as one claim per id, each
 with the claim's sentence, evidence and confidence, and each checked as a
 technique), or `NONE` or a dash for none; a closing block separator (`· ---`)
 is no part of it. Any other line (a qualifier, a negation, ids joined by
 another word) claims no id, is kept on the claim as `technique_line`, and the
-validation turn asks once for the ids alone (`isr.technique_line_unread`).
-The claims begun are counted against the blocks read, not the claims.
+validation turn asks once for the ids alone, an id the claim does not assert
+left off the line (`isr.technique_line_unread`). The claims begun are counted
+against the blocks read, not the claims; a retry is compared with the answer
+it replaces by claim blocks, so an id taken off a list when asked is the
+answer kept, and a question about one id of a list asks to remove that id from
+the line rather than to write NONE. Findings name the block the analyst wrote.
 Every validation turn after a loop gets what that loop left of its time, not
 a fresh budget, and is not asked when that cannot hold one answer at the pace
 the loop measured (its final-answer reserve); what it would have asked is then

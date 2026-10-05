@@ -510,6 +510,33 @@ PROMPTS: dict[str, str] = {
         ]
         if v is not None
     ),
+    "the absence and describe questions on one id of a technique list": " ".join(
+        v.message
+        for v in [
+            absence_claim_violation(
+                ClaimEvidence(
+                    claim="The file holds no persistence mechanism.",
+                    evidence_ref="[ev_0001]",
+                    confidence=0.9,
+                    technique_id="T1547",
+                ),
+                "T1547",
+                listed=True,
+            ),
+            claim_does_not_describe_violation(
+                ClaimEvidence(
+                    claim="The file opens a window.",
+                    evidence_ref="[ev_0001]",
+                    confidence=0.9,
+                    technique_id="T1003",
+                ),
+                "T1003",
+                knowledge,
+                listed=True,
+            ),
+        ]
+        if v is not None
+    ),
     "capability questions for evading analysis and packing": " ".join(
         v.message
         for v in ungrounded_capabilities(

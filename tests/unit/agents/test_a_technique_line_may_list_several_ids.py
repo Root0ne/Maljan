@@ -48,6 +48,11 @@ def _block(line: str) -> str:
         # The block separator written after the line, the next claim on the same line.
         ("T1027 · ---", ["T1027"]),
         ("T1027, T1140 ---", ["T1027", "T1140"]),
+        # A slash between whole ids.
+        ("T1027 / T1140", ["T1027", "T1140"]),
+        ("T1027/T1140", ["T1027", "T1140"]),
+        ("T1027, T1140 / T1106", ["T1027", "T1140", "T1106"]),
+        ("T1055/T1055.012", ["T1055", "T1055.012"]),
     ],
 )
 def test_a_list_of_ids_is_one_claim_per_id(line: str, ids: list[str]) -> None:
@@ -69,9 +74,25 @@ def test_a_list_of_ids_is_one_claim_per_id(line: str, ids: list[str]) -> None:
         "T1027.005, T1027 (rule-asserted)",
         "T1027 and not T1140",
         "T1105; T1620 (candidate)",
+        "T1027 / T1140 (absence)",
+        "T1027 / not T1140",
+        "T1027, T1140 (not supported)",
+        "T1055 and T1574 (absence)",
+        "T1027 (candidate), T1140",
+        "T1027, T1140 not observed",
+        "T1027, not T1140",
+        "NONE, T1027",
         # A separator the reader does not read as a list.
-        "T1027 / T1140",
         "T1027 or T1140",
+        "T1027 and/or T1140",
+        "T1027/or T1140",
+        "T1027 // T1140",
+        "T1027 /, T1140",
+        "T1027 & T1140",
+        "T1027; T1140",
+        "T1055.001/.002",
+        "T1027/",
+        "/T1027",
         # Something that is not an id.
         "T1027, T99",
         "T1027, ",
@@ -118,6 +139,9 @@ def test_the_question_says_a_list_of_ids_is_read() -> None:
 
     assert "separated by commas" in question.message
     assert "one claim per technique" not in question.message
+    # An id the claim does not assert comes off the line; it is not moved into the sentence.
+    assert "left off the line" in question.message
+    assert "is said in the claim, not on its TECHNIQUE line" not in question.message
 
 
 def test_every_id_of_a_list_gets_the_checks_a_technique_gets() -> None:

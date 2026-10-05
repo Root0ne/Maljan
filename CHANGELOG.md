@@ -2384,7 +2384,7 @@ change landed on `main`.
 
 ### Fixed
 
-- **A TECHNIQUE line listing ids separated by commas or "and" is read as one claim per id**, each checked as a technique; a closing `· ---` is read past, the claim format says several ids are separated by commas, and only a line with words beside an id is asked about.
+- **A TECHNIQUE line listing ids separated by commas, "and" or slashes is read as one claim per id**, each checked as a technique, and an id taken off the list when asked is the answer kept; a closing `· ---` is read past, the claim format says several ids are separated by commas, and only a line with words beside an id is asked about.
 - **A catalogue name word ending in a silent "e" is matched by its inflections**, so "deobfuscates" and "decoded" describe Deobfuscate/Decode Files or Information; and on the absence question a dash ends a negation's reach and a "never-" adjective negates nothing.
 - **The STIX bundle holds a malware object for the family the run states** (`is_family: true`), the judge's sample object kept as written and related to it as `variant-of`.
 - **Every sample network value the report prints for reading is defanged**, a host in capitals and an `.onion` name included: model prose and cells beyond the run's own indicators, Strings of note, every indicator column, the platform's findings, tool failures and a draft rule's source line and compile error; a rule body prints as it compiles, and the references and the model endpoint the operator configured stay links.

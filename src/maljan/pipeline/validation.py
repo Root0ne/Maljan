@@ -342,8 +342,9 @@ def technique_line_violation(lines: list[str]) -> Violation:
             f"{len(lines)} claim(s) have a TECHNIQUE line that is not technique ids or "
             f"NONE, so no technique is read from them: {shown}. Write each claim's "
             "technique ids alone, several separated by commas, or NONE when it claims "
-            "none; a word beside an id (a qualifier, a doubt, a negation) is said in the "
-            "claim, not on its TECHNIQUE line."
+            "none. An id the claim does not assert (negated, absent, not supported) is "
+            "left off the line, and the claim sentence says so; a doubt about an id the "
+            "claim does assert is said in the claim and in its CONFIDENCE."
         ),
     )
 
