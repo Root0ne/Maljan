@@ -1609,6 +1609,14 @@ only, and the model does not write to it. It lists:
   decoded in it. A place after a function start is not counted inside it;
 - the first sentence of the first of the agent's parsed claims that names it.
 
+Each artefact is counted once per function, as a distinct value. A text
+referred to from two places counts once. So does an answer that two entries
+recorded, and every entry that holds it is cited. An offset and its virtual
+address are one function only through an image base the run read; this is the
+decompiled-not-described check's rule when a base is known. With no base, both
+are kept as written. A visited function with neither an artefact nor a summary
+appears only by address, on one "also visited" line.
+
 A coverage line counts the functions visited against the functions reaching
 artefacts, and one line names those not yet visited. The sources are the
 agent's entries of the job, copied before the byte budget trims them, and the
