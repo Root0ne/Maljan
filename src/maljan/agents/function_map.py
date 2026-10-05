@@ -259,18 +259,10 @@ def _floss_artefacts(found: FunctionArtefacts, data: Mapping[str, Any], entry_id
 
 
 def keeps_for_the_map(entry: Any) -> bool:
-    """Whether the map or the ledger answers read this entry: a call that decompiles,
-    disassembles, lists or searches, or one of the analysis server's tools that tie
-    artefacts to functions."""
+    """Whether the map reads this entry: a call that decompiles or disassembles, or
+    one of the analysis server's tools that tie artefacts to functions."""
     tool = str(getattr(entry, "tool", "") or "").lower()
-    words = [w for w in re.split(r"[^a-z0-9]+", tool) if w]
-    return (
-        "decompil" in tool
-        or _lists_code(tool)
-        or "list" in words
-        or "search" in words
-        or tool in (_HASH_TOOL, _BLOB_TOOL, _FLOSS_TOOL)
-    )
+    return "decompil" in tool or _lists_code(tool) or tool in (_HASH_TOOL, _BLOB_TOOL, _FLOSS_TOOL)
 
 
 # A tool whose name says it disassembles, and one of those whose name says the

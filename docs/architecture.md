@@ -1614,22 +1614,7 @@ artefacts, and one line names those not yet visited. The sources are the
 agent's entries of the job, copied before the byte budget trims them, and the
 pack's artefacts, briefed by the node and handed on to an ask.
 
-A repeat the ledger already answers is answered from it (`agents.ledger_answers`),
-after the repeat guard has had its say. It is not run and nothing is written:
-
-- A list or search tool asked again for the same scope is answered from the
-  entry. So is a wider scope, when the earlier answer held fewer items than it
-  asked for. An answer with no stated limit is not taken as whole.
-- A function decompiled again on the same server with no new argument is
-  answered with its recorded listing. This covers another spelling of the
-  address, and one function of an earlier batch.
-
-The answer names the entry and says why. The first decompile answered this way
-in a loop says once how to move on: run a decoding tool the loop has, or name
-the decoder in a claim; state the constraint the code imposes; or give the
-answer. Asking for the same again is a counted repeat. The loop's budget record
-counts these answers under `ledger_answers`. The report's "Functions examined"
-section carries the map's coverage in one line.
+The report's "Functions examined" section carries the map's coverage in one line.
 
 An analyst whose loop ended with nothing at all — no claim and no prose — is
 given a second loop over the same material only when what is left of its

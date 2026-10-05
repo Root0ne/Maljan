@@ -12,10 +12,6 @@ change landed on `main`.
   platform.** It is built from the agent's ledger entries of the job, the
   pack's analysis-server artefacts and its parsed claims. It rides the
   run-state block on every turn and replaces nothing.
-- **A listing or a decompile the ledger already answers is answered from it,
-  and said.** This covers the same or a wider scope after a whole answer, and a
-  function decompiled again with no new argument. The first such decompile in a
-  loop says once how to move on. The loop's budget record counts these answers.
 - **"Functions examined" in the report carries the function map's coverage in
   one line.**
 

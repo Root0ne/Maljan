@@ -1,10 +1,9 @@
-"""Through the real tool loop: the map rides the run-state block, the ledger answers.
+"""Through the real tool loop: the map rides the run-state block and changes nothing else.
 
 The analyst sees its function map on every turn, beside the run-state lines it
-already read; a decompile of a function it already read is answered from the
-entry that holds the listing; the loop's record counts what was answered so;
-and what one loop read is on the map of the next loop of the same job, not of
-the next job.
+already read. Every call still runs, and the repeat guard answers an identical
+call exactly as it did before the map. What one loop read is on the map of the
+next loop of the same job, not of the next job.
 """
 
 from __future__ import annotations
@@ -119,29 +118,31 @@ def _run(analyst: _Analyst) -> None:
         analyst.safe_analyze_isr("the task")
 
 
-def test_a_second_spelling_is_answered_from_the_ledger_and_the_map_is_shown() -> None:
+def test_every_call_runs_and_the_map_rides_the_latest_answer() -> None:
     calls: list[dict[str, Any]] = []
     analyst, model = _analyst(["0x1360bc0904c", "1360bc0904c"], calls)
 
     _run(analyst)
 
-    assert len(calls) == 1
+    assert len(calls) == 2, "another spelling of the address is run, as before"
     last = [str(m.content) for m in model.seen[2] if isinstance(m, ToolMessage)][-1]
-    assert last.startswith(f"[ev_0001]\n{LISTING}")
-    assert "was already decompiled in [ev_0001]" in last
+    assert last.startswith(f"[ev_0002]\n{LISTING}")
     assert FUNCTION_MAP_HEAD in last
-    assert "- 0x1360bc0904c (FUN_1360bc0904c): decompiled in ev_0001" in last
-    records = analyst.drain_budget_records()
-    assert records[0]["ledger_answers"] == {"decompile": 1}
+    assert "- 0x1360bc0904c (FUN_1360bc0904c): decompiled in ev_0001, ev_0002" in last
+    assert "ledger_answers" not in analyst.drain_budget_records()[0]
 
 
-def test_a_loop_that_answered_nothing_from_the_ledger_records_nothing_of_it() -> None:
+def test_an_identical_repeat_is_served_by_the_repeat_guard_as_before() -> None:
+    from maljan.agents.evidence_recorder import served_repeat_notice
+
     calls: list[dict[str, Any]] = []
-    analyst, _model = _analyst(["0x1360bc0904c"], calls)
+    analyst, model = _analyst(["0x1360bc0904c", "0x1360bc0904c"], calls)
 
     _run(analyst)
 
-    assert "ledger_answers" not in analyst.drain_budget_records()[0]
+    assert len(calls) == 2
+    last = [str(m.content) for m in model.seen[2] if isinstance(m, ToolMessage)][-1]
+    assert served_repeat_notice("decompile_function", "ev_0001") in last
 
 
 def test_the_next_loop_of_the_job_reads_the_map_and_the_claims_of_the_last() -> None:
@@ -153,7 +154,7 @@ def test_the_next_loop_of_the_job_reads_the_map_and_the_claims_of_the_last() -> 
 
     _run(analyst)
 
-    assert len(calls) == 1, "the earlier loop's listing answers the second loop's call"
+    assert len(calls) == 2
     first = str(model.seen[0][-1].content)
     assert FUNCTION_MAP_HEAD in first
     assert "summary: FUN_1360bc0904c looks a name up by a stored value." in first

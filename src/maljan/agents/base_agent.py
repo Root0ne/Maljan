@@ -3188,10 +3188,6 @@ class BudgetMeter:
         # Why the cap ended it, in the words the stage event carries.
         if cap and detail:
             record["detail"] = detail
-        # The calls the ledger answered instead of running them, by kind.
-        answered = dict(getattr(getattr(self, "_loop_ledger_answers", None), "counts", None) or {})
-        if answered:
-            record["ledger_answers"] = answered
         self._note_budget(record)
         if cap:
             emit_stage_ended_at_cap(
@@ -3274,17 +3270,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         # later chunk's loop runs: its repeat guard is seeded with them.
         self._prior_chunk_calls: list[LedgerEntry] = []
         # The function map's sources for the job named by ``_function_map_job``:
-        # copies of this agent's function-level and listing entries, taken
+        # copies of this agent's function-level entries, taken
         # before the byte budget trims them, and the claims its answers carried.
-        # Kept across loops and drains, because the map and the ledger answers
-        # read every loop of the job; dropped when the job changes.
+        # Kept across loops and drains, because the map reads every loop of the
+        # job; dropped when the job changes.
         self._function_map_job = ""
         self._function_map_rows: list[LedgerEntry] = []
         self._function_map_claims: list[ClaimEvidence] = []
-        # This loop's own entries while it runs, and its reader of the answers
-        # the ledger already holds; ``None`` outside a loop.
+        # This loop's own entries while it runs; ``None`` outside a loop.
         self._live_map_entries: list[LedgerEntry] | None = None
-        self._loop_ledger_answers: Any = None
         # What the analysis server tied to each function, briefed by the node.
         self.pack_function_artefacts: Any = None
         # Bytes of tool output this agent has already kept. The budget is the
@@ -3806,7 +3800,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         return self._function_map_rows, self._function_map_claims
 
     def _function_map_entries(self) -> list[LedgerEntry]:
-        """The entries the map and the ledger answers read: earlier loops', then this loop's."""
+        """The entries the map reads: this job's earlier loops', then this loop's."""
         rows, _claims = self._function_map_sources()
         live = getattr(self, "_live_map_entries", None) or []
         return [*rows, *live]
@@ -3831,7 +3825,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             return ""
 
     def _keep_for_function_map(self, entries: Sequence[LedgerEntry]) -> None:
-        """Copies of the entries the map and the ledger answers read, before any trim."""
+        """Copies of the entries the map reads, taken before the byte budget trims them."""
         from maljan.agents.function_map import keeps_for_the_map
 
         rows, _claims = self._function_map_sources()
@@ -4060,9 +4054,6 @@ class BaseAnalyst(BudgetMeter, ABC):
         # "need more steps" stop message instead of real claims. Both are
         # capped by a caller's ceiling when this loop answers an ask.
         timeout, max_steps = self._loop_limits()
-        # A record written before this loop's tools are wrapped carries no
-        # count of a reader this loop never had.
-        self._loop_ledger_answers = None
 
         # A model list that moved on in an earlier loop starts this one at its
         # first model again — the switch is sticky for a loop, not for the job
@@ -4148,20 +4139,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         # an identical one is answered with the entry that holds it, as the
         # chunk's prompt lists them (``earlier_chunks_block``).
         repeats = seeded_repeat_guard(getattr(self, "_prior_chunk_calls", None))
-        # The answers the ledger already holds: a listing asked again for a
-        # scope it answered whole, a function decompiled again with nothing
-        # new. Read over this job's earlier loops and this loop's own calls.
-        from maljan.agents.ledger_answers import LedgerAnswers, decoding_tools
-
+        # The function map reads this loop's calls as they are made.
         self._live_map_entries = recorder.entries
-        ledger_answers = LedgerAnswers(
-            self._function_map_entries,
-            decoders=decoding_tools(
-                str(getattr(tool, "name", "") or "") for tool in self.pinned_tools()
-            ),
-            image_bases=tuple(getattr(self, "pack_image_bases", None) or ()),
-        )
-        self._loop_ledger_answers = ledger_answers
         # The arguments this loop had to close off, so the ledger entry for
         # such a call says so and keeps what the model actually wrote.
         repairs = ArgumentRepairs()
@@ -4216,7 +4195,6 @@ class BaseAnalyst(BudgetMeter, ABC):
             repairs,
             self._context_budget(),
             on_question=self._count_question,
-            ledger=ledger_answers,
         )
         # Sent with every request of this loop, so counted with its conversation.
         self._tool_definition_chars = tool_definition_chars(recorded)
