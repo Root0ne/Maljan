@@ -25,6 +25,7 @@ from unittest.mock import patch
 from maljan.pipeline.validation import (
     KEPT_WITH_A_FINDING,
     MARKED_IN_PLACE,
+    NO_TABLE_ANSWER,
     NO_TABLE_ROW,
     UNPUBLISHED_VALUE_CODE,
     record_flagged_statements,
@@ -113,7 +114,7 @@ class TestTheCheck:
         (found,) = unpublished_value_violations(_body(body), _answers())
 
         assert other in found.message and f"{REFUSED} (" not in found.message
-        assert found.labels == (f"{other.replace('.', '[.]')} (no: {NO_TABLE_ROW})",)
+        assert found.labels == (f"{other} (no: {NO_TABLE_ROW})",)
 
     def test_a_value_no_table_row_holds_is_asked_with_that_state(self) -> None:
         (found,) = unpublished_value_violations(_body("It also reaches 203.0.113.9."), _answers())
@@ -156,7 +157,7 @@ class TestTheCheck:
             f"Later it reaches {REFUSED} again.",
             f"Then {other} once more.",
         )
-        refused, other_said = REFUSED.replace(".", "[.]"), other.replace(".", "[.]")
+        refused, other_said = REFUSED, other
         assert found.labels == (
             f"{refused} ({REFUSAL}); {other_said} (no: {NO_TABLE_ROW})",
             f"{refused} ({REFUSAL})",
@@ -187,7 +188,7 @@ class TestTheCheck:
         (found,) = unpublished_value_violations(_body(f"It reaches {REFUSED}."), _long)
 
         assert REFUSAL in found.message and "artifact" not in found.message
-        assert found.labels == (f"{REFUSED.replace('.', '[.]')} ({REFUSAL})",)
+        assert found.labels == (f"{REFUSED} ({REFUSAL})",)
 
     def test_the_finding_is_kept_and_marked_in_place(self) -> None:
         assert UNPUBLISHED_VALUE_CODE in KEPT_WITH_A_FINDING
@@ -243,7 +244,8 @@ class TestTheComposerAsksOnce:
         assert result is not None and result.body == sentence
         (row,) = report.flagged_statements
         assert row.sentence == sentence and row.code == UNPUBLISHED_VALUE_CODE
-        assert REFUSAL in row.label and REFUSED.replace(".", "[.]") in row.label
+        # Stored as written; the renderer defangs and escapes it.
+        assert REFUSAL in row.label and REFUSED in row.label
 
     def test_a_record_section_costs_no_question(self) -> None:
         answer = json.dumps({"channels": [{"name": "fallback", "endpoints": [REFUSED]}]})
@@ -351,7 +353,9 @@ class TestOddAndLargeInput:
         payload: dict[str, Any] = {"body": None, "steps": [None, 7, {"action": "\u202e" * 100}]}
 
         assert unpublished_value_violations(payload, _answers()) == []
-        assert unpublished_value_violations(_body(f"It reaches {REFUSED}."), _broken) == []
+        # Fails closed: a value the table cannot answer for is refused for that reason.
+        (found,) = unpublished_value_violations(_body(f"It reaches {REFUSED}."), _broken)
+        assert NO_TABLE_ANSWER in found.message
 
     def test_a_long_section_finishes_quickly(self) -> None:
         import time

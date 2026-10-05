@@ -3718,6 +3718,8 @@ def network_values_in(text: str) -> list[tuple[str, str]]:
 
 # What a recommendation's check says of a value no row of the IOC table holds.
 NO_TABLE_ROW = "no row of this run's IOC table holds it"
+# What the publish check says of a value the IOC table could not answer for.
+NO_TABLE_ANSWER = "the IOC table gave no answer for it"
 
 
 def recommendation_indicator_violations(
@@ -3819,9 +3821,9 @@ def _unstated_values(
             continue
         try:
             answer = str(answers(kind, value) or "")
-        except Exception as exc:  # noqa: BLE001 — a value the table cannot answer is not asked
+        except Exception as exc:  # noqa: BLE001 — a value the table cannot answer is refused
             logger.debug("validation: no publish answer for a value (%s).", exc)
-            continue
+            answer = f"no: {NO_TABLE_ANSWER}"
         if publishes(answer):
             continue
         if not answer and kind == "domain" and is_well_known_benign_host(value):
@@ -3847,7 +3849,6 @@ def unpublished_value_violations(
     stands, and each sentence it keeps is marked where it stands with its own
     values' states (``labels``, ``MARKED_IN_PLACE``).
     """
-    from maljan.reporting.defang import defang
 
     # (state, value) -> sentence numbers, in the order first met.
     named: dict[tuple[str, str], list[int]] = {}
@@ -3864,11 +3865,11 @@ def unpublished_value_violations(
             if not found:
                 continue
             by_state: dict[str, list[str]] = {}
-            for kind, value, state in found:
+            for _kind, value, state in found:
                 named.setdefault((state, value), []).append(number)
-                said = defang(value, kind)
-                if said not in by_state.setdefault(state, []):
-                    by_state[state].append(said)
+                # As written: the renderer escapes and defangs the label.
+                if value not in by_state.setdefault(state, []):
+                    by_state[state].append(value)
             if written not in quoted:
                 quoted.append(written)
                 labels.append(
