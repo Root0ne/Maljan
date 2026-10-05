@@ -436,3 +436,48 @@ class TestAnEndedCallRecordsItsPace:
             model.invoke([HumanMessage(content="go")])
 
         assert IN_CALL_SOURCE in rates.rate_source("m")
+
+
+class TestAWatchThatFailsFailsSafe:
+    """A watch that raises reads nothing more: the answer streams on, the check after it runs."""
+
+    @pytest.mark.parametrize(("base_url", "compat"), _ENDPOINTS)
+    @pytest.mark.parametrize("where", ["feed", "count", "start"])
+    def test_the_answer_is_read_to_its_end_and_never_ended(
+        self, base_url: str, compat: str, where: str
+    ) -> None:
+        from unittest.mock import patch
+
+        from maljan.agents.base_agent import claims_repeat_rule
+        from maljan.agents.repeat_watch import ClaimRepeatReader
+
+        def _raise(*_args: Any, **_kwargs: Any) -> Any:
+            raise RuntimeError("the reader failed")
+
+        target = {"feed": "feed", "count": "count", "start": "__init__"}[where]
+        server = _Server(limit=200)
+        with patch.object(ClaimRepeatReader, target, _raise), watching(claims_repeat_rule(None)):
+            answer = _model(server, base_url, compat).invoke([HumanMessage(content="go")])
+
+        assert server.read == 200
+        assert answer.response_metadata["finish_reason"] == "stop"
+        assert ended_while_streaming(answer) is None
+        # The answer as written, for the check after it, which finds the repeats.
+        assert claims_repeated(str(answer.content)) is not None
+
+    def test_an_ollama_answer_too(self) -> None:
+        from unittest.mock import patch
+
+        from maljan.agents.base_agent import claims_repeat_rule
+        from maljan.agents.repeat_watch import ClaimRepeatReader
+
+        def _raise(*_args: Any, **_kwargs: Any) -> Any:
+            raise RuntimeError("the reader failed")
+
+        parts = _OllamaParts()
+        with patch.object(ClaimRepeatReader, "count", _raise), watching(claims_repeat_rule(None)):
+            answer = _ollama(parts).invoke([HumanMessage(content="go")])
+
+        assert parts.read == RUNAWAY_LINES
+        assert ended_while_streaming(answer) is None
+        assert claims_repeated(str(answer.content)) is not None

@@ -87,8 +87,43 @@ FENCES = [
 ENDINGS = ["\n", "\n", "\n", "\r\n", "\r", "\x0c", " ", "  \n", "\n\n\n"]
 
 
+# The shapes a repeat may be varied in, and lines no buffer may hold whole:
+# whitespace, case and numbering changes of one claim; claims written one after
+# another on a single line; long runs before a heading's label, inside its
+# parenthesis and around a DISPUTES rest; Greek capital sigmas, whose lowercase
+# depends on what follows; digits and letters the patterns read by their
+# Unicode class.
+VARIED = [
+    "CLAIM 12:   The   FILE reads its configuration   from a resource",
+    "CLAIM:\tthe file reads its configuration from a resource.",
+    "claim: the file reads its configuration from a resource",
+    "Claim 3: it resolves imports by hash",
+    "CLAIM 1. it resolves imports by hash",
+    "CLAIM: it reads a file CLAIM: it reads a file CLAIM: it reads a file",
+    " " * 300 + "CLAIM: it reads a file",
+    "> * # " * 60 + "CLAIM 7: it reads a file",
+    "CLAIM (" + "a:b - c " * 80 + "): it reads a file",
+    "DISPUTES:" + " " * 120 + "NONE" + " ." * 40,
+    "DISPUTES: " + "*_` " * 30 + "n/a" + "..." * 20,
+    "# * DISPUTES" + " " * 50,
+    "CLAIM: ΟΔΥΣΣΕΥΣ ΑΣ. ΑΣ' Β ΑΣ\u0301 b Σ",
+    # The same claims in the lowercase ``str.lower`` gives them: a final
+    # sigma, including one followed by a case-ignorable mark or quote.
+    "CLAIM: οδυσσευς ασ. ας' β ας\u0301 b σ",
+    "CLAIM: ΑΣ.Β",
+    "CLAIM: ασ.β",
+    "CLAIM \u0661\u0662: it reads a file",
+    "DIſſENT: none",
+    "EvIdEnCe: ev_0001",
+    "CLAIM: " + "it reads a file and " * 200,
+    "x" * 2000,
+]
+
+
 def _line(rng: random.Random) -> str:
     kind = rng.random()
+    if kind < 0.08:
+        return rng.choice(VARIED)
     if kind < 0.30:
         return rng.choice(HEADINGS) + rng.choice(SENTENCES)
     if kind < 0.60:
@@ -211,3 +246,123 @@ def test_the_cost_per_line_does_not_grow_with_the_answer() -> None:
     # cost of a line stays flat. A re-read of the whole answer at every line
     # would make it sixteen times.
     assert per_long < per_short * 2.5
+
+
+def _agree_in_pieces_of(text: str, size: int, margin: int | None) -> None:
+    reader = ClaimRepeatReader(margin)
+    for at in range(0, len(text), size):
+        reader.feed(text[at : at + size])
+        got = reader.count()
+        assert (got.begun, got.distinct, got.crossed) == _expected(text[: at + size], margin), repr(
+            text[: at + size][-200:]
+        )
+
+
+@pytest.mark.parametrize("first", range(len(VARIED)))
+def test_each_varied_shape_agrees_beside_every_other(first: int) -> None:
+    for second in range(len(VARIED)):
+        text = "\n".join([VARIED[first], VARIED[second], VARIED[first], VARIED[second]]) + "\n"
+        _agree_in_pieces_of(text, 97, None)
+
+
+def _peak_bytes(text: str, piece: int = 256) -> tuple[int, ClaimRepeatReader]:
+    import tracemalloc
+
+    reader = ClaimRepeatReader(None)
+    tracemalloc.start()
+    try:
+        for at in range(0, len(text), piece):
+            reader.feed(text[at : at + piece])
+            if "\n" in text[at : at + piece]:
+                reader.count()
+        return tracemalloc.get_traced_memory()[1], reader
+    finally:
+        tracemalloc.stop()
+
+
+class TestWhatTheReaderKeeps:
+    """Nothing it keeps grows with the text, but one hash per distinct claim."""
+
+    def test_a_closed_claim_is_kept_as_a_sixteen_byte_hash(self) -> None:
+        reader = ClaimRepeatReader(None)
+        reader.feed("CLAIM: " + "a long sentence " * 1000 + "\nCLAIM: b\nCLAIM: c")
+        reader.count()
+
+        kept = reader._pipeline.machines[0].seen._own
+        assert len(kept) == 1
+        assert all(isinstance(digest, bytes) and len(digest) == 16 for digest in kept)
+
+    def test_one_long_line_holds_nothing_of_itself(self) -> None:
+        short, _reader = _peak_bytes("CLAIM: " + "it reads a value and writes it back " * 300)
+        long, _reader = _peak_bytes("CLAIM: " + "it reads a value and writes it back " * 12_000)
+
+        # Forty times the line, and what the reader held stays where it was.
+        assert long < max(short * 2, 64 * 1024)
+
+    def test_a_long_run_of_trailing_dots_is_held_as_its_hash(self) -> None:
+        long, _reader = _peak_bytes("CLAIM: it reads a file" + " ." * 200_000)
+
+        assert long < 64 * 1024
+
+    def test_distinct_claims_cost_a_hash_each(self) -> None:
+        text = "".join(f"CLAIM: claim number {n}\n" for n in range(2_000))
+        peak, reader = _peak_bytes(text)
+
+        assert reader.count().distinct == 2_000
+        assert peak < 2_000 * 200 + 64 * 1024
+
+
+@pytest.mark.parametrize(
+    ("text", "begun", "distinct"),
+    [
+        # Whitespace, case and marks: one claim, repeated.
+        ("CLAIM: The file reads a key.\nCLAIM:   the FILE  reads a **key**\n", 2, 1),
+        # Its number is not part of a claim.
+        ("CLAIM 1: it reads a key\nCLAIM 2: it reads a key\nCLAIM 3: it reads a key\n", 3, 1),
+        # Claims written one after another on one line are one block to the check.
+        ("CLAIM: it reads a key CLAIM: it reads a key CLAIM: it reads a key\n", 1, 1),
+        # A label in lowercase, or ended with a dot, heads no claim for the check.
+        ("claim: it reads a key\nclaim: it reads a key\n", 0, 0),
+        ("CLAIM 1. it reads a key\nCLAIM 2. it reads a key\n", 0, 0),
+        # A different evidence line makes a different claim.
+        (
+            "CLAIM: it reads a key\nEVIDENCE: ev_0001\nCLAIM: it reads a key\nEVIDENCE: ev_0002\n",
+            2,
+            2,
+        ),
+    ],
+    ids=[
+        "whitespace-and-case",
+        "numbering",
+        "one-line",
+        "lowercase-label",
+        "dot-label",
+        "evidence",
+    ],
+)
+def test_varied_repeats_count_as_the_check_counts_them(
+    text: str, begun: int, distinct: int
+) -> None:
+    assert _expected(text, None)[:2] == (begun, distinct)
+    _agree_in_pieces_of(text, 3, None)
+
+
+def test_the_automata_are_built_from_the_patterns_the_check_reads() -> None:
+    """The heading patterns, as the automata in ``repeat_watch`` mirror them."""
+    from maljan.agents import claim_headings
+
+    prefix = "[ \\t>*_#]*(?:(?:[-+]|\\d+[.)])[ \\t]+)?[ \\t>*_#]*"
+    assert claim_headings.LINE_PREFIX == prefix
+    assert claim_headings.CLAIM_HEAD_RE.pattern == (
+        "^" + prefix + "CLAIM(?:[ \\t]*#?\\d+)?(?:[ \\t]*\\([^)\\n]*\\))?[ \\t]*(?:\\*\\*)?"
+        "[ \\t]*(?::|\u2014|\u2013|-(?=\\s))[ \\t]*(?:\\*\\*)?[ \\t]*"
+    )
+    assert claim_headings._SEPARATOR_RE.pattern == "^[ \\t]*-{3,}[ \\t]*$"
+    assert claim_headings._FIELD_LABEL_RE.pattern == (
+        "^" + prefix + "(?:EVIDENCE|CONFIDENCE|TECHNIQUE|DISSENT)\\b"
+    )
+    assert claim_headings._DISPUTES_LABEL_RE.pattern == (
+        "^" + prefix + "DISPUTES[ \\t]*(?:\\*\\*)?[ \\t]*:(?P<rest>.*)$"
+        "|^#+[ \\t]*\\**[ \\t]*DISPUTES\\b(?P<heading_rest>.*)$"
+    )
+    assert claim_headings._NO_DISPUTE == frozenset({"NONE", "N/A", "\u2014", "\u2013", "-"})

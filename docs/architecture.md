@@ -1495,7 +1495,10 @@ in 32,768 tokens, 85 of them distinct. Where the answer streams (llama.cpp,
 Ollama, and DeepSeek, which is read as a stream for this), the same rule is read
 at each line's end and ends the call once the margin is crossed
 (`llm.stream_watch`): the stream is closed and the answer is what was written up
-to there, which the check then asks about as above.
+to there, which the check then asks about as above. The reader
+(`agents.repeat_watch`) gives the check's verdict for every prefix and keeps no
+text: a claim is kept as a 16-byte hash and a line is read by automata built
+from the heading patterns, so its memory grows only with the distinct claims.
 
 Two more questions are asked of an analyst's answer in the same validation
 turn, each once, and what the analyst answers stands.
