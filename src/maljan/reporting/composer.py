@@ -67,6 +67,7 @@ from maljan.pipeline.validation import (
     section_cut_violation,
     stated_value_violations,
     technique_name_violations,
+    unpublished_value_violations,
     wrong_entry_citations,
 )
 from maljan.reporting.evidence_bundles import (
@@ -698,6 +699,9 @@ class ReportComposer:
         # Each ledger entry's text, set per ``compose`` call; ``None`` judges
         # no citation against an entry and annotates no claim.
         self._entries: EntryTexts | None = None
+        # The IOC table's answers, set per ``compose`` call; ``None`` asks no
+        # section about a value's publish state.
+        self._answers: Any = None
         # What this report lost or had trimmed, in the words the report's own
         # degradation reasons are written in. A section dropped after its
         # retries used to leave the report with no conclusion and nothing
@@ -742,6 +746,9 @@ class ReportComposer:
         # text, where a sample's decoded string can carry any.
         self._citable = list(citable_ids) if citable_ids is not None else pack_line_ids(facts_block)
         self._entries = evidence
+        # The IOC table's answer for each value, so a section naming a value
+        # this run does not publish is asked to write its state beside it.
+        self._answers = _published_answers(report)
         # What this run established, read once and asked of every section, so
         # a conclusion cannot be the first place "command-and-control" appears.
         self._grounding = CapabilityGrounding.from_report(report, isr_reports)
@@ -1145,6 +1152,7 @@ class ReportComposer:
         citable = list(getattr(self, "_citable", None) or [])
         prose = _PROSE_FIELDS.get(schema, ())
         entries = getattr(self, "_entries", None)
+        answers = getattr(self, "_answers", None)
         try:
             # A call that has to be held under its budget goes by the manual
             # path, where the hold can be passed with the call.
@@ -1192,6 +1200,7 @@ class ReportComposer:
                     *misstated_entry_contents(answer, entries, prose=prose),
                     *technique_name_violations(answer),
                     *repeated_item_violations(answer, _ITEM_IDENTITY.get(schema, {})),
+                    *(unpublished_value_violations(answer, answers) if answers else []),
                 ]
                 for extra in validators or []:
                     found.extend(extra(answer))
@@ -1328,6 +1337,7 @@ class ReportComposer:
                 *misstated_entry_contents(payload, entries, prose=prose),
                 *technique_name_violations(payload),
                 *repeated_item_violations(payload, _ITEM_IDENTITY.get(schema, {})),
+                *(unpublished_value_violations(payload, answers) if answers else []),
             ]
             for extra in validators or []:
                 found.extend(extra(payload))
@@ -1495,6 +1505,20 @@ class ReportComposer:
         )
         self.validation_tally.record_unresolved(f"composer:{section}", violations, asked=asked)
         record_flagged_statements(getattr(self, "_report", None), violations, asked=asked)
+
+
+def _published_answers(report: MalwareReport) -> Any:
+    """The IOC table's answer for a value (``narrative_agent.published_answers``), or ``None``.
+
+    ``None`` when the table cannot be read: the publish check then asks nothing.
+    """
+    try:
+        from maljan.reporting.narrative_agent import published_answers
+
+        return published_answers(report)
+    except Exception as exc:  # noqa: BLE001 — a missing table asks nothing
+        logger.debug("ReportComposer: the IOC table was not read (%s).", exc)
+        return None
 
 
 def _section_declined(payload: Any, schema: type[BaseModel]) -> bool:

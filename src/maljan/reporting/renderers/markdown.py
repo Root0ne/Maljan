@@ -2346,7 +2346,11 @@ def _rows_named_in(rows: list[dict[str, Any]], code: str, noun: str) -> set[int]
             continue
         match = pattern.search(str(row.get("message") or ""))
         if match:
-            found.update(int(number) for number in match.group(1).split(", "))
+            for number in match.group(1).split(", "):
+                try:
+                    found.add(int(number))
+                except ValueError:
+                    continue
     return found
 
 
@@ -2487,6 +2491,7 @@ def _degraded_sentence(report: MalwareReport, ctx: _Context) -> str:
 _FLAG_WORDS = {
     "narrative.ungrounded_capability": "not established by this run",
     "report.rule_match_as_action": "a rule match only, stated as an action",
+    "report.unpublished_value": "not published by this run",
 }
 
 

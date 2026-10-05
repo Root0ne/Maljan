@@ -288,3 +288,56 @@ class TestTheReportMarksAKeptRow:
         assert f"ev_0005 (unresolved: {STATED_VALUE_UNHELD_CODE})" in host
         row = next(line for line in text.splitlines() if line.startswith("| Interval"))
         assert STATED_VALUE_UNHELD_CODE not in row
+
+
+class TestOddAndLargeInput:
+    def test_odd_cells_raise_nothing(self) -> None:
+        payload = {
+            "items": [
+                None,
+                "a row that is a string",
+                {"key": None, "value": None, "evidence_refs": None},
+                {"key": 3, "value": 7000, "how_obtained": None, "evidence_refs": "ev_0020"},
+                {"key": "Big", "value": "9" * 6000, "evidence_refs": ["ev_0020"]},
+                {"key": "Wide", "value": "‮é\U0001f600" * 50, "evidence_refs": ["ev_0020"]},
+                {"key": "Long", "value": "x\\" * 50000, "evidence_refs": ["ev_0020"]},
+            ],
+            "identifiers": {"not": "a list"},
+        }
+
+        found = stated_value_violations(payload, _texts())
+
+        assert [v.code for v in found] == [STATED_VALUE_UNHELD_CODE]
+        assert found[0].message.startswith("configuration items 2, 3, 4, 5 ")
+
+    def test_a_large_table_against_a_large_ledger_finishes_quickly(self) -> None:
+        import time
+
+        entries = [
+            _entry(
+                f"ev_{n:04d}",
+                "strings",
+                json.dumps({"strings": [f"Software\\Vendor{n}\\Key{k}" for k in range(600)]}),
+            )
+            for n in range(300)
+        ]
+        texts = EntryTexts.from_ledger(entries)
+        cited = [f"ev_{n:04d}" for n in range(0, 300, 3)]
+        payload = {
+            "identifiers": [
+                {
+                    "kind": "Registry key",
+                    "value": f"Software\\Vendor{row % 300}\\Missing{row}",
+                    "evidence_refs": cited,
+                }
+                for row in range(3000)
+            ]
+        }
+
+        started = time.monotonic()
+        found = stated_value_violations(payload, texts)
+        elapsed = time.monotonic() - started
+
+        (asked,) = found
+        assert asked.message.startswith("identifiers 1, 2, 3, ")
+        assert elapsed < 10, elapsed

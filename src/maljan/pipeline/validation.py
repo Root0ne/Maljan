@@ -2487,7 +2487,13 @@ def record_flagged_statements(
         for violation in violations:
             if violation.code not in MARKED_IN_PLACE:
                 continue
-            label = violation.path.replace("_", " ")
+            # A value's publish state is its label as written; every other
+            # label is a term or a technique named by the finding's path.
+            label = (
+                violation.subject
+                if violation.code == UNPUBLISHED_VALUE_CODE
+                else violation.path.replace("_", " ")
+            )
             for sentence in violation.quoted:
                 key = (sentence, violation.code, label, asked)
                 if key not in seen:
@@ -3760,6 +3766,88 @@ def recommendation_indicator_violations(
     return out
 
 
+# A publish state written beside a value: ``no: <reason>``, as the IOC table
+# prints it.
+_PUBLISH_STATE_RE = re.compile(r"(?<![\w-])no:\s*\S", re.IGNORECASE)
+
+
+def _strings_with_places(node: Any, depth: int = 0) -> list[str]:
+    """Every string an answer carries outside its citing fields, as written."""
+    if depth > 4:
+        return []
+    if isinstance(node, str):
+        return [node]
+    if isinstance(node, dict):
+        return [
+            text
+            for key, value in node.items()
+            if key not in _CITING_FIELDS
+            for text in _strings_with_places(value, depth + 1)
+        ]
+    if isinstance(node, list | tuple):
+        return [text for item in node for text in _strings_with_places(item, depth + 1)]
+    return []
+
+
+def unpublished_value_violations(
+    payload: Any, answers: Callable[[str, str], str]
+) -> list[Violation]:
+    """Report-model text naming an address or a host this run does not publish, without its state.
+
+    ``answers`` is ``(kind, value) -> the IOC table's answer``, ``""`` for a
+    value no row holds (``narrative_agent.published_answers``). Every string
+    of the answer is read sentence by sentence; a value the table does not
+    answer ``yes`` for, in a sentence that does not write a ``no: <reason>``
+    beside it, is one question naming the table's answer and quoting each
+    sentence that names it. A reference host no row holds is a place to read,
+    not an indicator, and raises nothing. Nothing is removed: what the model
+    answers stands, and a sentence it keeps is marked where it stands with
+    the value's state (``MARKED_IN_PLACE``).
+    """
+    from maljan.extractors.network_extractor import is_well_known_benign_host
+    from maljan.reporting.defang import defang
+    from maljan.reporting.renderers.stix_renderer import publishes
+
+    found: dict[tuple[str, str], tuple[str, list[str]]] = {}
+    for text in _strings_with_places(payload):
+        for sentence in _SENTENCE_END_RE.split(text):
+            written = sentence.strip()
+            if not written or _PUBLISH_STATE_RE.search(written):
+                continue
+            for kind, value in network_values_in(written):
+                try:
+                    answer = str(answers(kind, value) or "")
+                except Exception as exc:  # noqa: BLE001 — a value the table cannot answer is not asked
+                    logger.debug("validation: no publish answer for a value (%s).", exc)
+                    continue
+                if publishes(answer):
+                    continue
+                if not answer and kind == "domain" and is_well_known_benign_host(value):
+                    continue
+                _why, sentences = found.setdefault(
+                    (kind, value), (answer or f"no: {NO_TABLE_ROW}", [])
+                )
+                if written not in sentences:
+                    sentences.append(written)
+    out: list[Violation] = []
+    for (kind, value), (why, sentences) in found.items():
+        out.append(
+            Violation(
+                code=UNPUBLISHED_VALUE_CODE,
+                message=(
+                    f"the text names {safe_finding_value(value)}, which this run does not "
+                    f"publish ({safe_finding_value(why)}), without that state. A value this "
+                    "run does not publish is written only with its publish state beside it. "
+                    "Write the state beside the value, or write the text without the value."
+                ),
+                path=f"{kind}:{value}",
+                quoted=tuple(sentences),
+                subject=f"{defang(value, kind)} {why}",
+            )
+        )
+    return out
+
+
 def _step_order(row: Mapping[str, Any], index: int) -> str:
     """A step's number as a question names it: its own ``order``, zero included."""
     order = row.get("order")
@@ -4019,6 +4107,9 @@ class EntryTexts:
     # for the model or trimmed by the byte budget. A value absent from one of
     # them may be in the part that is not here, so no absence is read off it.
     partial: frozenset[str] = frozenset()
+    # Each letter-and-digit run of the texts, and the entries it is a whole run
+    # of: built once, on first use, by :meth:`may_hold`.
+    _runs: dict[str, frozenset[str]] = field(default_factory=dict, compare=False, repr=False)
 
     @classmethod
     def from_ledger(cls, ledger: Iterable[Any], corpus: Any = None) -> EntryTexts:
@@ -4061,6 +4152,44 @@ class EntryTexts:
             for form in written_forms(spelling)
         )
 
+    def may_hold(self, value: str) -> set[str]:
+        """The entries that may hold ``value`` for :meth:`holds`: never fewer, often far fewer.
+
+        A text holds a value only where every letter-and-digit run of one of
+        its spellings is a whole run of the text — the value's own ends are
+        bounded by characters that end a run, or by an escape, which is why
+        the runs are read both as written and with the escapes taken out. Read
+        once per report into a lookup, so a table of many rows checked against
+        a ledger of many entries costs a set intersection per row, not a scan
+        of every entry's text.
+        """
+        if not self._runs:
+            runs: dict[str, set[str]] = {}
+            for entry_id, text in self.texts.items():
+                lowered = text.lower()
+                for run in {
+                    *_TEXT_RUN_RE.findall(lowered),
+                    *_TEXT_RUN_RE.findall(_ESCAPE_PAIR_RE.sub(" ", lowered)),
+                }:
+                    runs.setdefault(run, set()).add(entry_id)
+            # The empty run marks the lookup as built, for a ledger of no text too.
+            self._runs.update({run: frozenset(ids) for run, ids in runs.items()})
+            self._runs[""] = frozenset()
+        found: set[str] = set()
+        for spelling in library_spellings(value):
+            for form in written_forms(spelling):
+                needed = set(_TEXT_RUN_RE.findall(form.lower()))
+                if not needed:
+                    return set(self.texts)
+                holders: set[str] | None = None
+                for run in needed:
+                    ids = self._runs.get(run, frozenset())
+                    holders = set(ids) if holders is None else holders & ids
+                    if not holders:
+                        break
+                found |= holders or set()
+        return found
+
     def holding(self, value: str) -> list[str]:
         """Every entry whose text holds ``value``, in ledger order; none for an undecidable one."""
         if not decidable(value):
@@ -4079,6 +4208,10 @@ class EntryTexts:
 # number inside some longer run. Such a value raises no question and no note.
 # A number: ``0x``-prefixed hex, a hex run with a digit in it (a word spelled
 # only with a–f, ``added``, is a word), or digits with separators.
+# A run of letters and digits, and a two-character escape a JSON text writes:
+# what :meth:`EntryTexts.may_hold` reads a text and a value by.
+_TEXT_RUN_RE = re.compile(r"[a-z0-9]+")
+_ESCAPE_PAIR_RE = re.compile(r'\\[nrtbf"/\\]')
 _ONLY_A_NUMBER_RE = re.compile(
     r"0x[0-9a-f]+|(?=[a-f]*[0-9])[0-9a-f]+|[0-9][0-9.,:]*", re.IGNORECASE
 )
@@ -4479,7 +4612,11 @@ def _stated_spellings(value: str) -> list[str]:
     number = _NUMBER_WITH_UNIT_RE.fullmatch(value.strip())
     if number:
         written = number.group(1).replace(",", "")
-        amount = int(written, 16) if written.lower().startswith("0x") else int(written)
+        try:
+            amount = int(written, 16) if written.lower().startswith("0x") else int(written)
+        except ValueError:
+            # Past the digits ``int`` converts: the number is looked for as written.
+            return spellings
         spellings.extend(form for form in (str(amount), hex(amount)) if form not in spellings)
     return spellings
 
@@ -4506,6 +4643,16 @@ def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Vi
     if payload is None or entries is None or not entries.texts:
         return []
     out: list[Violation] = []
+    # Whether another entry holds a value, once per value however many rows state it.
+    held_elsewhere: dict[str, bool] = {}
+
+    def _held_by(value: str, among: set[str]) -> bool:
+        return any(
+            entries.holds(ref, form)
+            for form in _stated_spellings(value)
+            for ref in entries.may_hold(form) & among
+        )
+
     for list_key, (noun, nouns) in _STATED_VALUE_ROWS.items():
         unheld: dict[tuple[str, ...], list[tuple[int, str, str]]] = {}
         for index, row in enumerate(_rows_of(payload, list_key)):
@@ -4515,9 +4662,13 @@ def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Vi
             cited = [ref for ref in _ids_in(row.get("evidence_refs")) if ref in entries.texts]
             if not cited or any(ref in entries.partial for ref in cited):
                 continue
-            if any(entries.holds(ref, form) for ref in cited for form in _stated_spellings(value)):
+            if _held_by(value, set(cited)):
                 continue
-            if entries.holding(value):
+            if value not in held_elsewhere:
+                held_elsewhere[value] = decidable(value) and any(
+                    entries.holds(ref, value) for ref in entries.may_hold(value)
+                )
+            if held_elsewhere[value]:
                 continue
             label = str(row.get("key") or row.get("kind") or "").strip()
             unheld.setdefault(tuple(cited), []).append((index + 1, label, value))
