@@ -1,0 +1,117 @@
+# Reports and exports
+
+Every finished run produces one structured report, a `MalwareReport`, assembled
+from what the run gathered: the evidence ledger, the analysts' claims and the
+judge's verdict. Every rendering below is made on request from that one stored
+report, so there is a single source of truth and no second copy to fall behind
+it. How the report is built is described in
+[Reporting](../architecture.md#reporting).
+
+## Reading a report
+
+Read it from the evidence up rather than from the verdict down. Every section
+carries the ledger ids it was built from, rendered as chips in the console; a
+chip opens that call on the **EVIDENCE** tab with its arguments, its result and
+how long it took. The **Evidence** card on the summary tab counts what the
+whole report stands on: how many calls were made, how many failed, and how many
+sections can name nothing at all.
+
+The verdict is one of `Malware`, `Suspicious` or `Benign`. `verdict_reading`
+says how it was read: `stated` when the judge wrote it, and `unrecognised`,
+`unstated` or `fallback` when the judge's answer could not be read as written.
+Severity, category and family are the judge's; the builder computes no
+replacement for them.
+
+## Renderings
+
+One report is reachable by its own id or by the job that produced it
+(`GET /api/v1/reports/job/{job_id}`). Under `/api/v1/reports/{report_id}/`:
+
+| Path | What it serves |
+| :-- | :-- |
+| `markdown` | The report as Markdown. |
+| `html` | The report as HTML. |
+| `pdf` | The report as PDF. |
+| `full` | The whole `MalwareReport` JSON document: identity, static, dynamic, network, persistence, capability matrix, executive summary, detection signatures and the rest. |
+| `stix` | The exported STIX 2.1 bundle. `stix?source=judge` serves the judge's own bundle beside it, with the map from each id the judge wrote to the id it was published under. |
+| `mitre` | The ATT&CK view of the report. |
+| `iocs` | The indicator feed, with a publish decision on every row (below). |
+| `signatures/{kind}` | The detection drafts of one kind as plain text: `yara`, `sigma`, `suricata` or `snort`. |
+| `timeline` | The run's timeline. |
+
+=== "Markdown"
+
+    ```bash
+    curl -s http://localhost:8000/api/v1/reports/<report id>/markdown \
+      -H "Authorization: Bearer $TOKEN" > analysis.md
+    ```
+
+=== "STIX 2.1"
+
+    ```bash
+    curl -s http://localhost:8000/api/v1/reports/<report id>/stix \
+      -H "Authorization: Bearer $TOKEN" > bundle.json
+    ```
+
+=== "IOC feed"
+
+    ```bash
+    curl -s "http://localhost:8000/api/v1/reports/<report id>/iocs?kind=domain" \
+      -H "Authorization: Bearer $TOKEN"
+    ```
+
+=== "YARA drafts"
+
+    ```bash
+    curl -s http://localhost:8000/api/v1/reports/<report id>/signatures/yara \
+      -H "Authorization: Bearer $TOKEN" > drafts.yar
+    ```
+
+A job that failed after its report was built keeps that report, served by the
+same routes, with `incomplete_reason` saying where the run failed.
+
+## The IOC feed
+
+`iocs` is a feed another system acts on, and it answers accordingly. `include`
+decides what comes back:
+
+| `include` | What comes back |
+| :-- | :-- |
+| `published` (default) | Only what the platform's publish rule would publish — the same rule the exported STIX bundle is built with. |
+| `unpublished` | Only the rows it withholds, for a reader who is triaging rather than acting. |
+| `all` | Both. |
+
+Every row carries its `kind`, its `value`, a `source` (`sandbox`, `analyst`,
+`strings`, `identity` or `judge`), whether it is `published`, and
+`publish_answer`: `yes:` and why the row is published, or `no:` and why not. A
+value the sample hid carries `recovered_by`, naming the tool that recovered it
+and its ledger entry. The full rule — which kinds exist, when a sandbox address
+counts as the sample's — is in [Reports](../api.md#reports) in the REST API
+reference.
+
+## Detection drafts
+
+The YARA, Sigma and Suricata drafts are generated after the export and match
+only what the run publishes: a YARA string or a Suricata alert matches the IOC
+table's rows published `yes`, and a Sigma selection names a registry key or an
+image path only when the table publishes it or a sandbox recorded it. A Benign
+verdict publishes no malicious indicator, so it gets no draft, and the report
+says so. They are drafts: review them before deploying them.
+
+## Comparing two runs
+
+`GET /api/v1/reports/diff?a=<id>&b=<id>` compares two stored runs (`by=job`
+names them by job id). It states what each record says, section by section —
+verdict, ATT&CK, indicators, key findings, persistence, configuration, C2,
+detection, STIX, the run's own facts — with the evidence ids each run cites. It
+does not say which run is right and writes into neither. The console's
+comparison view draws the same answer; see [Comparing two
+runs](../console.md#comparing-two-runs), and [What changed between two
+runs](../api.md#what-changed-between-two-runs) for the format.
+
+## Enrichment
+
+`POST /api/v1/reports/{report_id}/enrich` queues threat-intelligence lookups
+for the indicators the report names and answers 202. The lookups run as their
+own job so they never delay a verdict. See [Where the enrichment
+runs](../configuration.md#where-the-enrichment-runs).

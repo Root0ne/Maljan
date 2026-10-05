@@ -34,7 +34,7 @@ HttpOnly cookie scoped to `/api/v1/auth` and is never sent by hand. See
 | `/jobs` | Create an analysis job, list and read jobs, read a job's event history and its evidence ledger, cancel a job. |
 | `/reports` | Everything a finished analysis produces: the report itself, its renderings, its indicators, its signatures, its timeline, and post-hoc enrichment. |
 | `/dashboard` | Aggregate counts for the console's landing page, and `GET /dashboard/tools?limit=` — the per-tool call counts of the caller's last `limit` completed runs (default 20, at most 100), read from each run's `run_summary.evidence.by_tool`. |
-| `/audit` | The audit trail and API-key management. Admin only. |
+| `/audit` | The audit trail, admin only (`/audit/logs`), and API keys (`/audit/api-keys`): any signed-in user mints, lists and revokes their own keys, and a key acts as the account that minted it. |
 | `/settings` | The settings catalog, values, patches, resets, export, import and the connection probes. Admin only. |
 | `/system` | Non-secret pipeline-mode flags for dashboards, and long-term-memory maintenance. |
 

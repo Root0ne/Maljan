@@ -8,6 +8,10 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        # mkdocs.yml names the icon extension's Python callables with YAML
+        # tags a safe loader refuses; the docs workflow's strict build parses
+        # it instead.
+        exclude: ^mkdocs\.yml$
       - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files

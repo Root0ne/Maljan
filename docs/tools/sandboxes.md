@@ -1,0 +1,98 @@
+# Sandboxes
+
+The sandbox produces the dynamic evidence: the process tree, network activity,
+the sandbox's own signatures, dropped files, registry and the rest. The
+`dynamic` analyst reads that report through in-process tools, with no transport
+to open, and the `network` analyst reads its capture. `core.sandbox.provider`
+picks the provider; a job can pick its own with `sandbox_provider`.
+
+| Provider | Detonates | Reached at |
+| :-- | :-- | :-- |
+| `mock` (default) | nothing | — |
+| `cape2` | on your CAPEv2 instance | `sandbox.cape2.base_url` |
+| `triage` | on Hatching Triage's cloud | `sandbox.triage.base_url`, `https://tria.ge/api/v0` by default |
+| `upload` | nothing of its own: reads a report produced elsewhere | — |
+| `rest` | on any HTTP sandbox you describe | `sandbox.rest.base_url` |
+
+!!! warning "A sandbox runs the sample"
+
+    Point Maljan only at a sandbox you are authorised to use, on a network
+    isolated from production. What a submission discloses depends on the
+    service: a cloud sandbox holds the sample under its own terms.
+
+## Mock
+
+The default executes nothing. It returns a recorded fixture for a sample it has
+one for, marked `recorded_fixture`, and an empty stand-in marked `synthetic` for
+any other. Where no sandbox ran, the triage pack writes one `sandbox_status`
+entry with the sentence that says so, the dynamic and network analysts are
+skipped, the run carries the reason, and a stand-in's empty sections are never
+rendered as "0 processes". See [Providers](../architecture.md#providers).
+
+## CAPEv2
+
+| Setting | Default | Notes |
+| :-- | :-- | :-- |
+| `sandbox.cape2.base_url` | `http://localhost:8000` | The CAPE REST API. |
+| `sandbox.cape2.api_token` | empty | Stored encrypted. |
+| `sandbox.cape2.timeout_seconds` | `300` | How long to wait for the report. |
+| `sandbox.cape2.poll_interval_seconds` | `10` | |
+| `sandbox.cape2.package_by_format` | `{}` | A file type to a CAPE analysis package, e.g. `{"apk": "apk", "elf": "generic", "pdf": "pdf", "ooxml": "doc"}`; `*` is the fallback, and a format with no entry is submitted without a package so CAPE picks one. |
+| `sandbox.cape2.submit_options` | `{}` | Sent verbatim as further form fields (`machine`, `tags`, `options`, `timeout`, anything `tasks/create/file` accepts). |
+| `sandbox.cape2.mcp` | disabled | An optional CAPE MCP server beside the REST API. |
+
+The guest platform is sent when CAPE has a name for it (`windows`, `linux`,
+`android`) and left unset otherwise. An APK detonated with the `exe` package
+produces nothing, which is what `package_by_format` is for.
+
+## Hatching Triage
+
+| Setting | Default | Notes |
+| :-- | :-- | :-- |
+| `sandbox.triage.base_url` | `https://tria.ge/api/v0` | |
+| `sandbox.triage.api_token` | empty | Stored encrypted. |
+| `sandbox.triage.profile` | empty | The VM profile; empty means the account default. |
+| `sandbox.triage.profile_by_format` | `{}` | A file type to a VM profile, with `*` as its fallback and `profile` behind that, so an APK reaches an Android profile. |
+| `sandbox.triage.analysis_seconds` | unset | How long the VM runs the sample, sent as `defaults.timeout`; unset leaves Triage's own default. |
+| `sandbox.triage.timeout_seconds` | `900` | How long the platform waits for the report. Must be longer than `analysis_seconds`, and validation refuses one that is not. |
+| `sandbox.triage.poll_interval_seconds` | `15` | |
+| `sandbox.triage.fetch_pcap` | `true` | Fetches the capture for the network analyst. |
+
+A value the account does not allow is refused by Triage, and the submission
+error quotes Triage's own words and names the setting. The run summary states
+the run-time limit Triage set for the task: a limit, not a measured duration.
+
+## An uploaded report
+
+The `upload` provider reads a report produced elsewhere instead of detonating:
+attach it to the sample with `POST /api/v1/samples/{sample_id}/sandbox-reports`,
+then name it on the job with `sandbox_report_id`, which also selects this
+provider. CAPEv2, Cuckoo and Triage formats are accepted by default
+(`sandbox.upload.allowed_formats`), up to 64 MiB (`sandbox.upload.max_report_bytes`).
+Only a report attached to the job's own sample is read. See [Running an
+analysis](../usage/running-an-analysis.md).
+
+## Any REST sandbox
+
+The `rest` provider describes a sandbox Maljan has never heard of, rather than
+coding it:
+
+| Block | What it says |
+| :-- | :-- |
+| `sandbox.rest.auth` | The header, scheme and token the API takes. |
+| `sandbox.rest.submit` | The multipart submission (`method`, `path`, `file_field`, `extra_fields`, `submit_fields`) and the JSONPath of the task id in its answer. |
+| `sandbox.rest.status` | The poll path, the JSONPath of the state, and the done and failed values. |
+| `sandbox.rest.report` | Where the report is, its format (`cape2`, `cuckoo`, `triage` or `generic`) and an optional capture path. |
+| `sandbox.rest.mapping` | For a `generic` report, an RFC 9535 JSONPath per channel: processes, calls, signatures, DNS, HTTP, TCP, UDP, hosts, domains, dropped files, registry. |
+
+An empty path in `mapping` says the sandbox does not publish that channel, and
+the report lists it as unavailable rather than reading like a clean sample by
+omission. `mapping.channels` maps a channel name of your own to a JSONPath for
+anything the schema has no field for; namespace it by platform, e.g.
+`{"android.permissions": "$.apk.permissions[*]"}`. See [Format routing and the
+sandbox](../configuration.md#format-routing-and-the-sandbox).
+
+## Connection tests
+
+The **Connect a sandbox** setup guide walks provider choice, credentials and a
+connection test. The `cape2`, `triage` and `rest` probes back its Test buttons.
