@@ -126,7 +126,7 @@ dev = [
     # were not checked out when the wheel and sdist were built), so it cannot
     # validate any bundle: upstream oasis-open/cti-stix-validator#248. Held at
     # 3.2.0 until a release ships them again.
-    "stix2-validator==3.2.0",
+    "stix2-validator==3.3.1",
 ]
 # The GitHub Pages site under docs/, built with MkDocs Material. Kept apart
 # from dev so the docs workflow installs it alone, with none of the runtime
