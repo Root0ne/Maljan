@@ -66,8 +66,9 @@ class NegotiationMetrics:
         rounds_completed:    Number of negotiation rounds actually executed.
         max_rounds:          Hard limit configured at startup.
         termination_reason:  Why the loop stopped (consensus / hard_limit /
-                             convergence / sycophancy / not_applicable /
-                             mediation_failed).
+                             converged / convergence / not_applicable /
+                             mediation_failed), read from the router's own
+                             rules (``pipeline.routing.debate_route``).
         sycophancy_events:   Number of rounds where sycophancy was detected.
         confidence_history:  Per-round mediator confidence scores.
         final_confidence:    Last recorded confidence value; ``None`` when
@@ -91,6 +92,11 @@ class NegotiationMetrics:
     # mediation that gave no final ``CONTRADICTIONS:`` block when asked, and one
     # whose block listed contradictions and also said none stands.
     mediation_notes: list[str] = field(default_factory=list)
+    # The platform's sentences for the mediator's lines it closed (about a
+    # claim no analyst still holds) or settled from the ledger, in order.
+    settled_contradictions: list[str] = field(default_factory=list)
+    # One sentence per claim a revision dropped (``pipeline.claim_drops``).
+    dropped_claims: list[str] = field(default_factory=list)
 
     @property
     def consensus_applicable(self) -> bool:
@@ -98,7 +104,8 @@ class NegotiationMetrics:
 
     @property
     def converged_early(self) -> bool:
-        return self.termination_reason != "hard_limit"
+        """Whether the debate ended before its round limit, for a reason other than the limit."""
+        return self.termination_reason != "hard_limit" and (self.rounds_completed < self.max_rounds)
 
 
 @dataclass
@@ -979,6 +986,14 @@ class RunSummary:
             lines += ["**Revisions that replaced an answer with fewer claims:**", ""]
             lines += [f"- {sentence}" for sentence in n.revision_replacements]
             lines.append("")
+        if n.dropped_claims:
+            lines += ["**Claims a revision dropped:**", ""]
+            lines += [f"- {sentence}" for sentence in n.dropped_claims]
+            lines.append("")
+        if n.settled_contradictions:
+            lines += ["**Contradictions the platform closed or settled:**", ""]
+            lines += [f"- {sentence}" for sentence in n.settled_contradictions]
+            lines.append("")
         if n.mediation_notes:
             lines += [f"- {sentence}" for sentence in n.mediation_notes]
             lines.append("")
@@ -1257,6 +1272,12 @@ class RunSummary:
                     else {}
                 ),
                 **({"mediation_notes": list(n.mediation_notes)} if n.mediation_notes else {}),
+                **(
+                    {"settled_contradictions": list(n.settled_contradictions)}
+                    if n.settled_contradictions
+                    else {}
+                ),
+                **({"dropped_claims": list(n.dropped_claims)} if n.dropped_claims else {}),
             },
             "agent_stats": [
                 {
@@ -1780,6 +1801,8 @@ class RunSummaryBuilder:
         self,
         state: dict[str, Any],
         max_iterations: int | None = None,
+        *,
+        sycophancy_check: bool = True,
     ) -> RunSummaryBuilder:
         """Extract negotiation metrics from the final pipeline state.
 
@@ -1787,6 +1810,7 @@ class RunSummaryBuilder:
             state: Final AnalysisState (subset OK).
             max_iterations: Configured hard limit. If None, falls back to
                 ``iteration_count`` so the report stays self-consistent.
+            sycophancy_check: The debate's own switch, which the router read.
         """
         confidence_history: list[float] = state.get("confidence_history") or []
         iteration_count: int = state.get("iteration_count", 0)
@@ -1804,31 +1828,25 @@ class RunSummaryBuilder:
             sycophancy_events = 1
 
         applicable = state.get("consensus_applicable", True) is not False
-        last_mediator = next(
-            (
-                arg
-                for arg in reversed(discussion_history)
-                if getattr(arg, "agent_name", "") == "Mediator"
-            ),
-            None,
-        )
-        mediation_failed = getattr(last_mediator, "status", "complete") in ("failed", "timeout")
-        if not applicable:
-            termination_reason = NOT_APPLICABLE
-        elif mediation_failed:
-            termination_reason = MEDIATION_FAILED
-        elif is_consensus:
-            termination_reason = "consensus"
-        elif len(confidence_history) >= 3 and not getattr(last_mediator, "contradictions", None):
-            recent = confidence_history[-3:]
-            std = _rolling_std(recent)
-            termination_reason = "convergence" if std < 0.02 else "hard_limit"
-        else:
-            termination_reason = "hard_limit"
 
         if max_iterations is None:
             # Backward-compat: legacy callers passed state with "_max_iterations".
             max_iterations = state.get("_max_iterations", iteration_count)
+
+        # The state the router last read is this one: the judge runs right
+        # after it. The same rules give the reason; a decision to revise at
+        # the end means the round limit ended the debate.
+        from maljan.pipeline.routing import HARD_LIMIT, route_within_limit
+
+        route, termination_reason = route_within_limit(
+            {**state, "is_consensus": is_consensus},
+            sycophancy_check=sycophancy_check,
+            log=False,
+        )
+        if not applicable:
+            termination_reason = NOT_APPLICABLE
+        elif route != "judge":
+            termination_reason = HARD_LIMIT
 
         self._negotiation = NegotiationMetrics(
             rounds_completed=iteration_count,
@@ -1853,6 +1871,20 @@ class RunSummaryBuilder:
                     in (CONTRADICTIONS_BLOCK_MISSING_NOTE, CONTRADICTIONS_BLOCK_MIXED_NOTE)
                 )
             ),
+            settled_contradictions=[
+                str(sentence)
+                for arg in discussion_history
+                if getattr(arg, "agent_name", "") == "Mediator"
+                for sentence in [
+                    *(getattr(arg, "closed", None) or []),
+                    *(getattr(arg, "settled", None) or []),
+                ]
+            ],
+            dropped_claims=[
+                str(row.get("sentence") or "")
+                for row in (state.get("dropped_claims") or [])
+                if isinstance(row, dict) and row.get("sentence")
+            ],
         )
         return self
 

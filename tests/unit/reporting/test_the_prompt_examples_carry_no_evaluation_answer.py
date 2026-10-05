@@ -100,6 +100,8 @@ from maljan.extractors.capability_matrix import (
 from maljan.llm.context_window import no_room_sentence
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.pipeline import triage_pack
+from maljan.pipeline.claim_drops import DroppedClaim, claims_dropped_violation
+from maljan.pipeline.debate_settlement import settle_contradictions, with_platform_settlement
 from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
@@ -1135,6 +1137,38 @@ PROMPTS: dict[str, str] = {
                 DecompiledFunction(address=0x10, names=("FUN_10",), entries=("ev_0001",)),
                 DecompiledFunction(address=None, names=("F",), entries=("ev_0002",)),
             ]
+        )
+    ),
+    "dropped claims question": _message_of(
+        claims_dropped_violation(
+            [DroppedClaim(claim="Reads 0x10.", values=("0x10",), missing=("0x10",))]
+        )
+    ),
+    "the platform's closed and settled lines told to a revision round": (
+        with_platform_settlement(
+            "mediator feedback",
+            [
+                *settle_contradictions(
+                    ["A Claim 9 — contradicted by B Claim 1."],
+                    {"a": AgentISR(agent_id="a", domain="static")},
+                    [],
+                    ["a", "b"],
+                ).closed,
+                *settle_contradictions(
+                    ["A Claim 1 counts 3 [ev_0001]; B Claim 1 counts 2."],
+                    {
+                        "a": AgentISR(
+                            agent_id="a",
+                            domain="static",
+                            claims=[
+                                ClaimEvidence(claim="c", evidence_ref="[ev_0001]", confidence=0.5)
+                            ],
+                        )
+                    },
+                    [{"id": "ev_0001", "tool": "t", "structured": {"total": 3}}],
+                    ["a", "b"],
+                ).settled,
+            ],
         )
     ),
     "claims that say only that a library is used": _message_of(

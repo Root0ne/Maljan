@@ -29,7 +29,7 @@ import asyncio
 import contextlib
 import re
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
@@ -2262,6 +2262,7 @@ class JudgeAgent(BudgetMeter):
         sample: Any = None,
         facts_block: str = "",
         run_state: str = "",
+        settle_contradictions: Callable[[list[str]], Any] | None = None,
     ) -> tuple[AgentArgument, bool | None]:
         """Find contradictions between expert reports and determine consensus.
 
@@ -2279,6 +2280,13 @@ class JudgeAgent(BudgetMeter):
             isr_reports: Optional structured ISR objects. When provided, their
                 summaries are appended to give the judge per-claim confidence
                 scores and explicit dissent signals.
+            settle_contradictions: The platform's reading of the final block's
+                lines (``pipeline.debate_settlement``): it returns which lines
+                stand, which are closed (about a claim no analyst still holds)
+                and which the ledger settles. Only standing lines count
+                against consensus; the other two are carried on the argument
+                as the platform's sentences. ``None`` reads every line as
+                standing, as before.
 
         Returns:
             Tuple of (AgentArgument with mediator findings, bool indicating
@@ -2509,6 +2517,31 @@ class JudgeAgent(BudgetMeter):
             )
             verdict = verdict.model_copy(update={"contradictions": stated})
 
+        # The platform reads the lines next: one about a claim no analyst
+        # still holds is closed, one disputing a count a ledger entry states
+        # is settled by stating it, and only the rest stand. A settler that
+        # fails leaves every line standing.
+        closed: list[str] = []
+        settled: list[str] = []
+        if settle_contradictions is not None and verdict.contradictions:
+            try:
+                settlement = settle_contradictions(list(verdict.contradictions))
+                closed = [str(s) for s in getattr(settlement, "closed", None) or []]
+                settled = [str(s) for s in getattr(settlement, "settled", None) or []]
+                standing = [str(s) for s in getattr(settlement, "standing", None) or []]
+            except Exception as exc:  # noqa: BLE001 — the block as the mediator wrote it
+                self.logger.warning("Mediator: the platform could not read the block (%s).", exc)
+            else:
+                if closed or settled:
+                    self.logger.info(
+                        "Mediator: %d line(s) closed and %d settled from the ledger by the "
+                        "platform; %d stand.",
+                        len(closed),
+                        len(settled),
+                        len(standing),
+                    )
+                    verdict = verdict.model_copy(update={"contradictions": standing})
+
         # A contradiction still standing is not consensus, whatever number the
         # mediator wrote; the number is kept and shown beside the list.
         reached = verdict.confidence >= self._consensus_threshold(consensus_threshold)
@@ -2534,6 +2567,8 @@ class JudgeAgent(BudgetMeter):
             finding=finding,
             confidence_score=verdict.confidence,
             contradictions=list(verdict.contradictions),
+            closed=closed,
+            settled=settled,
             note=(
                 CONTRADICTIONS_BLOCK_MISSING_NOTE
                 if block_missing

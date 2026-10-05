@@ -497,6 +497,8 @@ class MaljanApp:
             "validation_retries": 0,
             "validation_fed_back": {},
             "revision_replacements": [],
+            "revision_rounds": [],
+            "dropped_claims": [],
             "validation_not_run": [],
             "triage_facts": {},
             "nudge_retry_modes": {},

@@ -33,6 +33,21 @@ class AgentArgument(BaseModel):
             "does not end the debate."
         ),
     )
+    closed: list[str] = Field(
+        default_factory=list,
+        description=(
+            "For the mediator: the platform's sentence for each line of its block that "
+            "is about a claim no analyst still holds. Closed, it opens no round."
+        ),
+    )
+    settled: list[str] = Field(
+        default_factory=list,
+        description=(
+            "For the mediator: the platform's sentence for each line of its block that "
+            "disputes a count a ledger entry states, with the entry and its number. "
+            "Settled, it opens no round."
+        ),
+    )
     note: str = Field(
         default="",
         description=(
@@ -333,3 +348,17 @@ class AnalysisState(TypedDict):
     # every round adds its own; the judge reads them into
     # ``run_summary.negotiation.revision_replacements``.
     revision_replacements: Annotated[list[str], operator.add]
+
+    # What each revision round did, one record per round: how many revisions
+    # stood (``made``), whether any changed a claim, a technique or a finding
+    # (``changed``) and how many ledger entries the round added
+    # (``new_evidence``). Append-only; the router reads the last record: a
+    # round that changed nothing ends the debate, and agreement after a round
+    # that added no entry is what the sycophancy check may question.
+    revision_rounds: Annotated[list[dict[str, Any]], operator.add]
+
+    # Each claim a revision dropped, per analyst and round
+    # (``pipeline.claim_drops``): the claim, its values, the ones the revision
+    # no longer states, the reason it was withdrawn with (or ``""``) and the
+    # run summary's sentence. Append-only.
+    dropped_claims: Annotated[list[dict[str, Any]], operator.add]
