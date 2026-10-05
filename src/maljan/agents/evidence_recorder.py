@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
 from maljan.llm.context_window import answering_for
+from maljan.llm.stream_watch import watching
 from maljan.pipeline.events import (
     EventSink,
     emit_tool_call_finished,
@@ -1104,7 +1105,10 @@ def _record_tool(
             started, wall_clock = time.monotonic(), time.time()
             repeated = _served_again(kwargs)
             try:
-                with answering_for(recorder.agent) as call_answer:
+                # Outside the analyst's repeated-claims watch: a model a tool
+                # calls (a summariser, another agent asked) is not the
+                # analyst's answer (``BaseAnalyst._claims_watched``).
+                with answering_for(recorder.agent) as call_answer, watching(None):
                     value = func(**kwargs)
                 return _stamp(kwargs, started, wall_clock, value, repeated, call_answer.not_shown)
             except SampleNotOpened as exc:
@@ -1133,7 +1137,7 @@ def _record_tool(
                 # charges this answer to the conversation it is entering. The
                 # name survives the ``asyncio.to_thread`` both tool paths hand
                 # the guardrail to, because that copies the context.
-                with answering_for(recorder.agent) as call_answer:
+                with answering_for(recorder.agent) as call_answer, watching(None):
                     value = await coroutine(**kwargs)
                 return _stamp(kwargs, started, wall_clock, value, repeated, call_answer.not_shown)
             except SampleNotOpened as exc:

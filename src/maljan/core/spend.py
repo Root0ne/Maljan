@@ -589,6 +589,12 @@ class SpendMeter:
         self._reached_at: float | None = None
         self._said_unpriced = False
         self._unreported = 0
+        # Calls whose provider reported no usage and that carried a stated
+        # estimate instead (an answer ended while it streamed), and what the
+        # estimates cost.
+        self._estimated_calls = 0
+        self._estimated_usd = 0.0
+        self._estimated_source = ""
         # What this job has measured. The largest answer (output tokens,
         # reasoning included) of each model, per group: ``loop`` for tool-loop
         # turns, ``single`` for every other call. The largest prompt (tokens)
@@ -734,8 +740,24 @@ class SpendMeter:
 
     # ── What was spent ────────────────────────────────────────────────────
 
-    def settle(self, usage: Mapping[str, Any] | None, model: str, call: str = "") -> None:
-        """One recorded call, from the token ledger; ``call`` is what the ledger names it."""
+    def settle(
+        self,
+        usage: Mapping[str, Any] | None,
+        model: str,
+        call: str = "",
+        *,
+        estimated: Mapping[str, Any] | None = None,
+    ) -> None:
+        """One recorded call, from the token ledger; ``call`` is what the ledger names it.
+
+        ``estimated`` is the stated estimate a call that reported no usage
+        carried (its prompt priced as uncached input and its generated pieces
+        as output). It is charged against the ceiling and counted apart as
+        estimated; the call's reported figures stay absent.
+        """
+        if usage is None and estimated:
+            self._settle_estimate(estimated, model)
+            return
         try:
             name = _clean(model)
             if usage and name:
@@ -762,6 +784,27 @@ class SpendMeter:
                     self._settled += cost
         except Exception as exc:  # noqa: BLE001 — telemetry never costs a run
             logger.debug("spend not settled (%s).", exc)
+
+    def _settle_estimate(self, estimated: Mapping[str, Any], model: str) -> None:
+        try:
+            name = _clean(model) or "(unnamed model)"
+            figures = {
+                "input_tokens": int(estimated.get("input_tokens") or 0),
+                "output_tokens": int(estimated.get("output_tokens") or 0),
+            }
+            charged = self._charged(figures, model)
+            if charged is None:
+                self._note_unpriced(name)
+                return
+            cost, source = charged
+            with self._lock:
+                self._priced_from.setdefault(name, set()).add(source)
+                self._settled += cost
+                self._estimated_calls += 1
+                self._estimated_usd += cost
+                self._estimated_source = str(estimated.get("source") or "")
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs a run
+            logger.debug("estimated spend not settled (%s).", exc)
 
     def note_loop(self, key: Any, turns: list[Any], model: str = "") -> None:
         """What a running loop's turns so far cost, counted until the ledger has them.
@@ -1612,6 +1655,10 @@ class SpendMeter:
             if self._unreported:
                 out["unreported_calls"] = self._unreported
                 out["spent_is_at_least"] = True
+            if self._estimated_calls:
+                out["estimated_calls"] = self._estimated_calls
+                out["estimated_usd"] = round(self._estimated_usd, 6)
+                out["estimated_source"] = self._estimated_source
             if self._unpriced:
                 out["unpriced_models"] = dict(sorted(self._unpriced.items()))
                 out["note"] = (

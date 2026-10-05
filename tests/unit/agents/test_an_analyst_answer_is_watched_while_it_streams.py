@@ -19,8 +19,12 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from maljan.agents.base_agent import BaseAnalyst, _run_coro_blocking, claims_repeat_rule
 from maljan.core.config import Settings
-from maljan.llm.stream_watch import current_rule, watching
-from maljan.pipeline.validation import ANALYST_REPEATED_CODE, claims_repeated
+from maljan.llm.stream_watch import ENDED_KEY, current_rule, watching
+from maljan.pipeline.validation import (
+    ANALYST_REPEATED_CODE,
+    ENDED_WHILE_STREAMING_SENTENCE,
+    claims_repeated,
+)
 
 
 def _block(n: int) -> str:
@@ -33,6 +37,11 @@ def _block(n: int) -> str:
 DISTINCT = "".join(_block(n) for n in (1, 2, 3))
 # The three claims, then written again until the derived margin is crossed.
 ENDED = DISTINCT + DISTINCT + _block(1)
+
+
+def _says(rule: Any, text: str) -> str | None:
+    """What one answer's watcher says once it has read ``text``."""
+    return rule().feed(text)
 
 
 class _Model:
@@ -64,22 +73,22 @@ class TestTheRule:
     def test_it_ends_an_answer_where_the_check_on_the_finished_answer_would_fire(self) -> None:
         rule = claims_repeat_rule(None)
 
-        assert rule(DISTINCT + DISTINCT) is None
-        why = rule(ENDED)
+        assert _says(rule, DISTINCT + DISTINCT) is None
+        why = _says(rule, ENDED)
         assert why is not None
         assert "7 CLAIM block(s) begun, 3 distinct" in why
         assert claims_repeated(ENDED) is not None
 
     def test_the_operator_s_margin_is_the_one_read(self) -> None:
-        assert claims_repeat_rule(0)(DISTINCT + _block(1)) is not None
-        assert claims_repeat_rule(20)(ENDED) is None
+        assert _says(claims_repeat_rule(0), DISTINCT + _block(1)) is not None
+        assert _says(claims_repeat_rule(20), ENDED) is None
 
     def test_it_reads_the_text_the_check_reads_without_tool_call_scaffolding(self) -> None:
         # The claim parser strips a tool call's scaffolding before it reads
         # claims, so claims inside one are no claims to either reader.
         inside = DISTINCT + "<tool_call>\n" + DISTINCT * 3 + "</tool_call>\n"
 
-        assert claims_repeat_rule(None)(inside) is None
+        assert _says(claims_repeat_rule(None), inside) is None
 
 
 class TestTheRuleReachesTheAgentLoop:
@@ -102,8 +111,8 @@ class TestTheRuleReachesTheAgentLoop:
 
         (rule,) = model.rules
         assert rule is not None
-        assert rule(DISTINCT + DISTINCT) is None
-        assert rule(ENDED) is not None
+        assert _says(rule, DISTINCT + DISTINCT) is None
+        assert _says(rule, ENDED) is not None
 
     def test_the_operator_s_margin_reaches_the_rule(self) -> None:
         model = _Model("no claims")
@@ -114,7 +123,7 @@ class TestTheRuleReachesTheAgentLoop:
             analyst._invoke_llm_with_timeout([HumanMessage(content="go")], 5.0)
 
         (rule,) = model.rules
-        assert rule(DISTINCT + _block(1)) is not None
+        assert _says(rule, DISTINCT + _block(1)) is not None
 
     def test_nothing_outside_an_analyst_call_is_read_under_it(self) -> None:
         model = _Model("no claims")
@@ -147,3 +156,61 @@ class TestTheEndedAnswerIsAskedOnce:
         # Shown back as written up to its first repeat: nothing before it removed.
         assert [str(t.content) for t in shown] == [DISTINCT.rstrip()]
         assert len(kept.claims) == 3
+
+
+class TestTheQuestionSaysTheAnswerWasEnded:
+    def _asked(self, metadata: dict[str, Any]) -> str:
+        asked: list[list[Any]] = []
+
+        class _Asked(_Analyst):
+            def _invoke_llm_with_timeout(self, messages: list, timeout: float, **_: Any) -> str:
+                asked.append(list(messages))
+                self._record_usage(AIMessage(content=DISTINCT))
+                return DISTINCT
+
+        analyst = _Asked(MagicMock())
+        analyst._record_usage(AIMessage(content=ENDED, response_metadata=metadata))
+        isr = analyst._text_to_isr(ENDED, 0)
+        with (
+            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
+        ):
+            analyst._validate_isr(isr, "evidence")
+        (turns,) = asked
+        return str(turns[-1].content)
+
+    def test_an_ended_answer_s_question_says_so(self) -> None:
+        question = self._asked({ENDED_KEY: "7 CLAIM block(s) begun"})
+
+        assert ANALYST_REPEATED_CODE in question
+        assert ENDED_WHILE_STREAMING_SENTENCE.strip() in question
+
+    def test_an_answer_that_ran_to_its_end_is_asked_as_before(self) -> None:
+        question = self._asked({})
+
+        assert ANALYST_REPEATED_CODE in question
+        assert ENDED_WHILE_STREAMING_SENTENCE.strip() not in question
+
+
+class TestTheWatchIsTheAnalyst_sOwn:
+    def test_a_tool_the_loop_runs_is_answered_outside_it(self) -> None:
+        from langchain_core.tools import StructuredTool
+
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+
+        seen: list[Any] = []
+
+        def summarise(text: str) -> str:
+            """Summarise a text."""
+            seen.append(current_rule())
+            return "short"
+
+        (tool,) = record_tools(
+            [StructuredTool.from_function(func=summarise, name="summarise")],
+            EvidenceRecorder("static"),
+        )
+        with watching(claims_repeat_rule(None)):
+            tool.invoke({"text": "long"})
+            assert current_rule() is not None
+
+        assert seen == [None]

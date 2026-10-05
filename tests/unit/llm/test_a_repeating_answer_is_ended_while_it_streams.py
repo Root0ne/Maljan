@@ -23,8 +23,18 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from maljan.core.config import Settings
+from maljan.llm.context_window import CHARS_PER_TOKEN
+from maljan.llm.generation_rate import IN_CALL_SOURCE, GenerationRates, attach_rate_meter
 from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only
-from maljan.llm.stream_watch import current_rule, watched, watching
+from maljan.llm.stream_watch import (
+    ESTIMATED_USAGE_KEY,
+    ESTIMATED_USAGE_SOURCE,
+    current_rule,
+    ended_while_streaming,
+    text_rule,
+    watched,
+    watching,
+)
 from maljan.pipeline.validation import claims_repeated
 
 FIRST = (
@@ -58,7 +68,7 @@ def _rule(margin: int | None = None) -> Any:
         found = claims_repeated(text, margin)
         return None if found is None else f"{found.repeated} repeated claims"
 
-    return _stop
+    return text_rule(_stop)
 
 
 @pytest.fixture(autouse=True)
@@ -347,7 +357,7 @@ class TestTheRuleIsTheCaller_s:
             def __init__(self, text: str) -> None:
                 self.content = text
 
-        with watching(_broken):
+        with watching(text_rule(_broken)):
             read = list(watched(iter([_Piece("a\n"), _Piece("b\n")])))
         assert len(read) == 2
 
@@ -360,3 +370,69 @@ class TestTheRuleIsTheCaller_s:
                 return await asyncio.create_task(_inside())
 
         assert asyncio.run(_outer()) is True
+
+
+class TestWhatAnEndedAnswerSays:
+    @pytest.mark.parametrize(("base_url", "compat"), _ENDPOINTS)
+    def test_it_says_it_was_ended_and_why(self, base_url: str, compat: str) -> None:
+        server = _Server()
+        with watching(_rule()):
+            answer = _model(server, base_url, compat).invoke([HumanMessage(content="go")])
+
+        assert ended_while_streaming(answer) == "3 repeated claims"
+
+    @pytest.mark.parametrize(("base_url", "compat"), _ENDPOINTS)
+    def test_an_answer_read_to_its_end_says_nothing_of_it(self, base_url: str, compat: str) -> None:
+        server = _Server(limit=8)
+        with watching(_rule()):
+            answer = _model(server, base_url, compat).invoke([HumanMessage(content="go")])
+
+        assert ended_while_streaming(answer) is None
+        assert ESTIMATED_USAGE_KEY not in answer.response_metadata
+
+    @pytest.mark.parametrize("reasoning", [False, True], ids=["text", "with-reasoning"])
+    @pytest.mark.asyncio
+    async def test_a_deepseek_answer_carries_an_estimate_of_its_usage(
+        self, reasoning: bool
+    ) -> None:
+        server = _Server(reasoning=reasoning)
+        prompt = "go " * 100
+        with watching(_rule()):
+            answer = await _model(server, "https://api.deepseek.com", "deepseek").ainvoke(
+                [HumanMessage(content=prompt)]
+            )
+
+        estimate = answer.response_metadata[ESTIMATED_USAGE_KEY]
+        assert answer.usage_metadata is None
+        assert estimate["source"] == ESTIMATED_USAGE_SOURCE
+        assert estimate["input_tokens"] == -(-len(prompt) // CHARS_PER_TOKEN)
+        # One generated piece per line read, and the reasoning piece too.
+        assert estimate["output_tokens"] == len(_lines(str(answer.content))) + int(reasoning)
+
+    def test_an_ollama_answer_says_it_was_ended(self) -> None:
+        with watching(_rule()):
+            answer = _ollama(_OllamaParts()).invoke([HumanMessage(content="go")])
+
+        assert ended_while_streaming(answer) == "3 repeated claims"
+
+
+class TestAnEndedCallRecordsItsPace:
+    @pytest.mark.parametrize(("base_url", "compat"), _ENDPOINTS)
+    @pytest.mark.asyncio
+    async def test_the_pieces_it_streamed_are_its_measured_pace(
+        self, base_url: str, compat: str
+    ) -> None:
+        rates = GenerationRates()
+        model = attach_rate_meter(_model(_Server(), base_url, compat), rates, "m")
+        with watching(_rule()):
+            await model.ainvoke([HumanMessage(content="go")])
+
+        assert IN_CALL_SOURCE in rates.rate_source("m")
+
+    def test_an_ollama_call_too(self) -> None:
+        rates = GenerationRates()
+        model = attach_rate_meter(_ollama(_OllamaParts()), rates, "m")
+        with watching(_rule()):
+            model.invoke([HumanMessage(content="go")])
+
+        assert IN_CALL_SOURCE in rates.rate_source("m")

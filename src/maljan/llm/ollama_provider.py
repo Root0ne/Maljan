@@ -19,8 +19,11 @@ def with_watched_streams(chat_class: Any) -> Any:
     invoked or streamed. Each piece is read under the rule the caller named for
     the call; once the rule says to end the answer, no further piece is read
     and the stream is closed, which ends the request, and the answer is the
-    pieces read up to there. Without a rule every piece is read. Anything that
-    is not such a class is returned as it is.
+    pieces read up to there, saying why (``stream_watch.ENDED_KEY``). Without
+    a rule every piece is read. A transport failure while the answer streams,
+    or before it, is raised as ``openai.APIConnectionError``
+    (``generation_rate.as_connection_error``), as on the other streamed paths.
+    Anything that is not such a class is returned as it is.
     """
     if not isinstance(chat_class, type) or not hasattr(chat_class, "_aiterate_over_stream"):
         return chat_class
@@ -28,16 +31,45 @@ def with_watched_streams(chat_class: Any) -> Any:
     if cached is not None:
         return cached
     base: Any = chat_class
-    from maljan.llm.stream_watch import awatched, watched
+    from maljan.llm.generation_rate import as_connection_error
+    from maljan.llm.stream_watch import awatched, ends_recorded, mark_ended, watched
 
     def _iterate_over_stream(self: Any, messages: Any, stop: Any = None, **kwargs: Any) -> Any:
-        yield from watched(base._iterate_over_stream(self, messages, stop, **kwargs))
+        try:
+            yield from watched(base._iterate_over_stream(self, messages, stop, **kwargs))
+        except Exception as exc:
+            error = as_connection_error(exc)
+            if error is exc:
+                raise
+            raise error from exc
 
     async def _aiterate_over_stream(
         self: Any, messages: Any, stop: Any = None, **kwargs: Any
     ) -> Any:
-        async for chunk in awatched(base._aiterate_over_stream(self, messages, stop, **kwargs)):
-            yield chunk
+        try:
+            async for chunk in awatched(base._aiterate_over_stream(self, messages, stop, **kwargs)):
+                yield chunk
+        except Exception as exc:
+            error = as_connection_error(exc)
+            if error is exc:
+                raise
+            raise error from exc
+
+    def _generate(
+        self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Any:
+        with ends_recorded() as ended:
+            result = base._generate(self, messages, stop=stop, run_manager=run_manager, **kwargs)
+        return mark_ended(result, ended[0]) if ended else result
+
+    async def _agenerate(
+        self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Any:
+        with ends_recorded() as ended:
+            result = await base._agenerate(
+                self, messages, stop=stop, run_manager=run_manager, **kwargs
+            )
+        return mark_ended(result, ended[0]) if ended else result
 
     watched_class = type(
         chat_class.__name__,
@@ -45,6 +77,8 @@ def with_watched_streams(chat_class: Any) -> Any:
         {
             "_iterate_over_stream": _iterate_over_stream,
             "_aiterate_over_stream": _aiterate_over_stream,
+            "_generate": _generate,
+            "_agenerate": _agenerate,
         },
     )
     watched_class.__module__ = __name__

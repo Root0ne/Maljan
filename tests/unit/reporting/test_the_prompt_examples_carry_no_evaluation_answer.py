@@ -1124,6 +1124,11 @@ PROMPTS: dict[str, str] = {
     "analyst repeated-claims question naming a chunk": analyst_repeated_violation(
         ClaimsRepeated(begun=15, distinct=3, margin=3, chars=900), chunk="chunk 1 of 2"
     ).message,
+    "analyst repeated-claims question of an answer ended while it streamed": (
+        analyst_repeated_violation(
+            ClaimsRepeated(begun=7, distinct=3, margin=3, chars=600, first_repeat=4), ended=True
+        ).message
+    ),
     "decompiled functions no claim describes": _message_of(
         decompiled_not_described_violation(
             [

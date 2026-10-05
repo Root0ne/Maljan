@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
 import threading
+from contextvars import ContextVar
 from typing import Any
 from urllib.parse import urlparse
 
@@ -551,6 +553,58 @@ def _as_status_error(exc: Any) -> Any:
     return error
 
 
+# The generated pieces of the streamed call being joined (``with_streamed_answers``).
+_PIECES: ContextVar[list[int] | None] = ContextVar("maljan_streamed_pieces", default=None)
+
+
+def _prompt_chars(messages: Any, kwargs: dict[str, Any]) -> int:
+    """A request's prompt as the spend admission measures it: its messages and tool definitions."""
+    total = 0
+    for message in messages or []:
+        total += len(str(getattr(message, "content", "") or ""))
+        calls = getattr(message, "tool_calls", None)
+        if calls:
+            total += len(str(calls))
+        reasoning = (getattr(message, "additional_kwargs", None) or {}).get(REASONING_CONTENT_KEY)
+        if isinstance(reasoning, str):
+            total += len(reasoning)
+    tools = kwargs.get("tools")
+    if tools:
+        try:
+            total += len(json.dumps(tools, ensure_ascii=False, default=str))
+        except (TypeError, ValueError):
+            total += len(str(tools))
+    return total
+
+
+def _estimate_usage(result: Any, messages: Any, kwargs: dict[str, Any], pieces: int) -> None:
+    """Put a stated estimate of an ended call's usage on its answer, for the spend ceiling.
+
+    The stream was closed before the provider sent the usage it reports on
+    its last chunk, so the answer reports none, and the token ledger records
+    none. The provider still bills the prompt and what it generated. The
+    estimate is the prompt as the spend admission measured it (characters over
+    ``CHARS_PER_TOKEN``), priced as uncached input, and the generated pieces
+    the stream carried, reasoning included, as output; it is labelled as an
+    estimate and kept apart from any reported figure.
+    """
+    from maljan.llm.context_window import CHARS_PER_TOKEN
+    from maljan.llm.stream_watch import ESTIMATED_USAGE_KEY, ESTIMATED_USAGE_SOURCE
+
+    estimate = {
+        "input_tokens": -(-max(0, _prompt_chars(messages, kwargs)) // CHARS_PER_TOKEN),
+        "output_tokens": max(0, int(pieces)),
+        "source": ESTIMATED_USAGE_SOURCE,
+    }
+    for generation in getattr(result, "generations", None) or []:
+        message = getattr(generation, "message", None)
+        if getattr(message, "usage_metadata", None):
+            continue
+        metadata = getattr(message, "response_metadata", None)
+        if isinstance(metadata, dict):
+            metadata[ESTIMATED_USAGE_KEY] = dict(estimate)
+
+
 def with_streamed_llama_answers(chat_class: Any) -> Any:
     """``chat_class`` reading a llama.cpp answer as a stream (:func:`with_streamed_answers`)."""
     return with_streamed_answers(chat_class)
@@ -599,6 +653,14 @@ def with_streamed_answers(chat_class: Any, *, keep_reasoning: bool = False) -> A
     (``llm.stream_watch.watching``): once the rule says to end it, no further
     chunk is read, the stream is closed, which ends the request, and the
     answer is the chunks read up to there. Without a rule every chunk is read.
+    An answer ended so says why (``stream_watch.ENDED_KEY``) and, where the
+    provider reported no usage before the end, carries a stated estimate of it
+    (:func:`_estimate_usage`).
+
+    A transport failure while the answer streams is raised as
+    ``openai.APIConnectionError`` (``generation_rate.as_connection_error``),
+    the class the SDK gives the same failure on a whole answer, so the
+    callers that replay or retry a dropped connection read it as before.
 
     ``keep_reasoning`` leaves each reasoning piece on its chunk and in the
     joined answer, for a dialect whose reasoning is sent back (DeepSeek's).
@@ -613,10 +675,18 @@ def with_streamed_answers(chat_class: Any, *, keep_reasoning: bool = False) -> A
     if cached is not None:
         return cached
     base: Any = chat_class
-    from maljan.llm.stream_watch import awatched, watched
+    from maljan.llm.generation_rate import as_connection_error, generated_piece
+    from maljan.llm.stream_watch import awatched, ends_recorded, mark_ended, watched
 
     def _leaving(chunk: Any) -> Any:
+        counter = _PIECES.get()
+        if counter is not None and generated_piece(chunk):
+            counter[0] += 1
         return chunk if keep_reasoning else _without_reasoning(chunk)
+
+    def _as_caller_reads(exc: Exception) -> BaseException:
+        error = _as_status_error(exc)
+        return as_connection_error(exc) if error is exc else error
 
     def _convert_chunk_to_generation_chunk(self: Any, chunk: Any, *args: Any, **kwargs: Any) -> Any:
         generation = base._convert_chunk_to_generation_chunk(self, chunk, *args, **kwargs)
@@ -646,7 +716,7 @@ def with_streamed_answers(chat_class: Any, *, keep_reasoning: bool = False) -> A
             async for chunk in awatched(stream):
                 yield _leaving(chunk)
         except Exception as exc:
-            error = _as_status_error(exc)
+            error = _as_caller_reads(exc)
             if error is exc:
                 raise
             raise error from exc
@@ -661,7 +731,7 @@ def with_streamed_answers(chat_class: Any, *, keep_reasoning: bool = False) -> A
             for chunk in watched(stream):
                 yield _leaving(chunk)
         except Exception as exc:
-            error = _as_status_error(exc)
+            error = _as_caller_reads(exc)
             if error is exc:
                 raise
             raise error from exc
@@ -671,19 +741,43 @@ def with_streamed_answers(chat_class: Any, *, keep_reasoning: bool = False) -> A
     async def _agenerate(
         self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
     ) -> Any:
-        chunks = [
-            chunk
-            async for chunk in self._astream(messages, stop=stop, run_manager=run_manager, **kwargs)
-        ]
-        return _joined_answer(chunks, keep_reasoning=keep_reasoning)
+        counter = [0]
+        token = _PIECES.set(counter)
+        try:
+            with ends_recorded() as ended:
+                chunks = [
+                    chunk
+                    async for chunk in self._astream(
+                        messages, stop=stop, run_manager=run_manager, **kwargs
+                    )
+                ]
+        finally:
+            _PIECES.reset(token)
+        return _ended_answer(
+            _joined_answer(chunks, keep_reasoning=keep_reasoning), ended, counter, messages, kwargs
+        )
 
     def _generate(
         self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
     ) -> Any:
-        return _joined_answer(
-            list(self._stream(messages, stop=stop, run_manager=run_manager, **kwargs)),
-            keep_reasoning=keep_reasoning,
+        counter = [0]
+        token = _PIECES.set(counter)
+        try:
+            with ends_recorded() as ended:
+                chunks = list(self._stream(messages, stop=stop, run_manager=run_manager, **kwargs))
+        finally:
+            _PIECES.reset(token)
+        return _ended_answer(
+            _joined_answer(chunks, keep_reasoning=keep_reasoning), ended, counter, messages, kwargs
         )
+
+    def _ended_answer(
+        result: Any, ended: list[str], counter: list[int], messages: Any, kwargs: dict[str, Any]
+    ) -> Any:
+        if ended:
+            mark_ended(result, ended[0])
+            _estimate_usage(result, messages, kwargs, counter[0])
+        return result
 
     streamed = type(
         chat_class.__name__,

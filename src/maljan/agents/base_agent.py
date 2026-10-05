@@ -51,7 +51,7 @@ from maljan.llm.context_window import (
     window_full_error,
 )
 from maljan.llm.generation_rate import ModelCallDeadline
-from maljan.llm.stream_watch import StopRule, current_rule, watching
+from maljan.llm.stream_watch import StopRule, current_rule, ended_while_streaming, watching
 from maljan.pipeline.run_state import NO_LIMIT, NoLimit, budget_line
 from maljan.pipeline.turns import with_question
 from maljan.pipeline.validation import (
@@ -2381,27 +2381,38 @@ def claims_repeat_rule(margin: int | None) -> StopRule:
     """The repeated-claims check, read over an answer while it streams.
 
     The rule the check on a finished answer applies
-    (``pipeline.validation.claims_repeated``, ``margin`` the operator's
+    (``pipeline.validation.claims_repeated`` over the answer without its
+    tool-call scaffolding, ``margin`` the operator's
     ``validation.claim_repeat_margin`` or ``None``): once the answer so far
     holds more repeated claims than the margin allows, the call is ended
     (``llm.stream_watch``) and the answer is what was written up to there. The
     check on that answer then finds the same and asks its one whole-answer
-    question, as it does after any answer. Read over the text that check
-    reads: the answer without its tool-call scaffolding
-    (:func:`strip_tool_call_scaffolding`).
+    question, as it does after any answer. Read line by line at a flat cost
+    (``agents.repeat_watch.ClaimRepeatReader``), with the check's own verdict
+    for every prefix.
     """
+    from maljan.agents.repeat_watch import ClaimRepeatReader
 
-    def _ends(text: str) -> str | None:
-        found = claims_repeated(strip_tool_call_scaffolding(text), margin)
-        if found is None:
-            return None
-        return (
-            f"{found.begun} CLAIM block(s) begun, {found.distinct} distinct, "
-            f"{found.repeated} of them repeating an earlier one, more than the "
-            f"{found.margin} allowed"
-        )
+    line_ends = frozenset("\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029")
 
-    return _ends
+    class _Watcher:
+        def __init__(self) -> None:
+            self._reader = ClaimRepeatReader(margin)
+
+        def feed(self, piece: str) -> str | None:
+            self._reader.feed(piece)
+            if not any(ch in line_ends for ch in piece):
+                return None
+            found = self._reader.count()
+            if not found.crossed:
+                return None
+            return (
+                f"{found.begun} CLAIM block(s) begun, {found.distinct} distinct, "
+                f"{found.repeated} of them repeating an earlier one, more than the "
+                f"{found.margin} allowed"
+            )
+
+    return _Watcher
 
 
 def _cancel_and_watch(
@@ -3068,6 +3079,10 @@ class BudgetMeter:
         self._last_answer_cut = answer_cut_at_cap(
             response, cap_in_force(self.output_cap_tokens(), held)
         )
+        # Whether the watch ended this answer while it streamed, its claims
+        # repeated past the margin (``claims_repeat_rule``): the question the
+        # validation turn asks of it says so.
+        self._last_answer_ended = ended_while_streaming(response) is not None
         if announce:
             self._announce_fallback(response)
 
@@ -5746,7 +5761,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         """A block whose model calls are read under the repeated-claims rule as they stream.
 
         The margin is the one the check on the finished answer reads,
-        ``validation.claim_repeat_margin``; there is none by default.
+        ``validation.claim_repeat_margin``; there is none by default. The
+        block's scope is this analyst's own answers: a tool the loop runs is
+        answered outside it (``evidence_recorder``), so a summariser or a
+        guardrail that calls a model inside a tool, or another agent asked
+        through one, is never read under this rule.
         """
         margin = getattr(getattr(get_settings(), "validation", None), "claim_repeat_margin", None)
         return watching(claims_repeat_rule(None if margin is None else int(margin)))
@@ -6228,11 +6247,13 @@ class BaseAnalyst(BudgetMeter, ABC):
                     try:
                         isr = self.analyze_isr(prompt_text)
                         cut = getattr(self, "_last_answer_cut", None)
+                        ended = bool(getattr(self, "_last_answer_ended", False))
                     finally:
                         self._prior_chunk_calls = []
                         # Taken whether the chunk answered or raised: a cut
                         # left here would be read as the next chunk's.
                         self._last_answer_cut = None
+                        self._last_answer_ended = False
                     repeat_margin = getattr(
                         getattr(get_settings(), "validation", None), "claim_repeat_margin", None
                     )
@@ -6247,6 +6268,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                         # this chunk's own input, and what comes back stands
                         # for this chunk alone in the merge.
                         self._last_answer_cut = cut
+                        self._last_answer_ended = ended
                         isr = self._validate_isr(
                             isr,
                             prompt_text,
@@ -6607,6 +6629,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         }
         # Read once: the next model call records its own.
         self._last_answer_cut = None
+        # Whether each answer checked was ended while it streamed, keyed as the
+        # cuts are: its repeated-claims question says so.
+        ended_by: dict[int, bool] = {id(isr): bool(getattr(self, "_last_answer_ended", False))}
+        self._last_answer_ended = False
 
         # Whether the answer being checked wrote the same claims again past
         # the margin, read off its own text (``validation.claims_repeated``).
@@ -6632,7 +6658,14 @@ class BaseAnalyst(BudgetMeter, ABC):
                 # the model sees its answer up to the first repeat, and the
                 # cut question's words say it sees none of it.
                 widest = max((cap for cap, _text, _named in cut), default=0)
-                return [analyst_repeated_violation(found, chunk=chunk, cut=widest or None)]
+                return [
+                    analyst_repeated_violation(
+                        found,
+                        chunk=chunk,
+                        cut=widest or None,
+                        ended=ended_by.get(id(candidate), False),
+                    )
+                ]
             return [analyst_cut_violation(cap, text, chunk=named) for cap, text, named in cut]
 
         def _validator(candidate: AgentISR) -> list[Violation]:
@@ -6796,7 +6829,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                     )
                 )
             if loop_repeat is not None:
-                unasked_repeat = analyst_repeated_violation(loop_repeat, chunk=chunk)
+                unasked_repeat = analyst_repeated_violation(
+                    loop_repeat, chunk=chunk, ended=ended_by.get(id(isr), False)
+                )
                 self.validation_findings.append(
                     replace(
                         unasked_repeat,
@@ -6850,6 +6885,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             retry_cut = getattr(self, "_last_answer_cut", None)
             cuts[id(parsed)] = [(*retry_cut, chunk)] if retry_cut is not None else []
             self._last_answer_cut = None
+            ended_by[id(parsed)] = bool(getattr(self, "_last_answer_ended", False))
+            self._last_answer_ended = False
             return parsed
 
         def _keep(first_answer: AgentISR, retried: AgentISR) -> AgentISR:
