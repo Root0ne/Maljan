@@ -56,7 +56,7 @@ from maljan.pipeline.conditions import (
     TriageFacts,
     evaluate,
 )
-from maljan.pipeline.debate_facts import ledger_count_facts, with_ledger_facts
+from maljan.pipeline.debate_facts import facts_naming, ledger_count_facts, with_ledger_facts
 from maljan.pipeline.events import (
     claims_to_payload,
     describe_exception,
@@ -3199,16 +3199,24 @@ _NO_CONSENSUS_MEASURED: dict[str, Any] = {
 }
 
 
-def _ledger_counts(state: AnalysisState, agent_names: Sequence[str]) -> Any:
-    """The mediation's source of ledger counts for its block's lines, over this state."""
-    isr_reports = dict(state.get("isr_reports") or {})
-    ledger = list(state.get("evidence_ledger") or [])
-    names = list(agent_names)
-
-    def counts(lines: list[str]) -> list[str]:
-        return ledger_count_facts(lines, isr_reports, ledger, names)
-
-    return counts
+def _ledger_counts(state: AnalysisState, agent_names: Sequence[str], argument: Any) -> list[str]:
+    """The ledger counts for the lines a mediation listed, blocking or not. Never raises."""
+    lines = [
+        *(getattr(argument, "contradictions", None) or []),
+        *(getattr(argument, "not_blocking", None) or []),
+    ]
+    if not lines:
+        return []
+    try:
+        return ledger_count_facts(
+            lines,
+            dict(state.get("isr_reports") or {}),
+            list(state.get("evidence_ledger") or []),
+            list(agent_names),
+        )
+    except Exception as exc:  # noqa: BLE001 — no fact is stated
+        logger.debug("negotiation: the ledger counts were not read (%s).", exc)
+        return []
 
 
 def make_negotiation_node(
@@ -3395,10 +3403,6 @@ def make_negotiation_node(
                     # against each other alone.
                     facts_block=pack_text(state, container),
                     run_state=render_run_state(state),
-                    # The counts the ledger states for the entries the
-                    # block's lines cite: put in front of the mediator once,
-                    # every one of them, and the mediator marks each line.
-                    ledger_counts=_ledger_counts(state, agent_names),
                 ),
                 hard_timeout=mediation_timeout,
                 label="mediation",
@@ -3427,8 +3431,13 @@ def make_negotiation_node(
                 # the team, so it is a notice that names itself.
                 kind="system",
             )
-            platform_said = list(getattr(argument, "ledger_facts", None) or [])
+            # The counts the ledger states for the lines this mediation listed.
+            # No call is made for them: they ride on the next revision of the
+            # analysts each line names and on the next mediation's prompt, and
+            # a debate that ends here spends nothing on them.
+            platform_said = _ledger_counts(state, agent_names, argument)
             if platform_said:
+                argument.ledger_facts = list(platform_said)
                 emit_agent_message(
                     container.event_sink,
                     speaker=ROOM_SPEAKER,
@@ -3577,9 +3586,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 break
 
         syco_detected = state.get("sycophancy_detected", False)
-        revision_directive = with_ledger_facts(
-            build_revision_directive(syco_detected, mediator_feedback), ledger_facts
-        )
+        revision_directive = build_revision_directive(syco_detected, mediator_feedback)
 
         original_reports = state.get("reports") or {}
         # The answer each analyst has in force before this round: its last
@@ -3655,7 +3662,8 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 data,
                 own_report,
                 peer_reports,
-                revision_directive,
+                # The ledger counts of the lines that name this analyst.
+                with_ledger_facts(revision_directive, facts_naming(name, ledger_facts)),
                 iteration,
             )
 

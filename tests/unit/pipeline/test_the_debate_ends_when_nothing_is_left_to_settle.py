@@ -30,6 +30,7 @@ from langchain_core.runnables import RunnableLambda
 from maljan.agents.judge_agent import JudgeAgent
 from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.core.config import Settings
+from maljan.pipeline.debate_facts import LEDGER_FACTS_HEAD
 from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.pipeline.routing import ConsensusRouter, debate_route
 from maljan.pipeline.state import AgentArgument
@@ -283,16 +284,17 @@ def _isrs() -> dict[str, AgentISR]:
     }
 
 
-def _mediate(model: _Model, counts: Any = None) -> tuple[AgentArgument, bool | None]:
+def _mediate(
+    model: _Model, history: list[AgentArgument] | None = None
+) -> tuple[AgentArgument, bool | None]:
     judge = JudgeAgent(llm=model)  # type: ignore[arg-type]
     with patch.object(judge, "_supports_structured_output", return_value=False):
         return asyncio.run(
             judge.mediate(
                 {"gamma": "r", "beta": "r"},
-                [],
+                history or [],
                 isr_reports=_isrs(),
                 consensus_threshold=0.85,
-                ledger_counts=counts,
             )
         )
 
@@ -335,38 +337,27 @@ class TestTheMediatorDecides:
         assert argument.contradictions == [lines[1]]
 
 
-class TestTheLedgerCountsArePutToTheMediatorOnce:
-    def test_the_counts_are_asked_about_and_the_new_block_is_read(self) -> None:
-        model = _Model(
-            _block(COUNT_LINE),
-            _block(f"{COUNT_LINE} [not blocking: the entries state both counts]"),
-        )
-
-        argument, is_consensus = _mediate(
-            model,
-            counts=lambda lines: [f"For the line {lines[0]!r}: entry ev_0007 states total = 41."],
-        )
-
-        assert len(model.sent) == 2
-        question = str(model.sent[1][-1].content)
-        assert "entry ev_0007 states total = 41" in question
-        assert "[not blocking:" in question
-        assert is_consensus is True
-        assert argument.ledger_facts and "ev_0007" in argument.ledger_facts[0]
-
-    def test_no_counts_ask_nothing(self) -> None:
+class TestTheLedgerCountsCostNoCall:
+    def test_a_mediation_makes_its_one_call_and_asks_nothing_more(self) -> None:
         model = _Model(_block(COUNT_LINE))
 
-        _argument, is_consensus = _mediate(model, counts=lambda lines: [])
+        _argument, is_consensus = _mediate(model)
 
         assert len(model.sent) == 1
         assert is_consensus is False
 
-    def test_a_count_reader_that_raises_asks_nothing(self) -> None:
-        def counts(_lines: list[str]) -> list[str]:
-            raise RuntimeError("boom")
+    def test_the_next_mediation_s_prompt_carries_the_last_round_s_counts(self) -> None:
+        earlier = AgentArgument(
+            agent_name="Mediator",
+            finding="x",
+            confidence_score=0.9,
+            contradictions=[COUNT_LINE],
+            ledger_facts=['For the line "x": entry ev_0007 (t) states total = 41.'],
+        )
+        model = _Model(_block())
 
-        model = _Model(_block(COUNT_LINE))
-        _argument, is_consensus = _mediate(model, counts=counts)
+        _mediate(model, history=[earlier])
 
-        assert len(model.sent) == 1 and is_consensus is False
+        prompt = " ".join(str(m.content) for m in model.sent[0])
+        assert "entry ev_0007 (t) states total = 41" in prompt
+        assert LEDGER_FACTS_HEAD in prompt

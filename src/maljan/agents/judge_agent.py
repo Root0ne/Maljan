@@ -29,7 +29,7 @@ import asyncio
 import contextlib
 import re
 import uuid
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
@@ -78,7 +78,7 @@ from maljan.llm.context_window import (
 from maljan.llm.generation_rate import GenerationRates, ModelCallDeadline, model_name_of
 from maljan.memory.attck_loader import technique_label
 from maljan.memory.long_term_memory import a_past_case_technique
-from maljan.pipeline.debate_facts import ledger_facts_question, read_marks
+from maljan.pipeline.debate_facts import read_marks, with_ledger_facts
 from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
@@ -1448,6 +1448,14 @@ def _seconds_or_none(value: Any) -> float | None:
     return None if value is None else float(value)
 
 
+def _last_ledger_facts(history: Sequence[Any]) -> list[str]:
+    """The ledger counts the platform stated for the last mediation's lines, or none."""
+    for argument in reversed(list(history or [])):
+        if getattr(argument, "agent_name", "") == "Mediator":
+            return [str(f) for f in getattr(argument, "ledger_facts", None) or []]
+    return []
+
+
 class JudgeAgent(BudgetMeter):
     """Chief controller responsible for mediation, consensus detection, and final verdict.
 
@@ -2267,7 +2275,6 @@ class JudgeAgent(BudgetMeter):
         sample: Any = None,
         facts_block: str = "",
         run_state: str = "",
-        ledger_counts: Callable[[list[str]], list[str]] | None = None,
     ) -> tuple[AgentArgument, bool | None]:
         """Find contradictions between expert reports and determine consensus.
 
@@ -2285,10 +2292,6 @@ class JudgeAgent(BudgetMeter):
             isr_reports: Optional structured ISR objects. When provided, their
                 summaries are appended to give the judge per-claim confidence
                 scores and explicit dissent signals.
-            ledger_counts: The counts the evidence ledger states for the
-                entries the block's lines cite (``pipeline.debate_facts``).
-                When it returns any, they are put to the mediator once, with
-                no tools, and its block is read again. ``None`` asks nothing.
 
         Returns:
             Tuple of (AgentArgument with mediator findings, bool indicating
@@ -2330,6 +2333,10 @@ class JudgeAgent(BudgetMeter):
         # decision — earlier prompt wording let "CLEAN / NO THREAT DETECTED"
         # prose leak into the judge prompt and bias the verdict toward
         # benign even when YARA had a hit.
+        # The counts the ledger states for the lines the last mediation listed,
+        # carried on this call rather than asked in one of their own.
+        last_counts = with_ledger_facts("", _last_ledger_facts(history))
+        carried_facts = f"{last_counts}\n\n" if last_counts else ""
         prompt_messages = [
             (
                 "system",
@@ -2359,6 +2366,7 @@ class JudgeAgent(BudgetMeter):
                 f"{_standing_blocks(run_state, facts_block)}"
                 f"{_identity_prefix(sample)}"
                 f"Expert Reports:\n{reports_text}\n\nPrevious Discussion:\n{history}\n\n"
+                f"{carried_facts}"
                 f"{MEDIATOR_HUMAN_CLOSING}",
             ),
         ]
@@ -2478,26 +2486,6 @@ class JudgeAgent(BudgetMeter):
                 )
             elif answered and reading.ambiguous == "none_beside_plain_lines":
                 reading = ContradictionsBlock([])
-        # The ledger's counts for the entries the listed lines cite, every one
-        # of them, put to the mediator once: the mediator decides what they
-        # mean for each line, and marks it.
-        ledger_facts: list[str] = []
-        if ledger_counts is not None and reading.items:
-            try:
-                ledger_facts = [str(f) for f in ledger_counts(list(reading.items)) or []]
-            except Exception as exc:  # noqa: BLE001 — no fact is stated, nothing is asked
-                self.logger.warning("Mediator: the ledger counts were not read (%s).", exc)
-            if ledger_facts:
-                asked_text = await self._ask_for_contradictions_block(
-                    prompt_messages,
-                    reasoning_text,
-                    question=ledger_facts_question(ledger_facts),
-                    what="mediation ledger counts",
-                )
-                reread = read_contradictions_block(asked_text)
-                reasoning_text = asked_text
-                if reread.items is not None and not reread.ambiguous:
-                    reading = reread
         stated_block = reading.items
 
         # Now extract the final structured output from the detailed reasoning.
@@ -2579,7 +2567,6 @@ class JudgeAgent(BudgetMeter):
             confidence_score=verdict.confidence,
             contradictions=blocking,
             not_blocking=not_blocking,
-            ledger_facts=ledger_facts,
             note=(
                 CONTRADICTIONS_BLOCK_MISSING_NOTE
                 if block_missing
@@ -2591,20 +2578,14 @@ class JudgeAgent(BudgetMeter):
         return argument, is_consensus
 
     async def _ask_for_contradictions_block(
-        self,
-        prompt_messages: list[tuple[str, str]],
-        reasoning_text: str,
-        *,
-        question: str = CONTRADICTIONS_BLOCK_QUESTION,
-        what: str = "mediation block question",
+        self, prompt_messages: list[tuple[str, str]], reasoning_text: str
     ) -> str:
-        """The mediation with the answer to one question about its block.
+        """The mediation with the answer to one question for its missing block.
 
         One turn with no tools, after the mediator's own answer in the
-        conversation that produced it: the block it left out, or the ledger
-        counts for the lines it listed. What comes back is appended to the
-        answer, so its last block and agreement line are the ones read; a
-        question that is not made or fails leaves the answer as it was.
+        conversation that produced it. What comes back is appended to the
+        answer, so its last agreement line is the one read; a question that is
+        not made or fails leaves the answer as it was.
         """
         from langchain_core.messages import AIMessage, BaseMessage
 
@@ -2616,12 +2597,14 @@ class JudgeAgent(BudgetMeter):
         ]
         turns += [
             AIMessage(content=reasoning_text),
-            HumanMessage(content=question),
+            HumanMessage(content=CONTRADICTIONS_BLOCK_QUESTION),
         ]
         timeout = _seconds_or_none(loop_limits("judge")[0])
         slot = object()
         try:
-            bound = self._spend_admits(what, turns, slot=slot, deadline_s=timeout)
+            bound = self._spend_admits(
+                "mediation block question", turns, slot=slot, deadline_s=timeout
+            )
         except SpendCeilingStop as stop:
             self.logger.warning("Mediator block question not asked: %s.", stop)
             return reasoning_text
@@ -2637,7 +2620,7 @@ class JudgeAgent(BudgetMeter):
                 ),
                 timeout,
             )
-            self._record_usage(response, call=what)
+            self._record_usage(response, call="mediation block question")
             record_judge_response(
                 getattr(self, "truncation_ledger", None), response, cap=self._output_cap().tokens
             )

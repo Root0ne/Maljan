@@ -102,7 +102,6 @@ from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.pipeline import triage_pack
 from maljan.pipeline.debate_facts import (
     ledger_count_facts,
-    ledger_facts_question,
     with_ledger_facts,
 )
 from maljan.pipeline.evidence_summary import summarise
@@ -1142,20 +1141,7 @@ PROMPTS: dict[str, str] = {
             ]
         )
     ),
-    "ledger counts put to the mediator, with the blocking marks it is asked for": (
-        ledger_facts_question(
-            ledger_count_facts(
-                ["A Claim 1 counts 3 [ev_0001]; B Claim 1 counts 2 [ev_0002]."],
-                {},
-                [
-                    {"id": "ev_0001", "tool": "t", "structured": {"total": 3}},
-                    {"id": "ev_0002", "tool": "t", "structured": {"total": 2}},
-                ],
-                ["a", "b"],
-            )
-        )
-    ),
-    "ledger counts told to a revision round": with_ledger_facts(
+    "ledger counts told to a revision round and to the next mediation": with_ledger_facts(
         "mediator feedback",
         ledger_count_facts(
             ["A Claim 1 counts 3 [ev_0001]; B Claim 1 counts 2."],

@@ -2385,7 +2385,7 @@ change landed on `main`.
 ### Fixed
 
 - **The mediator marks each listed contradiction `[blocking: <reason>]` or `[not blocking: <reason>]`, and consensus is reached when its confidence meets the threshold and no line is marked blocking;** an unmarked line blocks as before, and the platform overrides a mark in neither direction.
-- **The counts a listed line's cited ledger entries state are put to the mediator once, every one of them, also when two entries disagree,** and the revision round is told them too.
+- **The counts a listed line's cited ledger entries state, in a field named for a count or a total and equal to a number the line states, ride on calls the debate already makes:** the revision directive of the analysts the line names and the next mediation's prompt, every count also when two entries disagree; no call is made for them.
 - **A debate whose every revision of the last round is the answer in force again, whitespace aside, ends as `converged`,** and the round limit stays the backstop.
 - **A revision is made against the analyst's answer in force and its peers', and each value of the answer in force it states nowhere is recorded** (hex and decimal as one number, decompiler names and defanged values read as theirs) in `run_summary.negotiation.dropped_claims` and the report's run appendix; nothing is asked.
 - **The debate stage's duration counts its revision rounds, and `termination_reason` is read from the router's own rules:** `converged_early` is true only for a debate that ended before its limit for another reason.

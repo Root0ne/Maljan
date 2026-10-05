@@ -4,9 +4,11 @@ Every listed line used to block consensus, so a bookkeeping line kept a debate
 open for rounds. The platform no longer decides that any line is closed or
 settled. What it does:
 
-- for a listed line whose cited entries state a number in a count or total
-  field, it states those entries' values to the mediator, every one of them,
-  also when they disagree, and asks once for the block again;
+- for a listed line whose cited entries state, in a field named for a count or
+  a total, a number the line itself states, it states those values, every one
+  of them, also when they disagree. They ride on calls the debate already
+  makes: the revision directive of the analysts the line names, and the next
+  mediation's prompt. No call is made for them;
 - it reads the mark the mediator puts on each line, ``[blocking: <reason>]`` or
   ``[not blocking: <reason>]``. A line marked not blocking does not stand
   against consensus; an unmarked line blocks, as every line did before.
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 from maljan.pipeline.debate_facts import (
     LEDGER_FACTS_HEAD,
+    facts_naming,
     ledger_count_facts,
     read_marks,
     with_ledger_facts,
@@ -75,13 +78,32 @@ class TestTheLedgerCountsAreStated:
         assert "ev_0007" in facts[0]
 
     def test_a_size_or_a_time_is_not_a_count(self) -> None:
-        line = "GAMMA Claim 1 says every 60 s [ev_0009]; ALPHA_STATIC Claim 1 says 450 s."
+        line = "GAMMA Claim 1 says 12 frames in 60 s [ev_0009]; ALPHA_STATIC Claim 1 says 900."
         entry = _entry("ev_0009", total_seconds=60, total_bytes=900, frame_count=12)
 
         facts = ledger_count_facts([line], {}, [entry], AGENTS)
 
         assert "frame_count = 12" in facts[0]
         assert "total_seconds" not in facts[0] and "total_bytes" not in facts[0]
+
+    def test_a_count_the_line_does_not_state_is_left_out(self) -> None:
+        line = "GAMMA Claim 1 says 41 [ev_0007]; ALPHA_STATIC Claim 1 says 40."
+        entry = _entry("ev_0007", total=41, string_count=218)
+
+        facts = ledger_count_facts([line], {}, [entry], AGENTS)
+
+        assert "total = 41" in facts[0]
+        assert "218" not in facts[0]
+
+    def test_an_entry_whose_counts_the_line_does_not_state_gives_no_fact(self) -> None:
+        line = "GAMMA Claim 1 says port 443 [ev_0007]; ALPHA_STATIC Claim 1 says 80."
+
+        assert ledger_count_facts([line], {}, [_entry("ev_0007", total=3)], AGENTS) == []
+
+    def test_a_claim_number_is_not_a_number_the_line_states(self) -> None:
+        line = "GAMMA Claim 3 says so [ev_0007]; ALPHA_STATIC Claim 1 says 40."
+
+        assert ledger_count_facts([line], {}, [_entry("ev_0007", total=3)], AGENTS) == []
 
     def test_a_line_that_cites_no_entry_with_a_count_states_nothing(self) -> None:
         line = "GAMMA Claim 1 says 41 [ev_0099]; ALPHA_STATIC Claim 1 says 40."
@@ -129,6 +151,19 @@ class TestTheMediatorsMarks:
         marks = read_marks(["A vs B on a count **[not blocking: bookkeeping]**"])
 
         assert marks[0].blocking is False and marks[0].reason == "bookkeeping"
+
+
+def test_a_fact_goes_to_the_analysts_its_line_names() -> None:
+    facts = ledger_count_facts(
+        ["BETA_REVERSER Claim 2 counts 41 [ev_0007]; GAMMA Claim 1 counts 40."],
+        {},
+        [_entry("ev_0007", total=41)],
+        AGENTS,
+    )
+
+    assert facts_naming("beta_reverser", facts) == facts
+    assert facts_naming("gamma", facts) == facts
+    assert facts_naming("alpha_static", facts) == []
 
 
 def test_the_facts_reach_a_revision_under_a_fixed_head() -> None:

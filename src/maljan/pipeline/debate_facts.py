@@ -5,10 +5,11 @@ revise. The platform decides nothing about a line's content. It does two
 things:
 
 - **states facts**: for a listed line whose cited ledger entries (cited by
-  the line itself, or by a claim the line names) hold a number in a count or
-  total field, it states every such entry's value, also when two entries
-  disagree. The mediation asks the mediator once to write its block again with
-  these facts in front of it;
+  the line itself, or by a claim the line names) hold, in a field whose name
+  says count or total, a number the line itself states, it states every such
+  value, also when two entries disagree. No call is made for them: they ride
+  on the calls the debate makes anyway, the revision directive of the analysts
+  the line names and the next mediation's prompt;
 - **reads marks**: the mediator ends each line with ``[blocking: <reason>]`` or
   ``[not blocking: <reason>]``. A line marked not blocking does not stand
   against consensus. An unmarked line blocks, as every line did before marks
@@ -48,19 +49,6 @@ _MARK = re.compile(
 
 # The head of the facts a revision round is told, after the mediator's feedback.
 LEDGER_FACTS_HEAD = "The evidence ledger states these counts for the lines the mediator listed:"
-
-# The one question the mediator is asked when the ledger states counts for its
-# lines. The turn carries no tools and follows the mediator's own answer.
-LEDGER_FACTS_QUESTION_HEAD = (
-    "The evidence ledger states these counts for entries your listed contradictions cite. "
-    "They are what the entries hold, and two entries may disagree:"
-)
-LEDGER_FACTS_QUESTION_TAIL = (
-    "Write your final 'CONTRADICTIONS:' block again with these in front of you, each line "
-    "ending in [blocking: <one-line reason>] or [not blocking: <one-line reason>], or the "
-    "single line 'CONTRADICTIONS: NONE'; then the line 'agreement_confidence: <number>'. "
-    "This turn carries no tools."
-)
 
 
 def _name_pattern(name: str) -> re.Pattern[str]:
@@ -128,10 +116,12 @@ def ledger_count_facts(
     ledger: Iterable[Any],
     agent_names: Iterable[str],
 ) -> list[str]:
-    """One sentence per listed line whose cited entries state a count, with every such count.
+    """One sentence per listed line whose cited entries state a count the line states.
 
-    A line counts only when it states a decimal number of its own (its claim
-    numbers and ledger ids aside). Never raises on a line it cannot read.
+    The numbers a line states are its decimal numbers, its claim numbers, hex
+    values and ledger ids aside; only a count equal to one of them is stated,
+    every such count of every cited entry. Never raises on a line it cannot
+    read.
     """
     names = list(agent_names) or [str(k) for k in isr_reports]
     entries: dict[str, tuple[str, Any]] = {}
@@ -146,12 +136,13 @@ def ledger_count_facts(
             bare = _CLAIM_NUMBERS.sub(
                 " ", re.sub(r"\b0x[0-9a-fA-F]+\b", " ", _ENTRY_ID.sub(" ", text))
             )
-            if not _NUMBER.search(bare):
+            numbers = {int(n) for n in _NUMBER.findall(bare)}
+            if not numbers:
                 continue
             cited = list(dict.fromkeys(_ENTRY_ID.findall(text)))
-            for name, numbers in _claims_named(text, names):
+            for name, claim_numbers in _claims_named(text, names):
                 claims = _claims_of(isr_reports, name)
-                for number in numbers:
+                for number in claim_numbers:
                     if 1 <= number <= len(claims):
                         ref = str(getattr(claims[number - 1], "evidence_ref", "") or "")
                         cited.extend(i for i in _ENTRY_ID.findall(ref) if i not in cited)
@@ -160,7 +151,7 @@ def ledger_count_facts(
                 if entry_id not in entries:
                     continue
                 tool, structured = entries[entry_id]
-                counts = _counts_of(structured)
+                counts = [(key, value) for key, value in _counts_of(structured) if value in numbers]
                 if counts:
                     said = ", ".join(f"{key} = {value}" for key, value in counts)
                     stated.append(f"entry {entry_id}{f' ({tool})' if tool else ''} states {said}")
@@ -171,10 +162,10 @@ def ledger_count_facts(
     return facts
 
 
-def ledger_facts_question(facts: Sequence[str]) -> str:
-    """The one question that puts the ledger's counts in front of the mediator."""
-    listed = "\n".join(f"- {fact}" for fact in facts)
-    return f"{LEDGER_FACTS_QUESTION_HEAD}\n{listed}\n{LEDGER_FACTS_QUESTION_TAIL}"
+def facts_naming(name: str, facts: Iterable[str]) -> list[str]:
+    """The facts whose line names the analyst ``name``: the ones its revision is told."""
+    pattern = _name_pattern(name)
+    return [str(f) for f in facts if pattern.search(str(f))]
 
 
 @dataclass(frozen=True)

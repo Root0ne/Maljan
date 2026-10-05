@@ -350,7 +350,7 @@ The debate ends when nothing is left to settle (`pipeline/debate_facts.py`,
 `pipeline/claim_drops.py`, `pipeline/routing.py`):
 
 - The mediator ends each line of its block with `[blocking: <reason>]` or `[not blocking: <reason>]`; consensus is its confidence at the threshold with no line marked blocking, an unmarked line blocks, and the platform overrides a mark in neither direction.
-- For a listed line whose cited entries (cited by the line or by a claim it names) hold a number in a count or total field, every such entry's value is put to the mediator once, with no tools, and its block is read again; a size or a time is not a count.
+- For a listed line whose cited entries (cited by the line or by a claim it names) hold, in a field named for a count or a total, a number the line itself states, every such value is stated; a size or a time is not a count. No call is made for them: they ride on the revision directive of the analysts the line names and on the next mediation's prompt, and a debate that ends at this mediation spends nothing on them.
 - A revision round whose every revision is the answer in force again, whitespace aside, ends the debate as `converged`; the router reads only the record of the round right before the mediation it routes.
 - A revision is made against the analyst's answer in force and its peers'; each value of the answer in force it states nowhere is recorded in `run_summary.negotiation.dropped_claims`, and nothing is asked.
 - The debate stage's duration adds the revision rounds' time to the mediations', and `termination_reason` comes from the router's own rules, `hard_limit` only when the debate would have gone on.

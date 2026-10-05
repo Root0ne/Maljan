@@ -188,8 +188,8 @@ class TestTheDebateDuration:
         assert merged[debate.key]["duration_ms"] == 4000
 
 
-class TestTheMediationIsHandedTheLedgerCounts:
-    def test_the_negotiation_node_passes_a_count_reader_over_the_answers_in_force(self) -> None:
+class TestTheLedgerCountsRideOnCallsAlreadyMade:
+    def _negotiate(self, lines: list[str]) -> tuple[dict[str, Any], list[dict[str, Any]], Any]:
         notices: list[dict[str, Any]] = []
         container = MagicMock()
         container.is_mock = False
@@ -197,10 +197,42 @@ class TestTheMediationIsHandedTheLedgerCounts:
         container.analyst_keys.return_value = NAMES
         judge = MagicMock()
         argument = AgentArgument(
-            agent_name="Mediator",
-            finding="ok",
-            confidence_score=0.9,
-            ledger_facts=['For the line "x": entry ev_0007 (t) states total = 41.'],
+            agent_name="Mediator", finding="ok", confidence_score=0.9, contradictions=lines
+        )
+        judge.mediate = AsyncMock(return_value=(argument, False))
+        container.get_judge_agent.return_value = judge
+        state = {
+            "iteration_count": 1,
+            "reports": {"static": "r", "dynamic": "r"},
+            "isr_reports": dict(IN_FORCE),
+            "evidence_ledger": [{"id": "ev_0007", "tool": "t", "structured": {"total": 41}}],
+        }
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("maljan.pipeline.nodes.pack_text", lambda *a: "")
+            mp.setattr("maljan.pipeline.nodes.render_run_state", lambda *a: "")
+            update = asyncio.run(make_negotiation_node(container)(state))
+        return update, notices, judge
+
+    def test_the_mediation_states_the_counts_after_its_one_call(self) -> None:
+        line = "DYNAMIC Claim 1 counts 41 [ev_0007]; STATIC Claim 1 counts 40."
+        update, notices, judge = self._negotiate([line])
+
+        assert judge.mediate.await_count == 1
+        assert "ledger_counts" not in judge.mediate.call_args.kwargs
+        argument = update["discussion_history"][0]
+        assert len(argument.ledger_facts) == 1 and "total = 41" in argument.ledger_facts[0]
+        assert any("entry ev_0007 (t) states total = 41" in str(n.get("text")) for n in notices)
+
+    def test_a_line_marked_not_blocking_is_stated_too(self) -> None:
+        notices: list[dict[str, Any]] = []
+        container = MagicMock()
+        container.is_mock = False
+        container.event_sink = lambda kind, data: notices.append(data)
+        container.analyst_keys.return_value = NAMES
+        judge = MagicMock()
+        line = "DYNAMIC Claim 1 counts 41 [ev_0007]; STATIC Claim 1 counts 40 [not blocking: tally]"
+        argument = AgentArgument(
+            agent_name="Mediator", finding="ok", confidence_score=0.9, not_blocking=[line]
         )
         judge.mediate = AsyncMock(return_value=(argument, True))
         container.get_judge_agent.return_value = judge
@@ -210,22 +242,26 @@ class TestTheMediationIsHandedTheLedgerCounts:
             "isr_reports": dict(IN_FORCE),
             "evidence_ledger": [{"id": "ev_0007", "tool": "t", "structured": {"total": 41}}],
         }
-
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr("maljan.pipeline.nodes.pack_text", lambda *a: "")
             mp.setattr("maljan.pipeline.nodes.render_run_state", lambda *a: "")
-            asyncio.run(make_negotiation_node(container)(state))
+            update = asyncio.run(make_negotiation_node(container)(state))
 
-        counts = judge.mediate.call_args.kwargs["ledger_counts"]
-        facts = counts(["DYNAMIC Claim 9 counts 41 [ev_0007]; STATIC Claim 1 counts 40."])
-        assert len(facts) == 1 and "total = 41" in facts[0]
-        assert any("entry ev_0007 (t) states total = 41" in str(n.get("text")) for n in notices)
+        assert update["discussion_history"][0].ledger_facts
 
-    def test_a_revision_round_is_told_the_ledger_counts(self) -> None:
+    def test_no_line_no_count(self) -> None:
+        update, _notices, _judge = self._negotiate([])
+
+        assert update["discussion_history"][0].ledger_facts == []
+
+    def test_a_revision_is_told_only_the_counts_of_the_lines_naming_it(self) -> None:
         argument = AgentArgument(
             agent_name="Mediator",
             finding="revise",
-            ledger_facts=['For the line "x": entry ev_0007 (t) states total = 41.'],
+            ledger_facts=[
+                'For the line "STATIC Claim 1 counts 41 [ev_0007]": entry ev_0007 (t) states '
+                "total = 41."
+            ],
         )
         container, agents = _container(
             {"static": ("t", IN_FORCE["static"]), "dynamic": ("t", IN_FORCE["dynamic"])}, {}
@@ -236,9 +272,11 @@ class TestTheMediationIsHandedTheLedgerCounts:
             mp.setattr("maljan.pipeline.nodes._build_revision_context", lambda *a: "data")
             asyncio.run(make_revision_node(container)(state))
 
-        directive = agents["static"].safe_revise_isr.call_args.args[3]
-        assert directive.startswith("revise")
-        assert "entry ev_0007 (t) states total = 41" in directive
+        told_static = agents["static"].safe_revise_isr.call_args.args[3]
+        told_dynamic = agents["dynamic"].safe_revise_isr.call_args.args[3]
+        assert told_static.startswith("revise")
+        assert "entry ev_0007 (t) states total = 41" in told_static
+        assert told_dynamic == "revise"
 
 
 class TestTheSummaryReadsTheDebatesOwnOptions:
