@@ -47,7 +47,7 @@ from maljan.pipeline.events import (
     emit_validation_feedback,
     safe_finding_value,
 )
-from maljan.schemas.evidence import entry_ids_in
+from maljan.schemas.evidence import answer_not_shown, entry_ids_in
 from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
 from maljan.schemas.stix_pattern import read_comparisons
 from maljan.utils.marked_cut import marked_cut
@@ -3133,8 +3133,10 @@ def decompiled_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
     """The functions these ledger entries decompiled, once each, in the order first asked.
 
     An entry counts when its tool's name says it decompiles and the call
-    answered. A batch answer keyed by address is one function per key, its
-    ``Error`` keys left out; a batch whose answer is not keyed takes the
+    answered with something the model read: an answer the conversation had no
+    room for (``schemas.evidence.answer_not_shown``) is no listing read. A
+    batch answer keyed by address is one function per key, its ``Error`` keys
+    left out; a batch whose answer is not keyed takes the
     addresses it was given. Otherwise the address is the one the call was
     given (hex with or without ``0x``, or an integer), or the one a
     decompiler's generic name carries. The names are the one the call was
@@ -3145,7 +3147,7 @@ def decompiled_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
     found: dict[Any, DecompiledFunction] = {}
     for entry in entries:
         tool = str(getattr(entry, "tool", "") or "").lower()
-        if "decompil" not in tool or not getattr(entry, "ok", True):
+        if "decompil" not in tool or not getattr(entry, "ok", True) or answer_not_shown(entry):
             continue
         entry_id = str(getattr(entry, "id", "") or "")
         for address, names in _entry_functions(entry):

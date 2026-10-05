@@ -35,7 +35,12 @@ from maljan.pipeline.events import (
     summarize_args,
     summarize_result,
 )
-from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, build_entry
+from maljan.schemas.evidence import (
+    EvidenceCounter,
+    LedgerEntry,
+    build_entry,
+    not_shown_record,
+)
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -283,8 +288,15 @@ class EvidenceRecorder:
         remediation: str | None = None,
         args_repaired: bool = False,
         args_raw: str | None = None,
+        not_shown: int | None = None,
     ) -> LedgerEntry:
-        """Append one entry and return it, so the caller can quote its id."""
+        """Append one entry and return it, so the caller can quote its id.
+
+        ``not_shown`` is the length of an answer the conversation had no room
+        for: the entry is recorded as cut (``schemas.evidence.not_shown_record``)
+        and ``output``, what the model was handed instead, is what the run's
+        corpus remembers.
+        """
         entry_id, seq = self.counter.next_id()
         entry = build_entry(
             entry_id=entry_id,
@@ -293,7 +305,7 @@ class EvidenceRecorder:
             tool=tool,
             args=args,
             server=server,
-            output=output,
+            output=output if not_shown is None else not_shown_record(not_shown),
             ok=ok,
             error=error,
             started_at=started_at,
@@ -304,6 +316,7 @@ class EvidenceRecorder:
             args_repaired=args_repaired,
             args_raw=args_raw,
             model=self.model or None,
+            not_shown=not_shown is not None,
         )
         self.entries.append(entry)
         # The function names a hash resolution read are names, and the event
@@ -981,7 +994,12 @@ def _record_tool(
         return repairs.take(name, kwargs) if repairs is not None else None
 
     def _stamp(
-        kwargs: dict[str, Any], started: float, wall_clock: float, value: Any, repeated: str | None
+        kwargs: dict[str, Any],
+        started: float,
+        wall_clock: float,
+        value: Any,
+        repeated: str | None,
+        not_shown: int | None = None,
     ) -> str:
         text = result_text(value)
         raw = _was_repaired(kwargs)
@@ -994,6 +1012,7 @@ def _record_tool(
             duration_ms=int((time.monotonic() - started) * 1000),
             args_repaired=raw is not None,
             args_raw=raw,
+            not_shown=not_shown,
         )
         _note(kwargs, entry.id)
         # Read off the answer itself, before any notice is appended to it: a
@@ -1085,9 +1104,9 @@ def _record_tool(
             started, wall_clock = time.monotonic(), time.time()
             repeated = _served_again(kwargs)
             try:
-                with answering_for(recorder.agent):
+                with answering_for(recorder.agent) as call_answer:
                     value = func(**kwargs)
-                return _stamp(kwargs, started, wall_clock, value, repeated)
+                return _stamp(kwargs, started, wall_clock, value, repeated, call_answer.not_shown)
             except SampleNotOpened as exc:
                 return _stopped(kwargs, started, wall_clock, exc, repeated)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
@@ -1114,9 +1133,9 @@ def _record_tool(
                 # charges this answer to the conversation it is entering. The
                 # name survives the ``asyncio.to_thread`` both tool paths hand
                 # the guardrail to, because that copies the context.
-                with answering_for(recorder.agent):
+                with answering_for(recorder.agent) as call_answer:
                     value = await coroutine(**kwargs)
-                return _stamp(kwargs, started, wall_clock, value, repeated)
+                return _stamp(kwargs, started, wall_clock, value, repeated, call_answer.not_shown)
             except SampleNotOpened as exc:
                 return _stopped(kwargs, started, wall_clock, exc, repeated)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
