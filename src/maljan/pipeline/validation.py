@@ -4608,30 +4608,53 @@ _STATED_VALUE_ROWS = {
     "items": ("configuration item", "configuration items"),
     "identifiers": ("identifier", "identifiers"),
 }
-# A number written alone or with the unit it counts: ``1000``, ``0x3e8``,
-# ``1,000 ms``, ``12 retries``.
+# A number written alone or with a unit: ``1000``, ``0x3e8``, ``1,000 ms``,
+# ``1000ms``. The unit is one word of ``_UNITS``.
 _NUMBER_WITH_UNIT_RE = re.compile(
-    r"(0x[0-9a-f]+|\d{1,3}(?:,\d{3})+|\d+)(?:\s*[a-z]+(?:\s+[a-z]+)?)?", re.IGNORECASE
+    r"(0x[0-9a-f]+|\d{1,3}(?:,\d{3})+|\d+)(\s*)([a-z]+)?", re.IGNORECASE
 )
+# The units a configuration value's number is written with: time and size.
+_UNITS = frozenset(
+    {
+        "ms", "msec", "msecs", "millisecond", "milliseconds",
+        "s", "sec", "secs", "second", "seconds",
+        "m", "min", "mins", "minute", "minutes",
+        "h", "hr", "hrs", "hour", "hours",
+        "d", "day", "days",
+        "b", "byte", "bytes",
+        "kb", "kib", "kilobytes", "mb", "mib", "megabytes", "gb", "gib", "gigabytes",
+    }
+)  # fmt: skip
 
 
-def _stated_spellings(value: str) -> list[str]:
+def _stated_spellings(value: str, *, numbers: bool = False) -> list[str]:
     """The spellings an entry may hold a stated value in: as written, and a number's two.
 
-    A number is held when the entry writes it in decimal or in hex, the way
-    a decompiler or a configuration dump does; a number written with its unit
-    is held by the number.
+    With ``numbers`` (a configuration value), a number is also held when the
+    entry writes it in decimal or in hex, the way a decompiler or a
+    configuration dump does, and a number written with a unit of ``_UNITS``
+    is held by the number. The unit follows a space, or is written against
+    the number only when its first letter is no hex digit: ``1000ms`` is a
+    number and a unit, ``1deadbeef`` and ``2bytes`` are not. A value the
+    conversion cannot read is looked for as written and nothing else.
     """
     spellings = [value]
-    number = _NUMBER_WITH_UNIT_RE.fullmatch(value.strip())
-    if number:
-        written = number.group(1).replace(",", "")
-        try:
-            amount = int(written, 16) if written.lower().startswith("0x") else int(written)
-        except ValueError:
-            # Past the digits ``int`` converts: the number is looked for as written.
+    if not numbers:
+        return spellings
+    try:
+        number = _NUMBER_WITH_UNIT_RE.fullmatch(value.strip())
+        if number is None:
             return spellings
-        spellings.extend(form for form in (str(amount), hex(amount)) if form not in spellings)
+        written, gap, unit = number.group(1).replace(",", ""), number.group(2), number.group(3)
+        if unit is not None and (
+            unit.lower() not in _UNITS or (not gap and unit[0].lower() in "abcdef")
+        ):
+            return spellings
+        amount = int(written, 16) if written.lower().startswith("0x") else int(written)
+        forms = (str(amount), hex(amount))
+    except (ValueError, OverflowError):
+        return spellings
+    spellings.extend(form for form in forms if form not in spellings)
     return spellings
 
 
@@ -4660,10 +4683,10 @@ def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Vi
     # Whether another entry holds a value, once per value however many rows state it.
     held_elsewhere: dict[str, bool] = {}
 
-    def _held_by(value: str, among: set[str]) -> bool:
+    def _held_by(value: str, among: set[str], numbers: bool) -> bool:
         return any(
             entries.holds(ref, form)
-            for form in _stated_spellings(value)
+            for form in _stated_spellings(value, numbers=numbers)
             for ref in entries.may_hold(form) & among
         )
 
@@ -4676,12 +4699,17 @@ def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Vi
             cited = [ref for ref in _ids_in(row.get("evidence_refs")) if ref in entries.texts]
             if not cited or any(ref in entries.partial for ref in cited):
                 continue
-            if _held_by(value, set(cited)):
+            try:
+                if _held_by(value, set(cited), list_key == "items"):
+                    continue
+                if value not in held_elsewhere:
+                    held_elsewhere[value] = decidable(value) and any(
+                        entries.holds(ref, value) for ref in entries.may_hold(value)
+                    )
+            except (ValueError, OverflowError, RecursionError) as exc:
+                # A value no reader can take is not decidable: nothing is said of it.
+                logger.debug("validation: a stated value was not read (%s).", type(exc).__name__)
                 continue
-            if value not in held_elsewhere:
-                held_elsewhere[value] = decidable(value) and any(
-                    entries.holds(ref, value) for ref in entries.may_hold(value)
-                )
             if held_elsewhere[value]:
                 continue
             label = str(row.get("key") or row.get("kind") or "").strip()

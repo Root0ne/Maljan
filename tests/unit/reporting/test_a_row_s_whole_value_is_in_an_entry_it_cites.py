@@ -143,8 +143,35 @@ class TestAStatedNumber:
         assert stated_value_violations(_items("0x3E8", "ev_0020"), _texts()) == []
 
     def test_a_number_with_its_unit_is_held_by_the_number(self) -> None:
-        assert stated_value_violations(_items("1000 ms", "ev_0020"), _texts()) == []
-        assert stated_value_violations(_items("12 retries", "ev_0020"), _texts()) == []
+        for value in ("1000 ms", "1000ms", "1,000 milliseconds", "0x3e8 ms", "12 s", "12 bytes"):
+            assert stated_value_violations(_items(value, "ev_0020"), _texts()) == [], value
+
+    def test_letters_that_are_no_unit_or_could_be_hex_are_not_a_unit(self) -> None:
+        texts = EntryTexts.from_ledger(
+            [_entry("ev_0030", "sandbox_signatures", "pid 1 of 3, score 64, flag 2")]
+        )
+        for value in (
+            "1deadbeef",
+            "2abcdef",
+            "3e8",
+            "3xyz",
+            "1 SOFTWARE Microsoft",
+            "3 e",
+            "64 retries",
+            "2bytes",
+        ):
+            assert stated_value_violations(_items(value, "ev_0030"), texts), value
+
+    def test_an_identifier_is_never_held_by_a_number_spelling(self) -> None:
+        texts = EntryTexts.from_ledger([_entry("ev_0030", "strings", "count 1000 and 2")])
+        assert stated_value_violations(_identifiers("0x3e8", "ev_0030"), texts)
+        assert stated_value_violations(_identifiers("2 ms", "ev_0030"), texts)
+
+    def test_a_malformed_number_is_not_decidable_and_raises_nothing(self) -> None:
+        for value in ("0x" + "f" * 4000, "0x" + "F" * 20000, "9" * 6000 + " ms"):
+            for payload in (_items(value, "ev_0020"), _identifiers(value, "ev_0020")):
+                found = stated_value_violations(payload, _texts())
+                assert [v.code for v in found] == [STATED_VALUE_UNHELD_CODE], value[:12]
 
     def test_a_number_is_held_only_as_a_whole_value(self) -> None:
         # ``12`` is in the entry; ``2`` alone is not a value of its own there.
