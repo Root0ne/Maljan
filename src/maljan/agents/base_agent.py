@@ -2386,11 +2386,13 @@ def claims_repeat_rule(margin: int | None) -> StopRule:
     holds more repeated claims than the margin allows, the call is ended
     (``llm.stream_watch``) and the answer is what was written up to there. The
     check on that answer then finds the same and asks its one whole-answer
-    question, as it does after any answer.
+    question, as it does after any answer. Read over the text that check
+    reads: the answer without its tool-call scaffolding
+    (:func:`strip_tool_call_scaffolding`).
     """
 
     def _ends(text: str) -> str | None:
-        found = claims_repeated(text, margin)
+        found = claims_repeated(strip_tool_call_scaffolding(text), margin)
         if found is None:
             return None
         return (

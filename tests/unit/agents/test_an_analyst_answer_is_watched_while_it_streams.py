@@ -74,6 +74,13 @@ class TestTheRule:
         assert claims_repeat_rule(0)(DISTINCT + _block(1)) is not None
         assert claims_repeat_rule(20)(ENDED) is None
 
+    def test_it_reads_the_text_the_check_reads_without_tool_call_scaffolding(self) -> None:
+        # The claim parser strips a tool call's scaffolding before it reads
+        # claims, so claims inside one are no claims to either reader.
+        inside = DISTINCT + "<tool_call>\n" + DISTINCT * 3 + "</tool_call>\n"
+
+        assert claims_repeat_rule(None)(inside) is None
+
 
 class TestTheRuleReachesTheAgentLoop:
     def test_a_rule_named_by_the_caller_is_carried_to_the_loop_s_task(self) -> None:
