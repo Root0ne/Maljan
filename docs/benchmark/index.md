@@ -21,20 +21,20 @@ The reference sample, 57 core items:
 
 | Run | Model | Found | Partly | Missed | Wrong | Beyond human |
 | :-- | :-- | --: | --: | --: | --: | --: |
-| [All-tools, hosted](scores/latrodectus-all-tools-run4.md) | DeepSeek-V4.1-Flash | **45** | 9 | 2 | 1 | **19** |
-| [All-tools, local](scores/latrodectus-all-tools-local6.md) | Qwen3.6-35B-A3B | 15 | 21 | 21 | 0 | **12** |
-| [Default team, iteration 6](scores/latrodectus-iteration6-default.md) | Qwen3.6-35B-A3B | 12 | 28 | 17 | 0 | not itemised |
-| [Default team, iteration 5](scores/latrodectus-iteration5-default.md) | Qwen3.6-35B-A3B | 14 | 25 | 18 | 0 | not itemised |
-| [Default team, iteration 4](scores/latrodectus-iteration4-default.md) | Qwen3.6-35B-A3B | 15 | 25 | 17 | 0 | not itemised |
-| [Default team, iteration 2](scores/latrodectus-iteration2-default.md) | Qwen3.6-35B-A3B | 12 | 25 | 20 | 0 | not itemised |
-| [Default team, iteration 2, with r2](scores/latrodectus-iteration2-r2.md) | Qwen3.6-35B-A3B | 11 | 24 | 21 | 1 | not itemised |
-| [Default team, iteration 1](scores/latrodectus-iteration1-default.md) | Qwen3.6-35B-A3B | 12 | 29 | 16 | 0 | not itemised |
-| [Default team, iteration 1, small model](scores/latrodectus-iteration1-small.md) | qwen3.8:27b | 10 | 28 | 19 | 0 | not itemised |
+| [All-tools, hosted](scores/latrodectus-all-tools-run4.md) | DeepSeek V4.1 Flash | **45** | 9 | 2 | 1 | **19** |
+| [All-tools, local](scores/latrodectus-all-tools-local6.md) | Qwen3.6-35B | 15 | 21 | 21 | 0 | **12** |
+| [Default, it. 6](scores/latrodectus-iteration6-default.md) | Qwen3.6-35B | 12 | 28 | 17 | 0 | — |
+| [Default, it. 5](scores/latrodectus-iteration5-default.md) | Qwen3.6-35B | 14 | 25 | 18 | 0 | — |
+| [Default, it. 4](scores/latrodectus-iteration4-default.md) | Qwen3.6-35B | 15 | 25 | 17 | 0 | — |
+| [Default, it. 2](scores/latrodectus-iteration2-default.md) | Qwen3.6-35B | 12 | 25 | 20 | 0 | — |
+| [Default, it. 2, with r2](scores/latrodectus-iteration2-r2.md) | Qwen3.6-35B | 11 | 24 | 21 | 1 | — |
+| [Default, it. 1](scores/latrodectus-iteration1-default.md) | Qwen3.6-35B | 12 | 29 | 16 | 0 | — |
+| [Default, it. 1, small model](scores/latrodectus-iteration1-small.md) | qwen3.8:27b | 10 | 28 | 19 | 0 | — |
 
 "Beyond human" counts the facts a run's report states that no
 human-report item holds and that the run's own evidence proves; the rule is in
 [Beyond the human reports](#beyond-the-human-reports). The default-team
-iterations were scored before that rule existed, and their score files do not
+iterations (—) were scored before that rule existed, and their score files do not
 itemise such facts.
 
 In short, for the default-team iterations:

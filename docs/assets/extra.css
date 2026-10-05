@@ -172,6 +172,21 @@
   font-weight: 600;
 }
 
+/* Tighter cells, so a table of short columns fits the content width rather
+   than scrolling under its own border. */
+.md-typeset table:not([class]) {
+  max-width: 100%;
+}
+
+.md-typeset table:not([class]) th,
+.md-typeset table:not([class]) td {
+  padding: 0.6em 0.8em;
+}
+
+.md-typeset table:not([class]) th {
+  min-width: 3rem;
+}
+
 .md-nav__title,
 .md-nav__item--section > .md-nav__link {
   font-weight: 600;
