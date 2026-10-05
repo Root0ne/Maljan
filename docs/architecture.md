@@ -1597,6 +1597,44 @@ once more, as any retry after a failure is. A replayed conversation keeps the
 seeds. A run's second chunk re-ran ten
 decompiles the first had done.
 
+An analyst that has read a function sees its function map in the run-state
+block on every turn (`agents.function_map`). The platform keeps it from facts
+only, and the model does not write to it. It lists:
+
+- every function the agent's own calls decompiled, or listed (a disassembly of
+  a whole function, or one at a known function's address), with the entries
+  that hold the listing;
+- what the analysis server tied to the function: names its hashes resolve to,
+  texts it refers to and the call sites they are passed to, strings FLOSS
+  decoded in it. A place after a function start is not counted inside it;
+- the first sentence of the first of the agent's parsed claims that names it.
+
+Each artefact is counted once per function, as a distinct value. A text
+referred to from two places counts once. So does an answer that two entries
+recorded, and every entry that holds it is cited. A call-site fact is one text,
+argument position, call and callee, so one text passed to two calls is two
+facts. An offset and its virtual address are one function only through an
+image base the run read: exactly one of the two is below the base, and they are
+apart by it. Two virtual addresses a base apart stay two functions. With no
+base, both are kept as written. A claim gives a function its summary by the
+decompiled-not-described check's reading when a base is known. With none, it
+needs the same address written out, or a name the decompiler gave the function.
+No address is guessed. A visited function with neither an artefact nor a
+summary appears on one "also visited" line, by address. Names other than a
+decompiler's generic `FUN_`, `sub_` or `fcn.` name are kept beside it, such as
+an export name.
+
+The block has no size limit, by the rule that no limit is set by default. It
+grows with the functions visited and the functions reaching artefacts. On a
+recorded run that decompiled 89 functions it was about 5 KB per turn.
+
+A coverage line counts the functions visited against the functions reaching
+artefacts, and one line names those not yet visited. The sources are the
+agent's entries of the job, copied before the byte budget trims them, and the
+pack's artefacts, briefed by the node and handed on to an ask.
+
+The report's "Functions examined" section carries the map's coverage in one line.
+
 An analyst whose loop ended with nothing at all — no claim and no prose — is
 given a second loop over the same material only when what is left of its
 stage time, its loop budget less what the node has spent, holds one turn and a

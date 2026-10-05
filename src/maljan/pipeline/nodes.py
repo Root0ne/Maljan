@@ -1541,6 +1541,13 @@ def pack_image_bases(state: AnalysisState) -> tuple[int, ...]:
     return image_bases_in(pack_entries(state.get("evidence_ledger") or []))
 
 
+def pack_function_artefacts(state: AnalysisState) -> Any:
+    """The artefacts the pack's analysis-server answers tie to each function."""
+    from maljan.agents.function_map import function_artefacts
+
+    return function_artefacts(pack_entries(state.get("evidence_ledger") or []))
+
+
 def brief_agent(agent: Any, state: AnalysisState, container: ServiceContainer) -> None:
     """Hand an agent the run's two standing blocks and the ids it may cite.
 
@@ -1551,6 +1558,9 @@ def brief_agent(agent: Any, state: AnalysisState, container: ServiceContainer) -
     agent.pack_ledger_ids = pack_ledger_ids(state)
     agent.pack_image_bases = pack_image_bases(state)
     agent.run_state_block = render_run_state(state)
+    # What the analysis server tied to each function, read once from the pack:
+    # the function map joins it to the functions the agent reads.
+    agent.pack_function_artefacts = pack_function_artefacts(state)
     # The routed format, so the platform check compares the agent's
     # techniques against the sample it is looking at.
     agent.sample_format = (

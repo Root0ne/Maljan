@@ -340,6 +340,35 @@ def _strings(value: Any) -> list[str]:
     return []
 
 
+def _function_map_text() -> str:
+    """The map block as a model reads it, head, coverage and both kinds of line."""
+    from types import SimpleNamespace
+
+    from maljan.agents.function_map import (
+        build_function_map,
+        function_artefacts,
+        function_map_block,
+    )
+
+    floss = LedgerEntry(
+        id="ev_0001",
+        tool="floss",
+        output=json.dumps(
+            {"strings": [{"kind": "decoded", "string": "a", "function_rva": "0x2000"}]}
+        ),
+    )
+    own = [
+        LedgerEntry(
+            id="ev_0002", tool="decompile_function", args={"address": "0x1000"}, output="x"
+        ),
+        LedgerEntry(id="ev_0003", tool="disassemble_function", args={"address": "0x3000"}),
+    ]
+    claim = SimpleNamespace(claim="0x1000 reads a value.", evidence_ref="ev_0002")
+    block = function_map_block(build_function_map(own, function_artefacts([floss]), [claim]))
+    assert block
+    return block
+
+
 EXAMPLES: dict[str, str] = {"narrative": EXAMPLE_OBJECT, **_EXAMPLES}
 
 
@@ -894,6 +923,7 @@ PROMPTS: dict[str, str] = {
     "a later chunk's answer from an earlier chunk's recorded result": earlier_chunk_answer(
         "a", "ev_0001", "a recorded result"
     ),
+    "the function map block": _function_map_text(),
     "analyst cut-at-cap question naming a chunk": analyst_cut_violation(
         4096, "CLAIM: The file opens a window.\nCLAIM: The fi", chunk="chunk 1 of 2"
     ).message,

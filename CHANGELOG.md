@@ -8,6 +8,13 @@ change landed on `main`.
 
 ### Added
 
+- **An analyst that has read a function sees a function map, kept by the
+  platform.** It is built from the agent's ledger entries of the job, the
+  pack's analysis-server artefacts and its parsed claims. It rides the
+  run-state block on every turn and replaces nothing.
+- **"Functions examined" in the report carries the function map's coverage in
+  one line.**
+
 - **A function an analyst decompiled and no claim describes is listed to it,
   once.** The functions come from the analyst's own ledger entries that
   decompiled something and answered:
