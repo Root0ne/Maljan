@@ -1794,7 +1794,8 @@ answer may write again before it is asked once for a whole answer
 (`isr.claims_repeated`), with the answer shown back up to its first repeated
 claim. Empty derives the margin from the answer itself: the number of distinct
 claims it wrote. A whole answer that does not repeat replaces the repeating
-one; otherwise the answer stands as written.
+one; otherwise the answer stands as written. On a streamed path (llama.cpp,
+Ollama, DeepSeek) the same margin ends the answer while it streams.
 
 `mobile` and `deep_static` are built from three seeded generic agent
 definitions — `triage`, `android_static` and `reverser` — whose prompts live in
