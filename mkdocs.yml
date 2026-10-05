@@ -8,18 +8,45 @@ edit_uri: edit/dev/docs/
 docs_dir: docs
 
 nav:
-  - Overview: README.md
-  - Getting started: getting-started.md
-  - Architecture: architecture.md
-  - Configuration: configuration.md
-  - Console: console.md
-  - API: api.md
-  - Deployment: deployment.md
-  - Operations: operations.md
-  - Security: security.md
-  - Development: development.md
+  - Get started:
+      - Introduction: README.md
+      - Quick start: getting-started.md
+      - Console: console.md
+  - Usage:
+      - Running an analysis: usage/running-an-analysis.md
+      - Teams and profiles: usage/teams.md
+      - Reports and exports: usage/reports-and-exports.md
+  - LLM providers:
+      - providers/index.md
+      - OpenAI-compatible: providers/openai-compatible.md
+      - Anthropic: providers/anthropic.md
+      - Gemini: providers/gemini.md
+      - Ollama: providers/ollama.md
+      - Local llama.cpp: providers/llama-cpp.md
+  - Tools:
+      - tools/index.md
+      - Ghidra: tools/ghidra.md
+      - radare2: tools/radare2.md
+      - capa and YARA: tools/capa-yara.md
+      - Sandboxes: tools/sandboxes.md
+      - VirusTotal: tools/virustotal.md
+      - Analysis and knowledge sidecars: tools/sidecars.md
+      - Generic MCP servers: tools/generic-mcp.md
+  - Integrations:
+      - REST API: api.md
+      - MCP servers: integrations/mcp-servers.md
+      - CI: integrations/ci.md
+  - Advanced:
+      - Configuration: configuration.md
+      - Architecture: architecture.md
+      - Security: security.md
+      - Deployment: deployment.md
+      - Operations: operations.md
+      - Development: development.md
   - Benchmark:
       - benchmark/index.md
+      - "Score: all-tools, local Qwen3.6-35B": benchmark/scores/latrodectus-all-tools-local6.md
+      - "Score: all-tools, hosted DeepSeek": benchmark/scores/latrodectus-all-tools-run4.md
       - "Score: iteration 6, default model": benchmark/scores/latrodectus-iteration6-default.md
       - "Score: iteration 5, default model": benchmark/scores/latrodectus-iteration5-default.md
       - "Score: iteration 4, default model": benchmark/scores/latrodectus-iteration4-default.md
@@ -36,34 +63,44 @@ theme:
   favicon: assets/logo.svg
   icon:
     repo: fontawesome/brands/github
+    admonition:
+      warning: material/shield-alert-outline
+  font:
+    text: Inter
+    code: JetBrains Mono
   palette:
-    # Flat, named Material swatches only — no custom gradients.
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: indigo
-      accent: amber
+    # Dark first. Flat colours only: the custom swatches are defined in
+    # assets/extra.css, and nothing on the site eases between colours.
+    - scheme: slate
+      primary: custom
+      accent: custom
       toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: indigo
-      accent: amber
-      toggle:
-        icon: material/brightness-4
+        icon: material/weather-sunny
         name: Switch to light mode
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
   features:
     - navigation.instant
+    - navigation.instant.progress
     - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
     - navigation.top
     - navigation.footer
-    - navigation.indexes
     - toc.follow
     - search.suggest
     - search.highlight
     - search.share
     - content.action.edit
     - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
 
 extra_css:
   - assets/extra.css
@@ -76,5 +113,17 @@ markdown_extensions:
       permalink: true
   - tables
   - fenced_code
-  - pymdownx.highlight
+  - admonition
+  - attr_list
+  - md_in_html
+  - def_list
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
   - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
