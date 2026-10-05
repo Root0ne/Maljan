@@ -222,6 +222,38 @@ class TestOtherToolBuilders:
         assert len(sections["functions_examined"].items) == 2
         assert "FUN_00401310" in sections["functions_examined"].items[0]
 
+    def test_functions_examined_says_the_function_map_s_coverage_in_one_line(self) -> None:
+        hashes = {
+            "image_base": "0x400000",
+            "hits": [
+                {
+                    "readings": [{"set": "exports", "name": "OpenThing"}],
+                    "occurrences": [{"function": "0x1310"}, {"function": "0x2000"}],
+                }
+            ],
+        }
+        entries = [
+            _entry("resolve_api_hashes", hashes, agent="pipeline"),
+            _entry(
+                "decompile_function",
+                "void FUN_00401310() { }",
+                seq=2,
+                args={"name": "FUN_00401310"},
+            ),
+        ]
+
+        text = _by_key(build_sections(entries))["functions_examined"].text
+
+        assert text == (
+            "Function map: 1 function visited (1 decompiled); 2 functions reach artefacts "
+            "the analysis server tied to them, 1 of them visited."
+        )
+
+    def test_a_run_that_read_no_function_has_no_coverage_line(self) -> None:
+        sections = _by_key(build_sections([_entry("list_functions", "a\nb")]))
+
+        assert sections["functions_examined"].text == ""
+
 
 class TestGenericFallbacks:
     def test_an_unknown_json_object_becomes_a_kv_block(self) -> None:

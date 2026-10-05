@@ -1230,6 +1230,28 @@ def build_sections(
             continue
         _fallback(acc, entry)
 
+    _function_map_coverage(acc, ledger or [])
     _artifact_sections(acc, isrs or {})
     _findings_section(acc, isrs or {}, published_techniques)
     return acc.result()
+
+
+def _function_map_coverage(acc: _Sections, ledger: list[LedgerEntry]) -> None:
+    """One line under "Functions examined": functions visited against functions reaching artefacts.
+
+    Read from the whole ledger the way the analysts' function map reads it
+    (``agents.function_map``); absent when no function was visited.
+    """
+    from maljan.agents.function_map import build_function_map
+
+    section = acc._by_key.get("functions_examined")
+    if section is None:
+        return
+    try:
+        found = build_function_map(ledger, None, [])
+    except Exception:  # noqa: BLE001 — a line of the report never costs the section
+        return
+    if not found.visited:
+        return
+    line = f"Function map: {found.coverage()}."
+    section.text = f"{section.text}\n\n{line}".strip() if section.text else line
