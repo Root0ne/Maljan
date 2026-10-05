@@ -3954,7 +3954,13 @@ URL's userinfo and each credential-named query value. Registration reads a
 configured URL's password of any length, a token in its username slot and its
 `api_key`, `apikey`, `access_token`, `token` and `key` values. With nothing
 registered, or a scope whose values could not be read, a row is held to the
-whole event scrub. The bound never leaves the head of a value the scrub masks,
+whole event scrub; outside the worker (the test suite, the command line, the
+`MaljanApp` facade before it registers) rows therefore keep the event scrub's
+masking, an ATT&CK name such as "Access Token Manipulation" included. A
+configured URL's username without a password is registered only when it has a
+credential's shape by the scrub's own rules, so a user name such as
+`administrator` stays a word in events and rows; rows still lose every URL's
+userinfo, and a credential-named key in a URL's query or fragment. The bound never leaves the head of a value the scrub masks,
 and the event that carries a row is scrubbed by the publisher like every
 other.
 

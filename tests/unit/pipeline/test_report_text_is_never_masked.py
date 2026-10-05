@@ -66,6 +66,11 @@ class TestTheEventScrubReadsAFamilyNameAsAName:
         assert scrub(f"carries TECHNIQUE {TECHNIQUE}, and") == f"carries TECHNIQUE {TECHNIQUE}, and"
         assert scrub("T1134.001 Token Impersonation/Theft") == "T1134.001 Token Impersonation/Theft"
 
+    def test_the_exact_name_keeps_its_exemption_before_sentence_punctuation(self) -> None:
+        for end in (".", ",", ";", ":", "!", "?"):
+            text = f"It carries {TECHNIQUE}{end} More follows."
+            assert scrub(text) == text, end
+
     def test_anything_else_after_a_label_is_masked(self) -> None:
         assert scrub("Access Token Manipulations") == "Access Token ***"
         assert scrub("Refresh Token Manipulation") == "Refresh Token ***"
@@ -188,6 +193,26 @@ class TestNoOperatorCredentialReachesARow:
             assert secret not in row, key
             assert "mode=x" in row, key
 
+    def test_a_credential_named_fragment_value(self) -> None:
+        for key in ("access_token", "token", "api_key", "key"):
+            ev.forget_secret_values()
+            secret = password(16, variant=6)
+            url = f"https://idp.example/cb#{key}={secret}&state=keep"
+            self._configured(url)
+
+            row = safe_finding_value(f"the indicator names {url}, and {secret} alone")
+
+            assert secret not in row, key
+            assert "state=keep" in row, key
+
+    def test_a_fragment_token_in_a_foreign_url_is_removed_from_the_row(self) -> None:
+        _registered()
+        secret = password(16, variant=7)
+
+        row = safe_finding_value(f"echoed https://idp.example/cb#access_token={secret}")
+
+        assert secret not in row
+
     def test_dev_s_pinned_userinfo_case(self) -> None:
         _registered()
         secret = prefixed_key("ghs_")
@@ -203,6 +228,45 @@ class TestNoOperatorCredentialReachesARow:
         _registered(configured)
 
         assert configured not in safe_finding_value(f"echoed {configured} back")
+
+
+class TestAPlainUsernameIsNoSecret:
+    """A configured URL's username without a password is a credential only by its shape."""
+
+    URLS = (
+        "postgresql+asyncpg://administrator@db.internal/maljan",
+        "redis://default@redis:6379/0",
+        "http://analyst@ghidra.internal:8080",
+        "ssh://git@github.com/org/repo",
+    )
+
+    def test_an_ordinary_username_is_not_registered(self) -> None:
+        from maljan.core.settings_catalog import configured_secret_values
+
+        found = configured_secret_values({"servers": [{"url": url} for url in self.URLS]})
+
+        assert not {"administrator", "default", "analyst", "git"} & found
+
+    def test_events_and_rows_keep_the_words(self) -> None:
+        from maljan.core.settings_catalog import configured_secret_values
+
+        _registered(*configured_secret_values({"servers": [{"url": url} for url in self.URLS]}))
+
+        assert scrub("the administrator logged on") == "the administrator logged on"
+        row = safe_finding_value("the analyst said the git default branch; administrator account")
+        assert row == "the analyst said the git default branch; administrator account"
+
+    def test_rows_still_lose_the_userinfo(self) -> None:
+        _registered()
+        row = safe_finding_value(f"see {self.URLS[2]}/api")
+
+        assert "analyst@" not in row and "***@ghidra.internal:8080/api" in row
+
+    def test_a_token_in_the_username_slot_is_still_registered(self) -> None:
+        from maljan.core.settings_catalog import configured_secret_values
+
+        token = prefixed_key("ghp_", 36)
+        assert token in configured_secret_values({"url": f"https://{token}@mcp.example/sse"})
 
 
 class TestAFailedRegistrationFallsBackToTheWholeScrub:

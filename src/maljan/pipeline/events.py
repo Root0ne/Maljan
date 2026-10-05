@@ -1322,7 +1322,7 @@ def _scheme_and_secret(found: re.Match[str]) -> str:
     Anything else after ``Bearer``, ``Basic`` or ``token`` is masked.
     """
     scheme = found.group(1)
-    after = found.group(0)[len(scheme) :].strip()
+    after = found.group(0)[len(scheme) :].strip().rstrip(".,;:!?")
     before = found.string[max(0, found.start() - 80) : found.start()].lower()
     for in_front, label, word in _labelled_attck_names():
         if label == scheme.lower() and after == word and before.endswith(in_front):
@@ -1395,7 +1395,7 @@ def _mask_short_secrets(text: str) -> str:
 
 
 # One query parameter of a URL, its key and its value.
-_QUERY_PARAMETER = re.compile(r"(?P<lead>[?&;])(?P<key>[^=&;#?]+)=(?P<value>[^&;#]*)")
+_QUERY_PARAMETER = re.compile(r"(?P<lead>[?&;#])(?P<key>[^=&;#?]+)=(?P<value>[^&;#]*)")
 
 
 def _without_credentials(found: re.Match[str]) -> str:

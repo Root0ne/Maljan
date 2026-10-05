@@ -1508,17 +1508,23 @@ class ReportComposer:
 
 
 def _published_answers(report: MalwareReport) -> Any:
-    """The IOC table's answer for a value (``narrative_agent.published_answers``), or ``None``.
+    """The IOC table's answer for a value (``narrative_agent.published_answers``).
 
-    ``None`` when the table cannot be read: the publish check then asks nothing.
+    When the table cannot be read, every value is refused for that reason, so
+    a section naming one is asked once and told the table could not be read.
     """
     try:
         from maljan.reporting.narrative_agent import published_answers
 
         return published_answers(report)
-    except Exception as exc:  # noqa: BLE001 — a missing table asks nothing
+    except Exception as exc:  # noqa: BLE001 — every value is then refused
         logger.debug("ReportComposer: the IOC table was not read (%s).", exc)
-        return None
+        return _table_not_read
+
+
+def _table_not_read(kind: str, value: str) -> str:
+    """The publish answer for every value when the IOC table could not be read."""
+    return "no: the IOC table could not be read"
 
 
 def _section_declined(payload: Any, schema: type[BaseModel]) -> bool:

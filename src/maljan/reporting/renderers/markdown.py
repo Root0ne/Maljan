@@ -2273,7 +2273,7 @@ class _Context:
             return f" ({_inline_safe(said, pipes=False)})"
         except Exception as exc:  # noqa: BLE001 — the cell says what is not known
             logger.debug("markdown: a cell's publish state was not read (%s).", exc)
-            return f" ({STATE_UNKNOWN})"
+            return f" ({STATE_UNKNOWN})" if _names_a_network_value(text) else ""
 
     def plain(self, text: str) -> str:
         """A value with the run's network indicators defanged and nothing else changed."""
@@ -2579,6 +2579,32 @@ def _inline_safe(text: Any, *, pipes: bool = True) -> str:
     """
     meta = _INLINE_META if pipes else _INLINE_META_NO_PIPE
     return _defanged_text(meta.sub(r"\\\1", str(text or "")))
+
+
+def _names_a_network_value(text: Any) -> bool:
+    """Whether a cell names an address, a host, a URL or a mailbox; true when that is unknown."""
+    try:
+        from maljan.pipeline.validation import network_values_in
+
+        plain = str(text or "")
+        return bool(
+            network_values_in(plain) or _URL_IN_TEXT.search(plain) or _EMAIL_IN_TEXT.search(plain)
+        )
+    except Exception:  # noqa: BLE001 — unread, the cell is taken to name one
+        return True
+
+
+def _code_span(text: str) -> str:
+    """``text`` as one code span, fenced longer than any backtick run inside it.
+
+    A value holding a backtick closed a one-backtick span and let what
+    followed render as Markdown, a live link included.
+    """
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    if not longest:
+        return f"`{text}`"
+    fence = "`" * (longest + 1)
+    return f"{fence} {text} {fence}"
 
 
 def _finding_text(row: dict[str, Any]) -> str:
@@ -3174,7 +3200,7 @@ def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
         lines.append(
             _row(
                 ctx.cell(item.kind),
-                f"`{_one_line(item.value)}`" + ctx.publish_state(item.value),
+                _code_span(_defanged_text(_one_line(item.value))) + ctx.publish_state(item.value),
                 ctx.cell(item.purpose) if item.purpose.strip() else PURPOSE_NOT_STATED,
                 cited,
             )

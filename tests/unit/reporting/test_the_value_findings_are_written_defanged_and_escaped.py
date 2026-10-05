@@ -131,6 +131,48 @@ class TestTheStateBesideACell:
         line = next(line for line in text.splitlines() if line.startswith("| Fallback"))
         assert f"({STATE_UNKNOWN})" in line
 
+    def test_a_failed_lookup_leaves_a_cell_with_no_network_value_alone(self) -> None:
+        report = _report(
+            technical_analysis=TechnicalAnalysis(
+                configuration=[
+                    ConfigItem(key="Mutex", value="Global\\M1", how_obtained="decrypted")
+                ]
+            )
+        )
+        with patch(
+            "maljan.pipeline.validation._unstated_values", side_effect=RuntimeError("broken")
+        ):
+            text = MarkdownRenderer().render(report)
+
+        line = next(line for line in text.splitlines() if line.startswith("| Mutex"))
+        assert STATE_UNKNOWN not in line
+
+
+class TestTheIdentifierCell:
+    @staticmethod
+    def _line(value: str) -> str:
+        report = _report(
+            technical_analysis=TechnicalAnalysis(
+                host_identifiers=[HostIdentifier(kind="Domain", value=value)]
+            )
+        )
+        text = MarkdownRenderer().render(report)
+        return next(line for line in text.splitlines() if line.startswith("| Domain"))
+
+    def test_a_host_shaped_value_is_defanged(self) -> None:
+        line = self._line("c2.badsite.net")
+
+        assert "c2[.]badsite[.]net" in line and "c2.badsite.net" not in line
+
+    def test_a_backtick_in_the_value_cannot_close_the_code_span(self) -> None:
+        line = self._line("pre` [y](http://inj.example/a) `post")
+
+        # The fence is longer than any backtick run in the value, so the span
+        # holds the whole value and no link is live.
+        cell = line.split(" | ")[1]
+        assert cell.startswith("`` ") and cell.endswith(" ``"), cell
+        assert "http://" not in line and "hxxp://inj[.]example/a" in line
+
 
 class TestTheFindingMessages:
     def test_both_value_findings_print_defanged_and_escaped_in_the_notes(self) -> None:

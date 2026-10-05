@@ -89,7 +89,7 @@ class TestTheCheck:
         (found,) = unpublished_value_violations(_body(sentence), _answers())
 
         assert found.code == UNPUBLISHED_VALUE_CODE
-        assert f"{REFUSED} ({REFUSAL}) in sentence 1" in found.message
+        assert f'{REFUSED} ({REFUSAL}) in "The sample connects to {REFUSED} on…"' in (found.message)
         assert found.quoted == (sentence,)
 
     def test_a_defanged_address_is_read_as_the_address(self) -> None:
@@ -113,7 +113,7 @@ class TestTheCheck:
 
         (found,) = unpublished_value_violations(_body(body), _answers())
 
-        assert other in found.message and f"{REFUSED} (" not in found.message
+        assert other in found.message and f"{REFUSED} ({REFUSAL})" not in found.message
         assert found.labels == (f"{other} (no: {NO_TABLE_ROW})",)
 
     def test_a_value_no_table_row_holds_is_asked_with_that_state(self) -> None:
@@ -150,8 +150,14 @@ class TestTheCheck:
 
         (found,) = unpublished_value_violations(_body(body), _answers())
 
-        assert f"{REFUSED} ({REFUSAL}) in sentences 1, 3;" in found.message
-        assert f"{other} (no: {NO_TABLE_ROW}) in sentences 1, 4" in found.message
+        assert (
+            f'{REFUSED} ({REFUSAL}) in "It reaches {REFUSED} and {other} on…", '
+            f'"Later it reaches {REFUSED} again.";'
+        ) in found.message
+        assert (
+            f'{other} (no: {NO_TABLE_ROW}) in "It reaches {REFUSED} and {other} on…", '
+            f'"Then {other} once more."'
+        ) in found.message
         assert found.quoted == (
             f"It reaches {REFUSED} and {other} on 443.",
             f"Later it reaches {REFUSED} again.",
@@ -171,15 +177,16 @@ class TestTheCheck:
         (found,) = unpublished_value_violations(_body(body), _answers())
 
         assert found.message.count(NO_TABLE_ROW) == 1
-        assert f"{', '.join(others)} (no: {NO_TABLE_ROW}) in sentences 1–3" in found.message
+        assert f"{', '.join(others)} (no: {NO_TABLE_ROW}) in " in found.message
+        assert all(f'"It connects to {value}."' in found.message for value in others)
 
-    def test_a_run_of_sentences_is_named_as_a_range(self) -> None:
+    def test_each_sentence_is_named_by_its_quoted_start(self) -> None:
         body = " ".join(f"It connects to {REFUSED} on port {n}." for n in range(1, 20))
 
         (found,) = unpublished_value_violations(_body(body), _answers())
 
-        assert "in sentences 1–19" in found.message
-        assert len(found.message) < 600
+        assert found.message.count('"It connects to') == 19
+        assert len(found.message) < 1200
 
     def test_the_state_is_the_answer_s_first_clause(self) -> None:
         def _long(kind: str, value: str) -> str:
@@ -279,6 +286,20 @@ class TestTheComposerAsksOnce:
             asyncio.run(comp.compose(_report()))
 
         assert captured["answers"]("ip", REFUSED) == REFUSAL
+
+
+class TestAnUnreadableTable:
+    def test_the_composer_asks_once_saying_the_table_could_not_be_read(self) -> None:
+        from maljan.reporting import composer as composer_module
+
+        with patch(
+            "maljan.reporting.narrative_agent.published_answers",
+            side_effect=RuntimeError("unreadable"),
+        ):
+            answers = composer_module._published_answers(_report())
+
+        (found,) = unpublished_value_violations(_body(f"It uses {REFUSED} as C2."), answers)
+        assert "the IOC table could not be read" in found.message
 
 
 class TestTheReportStatesTheState:

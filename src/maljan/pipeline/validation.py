@@ -3789,18 +3789,15 @@ def _prose_of_a_section(payload: Any) -> list[str]:
     return [text for text in texts if isinstance(text, str) and text.strip()]
 
 
-def _named_numbers(numbers: Sequence[int]) -> str:
-    """``sentence 3``, ``sentences 1, 3`` or ``sentences 1–19``, a run of three as a range."""
-    parts: list[str] = []
-    run: list[int] = []
-    for number in [*sorted(set(numbers)), None]:
-        if number is not None and run and number == run[-1] + 1:
-            run.append(number)
-            continue
-        if run:
-            parts.extend([f"{run[0]}–{run[-1]}"] if len(run) >= 3 else [str(item) for item in run])
-        run = [] if number is None else [number]
-    return f"sentence{'s' if len(numbers) > 1 else ''} {', '.join(parts)}"
+# How many words of a sentence a question quotes to name it.
+_SENTENCE_START_WORDS = 6
+
+
+def _sentence_start(sentence: str) -> str:
+    """A sentence named by its first words, quoted: ``"It connects to 192.0.2.1 on…"``."""
+    words = sentence.split()
+    start = " ".join(words[:_SENTENCE_START_WORDS])
+    return f'"{start}…"' if len(words) > _SENTENCE_START_WORDS else f'"{start}"'
 
 
 def _unstated_values(
@@ -3854,6 +3851,8 @@ def unpublished_value_violations(
     named: dict[tuple[str, str], list[int]] = {}
     quoted: list[str] = []
     labels: list[str] = []
+    # Each sentence by its number, to name it by its start in the question.
+    written_as: dict[int, str] = {}
     number = 0
     for text in _prose_of_a_section(payload):
         for sentence in _SENTENCE_END_RE.split(text):
@@ -3861,6 +3860,7 @@ def unpublished_value_violations(
             if not written:
                 continue
             number += 1
+            written_as[number] = written
             found = _unstated_values(written, answers)
             if not found:
                 continue
@@ -3887,7 +3887,10 @@ def unpublished_value_violations(
         sentences.update(numbers)
     said = "; ".join(
         f"{', '.join(safe_finding_value(value) for value in values)} "
-        f"({safe_finding_value(state)}) in {_named_numbers(sorted(sentences))}"
+        f"({safe_finding_value(state)}) in "
+        + ", ".join(
+            safe_finding_value(_sentence_start(written_as[number])) for number in sorted(sentences)
+        )
         for state, (values, sentences) in grouped.items()
     )
     return [
