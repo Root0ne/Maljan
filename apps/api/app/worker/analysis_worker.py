@@ -648,6 +648,16 @@ IDENTITY_FIELDS = frozenset(
 )
 
 
+def _registration_failed(scope: str) -> None:
+    """Hold finding rows to the whole scrub while ``scope``'s values are unread. Never raises."""
+    try:
+        from maljan.pipeline.events import secret_registration_failed
+
+        secret_registration_failed(scope)
+    except Exception as exc:  # noqa: BLE001 — the publisher's scrub still runs
+        logger.debug("The scrub was not told of an unread scope (%s).", type(exc).__name__)
+
+
 def remember_process_secrets(core_settings: Any = None) -> None:
     """Hand the scrub the secrets this worker holds from its start, kept for its life.
 
@@ -662,6 +672,7 @@ def remember_process_secrets(core_settings: Any = None) -> None:
         sources = [get_settings()] + ([core_settings] if core_settings is not None else [])
         remember_secret_values(configured_secret_values(*sources), scope="process")
     except Exception as exc:  # noqa: BLE001 — the shape rules still run
+        _registration_failed("process")
         logger.warning(
             "The worker's configured values were not handed to the scrub (%s).",
             type(exc).__name__,
@@ -690,6 +701,7 @@ def remember_configured_secrets(core_settings: Any) -> None:
 
         remember_secret_values(configured_secret_values(core_settings), scope="job")
     except Exception as exc:  # noqa: BLE001 — the shape rules still run
+        _registration_failed("job")
         logger.warning(
             "The job's configured values were not handed to the scrub (%s).", type(exc).__name__
         )

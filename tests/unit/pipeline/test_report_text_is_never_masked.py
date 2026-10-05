@@ -1,18 +1,21 @@
-"""The event and transcript scrub never reaches report text; in events a family name is a name.
+"""Report text keeps the evidence's words and never an operator credential.
 
 A local run's report printed "T1134 Access Token ***" in its validation
 findings, and its events masked a family name: the finding rows that the
-report prints went through the event scrub, and the length rule took a family
-name with a capitalised compound piece for a key.
+report prints went through the event scrub, the label rule took the word after
+"Token" for a secret, and the length rule took a family name with a
+capitalised compound piece for a key.
 
-Masking applies only to events and the transcript, which the publisher scrubs
-where the wire begins. A finding row keeps the words of the evidence and of
-the catalogue it quotes; only the operator's own configured values are kept
-out of it by value. In events the label rule is unchanged: whatever follows
-"Token", "Bearer" or "Basic" is masked, so "Access Token Manipulation" reads
-"Access Token ***" there, as before. A family name of slash-joined words with
-a capitalised compound among them is kept, except right after a credential
-label. Every credential shape is still masked in events, after every label.
+With the operator's configured values registered, a finding row is no longer
+run through the event scrub's shape rules. Every operator credential is still
+kept out of it: each configured value by value, a short one as a whole word, a
+URL's userinfo, and a query value whose key names a credential. A token in a
+URL's username slot and a short URL password are registered too. With nothing
+registered, or a registration that failed, a row is held to the whole scrub as
+before. In events, an ATT&CK name with a label word in it is kept on an exact
+match only, a slash-joined family name with a capitalised compound piece is
+kept away from a credential label, and every credential shape is masked
+everywhere else, after every label, and across a row's bound.
 """
 
 from __future__ import annotations
@@ -59,10 +62,14 @@ class TestTheEventScrubReadsAFamilyNameAsAName:
         for label in LABELS:
             assert FAMILY not in scrub(f"{label}{FAMILY}"), label
 
-    def test_the_label_rule_is_unchanged(self) -> None:
-        assert scrub(f"carries TECHNIQUE {TECHNIQUE}, and") == (
-            "carries TECHNIQUE T1134 Access Token ***, and"
-        )
+    def test_an_attck_name_with_a_label_word_is_kept_on_an_exact_match(self) -> None:
+        assert scrub(f"carries TECHNIQUE {TECHNIQUE}, and") == f"carries TECHNIQUE {TECHNIQUE}, and"
+        assert scrub("T1134.001 Token Impersonation/Theft") == "T1134.001 Token Impersonation/Theft"
+
+    def test_anything_else_after_a_label_is_masked(self) -> None:
+        assert scrub("Access Token Manipulations") == "Access Token ***"
+        assert scrub("Refresh Token Manipulation") == "Refresh Token ***"
+        assert scrub("Access token manipulation") == "Access token ***"
         assert scrub("Bearer Manipulation") == "Bearer ***"
         assert scrub("Basic Abcdefgh") == "Basic ***"
 
@@ -93,45 +100,168 @@ class TestTheEventScrubReadsAFamilyNameAsAName:
             assert key not in scrub(f"value {key}"), key
 
 
-class TestAFindingRowIsNotMasked:
+def _registered(*values: str, scope: str = "job") -> None:
+    """The worker's registration of the configured values, as each job makes it."""
+    ev.remember_secret_values(list(values), scope=scope)
+
+
+def _published(row: str) -> str:
+    """A row as an event carries it: through the publisher's scrub."""
+    from app.worker.analysis_worker import scrubbed
+
+    return str(scrubbed({"message": row})["message"])
+
+
+class TestAFindingRowKeepsTheEvidenceWords:
     def test_the_row_keeps_the_catalogue_name(self) -> None:
+        _registered()
         assert safe_finding_value(TECHNIQUE) == TECHNIQUE
 
     def test_the_row_keeps_a_credential_shape_the_evidence_holds(self) -> None:
+        _registered()
         key = prefixed_key("ghs_", 36)
         assert safe_finding_value(f"the string {key}") == f"the string {key}"
+        assert key not in _published(safe_finding_value(f"the string {key}"))
 
     def test_the_row_keeps_a_url_and_a_path_as_written(self) -> None:
+        _registered()
         value = "http://gate.example.com/live/?id=1 C:\\Users\\op\\x.exe"
         assert safe_finding_value(value) == value
 
     def test_the_row_is_still_bounded(self) -> None:
+        _registered()
         bounded = safe_finding_value("word " * 200)
         assert len(bounded) <= ev.FINDING_VALUE_LIMIT + 1
         assert bounded.endswith(ev.CUT_MARK)
 
     def test_a_bound_never_splits_a_digest(self) -> None:
+        _registered()
         digest = "ab" * 32
-        bounded = safe_finding_value("x " * 90 + digest + " tail " * 20)
-        assert digest in bounded
+        assert digest in safe_finding_value("x " * 90 + digest + " tail " * 20)
 
-    def test_an_operator_configured_value_is_still_kept_out(self) -> None:
+
+class TestNoOperatorCredentialReachesARow:
+    """The reviewer's probes: four configured URLs echoed into a row, and dev's pinned case."""
+
+    @staticmethod
+    def _configured(url: str) -> None:
+        from maljan.core.settings_catalog import configured_secret_values
+
+        _registered(*configured_secret_values({"tool_servers": [{"url": url}]}))
+
+    def test_a_long_url_password(self) -> None:
+        secret = password(12, variant=1)
+        url = f"https://operator:{secret}@sandbox.example/api"
+        self._configured(url)
+
+        row = safe_finding_value(f"the indicator names {url}")
+
+        assert secret not in row and "operator" not in row
+
+    def test_a_short_url_password(self) -> None:
+        secret = password(6, variant=2)
+        url = f"https://operator:{secret}@sandbox.example/api"
+        self._configured(url)
+
+        row = safe_finding_value(f"the indicator names {url}; it says {secret} too")
+
+        assert secret not in row
+
+    def test_a_token_in_the_username_slot(self) -> None:
+        token = prefixed_key("ghp_", 36)
+        url = f"https://{token}@mcp.example/sse"
+        self._configured(url)
+
+        row = safe_finding_value(f"the indicator names {url}, and {token} alone")
+
+        assert token not in row
+
+    def test_a_credential_named_query_value(self) -> None:
+        for key in ("api_key", "apikey", "access_token", "token", "key"):
+            ev.forget_secret_values()
+            secret = password(16, variant=4)
+            url = f"https://mcp.example/sse?{key}={secret}&mode=x"
+            self._configured(url)
+
+            row = safe_finding_value(f"the indicator names {url}, and {secret} alone")
+
+            assert secret not in row, key
+            assert "mode=x" in row, key
+
+    def test_dev_s_pinned_userinfo_case(self) -> None:
+        _registered()
+        secret = prefixed_key("ghs_")
+        url = f"http://operator:{secret}@evil.example.com/a?token={secret}"
+
+        row = safe_finding_value(f"[url:value = '{url}']")
+
+        assert secret not in row and "operator" not in row
+        assert "evil.example.com/a" in row
+
+    def test_a_configured_value_is_kept_out(self) -> None:
         configured = password(16, variant=3)
-        ev.remember_secret_values([configured], scope="job")
+        _registered(configured)
 
         assert configured not in safe_finding_value(f"echoed {configured} back")
 
-    def test_the_event_carrying_the_row_is_masked(self) -> None:
-        from app.worker.analysis_worker import scrubbed
+
+class TestAFailedRegistrationFallsBackToTheWholeScrub:
+    def test_nothing_registered_holds_a_row_to_the_scrub(self) -> None:
+        key = prefixed_key("ghs_", 36)
+        assert safe_finding_value(f"the string {key}") == "the string ***"
+
+    def test_a_failed_scope_holds_a_row_to_the_scrub(self) -> None:
+        _registered()
+        ev.secret_registration_failed("process")
+        key = prefixed_key("ghs_", 36)
+
+        assert safe_finding_value(f"the string {key}") == "the string ***"
+
+    def test_registering_the_scope_again_lifts_it(self) -> None:
+        ev.secret_registration_failed("job")
+        _registered()
+
+        assert safe_finding_value(TECHNIQUE) == TECHNIQUE
+
+    def test_the_worker_records_a_failed_registration(self) -> None:
+        from unittest.mock import patch
+
+        from app.worker import analysis_worker
+
+        _registered(scope="process")
+        with patch(
+            "maljan.core.settings_catalog.configured_secret_values",
+            side_effect=RuntimeError("unreadable"),
+        ):
+            analysis_worker.remember_configured_secrets(object())
 
         key = prefixed_key("ghs_", 36)
-        row = safe_finding_value(f"the string {key}")
+        assert safe_finding_value(f"the string {key}") == "the string ***"
 
-        assert key not in str(scrubbed({"message": row}))
+
+class TestNoKeyHeadCrossesTheBound:
+    def test_every_shape_across_the_cut_leaves_no_fragment_in_the_event(self) -> None:
+        for registered in (True, False):
+            ev.forget_secret_values()
+            if registered:
+                _registered()
+            for key in _every_key_shape():
+                for pad in range(ev.FINDING_VALUE_LIMIT - len(key) - 2, ev.FINDING_VALUE_LIMIT + 2):
+                    if pad < 1:
+                        continue
+                    text = "w" * (pad - 1) + " " + key + " tail of the row"
+                    published = _published(safe_finding_value(text))
+                    assert not any(key[at : at + 8] in published for at in range(len(key) - 7)), (
+                        registered,
+                        pad,
+                        key,
+                        published,
+                    )
 
 
 class TestTheReportMatchesTheEvidence:
     def test_the_printed_finding_carries_the_technique_name_whole(self) -> None:
+        _registered()
         tally = ValidationTally()
         tally.record_unresolved(
             "triage",

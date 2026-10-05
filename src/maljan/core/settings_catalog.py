@@ -267,6 +267,35 @@ def names_a_credential_value(key: str) -> bool:
     return bool(words) and words[-1] in _CREDENTIAL_LAST_WORDS
 
 
+# The query keys a service URL carries a credential under, beside every key
+# ``names_a_credential_value`` reads as one.
+_CREDENTIAL_QUERY_KEYS = frozenset({"api_key", "apikey", "access_token", "token", "key"})
+
+
+def _url_secrets(url: str) -> list[str]:
+    """The credentials a configured URL carries: its password of any length, a token
+    written alone in its username slot, and each query value whose key names a credential."""
+    from urllib.parse import parse_qsl, urlsplit
+
+    try:
+        parts = urlsplit(url)
+        password, username = parts.password, parts.username
+        query = parse_qsl(parts.query, keep_blank_values=False)
+    except ValueError:
+        return []
+    found: list[str] = []
+    if password:
+        found.append(password)
+    elif username and "@" in parts.netloc:
+        # Userinfo with no password is a token, the way an MCP or a Git
+        # service URL carries one.
+        found.append(username)
+    for key, value in query:
+        if value and (names_a_credential_value(key) or key.lower() in _CREDENTIAL_QUERY_KEYS):
+            found.append(value)
+    return found
+
+
 def configured_secret_values(*sources: Any) -> set[str]:
     """Every secret-kind value the given settings hold, as the platform would send it.
 
@@ -281,7 +310,6 @@ def configured_secret_values(*sources: Any) -> set[str]:
     read. The scrub masks these values by exact value
     (``pipeline.events.remember_secret_values``).
     """
-    from urllib.parse import urlsplit
 
     found: set[str] = set()
 
@@ -315,12 +343,8 @@ def configured_secret_values(*sources: Any) -> set[str]:
         elif isinstance(value, str):
             if named_secret:
                 _add(value)
-            elif "://" in value and "@" in value:
-                try:
-                    secret = urlsplit(value).password
-                except ValueError:
-                    secret = None
-                if secret:
+            elif "://" in value:
+                for secret in _url_secrets(value):
                     _add(secret)
 
     for source in sources:

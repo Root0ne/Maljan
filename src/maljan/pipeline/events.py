@@ -470,6 +470,13 @@ _SECRET_SCOPES: dict[str, frozenset[str]] = {}
 # or underscore touches it: ``minioadmin`` configured leaves ``minioadministrator``
 # as written. ``None`` when nothing is registered.
 _CONFIGURED_PATTERN: re.Pattern[str] | None = None
+# Configured values shorter than the floor, per scope: kept out of finding
+# rows only, each as a whole word (``_mask_short_secrets``).
+_SHORT_SECRETS: dict[str, frozenset[str]] = {}
+# The scopes whose configured values could not be read
+# (``secret_registration_failed``); while any is listed, a finding row is held
+# to the whole event scrub.
+_FAILED_SCOPES: set[str] = set()
 # A configured value shorter than this is not masked by value: a four-letter
 # password masked everywhere would take every word it spells out of every
 # sentence. Such a value is still masked by name and by shape.
@@ -1190,20 +1197,38 @@ def remember_secret_values(values: Iterable[str], *, scope: str = "job") -> None
     A value shorter than ``CONFIGURED_SECRET_FLOOR``, or blank, is not kept.
     Only the count is logged, never a value.
     """
-    kept = frozenset(
-        text
-        for text in (str(value or "") for value in values)
-        if len(text) >= CONFIGURED_SECRET_FLOOR and text.strip()
-    )
+    texts = [text for text in (str(value or "") for value in values) if text.strip()]
+    kept = frozenset(text for text in texts if len(text) >= CONFIGURED_SECRET_FLOOR)
     _SECRET_SCOPES[scope] = kept
+    # A shorter value is kept out of finding rows only (``safe_finding_value``):
+    # masked everywhere, a short password would take a word out of every event.
+    _SHORT_SECRETS[scope] = frozenset(text for text in texts if len(text) < CONFIGURED_SECRET_FLOOR)
+    _FAILED_SCOPES.discard(scope)
     _rebuild_configured_pattern()
     logger.debug("The scrub masks %d configured value(s) under %s.", len(kept), scope)
+
+
+def secret_registration_failed(scope: str) -> None:
+    """Record that a scope's configured values could not be read.
+
+    Until that scope is registered again, a finding row is held to the whole
+    event scrub (``safe_finding_value``): with no value to mask by, the shape
+    rules are what keeps an operator credential out of report text.
+    """
+    _FAILED_SCOPES.add(scope)
 
 
 def forget_secret_values() -> None:
     """Clear every scope: nothing is masked by value afterwards."""
     _SECRET_SCOPES.clear()
+    _SHORT_SECRETS.clear()
+    _FAILED_SCOPES.clear()
     _rebuild_configured_pattern()
+
+
+def _rows_kept_as_written() -> bool:
+    """Whether finding rows may keep their words: values registered, and no scope failed."""
+    return bool(_SECRET_SCOPES) and not _FAILED_SCOPES
 
 
 def _rebuild_configured_pattern() -> None:
@@ -1258,10 +1283,57 @@ def _scrub_line(line: str) -> str:
     return line
 
 
+# The ATT&CK names a label word stands in, read once from the vendored table:
+# for each, the text in front of the word and the word after it
+# (``Access Token Manipulation`` → ``("access ", "token", "Manipulation")``).
+_ATTCK_FILE = "data/attck_techniques.json"
+_LABELLED_NAMES: frozenset[tuple[str, str, str]] | None = None
+
+
+def _labelled_attck_names() -> frozenset[tuple[str, str, str]]:
+    """``(text before, label word, word after)`` for each vendored ATT&CK name with a label word."""
+    global _LABELLED_NAMES
+    if _LABELLED_NAMES is None:
+        found: set[tuple[str, str, str]] = set()
+        try:
+            import json
+
+            from maljan.core.paths import resolve_data
+
+            table = json.loads(resolve_data(_ATTCK_FILE).read_text(encoding="utf-8"))
+            for key, row in table.items():
+                if key.startswith("_") or not isinstance(row, dict):
+                    continue
+                name = str(row.get("name") or "")
+                for match in re.finditer(r"(?i)\b(bearer|basic|token)\s+(\S+)", name):
+                    in_front = name[: match.start()].lower()
+                    found.add((in_front, match.group(1).lower(), match.group(2)))
+        except Exception as exc:  # noqa: BLE001 — every label then masks what follows it
+            logger.warning("The ATT&CK names were not read for the scrub (%s).", exc)
+        _LABELLED_NAMES = frozenset(found)
+    return _LABELLED_NAMES
+
+
+def _scheme_and_secret(found: re.Match[str]) -> str:
+    """An authorization scheme with what follows it masked, unless the two are an ATT&CK name.
+
+    Kept only on an exact match with a name in the vendored ATT&CK table, the
+    words in front of the label included: ``Access Token Manipulation``.
+    Anything else after ``Bearer``, ``Basic`` or ``token`` is masked.
+    """
+    scheme = found.group(1)
+    after = found.group(0)[len(scheme) :].strip()
+    before = found.string[max(0, found.start() - 80) : found.start()].lower()
+    for in_front, label, word in _labelled_attck_names():
+        if label == scheme.lower() and after == word and before.endswith(in_front):
+            return found.group(0)
+    return f"{scheme} {_REDACTED}"
+
+
 def _scrub_once(line: str) -> str:
     """The configured secrets by value, then the four passes, once."""
     line = _mask_configured_values(line)
-    line = _SCHEME_AND_SECRET.sub(lambda m: f"{m.group(1)} {_REDACTED}", line)
+    line = _SCHEME_AND_SECRET.sub(_scheme_and_secret, line)
     line = _URL_RUN.sub(_shorten_url, line)
     line = _VALUE_RUN.sub(_hide_credentials, line)
     return _PATH_RUN.sub(_shorten_path, line)
@@ -1277,22 +1349,86 @@ FINDING_VALUE_LIMIT = 200
 def safe_finding_value(value: Any) -> str:
     """One model-written value, made fit to store in a finding row and to print.
 
-    The value as written, on one line, bounded. A finding row is report text:
-    the report prints it in its notes, so it keeps the words of the evidence
-    and the catalogue it quotes, and the event scrub never reaches it. Masking
-    applies to events and the transcript, which the publisher scrubs where the
-    wire begins (``analysis_worker._publish_event``), a row carried by an
-    event included. The one thing kept out of a row is a value the operator
-    configured as a secret, masked by value: that is no evidence of the run's.
+    A finding row is report text, printed in the report's notes, stored with
+    it and served by the API. With the operator's configured values
+    registered, the row keeps the words of the evidence and the catalogue it
+    quotes; what is kept out is every operator credential: each configured
+    value, by value (a short one as a whole word), a URL's userinfo, and a
+    query value whose key names a credential. The event scrub's shape rules do
+    not run, and the publisher still scrubs the event that carries the row.
+
+    With no values registered, or a scope that could not be read
+    (``secret_registration_failed``), the row is held to the whole event
+    scrub, as before: the shape rules are then what keeps a credential out.
+
+    Bounded either way, and never cut inside a value the scrub would mask.
     """
-    # Bounded where it is shown, and marked: a claim quoted back to its analyst
-    # cut mid-word read as the analyst's own ending.
-    one_line = _mask_configured_values(" ".join(str(value or "").split()))
-    return _bound_whole(one_line, FINDING_VALUE_LIMIT)
+    one_line = " ".join(str(value or "").split())
+    if not _rows_kept_as_written():
+        return _cut_whole(scrub(one_line), FINDING_VALUE_LIMIT)
+    kept = _mask_short_secrets(_mask_configured_values(one_line))
+    kept = _URL_RUN.sub(_without_credentials, kept)
+    return _bound_whole(kept, FINDING_VALUE_LIMIT)
+
+
+def _mask_short_secrets(text: str) -> str:
+    """``text`` with every configured value shorter than the floor masked as a whole word.
+
+    A value of fewer than four characters is not masked as a word, which would
+    take ordinary words out of the row; where it is a URL's password, the
+    userinfo removal takes it.
+    """
+    values = sorted(
+        {value for values in _SHORT_SECRETS.values() for value in values if len(value) >= 4},
+        key=len,
+        reverse=True,
+    )
+    if not values:
+        return text
+    pattern = (
+        _SECRET_BOUNDARY_BEFORE
+        + "(?:"
+        + "|".join(re.escape(value) for value in values)
+        + r")(?![A-Za-z0-9_])"
+    )
+    return re.sub(pattern, _REDACTED, text)
+
+
+# One query parameter of a URL, its key and its value.
+_QUERY_PARAMETER = re.compile(r"(?P<lead>[?&;])(?P<key>[^=&;#?]+)=(?P<value>[^&;#]*)")
+
+
+def _without_credentials(found: re.Match[str]) -> str:
+    """One URL with its userinfo masked and each credential-named query value masked."""
+    from maljan.core.settings_catalog import names_a_credential_value
+
+    rest = found.group("rest")
+    cut = min((rest.find(mark) for mark in "/?#" if mark in rest), default=len(rest))
+    authority, tail = rest[:cut], rest[cut:]
+    if "@" in authority:
+        authority = f"{_REDACTED}@" + authority.rsplit("@", 1)[1]
+
+    def _query(parameter: re.Match[str]) -> str:
+        key = parameter.group("key")
+        if not names_a_credential_value(key) and key.lower() not in _CREDENTIAL_QUERY_KEYS:
+            return parameter.group(0)
+        return f"{parameter.group('lead')}{key}={_REDACTED}"
+
+    return f"{found.group('scheme')}://{authority}{_QUERY_PARAMETER.sub(_query, tail)}"
+
+
+# The query keys a service URL carries a credential under, named by their last
+# word or as written here.
+_CREDENTIAL_QUERY_KEYS = frozenset({"api_key", "apikey", "access_token", "token", "key"})
 
 
 def _bound_whole(text: str, limit: int) -> str:
-    """``text`` bounded near ``limit`` and marked, never cut inside a digest or an identifier."""
+    """``text`` bounded near ``limit`` and marked, never cut inside a value the scrub masks.
+
+    A digest or an identifier the cut would split is kept whole. Any other
+    run the cut falls in is cut in front of when the scrub would mask it, so
+    the event that carries the row never holds the head of a key.
+    """
     if len(text) <= limit:
         return text
     cut = limit - 1
@@ -1302,6 +1438,13 @@ def _bound_whole(text: str, limit: int) -> str:
             break
     if cut >= len(text):
         return text
+    for found in _VALUE_RUN.finditer(text):
+        if found.start() < cut < found.end():
+            if scrub(found.group(0)) != found.group(0) or _looks_like_a_credential(
+                text[found.start() : cut]
+            ):
+                cut = found.start()
+            break
     return text[:cut] + CUT_MARK
 
 

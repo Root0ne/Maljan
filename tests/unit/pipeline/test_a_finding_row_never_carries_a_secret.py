@@ -1,23 +1,21 @@
 """What a producer wrote reaches the stored report through one helper.
 
-A violation message is report text: ``run_summary.validation.unresolved`` is
-stored with the report, ``report.md`` prints it and the console's run record
-draws it. Measured on a judge bundle whose indicator quoted a URL it had been
-shown: a 3 219-character ``stix.ungrounded_indicator`` row, and three more
-rows beside it.
+A violation message is not an event. The publisher scrubs what it emits, and
+nothing scrubbed what a producer's own words did on the way into
+``run_summary.validation.unresolved`` — which the API stores, ``report.md``
+prints and the console's run record draws verbatim. Measured on a judge bundle
+whose indicator quoted a URL it had been shown: a 3 219-character
+``stix.ungrounded_indicator`` row carrying ``operator:<key>@`` intact, and
+three more rows beside it.
 
-``pipeline.events.safe_finding_value`` is the one helper: the value as
-written, on one line, bounded, with only the operator's configured secrets
-kept out by value. The event scrub never reaches report text; it masks the
-events and the transcript, which the publisher scrubs where the wire begins,
-so a credential a row quotes is masked in the event that carries the row. The
-tests below check the rows that carry a producer's text, and then the scan at
-the bottom closes the class rather than the instances: it walks every
-``Violation`` message every module in the tree builds — keyword or
-positional — and fails on an interpolated value that is neither wrapped nor a
-value this codebase owns. It read one module and one keyword before, so seven
-construction sites in four other modules were never looked at and a row
-written as ``Violation(code, message)`` was invisible.
+``pipeline.events.safe_finding_value`` is the one answer — ``scrub``'s four
+passes and a length bound. The tests below check the rows that carry a
+producer's text, and then the scan at the bottom closes the class rather than
+the instances: it walks every ``Violation`` message every module in the tree
+builds — keyword or positional — and fails on an interpolated value that is
+neither wrapped nor a value this codebase owns. It read one module and one
+keyword before, so seven construction sites in four other modules were never
+looked at and a row written as ``Violation(code, message)`` was invisible.
 """
 
 from __future__ import annotations
@@ -58,13 +56,6 @@ def _messages(violations: list[Violation]) -> str:
     return " ".join(v.message for v in violations)
 
 
-def _published(message: str) -> str:
-    """A row as an event carries it: through the publisher's scrub."""
-    from app.worker.analysis_worker import scrubbed
-
-    return str(scrubbed({"message": message})["message"])
-
-
 class TestTheRowsThatQuoteAJudge:
     @staticmethod
     def _bundle(**assessment: Any) -> Bundle:
@@ -94,8 +85,8 @@ class TestTheRowsThatQuoteAJudge:
         violations = validate_verdict_bundle(self._bundle(), evidence_corpus=set())
 
         row = next(v for v in violations if v.code == "stix.ungrounded_indicator")
-        assert secret not in _published(row.message)
-        assert "operator" not in _published(row.message)
+        assert secret not in row.message
+        assert "operator" not in row.message
         assert len(row.message) < MESSAGE_LIMIT
 
     def test_an_attack_pattern_with_no_id_does_not_either(self) -> None:
@@ -104,7 +95,7 @@ class TestTheRowsThatQuoteAJudge:
         violations = validate_verdict_bundle(self._bundle(), evidence_corpus=set())
 
         row = next(v for v in violations if v.code == "attck.missing_id")
-        assert secret not in _published(row.message)
+        assert secret not in row.message
         assert len(row.message) < MESSAGE_LIMIT
 
     def test_a_severity_outside_the_enum_does_not_either(self) -> None:
@@ -116,7 +107,7 @@ class TestTheRowsThatQuoteAJudge:
         violations = validate_verdict_bundle(bundle)
 
         row = next(v for v in violations if v.code == "verdict.severity_enum")
-        assert secret not in _published(row.message)
+        assert secret not in row.message
         assert len(row.message) < MESSAGE_LIMIT
 
     def test_a_family_with_no_evidence_does_not_either(self) -> None:
@@ -128,24 +119,24 @@ class TestTheRowsThatQuoteAJudge:
         violations = validate_verdict_bundle(bundle)
 
         row = next(v for v in violations if v.code == "attribution.ungrounded_family")
-        assert secret not in _published(row.message)
+        assert secret not in row.message
         assert len(row.message) < MESSAGE_LIMIT
 
 
 class TestARowKeepsWordsAndMasksKeys:
-    """A row keeps what it quotes; the event that carries it masks every key shape.
+    """A row's words survive the scrub; no key shape does.
 
     The length rule used to take a run of words with separators between them
     for a key, and a claim reading ``anti-debugging/environment detection``
-    was stored as ``*** detection``. A row is report text and is not scrubbed;
-    every shape the scrub reads is still masked where the row is published.
+    was stored as ``*** detection``. Lifting that must not lift a key: every
+    shape the scrub reads is run through the row helper here.
     """
 
-    def test_every_key_shape_is_kept_in_a_row_and_masked_in_its_event(self) -> None:
+    def test_every_key_shape_is_masked_in_a_row(self) -> None:
         for value in _every_key_shape():
             row = safe_finding_value(f"the analyst quoted {value} as the key")
-            assert row == f"the analyst quoted {value} as the key", value
-            assert _published(row) == "the analyst quoted *** as the key", value
+            assert value not in row, value
+            assert row == "the analyst quoted *** as the key", value
 
     def test_a_row_is_not_cut_inside_a_digest(self) -> None:
         """A row that reaches the event feed is scrubbed again, and half a digest is a key there."""
@@ -194,7 +185,7 @@ class TestTheRowsThatQuoteAnAnalyst:
 
         violations = validate_isr(isr, attck=_Attck())
 
-        assert secret not in _published(_messages(violations))
+        assert secret not in _messages(violations)
         for row in violations:
             assert len(row.message) < MESSAGE_LIMIT, row.code
 
@@ -207,7 +198,7 @@ class TestTheRowsThatQuoteAnAnalyst:
         violations = validate_isr(isr)
 
         row = next(v for v in violations if v.code == "isr.confidence_range")
-        assert secret not in _published(row.message)
+        assert secret not in row.message
         assert len(row.message) < MESSAGE_LIMIT
 
     def test_a_coercion_failure_is_bounded_and_scrubbed(self) -> None:
@@ -220,7 +211,7 @@ class TestTheRowsThatQuoteAnAnalyst:
 
         violations = schema_violations(_Model, {"a": 1}, code="composer.schema")
 
-        assert secret not in _published(violations[0].message)
+        assert secret not in violations[0].message
         assert len(violations[0].message) < MESSAGE_LIMIT
 
 
@@ -257,8 +248,9 @@ CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
     ("pipeline/validation.py", "platform_mismatch_message"): frozenset(
         {"platforms", "expected_platforms", "domain", "expected_domain"}
     ),
-    # The table's own nouns and row numbers, around values each wrapped in the
-    # helper where the sentence is built.
+    # The table's own nouns and row numbers, and the section's own sentence
+    # numbers and states, around values each wrapped in the helper where the
+    # sentence is built.
     ("pipeline/validation.py", "stated_value_violations"): frozenset({"said"}),
     ("pipeline/validation.py", "unpublished_value_violations"): frozenset({"said"}),
     # A join of this module's own vocabulary of unsupported claims.
