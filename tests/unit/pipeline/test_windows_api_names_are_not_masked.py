@@ -126,7 +126,8 @@ class TestTheCatalogue:
         }
         for text, said in cases.items():
             assert ev.scrub(text) == said, text
-            assert ev.safe_finding_value(text) == said, text
+            # A finding row is report text: the event that carries it is scrubbed.
+            assert ev.safe_finding_value(text) == text, text
 
     def test_a_digest_after_a_directory_is_still_written_as_it_is(self) -> None:
         digest = hashlib.sha256(b"synthetic").hexdigest()
@@ -135,11 +136,7 @@ class TestTheCatalogue:
     def test_no_fragment_of_a_key_survives_beside_dotted_text(self) -> None:
         for shape in _every_key_shape():
             for joined in _dotted_forms(shape):
-                for scrubbed in (
-                    ev.scrub(joined),
-                    ev.scrub_keeping_layout(joined),
-                    ev.safe_finding_value(joined),
-                ):
+                for scrubbed in (ev.scrub(joined), ev.scrub_keeping_layout(joined)):
                     assert not _fragment_of(shape, scrubbed), (joined, scrubbed)
 
     def test_no_fragment_of_a_random_base64_key_survives(self) -> None:
@@ -163,11 +160,7 @@ class TestTheCatalogue:
                 f"kernel32.dll!{shape}",
                 f"{shape}!{CATALOGUE_NAME}",
             ):
-                for scrubbed in (
-                    ev.scrub(joined),
-                    ev.scrub_keeping_layout(joined),
-                    ev.safe_finding_value(joined),
-                ):
+                for scrubbed in (ev.scrub(joined), ev.scrub_keeping_layout(joined)):
                     assert shape not in scrubbed, joined
 
     def test_a_name_the_catalogue_does_not_hold_is_still_read_by_shape(self) -> None:

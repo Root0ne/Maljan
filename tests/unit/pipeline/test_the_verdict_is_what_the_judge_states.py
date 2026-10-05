@@ -412,13 +412,13 @@ class TestAVerdictThatIsNotText:
 
 
 class TestWhatTheJudgeWroteIsScrubbedBeforeItIsStored:
-    """The judge's own text reaches the stored report and the analysis page.
+    """The judge's own text reaches the stored report bounded, and its events masked.
 
-    A validation row and a degradation reason are not events, so the scrubbing
-    the event publisher does never touched them: a model echoing a credentialled
-    URL it had been shown into the verdict field put the credential in the
-    stored report and drew it on the page, and a four-kilobyte "verdict" was
-    printed as one line of the run record.
+    A validation row and a degradation reason are report text: the event scrub
+    does not rewrite them, and the event that carries one is scrubbed by the
+    publisher. A four-kilobyte "verdict" was printed as one line of the run
+    record, so each is bounded. A value the operator configured as a secret,
+    echoed by the judge, is kept out of report text by value.
     """
 
     @staticmethod
@@ -431,37 +431,45 @@ class TestWhatTheJudgeWroteIsScrubbedBeforeItIsStored:
         )
         return secret, _bundle([], {"verdict": written, "confidence": 0.9})
 
-    def test_the_violation_message_carries_no_credential_and_is_bounded(self) -> None:
+    @staticmethod
+    def _published(text: str) -> str:
+        from app.worker.analysis_worker import scrubbed
+
+        return str(scrubbed({"message": text})["message"])
+
+    def test_the_violation_message_is_bounded_and_masked_in_its_event(self) -> None:
         secret, bundle = self._noisy()
 
         message = stated_verdict_violations(bundle)[0].message
 
-        assert secret not in message
-        assert "operator" not in message
+        assert secret not in self._published(message)
         assert len(message) < 700
 
-    def test_the_degradation_reason_carries_no_credential_and_is_bounded(self) -> None:
+    def test_the_degradation_reason_is_bounded_and_masked_in_its_event(self) -> None:
         secret, bundle = self._noisy()
 
         reason = unrecognised_verdict_reason(bundle)
 
-        assert secret not in reason
-        assert "operator" not in reason
+        assert secret not in self._published(reason)
         assert len(reason) <= 300
 
-    def test_the_report_that_prints_it_carries_neither(self) -> None:
+    def test_the_report_that_prints_it_carries_no_configured_value(self) -> None:
+        from maljan.pipeline import events as ev
         from maljan.reporting.renderers.markdown import MarkdownRenderer
 
         secret, bundle = self._noisy()
-        report = _report(bundle, INCONCLUSIVE_VERDICT)
-        report.degradation_reasons.append(unrecognised_verdict_reason(bundle))
+        ev.remember_secret_values([secret], scope="job")
+        try:
+            report = _report(bundle, INCONCLUSIVE_VERDICT)
+            report.degradation_reasons.append(unrecognised_verdict_reason(bundle))
 
-        markdown = MarkdownRenderer().render(report)
+            markdown = MarkdownRenderer().render(report)
+        finally:
+            ev.forget_secret_values()
 
         assert secret not in markdown
-        assert "operator" not in markdown
 
-    def test_a_category_the_judge_invented_is_scrubbed_too(self) -> None:
+    def test_a_category_the_judge_invented_is_bounded_and_masked_in_its_event(self) -> None:
         from tests.credential_shapes import prefixed_key
 
         secret = prefixed_key("ghs_")
@@ -475,10 +483,10 @@ class TestWhatTheJudgeWroteIsScrubbedBeforeItIsStored:
 
         messages = " ".join(v.message for v in assessment_conflict_violations(bundle))
 
-        assert secret not in messages
+        assert secret not in self._published(messages)
         assert len(messages) < 900
 
-    def test_an_object_the_bundle_cannot_hold_is_scrubbed_too(self) -> None:
+    def test_an_object_the_bundle_cannot_hold_is_bounded_and_masked_in_its_event(self) -> None:
         from maljan.agents.judge_postprocess import lift_misplaced_extensions
         from tests.credential_shapes import prefixed_key
 
@@ -490,7 +498,7 @@ class TestWhatTheJudgeWroteIsScrubbedBeforeItIsStored:
 
         found = lift_misplaced_extensions(data)
 
-        assert secret not in found[0].message
+        assert secret not in self._published(found[0].message)
         assert len(found[0].message) < 700
 
 

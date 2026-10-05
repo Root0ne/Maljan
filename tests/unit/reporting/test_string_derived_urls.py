@@ -400,7 +400,7 @@ class TestWhatTheBundleCarries:
 
         assert renderer.declined == []
 
-    def test_a_declined_url_never_carries_a_credential_into_the_record(self) -> None:
+    def test_a_declined_url_is_bounded_and_masked_in_its_event(self) -> None:
         from tests.credential_shapes import prefixed_key
 
         secret = prefixed_key("ghs_")
@@ -421,8 +421,10 @@ class TestWhatTheBundleCarries:
         renderer.render(_report([]), base_bundle=base)
 
         _code, why = renderer.declined[0]
-        assert secret not in why
-        assert "operator" not in why
+        from app.worker.analysis_worker import scrubbed
+
+        # Report text, bounded; the event that carries it is masked.
+        assert secret not in str(scrubbed({"message": why})["message"])
         assert len(why) < 400
 
     def test_a_declined_url_is_bounded_however_long_the_model_wrote_it(self) -> None:

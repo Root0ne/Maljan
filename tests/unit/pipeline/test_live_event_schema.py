@@ -750,7 +750,8 @@ class TestASummaryIsCutOutsideADigest:
             one = ev.summarize_args({"value": _generated_text(rng)})
             assert ev.scrub(one) == one
             text = _generated_text(rng, pieces=rng.randint(10, 60))
-            for made in (ev.summarize_result(text), ev.safe_finding_value(text), ev.scrub(text)):
+            # A finding row is report text, not scrubbed before the publisher.
+            for made in (ev.summarize_result(text), ev.scrub(text)):
                 assert ev.scrub(made) == made, text
 
     def test_a_cut_never_lands_inside_a_url_or_after_a_scheme_word(self) -> None:

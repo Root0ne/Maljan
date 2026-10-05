@@ -769,7 +769,7 @@ async def _publish_event(
     # may still scrub, and this second pass changes nothing for two reasons:
     # the scrub repeats its passes until they change nothing, so it is
     # idempotent over its own output; and the producers that bound scrubbed
-    # text — the argument and result summaries and a finding row — cut it with
+    # text — the argument and result summaries — cut it with
     # ``events._cut_whole``, which keeps a digest or an identifier whole and
     # moves a cut that a scrub would change (inside a URL, after a scheme word)
     # back to the start of its word. A producer that cuts scrubbed text any

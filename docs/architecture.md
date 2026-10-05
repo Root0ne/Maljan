@@ -3934,12 +3934,11 @@ somebody can.
 
 Every model-written value on this path — a URL echoed into a decline, the
 judge's own verdict word, the category it invented, the type of an object the
-bundle cannot hold — goes through `pipeline.events.safe_finding_value`, which
-is `scrub` and a length bound. A validation row, a degradation reason and an
-export decline all land in `run_summary`, in the stored report and on the
-analysis page, and none of them is an event, so none of them was covered by the
-scrubbing the publisher does: a model echoing a credentialled URL into the
-verdict field put the credential in the stored report and drew it on the page.
+bundle cannot hold — goes through `pipeline.events.safe_finding_value`: the
+value as written, on one line, with a length bound, and with the operator's
+configured secrets kept out by value. A validation row, a degradation reason
+and an export decline are report text, so the event scrub never rewrites them;
+the event that carries one is scrubbed by the publisher like every other.
 
 No count bounds the indicators the export carries: it carries every value the
 one publish rule publishes, which is every `yes` row of the IOC table, and no

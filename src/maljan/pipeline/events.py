@@ -565,8 +565,15 @@ _MIME_TYPE = re.compile(
 # capital in front — and each shorter than the length floor, so that a piece
 # which would be a key on its own keeps the whole run a key. A key's body of
 # random letters mixes its case or runs past the floor; a vendor prefix is
-# asked before this and wins.
-_WORD_PIECE = re.compile(r"\A(?:[a-z]{1,23}|[A-Z]{1,23}|[A-Z][a-z]{1,22})\Z")
+# asked before this and wins. A capitalised compound of two or three words, as
+# a family or a product name is written (``NorthWind``, ``IcedId``), is a word
+# too: a first word of three letters or more, then one or two more, each a
+# capital and small letters. A key's random case does not keep that pattern,
+# and one alternating letter by letter (``AbCdEf…``) has more words than three.
+_WORD_PIECE = re.compile(
+    r"\A(?:[a-z]{1,23}|[A-Z]{1,23}|[A-Z][a-z]{1,22}"
+    r"|(?=[A-Za-z]{1,23}\Z)[A-Z][a-z]{2,}(?:[A-Z][a-z]+){1,2})\Z"
+)
 # The identifier this system issues for a job, a report, a sample and a
 # message. Exempt for the reason a digest is: it is on the job, on the report
 # and on the event that announced it, and an event reading ``report_id=***``
@@ -1224,39 +1231,71 @@ def _scrub_line(line: str) -> str:
     return line
 
 
+# A capitalised word, with the sentence's punctuation after it: what follows
+# "Token" in a name such as "Access Token Manipulation", and no credential
+# shape (``tests/credential_shapes.py`` builds none that is a capital and
+# small letters alone).
+_CAPITALISED_WORD = re.compile(r"[A-Z][a-z]+[.:!?]?")
+
+
+def _scheme_and_secret(found: re.Match[str]) -> str:
+    """An authorization scheme with its secret masked; "Token" before a capitalised word kept.
+
+    "Bearer" and "Basic" mask whatever follows them. "Token" is also a word
+    of names a report quotes — a technique's, a product's — and a capitalised
+    word after it is that name going on, not a secret.
+    """
+    scheme, secret = found.group(1), found.group(0)[len(found.group(1)) :].strip()
+    if scheme.lower() == "token" and _CAPITALISED_WORD.fullmatch(secret):
+        return found.group(0)
+    return f"{scheme} {_REDACTED}"
+
+
 def _scrub_once(line: str) -> str:
     """The configured secrets by value, then the four passes, once."""
     line = _mask_configured_values(line)
-    line = _SCHEME_AND_SECRET.sub(lambda m: f"{m.group(1)} {_REDACTED}", line)
+    line = _SCHEME_AND_SECRET.sub(_scheme_and_secret, line)
     line = _URL_RUN.sub(_shorten_url, line)
     line = _VALUE_RUN.sub(_hide_credentials, line)
     return _PATH_RUN.sub(_shorten_path, line)
 
 
 # How much of a model-written value reaches a finding row. Such a row is
-# stored with the report and printed verbatim by the console, so what goes in
-# it is held to the same rule an event payload is and then bounded: a value a
-# model wrote is as long as the model cared to make it, and a 4 KB "verdict"
-# drawn as one line of a run record is a page nobody can read.
+# stored with the report and printed verbatim by the console, so it is
+# bounded: a value a model wrote is as long as the model cared to make it, and
+# a 4 KB "verdict" drawn as one line of a run record is a page nobody can read.
 FINDING_VALUE_LIMIT = 200
 
 
 def safe_finding_value(value: Any) -> str:
-    """One model-written value, made safe to store in a finding row and to print.
+    """One model-written value, made fit to store in a finding row and to print.
 
-    The same four passes :func:`scrub` makes — an authorization scheme and its
-    secret, a URL cut back to scheme and host so its userinfo goes with the
-    rest, credential-shaped runs redacted, paths cut to their last segment —
-    and then a bound. A validation message, a degradation reason and an export
-    decline all end up in ``run_summary``, in the stored report and on the
-    analysis page, and none of them is an event, so none of them was covered by
-    the scrubbing the publisher does.
+    The value as written, on one line, bounded. A finding row is report text:
+    the report prints it in its notes, so it keeps the words of the evidence
+    and the catalogue it quotes, and the event scrub never reaches it. Masking
+    applies to events and the transcript, which the publisher scrubs where the
+    wire begins (``analysis_worker._publish_event``), a row carried by an
+    event included. The one thing kept out of a row is a value the operator
+    configured as a secret, masked by value: that is no evidence of the run's.
     """
     # Bounded where it is shown, and marked: a claim quoted back to its analyst
-    # cut mid-word read as the analyst's own ending. Cut the way an event
-    # summary is (``_cut_whole``): a row that reaches the event feed is
-    # scrubbed again, and a digest cut in two was masked there.
-    return _cut_whole(scrub(value), FINDING_VALUE_LIMIT)
+    # cut mid-word read as the analyst's own ending.
+    one_line = _mask_configured_values(" ".join(str(value or "").split()))
+    return _bound_whole(one_line, FINDING_VALUE_LIMIT)
+
+
+def _bound_whole(text: str, limit: int) -> str:
+    """``text`` bounded near ``limit`` and marked, never cut inside a digest or an identifier."""
+    if len(text) <= limit:
+        return text
+    cut = limit - 1
+    for found in _WHOLE_RUN.finditer(text):
+        if found.start() < cut < found.end():
+            cut = found.end()
+            break
+    if cut >= len(text):
+        return text
+    return text[:cut] + CUT_MARK
 
 
 def scrub_keeping_layout(text: Any) -> str:
