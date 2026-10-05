@@ -3411,8 +3411,19 @@ is assembled from what the run gathered rather than recomputed beside it:
   action, rationale or detection names an address or a host the IOC table does
   not publish, a well-known reference host no row holds aside; asked with the
   table's answer), `report.configuration_uncited` (a value said to be decrypted or
-  observed cites no entry) and `report.identifier_uncited` (a host identifier
-  cites no entry of the run). A field a model did not supply is absent from
+  observed cites no entry), `report.identifier_uncited` (a host identifier
+  cites no entry of the run), `report.value_not_in_cited_entry` (a host
+  identifier's or a configuration value's whole value is in none of the entries
+  it cites; a configuration number is held in decimal or hex, or by its number
+  beside a known time or size unit; rows citing the same entries are one
+  question, a kept row marked beside its evidence) and
+  `report.unpublished_value` (a section's prose — a body, the introduction, a
+  flow step — names a network value the IOC table does not publish with no
+  `no: <reason>` beside that value; one question per section, each state said
+  once with its values and sentences; each kept sentence marked in place with
+  its own values' states). A configuration, identifier or endpoint cell is not
+  asked about: the report prints the IOC table's state beside an unpublished
+  value in it. A field a model did not supply is absent from
   the report. The recommendation's category is the model's own. The Markdown
   prints the host identifiers in §9 under the report model's voice, unpublished,
   and the console draws them in the technical-analysis panel.
@@ -3934,12 +3945,24 @@ somebody can.
 
 Every model-written value on this path — a URL echoed into a decline, the
 judge's own verdict word, the category it invented, the type of an object the
-bundle cannot hold — goes through `pipeline.events.safe_finding_value`, which
-is `scrub` and a length bound. A validation row, a degradation reason and an
-export decline all land in `run_summary`, in the stored report and on the
-analysis page, and none of them is an event, so none of them was covered by the
-scrubbing the publisher does: a model echoing a credentialled URL into the
-verdict field put the credential in the stored report and drew it on the page.
+bundle cannot hold — goes through `pipeline.events.safe_finding_value`. A
+validation row, a degradation reason and an export decline are report text.
+With the operator's configured values registered (the worker registers them
+per job), a row keeps the evidence's words and loses every operator
+credential: each configured value by value (a short one as a whole word), a
+URL's userinfo and each credential-named query value. Registration reads a
+configured URL's password of any length, a token in its username slot and its
+`api_key`, `apikey`, `access_token`, `token` and `key` values. With nothing
+registered, or a scope whose values could not be read, a row is held to the
+whole event scrub; outside the worker (the test suite, the command line, the
+`MaljanApp` facade before it registers) rows therefore keep the event scrub's
+masking, an ATT&CK name such as "Access Token Manipulation" included. A
+configured URL's username without a password is registered only when it has a
+credential's shape by the scrub's own rules, so a user name such as
+`administrator` stays a word in events and rows; rows still lose every URL's
+userinfo, and a credential-named key in a URL's query or fragment. The bound never leaves the head of a value the scrub masks,
+and the event that carries a row is scrubbed by the publisher like every
+other.
 
 No count bounds the indicators the export carries: it carries every value the
 one publish rule publishes, which is every `yes` row of the IOC table, and no

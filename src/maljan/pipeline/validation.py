@@ -149,6 +149,10 @@ class Violation:
     # the finding to that technique's row by it: a message can name other ids
     # (an unknown id's names the closest real ones).
     subject: str = ""
+    # What a renderer prints after each of ``quoted``, in the same order, where
+    # each sentence carries its own label (a value and its publish state).
+    # Never shown to the producer and never stored on the channel.
+    labels: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         # A row written by a validator has no route, and its message is its
@@ -2487,8 +2491,12 @@ def record_flagged_statements(
         for violation in violations:
             if violation.code not in MARKED_IN_PLACE:
                 continue
-            label = violation.path.replace("_", " ")
-            for sentence in violation.quoted:
+            # A sentence with a label of its own (its values and their publish
+            # states) carries that; every other label is a term or a technique
+            # named by the finding's path.
+            default = violation.path.replace("_", " ")
+            for position, sentence in enumerate(violation.quoted):
+                label = violation.labels[position] if position < len(violation.labels) else default
                 key = (sentence, violation.code, label, asked)
                 if key not in seen:
                     seen.add(key)
@@ -3583,12 +3591,22 @@ CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
 UNPUBLISHED_RECOMMENDATION_CODE = "narrative.unpublished_indicator"
 ENTRY_CONTENTS_MISSTATED_CODE = "report.entry_contents_misstated"
 UNCITED_IDENTIFIER_CODE = "report.identifier_uncited"
+# A table row whose whole value is in none of the entries it cites
+# (``stated_value_violations``). Asked once; a row kept after it is marked
+# beside its evidence.
+STATED_VALUE_UNHELD_CODE = "report.value_not_in_cited_entry"
+# Technical prose naming a network value this run does not publish without
+# that value's publish state (``unpublished_value_violations``). Asked once; a
+# sentence kept after it is marked where it stands with the state.
+UNPUBLISHED_VALUE_CODE = "report.unpublished_value"
 TECHNIQUE_NAME_CODE = "report.technique_name"
 
 # The codes a report round's answer is kept with. A broken shape leaves nothing
 # to print; each of these leaves a printable answer with a finding beside it.
 # The findings whose sentences survive marked where they stand in the report.
-MARKED_IN_PLACE: frozenset[str] = frozenset({UNGROUNDED_CAPABILITY_CODE, RULE_MATCH_AS_ACTION_CODE})
+MARKED_IN_PLACE: frozenset[str] = frozenset(
+    {UNGROUNDED_CAPABILITY_CODE, RULE_MATCH_AS_ACTION_CODE, UNPUBLISHED_VALUE_CODE}
+)
 
 KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
     {
@@ -3600,6 +3618,8 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         CITATION_WRONG_ENTRY_CODE,
         ENTRY_CONTENTS_MISSTATED_CODE,
         UNCITED_IDENTIFIER_CODE,
+        STATED_VALUE_UNHELD_CODE,
+        UNPUBLISHED_VALUE_CODE,
         TECHNIQUE_NAME_CODE,
         RULE_MATCH_AS_ACTION_CODE,
         REPEATED_ITEMS_CODE,
@@ -3698,6 +3718,8 @@ def network_values_in(text: str) -> list[tuple[str, str]]:
 
 # What a recommendation's check says of a value no row of the IOC table holds.
 NO_TABLE_ROW = "no row of this run's IOC table holds it"
+# What the publish check says of a value the IOC table could not answer for.
+NO_TABLE_ANSWER = "the IOC table gave no answer for it"
 
 
 def recommendation_indicator_violations(
@@ -3746,6 +3768,145 @@ def recommendation_indicator_violations(
             )
         )
     return out
+
+
+# A publish state written beside a value: ``no: <reason>``, as the IOC table
+# prints it.
+_PUBLISH_STATE_RE = re.compile(r"(?<![\w-])no:\s*\S", re.IGNORECASE)
+
+
+def _prose_of_a_section(payload: Any) -> list[str]:
+    """A composer answer's prose, in order: a body or a text, then each step's action.
+
+    Only prose: a table cell (a configuration value, an identifier, an
+    endpoint) is a value, and the report prints its publish state beside it.
+    """
+    data = payload if isinstance(payload, dict) else {}
+    texts = [data.get(key) for key in ("body", "text")]
+    for step in data.get("steps") or []:
+        if isinstance(step, dict):
+            texts.append(step.get("action"))
+    return [text for text in texts if isinstance(text, str) and text.strip()]
+
+
+# How many words of a sentence a question quotes to name it.
+_SENTENCE_START_WORDS = 6
+
+
+def _sentence_start(sentence: str) -> str:
+    """A sentence named by its first words, quoted: ``"It connects to 192.0.2.1 on…"``."""
+    words = sentence.split()
+    start = " ".join(words[:_SENTENCE_START_WORDS])
+    return f'"{start}…"' if len(words) > _SENTENCE_START_WORDS else f'"{start}"'
+
+
+def _unstated_values(
+    sentence: str, answers: Callable[[str, str], str]
+) -> list[tuple[str, str, str]]:
+    """``(kind, value, state)`` for each value of ``sentence`` the table does not publish,
+    written without a ``no: <reason>`` between it and the next value the sentence names."""
+    from maljan.extractors.network_extractor import is_well_known_benign_host
+    from maljan.reporting.renderers.stix_renderer import publishes
+
+    plain = _refanged(sentence).lower()
+    values = network_values_in(sentence)
+    places = sorted((plain.find(value.lower()), kind, value) for kind, value in values if value)
+    out: list[tuple[str, str, str]] = []
+    for position, (start, kind, value) in enumerate(places):
+        end = places[position + 1][0] if position + 1 < len(places) else len(plain)
+        if start >= 0 and _PUBLISH_STATE_RE.search(plain[start + len(value) : max(end, start)]):
+            continue
+        try:
+            answer = str(answers(kind, value) or "")
+        except Exception as exc:  # noqa: BLE001 — a value the table cannot answer is refused
+            logger.debug("validation: no publish answer for a value (%s).", exc)
+            answer = f"no: {NO_TABLE_ANSWER}"
+        if publishes(answer):
+            continue
+        if not answer and kind == "domain" and is_well_known_benign_host(value):
+            continue
+        out.append((kind, value, (answer or f"no: {NO_TABLE_ROW}").split(";", 1)[0].strip()))
+    return out
+
+
+def unpublished_value_violations(
+    payload: Any, answers: Callable[[str, str], str]
+) -> list[Violation]:
+    """Report-model prose naming an address or a host this run does not publish, without its state.
+
+    ``answers`` is ``(kind, value) -> the IOC table's answer``, ``""`` for a
+    value no row holds (``narrative_agent.published_answers``). The section's
+    prose (:func:`_prose_of_a_section`) is read sentence by sentence; a value
+    the table does not answer ``yes`` for, with no ``no: <reason>`` between it
+    and the next value its sentence names, is listed. One question per
+    section names each value with its state — the answer's first clause, the
+    one that says why — and the sentences that name it, numbered in the
+    section's order. A reference host no row holds is a place to read, not an
+    indicator, and raises nothing. Nothing is removed: what the model answers
+    stands, and each sentence it keeps is marked where it stands with its own
+    values' states (``labels``, ``MARKED_IN_PLACE``).
+    """
+
+    # (state, value) -> sentence numbers, in the order first met.
+    named: dict[tuple[str, str], list[int]] = {}
+    quoted: list[str] = []
+    labels: list[str] = []
+    # Each sentence by its number, to name it by its start in the question.
+    written_as: dict[int, str] = {}
+    number = 0
+    for text in _prose_of_a_section(payload):
+        for sentence in _SENTENCE_END_RE.split(text):
+            written = sentence.strip()
+            if not written:
+                continue
+            number += 1
+            written_as[number] = written
+            found = _unstated_values(written, answers)
+            if not found:
+                continue
+            by_state: dict[str, list[str]] = {}
+            for _kind, value, state in found:
+                named.setdefault((state, value), []).append(number)
+                # As written: the renderer escapes and defangs the label.
+                if value not in by_state.setdefault(state, []):
+                    by_state[state].append(value)
+            if written not in quoted:
+                quoted.append(written)
+                labels.append(
+                    "; ".join(
+                        f"{', '.join(values)} ({state})" for state, values in by_state.items()
+                    )
+                )
+    if not named:
+        return []
+    # Each state once, with every value it refuses and the sentences naming them.
+    grouped: dict[str, tuple[list[str], set[int]]] = {}
+    for (state, value), numbers in named.items():
+        values, sentences = grouped.setdefault(state, ([], set()))
+        values.append(value)
+        sentences.update(numbers)
+    said = "; ".join(
+        f"{', '.join(safe_finding_value(value) for value in values)} "
+        f"({safe_finding_value(state)}) in "
+        + ", ".join(
+            safe_finding_value(_sentence_start(written_as[number])) for number in sorted(sentences)
+        )
+        for state, (values, sentences) in grouped.items()
+    )
+    return [
+        Violation(
+            code=UNPUBLISHED_VALUE_CODE,
+            message=(
+                f"the text names values this run does not publish, without their state: "
+                f"{said}. A value this run does not publish is written only with its publish "
+                "state beside it. Write the state beside each value, or write the text "
+                "without the value."
+            ),
+            path="unpublished values",
+            quoted=tuple(quoted),
+            labels=tuple(labels),
+        )
+    ]
 
 
 def _step_order(row: Mapping[str, Any], index: int) -> str:
@@ -4007,6 +4168,9 @@ class EntryTexts:
     # for the model or trimmed by the byte budget. A value absent from one of
     # them may be in the part that is not here, so no absence is read off it.
     partial: frozenset[str] = frozenset()
+    # Each letter-and-digit run of the texts, and the entries it is a whole run
+    # of: built once, on first use, by :meth:`may_hold`.
+    _runs: dict[str, frozenset[str]] = field(default_factory=dict, compare=False, repr=False)
 
     @classmethod
     def from_ledger(cls, ledger: Iterable[Any], corpus: Any = None) -> EntryTexts:
@@ -4049,6 +4213,44 @@ class EntryTexts:
             for form in written_forms(spelling)
         )
 
+    def may_hold(self, value: str) -> set[str]:
+        """The entries that may hold ``value`` for :meth:`holds`: never fewer, often far fewer.
+
+        A text holds a value only where every letter-and-digit run of one of
+        its spellings is a whole run of the text — the value's own ends are
+        bounded by characters that end a run, or by an escape, which is why
+        the runs are read both as written and with the escapes taken out. Read
+        once per report into a lookup, so a table of many rows checked against
+        a ledger of many entries costs a set intersection per row, not a scan
+        of every entry's text.
+        """
+        if not self._runs:
+            runs: dict[str, set[str]] = {}
+            for entry_id, text in self.texts.items():
+                lowered = text.lower()
+                for run in {
+                    *_TEXT_RUN_RE.findall(lowered),
+                    *_TEXT_RUN_RE.findall(_ESCAPE_PAIR_RE.sub(" ", lowered)),
+                }:
+                    runs.setdefault(run, set()).add(entry_id)
+            # The empty run marks the lookup as built, for a ledger of no text too.
+            self._runs.update({run: frozenset(ids) for run, ids in runs.items()})
+            self._runs[""] = frozenset()
+        found: set[str] = set()
+        for spelling in library_spellings(value):
+            for form in written_forms(spelling):
+                needed = set(_TEXT_RUN_RE.findall(form.lower()))
+                if not needed:
+                    return set(self.texts)
+                holders: set[str] | None = None
+                for run in needed:
+                    ids = self._runs.get(run, frozenset())
+                    holders = set(ids) if holders is None else holders & ids
+                    if not holders:
+                        break
+                found |= holders or set()
+        return found
+
     def holding(self, value: str) -> list[str]:
         """Every entry whose text holds ``value``, in ledger order; none for an undecidable one."""
         if not decidable(value):
@@ -4067,6 +4269,10 @@ class EntryTexts:
 # number inside some longer run. Such a value raises no question and no note.
 # A number: ``0x``-prefixed hex, a hex run with a digit in it (a word spelled
 # only with a–f, ``added``, is a word), or digits with separators.
+# A run of letters and digits, and a two-character escape a JSON text writes:
+# what :meth:`EntryTexts.may_hold` reads a text and a value by.
+_TEXT_RUN_RE = re.compile(r"[a-z0-9]+")
+_ESCAPE_PAIR_RE = re.compile(r'\\[nrtbf"/\\]')
 _ONLY_A_NUMBER_RE = re.compile(
     r"0x[0-9a-f]+|(?=[a-f]*[0-9])[0-9a-f]+|[0-9][0-9.,:]*", re.IGNORECASE
 )
@@ -4441,6 +4647,151 @@ def wrong_entry_citations(
             Violation(code=CITATION_WRONG_ENTRY_CODE, message=message, path="citation")
         )
     return violations
+
+
+# The tables whose rows state one value each, by the list a section answers
+# with, and what a question calls one of their rows and several.
+_STATED_VALUE_ROWS = {
+    "items": ("configuration item", "configuration items"),
+    "identifiers": ("identifier", "identifiers"),
+}
+# A number written alone or with a unit: ``1000``, ``0x3e8``, ``1,000 ms``,
+# ``1000ms``. The unit is one word of ``_UNITS``.
+_NUMBER_WITH_UNIT_RE = re.compile(
+    r"(0x[0-9a-f]+|\d{1,3}(?:,\d{3})+|\d+)(\s*)([a-z]+)?", re.IGNORECASE
+)
+# The units a configuration value's number is written with: time and size.
+_UNITS = frozenset(
+    {
+        "ms", "msec", "msecs", "millisecond", "milliseconds",
+        "s", "sec", "secs", "second", "seconds",
+        "m", "min", "mins", "minute", "minutes",
+        "h", "hr", "hrs", "hour", "hours",
+        "d", "day", "days",
+        "b", "byte", "bytes",
+        "kb", "kib", "kilobytes", "mb", "mib", "megabytes", "gb", "gib", "gigabytes",
+    }
+)  # fmt: skip
+
+
+def _stated_spellings(value: str, *, numbers: bool = False) -> list[str]:
+    """The spellings an entry may hold a stated value in: as written, and a number's two.
+
+    With ``numbers`` (a configuration value), a number is also held when the
+    entry writes it in decimal or in hex, the way a decompiler or a
+    configuration dump does, and a number written with a unit of ``_UNITS``
+    is held by the number. The unit follows a space, or is written against
+    the number only when its first letter is no hex digit: ``1000ms`` is a
+    number and a unit, ``1deadbeef`` and ``2bytes`` are not. A value the
+    conversion cannot read is looked for as written and nothing else.
+    """
+    spellings = [value]
+    if not numbers:
+        return spellings
+    try:
+        number = _NUMBER_WITH_UNIT_RE.fullmatch(value.strip())
+        if number is None:
+            return spellings
+        written, gap, unit = number.group(1).replace(",", ""), number.group(2), number.group(3)
+        if unit is not None and (
+            unit.lower() not in _UNITS or (not gap and unit[0].lower() in "abcdef")
+        ):
+            return spellings
+        amount = int(written, 16) if written.lower().startswith("0x") else int(written)
+        forms = (str(amount), hex(amount))
+    except (ValueError, OverflowError):
+        return spellings
+    spellings.extend(form for form in forms if form not in spellings)
+    return spellings
+
+
+def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Violation]:
+    """Table rows whose whole value is in none of the entries the row cites.
+
+    A configuration item or a host identifier states one value and cites the
+    entries it was read in. The whole value is looked for in each cited entry
+    under the citation check's own normalisation (:meth:`EntryTexts.holds`),
+    a number also in decimal and hex (:func:`_stated_spellings`). Held by one,
+    the row stands. Held by none, the row is asked about once, together with
+    the other rows of its table that cite the same entries; each row is named
+    by its number, which is how the report marks a row kept after it.
+
+    Not asked here: a row citing no entry the run holds text for (the uncited
+    questions ask it), a row with a cited entry known to be partial (the value
+    may be in the part that is not here), a configuration value marked
+    inferred (its own column says it was not read), and a value another entry
+    of the run holds, which :func:`wrong_entry_citations` asks with that entry
+    offered. A number held only by an entry the row does not cite is a
+    coincidence, not a source, so none is offered for it.
+    """
+    if payload is None or entries is None or not entries.texts:
+        return []
+    out: list[Violation] = []
+    # Whether another entry holds a value, once per value however many rows state it.
+    held_elsewhere: dict[str, bool] = {}
+
+    def _held_by(value: str, among: set[str], numbers: bool) -> bool:
+        return any(
+            entries.holds(ref, form)
+            for form in _stated_spellings(value, numbers=numbers)
+            for ref in entries.may_hold(form) & among
+        )
+
+    for list_key, (noun, nouns) in _STATED_VALUE_ROWS.items():
+        unheld: dict[tuple[str, ...], list[tuple[int, str, str]]] = {}
+        for index, row in enumerate(_rows_of(payload, list_key)):
+            value = str(row.get("value") or "").strip()
+            if not value or str(row.get("how_obtained") or "").strip().lower() == "inferred":
+                continue
+            cited = [ref for ref in _ids_in(row.get("evidence_refs")) if ref in entries.texts]
+            if not cited or any(ref in entries.partial for ref in cited):
+                continue
+            try:
+                if _held_by(value, set(cited), list_key == "items"):
+                    continue
+                if value not in held_elsewhere:
+                    held_elsewhere[value] = decidable(value) and any(
+                        entries.holds(ref, value) for ref in entries.may_hold(value)
+                    )
+            except (ValueError, OverflowError, RecursionError) as exc:
+                # A value no reader can take is not decidable: nothing is said of it.
+                logger.debug("validation: a stated value was not read (%s).", type(exc).__name__)
+                continue
+            if held_elsewhere[value]:
+                continue
+            label = str(row.get("key") or row.get("kind") or "").strip()
+            unheld.setdefault(tuple(cited), []).append((index + 1, label, value))
+        for refs, rows in unheld.items():
+            named = safe_finding_value(", ".join(entries.named(ref) for ref in refs))
+            if len(rows) == 1:
+                ((number, label, value),) = rows
+                said = (
+                    f"{noun} {number} ({safe_finding_value(label)}: "
+                    f"{safe_finding_value(value)!r}) is in none of the entries it cites: {named}."
+                )
+            else:
+                values = "; ".join(
+                    f"{number}: {safe_finding_value(value)!r}"
+                    for number, _label, value in rows[:_MAX_NAMED_IDS]
+                )
+                more = len(rows) - _MAX_NAMED_IDS
+                said = (
+                    f"{nouns} {', '.join(str(number) for number, _l, _v in rows)} are each in "
+                    f"none of the entries they cite: {named}. Their values: {values}"
+                    f"{f' and {more} more' if more > 0 else ''}."
+                )
+            out.append(
+                Violation(
+                    code=STATED_VALUE_UNHELD_CODE,
+                    message=(
+                        f"{said} A value in this table is one an entry records as written. "
+                        "Cite the entry that holds the whole value, write the value as that "
+                        "entry records it, or leave the row out."
+                    ),
+                    path=f"{list_key}.value:{','.join(refs)}",
+                )
+            )
+    return out
 
 
 # A statement that an entry holds nothing, or one line and no more. Asked of

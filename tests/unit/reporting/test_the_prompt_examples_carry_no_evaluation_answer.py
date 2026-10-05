@@ -140,10 +140,12 @@ from maljan.pipeline.validation import (
     recommendation_indicator_violations,
     repeated_item_violations,
     section_cut_violation,
+    stated_value_violations,
     technique_line_violation,
     unattributed_indicator_violations,
     undescribed_technique_finding,
     ungrounded_capabilities,
+    unpublished_value_violations,
     validate_verdict_bundle,
 )
 from maljan.providers.base import STATIC_EVIDENCE_INSTRUCTIONS, absent_provider_fragment
@@ -614,6 +616,25 @@ PROMPTS: dict[str, str] = {
                 ]
             },
             lambda kind, value: "no: x" if kind == "ip" else "",
+        )
+    ),
+    "composer question about table rows no cited entry holds": " ".join(
+        v.message
+        for v in stated_value_violations(
+            {
+                "items": [
+                    {"key": "k", "value": "one.example", "evidence_refs": ["ev_0001"]},
+                    {"key": "j", "value": "two.example", "evidence_refs": ["ev_0001"]},
+                ],
+                "identifiers": [{"kind": "k", "value": "three", "evidence_refs": ["ev_0001"]}],
+            },
+            EntryTexts(texts={"ev_0001": "nothing here"}, tools={"ev_0001": "strings"}),
+        )
+    ),
+    "composer question about an unpublished value in its text": " ".join(
+        v.message
+        for v in unpublished_value_violations(
+            {"body": "It reaches 192.0.2.1."}, lambda kind, value: "no: x"
         )
     ),
     "judge question about an indicator on a value the sample did not reach": " ".join(

@@ -673,14 +673,11 @@ class MarkdownRenderer:
                 how = item.how_obtained + (
                     " (unresolved: report.configuration_uncited)" if unresolved else ""
                 )
-                body.append(
-                    _row(
-                        ctx.cell(item.key),
-                        ctx.cell(item.value),
-                        how,
-                        ", ".join(item.evidence_refs) or "no evidence cited",
-                    )
-                )
+                cited = ", ".join(item.evidence_refs) or "no evidence cited"
+                if index + 1 in ctx.config_unheld:
+                    cited += " (unresolved: report.value_not_in_cited_entry)"
+                value = ctx.cell(item.value) + ctx.publish_state(item.value)
+                body.append(_row(ctx.cell(item.key), value, how, cited))
             blocks.append("\n".join(body))
         else:
             blocks.append(
@@ -838,7 +835,7 @@ class MarkdownRenderer:
                     _row(
                         ctx.cell(ch.name),
                         ctx.cell(ch.protocol or "-"),
-                        "; ".join(_endpoint(e) for e in ch.endpoints) or "-",
+                        "; ".join(_endpoint_with_state(e, ctx) for e in ch.endpoints) or "-",
                         ctx.cell(ch.encryption or "-"),
                         ctx.cell(fmt or "-"),
                         ", ".join(dict.fromkeys(refs)) or "no evidence cited",
@@ -1770,14 +1767,14 @@ class MarkdownRenderer:
                 lines.append(
                     _item(
                         f"`{row.get('code', '')}` ({row.get('agent', '')}){advisory}: "
-                        f"{row.get('message') or ''}"
+                        f"{_finding_text(row)}"
                     )
                 )
             for row in answered:
                 lines.append(
                     _item(
                         f"`{row.get('code', '')}` ({row.get('agent', '')}) (answered): "
-                        f"{row.get('message') or ''}"
+                        f"{_finding_text(row)}"
                     )
                 )
             if others or answered:
@@ -2070,6 +2067,14 @@ class _Context:
                 self.unresolved, "report.configuration_uncited", r"configuration item (\d+)"
             )
         }
+        # The rows whose whole value is in none of the entries they cite, kept
+        # after the question: marked beside their evidence.
+        self.config_unheld = _rows_named_in(
+            self.unresolved, "report.value_not_in_cited_entry", "configuration item"
+        )
+        self.identifier_unheld = _rows_named_in(
+            self.unresolved, "report.value_not_in_cited_entry", "identifier"
+        )
         net = report.network
         # What the run knows about a sandbox, in four answers: it recorded
         # something; its tools were called and returned nothing; none was
@@ -2148,9 +2153,16 @@ class _Context:
         marks: dict[str, list[str]] = {}
         for row in getattr(report, "flagged_statements", None) or []:
             if row.sentence.strip():
-                mark = _flag_mark(row.code, row.label, asked=row.asked)
+                try:
+                    label = _inline_safe(row.label, pipes=False)
+                except Exception as exc:  # noqa: BLE001 — the sentence is marked all the same
+                    logger.debug("markdown: a mark's label was not written (%s).", exc)
+                    label = STATE_UNKNOWN
+                mark = _flag_mark(row.code, label, asked=row.asked)
                 if mark not in marks.setdefault(row.sentence, []):
                     marks[row.sentence].append(mark)
+        # The IOC table's answers, read on first use by ``publish_state``.
+        self._answers: Any = None
         self.flagged = sorted(
             ((sentence, " ".join(found)) for sentence, found in marks.items()),
             key=lambda pair: -len(pair[0]),
@@ -2227,6 +2239,41 @@ class _Context:
         for end, mark in sorted(inserts, reverse=True):
             text = f"{text[:end]} {mark}{text[end:]}"
         return text
+
+    def publish_state(self, text: Any) -> str:
+        """`` (no: <why>)`` for each value of a table cell this run does not publish, or ``""``.
+
+        The platform states the IOC table's answer beside the value; nothing
+        is asked. A reference host no row holds is no indicator and gets
+        nothing. The state is the answer's first clause, as the prose marks
+        print it; one value alone is not named again. Written defanged and
+        with Markdown's own characters escaped (:func:`_inline_safe`). Fails
+        closed: a table that cannot be read states every value refused for
+        that reason, and a lookup that fails says the state is unknown.
+        """
+        try:
+            from maljan.pipeline.validation import _unstated_values
+            from maljan.reporting.defang import defang
+
+            if self._answers is None:
+                try:
+                    from maljan.reporting.narrative_agent import published_answers
+
+                    self._answers = published_answers(self.report)
+                except Exception as exc:  # noqa: BLE001 — every value is then refused
+                    logger.debug("markdown: the IOC table was not read (%s).", exc)
+                    self._answers = lambda kind, value: TABLE_NOT_READ
+            found = _unstated_values(str(text or ""), self._answers)
+            if not found:
+                return ""
+            if len(found) == 1:
+                said = found[0][2]
+            else:
+                said = "; ".join(f"{defang(value, kind)}: {state}" for kind, value, state in found)
+            return f" ({_inline_safe(said, pipes=False)})"
+        except Exception as exc:  # noqa: BLE001 — the cell says what is not known
+            logger.debug("markdown: a cell's publish state was not read (%s).", exc)
+            return f" ({STATE_UNKNOWN})" if _names_a_network_value(text) else ""
 
     def plain(self, text: str) -> str:
         """A value with the run's network indicators defanged and nothing else changed."""
@@ -2326,6 +2373,27 @@ def _named_in(rows: list[dict[str, Any]], code: str, pattern: str) -> set[str]:
         match = re.search(pattern, str(row.get("message") or ""))
         if match:
             found.add(match.group(1))
+    return found
+
+
+def _rows_named_in(rows: list[dict[str, Any]], code: str, noun: str) -> set[int]:
+    """The row numbers the unresolved rows of one code name at their start.
+
+    ``identifier 3 (…)`` names one row; ``identifiers 3, 4, 9 are …`` names
+    several.
+    """
+    pattern = re.compile(rf"^{re.escape(noun)}s? (\d+(?:, \d+)*)\b")
+    found: set[int] = set()
+    for row in rows:
+        if row.get("code") != code:
+            continue
+        match = pattern.search(str(row.get("message") or ""))
+        if match:
+            for number in match.group(1).split(", "):
+                try:
+                    found.add(int(number))
+                except ValueError:
+                    continue
     return found
 
 
@@ -2466,7 +2534,89 @@ def _degraded_sentence(report: MalwareReport, ctx: _Context) -> str:
 _FLAG_WORDS = {
     "narrative.ungrounded_capability": "not established by this run",
     "report.rule_match_as_action": "a rule match only, stated as an action",
+    "report.unpublished_value": "not published by this run",
 }
+
+
+# What a cell says of a value whose publish state could not be read, and the
+# state of every value when the IOC table itself could not be read.
+STATE_UNKNOWN = "publish state unknown: the IOC table's answer could not be read"
+TABLE_NOT_READ = "no: the IOC table could not be read"
+# The findings this report's own checks write about a value: printed defanged
+# and escaped wherever the report prints their messages.
+_VALUE_FINDING_CODES = frozenset({"report.value_not_in_cited_entry", "report.unpublished_value"})
+# The table separator, named rather than written: a literal one in this module
+# is a table row assembled by hand (``test_a_table_row_is_never_assembled_by_hand``).
+_PIPE = chr(124)
+# A URL and a mailbox in free text, for defanging what no indicator list holds.
+_URL_IN_TEXT = re.compile(
+    r"(?i)\b(?:https?" + _PIPE + r"ftp" + _PIPE + r"hxxps?)://[^\s<>()\[\]`'\"" + _PIPE + r"]+"
+)
+_EMAIL_IN_TEXT = re.compile(r"(?<![\w.+-])[\w.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
+# The characters that make Markdown of a sample's text: a code span, a link or
+# image, an HTML tag, a table cell, emphasis, and the backslash itself.
+_INLINE_META = re.compile(r"([\\`\[\]<>*" + _PIPE + r"])")
+_INLINE_META_NO_PIPE = re.compile(r"([\\`\[\]<>*])")
+
+
+def _defanged_text(text: str) -> str:
+    """``text`` with every URL, mailbox, address and host in it defanged, as the report does."""
+    from maljan.pipeline.validation import network_values_in
+    from maljan.reporting.defang import defang_text
+
+    indicators = [(found.group(0), "url") for found in _URL_IN_TEXT.finditer(text)]
+    indicators += [(found.group(0), "email") for found in _EMAIL_IN_TEXT.finditer(text)]
+    indicators += [(value, kind) for kind, value in network_values_in(text)]
+    return defang_text(text, indicators)
+
+
+def _inline_safe(text: Any, *, pipes: bool = True) -> str:
+    """A value this report's checks wrote about the sample: escaped, then defanged.
+
+    Markdown's own characters are escaped first, so a sample's value cannot
+    open a link, a tag or a code span; ``pipes=False`` leaves the table
+    separator to the row, which escapes it itself (:func:`_cell`).
+    """
+    meta = _INLINE_META if pipes else _INLINE_META_NO_PIPE
+    return _defanged_text(meta.sub(r"\\\1", str(text or "")))
+
+
+def _names_a_network_value(text: Any) -> bool:
+    """Whether a cell names an address, a host, a URL or a mailbox; true when that is unknown."""
+    try:
+        from maljan.pipeline.validation import network_values_in
+
+        plain = str(text or "")
+        return bool(
+            network_values_in(plain) or _URL_IN_TEXT.search(plain) or _EMAIL_IN_TEXT.search(plain)
+        )
+    except Exception:  # noqa: BLE001 — unread, the cell is taken to name one
+        return True
+
+
+def _code_span(text: str) -> str:
+    """``text`` as one code span, fenced longer than any backtick run inside it.
+
+    A value holding a backtick closed a one-backtick span and let what
+    followed render as Markdown, a live link included.
+    """
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    if not longest:
+        return f"`{text}`"
+    fence = "`" * (longest + 1)
+    return f"{fence} {text} {fence}"
+
+
+def _finding_text(row: dict[str, Any]) -> str:
+    """A finding's message as the report prints it: the value findings defanged and escaped."""
+    message = str(row.get("message") or "")
+    if row.get("code") not in _VALUE_FINDING_CODES:
+        return message
+    try:
+        return _inline_safe(message)
+    except Exception as exc:  # noqa: BLE001 — never the raw values
+        logger.debug("markdown: a finding was not written (%s).", exc)
+        return STATE_UNKNOWN
 
 
 def _flag_mark(code: str, label: str, *, asked: bool = True) -> str:
@@ -2485,7 +2635,7 @@ def _findings_beside(rows: list[dict[str, str]]) -> list[str]:
     if not rows:
         return []
     lines = ["", f"_The platform's unresolved findings on this section ({MEASURED}):_", ""]
-    lines.extend(_item(f"`{row['code']}`: {row['message']}") for row in rows)
+    lines.extend(_item(f"`{row['code']}`: {_finding_text(row)}") for row in rows)
     return lines
 
 
@@ -2986,6 +3136,16 @@ def _names_any(text: str, words: tuple[str, ...]) -> bool:
     return any(word in lowered for word in words)
 
 
+def _endpoint_with_state(value: str, ctx: _Context) -> str:
+    """An endpoint as :func:`_endpoint` writes it, with the IOC table's state where it adds one.
+
+    An endpoint already marked as no host outside could answer keeps that
+    mark alone.
+    """
+    written = _endpoint(value)
+    return written + ctx.publish_state(value) if written.endswith("`") else written
+
+
 def _endpoint(value: str) -> str:
     """One model-written endpoint, defanged, and marked when no host outside could answer."""
     from maljan.extractors.network_extractor import (
@@ -3035,10 +3195,12 @@ def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
         cited = ", ".join(item.evidence_refs) or "no evidence cited"
         if index + 1 in ctx.identifier_findings:
             cited += " (unresolved: report.identifier_uncited)"
+        if index + 1 in ctx.identifier_unheld:
+            cited += " (unresolved: report.value_not_in_cited_entry)"
         lines.append(
             _row(
                 ctx.cell(item.kind),
-                f"`{_one_line(item.value)}`",
+                _code_span(_defanged_text(_one_line(item.value))) + ctx.publish_state(item.value),
                 ctx.cell(item.purpose) if item.purpose.strip() else PURPOSE_NOT_STATED,
                 cited,
             )

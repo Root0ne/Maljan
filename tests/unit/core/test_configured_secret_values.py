@@ -163,3 +163,21 @@ def test_a_disabled_setting_leaves_the_word_in_a_report() -> None:
         configured_secret_values(_Settings(servers=[_Server(env={"AUTH_MODE": "disabled"})]))
     )
     assert ev.scrub("Defender is disabled.") == "Defender is disabled."
+
+
+def test_a_configured_url_gives_every_credential_it_carries() -> None:
+    from tests.credential_shapes import password, prefixed_key
+
+    short, token, query = password(5), prefixed_key("ghp_", 36), password(16, variant=5)
+    found = configured_secret_values(
+        {
+            "servers": [
+                {"url": f"https://operator:{short}@sandbox.example/api"},
+                {"url": f"https://{token}@mcp.example/sse"},
+                {"url": f"https://mcp.example/sse?access_token={query}&mode=plain"},
+            ]
+        }
+    )
+
+    assert {short, token, query} <= found
+    assert "operator" not in found and "plain" not in found
