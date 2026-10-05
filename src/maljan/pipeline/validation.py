@@ -1043,53 +1043,63 @@ def _stem(word: str) -> str:
     return stem
 
 
-# The regular inflections of a word that ends in a silent "e", by what replaces
-# that "e": "decode" is written "decodes", "decoded", "decoder", "decoding";
-# "deobfuscate" is written "deobfuscation". ``_stem`` keeps such a word whole —
-# no ending of its own comes off it — so without these its inflections never
-# met it.
-_SILENT_E_INFLECTIONS = ("es", "ed", "er", "ers", "ing", "ings", "ion", "ions")
+# The regular inflections of a verb that ends in a silent "e", by what replaces
+# that "e": "decode" is written "decodes", "decoded", "decoding". ``_stem``
+# keeps such a word whole, so without these they never met it. Only these
+# forms, compared whole: an agent noun or a nominalisation ("computer",
+# "privation") is a word of its own as often as it is the verb's.
+_SILENT_E_INFLECTIONS = ("s", "d")
+_SILENT_E_DROPPED = ("ing", "ings")
 
 
-def _inflected_stems(word: str) -> set[str]:
-    """The stems of ``word``'s regular inflections, where ``_stem`` would not reach them.
+def _inflected_forms(name: str) -> set[str]:
+    """The inflections of the verb a catalogue name opens with, when it ends in a silent "e".
 
-    Only a word ending in a silent "e" with at least four letters before it,
-    the floor ``_stem`` keeps: a shorter word ("use", "code") has inflections
-    that are words of their own ("user", "coder").
+    ATT&CK writes a technique led by its action as a verb first
+    ("Deobfuscate/Decode Files or Information"); a word anywhere else in a
+    name is a noun ("Monitor Process State", "Malicious Copy and Paste"), and
+    its "-d" form is another word ("stated", "pasted"). The leading word, or
+    each word of a leading slash pair, with at least four letters before the
+    "e": a shorter one ("use", "code") has forms that are words of their own.
     """
-    lowered = word.lower()
-    if not lowered.endswith("e") or len(lowered) < 5:
-        return set()
-    base = lowered[:-1]
-    return {_stem(base + ending) for ending in _SILENT_E_INFLECTIONS}
+    words = str(name or "").split()
+    lead = words[0] if words else ""
+    forms: set[str] = set()
+    for word in lead.split("/"):
+        lowered = word.lower()
+        if not re.fullmatch(r"[a-z]+e", lowered) or len(lowered) < 5:
+            continue
+        forms.update(lowered + ending for ending in _SILENT_E_INFLECTIONS)
+        forms.update(lowered[:-1] + ending for ending in _SILENT_E_DROPPED)
+    return forms
 
 
-def _name_terms(technique_id: str, attck: Any) -> tuple[str, set[str]]:
-    """The catalogue name of a technique and the stems of its words, parent's included.
+def _name_terms(technique_id: str, attck: Any) -> tuple[str, set[str], set[str]]:
+    """The catalogue name, the stems of its words and the inflections of its leading verb.
 
-    With the stems of each word's regular inflections (:func:`_inflected_stems`),
-    so "deobfuscates" and "decoded" share a term with Deobfuscate/Decode Files
-    or Information. ``("", set())`` when the catalogue gives no name.
+    The parent's name is included for a sub-technique. The inflections
+    (:func:`_inflected_forms`) are compared as whole words, so "deobfuscates"
+    and "decoded" share a term with Deobfuscate/Decode Files or Information.
+    ``("", set(), set())`` when the catalogue gives no name.
     """
     answer = _catalogue_answer(str(technique_id), attck, "attck_lookup")
     name = str(answer.get("name") or "").strip()
     if not name:
-        return "", set()
+        return "", set(), set()
     names = [name]
     if "." in str(technique_id):
         parent = _catalogue_answer(str(technique_id).split(".")[0], attck, "attck_lookup")
         names.append(str(parent.get("name") or ""))
-    words = [
-        word
+    stems = {
+        _stem(word)
         for text in names
         for word in re.findall(r"[A-Za-z0-9]+", text)
         if len(word) >= 3 and word.lower() not in _NAME_FILLER_WORDS
-    ]
-    stems = {_stem(word) for word in words}
-    for word in words:
-        stems |= _inflected_stems(word)
-    return name, stems
+    }
+    forms: set[str] = set()
+    for text in names:
+        forms |= _inflected_forms(text)
+    return name, stems, forms
 
 
 def claim_does_not_describe_violation(
@@ -1111,13 +1121,17 @@ def claim_does_not_describe_violation(
     text = str(getattr(claim, "claim", "") or "")
     if not text.strip() or attck is None:
         return None
-    name, stems = _name_terms(technique_id, attck)
+    name, stems, forms = _name_terms(technique_id, attck)
     if not name:
         return None
     pattern = behaviour_pattern(technique_id, attck)
     if pattern is not None and pattern.search(text):
         return None
-    if any(_stem(word) in stems for word in re.findall(r"[A-Za-z0-9]+", text) if len(word) >= 3):
+    if any(
+        _stem(word) in stems or word.lower() in forms
+        for word in re.findall(r"[A-Za-z0-9]+", text)
+        if len(word) >= 3
+    ):
         return None
     tid = safe_finding_value(technique_id)
     otherwise = (
@@ -1150,7 +1164,7 @@ def undescribed_technique_finding(technique_id: str, attck: Any, claims: int) ->
     ``""`` without the catalogue's name for the id: nothing is stated that
     cannot be checked.
     """
-    name, _stems = _name_terms(technique_id, attck)
+    name, _stems, _forms = _name_terms(technique_id, attck)
     if not name:
         return ""
     tid = safe_finding_value(technique_id)

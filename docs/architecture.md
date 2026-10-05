@@ -1137,9 +1137,11 @@ decides.
    (`attck.claim_does_not_describe`). A claim whose sentence shares no term
    with the technique it carries — no capability term listing the id, no word
    of its catalogue name or its parent's (compared with common endings off:
-   "obfuscation" and "Obfuscated Files or Information" share one; a name word
-   ending in a silent "e" also by its regular inflections, so "deobfuscates"
-   and "decoded" share one with Deobfuscate/Decode Files or Information), no tactic
+   "obfuscation" and "Obfuscated Files or Information" share one; the verb a
+   name opens with, when it ends in a silent "e", also by its -s, -d and -ing
+   forms compared whole, so "deobfuscates" and "decoded" share one with
+   Deobfuscate/Decode Files or Information while "stated", "computer" and
+   "officer" share none with State, Compute or Office), no tactic
    as a category phrase — is asked once to keep the technique only if the
    sample does it, and then to say what it does. Decided only where the
    catalogue gives the id's name, and not asked of an absence claim or a

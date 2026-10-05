@@ -35,8 +35,6 @@ def _claim(text: str, technique: str) -> ClaimEvidence:
     [
         ("The sample deobfuscates its own strings at run time.", "T1140"),
         ("Its strings are decoded only at run time by one routine.", "T1140"),
-        ("The strings are recovered at run time by the decoder routine.", "T1140"),
-        ("Deobfuscation of its configuration happens before use.", "T1140"),
         ("A full enumeration of the config decodings agrees in total.", "T1140"),
         ("The routine is decoding every blob before its caller reads it.", "T1140"),
         # A name word ending in -ion, written as its verb.
@@ -64,3 +62,66 @@ def test_a_word_that_is_no_inflection_is_still_asked(text: str, technique: str) 
     codes = [v.code for v in validate_isr(isr, attck=knowledge, sample=PE)]
 
     assert codes == [CLAIM_DOES_NOT_DESCRIBE_CODE]
+
+
+# Words of their own that look like the inflections of a catalogue name word.
+UNRELATED = (
+    "stated",
+    "station",
+    "stats",
+    "computer",
+    "past",
+    "officer",
+    "temples",
+    "privy",
+    "privation",
+    "coder",
+)
+
+
+def _every_technique() -> list[str]:
+    from maljan.memory.attck_loader import valid_ids
+
+    return sorted(valid_ids())
+
+
+def test_no_catalogue_name_shares_a_term_with_a_word_of_its_own() -> None:
+    from maljan.pipeline.validation import _name_terms, _stem
+
+    shared = []
+    for tid in _every_technique():
+        name, stems, forms = _name_terms(tid, knowledge)
+        for word in UNRELATED:
+            if _stem(word) in stems or word in forms:
+                shared.append((tid, name, word))
+    assert shared == []
+
+
+def test_the_inflections_come_from_the_leading_verb_only() -> None:
+    from maljan.pipeline.validation import _inflected_forms
+
+    assert _inflected_forms("Deobfuscate/Decode Files or Information") == {
+        "deobfuscates",
+        "deobfuscated",
+        "deobfuscating",
+        "deobfuscatings",
+        "decodes",
+        "decoded",
+        "decoding",
+        "decodings",
+    }
+    assert _inflected_forms("Monitor Process State") == set()
+    assert _inflected_forms("Malicious Copy and Paste") == set()
+    # A leading word shorter than five letters keeps no forms ("use" and "user").
+    assert _inflected_forms("Use Alternate Authentication Material") == set()
+
+
+@pytest.mark.parametrize(
+    ("text", "technique"),
+    [
+        ("The sample collects the computer name.", "T1578"),
+        ("The analyst stated the sample reads its own image.", "T0801"),
+    ],
+)
+def test_a_word_of_its_own_is_no_inflection_of_a_name_word(text: str, technique: str) -> None:
+    assert claim_does_not_describe_violation(_claim(text, technique), technique, knowledge)
