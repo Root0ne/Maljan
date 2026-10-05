@@ -2,7 +2,7 @@
 
 Tests:
   - chunk_merger.merge_chunk_isrs() — deduplication, confidence selection,
-    dissent reconciliation, MAX_MERGED_CLAIMS cap
+    dissent reconciliation, every claim kept
   - BaseAnalyst.safe_analyze_isr_chunked() — single chunk fast path, multi
     chunk merge path, partial failure handling
   - ServiceContainer.load_chunked() — single text fast path, chunked path
@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.analysis.chunk_merger import MAX_MERGED_CLAIMS, merge_chunk_isrs
+from maljan.analysis.chunk_merger import merge_chunk_isrs
 from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
@@ -178,37 +178,22 @@ class TestMergeChunkISRsUnkeyedDedup:
 
 
 # ---------------------------------------------------------------------------
-# merge_chunk_isrs — MAX_MERGED_CLAIMS cap
+# merge_chunk_isrs — every claim is kept
 # ---------------------------------------------------------------------------
 
 
-class TestMergeChunkISRsCap:
-    def test_excess_claims_capped(self) -> None:
-        # Create MAX_MERGED_CLAIMS + 5 unique claims
-        claims = [_claim(f"T{1000 + i:04d}", 0.5) for i in range(MAX_MERGED_CLAIMS + 5)]
-        isrs = [_make_isr(claims=claims)]
-        merge_chunk_isrs(isrs)  # single ISR returns unchanged — no cap triggered
-        # Wrap in two ISRs to trigger merge path
-        isrs2 = [
-            _make_isr(claims=claims[: MAX_MERGED_CLAIMS + 3]),
-            _make_isr(claims=claims[MAX_MERGED_CLAIMS + 3 :]),
-        ]
-        result2 = merge_chunk_isrs(isrs2)
-        assert len(result2.claims) <= MAX_MERGED_CLAIMS
+class TestMergeChunkISRsKeepsEveryClaim:
+    def test_no_claim_is_dropped_for_a_count(self) -> None:
+        claims = [_claim(f"T{1000 + i:04d}", 0.5) for i in range(45)]
+        result = merge_chunk_isrs([_make_isr(claims=claims[:30]), _make_isr(claims=claims[30:])])
+        assert {c.technique_id for c in result.claims} == {c.technique_id for c in claims}
 
-    def test_highest_confidence_claims_survive_cap(self) -> None:
-        # Low-confidence claims should be dropped first
+    def test_low_confidence_claims_are_kept_after_the_high_ones(self) -> None:
         low = [_claim(f"T{2000 + i:04d}", 0.1) for i in range(5)]
-        high = [_claim(f"T{3000 + i:04d}", 0.9) for i in range(MAX_MERGED_CLAIMS)]
-        isrs = [
-            _make_isr(claims=high),
-            _make_isr(claims=low),
-        ]
-        result = merge_chunk_isrs(isrs)
-        surviving_ids = {c.technique_id for c in result.claims}
-        # All high-confidence TTP claims should survive
-        for h in high[:MAX_MERGED_CLAIMS]:
-            assert h.technique_id in surviving_ids
+        high = [_claim(f"T{3000 + i:04d}", 0.9) for i in range(25)]
+        result = merge_chunk_isrs([_make_isr(claims=high), _make_isr(claims=low)])
+        assert len(result.claims) == 30
+        assert [c.confidence for c in result.claims[:25]] == [0.9] * 25
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +267,7 @@ class TestSafeAnalyzeISRChunked:
         def _infer_domain(self):
             return "static"
 
-        def _system_prompt(self, fallback):
+        def _system_prompt(self, fallback, tools=None):
             return "system"
 
         def _truncate_input(self, text: str) -> str:
@@ -328,6 +313,169 @@ class TestSafeAnalyzeISRChunked:
         result = analyst.safe_analyze_isr_chunked(chunks)
         # Merged ISR should have claims from both chunks
         assert len(result.claims) >= 1
+
+    def test_the_merged_validation_runs_under_the_agent_s_lock(
+        self, analyst: _ConcreteAnalyst
+    ) -> None:
+        """A delegated ask of the same agent waits until the validation turn is done.
+
+        The validation turn marks the findings buffer and slices it in
+        ``_parse``; an ask landing in between would carry this ISR's findings
+        onto its own answer, or its findings onto this one.
+        """
+        import threading
+        import time
+
+        from maljan.agents.base_agent import lock_for
+
+        analyst.delegation_lock = threading.RLock()
+        order: list[str] = []
+        validating = threading.Event()
+
+        def _validate(isr: AgentISR, evidence: str, **_kw: object) -> AgentISR:
+            order.append("validation starts")
+            validating.set()
+            time.sleep(0.3)
+            order.append("validation ends")
+            return isr
+
+        def _ask() -> None:
+            validating.wait(5)
+            with lock_for(analyst):
+                order.append("ask")
+
+        analyst._validate_isr = _validate  # type: ignore[method-assign]
+        asker = threading.Thread(target=_ask)
+        asker.start()
+        analyst.safe_analyze_isr_chunked([_make_chunk(i, 2) for i in range(2)])
+        asker.join(5)
+
+        assert order == ["validation starts", "validation ends", "ask"]
+
+    def test_a_cut_in_chunk_one_reaches_the_merged_check_after_a_short_chunk_two(
+        self, analyst: _ConcreteAnalyst
+    ) -> None:
+        """Each chunk's loop records its own answer; chunk 2's must not erase chunk 1's cut."""
+        cut_text = "CLAIM: one\nEVIDENCE: [ev_0001]\nCLAIM: tw"
+        answers = iter([(32768, cut_text), None])
+        real_analyze = analyst.analyze_isr
+
+        def _analyze(data: str) -> AgentISR:
+            isr = real_analyze(data)
+            # What ``_record_usage`` leaves after each chunk's last answer.
+            analyst._last_answer_cut = next(answers)
+            return isr
+
+        seen: list[tuple[object, dict[str, object]]] = []
+
+        def _validate(isr: AgentISR, evidence: str, **kw: object) -> AgentISR:
+            seen.append((analyst._last_answer_cut, dict(kw)))
+            return isr
+
+        analyst.analyze_isr = _analyze  # type: ignore[method-assign]
+        analyst._validate_isr = _validate  # type: ignore[method-assign]
+        analyst.safe_analyze_isr_chunked([_make_chunk(i, 2) for i in range(2)])
+
+        # Chunk 1's cut is asked about inside chunk 1; the merged check gets no cut.
+        assert seen == [
+            ((32768, cut_text), {"chunk": "chunk 1 of 2", "only_cut": True}),
+            (None, {}),
+        ]
+
+    def test_a_chunk_that_raises_after_a_cut_leaves_no_cut_for_the_next(
+        self, analyst: _ConcreteAnalyst
+    ) -> None:
+        real_analyze = analyst.analyze_isr
+        calls: list[int] = []
+        seen: list[object] = []
+
+        def _analyze(data: str) -> AgentISR:
+            calls.append(1)
+            if len(calls) == 1:
+                analyst._last_answer_cut = (32768, "CLAIM: cut")
+                raise RuntimeError("the loop failed after its answer")
+            return real_analyze(data)
+
+        def _validate(isr: AgentISR, evidence: str, **kw: object) -> AgentISR:
+            seen.append(analyst._last_answer_cut)
+            return isr
+
+        analyst.analyze_isr = _analyze  # type: ignore[method-assign]
+        analyst._validate_isr = _validate  # type: ignore[method-assign]
+        analyst.safe_analyze_isr_chunked([_make_chunk(i, 2) for i in range(2)])
+
+        assert seen == [None]
+
+    def test_a_later_chunk_is_told_what_the_earlier_ones_called(
+        self, analyst: _ConcreteAnalyst
+    ) -> None:
+        """Chunk 2 re-ran ten decompiles chunk 1 had done: it is now told, and they are not run."""
+        from maljan.agents.base_agent import EARLIER_CHUNKS_HEAD
+        from maljan.schemas.evidence import LedgerEntry
+
+        analyst._evidence_entries = []
+        prompts: list[str] = []
+        seeds: list[list[str]] = []
+        real_analyze = analyst.analyze_isr
+
+        def _analyze(data: str) -> AgentISR:
+            prompts.append(data)
+            seeds.append([e.id for e in getattr(analyst, "_prior_chunk_calls", None) or []])
+            n = len(analyst._evidence_entries) + 1
+            analyst._evidence_entries.append(
+                LedgerEntry(
+                    id=f"ev_{n:04d}",
+                    agent="static",
+                    tool="decompile_function",
+                    args={"address": f"0x{n:04x}"},
+                    ok=n != 2,
+                    output=f"int FUN_{n:04x}(void)\n{{ return {n}; }}",
+                    remediation=None if n != 2 else "load the program first",
+                )
+            )
+            return real_analyze(data)
+
+        analyst.analyze_isr = _analyze  # type: ignore[method-assign]
+        analyst.safe_analyze_isr_chunked([_make_chunk(i, 3) for i in range(3)])
+
+        first_call = '- decompile_function({"address": "0x0001"}) \u2192 ev_0001'
+        failed_call = '- decompile_function({"address": "0x0002"}) \u2192 ev_0002 (failed)'
+        assert EARLIER_CHUNKS_HEAD not in prompts[0]
+        assert EARLIER_CHUNKS_HEAD in prompts[1]
+        assert first_call in prompts[1]
+        assert first_call in prompts[2]
+        assert failed_call in prompts[2]
+        assert f"{first_call}: int FUN_0001(void) {{ return 1; }}" in prompts[1]
+        assert f"{failed_call}: the call failed; load the program first" in prompts[2]
+        assert seeds == [[], ["ev_0001"], ["ev_0001", "ev_0002"]]
+        # The calls of this analysis alone, and none left behind for a later loop.
+        assert getattr(analyst, "_prior_chunk_calls", None) in (None, [])
+
+    def test_the_loop_seeds_its_repeat_guard_with_them(self) -> None:
+        from maljan.agents.evidence_recorder import seeded_repeat_guard
+        from maljan.schemas.evidence import LedgerEntry
+
+        guard = seeded_repeat_guard(
+            [
+                LedgerEntry(
+                    id="ev_0004",
+                    tool="decompile_function",
+                    args={"address": "0x1"},
+                    output="int FUN_1(void)",
+                )
+            ]
+        )
+
+        assert guard.answered_by("decompile_function", {"address": "0x1"}) == "ev_0004"
+        assert guard.answered_by("decompile_function", {"address": "0x2"}) is None
+
+    def test_the_analyst_loop_builds_its_guard_from_the_earlier_chunks(self) -> None:
+        import inspect
+
+        from maljan.agents import base_agent
+
+        source = inspect.getsource(base_agent.BaseAnalyst.execute_tool_loop)
+        assert 'seeded_repeat_guard(getattr(self, "_prior_chunk_calls", None))' in source
 
 
 # ---------------------------------------------------------------------------

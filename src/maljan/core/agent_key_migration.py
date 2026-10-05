@@ -124,11 +124,11 @@ def _identity_of_definition(entry: dict[str, Any], seed: Any, key: str) -> tuple
     from maljan.core.config import (
         JUDGE_AGENT_KEY,
         AgentDefinition,
-        _without_the_empty_builtin_tool_list,
+        as_stored_builtin,
     )
 
     try:
-        merged = {**seed.model_dump(), **_without_the_empty_builtin_tool_list(entry)}
+        merged = {**seed.model_dump(), **as_stored_builtin(key, entry)}
         current = AgentDefinition(**merged).model_dump()
     except Exception:  # noqa: BLE001 — a stored entry the seed cannot absorb is not the seed
         return None
@@ -168,7 +168,7 @@ def _is_the_seeded_profile(entry: Any, seed: Any) -> bool:
     expected = seed.model_dump()
     for dump in (current, expected):
         # The three fields the identity check forgives on a built-in team, and
-        # the two per-stage fields it forgives inside one.
+        # the three per-stage fields it forgives inside one.
         dump.pop("exclude_servers", None)
         dump.pop("analysts", None)
         dump.pop("derived_from_analysts", None)

@@ -31,7 +31,7 @@ class TestCorroborationInTheTerminal:
             )
         )
         out = capsys.readouterr().out
-        assert "2 technique(s) | 1 named by more than one source" in out
+        assert "Corroboration: 2 technique(s) named | 1 named by more than one source" in out
         assert "T1055          capa, static, dynamic" in out
         assert "T1071          static" in out
         assert "asserted_by" not in out
@@ -39,5 +39,22 @@ class TestCorroborationInTheTerminal:
     def test_a_stored_flat_row_still_prints(self, capsys: pytest.CaptureFixture[str]) -> None:
         _print_run_summary_inline(_summary({"T1055": ["static", "dynamic"]}))
         out = capsys.readouterr().out
-        assert "1 technique(s) | 1 named by more than one source" in out
+        assert "Corroboration: 1 technique(s) named | 1 named by more than one source" in out
         assert "T1055          static, dynamic" in out
+
+
+class TestTheLegacySummaryNamesBothBundles:
+    def test_the_exported_count_and_the_judge_s_are_both_written(self, tmp_path) -> None:
+        from maljan.cli import _write_markdown_report
+
+        summary = {
+            **_summary({}),
+            "file_hash": "e" * 64,
+            "stix_object_count": 77,
+            "judge_stix_object_count": 4,
+        }
+        path = tmp_path / "summary.md"
+        _write_markdown_report({"run_summary": summary}, str(path))
+
+        written = path.read_text(encoding="utf-8")
+        assert "**STIX objects**: 77 (the judge's bundle: 4)" in written

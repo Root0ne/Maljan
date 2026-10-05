@@ -163,7 +163,8 @@ class TestWhatTheIndicatorCapOrphans:
         assert dropped["cap_orphan"] == 1
         assert dropped["dangling_relationship"] == 0
 
-    def test_the_renderer_reports_what_the_cap_left_behind(self) -> None:
+    def test_the_renderer_carries_every_indicator_and_orphans_nothing(self) -> None:
+        """The export has no total cap, so nothing is left for it to orphan."""
         from maljan.core.truncation_ledger import TruncationLedger as Ledger
         from maljan.reporting.builder import MalwareReportBuilder
         from maljan.reporting.models import NetworkIOCs
@@ -198,8 +199,8 @@ class TestWhatTheIndicatorCapOrphans:
         report.dynamic = DynamicBehavior(
             file_operations=[{"operation": "write", "path": f"h{n}.exe"} for n in range(40)]
         )
-        # More indicators than the cap keeps, each with a relationship of its
-        # own, so the cap is bound to orphan some of them.
+        # Forty indicators, more than the fifteen a cap used to keep, each with
+        # a relationship of its own.
         objects: list[dict[str, Any]] = []
         for index in range(40):
             oid = f"indicator--0f1e2d3c-4b5a-4968-8776-6554433322{index:02d}"
@@ -213,13 +214,17 @@ class TestWhatTheIndicatorCapOrphans:
             )
         ledger = Ledger()
 
-        ExtendedSTIXRenderer().render(
+        bundle = ExtendedSTIXRenderer().render(
             report, Bundle.model_validate({"objects": objects}), ledger=ledger
         )
 
-        dropped = ledger.snapshot()["integrity_dropped"]
+        patterns = {str(getattr(o, "pattern", "")) for o in bundle.objects}
+        assert all(f"[file:name = 'h{index}.exe']" in patterns for index in range(40))
+        snapshot = ledger.snapshot()
+        dropped = snapshot["integrity_dropped"]
         assert isinstance(dropped, dict)
-        assert dropped["cap_orphan"] > 0
+        assert dropped["cap_orphan"] == 0
+        assert snapshot["indicator_cap_removed"] == 0
 
 
 class TestEverythingThatLeavesTheBundleIsCounted:
@@ -248,12 +253,10 @@ class TestEverythingThatLeavesTheBundleIsCounted:
         assert snapshot["integrity_refs_trimmed"] == 2
         assert snapshot["integrity_objects_removed"] == 0
 
-    def test_a_reader_can_total_what_left_a_capped_bundle(self) -> None:
-        from maljan.reporting.renderers.stix_renderer import _within_the_indicator_cap
-
+    def test_a_reader_can_total_what_left_a_large_bundle(self) -> None:
         ledger = TruncationLedger()
-        # Twenty indicators over the cap of fifteen, each with a relationship
-        # the cap will orphan, plus a note referencing every one of them.
+        # Twenty indicators, more than the fifteen a cap used to keep, each
+        # with a relationship, plus a note referencing every one of them.
         ids = [f"indicator--{index:02d}" for index in range(20)]
         objects: list[Any] = [
             _indicator(oid, pattern=f"[domain-name:value = 'h{index}.example.org']")
@@ -266,39 +269,15 @@ class TestEverythingThatLeavesTheBundleIsCounted:
         objects.append(self._note("note--1", ids))
         assembled = len(objects)
 
-        # The sequence the renderer runs: repair, cap, sweep what the cap
-        # orphaned.
-        repaired = enforce_bundle_integrity(objects, ledger=ledger)
-        order = {oid: (1, 0, index) for index, oid in enumerate(ids)}
-        capped = _within_the_indicator_cap([_Named(o) for o in repaired], order, ledger=ledger)
-        final = enforce_bundle_integrity(
-            [named.obj for named in capped], ledger=ledger, dropped_as="cap_orphan"
-        )
+        # The sequence the renderer runs: the repair, and nothing after it.
+        final = enforce_bundle_integrity(objects, ledger=ledger)
 
         snapshot = ledger.snapshot()
-        assert snapshot["indicator_cap_removed"] == 5
-        assert assembled - len(final) == (
-            int(snapshot["integrity_objects_removed"]) + int(snapshot["indicator_cap_removed"])
-        )
-        # The note kept only the indicators that survived both the cap and the
-        # sweep, and every reference it lost is on the ledger.
+        assert snapshot["indicator_cap_removed"] == 0
+        assert assembled - len(final) == int(snapshot["integrity_objects_removed"]) == 0
         note = next(o for o in final if o["type"] == "note")
-        assert len(note["object_refs"]) == 15
-        assert snapshot["integrity_refs_trimmed"] == 5
-
-
-class _Named:
-    """A dict object wearing the ``.type``/``.id`` the cap reads.
-
-    The cap runs over pydantic SDOs in a real export; the pass either side of
-    it works on both. Rather than build twenty valid SDOs, this gives the cap
-    the two attributes it asks for and hands the dicts back afterwards.
-    """
-
-    def __init__(self, obj: dict[str, Any]) -> None:
-        self.obj = obj
-        self.type = obj["type"]
-        self.id = obj["id"]
+        assert len(note["object_refs"]) == 20
+        assert snapshot["integrity_refs_trimmed"] == 0
 
 
 class TestWhoseRemovalsTheyAre:
@@ -327,7 +306,6 @@ class TestWhoseRemovalsTheyAre:
 
     def test_a_discarded_retry_does_not_move_what_the_export_reconciles(self) -> None:
         """Two judge attempts, one export: the export's figures are the export's."""
-        from maljan.reporting.renderers.stix_renderer import _within_the_indicator_cap
 
         ledger = TruncationLedger()
         # Two verdict attempts, the first of them thrown away and retried.
@@ -349,20 +327,13 @@ class TestWhoseRemovalsTheyAre:
             for index, oid in enumerate(ids)
         ]
         assembled = len(objects)
-        repaired = enforce_bundle_integrity(objects, ledger=ledger)
-        order = {oid: (1, 0, index) for index, oid in enumerate(ids)}
-        capped = _within_the_indicator_cap([_Named(o) for o in repaired], order, ledger=ledger)
-        final = enforce_bundle_integrity(
-            [named.obj for named in capped], ledger=ledger, dropped_as="cap_orphan"
-        )
+        final = enforce_bundle_integrity(objects, ledger=ledger)
 
         snapshot = ledger.snapshot()
         assert snapshot["judge_integrity_invocations"] == 2
         assert snapshot["judge_integrity_objects_removed"] == 4
         # The invariant a reader uses, unmoved by either judge attempt.
-        assert assembled - len(final) == (
-            int(snapshot["integrity_objects_removed"]) + int(snapshot["indicator_cap_removed"])
-        )
+        assert assembled - len(final) == int(snapshot["integrity_objects_removed"])
 
     def test_the_reasons_are_kept_apart_too(self) -> None:
         ledger = TruncationLedger()

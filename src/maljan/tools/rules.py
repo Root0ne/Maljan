@@ -169,6 +169,9 @@ def _yara_native_matches(
                         "offset": int(getattr(instance, "offset", 0) or 0),
                         "identifier": str(string_match.identifier),
                         "data_hex": blob[:_MAX_MATCH_BYTES].hex(),
+                        # The match's own length, so a hex cut at the bound
+                        # reads as the first bytes of a longer match.
+                        "length": len(blob),
                     }
                 )
         rows.append(
@@ -218,6 +221,7 @@ def _yara_regex_matches(layer: Any, data: bytes) -> list[dict[str, Any]]:
                         "data_hex": match.group()
                         .encode("utf-8", errors="replace")[:_MAX_MATCH_BYTES]
                         .hex(),
+                        "length": len(match.group().encode("utf-8", errors="replace")),
                     }
                 )
         if not strings:
@@ -348,16 +352,17 @@ def sigma_match_sandbox(report: dict[str, Any] | None, ruleset: str = "default")
 
 def capa(
     path: str,
-    timeout_s: int = 300,
+    timeout_s: int | None = None,
     backend: str = "auto",
     rules_dir: str = DEFAULT_CAPA_RULES,
     signatures_dir: str = DEFAULT_CAPA_SIGNATURES,
 ) -> dict[str, Any]:
     """The capabilities capa finds, each with its ATT&CK and MBC metadata.
 
-    capa runs in a spawned subprocess with a hard budget, exactly as the
-    provider runs it: vivisect's disassembly loop has no cancellation point, so
-    a thread-based timeout can report an overrun while the work keeps running.
+    capa runs in a spawned subprocess with the caller's budget, exactly as the
+    provider runs it (``None``, the default, is no wall clock of its own):
+    vivisect's disassembly loop has no cancellation point, so a thread-based
+    timeout can report an overrun while the work keeps running.
     A child process can actually be killed, and on expiry this one is.
     """
     target = Path(path)
@@ -375,21 +380,46 @@ def capa(
         rules_dir=str(rules),
         signatures_dir=str(resolve_data(signatures_dir)),
         backend_name=backend_name,
-        timeout_seconds=max(1, int(timeout_s)),
+        timeout_seconds=None if timeout_s is None else max(1, int(timeout_s)),
     )
     if document is None:
-        return {"error": "capa produced no result within its budget", "tool": "capa"}
-    return {"capabilities": _capa_capabilities(document), "meta": _capa_meta(document)}
+        return {
+            "error": (
+                "capa produced no result within its budget, or its worker exited without an "
+                "answer (the server log says which)"
+            ),
+            "tool": "capa",
+        }
+    return {
+        "capabilities": _capa_capabilities(document),
+        "meta": _capa_meta(document),
+        "function_starts": capa_function_starts(document),
+    }
 
 
 def _capa_capabilities(document: dict[str, Any]) -> list[dict[str, Any]]:
-    """Flatten a capa ResultDocument's rule map into one row per rule."""
+    """Flatten a capa ResultDocument's rule map into one row per rule.
+
+    ``addresses`` is where each match is, in capa's order, so a reader can
+    take a rule to the function, basic block or instruction that matched it:
+    an address inside the image as its offset from the image base capa
+    analysed at, which is the number a disassembler that loaded the file
+    elsewhere agrees with (FLOSS's ``function_rva`` is the same kind of
+    number). A match with no address — a file-scope rule — has none listed.
+    """
+    base = _capa_base_address(document)
     rows: list[dict[str, Any]] = []
     for rule in (document.get("rules") or {}).values():
         if not isinstance(rule, dict):
             continue
         meta = rule.get("meta") or {}
         scopes = rule.get("matches") or []
+        addresses: list[str] = []
+        for match in scopes:
+            located = match[0] if isinstance(match, list | tuple) and match else None
+            where = _capa_address(located, base)
+            if where and where not in addresses:
+                addresses.append(where)
         rows.append(
             {
                 "namespace": str(meta.get("namespace") or ""),
@@ -397,10 +427,70 @@ def _capa_capabilities(document: dict[str, Any]) -> list[dict[str, Any]]:
                 "attck": [_capa_attck(entry) for entry in (meta.get("attack") or [])],
                 "mbc": [_capa_mbc(entry) for entry in (meta.get("mbc") or [])],
                 "match_count": len(scopes),
+                "addresses": addresses,
             }
         )
     rows.sort(key=lambda r: (r["namespace"], r["rule"]))
     return rows
+
+
+def capa_function_starts(document: dict[str, Any]) -> list[str]:
+    """Every function capa found, as the offset of its start from the image base.
+
+    Read from the document's feature counts, which list each function capa
+    analysed with its address. Only addresses inside the image are kept, and
+    only when capa names the base, so each is the number a disassembler agrees
+    with; the list says where functions start, not where they end.
+    """
+    base = _capa_base_address(document)
+    if base is None:
+        return []
+    analysis = (document.get("meta") or {}).get("analysis") or {}
+    counts = analysis.get("feature_counts") or {}
+    starts: list[str] = []
+    for row in counts.get("functions") or []:
+        address = row.get("address") if isinstance(row, dict) else None
+        where = _capa_address(address, base)
+        if where and where.startswith("0x") and where not in starts:
+            starts.append(where)
+    return starts
+
+
+def _capa_base_address(document: dict[str, Any]) -> int | None:
+    """The image base capa analysed at, when its document names one."""
+    analysis = (document.get("meta") or {}).get("analysis") or {}
+    base = analysis.get("base_address")
+    if isinstance(base, dict) and base.get("type") == "absolute":
+        value = base.get("value")
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+    return None
+
+
+def _capa_address(address: Any, base: int | None) -> str | None:
+    """One match's address as a reader takes it to a disassembler, or ``None``.
+
+    capa writes an address as ``{"type": ..., "value": ...}``. An absolute
+    one is given as its offset from the image base when capa names the base
+    (the offset is what a disassembler agrees with) and marked ``va`` when it
+    does not; a file offset is marked ``file``; a relative one is already an
+    offset. Any other kind — no address, a .NET token, a process or a thread
+    of a dynamic analysis — is not a place in the image and is left out.
+    """
+    if not isinstance(address, dict):
+        return None
+    kind = address.get("type")
+    value = address.get("value")
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    if kind == "absolute":
+        if base is not None and value >= base:
+            return hex(value - base)
+        return f"va {hex(value)}"
+    if kind == "relative":
+        return hex(value)
+    if kind == "file":
+        return f"file {hex(value)}"
+    return None
 
 
 def _capa_attck(entry: Any) -> str:

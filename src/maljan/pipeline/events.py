@@ -26,11 +26,11 @@ from __future__ import annotations
 import base64
 import binascii
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from maljan.core.logger import logger
-from maljan.utils.marked_cut import marked_cut
+from maljan.utils.marked_cut import CUT_MARK, marked_cut
 
 # (event_type, payload) -> None. Must be safe to call from any thread.
 EventSink = Callable[[str, dict[str, Any]], None]
@@ -112,7 +112,8 @@ def emit(sink: EventSink | None, event_type: str, data: dict[str, Any]) -> None:
 # ``stage_ended_at_cap`` says which cap, when a cap is what ended the work:
 # ``steps`` (the loop's own recursion limit), ``time``
 # (the wall-clock hard cap), ``repeats`` (the repeat guard), ``no_room`` (the
-# conversation had no room left for a tool answer) or ``budget_seconds`` (the
+# conversation had no room left for a tool answer), ``spend`` (the operator's
+# spend ceiling for the job) or ``budget_seconds`` (the
 # triage pack's budget). Both are telemetry; neither changes what a model said.
 BUDGET_TICK = "budget_tick"
 STAGE_ENDED_AT_CAP = "stage_ended_at_cap"
@@ -123,7 +124,7 @@ TOOL_SERVER_RESTED = "tool_server_rested"
 # failed as a provider (``maljan.llm.fallback``). Once per switch.
 MODEL_FALLBACK = "model_fallback"
 BUDGET_TICK_EVERY = 5
-CAPS: tuple[str, ...] = ("steps", "time", "repeats", "no_room", "budget_seconds")
+CAPS: tuple[str, ...] = ("steps", "time", "repeats", "no_room", "spend", "budget_seconds")
 
 
 def emit_budget_tick(
@@ -132,15 +133,18 @@ def emit_budget_tick(
     agent: str,
     stage: str,
     steps_used: int,
-    max_steps: int,
+    max_steps: int | None,
     elapsed_s: float,
-    timeout_s: float,
+    timeout_s: float | None,
     prompt_chars: int,
     ledger_entries: int,
     final: bool = False,
     tool_definition_chars: int = 0,
 ) -> None:
     """One agent's spend as of now: steps against its cap, seconds against its limit.
+
+    ``max_steps`` and ``timeout_s`` are ``None`` for a loop with no limit in
+    that dimension, and are sent as ``null``.
 
     ``tool_definition_chars`` is what the loop's tool definitions weigh; they
     go with every request and the context budget counts them beside the
@@ -153,9 +157,9 @@ def emit_budget_tick(
             "agent": str(agent),
             "stage": str(stage),
             "steps_used": max(0, int(steps_used)),
-            "max_steps": max(0, int(max_steps)),
+            "max_steps": None if max_steps is None else max(0, int(max_steps)),
             "elapsed_s": round(max(0.0, float(elapsed_s)), 1),
-            "timeout_s": round(max(0.0, float(timeout_s)), 1),
+            "timeout_s": None if timeout_s is None else round(max(0.0, float(timeout_s)), 1),
             "prompt_chars": max(0, int(prompt_chars)),
             "ledger_entries": max(0, int(ledger_entries)),
             "tool_definition_chars": max(0, int(tool_definition_chars)),
@@ -312,7 +316,7 @@ def emit_agent_message(
     emit(sink, AGENT_MESSAGE, payload)
 
 
-def summarize_claims(claims: Any, *, speaker: str) -> str:
+def summarize_claims(claims: Any, *, speaker: str, source: str = "") -> str:
     """One skimmable line standing in for an analyst's full ISR text.
 
     The raw ``to_text_summary()`` is several hundred words that already restate
@@ -322,6 +326,10 @@ def summarize_claims(claims: Any, *, speaker: str) -> str:
     read differently live and on replay, which is exactly what one shared
     transcript model is supposed to prevent. The structured ``claims`` payload
     carries the detail; this is the headline.
+
+    ``source`` is the whole phrase the claims come "from", where the speaker's
+    name does not read inside "the … layer" (``nodes.claims_source``: an
+    agent named by its place in a stage); the name's layer otherwise.
     """
     items = list(claims or [])
     if not items:
@@ -333,7 +341,9 @@ def summarize_claims(claims: Any, *, speaker: str) -> str:
     if len(lead) > 240:
         lead = lead[:239] + "…"
     plural = "" if len(items) == 1 else "s"
-    headline = f"{len(items)} evidence-backed claim{plural} from the {speaker} layer."
+    headline = (
+        f"{len(items)} evidence-backed claim{plural} from {source or f'the {speaker} layer'}."
+    )
     return f"{headline} Leading: {lead}" if lead else headline
 
 
@@ -410,6 +420,67 @@ _SECRET_ARGUMENT_WORDS = (
 # echoed by an API response travelled verbatim while the same key passed as a
 # bare argument was replaced.
 _CREDENTIAL_PREFIXES = ("sk-", "sk_", "nvapi-", "ghp_", "gho_", "xoxb-")
+# Vendor key formats whose prefix is also the start of ordinary words
+# (``key-exchange``) or whose body can be letter groups the word rule below
+# reads as words. A run that begins with one of these and carries a body of at
+# least ``PREFIXED_KEY_BODY_FLOOR`` characters after it is a key, asked before
+# the word rule: GitLab, Slack, GitHub, Hugging Face, Mailgun, Stripe, npm and
+# Google OAuth client secrets. Every real body of these formats is longer than
+# the floor. Mailgun's ``key-`` is asked apart (``_MAILGUN_PREFIX``): it begins
+# ordinary phrases (``key-derivation-function-parameters``), so its body must
+# also not be words.
+_PREFIXED_KEY_FORMATS = (
+    "glpat-",
+    "xoxp-",
+    "xoxb-",
+    "xoxa-",
+    "xoxs-",
+    "xoxr-",
+    "xapp-",
+    "ghs_",
+    "ghp_",
+    "gho_",
+    "ghu_",
+    "ghr_",
+    "github_pat_",
+    "hf_",
+    "rk_live_",
+    "sk_live_",
+    "pk_live_",
+    "rk_test_",
+    "sk_test_",
+    "pk_test_",
+    "npm_",
+    "gocspx-",
+    *_CREDENTIAL_PREFIXES,
+)
+PREFIXED_KEY_BODY_FLOOR = 20
+_MAILGUN_PREFIX = "key-"
+# The secret values this process holds in its own settings — model API keys,
+# sandbox and Ghidra tokens, the VirusTotal key, the database, Redis and object
+# store passwords — masked by exact value wherever the scrub runs, whatever
+# their shape: a passphrase an operator configured reads as words to every
+# shape rule here, and this is what catches it. Held per scope — ``process``
+# for what a worker or an app holds from its start, ``job`` for a job's own
+# settings — and a scope registered again replaces what it held, so a secret no
+# longer configured stops being masked. Filled by ``remember_secret_values``.
+_SECRET_SCOPES: dict[str, frozenset[str]] = {}
+# The union of every scope as one pattern, longest value first so a secret that
+# contains another is masked whole, and each value only where no letter, digit
+# or underscore touches it: ``minioadmin`` configured leaves ``minioadministrator``
+# as written. ``None`` when nothing is registered.
+_CONFIGURED_PATTERN: re.Pattern[str] | None = None
+# Configured values shorter than the floor, per scope: kept out of finding
+# rows only, each as a whole word (``_mask_short_secrets``).
+_SHORT_SECRETS: dict[str, frozenset[str]] = {}
+# The scopes whose configured values could not be read
+# (``secret_registration_failed``); while any is listed, a finding row is held
+# to the whole event scrub.
+_FAILED_SCOPES: set[str] = set()
+# A configured value shorter than this is not masked by value: a four-letter
+# password masked everywhere would take every word it spells out of every
+# sentence. Such a value is still masked by name and by shape.
+CONFIGURED_SECRET_FLOOR = 8
 # Where a run of interest may begin: the start of the text, or right after a
 # character that separates values. Whitespace is not enough — a compact JSON
 # body from a tool server is one whitespace-separated word, and everything
@@ -468,6 +539,12 @@ _SCHEME_AND_SECRET = re.compile(r"(?i)\b(bearer|basic|token)\s+" + _UNTIL_CHARS 
 # stopped at ``[A-Za-z0-9_-]`` read the run as ending at the first of them and
 # then failed its own whole-run anchor.
 _CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9+/_\-]{24,}={0,2})\Z")
+# The environment variables the platform's own sentences name, which the rule
+# above takes for keys by their length. Named one by one rather than by shape:
+# an upper-case run with underscores in it is also what a key can look like,
+# and the remedy "check GHIDRA_CONTAINER_SAMPLES_PATH" read "check ***" on the
+# console, for the one failure whose remedy is that variable.
+_OWN_VARIABLE_NAMES = frozenset({"GHIDRA_CONTAINER_SAMPLES_PATH"})
 # A JSON Web Token, which no length rule can see: it is three base64url runs
 # with dots between them, and this project's own access token is one. The
 # segments are held to a floor so that a dotted module name or a hostname is
@@ -480,8 +557,37 @@ _JWT_RUN = re.compile(r"\A[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]
 # name by the pass below, which is what a reader needs, and reading it as a
 # key would replace the file name too. A path here is one with a marker *and*
 # a second separator: ``/wJalrXUtnFEMIK7MDENG`` is a key that begins with a
-# slash, not a directory.
-_MIME_TYPE = re.compile(r"\A[a-z]+/[a-z0-9][a-z0-9.+_\-]*\Z")
+# slash, not a directory. The type is one of the registered top-level types
+# (or an ``x-`` one), and the subtype is exempt only when it is no key itself:
+# ``left/<key>`` has the shape of a MIME type and is a key after a word.
+_MIME_TYPE = re.compile(
+    r"\A(?:application|audio|chemical|font|image|inode|message|model|multipart|text|video"
+    r"|x-[a-z0-9.+\-]+)/[a-z0-9][a-z0-9.+_\-]*\Z"
+)
+# Words with separators between them, which the base64 alternative above reads
+# as a key by its length alone: a claim's ``anti-debugging/environment``, a
+# STIX property name and an analyst's roster key are all 24 characters and
+# more of that alphabet. Two or more pieces split on ``_``, ``-`` or ``/``,
+# each written the way a word is — all lower case, all capitals, or one
+# capital in front — and each shorter than the length floor, so that a piece
+# which would be a key on its own keeps the whole run a key. A key's body of
+# random letters mixes its case or runs past the floor; a vendor prefix is
+# asked before this and wins.
+_WORD_PIECE = re.compile(r"\A(?:[a-z]{1,23}|[A-Z]{1,23}|[A-Z][a-z]{1,22})\Z")
+# A capitalised compound of two or three words, as a family or a product name
+# is written (``NorthWind``): a first word of three letters or more, then one
+# or two more, each a capital and small letters. A key's random case does not
+# keep that pattern, and one alternating letter by letter (``AbCdEf…``) has
+# more words than three. Read only by :func:`_is_a_family_name`, and never
+# for a run that follows a credential label.
+_COMPOUND_PIECE = re.compile(r"\A(?=[A-Za-z]{1,23}\Z)[A-Z][a-z]{2,}(?:[A-Z][a-z]+){1,2}\Z")
+# A credential label right before a run: an argument word a credential is
+# named by (``_SECRET_ARGUMENT_WORDS``, "Access Token" among them by its last
+# word), an authorization scheme, then an optional ``:`` or ``=`` and quote.
+_LABEL_BEFORE_RE = re.compile(
+    r"(?i)(?:api[_-]?key|auth\w*|bearer|basic|cookie|credentials?|passphrase|passwd|password"
+    r"|private[_-]?key|pwd|secrets?|session\w*|tokens?)[\s\"']*[:=]?[\s\"']*\Z"
+)
 # The identifier this system issues for a job, a report, a sample and a
 # message. Exempt for the reason a digest is: it is on the job, on the report
 # and on the event that announced it, and an event reading ``report_id=***``
@@ -527,8 +633,9 @@ _URL_RUN = re.compile(
 # and a dash or a quotation mark a model typed is the end of the value in
 # front of it. A colon is already outside the class, so a JWT's dots are the
 # one separator left inside it — which is what lets the whole token be seen as
-# one run.
-_VALUE_RUN = re.compile(r"[^\s\"'`<>;:{}\[\](),=\\\x80-\U0010ffff]+")
+# one run. ``!`` splits too: ``kernel32.dll!<key>`` is a module name and a key,
+# and read as one run neither rule saw the key.
+_VALUE_RUN = re.compile(r"[^\s\"'`<>;:{}\[\](),=!\\\x80-\U0010ffff]+")
 # A filesystem path, wherever it starts. A slash alone is not the signal: a
 # MIME type (``application/x-msdownload``), a sub-technique id
 # (``T1055/012``), a date (``2026/09/17``) and a ratio all carry one, and
@@ -569,6 +676,11 @@ _PATH_RUN = re.compile(
 # 64 rather than a rounder number so a sha256 — the one long value this is
 # meant to let through whole — fits exactly instead of arriving one character
 # short of identifying anything.
+#
+# Each of these caps, and ``FINDING_VALUE_LIMIT`` below, can be exceeded by one
+# whole value: a digest or an identifier the cut would split is kept whole with
+# its extension (``_cut_whole``), so ``<sha256>.exe`` runs past the cap by a
+# few characters rather than arriving as half a digest a second scrub masks.
 ARGUMENT_VALUE_CHARS = 64
 ARGUMENT_SUMMARY_CHARS = 240
 ARGUMENTS_SUMMARISED = 6
@@ -652,7 +764,7 @@ def _is_a_token(run: str) -> bool:
     return decoded.lstrip().startswith(b"{")
 
 
-def _looks_like_a_credential(token: str) -> bool:
+def _looks_like_a_credential(token: str, *, whole: bool = False) -> bool:
     """Whether this run of characters is a key rather than a word or a digest.
 
     In this order, and the order is the argument. A digest and an identifier
@@ -669,24 +781,190 @@ def _looks_like_a_credential(token: str) -> bool:
     carries are exempted where their names are known, by key, in the
     publisher (``analysis_worker.scrubbed``); they are not guessed at here.
 
-    What that costs, stated rather than discovered: an agent key of 24 to 32
-    characters — the pattern allows up to 32 — has the shape of a key, so it
-    reads as ``***`` inside a *sentence*. The identity fields the line is
+    Words joined by separators are exempt by their shape (``_is_words``):
+    every piece letters alone, written the way a word is, and shorter than the
+    floor. That is what keeps a claim's ``anti-debugging/environment`` and an
+    agent key such as ``windows_pe_static_reverse_engineer`` in a sentence.
+    What is left costs, stated rather than discovered: an agent key of 24 to
+    32 characters with a digit in one of its pieces has the shape of a key, so
+    it reads as ``***`` inside a *sentence*. The identity fields the line is
     filed under are exempt by name and travel whole, so attribution is
     unaffected and only the name inside the prose goes. The roster is not
     consulted here on purpose: this is one pure function shared by every job
     on the worker, and a redaction rule whose answer depended on which run was
-    publishing would not be a redaction rule. ``docs/configuration.md`` tells
-    an operator to keep keys short; no shipped key is close to the floor.
+    publishing would not be a redaction rule.
     """
-    if _DIGEST.match(token) or _IDENTIFIER.match(token):
+    if _DIGEST.match(token) or _IDENTIFIER.match(token) or token in _OWN_VARIABLE_NAMES:
         return False
     lowered = token.lower()
     if any(lowered.startswith(prefix) for prefix in _CREDENTIAL_PREFIXES):
         return True
-    if _MIME_TYPE.match(token) or _PATH_SHAPED.match(token):
+    if any(
+        lowered.startswith(prefix) and len(token) - len(prefix) >= PREFIXED_KEY_BODY_FLOOR
+        for prefix in _PREFIXED_KEY_FORMATS
+    ):
+        return True
+    if (
+        lowered.startswith(_MAILGUN_PREFIX)
+        and len(token) - len(_MAILGUN_PREFIX) >= PREFIXED_KEY_BODY_FLOOR
+        and not _is_words(token)
+    ):
+        return True
+    if _MIME_TYPE.match(token) and not _looks_like_a_credential(token.split("/", 1)[1]):
         return False
-    return bool(_CREDENTIAL_RUN.match(token)) or _is_a_token(token)
+    if _PATH_SHAPED.match(token) or _is_words(token):
+        return False
+    if _is_api_name(token):
+        return False
+    if _CREDENTIAL_RUN.match(token) or _is_a_token(token):
+        return True
+    if whole:
+        return False
+    # A key joined to other text by a slash, a bar, a plus or an ampersand is
+    # still a key: ``<jwt>/name`` failed every rule anchored to the whole run.
+    # ``whole`` asks only the rules that read the run as one.
+    pieces = [piece for piece in _JOINS.split(token) if piece]
+    return len(pieces) > 1 and any(_looks_like_a_credential(piece) for piece in pieces)
+
+
+# The Windows function names and hash-algorithm ids the scrub leaves as
+# written. The length rule reads ``ZwSetInformationJobObject`` as a key, and a
+# pair of algorithm ids joined by a slash as one; the live console and the
+# stored transcript printed ``***`` where the report printed the names. Three
+# sources, all exact: the vendored export-name catalogue and the vendored
+# hash-algorithm catalogue (``api_hashes``' data files, each read once), and
+# the names this job's hash resolution on the analysis server read
+# (``remember_resolved_names``), which the next job forgets. A vendor prefix is
+# asked before any of them, and a configured value is masked by value before any
+# rule is read, so none exempts a credential.
+_EXPORT_NAMES_FILE = "data/windows_export_names_v1.json"
+_ALGORITHMS_FILE = "data/api_hash_algorithms_v1.json"
+_RESOLVED_NAMES: set[str] = set()
+# The catalogues' names, read on first use.
+_CATALOGUE: frozenset[str] | None = None
+_ALGORITHM_IDS: frozenset[str] | None = None
+# What joins several names into one run: a slash, a bar, a plus, an ampersand.
+_JOINS = re.compile(r"[/|+&]")
+# A resolved name is taken only in the shape a Windows function name has: an
+# identifier with both cases in it. An all-lowercase run is what several key
+# formats are, and no catalogue name past the length floor is written that way
+# except words joined by underscores, which the word rule already keeps.
+_API_NAME_SHAPE = re.compile(r"\A[A-Za-z_?@$][A-Za-z0-9_?@$]*\Z")
+
+
+def _read_data(path: str) -> Any:
+    import json
+
+    from maljan.core.paths import resolve_data
+
+    return json.loads(resolve_data(path).read_text(encoding="utf-8"))
+
+
+def _catalogue_names() -> frozenset[str]:
+    """Every exported name the vendored catalogue holds; empty when it cannot be read."""
+    global _CATALOGUE
+    if _CATALOGUE is None:
+        try:
+            document = _read_data(_EXPORT_NAMES_FILE)
+            _CATALOGUE = frozenset(
+                str(name)
+                for exported in (document.get("dlls") or {}).values()
+                for name in exported or []
+            )
+        except Exception as exc:  # noqa: BLE001 — the shape rules still run
+            logger.warning(
+                "The export-name catalogue was not read for the scrub (%s).", type(exc).__name__
+            )
+            _CATALOGUE = frozenset()
+    return _CATALOGUE
+
+
+def _algorithm_ids() -> frozenset[str]:
+    """Every hash-algorithm id the vendored catalogue holds; empty when it cannot be read."""
+    global _ALGORITHM_IDS
+    if _ALGORITHM_IDS is None:
+        try:
+            document = _read_data(_ALGORITHMS_FILE)
+            _ALGORITHM_IDS = frozenset(
+                str(entry["id"])
+                for entry in document.get("algorithms") or []
+                if isinstance(entry, dict) and entry.get("id")
+            )
+        except Exception as exc:  # noqa: BLE001 — the shape rules still run
+            logger.warning(
+                "The hash-algorithm catalogue was not read for the scrub (%s).", type(exc).__name__
+            )
+            _ALGORITHM_IDS = frozenset()
+    return _ALGORITHM_IDS
+
+
+def _is_a_catalogue_name(name: str) -> bool:
+    return name in _RESOLVED_NAMES or name in _catalogue_names() or name in _algorithm_ids()
+
+
+def _is_api_name(token: str) -> bool:
+    """Whether ``token`` is a Windows function name or a hash-algorithm id, alone or
+    several joined by ``/``, ``|``, ``+`` or ``&``.
+
+    A module in front of a name (``kernel32.dll!Name``) is split off by the
+    value run itself, so the name is asked alone.
+    """
+    if _is_a_catalogue_name(token):
+        return True
+    pieces = [piece for piece in _JOINS.split(token) if piece]
+    return len(pieces) > 1 and all(_is_a_catalogue_name(piece) for piece in pieces)
+
+
+def remember_resolved_names(answer: Any) -> None:
+    """Add the function names a ``resolve_api_hashes`` answer read to the names kept as written.
+
+    ``answer`` is the tool's answer as a dict or as its JSON text; every
+    reading under ``hits`` and ``lone_hits`` is taken whose name has the shape
+    a Windows function name has (``_API_NAME_SHAPE`` and both cases). Held for
+    the job, in this process, until ``forget_resolved_names``. Never raises.
+    """
+    try:
+        if isinstance(answer, str):
+            import json
+
+            answer = json.loads(answer)
+        if not isinstance(answer, dict):
+            return
+        for key in ("hits", "lone_hits"):
+            for hit in answer.get(key) or []:
+                for reading in (hit.get("readings") or []) if isinstance(hit, dict) else []:
+                    name = str(reading.get("name") or "") if isinstance(reading, dict) else ""
+                    if (
+                        _API_NAME_SHAPE.match(name)
+                        and any(c.islower() for c in name)
+                        and any(c.isupper() for c in name)
+                    ):
+                        _RESOLVED_NAMES.add(name)
+    except Exception as exc:  # noqa: BLE001 — the shape rules still run
+        logger.debug("A hash resolution's names were not handed to the scrub (%s).", exc)
+
+
+def forget_resolved_names() -> None:
+    """Clear the names a job's hash resolution read: the next job starts with none."""
+    _RESOLVED_NAMES.clear()
+
+
+def resolved_names_held() -> int:
+    """How many resolved names the scrub keeps as written for this job."""
+    return len(_RESOLVED_NAMES)
+
+
+def _is_words(run: str) -> bool:
+    """Whether this run is words joined by ``_``, ``-`` or ``/`` rather than a key.
+
+    What this costs: no shape tells a passphrase or a letters-only grouped
+    code from a hyphenated phrase, so a secret of that shape passes this rule.
+    A vendor prefix is asked before it (``_PREFIXED_KEY_FORMATS``), and the
+    secrets the platform holds are masked by value before any shape is read
+    (``remember_secret_values``); ``docs/configuration.md`` states the rest.
+    """
+    pieces = re.split(r"[_\-/]", run)
+    return len(pieces) >= 2 and all(_WORD_PIECE.match(piece) for piece in pieces)
 
 
 def _shorten_url(found: re.Match[str]) -> str:
@@ -735,9 +1013,158 @@ def _shorten_path(found: re.Match[str]) -> str:
     return segments[-1]
 
 
+def _is_a_family_name(run: str) -> bool:
+    """Whether ``run`` is a family name of words joined by ``/``, one a capitalised compound.
+
+    ``Rivulet/NorthWind/Calder``: two or more pieces, each a word
+    (``_WORD_PIECE``) or a capitalised compound (``_COMPOUND_PIECE``), at
+    least one a compound and none with a digit. The caller asks it only where
+    no credential label stands before the run.
+    """
+    pieces = run.split("/")
+    return (
+        len(pieces) >= 2
+        and all(_WORD_PIECE.match(piece) or _COMPOUND_PIECE.match(piece) for piece in pieces)
+        and any(_COMPOUND_PIECE.match(piece) for piece in pieces)
+    )
+
+
 def _hide_credentials(found: re.Match[str]) -> str:
+    """One value run, with every key in it masked together with the base64 around it.
+
+    In this order:
+
+    - A run that reads as a key as one run is masked whole.
+    - A run that is a name the scrub keeps (a digest, an identifier, one of the
+      platform's own variable names, a MIME type, a path, words, a catalogue
+      name) is kept, whatever follows it: ``ZwSetInformationJobObject=1`` is an
+      assignment to a name.
+    - A run followed by base64 padding (``_PADDING``: one or two ``=`` that end
+      a value) ends in a base64 value: its last stretch of base64 characters,
+      when it is 24 characters or more and no name the scrub keeps, is masked,
+      whatever it begins with. A standard base64 key cut by its own ``/`` and
+      ``+`` into fragments shorter than the length rule, or beginning with a
+      slash as a path does, is caught here by its padding. An ``=`` that starts
+      a value is an assignment and not padding.
+    - Otherwise, when a piece of the run between ``/``, ``|``, ``+`` and ``&``
+      reads as a key, or a token sits inside it, the key is masked with the
+      whole stretch of base64 characters (``A-Za-z0-9+/_-``) around it. Any
+      character outside those alphabets (a dot, ``%``, ``|``, ``&``) bounds
+      the stretch: ``host.example/<key>/x.php`` reads ``host.***.php``.
+    """
     value = found.group(0)
-    return _REDACTED if _looks_like_a_credential(value) else value
+    if _names_only(value):
+        return value
+    if _is_a_family_name(value) and not _LABEL_BEFORE_RE.search(
+        found.string[max(0, found.start() - 40) : found.start()]
+    ):
+        return value
+    if _looks_like_a_credential(value, whole=True):
+        return _REDACTED
+    head = ""
+    tail = _TRAILING_STRETCH.search(value)
+    padding = _PADDING.match(found.string, found.end())
+    if (
+        tail is not None
+        and padding is not None
+        and len(tail.group(0)) >= 24
+        and not _names_only(tail.group(0))
+        and (
+            padding.group("end") is not None
+            or (len(tail.group(0)) + len(padding.group("signs"))) % 4 == 0
+        )
+    ):
+        head, value = value[: tail.start()], ""
+    if not value:
+        return f"{_hide_in_run(head)}{_REDACTED}" if head else _REDACTED
+    return _hide_in_run(value)
+
+
+def _names_only(stretch: str) -> bool:
+    """Whether a run is a name the scrub keeps, or names joined by ``/``, with no
+    vendor prefix in it: ``path/ZwSetInformationJobObject`` is a word and a
+    catalogue name, and a random key is not written that way.
+
+    Split on ``/`` alone: ``+`` joins no words, and a key cut by its own ``+``
+    into letter-only pieces is a key. Catalogue names joined by ``+`` are kept
+    as one run by the catalogue rule (``_is_api_name``).
+
+    Asked before the padding rule, so a kept name stays readable in front of
+    ``=``. A path's shape is not asked here: a key that begins with a slash has
+    it, and padding after a run is what a path does not end with; the path rule
+    is asked in ``_hide_in_run``, for a run with no padding after it.
+    """
+    pieces = [piece for piece in stretch.split("/") if piece]
+    if _kept_name(stretch):
+        return True
+    return (
+        len(pieces) > 1
+        and all(_WORD_PIECE.match(piece) or _kept_name(piece) for piece in pieces)
+        and not any(_looks_like_a_credential(piece, whole=True) for piece in pieces)
+    )
+
+
+def _kept_name(token: str) -> bool:
+    """``_readable`` without the path rule, and never a run with a vendor prefix."""
+    return _readable(token, path=False) and not _looks_like_a_credential(token, whole=True)
+
+
+def _hide_in_run(value: str) -> str:
+    """The rest of ``_hide_credentials`` for a run with no padding after it."""
+    if not value or _readable(value) or not _looks_like_a_credential(value):
+        return value
+    # A token inside the run: its dots end every stretch, so it is found as
+    # itself first and masked with the stretches on either side of it.
+    value = _JWT_INSIDE.sub(
+        lambda token: _REDACTED if _is_a_token(token.group(0)) else token.group(0), value
+    )
+    return _BASE64_STRETCH.sub(
+        lambda stretch: _REDACTED if _stretch_holds_a_key(stretch.group(0)) else stretch.group(0),
+        value,
+    )
+
+
+# A stretch of base64 or base64url characters, and one next to the mark a token
+# was masked with.
+_BASE64_STRETCH = re.compile(r"[A-Za-z0-9+/_\-]*\*\*\*[A-Za-z0-9+/_\-]*|[A-Za-z0-9+/_\-]+")
+# The stretch of base64 characters a run ends with.
+_TRAILING_STRETCH = re.compile(r"[A-Za-z0-9+/_\-]+\Z")
+# Base64 padding after a run: one or two ``=`` that end the value. What may
+# follow them is the end of the text or a character no value starts with:
+# whitespace; a closing quote, bracket or brace, or ``</`` of a closing tag;
+# the separators ``,`` ``;`` ``:`` ``.``; and the scrub's joiners ``/`` ``|``
+# ``+`` ``&`` ``!``, which join a key to a path, a module name or a list. A
+# quote is closing when an end or one of those separators follows it, and a
+# backslash before a quote is the JSON escape of one. Any other follower (a
+# letter, a digit, ``-``, ``_``, an opening quote) starts a value, so that
+# ``=`` is an assignment; ``_hide_credentials`` still takes it for padding
+# when the stretch and its signs together are a multiple of 4 characters,
+# which is what a base64 value's length is.
+_PADDING = re.compile(
+    r"(?P<signs>={1,2})(?!=)"
+    r"(?P<end>\Z|(?=[\s)\]}>,;:.\/|+&!])|(?=</)|(?=\\?[\"'`](?:\Z|[\s)\]}>,;:.\/|&!])))?"
+)
+# A token's shape anywhere in a run: three base64url segments with dots between.
+_JWT_INSIDE = re.compile(r"[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}")
+
+
+def _readable(token: str, *, path: bool = True) -> bool:
+    """Whether the whole run is a name the scrub keeps: a digest, an identifier, one of
+    the platform's own variable names, a MIME type, a path (unless ``path`` is false),
+    words, or a catalogue name."""
+    if _DIGEST.match(token) or _IDENTIFIER.match(token) or token in _OWN_VARIABLE_NAMES:
+        return True
+    if _MIME_TYPE.match(token) and not _looks_like_a_credential(token.split("/", 1)[1]):
+        return True
+    return bool((path and _PATH_SHAPED.match(token)) or _is_words(token) or _is_api_name(token))
+
+
+def _stretch_holds_a_key(stretch: str) -> bool:
+    """Whether a stretch of base64 characters holds a key: a masked token, or a piece
+    of it between ``/`` and ``+`` that reads as a key."""
+    if _REDACTED in stretch:
+        return True
+    return any(_looks_like_a_credential(piece) for piece in re.split(r"[/+]", stretch) if piece)
 
 
 def scrub(text: Any) -> str:
@@ -761,34 +1188,264 @@ def scrub(text: Any) -> str:
     return _scrub_line(" ".join(str(text or "").split()))
 
 
+def remember_secret_values(values: Iterable[str], *, scope: str = "job") -> None:
+    """Set the values the scrub masks by exact value under ``scope``, in this process.
+
+    A scope registered again replaces what it held: the worker registers each
+    job's settings under ``job``, so a secret the operator removed is not masked
+    in the next job, and its own startup secrets under ``process``, which stay.
+    A value shorter than ``CONFIGURED_SECRET_FLOOR``, or blank, is not kept.
+    Only the count is logged, never a value.
+    """
+    texts = [text for text in (str(value or "") for value in values) if text.strip()]
+    kept = frozenset(text for text in texts if len(text) >= CONFIGURED_SECRET_FLOOR)
+    _SECRET_SCOPES[scope] = kept
+    # A shorter value is kept out of finding rows only (``safe_finding_value``):
+    # masked everywhere, a short password would take a word out of every event.
+    _SHORT_SECRETS[scope] = frozenset(text for text in texts if len(text) < CONFIGURED_SECRET_FLOOR)
+    _FAILED_SCOPES.discard(scope)
+    _rebuild_configured_pattern()
+    logger.debug("The scrub masks %d configured value(s) under %s.", len(kept), scope)
+
+
+def secret_registration_failed(scope: str) -> None:
+    """Record that a scope's configured values could not be read.
+
+    Until that scope is registered again, a finding row is held to the whole
+    event scrub (``safe_finding_value``): with no value to mask by, the shape
+    rules are what keeps an operator credential out of report text.
+    """
+    _FAILED_SCOPES.add(scope)
+
+
+def forget_secret_values() -> None:
+    """Clear every scope: nothing is masked by value afterwards."""
+    _SECRET_SCOPES.clear()
+    _SHORT_SECRETS.clear()
+    _FAILED_SCOPES.clear()
+    _rebuild_configured_pattern()
+
+
+def _rows_kept_as_written() -> bool:
+    """Whether finding rows may keep their words: values registered, and no scope failed."""
+    return bool(_SECRET_SCOPES) and not _FAILED_SCOPES
+
+
+def _rebuild_configured_pattern() -> None:
+    global _CONFIGURED_PATTERN
+    values = sorted(set().union(*_SECRET_SCOPES.values()), key=len, reverse=True)
+    _CONFIGURED_PATTERN = (
+        re.compile(
+            _SECRET_BOUNDARY_BEFORE
+            + "(?:"
+            + "|".join(re.escape(value) for value in values)
+            + r")(?![A-Za-z0-9_])"
+        )
+        if values
+        else None
+    )
+
+
+# In front of a configured value: no letter, digit or underscore — or the end of
+# an escape sequence. A tool answer carried as JSON text puts ``\n``, ``\t`` or
+# ``\u00a0`` against a value at the start of a line, and the escape's letter or
+# last hex digit is not part of the value. After the value an escape begins with
+# a backslash, which already counts as a boundary.
+_SECRET_BOUNDARY_BEFORE = r"(?:(?<![A-Za-z0-9_])|(?<=\\[A-Za-z])|(?<=\\u[0-9A-Fa-f]{4}))"
+
+
+def _mask_configured_values(line: str) -> str:
+    """``line`` with every configured value replaced by the redaction mark."""
+    if _CONFIGURED_PATTERN is None:
+        return line
+    return _CONFIGURED_PATTERN.sub(_REDACTED, line)
+
+
+# How many times the passes are repeated at most before the text is taken as
+# settled. Each pass only removes or masks, so the text settles in two or three.
+_SCRUB_PASSES = 4
+
+
 def _scrub_line(line: str) -> str:
-    """The four passes, over text that is already one line."""
-    line = _SCHEME_AND_SECRET.sub(lambda m: f"{m.group(1)} {_REDACTED}", line)
+    """The passes over text that is already one line, repeated until they change nothing.
+
+    Once is not always enough: a path cut to its last segment can leave a
+    key-shaped segment the value pass had not seen as a run of its own, and a
+    second scrub then masked it. Repeating until nothing changes makes the
+    scrub idempotent, which is what lets the publisher scrub a payload a
+    producer already scrubbed without changing a character of it.
+    """
+    for _ in range(_SCRUB_PASSES):
+        scrubbed = _scrub_once(line)
+        if scrubbed == line:
+            break
+        line = scrubbed
+    return line
+
+
+# The ATT&CK names a label word stands in, read once from the vendored table:
+# for each, the text in front of the word and the word after it
+# (``Access Token Manipulation`` → ``("access ", "token", "Manipulation")``).
+_ATTCK_FILE = "data/attck_techniques.json"
+_LABELLED_NAMES: frozenset[tuple[str, str, str]] | None = None
+
+
+def _labelled_attck_names() -> frozenset[tuple[str, str, str]]:
+    """``(text before, label word, word after)`` for each vendored ATT&CK name with a label word."""
+    global _LABELLED_NAMES
+    if _LABELLED_NAMES is None:
+        found: set[tuple[str, str, str]] = set()
+        try:
+            import json
+
+            from maljan.core.paths import resolve_data
+
+            table = json.loads(resolve_data(_ATTCK_FILE).read_text(encoding="utf-8"))
+            for key, row in table.items():
+                if key.startswith("_") or not isinstance(row, dict):
+                    continue
+                name = str(row.get("name") or "")
+                for match in re.finditer(r"(?i)\b(bearer|basic|token)\s+(\S+)", name):
+                    in_front = name[: match.start()].lower()
+                    found.add((in_front, match.group(1).lower(), match.group(2)))
+        except Exception as exc:  # noqa: BLE001 — every label then masks what follows it
+            logger.warning("The ATT&CK names were not read for the scrub (%s).", exc)
+        _LABELLED_NAMES = frozenset(found)
+    return _LABELLED_NAMES
+
+
+def _scheme_and_secret(found: re.Match[str]) -> str:
+    """An authorization scheme with what follows it masked, unless the two are an ATT&CK name.
+
+    Kept only on an exact match with a name in the vendored ATT&CK table, the
+    words in front of the label included: ``Access Token Manipulation``.
+    Anything else after ``Bearer``, ``Basic`` or ``token`` is masked.
+    """
+    scheme = found.group(1)
+    after = found.group(0)[len(scheme) :].strip().rstrip(".,;:!?")
+    before = found.string[max(0, found.start() - 80) : found.start()].lower()
+    for in_front, label, word in _labelled_attck_names():
+        if label == scheme.lower() and after == word and before.endswith(in_front):
+            return found.group(0)
+    return f"{scheme} {_REDACTED}"
+
+
+def _scrub_once(line: str) -> str:
+    """The configured secrets by value, then the four passes, once."""
+    line = _mask_configured_values(line)
+    line = _SCHEME_AND_SECRET.sub(_scheme_and_secret, line)
     line = _URL_RUN.sub(_shorten_url, line)
     line = _VALUE_RUN.sub(_hide_credentials, line)
     return _PATH_RUN.sub(_shorten_path, line)
 
 
 # How much of a model-written value reaches a finding row. Such a row is
-# stored with the report and printed verbatim by the console, so what goes in
-# it is held to the same rule an event payload is and then bounded: a value a
-# model wrote is as long as the model cared to make it, and a 4 KB "verdict"
-# drawn as one line of a run record is a page nobody can read.
+# stored with the report and printed verbatim by the console, so it is
+# bounded: a value a model wrote is as long as the model cared to make it, and
+# a 4 KB "verdict" drawn as one line of a run record is a page nobody can read.
 FINDING_VALUE_LIMIT = 200
 
 
 def safe_finding_value(value: Any) -> str:
-    """One model-written value, made safe to store in a finding row and to print.
+    """One model-written value, made fit to store in a finding row and to print.
 
-    The same four passes :func:`scrub` makes — an authorization scheme and its
-    secret, a URL cut back to scheme and host so its userinfo goes with the
-    rest, credential-shaped runs redacted, paths cut to their last segment —
-    and then a bound. A validation message, a degradation reason and an export
-    decline all end up in ``run_summary``, in the stored report and on the
-    analysis page, and none of them is an event, so none of them was covered by
-    the scrubbing the publisher does.
+    A finding row is report text, printed in the report's notes, stored with
+    it and served by the API. With the operator's configured values
+    registered, the row keeps the words of the evidence and the catalogue it
+    quotes; what is kept out is every operator credential: each configured
+    value, by value (a short one as a whole word), a URL's userinfo, and a
+    query value whose key names a credential. The event scrub's shape rules do
+    not run, and the publisher still scrubs the event that carries the row.
+
+    With no values registered, or a scope that could not be read
+    (``secret_registration_failed``), the row is held to the whole event
+    scrub, as before: the shape rules are then what keeps a credential out.
+
+    Bounded either way, and never cut inside a value the scrub would mask.
     """
-    return scrub(value)[:FINDING_VALUE_LIMIT]
+    one_line = " ".join(str(value or "").split())
+    if not _rows_kept_as_written():
+        return _cut_whole(scrub(one_line), FINDING_VALUE_LIMIT)
+    kept = _mask_short_secrets(_mask_configured_values(one_line))
+    kept = _URL_RUN.sub(_without_credentials, kept)
+    return _bound_whole(kept, FINDING_VALUE_LIMIT)
+
+
+def _mask_short_secrets(text: str) -> str:
+    """``text`` with every configured value shorter than the floor masked as a whole word.
+
+    A value of fewer than four characters is not masked as a word, which would
+    take ordinary words out of the row; where it is a URL's password, the
+    userinfo removal takes it.
+    """
+    values = sorted(
+        {value for values in _SHORT_SECRETS.values() for value in values if len(value) >= 4},
+        key=len,
+        reverse=True,
+    )
+    if not values:
+        return text
+    pattern = (
+        _SECRET_BOUNDARY_BEFORE
+        + "(?:"
+        + "|".join(re.escape(value) for value in values)
+        + r")(?![A-Za-z0-9_])"
+    )
+    return re.sub(pattern, _REDACTED, text)
+
+
+# One query parameter of a URL, its key and its value.
+_QUERY_PARAMETER = re.compile(r"(?P<lead>[?&;#])(?P<key>[^=&;#?]+)=(?P<value>[^&;#]*)")
+
+
+def _without_credentials(found: re.Match[str]) -> str:
+    """One URL with its userinfo masked and each credential-named query value masked."""
+    from maljan.core.settings_catalog import names_a_credential_value
+
+    rest = found.group("rest")
+    cut = min((rest.find(mark) for mark in "/?#" if mark in rest), default=len(rest))
+    authority, tail = rest[:cut], rest[cut:]
+    if "@" in authority:
+        authority = f"{_REDACTED}@" + authority.rsplit("@", 1)[1]
+
+    def _query(parameter: re.Match[str]) -> str:
+        key = parameter.group("key")
+        if not names_a_credential_value(key) and key.lower() not in _CREDENTIAL_QUERY_KEYS:
+            return parameter.group(0)
+        return f"{parameter.group('lead')}{key}={_REDACTED}"
+
+    return f"{found.group('scheme')}://{authority}{_QUERY_PARAMETER.sub(_query, tail)}"
+
+
+# The query keys a service URL carries a credential under, named by their last
+# word or as written here.
+_CREDENTIAL_QUERY_KEYS = frozenset({"api_key", "apikey", "access_token", "token", "key"})
+
+
+def _bound_whole(text: str, limit: int) -> str:
+    """``text`` bounded near ``limit`` and marked, never cut inside a value the scrub masks.
+
+    A digest or an identifier the cut would split is kept whole. Any other
+    run the cut falls in is cut in front of when the scrub would mask it, so
+    the event that carries the row never holds the head of a key.
+    """
+    if len(text) <= limit:
+        return text
+    cut = limit - 1
+    for found in _WHOLE_RUN.finditer(text):
+        if found.start() < cut < found.end():
+            cut = found.end()
+            break
+    if cut >= len(text):
+        return text
+    for found in _VALUE_RUN.finditer(text):
+        if found.start() < cut < found.end():
+            if scrub(found.group(0)) != found.group(0) or _looks_like_a_credential(
+                text[found.start() : cut]
+            ):
+                cut = found.start()
+            break
+    return text[:cut] + CUT_MARK
 
 
 def scrub_keeping_layout(text: Any) -> str:
@@ -856,10 +1513,52 @@ def _summarize_value(value: Any) -> str:
         return str(value)
     if isinstance(value, dict | list | tuple):
         return f"<{len(value)} items>" if not isinstance(value, dict) else f"<{len(value)} keys>"
-    text = scrub(value)
-    if len(text) > ARGUMENT_VALUE_CHARS:
-        text = text[: ARGUMENT_VALUE_CHARS - 1] + "…"
-    return text
+    return _cut_whole(scrub(value), ARGUMENT_VALUE_CHARS)
+
+
+# A digest or an identifier inside a longer text, which a cut must not split:
+# the publisher scrubs every payload again, and the part of a digest left in
+# front of the cut is a hex run of no digest's length, which that second pass
+# reads as a key.
+_WHOLE_RUN = re.compile(
+    r"(?<![A-Za-z0-9])(?:[A-Fa-f0-9]{64}|[A-Fa-f0-9]{40}|[A-Fa-f0-9]{32}"
+    r"|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+    r"(?:\.[A-Za-z0-9]{1,16}(?![A-Za-z0-9.]))?(?![A-Za-z0-9])"
+)
+
+
+def _cut_whole(text: str, limit: int) -> str:
+    """``text`` bounded near ``limit`` and marked, never cut inside a value the scrub kept.
+
+    ``text`` is already scrubbed. A digest or an identifier the cut would
+    split is kept whole, with the file extension after it: ``<sha256>.exe`` is
+    the name a reader needs, and it runs past the cap by a few characters. Any
+    other run the cut would leave in a shape the scrub reads as a key is cut in
+    front of instead. And whatever the cut leaves, a URL cut short or a scheme
+    word with the cut mark after it, the result is scrubbed once more: while
+    that changes it, the cut moves back to the start of the word it falls in,
+    so scrubbing the result again changes nothing.
+    """
+    if len(text) <= limit:
+        return text
+    cut = limit - 1
+    for found in _WHOLE_RUN.finditer(text):
+        if found.start() < cut < found.end():
+            cut = found.end()
+            break
+    if cut >= len(text):
+        return text
+    for found in _VALUE_RUN.finditer(text):
+        if found.start() < cut < found.end():
+            if _looks_like_a_credential(text[found.start() : cut]):
+                cut = found.start()
+            break
+    made = text[:cut] + CUT_MARK
+    while cut > 0 and scrub(made) != made:
+        cut = text.rfind(" ", 0, cut)
+        cut = max(cut, 0)
+        made = text[:cut].rstrip() + CUT_MARK
+    return made
 
 
 def summarize_args(args: Any) -> str:
@@ -884,8 +1583,9 @@ def summarize_args(args: Any) -> str:
         parts.append(f"{name}={shown}")
     if len(args) > ARGUMENTS_SUMMARISED:
         parts.append(f"+{len(args) - ARGUMENTS_SUMMARISED} more")
-    line = ", ".join(parts)
-    return line[: ARGUMENT_SUMMARY_CHARS - 1] + "…" if len(line) > ARGUMENT_SUMMARY_CHARS else line
+    # The joined line is scrubbed as a whole too: two values side by side can
+    # make a run neither was alone.
+    return _cut_whole(scrub(", ".join(parts)), ARGUMENT_SUMMARY_CHARS)
 
 
 def summarize_result(output: Any, *, ok: bool = True, remediation: str = "") -> str:
@@ -906,9 +1606,7 @@ def summarize_result(output: Any, *, ok: bool = True, remediation: str = "") -> 
         text = f"{headline}; {fix}" if fix else headline
     else:
         text = scrub(output)
-    if len(text) > RESULT_SUMMARY_CHARS:
-        text = text[: RESULT_SUMMARY_CHARS - 1] + "…"
-    return text
+    return _cut_whole(text, RESULT_SUMMARY_CHARS)
 
 
 def emit_tool_call_started(

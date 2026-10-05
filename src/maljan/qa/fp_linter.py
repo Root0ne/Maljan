@@ -199,16 +199,14 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                 severity="warn",
                 message=(
                     f"{file_name_count} file:name indicators present "
-                    f"(threshold {MAX_FILE_NAME_INDICATORS}). The judge "
-                    "renderer's cap may not be running."
+                    f"(more than {MAX_FILE_NAME_INDICATORS})."
                 ),
                 field="stix_bundle_extended.objects[indicator]",
                 explanation=(
-                    "file:name indicators are capped in the STIX bundle to keep "
-                    "low-signal IOCs from drowning the high-signal ones. When "
-                    "this fires, the cap in the extended renderer "
-                    "(``_accept_string_ioc``) either did not run or the bundle "
-                    "was rebuilt downstream without re-applying the limit."
+                    "A count, not a limit: the export carries every file name "
+                    "the publish rule publishes and drops none for their "
+                    "number. Many file names can drown the network indicators "
+                    "for a reader, so the count is stated."
                 ),
             )
         )
@@ -218,17 +216,14 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                 rule="C4",
                 severity="warn",
                 message=(
-                    f"{total_count} total indicators present "
-                    f"(threshold {MAX_TOTAL_INDICATORS}). The hard cap should "
-                    f"have collapsed lower-signal kinds."
+                    f"{total_count} total indicators present (more than {MAX_TOTAL_INDICATORS})."
                 ),
                 field="stix_bundle_extended.objects[indicator]",
                 explanation=(
-                    "The STIX bundle's total indicator count is hard-capped "
-                    "to keep downstream consumers (SIEM ingest, MISP "
-                    "export) tractable. When this fires the priority order "
-                    "(hashes > network IOCs > file:name) wasn't applied at "
-                    "the renderer."
+                    "A count, not a limit: the export carries every value the "
+                    "publish rule publishes and drops none for their number. "
+                    "A large bundle is stated so a consumer that ingests it "
+                    "(SIEM, MISP) knows what it is receiving."
                 ),
             )
         )

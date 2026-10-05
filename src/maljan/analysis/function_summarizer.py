@@ -81,6 +81,20 @@ _MERGE_HUMAN_TMPL = (
 # ---------------------------------------------------------------------------
 
 
+# Said at the head of a text the summariser's window could not hold whole.
+SHORTENED_NOTE = (
+    "NOTE: only the first {shown:,} of {total:,} characters fit this model's window; "
+    "the text below ends in … where it was cut."
+)
+SHORTENED_NOTE_ROOM = 200
+
+# Said at the head of a summary that ended at its output limit, by the rule an
+# analyst's answer is checked with (``base_agent.answer_cut_at_cap``).
+SUMMARY_CUT_NOTE = (
+    "NOTE: this summary ended at its {cap:,}-token output limit, so its end is missing."
+)
+
+
 class FunctionSummarizer:
     """Two-stage LLM-based token-cost optimisation.
 
@@ -95,9 +109,17 @@ class FunctionSummarizer:
         max_summary_words: int = 150,
         token_ledger: Any | None = None,
         model_label: str = "",
+        room_chars: Any = None,
+        truncation_ledger: Any = None,
     ) -> None:
         self._llm = llm
         self._max_words = max_summary_words
+        # What one summariser prompt may carry, in characters, asked per call:
+        # a callable returning the window's room, or ``None`` for no bound. A
+        # fixed 8,000 and 12,000 used to stand here.
+        self._room_chars = room_chars
+        # Where a shortened prompt is recorded, for the run's degradation reasons.
+        self._truncation_ledger = truncation_ledger
         # Each summary is a model call the run pays for, recorded under
         # ``summarizer`` and the model the summariser calls.
         self._token_ledger = token_ledger
@@ -107,7 +129,11 @@ class FunctionSummarizer:
         from maljan.core.token_ledger import record_response_usage
 
         record_response_usage(
-            self._token_ledger, response, agent="summarizer", model=self._model_label
+            self._token_ledger,
+            response,
+            agent="summarizer",
+            model=self._model_label,
+            call="function summary",
         )
 
     def summarize_chunk(self, code_chunk: str) -> str:
@@ -124,7 +150,7 @@ class FunctionSummarizer:
 
         prompt = _SUMMARIZE_HUMAN_TMPL.format(
             max_words=self._max_words,
-            code_chunk=code_chunk[:8000],  # Hard limit — token budget.
+            code_chunk=self._fitted(code_chunk, _SUMMARIZE_SYSTEM + _SUMMARIZE_HUMAN_TMPL),
         )
 
         messages = [
@@ -133,8 +159,7 @@ class FunctionSummarizer:
         ]
 
         try:
-            response = self._ask(messages)
-            self._record(response)
+            response, cut_at = self._ask(messages)
             summary: str = response.content  # type: ignore[assignment,union-attr]
             word_count = len(summary.split())
             logger.debug(
@@ -142,33 +167,130 @@ class FunctionSummarizer:
                 len(code_chunk),
                 word_count,
             )
-            return summary.strip()
+            return self._said_whole_or_cut(summary.strip(), cut_at)
         except Exception as exc:
             logger.warning(
                 "FunctionSummarizer.summarize_chunk failed: %s — returning raw chunk.", exc
             )
-            # Graceful degradation: on error return the raw chunk.
-            return code_chunk[: self._max_words * 6]  # Approximate char limit.
+            # Graceful degradation: on error return the raw chunk, whole; the
+            # analyst's input it becomes is sized from the analyst's window.
+            return code_chunk
 
-    def _ask(self, messages: list[Any]) -> Any:
+    def _fitted(self, text: str, framing: str) -> str:
+        """``text`` whole when the window's room holds it beside ``framing``, else shortened, said.
+
+        The room is asked of ``room_chars`` per call; with none, or no window
+        learned, the text goes whole. A shortened text ends in the cut mark
+        and begins with a line saying how much of it is shown.
+        """
+        from maljan.utils.marked_cut import marked_cut
+
+        try:
+            room = self._room_chars() if callable(self._room_chars) else None
+        except Exception:  # noqa: BLE001 — a room that cannot be read bounds nothing
+            room = None
+        if not isinstance(room, int) or room <= 0:
+            return text
+        width = room - len(framing) - SHORTENED_NOTE_ROOM
+        if len(text) <= width:
+            return text
+        shown = marked_cut(text, max(1, width))
+        logger.warning(
+            "FunctionSummarizer: %d of %d characters fit the window; the rest is left out.",
+            len(shown),
+            len(text),
+        )
+        record = getattr(self._truncation_ledger, "record_input_shortened", None)
+        if callable(record):
+            try:
+                record(
+                    "The function summariser's prompt was shortened: the first "
+                    f"{len(shown):,} of {len(text):,} characters fit its model's window."
+                )
+            except Exception as exc:  # noqa: BLE001 — a record never costs a summary
+                logger.debug("FunctionSummarizer: the shortening was not recorded (%s).", exc)
+        return f"{SHORTENED_NOTE.format(shown=len(shown), total=len(text))}\n{shown}"
+
+    def _ask(self, messages: list[Any]) -> tuple[Any, int | None]:
         """One summariser call, on the agent loop so a cancelled job cancels it in flight.
 
-        Held to the provider's own request timeout, the longest a call could
-        have taken before. A model that has only a synchronous ``invoke`` is
-        called as before.
+        Held to what the call's own request is given: the provider's request
+        timeout, or, where the model's pace is measured and its output cap
+        takes longer at that pace, that time
+        (``generation_rate.sized_request_timeout``), so the wait never ends
+        before the request would. A model that has only a synchronous
+        ``invoke`` is called as before.
+
+        Admitted by the job's spend ceiling first, like every model call: sent
+        with its cap held to what the spend pays for, reserved while it runs,
+        and recorded on the token ledger before the reservation goes. A call
+        the ceiling refuses raises :class:`SpendCeilingStop`, and the caller
+        keeps the raw text.
+
+        Returns the answer and the cap it was cut at, or ``None`` when it was
+        not cut: the server's ``length``, or a count that reached the cap the
+        call was sent with, held or the model's own (``answer_cut_at_cap``).
         """
         import inspect
 
         from maljan.agents.base_agent import run_coro_blocking
+        from maljan.core.spend import admitted
+        from maljan.llm.context_window import output_bound_kwargs
+        from maljan.llm.generation_rate import sized_request_timeout
         from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
 
-        if not inspect.iscoroutinefunction(getattr(type(self._llm), "ainvoke", None)):
-            return self._llm.invoke(messages)
-        return run_coro_blocking(
-            self._llm.ainvoke(messages),
-            float(PROVIDER_REQUEST_TIMEOUT_SECONDS),
-            label="function-summarizer",
+        cap = 0
+        for attr in ("max_tokens", "num_predict", "max_output_tokens"):
+            value = getattr(self._llm, attr, None)
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                cap = value
+                break
+        chars = sum(len(str(getattr(message, "content", message))) for message in messages)
+        seconds = sized_request_timeout(self._llm, cap, chars)
+        with admitted(
+            self._token_ledger,
+            kind="summary",
+            llm=self._llm,
+            model=self._model_label,
+            prompt_chars=chars,
+            cap_tokens=cap,
+        ) as bound:
+            held = output_bound_kwargs(self._llm, bound) if bound is not None else {}
+            if not inspect.iscoroutinefunction(getattr(type(self._llm), "ainvoke", None)):
+                response = self._llm.invoke(messages, **held)
+            else:
+                response = run_coro_blocking(
+                    self._llm.ainvoke(messages, **held),
+                    float(seconds if seconds is not None else PROVIDER_REQUEST_TIMEOUT_SECONDS),
+                    label="function-summarizer",
+                )
+            self._record(response)
+            from maljan.agents.base_agent import answer_cut_at_cap, cap_in_force
+
+            cut = answer_cut_at_cap(response, cap_in_force(cap, bound if held else None))
+            return response, (cut[0] if cut is not None else None)
+
+    def _said_whole_or_cut(self, text: str, cut_at: int | None) -> str:
+        """``text``, headed by the cut note and recorded when its call ended at its output limit.
+
+        A cut summary kept as whole would reach the analyst as the chunk's
+        whole account, with its end missing and nothing saying so.
+        """
+        if cut_at is None or not text:
+            return text
+        logger.warning(
+            "FunctionSummarizer: the summary ended at its %d-token output limit.", cut_at
         )
+        record = getattr(self._truncation_ledger, "record_input_shortened", None)
+        if callable(record):
+            try:
+                record(
+                    "A function summary ended at its "
+                    f"{cut_at:,}-token output limit; the analyst was told its end is missing."
+                )
+            except Exception as exc:  # noqa: BLE001 — a record never costs a summary
+                logger.debug("FunctionSummarizer: the cut was not recorded (%s).", exc)
+        return f"{SUMMARY_CUT_NOTE.format(cap=cut_at)}\n{text}"
 
     def summarize_chunks(self, chunks: list[str]) -> str:
         """Summarise multiple chunks and merge the results.
@@ -230,7 +352,7 @@ class FunctionSummarizer:
         combined = "\n\n".join(summaries)
         prompt = _MERGE_HUMAN_TMPL.format(
             max_words=self._max_words * 2,
-            summaries=combined[:12000],  # Token budget guard.
+            summaries=self._fitted(combined, _MERGE_SYSTEM + _MERGE_HUMAN_TMPL),
         )
 
         messages = [
@@ -239,10 +361,9 @@ class FunctionSummarizer:
         ]
 
         try:
-            response = self._ask(messages)
-            self._record(response)
+            response, cut_at = self._ask(messages)
             result: str = response.content  # type: ignore[assignment,union-attr]
-            return result.strip()
+            return self._said_whole_or_cut(result.strip(), cut_at)
         except Exception as exc:
             logger.warning(
                 "FunctionSummarizer._merge_summaries failed: %s — returning concatenated.", exc

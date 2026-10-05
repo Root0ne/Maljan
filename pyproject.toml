@@ -122,6 +122,10 @@ dev = [
     # conformance check that counts families at two.
     "cairosvg>=2.9.0",
     "ruff>=0.15.9",
+    # 3.3.1 is published without its STIX JSON schemas (the schema submodules
+    # were not checked out when the wheel and sdist were built), so it cannot
+    # validate any bundle: upstream oasis-open/cti-stix-validator#248. Held at
+    # 3.2.0 until a release ships them again.
     "stix2-validator==3.2.0",
 ]
 # The GitHub Pages site under docs/, built with MkDocs Material. Kept apart

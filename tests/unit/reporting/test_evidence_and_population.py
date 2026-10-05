@@ -16,6 +16,7 @@ from maljan.reporting.models import (
     StaticAnalysis,
     StringIOC,
 )
+from maljan.reporting.renderers.stix_renderer import publishes
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 
@@ -44,7 +45,7 @@ class TestConsolidatedIOCs:
         assert by_type["IPv4"].value == "94.156.79.162"
         assert by_type["SHA-256"].value == "a" * 64
         assert by_type["SHA-256"].is_network is False
-        assert by_type["SHA-256"].published == "yes"
+        assert publishes(by_type["SHA-256"].published)
 
     def test_dedupes(self) -> None:
         r = _report(
@@ -326,14 +327,12 @@ class TestAbsenceMustBeProvableNotJustUnstated:
         key = next(k for k in binary if k.startswith("imported_dlls"))
         assert "complete list, 3 total" in key
 
-    def test_a_truncated_list_is_never_declared_complete(self) -> None:
-        """Trading one wrong inference for a worse one: telling the model an
-        abridged list is exhaustive would license it to deny real imports."""
+    def test_a_long_list_is_shown_whole_and_declared_complete(self) -> None:
+        """No count cuts the import list, so it is always the complete list."""
         binary = bundle_for("execution_flow", self._with_dlls(40))["binary"]
         key = next(k for k in binary if k.startswith("imported_dlls"))
-        assert "complete" not in key
-        assert "NOT exhaustive" in key
-        assert len(binary[key]) == 24
+        assert "complete list, 40 total" in key
+        assert len(binary[key]) == 40
 
     def test_the_clr_shim_absence_is_its_own_fact(self) -> None:
         binary = bundle_for("execution_flow", self._with_dlls(3))["binary"]

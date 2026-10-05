@@ -22,7 +22,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -32,10 +32,17 @@ from langchain_core.language_models.chat_models import BaseChatModel
 if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
 
-from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
+from maljan.agents.claim_headings import (
+    LINE_PREFIX,
+    claims_headed,
+    count_claims_after_disputes,
+    count_claims_begun,
+)
+from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT, KEEP_REPLY
 from maljan.core.config import get_settings
-from maljan.core.exceptions import AgentLoopCancelled, AnalystError
+from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
 from maljan.core.logger import logger
+from maljan.core.spend import LOOP_TURN_CALL, SPEND_CAP, SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.llm.context_window import (
     CHARS_PER_TOKEN,
@@ -43,18 +50,37 @@ from maljan.llm.context_window import (
     tool_definition_chars,
     window_full_error,
 )
+from maljan.llm.generation_rate import ModelCallDeadline
+from maljan.llm.stream_watch import StopRule, current_rule, ended_while_streaming, watching
+from maljan.pipeline.run_state import NO_LIMIT, NoLimit, budget_line
+from maljan.pipeline.turns import with_question
 from maljan.pipeline.validation import (
     ABSENCE_CLAIM_CODE,
     ALIGNMENT_MARGIN,
     ANALYST_CUT_CODE,
+    ANALYST_REPEATED_CODE,
     CLAIM_DOES_NOT_DESCRIBE_CODE,
+    CLAIMS_UNDER_DISPUTES_CODE,
+    DECOMPILED_NOT_DESCRIBED_CODE,
+    LIBRARY_ONLY_CLAIMS_CODE,
     VALIDITY_CODE,
+    ClaimsRepeated,
     ValidationTally,
     Violation,
     analyst_cut_violation,
+    analyst_repeated_violation,
+    chunk_cut_unread_sentence,
+    claims_kept_under_disputes_finding,
+    claims_repeated,
+    decompiled_functions,
+    decompiled_not_described_violation,
+    image_bases_in,
+    library_only_claims,
+    library_only_claims_violation,
     mark_invalid_technique_ids,
     parse_violations,
     retry_with_feedback_sync,
+    undescribed_decompiles,
     validate_isr,
     validity_check_available,
 )
@@ -83,6 +109,10 @@ RECURSION_STOP_TEXT = "Sorry, need more steps to process this request."
 # the step-cap stop appended after a recursion error. No model served it, so
 # it is not a call on the token ledger.
 SYNTHETIC_TURN_KEY = "maljan_synthetic_turn"
+
+# What the token ledger calls one model turn of a tool loop, for a call that
+# reported no usage.
+TOOL_LOOP_TURN_CALL = LOOP_TURN_CALL
 
 
 def is_model_turn(message: Any) -> bool:
@@ -259,6 +289,11 @@ def _message_chars(m: object) -> int:
     calls = getattr(m, "tool_calls", None)
     if calls:
         total += len(str(calls))
+    # A thinking model's reasoning that a provider has sent back with the turn
+    # (``openai_provider.with_reasoning_passback``) is read with it too.
+    reasoning = (getattr(m, "additional_kwargs", None) or {}).get("reasoning_content")
+    if isinstance(reasoning, str):
+        total += len(reasoning)
     return total
 
 
@@ -409,7 +444,7 @@ def steps_used(messages: list) -> int:
     return len(ai_turns) + tool_rounds
 
 
-def model_turns_left(max_steps: int, messages: list) -> int:
+def model_turns_left(max_steps: int | None, messages: list) -> int | None:
     """How many model turns the loop still has, counted the way langgraph counts.
 
     ``max_steps`` is handed to langgraph as ``recursion_limit``, and langgraph
@@ -417,9 +452,31 @@ def model_turns_left(max_steps: int, messages: list) -> int:
     tools costs a second for the tool node. So the budget in model turns is
     half the steps, rounded up, less what the transcript already spent — one
     per assistant turn plus one per tool round. What the model is told is a
-    number it can act on; the graph's own step count is not.
+    number it can act on; the graph's own step count is not. ``None`` for a
+    loop with no step limit: there is no count to give.
     """
+    if max_steps is None:
+        return None
     return max(0, (int(max_steps) - steps_used(messages) + 1) // 2)
+
+
+def recursion_limit(max_steps: int | None) -> int:
+    """The ``recursion_limit`` langgraph is handed for a loop of ``max_steps``.
+
+    langgraph has no "unlimited" and ends a graph at twenty-five steps when it
+    is given none, so a loop with no step limit is handed the largest number
+    Python's platform offers: the graph never stops for steps, and the loop
+    ends by its model answering or by one of the stops that remain (the
+    repeat guard, the room, the spend ceiling, the job timeout).
+    """
+    return sys.maxsize if max_steps is None else int(max_steps)
+
+
+def limit_text(value: float | None, unit: str = "") -> str:
+    """A limit for a log line: ``180s``, ``40``, or ``none`` where there is none."""
+    if value is None:
+        return "none"
+    return f"{int(value)}{unit}"
 
 
 class LoopBudget:
@@ -435,9 +492,12 @@ class LoopBudget:
     needs no charging: a delegated call runs inside the caller's own timeout.
     """
 
-    def __init__(self, max_steps: int, timeout: float, started: float | None = None) -> None:
-        self.max_steps = int(max_steps)
-        self.timeout = float(timeout)
+    def __init__(
+        self, max_steps: int | None, timeout: float | None, started: float | None = None
+    ) -> None:
+        # ``None`` in either is no limit in that dimension.
+        self.max_steps = None if max_steps is None else int(max_steps)
+        self.timeout = None if timeout is None else float(timeout)
         self.started = time.monotonic() if started is None else float(started)
         self.own_steps = 0
         self.delegated_steps = 0
@@ -455,15 +515,35 @@ class LoopBudget:
         """
         self.delegated_steps += max(0, int(steps))
 
-    def steps_left(self) -> int:
+    def steps_left(self) -> int | None:
+        """Steps this loop has left, or ``None`` with no step limit."""
+        if self.max_steps is None:
+            return None
         return max(0, self.max_steps - self.own_steps)
 
-    def turns_left(self, messages: list) -> int:
-        """The budget line's number: model turns this loop has left."""
+    def turns_left(self, messages: list) -> int | None:
+        """The budget line's number: model turns this loop has left, ``None`` with no limit."""
         return model_turns_left(self.max_steps, messages)
 
-    def seconds_left(self) -> float:
+    def seconds_left(self) -> float | None:
+        """Seconds this loop has left, or ``None`` with no time limit."""
+        if self.timeout is None:
+            return None
         return max(0.0, self.timeout - (time.monotonic() - self.started))
+
+    def deadline(self) -> float | None:
+        """When this loop's time runs out on the monotonic clock, or ``None`` with no limit."""
+        return None if self.timeout is None else self.started + self.timeout
+
+    def stated_turns(self, messages: list) -> int | NoLimit:
+        """What the run-state block says of the turns: a count, or no limit."""
+        left = self.turns_left(messages)
+        return NO_LIMIT if left is None else left
+
+    def stated_seconds(self) -> float | NoLimit:
+        """What the run-state block says of the time: seconds, or no limit."""
+        left = self.seconds_left()
+        return NO_LIMIT if left is None else left
 
 
 class BudgetCeiling:
@@ -482,10 +562,13 @@ class BudgetCeiling:
     without one.
     """
 
-    def __init__(self, steps: int, seconds: float, wall: float | None = None) -> None:
-        self.steps = int(steps)
-        self.seconds = float(seconds)
-        self.wall = float(seconds if wall is None else wall)
+    def __init__(self, steps: int | None, seconds: float | None, wall: float | None = None) -> None:
+        # ``None`` steps or seconds is no limit in that dimension: an ask with
+        # no budget of its own, answered for a caller with no clock.
+        self.steps = None if steps is None else int(steps)
+        self.seconds = None if seconds is None else float(seconds)
+        wall = seconds if wall is None else wall
+        self.wall = None if wall is None else float(wall)
 
 
 # The class-level stand-ins for two pieces of per-agent state, for an analyst
@@ -669,6 +752,36 @@ def _model_label(llm: Any) -> str:
     return model_name_of(llm)
 
 
+def model_held_per_turn(llm: Any, tools: list) -> tuple[Any, Any | None]:
+    """``(loop model, binding)``: ``llm`` bound to ``tools`` here, and where a turn's cap is set.
+
+    A ReAct executor handed a bare model binds the tools itself, and a binding
+    made inside it cannot be reached, so its turns cannot be held to what the
+    spend ceiling leaves: they are made at their whole cap or not at all.
+    Bound here, the executor keeps the binding it was handed (it binds only a
+    model that is not bound to these tools yet) and each turn's held cap is set
+    on it (:func:`_hold_the_turn`). ``(llm, None)`` when the model cannot be
+    bound this way or takes no per-call cap.
+    """
+    from langchain_core.runnables import RunnableBinding
+
+    binder = getattr(llm, "bind_tools", None)
+    if not callable(binder):
+        return llm, None
+    names = [str(getattr(tool, "name", "")) for tool in tools]
+    if len(set(names)) != len(names):
+        return llm, None
+    try:
+        bound = binder(tools)
+    except Exception as exc:  # noqa: BLE001 — the executor binds them the ordinary way
+        logger.debug("a loop's model was not bound ahead of its executor (%s).", exc)
+        return llm, None
+    if not isinstance(bound, RunnableBinding):
+        return llm, None
+    binding = _loop_binding(bound, llm)
+    return (bound, binding) if binding is not None else (llm, None)
+
+
 def _model_that_closes_off_truncated_calls(llm: Any, tools: list, repair: Any) -> Any:
     """``llm`` with the repair appended, or ``llm`` when it cannot be appended to.
 
@@ -704,6 +817,40 @@ def _model_that_closes_off_truncated_calls(llm: Any, tools: list, repair: Any) -
     if not isinstance(bound, RunnableBinding):
         return llm
     return bound | RunnableLambda(repair)
+
+
+def _loop_binding(loop_model: Any, llm: Any) -> Any | None:
+    """The model binding a loop's turns are sent through, where a turn's cap can be set on it.
+
+    ``None`` when the loop runs on a model it could not bind itself, or on
+    one that takes no per-call output cap: a turn of such a loop cannot be
+    held, and the spend ceiling admits it only at its whole cap.
+    """
+    from langchain_core.runnables import RunnableBinding, RunnableSequence
+
+    from maljan.llm.context_window import accepts_output_bound
+
+    if not accepts_output_bound(llm):
+        return None
+    first = loop_model.first if isinstance(loop_model, RunnableSequence) else loop_model
+    if not isinstance(first, RunnableBinding) or not isinstance(first.kwargs, dict):
+        return None
+    return first
+
+
+def _hold_the_turn(binding: Any, llm: Any, held: int | None) -> None:
+    """Set the next turn's output cap on the loop's binding: ``held``, or the model's own."""
+    if binding is None:
+        return
+    from maljan.llm.context_window import output_bound_kwargs
+
+    field = next(iter(output_bound_kwargs(llm, 1)), None)
+    if field is None:
+        return
+    if held is None:
+        binding.kwargs.pop(field, None)
+    else:
+        binding.kwargs[field] = int(held)
 
 
 def lock_for(agent: Any) -> Any:
@@ -763,7 +910,7 @@ def _steps_this_loop_spent(ledger: LoopBudget, messages: list) -> int:
     return int(steps_used(messages) if messages else ledger.own_steps)
 
 
-def hard_cap(timeout: float, ceiling: BudgetCeiling | None = None) -> float:
+def hard_cap(timeout: float | None, ceiling: BudgetCeiling | None = None) -> float | None:
     """The wall a loop is aborted at, never later than a caller is waiting for.
 
     A delegated loop runs on a tool thread that cannot be cancelled, so the
@@ -774,11 +921,19 @@ def hard_cap(timeout: float, ceiling: BudgetCeiling | None = None) -> float:
     than being clipped away against the ask's own timeout — a callee whose
     abort fires at the same second as its soft timeout never gets to write up
     what it gathered.
+
+    ``None`` for a loop with no time limit and no caller's clock above it: the
+    loop is not aborted on a clock of its own, and each model call inside it
+    waits as long as its answer takes at the model's measured pace.
     """
-    wall = float(timeout) + HARD_CAP_GRACE
-    if ceiling is not None:
-        wall = min(wall, float(ceiling.wall))
-    return max(1.0, wall)
+    walls: list[float] = []
+    if timeout is not None:
+        walls.append(float(timeout) + HARD_CAP_GRACE)
+    if ceiling is not None and ceiling.wall is not None:
+        walls.append(float(ceiling.wall))
+    if not walls:
+        return None
+    return max(1.0, min(walls))
 
 
 def a_budget(value: Any) -> int | None:
@@ -813,6 +968,61 @@ def _definition_budget(cfg: Any, agent_name: str) -> tuple[int | None, int | Non
     )
 
 
+# Kept back from an analyst's input room for the notice a shortened input
+# begins with.
+INPUT_NOTICE_ROOM = 400
+INPUT_SHORTENED_NOTICE = (
+    "NOTE: this input did not fit the model's window whole and was shortened: "
+    "{detail}. What was left out is reachable by tool call where a tool reads it."
+)
+
+
+def shorten_input(text: str, room: int) -> tuple[str, str]:
+    """``text`` shortened to ``room`` characters as a document, and the sentence saying how.
+
+    A JSON document keeps every key and loses elements off its largest lists
+    (``output_shortening.shorten_json_document``), with its own bookkeeping of
+    what was left out; any other text keeps its head and ends in the cut mark.
+    Either way the result begins with :data:`INPUT_SHORTENED_NOTICE`. A JSON
+    document that fits once written without its whitespace comes back whole,
+    with an empty sentence.
+    """
+    from maljan.agents.output_shortening import shorten_json_document
+    from maljan.utils.marked_cut import marked_cut
+
+    budget = max(0, int(room))
+    shaped = shorten_json_document(text, budget)
+    if shaped.compacted:
+        # Whole, written without its whitespace: nothing was left out.
+        return shaped.text, ""
+    if shaped.shortened:
+        body = shaped.text
+        detail = (
+            f"{len(text):,} characters of JSON shortened to {len(body):,} by leaving list "
+            "elements out; the document says which lists and how many"
+        )
+    else:
+        body = marked_cut(text, budget)
+        detail = f"the first {len(body):,} of {len(text):,} characters are shown, ending in …"
+    notice = INPUT_SHORTENED_NOTICE.format(detail=detail)
+    return f"{notice}\n\n{body}", detail
+
+
+def spend_reached(agent: Any) -> bool:
+    """Whether the job ``agent`` serves has reached its spend ceiling. Never raises.
+
+    A module function, so a duck-typed analyst that borrows one method is held
+    to the same rule.
+    """
+    from maljan.core.spend import SpendMeter
+
+    meter = getattr(getattr(agent, "token_ledger", None), "spend", None)
+    try:
+        return isinstance(meter, SpendMeter) and meter.exhausted() is True
+    except Exception:  # noqa: BLE001 — a meter is never worth a lost analysis
+        return False
+
+
 def slowest_call(entries: Any) -> str:
     """`, slowest <tool> 12.3s`, or `""` when nothing in the loop was timed.
 
@@ -834,11 +1044,16 @@ def slowest_call(entries: Any) -> str:
     return f", slowest {slowest[1]} {slowest[0] / 1000.0:.1f}s"
 
 
-def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[int, int]:
-    """``(timeout, max_steps)`` for one loop of ``agent_name``.
+def loop_limits(
+    agent_name: str, ceiling: BudgetCeiling | None = None
+) -> tuple[int | None, int | None]:
+    """``(timeout, max_steps)`` for one loop of ``agent_name``; ``None`` is no limit.
 
     The agent's own definition first, then the deprecated per-agent override
-    maps — each held to what a budget can be — then the deployment's defaults.
+    maps — each held to what a budget can be — then the deployment's own
+    ``react_agent_timeout`` / ``react_agent_max_steps``. All of them are
+    ``None`` unless an operator set one, and a dimension nobody set has no
+    limit.
     A budget is a property of the agent
     — an operator cloning a team gets the definition, and used to get none of
     its budget — so the definition wins over a map keyed by agent name
@@ -851,13 +1066,19 @@ def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[
     own_timeout, own_steps = _definition_budget(cfg, agent_name)
     overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
     step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
-    timeout = own_timeout or a_budget(overrides.get(agent_name)) or int(cfg.react_agent_timeout)
+    timeout = (
+        own_timeout
+        or a_budget(overrides.get(agent_name))
+        or a_budget(getattr(cfg, "react_agent_timeout", None))
+    )
     max_steps = (
-        own_steps or a_budget(step_overrides.get(agent_name)) or int(cfg.react_agent_max_steps)
+        own_steps
+        or a_budget(step_overrides.get(agent_name))
+        or a_budget(getattr(cfg, "react_agent_max_steps", None))
     )
     if ceiling is not None:
-        max_steps = max(2, int(ceiling.steps))
-        timeout = max(1, int(ceiling.seconds))
+        max_steps = None if ceiling.steps is None else max(2, int(ceiling.steps))
+        timeout = None if ceiling.seconds is None else max(1, int(ceiling.seconds))
     return timeout, max_steps
 
 
@@ -867,8 +1088,20 @@ def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[
 # either, and each ask is another full model turn.
 # No tool half to the sentence: the nudge invokes the bare model, with no tools
 # bound to that turn, so a model that took that branch answered with an empty
-# message and the run's one extra step bought nothing.
-FINAL_ANSWER_NUDGE = "Your last message was not a final report. Return your final ISR now."
+# message and the run's one extra step bought nothing. The turn says so: the
+# system prompt above it described the loop's tools, and this request carries
+# none (or carries them forbidden, on the second way of asking).
+# The question a loop is asked when it starts after the job's spend ceiling
+# was reached: it has no tool phase, and says so to the model.
+SPEND_CEILING_QUESTION = (
+    "The job's spend ceiling is reached, so no tool can be called. Write your final "
+    "answer now from what you were given above."
+)
+
+FINAL_ANSWER_NUDGE = (
+    "Your last message was not a final report. No tool can be called in this turn. "
+    "Return your final ISR now."
+)
 
 # What the analyst reports for itself when even the nudge produced no report.
 # Not ``no_data``: the analyst had data, read it, and stopped mid-thought.
@@ -891,6 +1124,28 @@ def unparsed_answers_reason(names: Sequence[str]) -> str:
     )
 
 
+def tool_free_turns(messages: Sequence[Any]) -> list[Any]:
+    """``messages`` with each system turn's sentence about tools saying none can be called.
+
+    For the turns that resend a loop's conversation with no tool callable —
+    the final-answer nudge and the forced synthesis. Only the sentence
+    changes; the rest of the system turn, and every other message, is sent as
+    the loop sent it.
+    """
+    from langchain_core.messages import SystemMessage
+
+    from maljan.agents.prompt_fragments import for_a_tool_free_turn
+
+    out: list[Any] = []
+    for message in messages:
+        if isinstance(message, SystemMessage) and isinstance(message.content, str):
+            text = for_a_tool_free_turn(message.content)
+            if text != message.content:
+                message = message.model_copy(update={"content": text})
+        out.append(message)
+    return out
+
+
 def answer_is_isr(text: str) -> bool:
     """Whether an answer carries a report at all.
 
@@ -903,7 +1158,7 @@ def answer_is_isr(text: str) -> bool:
 
     if not text or not text.strip():
         return False
-    return "CLAIM:" in text or has_findings_block(text)
+    return "CLAIM:" in text or count_claims_begun(text) > 0 or has_findings_block(text)
 
 
 def nudge_turns(msgs: list) -> tuple[list, bool]:
@@ -931,7 +1186,19 @@ def nudge_turns(msgs: list) -> tuple[list, bool]:
             # templates render as nothing and a few reject.
             if not content.strip() and not kept_calls:
                 continue
-            out.append(AIMessage(content=message.content, tool_calls=kept_calls))
+            # The reasoning a provider asks to have sent back stays with the
+            # turn it belongs to (``openai_provider.with_reasoning_passback``);
+            # nothing else of the dropped call's raw form is carried.
+            kept_kwargs = {
+                key: value
+                for key, value in (message.additional_kwargs or {}).items()
+                if key == "reasoning_content"
+            }
+            out.append(
+                AIMessage(
+                    content=message.content, tool_calls=kept_calls, additional_kwargs=kept_kwargs
+                )
+            )
             continue
         out.append(message)
     return out, changed
@@ -1158,17 +1425,110 @@ def describe_exception_for_log(exc: BaseException) -> str:
     return type(exc).__name__
 
 
-# Structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block parsing, used by the
-# view- and tier-decomposition paths whose prompts explicitly demand that shape.
+# Structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block parsing
+# (``read_claim_blocks``), the one reader every path that reads claims uses.
 _BLOCK_SPLIT_RE = re.compile(r"(?:^|\r?\n)\s*-{3,}\s*(?:\r?\n|$)", flags=re.MULTILINE)
 _BLOCK_CLAIM_RE = re.compile(
-    r"CLAIM:\s*(.+?)(?=\s*\n\s*(?:EVIDENCE|CONFIDENCE|TECHNIQUE):|\Z)", re.DOTALL
+    r"CLAIM:\s*(.+?)(?=\s*\n" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|TECHNIQUE):|\Z)",
+    re.DOTALL,
 )
-_BLOCK_EVIDENCE_RE = re.compile(
-    r"EVIDENCE:\s*(.+?)(?=\s*\n\s*(?:CONFIDENCE|TECHNIQUE):|\Z)", re.DOTALL
+# The fields are read in a block's tail: from the first field label that
+# begins a line to the block's end. The claim sentence above the tail never
+# lends a field, so a claim that says "TECHNIQUE: flags" mid-sentence keeps
+# its real line. Inside the tail a label also counts after whitespace, since
+# models write a claim's fields on one line as well as on three
+# ("EVIDENCE: [ev_0309]. CONFIDENCE: 0.65 TECHNIQUE: T1071.001").
+_TAIL_START_RE = re.compile(
+    r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|(?i:TECHNIQUE)):", re.MULTILINE
 )
-_BLOCK_CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*([\d.]+)")
-_BLOCK_TECHNIQUE_RE = re.compile(r"TECHNIQUE:\s*(T\d{4}(?:\.\d{3})?|NONE)", re.IGNORECASE)
+_INLINE = r"(?:^|(?<=[\s*_>#]))"
+# EVIDENCE runs to the next CONFIDENCE or TECHNIQUE label that starts a line
+# when one follows it, so words inside the evidence ("maps to MITRE
+# technique: T1055", "the tool said CONFIDENCE: 0.2") never cut it and every
+# id written after them stays cited. Only when no such line follows does it
+# end at a label written later on its own line, spelled in capitals as the
+# labels are ("EVIDENCE: [ev_0309]. CONFIDENCE: 0.65 TECHNIQUE: T1071.001").
+_BLOCK_EVIDENCE_LABEL_RE = re.compile(_INLINE + r"EVIDENCE:[ \t]*", re.MULTILINE)
+_EVIDENCE_ENDS_AT_LINE_START_RE = re.compile(
+    r"\n" + LINE_PREFIX + r"(?:CONFIDENCE|(?i:TECHNIQUE)):"
+)
+_EVIDENCE_ENDS_INLINE_RE = re.compile(r"\s+" + LINE_PREFIX + r"(?:CONFIDENCE|TECHNIQUE):")
+# The CONFIDENCE value as written: what follows the label on its line, read
+# by ``_stated_confidence``. A label present with nothing readable after it is
+# a confidence the reader could not read, not one the analyst left out.
+_LINE_CONFIDENCE_RE = re.compile(r"^" + LINE_PREFIX + r"CONFIDENCE:[ \t]*(.*)$", re.MULTILINE)
+_BLOCK_CONFIDENCE_RE = re.compile(_INLINE + r"CONFIDENCE:[ \t]*(.*)$", re.MULTILINE)
+# The number that opens the value: digits with at most one decimal point, and
+# a percent sign after it where one is written. What follows the number (a
+# full stop, a comma, a bracketed note, words) is the sentence around it, and
+# a number that runs on into more digits ("0.9.5") is no number read here, nor
+# one a comma or a dash joins to more digits: a decimal comma ("0,85") or a
+# range ("0.8-0.9") is a value this reader would have to guess at.
+_CONFIDENCE_NUMBER_RE = re.compile(
+    r"(\d+(?:\.\d+)?|\.\d+)(?![\d.]*\d)(?!\s*[,\-\u2013\u2014]\s*\d)\s*(%)?"
+)
+# Marks a model writes around a value: emphasis, code quotes and a bracket.
+_CONFIDENCE_MARKS = "*_`([ \t"
+# What the reader states a CONFIDENCE value as, when it reads none.
+UNREADABLE_CONFIDENCE_MARK = "(empty)"
+# The whole TECHNIQUE value as written: one id is a claimed technique, and
+# anything more (a qualifier, a negation, a second id) is the analyst's line,
+# kept and asked about rather than read for the first id in it. It ends at the
+# line's end or at a CONFIDENCE or EVIDENCE label written after it.
+_LINE_TECHNIQUE_RE = re.compile(
+    r"^" + LINE_PREFIX + r"(?i:TECHNIQUE):[ \t]*(.*?)(?=[ \t]+(?:CONFIDENCE|EVIDENCE):|$)",
+    re.MULTILINE,
+)
+_BLOCK_TECHNIQUE_LINE_RE = re.compile(
+    _INLINE + r"TECHNIQUE:[ \t]*(.*?)(?=[ \t]+(?:CONFIDENCE|EVIDENCE):|$)", re.MULTILINE
+)
+
+
+def _field_tail(block: str) -> str:
+    """The part of a block its fields are read from: from the first line-start label on."""
+    start = _TAIL_START_RE.search(block)
+    return block[start.start() :] if start else ""
+
+
+def _evidence_field(tail: str) -> str | None:
+    """The EVIDENCE value in a block's tail as written, or ``None`` when it has no label."""
+    label = _BLOCK_EVIDENCE_LABEL_RE.search(tail)
+    if label is None:
+        return None
+    rest = tail[label.end() :]
+    end = _EVIDENCE_ENDS_AT_LINE_START_RE.search(rest) or _EVIDENCE_ENDS_INLINE_RE.search(rest)
+    return rest[: end.start()] if end else rest
+
+
+def _field(
+    tail: str, at_line_start: re.Pattern[str], anywhere: re.Pattern[str]
+) -> re.Match[str] | None:
+    """A field in the tail: its label at a line start first, else after whitespace."""
+    return at_line_start.search(tail) or anywhere.search(tail)
+
+
+_ONE_TECHNIQUE_RE = re.compile(r"T\d{4}(?:\.\d{3})?", re.IGNORECASE)
+# What a TECHNIQUE line says to claim none.
+_NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
+
+
+def read_technique_line(line: str) -> tuple[str | None, str | None]:
+    """``(technique_id, unread line)`` for one claim's TECHNIQUE line as written.
+
+    Exactly one id, and nothing else, is the claimed technique; ``NONE`` or a
+    dash claims none. Anything else — words after an id ("T1027.002 not
+    supported"), a qualifier ("T1055 (unproven)"), several ids ("T1055,
+    T1106") — claims no technique the reader could name without deciding what
+    the words mean, so no id is read and the line is returned as written, for
+    the validation turn to ask about (``isr.technique_line_unread``).
+    """
+    text = str(line or "").strip()
+    bare = text.strip("*`_ ").rstrip(".").strip()
+    if bare.upper() in _NO_TECHNIQUE:
+        return None, None
+    if _ONE_TECHNIQUE_RE.fullmatch(bare):
+        return bare.upper(), None
+    return None, text
 
 
 # Model tool-call scaffolding, which is not prose and is never a finding.
@@ -1195,7 +1555,9 @@ _INVOCATION_KEYS = ({"name", "arguments"}, {"name", "parameters"}, {"tool", "arg
 def _is_tool_invocation(payload: str) -> bool:
     try:
         parsed = json.loads(payload)
-    except ValueError:
+    except (ValueError, RecursionError):
+        # Not JSON, or nested past the parser's depth: text that is not
+        # stripped, and never an error that loses the whole answer.
         return False
     if not isinstance(parsed, dict):
         return False
@@ -1253,9 +1615,6 @@ def evidence_ref_width() -> int:
     )
 
 
-# How many dropped ids are written back after the evidence field's cut.
-_EVIDENCE_REF_IDS = 3
-
 # The start of an id the cut sliced through, at the end of the kept text: any
 # prefix of ``[ev_NNNN``, from the bare bracket up to a whole id whose closing
 # bracket was cut, and the space before it. The whole id is written back.
@@ -1269,9 +1628,9 @@ def evidence_ref_text(evidence_text: str) -> str:
     (``evidence_ref_width``), and the claim format asks for the id at
     the end of a line whose front is prose, so on a long line the cut lands on
     the one part the run can check. Any id the cut dropped is written back
-    after it, in the order the model wrote it, up to a few: the field is what
-    the report prints and what long-term memory embeds, and the width should
-    bound it. An id the cut sliced through is removed from
+    after it, in the order the model wrote it — every one: an id is the
+    citation, and a claim that loses one cites less than its analyst did. An
+    id the cut sliced through is removed from
     the kept text, since the whole id follows.
 
     The cut is marked (``utils.marked_cut.CUT_MARK``) where the kept text ends.
@@ -1287,7 +1646,7 @@ def evidence_ref_text(evidence_text: str) -> str:
         found
         for found in dict.fromkeys(f.lower() for f in ENTRY_ID_RE.findall(evidence_text))
         if found not in still_there
-    ][:_EVIDENCE_REF_IDS]
+    ]
     if not dropped:
         return kept
     return f"{kept} {' '.join(f'[{found}]' for found in dropped)}"
@@ -1299,33 +1658,78 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
     The claims alone; ``parse_structured_claims_counted`` also says how many
     blocks were not claims for want of a confidence.
     """
-    return parse_structured_claims_counted(text)[0]
+    return read_claim_blocks(text).claims
 
 
 def parse_structured_claims_counted(text: str) -> tuple[list[ClaimEvidence], int]:
-    """``(claims, blocks that stated no confidence)`` for the ``CLAIM:`` blocks in ``text``.
+    """``(claims, blocks that stated no confidence)`` for the ``CLAIM:`` blocks in ``text``."""
+    read = read_claim_blocks(text)
+    return read.claims, read.without_confidence
 
-    The view/tier decomposition prompts (``_VIEW_SYSTEM``)
-    require this exact format; the parsed output used to be handed to a
-    free-text sentence splitter, which has no notion of a ``TECHNIQUE:`` line,
-    so every technique ID produced through those paths was dropped and the raw
-    "CLAIM: ..." prefix leaked into the claim text.
 
-    More lenient than the static analyst's strict variant about the citation:
-    a block without ``EVIDENCE:`` is still a finding, recorded as unsourced.
-    Not about the confidence. A block that states none, or one that cannot be
-    read as a number, is not a claim: the confidence on a claim is the
-    analyst's own statement, and this parser used to write 0.5 where the
-    analyst wrote nothing. Such blocks are counted instead, and the count is
-    what the validation turn asks the analyst about.
+@dataclass(frozen=True)
+class ClaimRead:
+    """What one read of an answer's claim blocks found.
+
+    ``begun`` is the claim headings the answer opened
+    (``claim_headings.count_claims_begun``). A block that stated no confidence
+    is not a claim and is counted apart, because the validation turn asks the
+    analyst about it. Whatever else the model began and the reader did not
+    read is ``unread``, which the caller records rather than lets pass.
+
+    ``confidence_unreadable`` is the CONFIDENCE values the reader found and
+    could not read as a number from 0 to 1 or a percentage, one per block, as
+    written. Those blocks are unread, not blocks without a confidence: the
+    analyst stated one, and the sentence saying they are unread quotes it.
+
+    ``after_disputes`` is the claim headings written under the DISPUTES
+    section, which are not the analyst's own and are not read. They count as
+    unread only when none of the answer's own claims was read: then they may
+    be the answer's only claims, and saying nothing would lose them silently.
+    """
+
+    claims: list[ClaimEvidence]
+    without_confidence: int
+    begun: int
+    after_disputes: int = 0
+    confidence_unreadable: tuple[str, ...] = ()
+
+    @property
+    def unread(self) -> int:
+        """Claims begun that are neither read nor counted as stating no confidence."""
+        own = max(
+            len(self.confidence_unreadable),
+            self.begun - len(self.claims) - self.without_confidence,
+            0,
+        )
+        return own + (self.after_disputes if not self.claims else 0)
+
+
+def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead:
+    """The one reader of an analyst's ``CLAIM`` blocks, for every path that reads claims.
+
+    The answer is split at every claim heading where a block can begin
+    (``claim_headings.claims_headed``: plain, numbered or marked, with or
+    without a ``---`` line between claims) and at the model's own ``---``
+    lines. Each block yields at most one claim; the heading count says how
+    many the model began, so a block the reader could not split is visible.
+
+    ``require_evidence`` is the static, dynamic and network analysts'
+    stricter reading: a block without an ``EVIDENCE:`` line, or with one that
+    was nothing but tool-call scaffolding, is not their claim. Everywhere else
+    such a block is still a finding, recorded as unsourced. Neither reading
+    puts a confidence on a block that states none: the confidence on a claim
+    is the analyst's own statement, so such blocks are counted instead, and
+    the count is what the validation turn asks the analyst about.
     """
     claims: list[ClaimEvidence] = []
     without_confidence = 0
+    unreadable: list[str] = []
     # Stripped per field rather than over the whole text: removing a block
     # that sat between ``CLAIM:`` and ``EVIDENCE:`` would leave the claim
     # marker with nothing after it, and the next line would slide up into the
     # claim. A block whose claim is nothing but scaffolding is dropped below.
-    for raw_block in _BLOCK_SPLIT_RE.split(text):
+    for raw_block in _BLOCK_SPLIT_RE.split(claims_headed(text or "")):
         block = raw_block.strip()
         if not block or "CLAIM:" not in block:
             continue
@@ -1334,60 +1738,137 @@ def parse_structured_claims_counted(text: str) -> tuple[list[ClaimEvidence], int
             continue
         claim_text = strip_tool_call_scaffolding(claim_match.group(1)).strip()
         if not claim_text:
-            # C1: the whole claim was a tool call. An empty finding is worse
-            # than none at all -- it reaches the operator as a blank row.
+            # The whole claim was a tool call. An empty finding is worse than
+            # none at all -- it reaches the operator as a blank row.
             continue
 
         # The citation is model output too, and a model that writes a tool
         # call while it is naming an artifact puts the block here rather than
         # in the claim. Cleaned to nothing it means what a missing EVIDENCE
-        # line already means to this lenient parser: a finding worth keeping,
-        # recorded as unsourced.
-        evidence_match = _BLOCK_EVIDENCE_RE.search(block)
+        # line means.
+        tail = _field_tail(block)
+        evidence_value = _evidence_field(tail)
         evidence_text = (
-            strip_tool_call_scaffolding(evidence_match.group(1)).strip() if evidence_match else ""
+            strip_tool_call_scaffolding(evidence_value).strip() if evidence_value else ""
         )
-        confidence_match = _BLOCK_CONFIDENCE_RE.search(block)
-        technique_match = _BLOCK_TECHNIQUE_RE.search(block)
-
-        confidence = _stated_confidence(confidence_match)
-        if confidence is None:
+        if require_evidence and not evidence_text:
+            continue
+        stated = _field(tail, _LINE_CONFIDENCE_RE, _BLOCK_CONFIDENCE_RE)
+        if stated is None:
             without_confidence += 1
             continue
+        confidence = _stated_confidence(stated)
+        if confidence is None:
+            unreadable.append(_confidence_as_written(stated))
+            continue
 
-        technique_id: str | None = None
-        if technique_match:
-            raw_tid = technique_match.group(1).upper()
-            # Kept as written. Whether the id is real, retired or a
-            # placeholder is ``attck.unknown_id``'s question, asked with
-            # feedback and recorded; a parser that dropped it here would be
-            # the silent rewrite this pipeline does not do.
-            if raw_tid != "NONE":
-                technique_id = raw_tid
+        # One id is kept as written. Whether it is real, retired or a
+        # placeholder is ``attck.unknown_id``'s question, asked with feedback
+        # and recorded; a line that is more than one id is kept whole and
+        # asked about, never cut to its first id.
+        technique_match = _field(tail, _LINE_TECHNIQUE_RE, _BLOCK_TECHNIQUE_LINE_RE)
+        technique_id, technique_line = read_technique_line(
+            technique_match.group(1) if technique_match else ""
+        )
 
         claims.append(
             ClaimEvidence(
-                claim=claim_text[:300],
+                # Whole, as written: a claim stored at a fixed width was
+                # checked, retried and published as the cut text.
+                claim=claim_text,
                 evidence_ref=evidence_ref_text(evidence_text),
                 confidence=confidence,
                 technique_id=technique_id,
+                technique_line=technique_line,
             )
         )
-    return claims, without_confidence
+    return ClaimRead(
+        claims=claims,
+        without_confidence=without_confidence,
+        begun=count_claims_begun(text or ""),
+        after_disputes=count_claims_after_disputes(text or ""),
+        confidence_unreadable=tuple(unreadable),
+    )
+
+
+def claims_unread_sentence(agent: str, read: ClaimRead, revision_round: int = 0) -> str:
+    """The sentence a run records for an answer whose claims were not all read."""
+    stage = f" (round {int(revision_round)})" if int(revision_round) else ""
+    declined = (
+        f", {read.without_confidence} stated no confidence" if read.without_confidence else ""
+    )
+    quoted = (
+        f" and wrote {read.after_disputes} more under its DISPUTES section"
+        if read.after_disputes and not read.claims
+        else ""
+    )
+    unreadable = (
+        f" {confidence_unreadable_sentence(read.confidence_unreadable)}"
+        if read.confidence_unreadable
+        else ""
+    )
+    return (
+        f"The {agent} analyst's answer{stage} began {read.begun} claim(s){quoted}, and "
+        f"{len(read.claims)} were read{declined}; {read.unread} could not be read as a "
+        f"claim and are not in its findings.{unreadable}"
+    )
+
+
+def confidence_unreadable_sentence(values: Sequence[str]) -> str:
+    """What the reader says of the CONFIDENCE values it could not read, each distinct one quoted."""
+    written = list(dict.fromkeys(str(v) for v in values))
+    quoted = ", ".join(repr(v) for v in written)
+    return (
+        f"{len(values)} of them wrote a CONFIDENCE that reads as neither a number from 0.0 "
+        f"to 1.0 nor a percentage ({quoted})."
+    )
+
+
+def claims_under_disputes_sentence(agent: str, count: int, revision_round: int = 0) -> str:
+    """What a run records of an answer that kept claim headings under its DISPUTES section."""
+    stage = f" (round {int(revision_round)})" if int(revision_round) else ""
+    return (
+        f"The {agent} analyst's answer{stage} wrote {int(count)} claim heading(s) under its "
+        "DISPUTES section, which are not read as its own."
+    )
 
 
 def _stated_confidence(match: re.Match[str] | None) -> float | None:
-    """The confidence a ``CONFIDENCE:`` line states, or ``None`` when it states none.
+    """The confidence a ``CONFIDENCE:`` line states, or ``None`` when it cannot be read.
 
-    A number above one or below zero is still the analyst's number, held to
-    the range the schema carries; a line that is not a number states nothing.
+    The number that opens the value, whatever follows it: "0.9." and "0.9,"
+    and "0.85 (one part lower)" all state 0.9 or 0.85. A number from 0 to 1 is
+    read as written, as the prompts ask, and a percentage written with its
+    sign is read as its share ("85%" is 0.85). Anything else — a word, a
+    number above one written without a percent sign, a negative number, a
+    number that runs on into more digits, a decimal comma, a range — is not
+    read: the claim
+    is unread and the sentence recording it quotes the value, and nothing
+    here decides what a number outside the scale meant.
     """
     if match is None:
         return None
+    value = str(match.group(1) or "").strip().lstrip(_CONFIDENCE_MARKS)
+    number = _CONFIDENCE_NUMBER_RE.match(value)
+    if number is None:
+        return None
     try:
-        return max(0.0, min(1.0, float(match.group(1))))
+        stated = float(number.group(1))
     except ValueError:
         return None
+    if number.group(2):
+        return stated / 100.0 if 0.0 <= stated <= 100.0 else None
+    return stated if 0.0 <= stated <= 1.0 else None
+
+
+def _confidence_as_written(match: re.Match[str]) -> str:
+    """A CONFIDENCE value the reader could not read, as the line wrote it."""
+    written = _LABEL_AFTER_VALUE_RE.split(str(match.group(1) or ""), maxsplit=1)[0].strip()
+    return written or UNREADABLE_CONFIDENCE_MARK
+
+
+# A field label written after the value on the same line, where the value ends.
+_LABEL_AFTER_VALUE_RE = re.compile(r"\s+(?:TECHNIQUE|EVIDENCE):")
 
 
 def _extract_technique_ids(text: str) -> list[str]:
@@ -1883,14 +2364,57 @@ def _submit_to_agent_loop(
     hold one: the wrapper records itself before awaiting.
     """
     running: list[asyncio.Task[Any]] = []
+    # The rule the caller's streamed answers are read under
+    # (``llm.stream_watch``), carried to the loop's task: the task runs in the
+    # loop thread's context, not the caller's.
+    rule = current_rule()
 
     async def _tracked() -> Any:
         task = asyncio.current_task()
         if task is not None:
             running.append(task)
-        return await coro
+        with watching(rule):
+            return await coro
 
     return asyncio.run_coroutine_threadsafe(_tracked(), loop), running
+
+
+def claims_repeat_rule(margin: int | None) -> StopRule:
+    """The repeated-claims check, read over an answer while it streams.
+
+    The rule the check on a finished answer applies
+    (``pipeline.validation.claims_repeated`` over the answer without its
+    tool-call scaffolding, ``margin`` the operator's
+    ``validation.claim_repeat_margin`` or ``None``): once the answer so far
+    holds more repeated claims than the margin allows, the call is ended
+    (``llm.stream_watch``) and the answer is what was written up to there. The
+    check on that answer then finds the same and asks its one whole-answer
+    question, as it does after any answer. Read line by line at a flat cost
+    (``agents.repeat_watch.ClaimRepeatReader``), with the check's own verdict
+    for every prefix.
+    """
+    from maljan.agents.repeat_watch import ClaimRepeatReader
+
+    line_ends = frozenset("\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029")
+
+    class _Watcher:
+        def __init__(self) -> None:
+            self._reader = ClaimRepeatReader(margin)
+
+        def feed(self, piece: str) -> str | None:
+            self._reader.feed(piece)
+            if not any(ch in line_ends for ch in piece):
+                return None
+            found = self._reader.count()
+            if not found.crossed:
+                return None
+            return (
+                f"{found.begun} CLAIM block(s) begun, {found.distinct} distinct, "
+                f"{found.repeated} of them repeating an earlier one, more than the "
+                f"{found.margin} allowed"
+            )
+
+    return _Watcher
 
 
 def _cancel_and_watch(
@@ -1985,7 +2509,11 @@ def _in_flight(
     )
 
 
-def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
+class HardCapExceeded(TimeoutError):
+    """The wait around an agent-loop coroutine ran out: its hard cap, not a call's own timeout."""
+
+
+def _run_coro_blocking(coro: Any, hard_timeout: float | None, label: str = "") -> Any:
     """Submit ``coro`` to the shared agent loop and block until done / timeout.
 
     Mirrors the old daemon-thread + ``t.join(timeout)`` contract: on the hard
@@ -2025,11 +2553,18 @@ def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
     try:
         return future.result(timeout=hard_timeout)
     except _FuturesTimeout:
+        # A ``TimeoutError`` the coroutine itself raised — a model call's own
+        # whole-call deadline — reaches here too, since the two are one class:
+        # it is the call's answer, handed on untouched, not this wait running out.
+        if future.done() and not future.cancelled():
+            raise
         # We cancelled it: it ran out of wall clock. Whether that cancellation
         # is ever *delivered* is a separate question, and one the watchdog
         # answers rather than assuming.
         _cancel_and_watch(loop, future, running, what)
-        raise TimeoutError(f"{what} exceeded hard cap of {int(hard_timeout)}s") from None
+        raise HardCapExceeded(
+            f"{what} exceeded hard cap of {limit_text(hard_timeout, 's')}"
+        ) from None
     except _FuturesCancelled as exc:
         if job is not None and job.is_cancelled:
             job.check(f"while {what} was in flight")
@@ -2057,7 +2592,7 @@ run_coro_blocking = _run_coro_blocking
 CLOSE_TOOLS_TIMEOUT = 15.0
 
 
-async def run_on_agent_loop(coro: Any, hard_timeout: float, label: str = "") -> Any:
+async def run_on_agent_loop(coro: Any, hard_timeout: float | None, label: str = "") -> Any:
     """Await ``coro`` on the shared agent loop from a *different* running loop.
 
     The async sibling of ``_run_coro_blocking``, and the other half of the
@@ -2085,8 +2620,13 @@ async def run_on_agent_loop(coro: Any, hard_timeout: float, label: str = "") -> 
     try:
         return await asyncio.wait_for(asyncio.wrap_future(future), hard_timeout)
     except TimeoutError:
+        # The coroutine's own timeout (a model call's deadline) is its answer.
+        if future.done() and not future.cancelled():
+            raise
         _cancel_and_watch(loop, future, running, what)
-        raise TimeoutError(f"{what} exceeded hard cap of {int(hard_timeout)}s") from None
+        raise HardCapExceeded(
+            f"{what} exceeded hard cap of {limit_text(hard_timeout, 's')}"
+        ) from None
     except (asyncio.CancelledError, _FuturesCancelled) as exc:
         # The caller itself being cancelled is not the call failing: the
         # cancellation goes on up, and the call on the agent loop is stopped
@@ -2151,24 +2691,32 @@ def frame_messages(
 
     ``facts_block`` goes at the head of the first human turn, once: it is the
     triage pack, and the human turn is where the task and the data are.
-    ``run_state`` goes into the first system turn between its markers,
-    replacing the block already there — the same conversation framed twice
-    carries one block, the newer one. Empty blocks change nothing, so an
-    agent outside a staged run sends exactly what it always sent.
-    """
-    from langchain_core.messages import HumanMessage, SystemMessage
+    ``run_state`` goes at the end of the last message, between its markers —
+    the task on a first turn, the latest tool answer after a tool call, the
+    question a nudge or a retry asks — and a block already at the end of any
+    message is taken off first, leaving that message's bytes exactly as they
+    were: the same conversation framed twice carries one block, the newer, on
+    its last message.
 
-    from maljan.pipeline.run_state import RUN_STATE_BEGIN, with_run_state
+    At the end because a tool loop regenerates the block on every turn:
+    anywhere earlier, the changed budget line would change the request's
+    prefix, which voids a hosted provider's prefix cache and makes a local
+    server read the whole conversation again. Each turn's request is the
+    previous one's without its block, plus the new turns and the new block.
+    On a message rather than as a turn of its own, so no request has two user
+    turns in a row — which strict chat templates refuse — and no turn that
+    says only the run's state, which a model can take for the question.
+
+    Only a human turn or a tool answer carries it; a conversation ending on
+    anything else is sent without it, because the platform does not add
+    words to what a model said. Empty blocks change nothing, so an agent
+    outside a staged run sends exactly what it always sent.
+    """
+    from langchain_core.messages import HumanMessage
+
     from maljan.pipeline.triage_pack import PACK_HEADING
 
-    out: list[BaseMessage] = list(messages)
-    if run_state or any(
-        isinstance(m, SystemMessage) and RUN_STATE_BEGIN in str(m.content) for m in out
-    ):
-        for index, message in enumerate(out):
-            if isinstance(message, SystemMessage):
-                out[index] = SystemMessage(content=with_run_state(str(message.content), run_state))
-                break
+    out: list[BaseMessage] = without_run_state(list(messages))
     if facts_block:
         for index, message in enumerate(out):
             if isinstance(message, HumanMessage):
@@ -2176,7 +2724,51 @@ def frame_messages(
                 if PACK_HEADING not in content:
                     out[index] = HumanMessage(content=f"{facts_block}\n\n{content}")
                 break
+    if run_state and out and _carries_run_state(out[-1]):
+        out[-1] = _with_run_state_on(out[-1], run_state)
     return out
+
+
+def _carries_run_state(message: Any) -> bool:
+    """Whether ``message`` is a turn the run-state block may ride on."""
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    return isinstance(message, HumanMessage | ToolMessage)
+
+
+def _with_run_state_on(message: Any, body: str) -> Any:
+    """``message`` with the block for ``body`` at its end: text appended, or a text part."""
+    from maljan.pipeline.run_state import run_state_block, with_run_state_tail
+
+    content = message.content
+    if isinstance(content, list):
+        part = {"type": "text", "text": run_state_block(body)}
+        return message.model_copy(update={"content": [*content, part]})
+    return message.model_copy(update={"content": with_run_state_tail(str(content or ""), body)})
+
+
+def _without_run_state_on(message: Any) -> Any:
+    """``message`` as it was before a block was put at its end; itself when none was."""
+    from maljan.pipeline.run_state import is_run_state_block, without_run_state_tail
+
+    if not _carries_run_state(message):
+        return message
+    content = message.content
+    if isinstance(content, list):
+        last = content[-1] if content else None
+        if isinstance(last, dict) and last.get("type") == "text":
+            if is_run_state_block(last.get("text")):
+                return message.model_copy(update={"content": content[:-1]})
+        return message
+    if not isinstance(content, str):
+        return message
+    bare = without_run_state_tail(content)
+    return message if bare == content else message.model_copy(update={"content": bare})
+
+
+def without_run_state(messages: list[Any]) -> list[Any]:
+    """``messages`` with the run-state block taken off whichever message carried it."""
+    return [_without_run_state_on(m) for m in messages]
 
 
 def revision_messages(
@@ -2253,12 +2845,14 @@ def revision_messages(
 
 
 def analyst_output_cap(agent: str = "") -> int:
-    """The output cap an analyst's calls are built with, in tokens.
+    """The output cap settings derive for an analyst, in tokens, for a model without a record.
 
     ``llm.expert_max_tokens`` when the operator set it, and otherwise the cap
-    derived from the window the analyst's model serves
-    (``context_window.output_cap_for``), as the container binds it. Read,
-    never raised: the cut question names the cap in force.
+    derived from what the job has learned of the window
+    (``context_window.output_cap_for``). An analyst whose model the container
+    built reads the cap that model was built with instead
+    (``BaseAnalyst.output_cap_tokens``); this answers only for a model handed
+    in by other means. Read, never raised.
     """
     try:
         from maljan.llm.context_window import output_cap_for
@@ -2286,6 +2880,87 @@ def answer_cut_at_cap(response: Any, cap: int) -> tuple[int, str] | None:
     return None
 
 
+def cap_in_force(built: int, held: int | None) -> int:
+    """The output cap one call was sent with: ``held`` where the call was held below ``built``.
+
+    A call the spend ceiling held is sent its held cap, which is never above
+    the model's own; a model built with no cap (0) is held to ``held`` alone.
+    """
+    built = max(0, int(built or 0))
+    if isinstance(held, int) and not isinstance(held, bool) and held > 0:
+        return held if built <= 0 else min(built, held)
+    return built
+
+
+def turn_held_cap(binding: Any, llm: Any) -> int | None:
+    """The cap a loop's binding holds its turns to now, or ``None`` when they go at the model's own."""
+    if binding is None or not isinstance(getattr(binding, "kwargs", None), dict):
+        return None
+    from maljan.llm.context_window import output_bound_kwargs
+
+    field = next(iter(output_bound_kwargs(llm, 1)), None)
+    value = binding.kwargs.get(field) if field is not None else None
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+# What a later chunk's prompt opens with: the calls the earlier chunks of the
+# same analysis made, each with the entry that holds its answer. Its loop
+# answers an identical call with the result that entry recorded
+# (``seeded_repeat_guard``).
+EARLIER_CHUNKS_HEAD = (
+    "Earlier chunks of this same input were already analysed. These are the tool calls "
+    "made there, each with the ledger entry that holds its result and the opening of "
+    "what it returned. Cite those entries instead of making the same call again: an "
+    "identical call is not run again, and is answered with the result its entry "
+    "recorded. A call marked failed, or marked as one whose result was not kept, may be "
+    "made once more."
+)
+
+
+def earlier_chunks_block(entries: Sequence[Any]) -> str:
+    """The earlier chunks' tool calls as ``tool(args) → ev_id`` lines under their head, or ``""``.
+
+    Every call, in the order made; a call that failed says so.
+    """
+    lines: list[str] = []
+    for entry in entries or ():
+        tool = str(getattr(entry, "tool", "") or "")
+        entry_id = str(getattr(entry, "id", "") or "")
+        if not tool or not entry_id:
+            continue
+        args = getattr(entry, "args", None) or {}
+        try:
+            shown = json.dumps(args, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            shown = repr(args)
+        ok = bool(getattr(entry, "ok", True))
+        # A result the run did not keep whole cannot answer the call again,
+        # which is then made once more, as a failed one may be.
+        kept = bool(str(getattr(entry, "output", "") or "")) and not bool(
+            getattr(entry, "truncated", False)
+        )
+        failed = (
+            " (failed)" if not ok else "" if kept else " (result not kept; may be made once more)"
+        )
+        # What the call found, as the console's headline of it, on one line:
+        # the entry's answer is in another conversation and no tool reads a
+        # ledger entry by its id.
+        from maljan.pipeline.events import summarize_result
+
+        headline = " ".join(
+            summarize_result(
+                str(getattr(entry, "output", "") or ""),
+                ok=ok,
+                remediation=str(getattr(entry, "remediation", "") or ""),
+            ).split()
+        )
+        said = f": {headline}" if headline else ""
+        lines.append(f"- {tool}({shown}) \u2192 {entry_id}{failed}{said}")
+    if not lines:
+        return ""
+    return "\n".join([EARLIER_CHUNKS_HEAD, *lines])
+
+
 class _PriorAnswer:
     """The answer the analyst already gave, in the shape the retry loop reads.
 
@@ -2295,11 +2970,20 @@ class _PriorAnswer:
     second copy that drifts.
     """
 
-    def __init__(self, isr: AgentISR) -> None:
+    def __init__(self, isr: AgentISR, shown: str | None = None) -> None:
         self.isr = isr
-        # An answer that parsed into nothing is shown back as the prose it was,
-        # so the question about its format is asked over what was written.
-        self.content = isr.unparsed_answer or isr.to_text_summary()
+        # The answer as the model wrote it, CLAIM blocks and findings block
+        # included: shown a summary of its parsed claims, a model answered
+        # again in the summary's shape, and nothing in that shape is a claim.
+        # The summary stands only for an ISR no single answer produced — a
+        # merge of chunks. ``shown`` replaces it where only part of the answer
+        # is sent back: an answer that repeated its claims is shown up to the
+        # first claim that repeats.
+        self.content = (
+            shown
+            if shown is not None
+            else isr.answer_text or isr.unparsed_answer or isr.to_text_summary()
+        )
 
 
 def alignment_gate(knowledge: Any, cfg_validation: Any, log: Any, name: str) -> Any | None:
@@ -2373,26 +3057,58 @@ class BudgetMeter:
         share = getattr(llm, "fallback_turn_share", None)
         return float(share) if isinstance(share, int | float) else None
 
-    def _record_usage(self, response: Any, *, announce: bool = True) -> None:
+    def _record_usage(
+        self, response: Any, *, announce: bool = True, call: str = "", held: int | None = None
+    ) -> None:
         """One model answer onto the run's ledger, under this agent and the model that gave it.
 
         ``announce`` publishes the switch when this answer is the one a
         fallback gave; the tool loop announces its turns as they happen and
-        records them afterwards, so it passes ``False`` here.
+        records them afterwards, so it passes ``False`` here. ``call`` names
+        what the call was, which the ledger keeps for a call that reported no
+        usage. ``held`` is the cap the call was held to, when it was: the cut
+        check reads the cap the call was sent with (``cap_in_force``).
         """
         record_response_usage(
             getattr(self, "token_ledger", None),
             response,
             agent=str(getattr(self, "name", "") or ""),
             model=self._model_label(),
+            call=call,
         )
         # Whether this answer ended at the output cap, kept for the validation
         # turn: the last model answer recorded is the one the turn checks.
         self._last_answer_cut = answer_cut_at_cap(
-            response, analyst_output_cap(str(getattr(self, "name", "") or ""))
+            response, cap_in_force(self.output_cap_tokens(), held)
         )
+        # Whether the watch ended this answer while it streamed, its claims
+        # repeated past the margin (``claims_repeat_rule``): the question the
+        # validation turn asks of it says so.
+        self._last_answer_ended = ended_while_streaming(response) is not None
         if announce:
             self._announce_fallback(response)
+
+    def output_cap_tokens(self) -> int:
+        """The output cap this analyst's model was built with, in tokens.
+
+        Read from the record the container left on the model
+        (``context_window.built_output_cap``), the one source the cut check
+        and the spend meter share; nothing derives it again after the build.
+        A model the container did not build carries no record, and only then
+        is it derived from settings (``analyst_output_cap``).
+        """
+        from maljan.llm.context_window import built_output_cap
+
+        model = getattr(self, "llm", None)
+        built = built_output_cap(model)
+        if built is not None:
+            return int(built.tokens)
+        logger.debug(
+            "output cap: %s's %s carries no built cap; derived from settings.",
+            getattr(self, "name", ""),
+            type(model).__name__,
+        )
+        return analyst_output_cap(str(getattr(self, "name", "") or ""))
 
     def _record_turns_taken(self, latest: Mapping[str, Any], sent: int) -> None:
         """The model turns of a loop that did not come back, onto the run's ledger.
@@ -2404,7 +3120,7 @@ class BudgetMeter:
         """
         for message in list(latest.get("messages") or [])[sent:]:
             if is_model_turn(message):
-                self._record_usage(message, announce=False)
+                self._record_usage(message, announce=False, call=TOOL_LOOP_TURN_CALL)
 
     def _announce_fallback(self, message: Any) -> None:
         """Publish ``model_fallback`` when ``message`` is the turn its model list moved on.
@@ -2513,11 +3229,15 @@ class BudgetMeter:
             "steps_used": _steps_this_loop_spent(ledger, messages),
             "max_steps": ledger.max_steps,
             "elapsed_s": round(time.monotonic() - ledger.started, 1),
-            "timeout_s": round(ledger.timeout, 1),
+            # ``None`` in either is a loop with no limit in that dimension.
+            "timeout_s": None if ledger.timeout is None else round(ledger.timeout, 1),
             "delegated_steps": ledger.delegated_steps,
             "tool_definition_chars": self._definitions_sent(),
             "cap": cap,
         }
+        # Why the cap ended it, in the words the stage event carries.
+        if cap and detail:
+            record["detail"] = detail
         self._note_budget(record)
         if cap:
             emit_stage_ended_at_cap(
@@ -2596,6 +3316,21 @@ class BaseAnalyst(BudgetMeter, ABC):
         # once at the end. The node drains it — reading without clearing is how
         # a revision that made no calls re-emits the analysis round's.
         self._evidence_entries: list[LedgerEntry] = []
+        # The calls the earlier chunks of a chunked analysis made, set while a
+        # later chunk's loop runs: its repeat guard is seeded with them.
+        self._prior_chunk_calls: list[LedgerEntry] = []
+        # The function map's sources for the job named by ``_function_map_job``:
+        # copies of this agent's function-level entries, taken
+        # before the byte budget trims them, and the claims its answers carried.
+        # Kept across loops and drains, because the map reads every loop of the
+        # job; dropped when the job changes.
+        self._function_map_job = ""
+        self._function_map_rows: list[LedgerEntry] = []
+        self._function_map_claims: list[ClaimEvidence] = []
+        # This loop's own entries while it runs; ``None`` outside a loop.
+        self._live_map_entries: list[LedgerEntry] | None = None
+        # What the analysis server tied to each function, briefed by the node.
+        self.pack_function_artefacts: Any = None
         # Bytes of tool output this agent has already kept. The budget is the
         # agent's, not the loop's: a chunked analysis re-enters the loop once
         # per chunk and would otherwise be handed the whole budget again on
@@ -2644,6 +3379,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # in a test or a script exactly what it was.
         self._analysis_file_path: str | None = None
         self._path_by_server: dict[str, str] = {}
+        # The job's packet captures, host paths the tool layer fills in and no
+        # prompt names. Assigned per sample by ``pipeline.nodes.brief_agent``.
+        self._captures: tuple[str, ...] = ()
         # The ``ResolvedAgent`` the container built this agent from — its own
         # prompt, tools and static provider id, so a clone never has to
         # re-derive what it already knows about itself.
@@ -2719,26 +3457,51 @@ class BaseAnalyst(BudgetMeter, ABC):
         # to the state and the judge reads it into ``run_summary.budget``.
         self._budget_records: Sequence[dict[str, Any]] = []
 
-    def _system_prompt(self, fallback: str | Callable[[], str]) -> str:
+    def _system_prompt(
+        self,
+        fallback: str | Callable[[Sequence[Any]], str],
+        tools: Sequence[Any] | None = None,
+    ) -> str:
         """This analyst's system turn for the job it is actually running.
 
-        The container resolves an agent once per job — its prompt already
-        carries the sample's format fragment, the agent's own static provider
-        fragment and any prompt the operator set on the definition — and hands
-        it over as ``_resolved``. Reading it here is what makes that resolution
-        the prompt a built-in analyst sends, rather than a value only the
-        settings probe ever saw.
+        The container resolves an agent once per job — its prompt carries the
+        sample's format fragment, the agent's own static provider fragment and
+        any prompt the operator set on the definition — and hands it over as
+        ``_resolved``. Building it here, through the same composition, is what
+        makes that resolution the prompt a built-in analyst sends, rather than
+        a value only the settings probe ever saw.
 
-        ``fallback`` is the module constant (or a callable that assembles it),
-        used by an analyst constructed outside a container: a test, a script,
-        the CLI. It is the neutral assembly, which is the honest answer when
-        nothing has said what the sample is.
+        ``tools`` is the list the request this prompt goes with carries:
+        ``self.tools`` by default, which is what the tool loop binds, and
+        ``()`` for a tools-free call — a revision, a validation turn, a
+        synthesis. The prompt's statement about tools is built from it, so a
+        request is never told about tools it does not carry, nor told it has
+        none when it does.
+
+        ``fallback`` is the module constant, or a callable that assembles the
+        prompt for a tool list, used by an analyst constructed outside a
+        container: a test, a script, the CLI. It is the neutral assembly,
+        which is the honest answer when nothing has said what the sample is.
         """
+        # By default the list the loop binds: ``pinned_tools`` is what
+        # ``execute_tool_loop`` hands the model, without the delivery tools.
+        if tools is not None:
+            sent = list(tools)
+        else:
+            try:
+                sent = list(self.pinned_tools())
+            except AttributeError:  # a stand-in built without ``__init__``
+                sent = list(getattr(self, "tools", None) or [])
         resolved = getattr(self, "_resolved", None)
+        container = getattr(self, "_container", None)
+        if resolved is not None and container is not None and bool(getattr(resolved, "key", "")):
+            from maljan.agents.composition import prompt_for
+
+            return prompt_for(resolved, container, sent)
         prompt = getattr(resolved, "prompt", "") if resolved is not None else ""
         if prompt:
             return str(prompt)
-        return fallback() if callable(fallback) else fallback
+        return fallback(sent) if callable(fallback) else fallback
 
     def _initialize_mcp_client(self) -> None:
         """Attach this analyst's MCP toolkit. Subclasses that have one override."""
@@ -2841,6 +3604,45 @@ class BaseAnalyst(BudgetMeter, ABC):
     def _static_capabilities(self) -> Any | None:
         """The provider's degrade policy, or None for an analyst without one."""
         return None
+
+    def _own_static_provider(self) -> Any | None:
+        """This agent's own static provider, when the agent's tools include its tools.
+
+        Read from the job's container by the agent's resolution, the same
+        lookup the analyst node pins the sample path through. ``None`` for an
+        agent built outside a container and for one that reads no provider.
+        """
+        from maljan.agents.prompt_fragments import PROVIDER_FAMILY, tool_families
+
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        if PROVIDER_FAMILY not in tool_families(list(getattr(self, "tools", None) or [])):
+            return None
+        resolved = getattr(self, "_resolved", None)
+        provider_id = getattr(resolved, "static_provider_id", None) if resolved else None
+        try:
+            if provider_id:
+                return container.get_static_provider(str(provider_id))
+            return container.get_static_provider()
+        except Exception as exc:  # noqa: BLE001 — a lookup is never worth a lost loop
+            self.logger.debug("%s: no static provider to ask (%s).", self.name, exc)
+            return None
+
+    def _stop_if_the_sample_did_not_open(self) -> None:
+        """Raise the failure this agent's provider met opening the job's sample, if it met one.
+
+        Asked before a tool loop starts, so a later loop of the job — a second
+        chunk, an ask of this agent — spends no model turn on a provider with
+        no program loaded. Only a provider that keeps such a record answers.
+        """
+        known = getattr(self._own_static_provider(), "sample_failure", None)
+        failure = known() if callable(known) else None
+        if not isinstance(failure, SampleNotOpened):
+            return
+        failure.stopped_agent = self.name
+        self.logger.error("%s: %s; its loop is not started.", self.name, failure)
+        raise failure
 
     def _server_registry(self) -> Any | None:
         """The job's tool-server registry, or None when this agent runs bare."""
@@ -2948,9 +3750,10 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         if active_profile(container.config).exclude_sandbox_tools:
             return []
+        from maljan.agents.prompt_fragments import SANDBOX_FAMILY, stamp_source
         from maljan.providers.sandbox_tools import sandbox_tools
 
-        return list(sandbox_tools(container))
+        return stamp_source(sandbox_tools(container), SANDBOX_FAMILY)
 
     def _profile_excluded_servers(self) -> str:
         """The servers the active profile withholds, as ``for_agent``'s argument."""
@@ -3013,9 +3816,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             default_path=self._analysis_file_path,
             path_by_server=self._path_by_server,
             agent_name=self.name,
+            captures=tuple(getattr(self, "_captures", ()) or ()),
         )
 
-    def _run_state_body(self, steps_left: int | None, seconds_left: float | None) -> str:
+    def _run_state_body(
+        self, steps_left: int | NoLimit | None, seconds_left: float | NoLimit | None
+    ) -> str:
         """The node's run-state lines plus this loop's remaining budget.
 
         Once the conversation has no room left for a tool answer the block
@@ -3026,14 +3832,68 @@ class BaseAnalyst(BudgetMeter, ABC):
         body = str(getattr(self, "run_state_block", "") or "").rstrip()
         if not body:
             return ""
-        budget = []
-        if steps_left is not None:
-            budget.append(f"{max(0, int(steps_left))} model turns")
-        if seconds_left is not None:
-            budget.append(f"{max(0, int(seconds_left))} s")
-        if budget:
-            body = f"{body}\nbudget remaining: {', '.join(budget)}"
-        return f"{body}\n{NO_ROOM_RUN_STATE}" if self._says_no_room() else body
+        line = budget_line(steps_left, seconds_left)
+        if line:
+            body = f"{body}\n{line}"
+        if self._says_no_room():
+            body = f"{body}\n{NO_ROOM_RUN_STATE}"
+        found = self._function_map_text()
+        return f"{body}\n{found}" if found else body
+
+    def _function_map_sources(self) -> tuple[list[LedgerEntry], list[ClaimEvidence]]:
+        """This job's kept entries and claims, emptied first when the job has changed."""
+        job = self._job_key()
+        if getattr(self, "_function_map_job", "") != job:
+            self._function_map_job = job
+            self._function_map_rows = []
+            self._function_map_claims = []
+        return self._function_map_rows, self._function_map_claims
+
+    def _function_map_entries(self) -> list[LedgerEntry]:
+        """The entries the map reads: this job's earlier loops', then this loop's."""
+        rows, _claims = self._function_map_sources()
+        live = getattr(self, "_live_map_entries", None) or []
+        return [*rows, *live]
+
+    def _function_map_text(self) -> str:
+        """The function map block for this agent as of now, or ``""``; never raises."""
+        from maljan.agents.function_map import build_function_map, function_map_block
+
+        try:
+            _rows, claims = self._function_map_sources()
+            found = build_function_map(
+                self._function_map_entries(),
+                getattr(self, "pack_function_artefacts", None),
+                list(claims),
+                tuple(getattr(self, "pack_image_bases", None) or ()),
+            )
+            # Only an agent that has read a function is shown the map: the
+            # pack's artefacts alone are already in the pack it reads.
+            return function_map_block(found) if found.visited else ""
+        except Exception as exc:  # noqa: BLE001 — the map never costs a turn
+            self.logger.debug("%s: function map left out (%s).", self.name, exc)
+            return ""
+
+    def _keep_for_function_map(self, entries: Sequence[LedgerEntry]) -> None:
+        """Copies of the entries the map reads, taken before the byte budget trims them."""
+        from maljan.agents.function_map import keeps_for_the_map
+
+        rows, _claims = self._function_map_sources()
+        for entry in entries:
+            if keeps_for_the_map(entry):
+                try:
+                    rows.append(entry.model_copy(deep=True))
+                except Exception:  # noqa: BLE001 — a copy never costs the ledger
+                    continue
+
+    def _keep_claims_for_function_map(self, isr: AgentISR) -> AgentISR:
+        """``isr``, with its claims kept for the map's one-line summaries."""
+        try:
+            _rows, claims = self._function_map_sources()
+            claims.extend(getattr(isr, "claims", None) or [])
+        except Exception:  # noqa: BLE001 — the map never costs an answer
+            pass
+        return isr
 
     def _says_no_room(self) -> bool:
         """Whether this loop's run-state block carries the no-room line.
@@ -3070,8 +3930,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         self,
         messages: list[BaseMessage],
         *,
-        steps_left: int | None = None,
-        seconds_left: float | None = None,
+        steps_left: int | NoLimit | None = None,
+        seconds_left: float | NoLimit | None = None,
     ) -> list[BaseMessage]:
         """``messages`` with this agent's facts block and run-state block in place."""
         return frame_messages(
@@ -3080,17 +3940,40 @@ class BaseAnalyst(BudgetMeter, ABC):
             run_state=self._run_state_body(steps_left, seconds_left),
         )
 
-    def _loop_limits(self) -> tuple[int, int]:
-        """This agent's ``(timeout, max_steps)`` for one loop; see ``loop_limits``."""
+    def _with_current_run_state(
+        self,
+        messages: list[Any],
+        steps_left: int | NoLimit | None,
+        seconds_left: float | NoLimit | None,
+    ) -> list[Any]:
+        """``messages`` with this agent's run-state block as of now on the last; never raises.
+
+        For the turns sent after a loop — the nudge and the forced synthesis —
+        which resend its conversation and end on their own question: the block
+        they carry is the one the loop's next turn would have read, at the end
+        of that question.
+        """
+        try:
+            return frame_messages(
+                list(messages), run_state=self._run_state_body(steps_left, seconds_left)
+            )
+        except Exception as exc:  # noqa: BLE001 — the block never costs a turn
+            self.logger.debug("%s: run-state block left out (%s).", self.name, exc)
+            return list(messages)
+
+    def _loop_limits(self) -> tuple[int | None, int | None]:
+        """This agent's ``(timeout, max_steps)`` for one loop, ``None`` for no limit; see ``loop_limits``."""
         return loop_limits(self.name, getattr(self, "_budget_ceiling", None))
 
     def _run_state_refresher(
         self,
-        max_steps: int,
-        timeout: float,
+        max_steps: int | None,
+        timeout: float | None,
         started: float,
         budget: LoopBudget | None = None,
         recorder: Any = None,
+        spend_slot: Any = None,
+        held_binding: Any = None,
     ) -> Any:
         """The per-turn hook that regenerates the run-state block's budget line.
 
@@ -3105,6 +3988,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         numbers reads the same line. ``recorder`` is what the tick counts its
         ledger entries from — without it every tick but the last published a
         zero that meant "nobody asked" rather than "no calls yet".
+
+        ``spend_slot`` is the key the loop's turn in flight is reserved under
+        with the spend ceiling, and ``held_binding`` the loop's model binding
+        a turn's held output cap is set on (:func:`_hold_the_turn`); without
+        one a turn is admitted only at its whole cap.
         """
         ledger = budget if budget is not None else LoopBudget(max_steps, timeout, started)
         from maljan.pipeline.events import BUDGET_TICK_EVERY
@@ -3119,9 +4007,36 @@ class BaseAnalyst(BudgetMeter, ABC):
             # Counted on every turn whether or not there is a block to show
             # it in: the budget is what an ask from inside this loop reads.
             ledger.note_turns(messages)
-            # And what the conversation weighs, which is what the next tool
-            # answer's cap is measured against.
-            self._note_conversation(messages)
+            sent = messages
+            if str(getattr(self, "run_state_block", "") or ""):
+                # The budget is stated in model turns (``model_turns_left``):
+                # the framing and the tool results cost nothing, an assistant
+                # turn costs one and a tool round costs one more, which is how
+                # the graph's recursion limit is spent.
+                try:
+                    sent = self.frame_messages(
+                        messages,
+                        steps_left=ledger.stated_turns(messages),
+                        seconds_left=ledger.stated_seconds(),
+                    )
+                except Exception as exc:  # noqa: BLE001 — the block never costs a turn
+                    self.logger.debug("%s: run-state refresh skipped (%s).", self.name, exc)
+                    sent = messages
+            # And what the request weighs, block included, which is what the
+            # next tool answer's cap is measured against.
+            self._note_conversation(sent)
+            # The spend ceiling's word on the turn about to be sent: held to
+            # what the spend it may use pays for, or not sent, and then the
+            # loop's salvage writes the answer from what was gathered.
+            held = self._spend_admits(
+                "loop turn",
+                sent,
+                slot=spend_slot,
+                holdable=held_binding is not None,
+                wait_s=ledger.seconds_left(),
+            )
+            if held_binding is not None:
+                _hold_the_turn(held_binding, self.llm, held)
             # The meter, every few steps: a tick per turn would be a stream
             # of near-identical events on a forty-step loop.
             used = steps_used(messages)
@@ -3132,21 +4047,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     messages,
                     ledger_entries=len(getattr(recorder, "entries", None) or []),
                 )
-            if not str(getattr(self, "run_state_block", "") or ""):
-                return messages
-            # The budget is stated in model turns (``model_turns_left``): the
-            # framing and the tool results cost nothing, an assistant turn
-            # costs one and a tool round costs one more, which is how the
-            # graph's recursion limit is spent.
-            try:
-                return self.frame_messages(
-                    messages,
-                    steps_left=ledger.turns_left(messages),
-                    seconds_left=ledger.seconds_left(),
-                )
-            except Exception as exc:  # noqa: BLE001 — the block never costs a turn
-                self.logger.debug("%s: run-state refresh skipped (%s).", self.name, exc)
-                return messages
+            return sent
 
         return refresh
 
@@ -3210,25 +4111,42 @@ class BaseAnalyst(BudgetMeter, ABC):
         # inside an ask is the ask's, not the agent's own.
         from maljan.llm.fallback import restart_models
 
-        restart_models(self.llm, loop_seconds=float(timeout), share=self._turn_share())
+        restart_models(self.llm, loop_seconds=timeout, share=self._turn_share())
 
         # The two standing blocks: the pack at the head of the task, the run
-        # state in the system turn with this loop's whole budget still ahead.
+        # state last with this loop's whole budget still ahead.
+        whole = LoopBudget(max_steps, timeout)
         prebuilt = self.frame_messages(
-            prebuilt, steps_left=model_turns_left(max_steps, []), seconds_left=float(timeout)
+            prebuilt, steps_left=whole.stated_turns([]), seconds_left=whole.stated_seconds()
         )
 
+        # A loop that starts after the job's spend ceiling was reached has no
+        # tool phase: its agent answers once, tool-free, from what it was given.
+        # A loop that would start after the job's spend ceiling was reached is
+        # not started: once it is reached only the verdict and the report run.
+        if self._spend_reached():
+            plain = LoopBudget(max_steps, timeout)
+            self._record_budget(plain, [], SPEND_CAP, detail=self._spend_reason())
+            self.logger.warning(
+                "%s: the job's spend ceiling is reached; this loop is not started.", self.name
+            )
+            return ""
         if not self.tools:
-            plain = LoopBudget(int(max_steps), float(timeout))
-            self._last_loop_deadline = plain.started + float(timeout)
+            plain = LoopBudget(max_steps, timeout)
+            self._last_loop_deadline = plain.deadline()
             try:
                 answer = self._invoke_llm_with_timeout(prebuilt, timeout)
             except TimeoutError:
                 self._record_budget(plain, [], "time", detail="the model did not answer in time")
                 raise
+            except SpendCeilingStop as stop:
+                self._record_budget(plain, [], SPEND_CAP, detail=str(stop))
+                return ""
             self.steps_spent += 1
             self._record_budget(plain, [], None)
             return self._capture_findings(answer)
+
+        self._stop_if_the_sample_did_not_open()
 
         from langgraph.errors import GraphRecursionError
         from langgraph.prebuilt import create_react_agent
@@ -3243,9 +4161,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         from maljan.agents.evidence_recorder import (
             ArgumentRepairs,
             EvidenceRecorder,
-            RepeatGuard,
             record_tools,
             repair_invalid_tool_calls,
+            seeded_repeat_guard,
         )
 
         # An agent built outside a container has no counter attached, and one
@@ -3266,21 +4184,29 @@ class BaseAnalyst(BudgetMeter, ABC):
             # The model a call is filed under until a turn names another.
             model=self._model_label(),
         )
-        # The repeat guard is per loop, like the recorder: a second chunk is a
-        # new conversation and the model has not seen the first one's answers.
-        repeats = RepeatGuard()
+        # The repeat guard is per loop, like the recorder, and a later chunk's
+        # starts with the calls the earlier chunks of the same analysis made:
+        # an identical one is answered with the entry that holds it, as the
+        # chunk's prompt lists them (``earlier_chunks_block``).
+        repeats = seeded_repeat_guard(getattr(self, "_prior_chunk_calls", None))
+        # The function map reads this loop's calls as they are made.
+        self._live_map_entries = recorder.entries
         # The arguments this loop had to close off, so the ledger entry for
         # such a call says so and keeps what the model actually wrote.
         repairs = ArgumentRepairs()
 
-        messages = prebuilt
+        # The loop's own conversation starts without the block: the refresher
+        # puts the current one on the latest message, every turn, and the
+        # messages the loop keeps are the ones each request is built from.
+        messages = without_run_state(prebuilt)
 
         # The loop's budget, readable by an ask made from inside it and
         # charged by the delegation when the callee returns.
-        budget = LoopBudget(int(max_steps), float(timeout))
+        budget = LoopBudget(max_steps, timeout)
         # When this loop's time runs out: the validation turn that follows it
-        # is held to what is left, not given a fresh budget.
-        self._last_loop_deadline = budget.started + float(timeout)
+        # is held to what is left, not given a fresh budget. ``None`` with no
+        # time limit.
+        self._last_loop_deadline = budget.deadline()
         self.loop_budget = budget
 
         # The run-state block is regenerated on every model turn with the
@@ -3289,7 +4215,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The per-turn refresher rides ``create_react_agent(prompt=...)``, which
         # langgraph 1.x deprecates in favour of ``langchain.agents.create_agent``
         # and its middleware hook. The contract this loop needs is one call
-        # before every model turn that can replace the system message; that is
+        # before every model turn that can rewrite the request it sends; that is
         # what moves when the helper does.
         def _close_off_truncated_calls(answer: Any) -> Any:
             """The model's turn with a call it ran out of room to finish made good.
@@ -3323,20 +4249,40 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Sent with every request of this loop, so counted with its conversation.
         self._tool_definition_chars = tool_definition_chars(recorded)
         self.ended_out_of_room = False
+        # The key this loop's turns are counted and reserved under with the
+        # job's spend meter, until the ledger records them.
+        spend_key = object()
+        loop_model = _model_that_closes_off_truncated_calls(
+            self.llm, recorded, _close_off_truncated_calls
+        )
+        # Where each turn's held cap is set, and read back for the last turn's cut check.
+        held_binding = _loop_binding(loop_model, self.llm)
         agent_executor = create_react_agent(
-            _model_that_closes_off_truncated_calls(self.llm, recorded, _close_off_truncated_calls),
+            loop_model,
             recorded,
             prompt=self._run_state_refresher(
-                int(max_steps),
-                float(timeout),
+                max_steps,
+                timeout,
                 budget.started,
                 budget=budget,
                 recorder=recorder,
+                spend_slot=spend_key,
+                held_binding=held_binding,
             ),
         )
 
         # Whether the server, rather than the budget, said the window was full.
         window_full = False
+        # Whether the job's spend ceiling ended the tool phase. The meter
+        # counts this loop's turns while it runs, under a key of its own,
+        # until the ledger records them.
+        spend_capped = False
+        # The refusal that ended it, when the ceiling refused this loop's next
+        # turn while the job's spend was not yet exhausted.
+        spend_refusal = ""
+        # Whether one model call's whole-call deadline ended the tool phase.
+        call_deadline_hit = False
+        spend_meter = self._spend_meter()
         # Whether the time budget ended the tool phase, and the sentence saying
         # how: the loop's own turn times against what was left.
         time_capped = False
@@ -3362,13 +4308,17 @@ class BaseAnalyst(BudgetMeter, ABC):
         # the coroutine so a loop the hard cap stops still hands over the turns
         # it took: they were answered and spent.
         latest: dict = {"messages": list(messages)}
+        # The question asked when the model's first answer called no tool,
+        # once it is asked: what followed it is read after the loop.
+        tool_ask: dict[str, Any] = {}
 
         # Run the ReAct coroutine on the shared, never-closing agent
         # loop (see ``_get_agent_loop``) instead of a throwaway per-call loop.
         async def _invoke() -> dict:
             self.logger.info(
-                "Invoking ReAct agent (timeout=%ds, tools=%d)...",
-                timeout,
+                "Invoking ReAct agent (timeout=%s, steps=%s, tools=%d)...",
+                limit_text(timeout, "s"),
+                limit_text(max_steps),
                 len(self.tools),
             )
             # The provider sets
@@ -3400,18 +4350,142 @@ class BaseAnalyst(BudgetMeter, ABC):
                 alive until the loop's finalizer gets to it, and on a box with
                 one llama-server slot a run that is still alive is not free.
                 """
-                nonlocal time_capped, time_detail, final_reserve
-                stream: Any = agent_executor.astream(
-                    {"messages": messages},
-                    {"recursion_limit": max_steps},
-                    stream_mode="values",
-                )
                 spoken: set[str] = set()
                 pace = TurnPace(_rate_of_the_answering_model)
                 # Kept past the loop: what one turn and a final answer cost at
                 # this model's pace is what the stage asks before it gives
                 # this analyst a second loop.
                 self._last_pace = pace
+                # A replayed conversation starts without the question: it is
+                # asked again, if at all, of the replay's own answer.
+                tool_ask.clear()
+                if not await _one_pass(list(messages), spoken, pace):
+                    return dict(latest)
+                # The model answered. An analyst with tools whose first answer
+                # called none is told so, with the tools it has, and asked once
+                # in the same conversation: KEEP keeps that answer as written,
+                # and any other answer it writes next stands.
+                conversation = list(latest.get("messages") or [])
+                question = self._no_tool_call_question(
+                    conversation, budget, max_steps, recorded, pace
+                )
+                if question is None:
+                    return dict(latest)
+                tool_ask["question"] = question
+                tool_ask["first_answer"] = str(getattr(conversation[-1], "content", "") or "")
+                tool_ask["conversation"] = conversation
+                await _the_question_pass([*conversation, question], conversation, spoken, pace)
+                return dict(latest)
+
+            async def _the_question_pass(
+                start: list[Any], conversation: list[Any], spoken: set[str], pace: TurnPace
+            ) -> None:
+                """The pass after the no-tool-call question, and the first answer when none follows.
+
+                Held inside what is left of the loop's clock. A stop or a
+                failure that leaves no answer after the question — the spend
+                ceiling, a call's deadline, the clock, a full window, the step
+                cap — puts the conversation back as it stood before the
+                question and the first answer stands as written, with why on
+                the record; the flags that stop set are cleared, so nothing
+                downstream salvages or empties a loop whose answer arrived. A
+                model that called tools after the question goes on as any loop
+                that called tools does, and its first answer still stands if
+                nothing is written after them.
+                """
+                nonlocal time_capped, time_detail, final_reserve, spend_capped
+                nonlocal call_deadline_hit, spend_refusal, window_full
+                saved = (
+                    time_capped,
+                    time_detail,
+                    final_reserve,
+                    spend_capped,
+                    call_deadline_hit,
+                    spend_refusal,
+                    window_full,
+                )
+                latest["messages"] = list(start)
+                left = budget.seconds_left()
+                why = ""
+                finished = False
+                try:
+                    finished = await asyncio.wait_for(
+                        _one_pass(start, spoken, pace),
+                        timeout=None if left is None else max(0.0, left - 1.0),
+                    )
+                except ModelCallDeadline as exc:
+                    why = f"model call deadline: {exc}"
+                except SpendCeilingStop as stop:
+                    why = f"the spend ceiling: {stop}"
+                except TimeoutError:
+                    why = "the loop's time ran out before an answer to the question"
+                except Exception as exc:  # noqa: BLE001 — the first answer stands on any failure
+                    why = (
+                        "the model server reported its context window full"
+                        if window_full_error(exc)
+                        else f"the question failed ({type(exc).__name__})"
+                    )
+                after = list(latest.get("messages") or [])[len(start) :]
+                answered = bool(after) and is_model_turn(after[-1])
+                called = any(getattr(m, "tool_calls", None) for m in after)
+                if finished and answered and not called:
+                    last = str(getattr(after[-1], "content", "") or "")
+                    # Emphasis marks aside, as a claim's block is compared.
+                    bare = re.sub(r"[*_`]", "", last).strip().rstrip(".").strip()
+                    if bare.upper() == KEEP_REPLY:
+                        tool_ask["followed"] = "kept_first_answer"
+                    return
+                if finished or (called and not why):
+                    return
+                why = why or self._why_the_pass_stopped(
+                    saved,
+                    time_capped,
+                    time_detail,
+                    spend_capped,
+                    spend_refusal,
+                    call_deadline_hit,
+                    window_full,
+                    repeats,
+                )
+                (
+                    time_capped,
+                    time_detail,
+                    final_reserve,
+                    spend_capped,
+                    call_deadline_hit,
+                    spend_refusal,
+                    window_full,
+                ) = saved
+                latest["messages"] = list(conversation)
+                tool_ask["dropped"] = after
+                tool_ask["followed"] = "no_answer"
+                tool_ask["why"] = why
+                self.logger.warning(
+                    "%s: no answer followed the question about its tools (%s); its first "
+                    "answer stands as written.",
+                    self.name,
+                    why,
+                )
+
+            async def _one_pass(start: list[Any], spoken: set[str], pace: TurnPace) -> bool:
+                """One run of the graph from ``start``; whether the model ended it by answering.
+
+                ``False`` when a stop below ended it — the repeat guard, the
+                room, the spend ceiling, the clock, a call's deadline, the step
+                cap or a full window — and ``latest`` holds the conversation as
+                it stood.
+                """
+                nonlocal time_capped, time_detail, final_reserve, spend_capped
+                nonlocal call_deadline_hit, spend_refusal
+                # What the steps have left after the turns ``start`` already
+                # spent; the first pass has spent none.
+                steps = None if max_steps is None else max(1, max_steps - steps_used(start))
+                stream: Any = agent_executor.astream(
+                    {"messages": start},
+                    {"recursion_limit": recursion_limit(steps)},
+                    stream_mode="values",
+                )
+                finished = False
                 async with contextlib.aclosing(stream) as snapshots:
                     try:
                         async for snapshot in snapshots:
@@ -3440,6 +4514,24 @@ class BaseAnalyst(BudgetMeter, ABC):
                                     self.name,
                                 )
                                 break
+                            # And for the operator's spend ceiling: what the
+                            # job has spent, this loop's turns included, has
+                            # reached it, so the tool phase ends and the
+                            # salvage writes up what was gathered.
+                            if spend_meter is not None:
+                                spend_meter.note_loop(
+                                    spend_key,
+                                    list(latest.get("messages") or [])[len(messages) :],
+                                    self._model_label() or _model_label(self.llm),
+                                )
+                                if spend_meter.exhausted():
+                                    spend_capped = True
+                                    self.logger.warning(
+                                        "%s ReAct loop ended: the job's spend ceiling is "
+                                        "reached; synthesising from what it gathered.",
+                                        self.name,
+                                    )
+                                    break
                             # And the same end for the clock, early enough for
                             # the answer: once what is left cannot hold another
                             # turn at this model's own pace and the final-answer
@@ -3448,11 +4540,11 @@ class BaseAnalyst(BudgetMeter, ABC):
                             # time budget itself there is no turn left to write.
                             pace.note(snapshot, _model_label(self.llm))
                             left = budget.seconds_left()
-                            if pace.leaves_no_room_for(left):
+                            if left is not None and pace.leaves_no_room_for(left):
                                 time_capped = True
                                 final_reserve = pace.reserve()
                                 time_detail = (
-                                    f"{left:.0f}s of {float(timeout):.0f}s left; the longest "
+                                    f"{left:.0f}s of {float(timeout or 0):.0f}s left; the longest "
                                     f"turn of {pace.current} (its tools and its next "
                                     f"answer) took {pace.longest():.0f}s, and "
                                     f"{final_reserve:.0f}s are kept for the final answer"
@@ -3464,6 +4556,32 @@ class BaseAnalyst(BudgetMeter, ABC):
                                     time_detail,
                                 )
                                 break
+                        else:
+                            # The graph ran to its end: the model answered.
+                            finished = True
+                    except ModelCallDeadline as exc:
+                        # One model call ran past its whole-call deadline: a
+                        # failed turn, not the loop's clock. The tool phase
+                        # ends here and the salvage writes the answer from
+                        # what was gathered; with nothing gathered the agent
+                        # fails as a provider failure does.
+                        if not recorder.entries:
+                            raise
+                        call_deadline_hit = True
+                        time_detail = f"model call deadline: {exc}"
+                        self.logger.warning(
+                            "%s ReAct loop ended: %s; synthesising from what it gathered.",
+                            self.name,
+                            time_detail,
+                        )
+                    except SpendCeilingStop as stop:
+                        spend_capped = True
+                        spend_refusal = str(stop)
+                        self.logger.warning(
+                            "%s ReAct loop ended: the next turn does not fit the job's spend "
+                            "ceiling; synthesising from what it gathered.",
+                            self.name,
+                        )
                     except GraphRecursionError:
                         # The step cap, reached without langgraph's own
                         # "need more steps" turn — which it only takes when
@@ -3474,10 +4592,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                         # agent at its cap writes up what it has, and a
                         # recursion error is not something a model can read.
                         self.logger.warning(
-                            "%s ReAct loop reached its %d-step cap; "
+                            "%s ReAct loop reached its %s-step cap; "
                             "synthesising from what it gathered.",
                             self.name,
-                            max_steps,
+                            limit_text(max_steps),
                         )
                         latest["messages"] = [
                             *list(latest.get("messages") or []),
@@ -3508,7 +4626,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                             self.name,
                             type(exc).__name__,
                         )
-                return dict(latest)
+                return finished
 
             last_conn_exc: Exception | None = None
             for _attempt in range(3):
@@ -3518,9 +4636,12 @@ class BaseAnalyst(BudgetMeter, ABC):
                 # analyst for a blip the retry exists to absorb.
                 repeats.reset()
                 try:
+                    # No clock of the loop's own with no time limit: each
+                    # model call inside it waits as long as its answer takes
+                    # at the model's measured pace.
                     result = await asyncio.wait_for(
                         _until_it_answers_or_repeats(),
-                        timeout=float(timeout),
+                        timeout=None if timeout is None else float(timeout),
                     )
                     msg_count = len(result.get("messages", []))
                     self.logger.info(
@@ -3528,6 +4649,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                         msg_count,
                     )
                     return result
+                except ModelCallDeadline:
+                    # A model call's own deadline with nothing gathered: the
+                    # call failed, which is not this loop's clock.
+                    raise
                 except TimeoutError:
                     # The time budget itself, reached inside one turn or one
                     # tool call longer than any the loop had seen. What was
@@ -3535,21 +4660,42 @@ class BaseAnalyst(BudgetMeter, ABC):
                     # the analyst; the salvage gets whatever time is left,
                     # which may be none. Any other timeout is not this one.
                     nonlocal time_capped, time_detail, budget_ran_out_empty
-                    if budget.seconds_left() > 1.0:
+                    # The loop's clock ended the pass after the question about
+                    # its tools — a call that blocks its thread outlives the
+                    # pass's own deadline: the first answer stands as written.
+                    if tool_ask.get("first_answer") is not None:
+                        if "followed" not in tool_ask:
+                            held = list(tool_ask.get("conversation") or [])
+                            tool_ask["dropped"] = list(latest.get("messages") or [])[
+                                len(held) + 1 :
+                            ]
+                            latest["messages"] = held
+                            tool_ask["followed"] = "no_answer"
+                            tool_ask["why"] = (
+                                "the loop's clock ran out before an answer to the question"
+                            )
+                            self.logger.warning(
+                                "%s: the loop's clock ended the pass after the question "
+                                "about its tools; its first answer stands as written.",
+                                self.name,
+                            )
+                        return dict(latest)
+                    left_now = budget.seconds_left()
+                    if left_now is None or left_now > 1.0:
                         raise
                     if not recorder.entries:
                         budget_ran_out_empty = True
                         raise
                     time_capped = True
                     time_detail = (
-                        f"the loop reached its {float(timeout):.0f}s budget inside a "
+                        f"the loop reached its {float(timeout or 0):.0f}s budget inside a "
                         "turn longer than any it had measured"
                     )
                     self.logger.warning(
-                        "%s ReAct loop reached its %ds time budget mid-turn; keeping "
+                        "%s ReAct loop reached its %s time budget mid-turn; keeping "
                         "what it gathered.",
                         self.name,
-                        timeout,
+                        limit_text(timeout, "s"),
                     )
                     return dict(latest)
                 except APIConnectionError as conn_exc:
@@ -3589,27 +4735,37 @@ class BaseAnalyst(BudgetMeter, ABC):
         hard_timeout = hard_cap(timeout, getattr(self, "_budget_ceiling", None))
         try:
             try:
-                thread_result: dict | None = _run_coro_blocking(
-                    _invoke(), hard_timeout, label=f"react:{self.name}"
-                )
+                with BaseAnalyst._claims_watched(self):  # type: ignore[arg-type]
+                    thread_result: dict | None = _run_coro_blocking(
+                        _invoke(), hard_timeout, label=f"react:{self.name}"
+                    )
+            except ModelCallDeadline as exc:
+                detail = f"model call deadline: {exc}"
+                self.logger.error("%s ReAct agent failed: %s.", self.name, detail)
+                self._record_budget(budget, [], "time", detail=detail)
+                self._record_turns_taken(latest, len(messages))
+                raise AnalystError(f"{self.name} ReAct agent failed: {detail}") from exc
             except TimeoutError:
                 # Two different walls. The soft budget with nothing gathered
                 # is not the hard cap, and is not said to be.
                 if budget_ran_out_empty:
                     self.logger.critical(
-                        "%s ReAct agent reached its %ds budget with nothing gathered; "
+                        "%s ReAct agent reached its %s budget with nothing gathered; "
                         "aborting this analyst.",
                         self.name,
-                        timeout,
+                        limit_text(timeout, "s"),
                     )
-                    detail = f"the loop reached its {int(timeout)}s budget with nothing gathered"
+                    detail = (
+                        f"the loop reached its {limit_text(timeout, 's')} budget "
+                        "with nothing gathered"
+                    )
                 else:
                     self.logger.critical(
-                        "%s ReAct agent exceeded the %ds hard cap; aborting this analyst.",
+                        "%s ReAct agent exceeded the %s hard cap; aborting this analyst.",
                         self.name,
-                        hard_timeout,
+                        limit_text(hard_timeout, "s"),
                     )
-                    detail = f"the loop exceeded its {int(hard_timeout)}s hard cap"
+                    detail = f"the loop exceeded its {limit_text(hard_timeout, 's')} hard cap"
                 self._record_budget(budget, [], "time", detail=detail)
                 self._record_turns_taken(latest, len(messages))
                 raise
@@ -3631,6 +4787,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             # because the last one timed out is the opposite of a ledger.
             self._finish_evidence(recorder)
             self.loop_budget = None
+            # A loop that failed has recorded its turns on the ledger by now,
+            # so the meter stops counting them as running. A finished loop's
+            # turns are recorded below, and the meter lets go of them there,
+            # after they are on the ledger: never a moment counted nowhere.
+            if spend_meter is not None and sys.exc_info()[1] is not None:
+                spend_meter.forget_loop(spend_key)
             # Read before the conversation is forgotten: forgetting it clears
             # the mark, so a question asked afterwards is always answered no
             # and a loop that ran out of room recorded the step cap instead.
@@ -3643,6 +4805,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             self._forget_conversation()
 
         if thread_result is None:
+            if spend_meter is not None:
+                spend_meter.forget_loop(spend_key)
             raise AnalystError(f"{self.name} ReAct agent returned no result")
 
         msgs = thread_result.get("messages", []) or []
@@ -3653,6 +4817,17 @@ class BaseAnalyst(BudgetMeter, ABC):
         # is a non-empty list. Counting them is cheap and the most useful
         # single metric for "did this analyst overspend on Ghidra".
         tool_call_count = sum(len(getattr(m, "tool_calls", None) or []) for m in msgs)
+        # The analyst's own loops' calls count toward its own: one that called
+        # a tool in any of them is not asked why it called none. A loop that
+        # answered another agent's ask is that agent's work, and is not counted.
+        if getattr(self, "_budget_ceiling", None) is None:
+            self._tool_calls_made = int(getattr(self, "_tool_calls_made", 0) or 0) + tool_call_count
+        # Turns the question's pass took and the first answer replaced: spent,
+        # and counted where every turn of the loop is.
+        dropped = [m for m in tool_ask.get("dropped") or [] if is_model_turn(m)]
+        self.steps_spent += steps_used(dropped)
+        for _m in dropped:
+            self._record_usage(_m, announce=False, call=TOOL_LOOP_TURN_CALL)
         # The ReAct tool-loop's LLM calls happen INSIDE
         # langgraph's ``create_react_agent`` executor, so they never passed
         # through ``_invoke_llm_with_timeout`` where token usage is tallied.
@@ -3660,9 +4835,20 @@ class BaseAnalyst(BudgetMeter, ABC):
         # per-run TokenLedger reported ~1 call for a multi-call ReAct run.
         # Record every AI turn the executor produced (each carries its own
         # ``usage_metadata``) so the ledger reflects real LLM spend.
-        for _m in msgs:
-            if is_model_turn(_m):
-                self._record_usage(_m, announce=False)
+        # The last turn is the answer the validation turn checks for a cut, so
+        # it is checked against the cap it was sent with: the binding still
+        # holds the cap the spend ceiling set for that turn, or none.
+        turns = [m for m in msgs if is_model_turn(m)]
+        last_held = turn_held_cap(held_binding, self.llm)
+        for index, _m in enumerate(turns):
+            self._record_usage(
+                _m,
+                announce=False,
+                call=TOOL_LOOP_TURN_CALL,
+                held=last_held if index == len(turns) - 1 else None,
+            )
+        if spend_meter is not None:
+            spend_meter.forget_loop(spend_key)
         elapsed = _time.monotonic() - _t0
         # A loop that overran is a slow model or a slow tool, and the loop's
         # own elapsed time cannot tell them apart. Every ledger entry carries
@@ -3673,16 +4859,20 @@ class BaseAnalyst(BudgetMeter, ABC):
         slowest = slowest_call(recorder.entries)
         cfg_obj = get_settings()
         _budget = getattr(cfg_obj, "react_agent_tool_call_budget", 20)
+        # ``react_agent_tool_call_budget`` is a warning threshold, never a
+        # limit: the loop was not stopped at it, and the line says so rather
+        # than reading as an overrun of something enforced.
         if tool_call_count > _budget:
             self.logger.warning(
-                "%s ReAct loop spent %d tool calls (budget=%d, elapsed=%.1fs)%s.",
+                "%s ReAct loop made %d tool calls, past the tool-call warning "
+                "threshold of %d (not a limit; elapsed=%.1fs)%s.",
                 self.name,
                 tool_call_count,
                 _budget,
                 elapsed,
                 slowest,
             )
-        elif elapsed > 0.9 * float(timeout):
+        elif timeout is not None and elapsed > 0.9 * float(timeout):
             self.logger.warning(
                 "%s ReAct loop close to timeout: elapsed=%.1fs, "
                 "timeout=%ds, tool_calls=%d, messages=%d%s.",
@@ -3705,6 +4895,10 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         final_message = msgs[-1]
         content = str(final_message.content)
+        # The first answer stands as written: the model replied KEEP to the
+        # question about its tools, or nothing answered the question.
+        if tool_ask.get("followed") in ("kept_first_answer", "no_answer"):
+            content = str(tool_ask.get("first_answer") or "")
         # Forced synthesis: a tool-using ReAct loop
         # that spends its whole step budget gathering evidence ends with
         # LangGraph's "need more steps" stop message (or an empty final turn),
@@ -3720,6 +4914,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # steps: it has evidence and no answer, and the salvage is what turns
         # the first into the second.
         ended_early = repeats.ending_the_loop() or no_room or window_full or time_capped
+        ended_early = ended_early or spend_capped or call_deadline_hit
         self._record_react_loop(hit_step_cap=hit_step_cap)
         if repeats.ending_the_loop():
             cap, why = "repeats", f"{repeats.served_repeats} repeated tool call(s)"
@@ -3728,6 +4923,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         elif window_full:
             cap, why = "no_room", "the model server reported its context window full"
         elif time_capped:
+            cap, why = "time", time_detail
+        elif spend_capped:
+            cap, why = SPEND_CAP, self._spend_reason() or spend_refusal
+        elif call_deadline_hit:
             cap, why = "time", time_detail
         elif hit_step_cap:
             cap, why = "steps", ""
@@ -3761,7 +4960,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             # the hard cap the loop was already inside. Measured 2026-08-11:
             # 109.5 s loop + a fresh 1,500 s synthesis = 1,677 s against a
             # 1,530 s cap, and zero techniques out the other side.
-            if time_capped:
+            if time_capped and timeout is not None:
                 self._give_the_final_turn(final_reserve, float(timeout) - elapsed)
             synthesized = self._force_final_synthesis(msgs, timeout, elapsed)
             if synthesized.strip() and not _RECURSION_STOP_RE.search(synthesized):
@@ -3775,6 +4974,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         # in the platform's own voice, not in the agent's.
         if cap is not None and not answered:
             content = ""
+        # Tools called after the question about them, and nothing written
+        # after: the first answer stands as written.
+        if tool_ask.get("question") is not None and not content.strip():
+            content = str(tool_ask.get("first_answer") or "")
+            tool_ask.setdefault("why", "no answer followed the tool calls made after the question")
+        asked_about_tools = self._what_followed_the_tool_question(msgs, tool_ask)
+        if asked_about_tools is not None:
+            self._note_on_last_loop("tool_ask", asked_about_tools)
         self.ended_out_of_room = cap == "no_room"
 
         # A final message that is neither a structured report nor a findings
@@ -3801,6 +5008,95 @@ class BaseAnalyst(BudgetMeter, ABC):
             self._settle_final_answer(content, msgs, timeout, elapsed, max_steps)
         )
 
+    def _spend_meter(self) -> Any:
+        """The job's spend meter (``core.spend.SpendMeter``), or ``None``."""
+        from maljan.core.spend import SpendMeter
+
+        meter = getattr(getattr(self, "token_ledger", None), "spend", None)
+        return meter if isinstance(meter, SpendMeter) else None
+
+    def _spend_reached(self) -> bool:
+        """Whether the job's spend ceiling is reached. Never raises."""
+        meter = self._spend_meter()
+        try:
+            return bool(meter is not None and meter.exhausted() is True)
+        except Exception:  # noqa: BLE001 — a meter is never worth a lost loop
+            return False
+
+    def _spend_admits(
+        self,
+        kind: str,
+        messages: list[Any],
+        *,
+        slot: Any = None,
+        holdable: bool | None = None,
+        model: Any = None,
+        deadline_s: float | None = None,
+        wait_s: float | None = None,
+    ) -> int | None:
+        """The spend ceiling's word on one call before it is made (``SpendMeter.admit``).
+
+        ``None`` to make it as it is, a number to make it with that output
+        cap; raises :class:`SpendCeilingStop` when it is not to be made. With
+        ``slot`` the call's worst case is reserved until it is released.
+        ``holdable`` defaults to whether the model the call goes to (``model``,
+        else this agent's) takes a cap of its own per call: one that does not
+        is admitted only at its whole cap.
+        """
+        meter = self._spend_meter()
+        if meter is None:
+            return None
+        from maljan.llm.context_window import accepts_output_bound
+
+        target = self.llm if model is None else model
+        return cast(
+            "int | None",
+            meter.admit(
+                kind=kind,
+                model=self._model_label() or _model_label(self.llm),
+                prompt_chars=sum(_message_chars(m) for m in messages) + self._definitions_sent(),
+                cap_tokens=self.output_cap_tokens(),
+                slot=slot,
+                holdable=accepts_output_bound(target) if holdable is None else holdable,
+                # The call's own deadline where the caller has one, else the
+                # whole-call deadline its request is sent with.
+                deadline_s=call_deadline_of(target, messages) if deadline_s is None else deadline_s,
+                # How long it may wait for calls in flight: its loop's own time.
+                wait_s=wait_s,
+            ),
+        )
+
+    def _spend_release(self, slot: Any) -> None:
+        meter = self._spend_meter()
+        if meter is not None:
+            meter.release(slot)
+
+    def _spend_refuses(self, kind: str, messages: list[Any]) -> bool:
+        """Whether the spend ceiling would refuse this call now; nothing is reserved or logged."""
+        meter = self._spend_meter()
+        if meter is None:
+            return False
+        try:
+            return bool(
+                meter.preview(
+                    kind=kind,
+                    model=self._model_label() or _model_label(self.llm),
+                    prompt_chars=sum(_message_chars(m) for m in messages)
+                    + self._definitions_sent(),
+                    cap_tokens=self.output_cap_tokens(),
+                )
+                == 0
+            )
+        except Exception:  # noqa: BLE001 — a question about the meter is never a failure
+            return False
+
+    def _spend_reason(self) -> str:
+        meter = self._spend_meter()
+        try:
+            return str(meter.reason()) if meter is not None else ""
+        except Exception:  # noqa: BLE001 — a meter is never worth a lost loop
+            return ""
+
     def _count_question(self, code: str) -> None:
         """Count one question a tool call was answered with, where the run summary reads it."""
         with self._the_meter_s_lock():
@@ -3824,8 +5120,165 @@ class BaseAnalyst(BudgetMeter, ABC):
         except Exception as exc:  # noqa: BLE001 — a deadline is never worth a turn
             self.logger.debug("final-turn deadline not set (%s).", exc)
 
+    def _no_tool_call_question(
+        self,
+        conversation: list[Any],
+        budget: LoopBudget,
+        max_steps: int | None,
+        tools: list[Any],
+        pace: TurnPace | None = None,
+    ) -> Any | None:
+        """The question for an analyst whose first answer called no tool, or ``None``.
+
+        Asked once per analyst, in its own loops: not after any of them called
+        a tool or was asked, not in a loop that called a tool, and not inside
+        an ask another agent made of it. Asked only when a whole answer after
+        it fits: two graph steps left (one complete model turn), the time the
+        loop keeps for a final answer at its own pace, the conversation and an
+        answer of the output cap inside the model's window, and a spend
+        ceiling that admits it. Nothing is decided for the model: the question
+        states the fact and the tools it has, and the model answers it.
+        """
+        from langchain_core.messages import HumanMessage
+
+        from maljan.agents.prompt_fragments import no_tool_call_question
+
+        if getattr(self, "_asked_about_tools", False):
+            return None
+        if getattr(self, "_budget_ceiling", None) is not None:
+            return None
+        if int(getattr(self, "_tool_calls_made", 0) or 0) > 0:
+            return None
+        if any(getattr(message, "tool_calls", None) for message in conversation):
+            return None
+        last = conversation[-1] if conversation else None
+        if not is_model_turn(last) or not str(getattr(last, "content", "") or "").strip():
+            return None
+        names = [str(getattr(tool, "name", "") or "") for tool in tools or ()]
+        if not any(names):
+            return None
+        if max_steps is not None and max_steps - steps_used(conversation) < 2:
+            self.logger.info("%s: no step budget left to ask about its tools.", self.name)
+            return None
+        seconds = budget.seconds_left()
+        needs = pace.reserve() if pace is not None else float(_SYNTHESIS_MIN_SECONDS)
+        if seconds is not None and seconds < needs:
+            self.logger.info(
+                "%s: %.0fs left, and an answer needs %.0fs at this loop's pace; its tools "
+                "are not asked about.",
+                self.name,
+                seconds,
+                needs,
+            )
+            return None
+        question = HumanMessage(content=no_tool_call_question(names))
+        asked = [*conversation, question]
+        if not BaseAnalyst._fits_the_window(self, asked, int(self.output_cap_tokens() or 0)):
+            self.logger.info(
+                "%s: the conversation and a whole answer do not fit the window; its tools "
+                "are not asked about.",
+                self.name,
+            )
+            return None
+        if self._spend_refuses("no-tool-call question", asked):
+            self.logger.info(
+                "%s: the spend ceiling leaves no room to ask about its tools.", self.name
+            )
+            return None
+        self.logger.warning(
+            "%s answered without calling any of its %d tool(s); asking once whether it "
+            "wants to call one before its answer stands.",
+            self.name,
+            len([name for name in names if name]),
+        )
+        return question
+
+    @staticmethod
+    def _why_the_pass_stopped(
+        saved: tuple[Any, ...],
+        time_capped: bool,
+        time_detail: str,
+        spend_capped: bool,
+        spend_refusal: str,
+        call_deadline_hit: bool,
+        window_full: bool,
+        repeats: Any,
+    ) -> str:
+        """Which stop ended the question's pass, in the words its record uses."""
+        was_time, _detail, _reserve, was_spend, was_deadline, _refusal, was_full = saved
+        if window_full and not was_full:
+            return "the model server reported its context window full"
+        if spend_capped and not was_spend:
+            return f"the spend ceiling{': ' + spend_refusal if spend_refusal else ''}"
+        if call_deadline_hit and not was_deadline:
+            return time_detail or "a model call's deadline"
+        if time_capped and not was_time:
+            return f"the loop's time budget: {time_detail}" if time_detail else "the loop's time"
+        if getattr(repeats, "ending_the_loop", lambda: False)():
+            return "repeated tool calls"
+        return "the loop's step budget"
+
+    def _what_followed_the_tool_question(
+        self, messages: list[Any], asked: Mapping[str, Any]
+    ) -> dict[str, Any] | None:
+        """What the model did after the no-tool-call question, for the loop's record.
+
+        ``tool_calls_after`` is the calls it made after the question, and
+        ``followed`` says what came of it: ``called_tools``,
+        ``answered_without_tools``, ``kept_first_answer`` (it replied KEEP) or
+        ``no_answer``. ``why`` says why its first answer stands when nothing
+        was written after the question. ``None`` when the question was not
+        asked in this loop.
+        """
+        question = asked.get("question")
+        if question is None:
+            return None
+        self._asked_about_tools = True
+        text = str(getattr(question, "content", "") or "")
+        at = next(
+            (
+                index
+                for index in range(len(messages) - 1, -1, -1)
+                if messages[index] is question
+                or (
+                    getattr(messages[index], "type", "") == "human"
+                    and str(getattr(messages[index], "content", "") or "") == text
+                )
+            ),
+            None,
+        )
+        after = [] if at is None else list(messages[at + 1 :])
+        calls = sum(len(getattr(m, "tool_calls", None) or []) for m in after)
+        answered = bool(after) and (
+            is_model_turn(after[-1]) and bool(str(getattr(after[-1], "content", "") or "").strip())
+        )
+        preset = str(asked.get("followed") or "")
+        if preset:
+            followed = preset
+        elif calls:
+            followed = "called_tools"
+        elif answered:
+            followed = "answered_without_tools"
+        else:
+            followed = "no_answer"
+        record: dict[str, Any] = {"tool_calls_after": calls, "followed": followed}
+        if asked.get("why"):
+            record["why"] = str(asked["why"])
+        self.logger.info(
+            "%s: after the question about its tools it made %d tool call(s) (%s).",
+            self.name,
+            calls,
+            followed,
+        )
+        return record
+
     def _settle_final_answer(
-        self, content: str, msgs: list, timeout: int, elapsed: float, max_steps: int
+        self,
+        content: str,
+        msgs: list,
+        timeout: float | None,
+        elapsed: float,
+        max_steps: int | None,
     ) -> str:
         """The loop's answer, nudged once if it was not a report, and judged.
 
@@ -3851,7 +5304,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         return content
 
     def _nudge_for_final_answer(
-        self, msgs: list, timeout: int, elapsed: float, max_steps: int
+        self, msgs: list, timeout: float | None, elapsed: float, max_steps: int | None
     ) -> str | None:
         """Ask once for the report the loop did not produce; ``None`` on failure.
 
@@ -3861,19 +5314,20 @@ class BaseAnalyst(BudgetMeter, ABC):
         against the time the loop has already used. Never raises — a nudge that
         cannot run leaves the answer exactly as the loop left it.
         """
-        from langchain_core.messages import HumanMessage
 
         remaining_steps = model_turns_left(max_steps, list(msgs))
-        if remaining_steps < 1:
+        if remaining_steps is not None and remaining_steps < 1:
             self.logger.info(
                 "%s: no step budget left for the final-answer nudge.",
                 self.name,
             )
             return None
-        remaining_time = float(timeout) - elapsed
-        if remaining_time <= 1.0:
+        remaining_time = None if timeout is None else float(timeout) - elapsed
+        if remaining_time is not None and remaining_time <= 1.0:
             self.logger.info("%s: no time budget left for the final-answer nudge.", self.name)
             return None
+        stated_steps = NO_LIMIT if remaining_steps is None else remaining_steps
+        stated_time = NO_LIMIT if remaining_time is None else remaining_time
 
         self.logger.warning(
             "%s: the loop's last message was not a final report; asking once for one.",
@@ -3885,14 +5339,49 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.logger.warning(
                 "%s: the nudge leaves out a tool call whose arguments never parsed.", self.name
             )
-        turns = [*sendable, HumanMessage(content=FINAL_ANSWER_NUDGE)]
-        budget = min(remaining_time, float(timeout))
+        # The run state as of now, at the end of the nudge's own question, the
+        # place the loop's turns carried it.
+        turns = self._with_current_run_state(
+            with_question(tool_free_turns(sendable), FINAL_ANSWER_NUDGE),
+            stated_steps,
+            stated_time,
+        )
+        loop_turns = self._with_current_run_state(
+            with_question(sendable, FINAL_ANSWER_NUDGE), stated_steps, stated_time
+        )
+        budget = remaining_time
+        if self._spend_refuses("final-answer nudge", list(turns)):
+            self.logger.info("%s: the spend ceiling leaves no room for the nudge.", self.name)
+            return None
 
-        def _ask_with(model: Any, label: str) -> Any:
+        def _ask_with(model: Any, label: str, sent: list[Any] | None = None) -> Any:
+            messages = turns if sent is None else sent
+            # Admitted per call, held to what the spend pays for, and its
+            # worst case reserved while it runs.
+            slot = object()
+            bound = self._spend_admits(
+                "final-answer nudge",
+                list(messages),
+                slot=slot,
+                deadline_s=None if budget is None else float(budget),
+            )
+            from maljan.llm.context_window import output_bound_kwargs
+
+            held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
+
             async def _ask() -> Any:
-                return await asyncio.wait_for(model.ainvoke(turns), timeout=budget)
+                answer = await asyncio.wait_for(model.ainvoke(messages, **held), timeout=budget)
+                # On the ledger before the reservation goes.
+                self._record_usage(answer, call="final-answer nudge", held=bound if held else None)
+                return answer
 
-            return _run_coro_blocking(_ask(), budget + 5, label=label)
+            try:
+                with BaseAnalyst._claims_watched(self):  # type: ignore[arg-type]
+                    return _run_coro_blocking(
+                        _ask(), None if budget is None else budget + 5, label=label
+                    )
+            finally:
+                self._spend_release(slot)
 
         try:
             answer = _ask_with(self.llm, f"nudge:{self.name}")
@@ -3906,7 +5395,11 @@ class BaseAnalyst(BudgetMeter, ABC):
                 self._nudge_retry_mode = "+".join(modes) or None
                 return None
             try:
-                answer = _ask_with(withheld, f"nudge-tools-none:{self.name}")
+                # The loop's own system turn, unchanged: the tools are bound
+                # here, so the transcript renders as the loop's did and the
+                # server keeps its prefix; the nudge's own words say no tool
+                # can be called.
+                answer = _ask_with(withheld, f"nudge-tools-none:{self.name}", loop_turns)
             except Exception as again:  # noqa: BLE001 — changes nothing
                 self.logger.warning(
                     "%s: the final-answer nudge failed with tools withheld too (%s).",
@@ -3917,7 +5410,6 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return None
             modes.append("tool_choice_none")
         self._nudge_retry_mode = "+".join(modes) or None
-        self._record_usage(answer)
         text = str(getattr(answer, "content", "") or "")
         return text or None
 
@@ -3968,6 +5460,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         try:
             entries = list(recorder.entries)
+            # Kept for the map whole, before the byte budget blanks an answer.
+            self._keep_for_function_map(entries)
+            self._live_map_entries = None
             budget = int(getattr(get_settings().reporting, "evidence_budget_bytes", 0) or 0)
             trimmed, self._evidence_bytes_spent = apply_budget(
                 entries, budget, already_spent=self._evidence_bytes_spent
@@ -4004,6 +5499,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             block = parse_findings_block(content)
             if not block:
                 return content
+            # The prose goes on to the parser; the answer it came out of is
+            # what the validation turn shows back (``_text_to_isr``).
+            self._last_written_answer: tuple[str, str] | None = (block.prose, content)
             self._findings_buffer.extend(block.findings)
             self._artifacts_buffer.extend(block.artifacts)
             self.logger.info(
@@ -4049,7 +5547,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         return [entry.to_captured() for entry in self._evidence_entries]
 
-    def _force_final_synthesis(self, msgs: list, timeout: int, elapsed: float = 0.0) -> str:
+    def _force_final_synthesis(
+        self, msgs: list, timeout: float | None, elapsed: float = 0.0
+    ) -> str:
         """Salvage a ReAct loop that hit its step budget without answering.
 
         LangGraph returns a "...need more steps..." stop message when the agent
@@ -4085,11 +5585,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         from langchain_core.messages import HumanMessage
 
         # Not truncated to whole seconds: at the time cap a second is a large
-        # share of what the final answer was kept.
-        remaining = max(0.0, float(timeout) - elapsed)
+        # share of what the final answer was kept. ``None`` with no time
+        # limit: the salvage is then sized by the window alone.
+        remaining = None if timeout is None else max(0.0, float(timeout) - elapsed)
         generation_rate, prompt_rate = self._measured_rates()
         paced_unknown = generation_rate is None or prompt_rate is None
-        if paced_unknown and remaining < _SYNTHESIS_MIN_SECONDS:
+        if paced_unknown and remaining is not None and remaining < _SYNTHESIS_MIN_SECONDS:
             self.logger.warning(
                 "%s skipping forced synthesis: only %ds of the %ds budget left "
                 "(minimum %ds) — starting it is how the hard cap fires.",
@@ -4113,11 +5614,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
         # What the time left can hold at this model's measured pace, when both
         # of its rates are known; the window's bound applies either way.
-        paced = salvage_chars_at_pace(
-            remaining,
-            generation_rate=generation_rate,
-            prompt_rate=prompt_rate,
-            chars_per_token=self._chars_per_token(),
+        paced = (
+            None
+            if remaining is None
+            else salvage_chars_at_pace(
+                remaining,
+                generation_rate=generation_rate,
+                prompt_rate=prompt_rate,
+                chars_per_token=self._chars_per_token(),
+            )
         )
         budget = window_budget if paced is None else min(window_budget, paced)
         # The same transcript rule the nudge follows: a tool call whose
@@ -4131,8 +5636,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             # time left at this pace. Starting anyway is a call that runs into
             # its hard cap and keeps the model busy past it.
             detail = (
-                f"{remaining:.0f}s were left; at {rates} they hold {max(0, paced)} characters "
-                f"of request, and the task alone is {framing}"
+                f"{remaining or 0:.0f}s were left; at {rates} they hold {max(0, paced)} "
+                f"characters of request, and the task alone is {framing}"
             )
             self.logger.warning("%s skipping forced synthesis: %s.", self.name, detail)
             self._note_salvage(
@@ -4175,7 +5680,15 @@ class BaseAnalyst(BudgetMeter, ABC):
             "sized_by": "window" if paced is None or window_budget <= paced else "pace",
         }
         try:
-            answer = self._invoke_llm_with_timeout([*trimmed, directive], remaining)
+            answer = self._invoke_llm_with_timeout(
+                self._with_current_run_state(
+                    with_question(tool_free_turns(trimmed), str(directive.content)),
+                    None,
+                    NO_LIMIT if remaining is None else remaining,
+                ),
+                remaining,
+                what="step-cap salvage",
+            )
         except Exception as exc:  # noqa: BLE001 - best-effort salvage
             self.logger.error(
                 "%s forced synthesis failed: %s (%s)",
@@ -4244,12 +5757,25 @@ class BaseAnalyst(BudgetMeter, ABC):
         loop budget.
         """
         timeout, _steps = loop_limits(self.name, getattr(self, "_budget_ceiling", None))
-        return self._invoke_llm_with_timeout(messages, float(timeout), model=model, what=what)
+        return self._invoke_llm_with_timeout(messages, timeout, model=model, what=what)
+
+    def _claims_watched(self) -> Any:
+        """A block whose model calls are read under the repeated-claims rule as they stream.
+
+        The margin is the one the check on the finished answer reads,
+        ``validation.claim_repeat_margin``; there is none by default. The
+        block's scope is this analyst's own answers: a tool the loop runs is
+        answered outside it (``evidence_recorder``), so a summariser or a
+        guardrail that calls a model inside a tool, or another agent asked
+        through one, is never read under this rule.
+        """
+        margin = getattr(getattr(get_settings(), "validation", None), "claim_repeat_margin", None)
+        return watching(claims_repeat_rule(None if margin is None else int(margin)))
 
     def _invoke_llm_with_timeout(
         self,
         messages: list,
-        timeout: float,
+        timeout: float | None,
         *,
         model: Any = None,
         what: str = "no-tools fallback",
@@ -4260,7 +5786,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         the agent has no tools registered, by the salvage, by the validation
         turn and by ``ask_the_model``. Runs on the shared agent loop so a
         stalled / queued llama-server cannot freeze the worker, and a timeout
-        or a cancelled job cancels the request itself.
+        or a cancelled job cancels the request itself. ``timeout`` ``None`` is
+        no wall clock of the caller's: the request waits as long as its answer
+        takes at the model's measured pace (the request timeout it is sent
+        with), and a cancelled job still cancels it.
         """
         import time as _time
 
@@ -4270,11 +5799,25 @@ class BaseAnalyst(BudgetMeter, ABC):
         # rather than a throwaway per-call loop, so no openai async client is
         # ever orphaned on a closed loop.
         llm: Any = self.llm if model is None else model
+        # The spend ceiling's word before the call: made with its cap held to
+        # what the spend it may use pays for, its worst case reserved while it
+        # runs, or not made (``SpendCeilingStop`` reaches the caller).
+        spend_slot = object()
+        bound = self._spend_admits(
+            "salvage" if what == "step-cap salvage" else what,
+            list(messages),
+            slot=spend_slot,
+            model=llm,
+            deadline_s=None if timeout is None else float(timeout),
+        )
+        from maljan.llm.context_window import output_bound_kwargs
+
+        bound_kwargs = output_bound_kwargs(llm, bound) if bound is not None else {}
 
         async def _invoke() -> str:
             # ``what`` goes into the format itself so the timeout stays the
             # line's first argument, as log readers of this line expect.
-            self.logger.info(f"Invoking LLM ({what}, timeout=%ds)...", timeout)  # noqa: G004
+            self.logger.info(f"Invoking LLM ({what}, timeout=%s)...", limit_text(timeout, "s"))  # noqa: G004
             # The model's own async call where it has one, so the timeout and
             # a cancelled job cancel the request itself: the connection closes
             # and the server stops generating. A synchronous ``invoke`` in a
@@ -4284,27 +5827,47 @@ class BaseAnalyst(BudgetMeter, ABC):
             # that stubs only ``invoke`` is still run in a thread.
             ask = getattr(type(llm), "ainvoke", None)
             call = (
-                llm.ainvoke(messages)
+                llm.ainvoke(messages, **bound_kwargs)
                 if inspect.iscoroutinefunction(ask)
-                else asyncio.to_thread(llm.invoke, messages)
+                else asyncio.to_thread(llm.invoke, messages, **bound_kwargs)
             )
-            response = await asyncio.wait_for(call, timeout=float(timeout))
-            self._record_usage(response)
+            response = await asyncio.wait_for(
+                call, timeout=None if timeout is None else float(timeout)
+            )
+            self._record_usage(response, call=what, held=bound if bound_kwargs else None)
             return str(response.content)
 
         _t0 = _time.monotonic()
         hard_timeout = hard_cap(timeout, getattr(self, "_budget_ceiling", None))
         try:
-            content = _run_coro_blocking(_invoke(), hard_timeout, label=f"llm:{self.name}")
-        except TimeoutError:
+            try:
+                with BaseAnalyst._claims_watched(self):  # type: ignore[arg-type]
+                    content = _run_coro_blocking(_invoke(), hard_timeout, label=f"llm:{self.name}")
+            finally:
+                # Returned or failed, the call is no longer in flight.
+                self._spend_release(spend_slot)
+        except ModelCallDeadline as exc:
+            self.logger.error("LLM %s ended at its model call deadline: %s", what, exc)
+            raise AnalystError(f"{self.name} {what} failed: model call deadline: {exc}") from exc
+        except HardCapExceeded:
             self.logger.critical(
-                "%s %s exceeded the %ds hard cap.",
+                "%s %s exceeded the %s hard cap.",
                 self.name,
                 what,
-                hard_timeout,
+                limit_text(hard_timeout, "s"),
             )
             raise
-        except AnalystError:
+        except TimeoutError:
+            # The call's own per-call timeout, passed through by the runner:
+            # a call deadline, which is not the hard cap and is not said to be.
+            self.logger.error(
+                "%s %s ended at its call deadline of %s.",
+                self.name,
+                what,
+                limit_text(timeout, "s"),
+            )
+            raise
+        except (AnalystError, SpendCeilingStop):
             raise
         except Exception as exc:
             self.logger.error("LLM %s failed: %s (%s)", what, type(exc).__name__, exc)
@@ -4312,11 +5875,11 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         elapsed = _time.monotonic() - _t0
         self.logger.info(
-            "%s %s: elapsed=%.1fs, timeout=%ds.",
+            "%s %s: elapsed=%.1fs, timeout=%s.",
             self.name,
             what,
             elapsed,
-            timeout,
+            limit_text(timeout, "s"),
         )
         return str(content)
 
@@ -4375,7 +5938,7 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         The delegated path (``agents.delegation``): the agent's own system
         prompt, the task as the human turn — framed like every other first
-        turn, with the pack in front and the run state in the system turn —
+        turn, with the pack in front and the run state at the end —
         the tool loop, the parse into claims, and the same checks an answer to
         a stage gets: the consistency gate and the technique check, in this
         agent's own conversation. Returns the loop's text and the checked ISR.
@@ -4424,7 +5987,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         with lock_for(self):
             return self._analyze_isr_guarded(data)
 
-    def safe_analyze_isr_within(self, data: str, seconds: float) -> AgentISR:
+    def safe_analyze_isr_within(self, data: str, seconds: float | None) -> AgentISR:
         """``safe_analyze_isr`` with the loop held to ``seconds``, what the stage has left.
 
         The ceiling a delegated ask uses, with this agent's own step budget:
@@ -4435,7 +5998,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         _timeout, max_steps = loop_limits(self.name)
         with lock_for(self):
             before = getattr(self, "_budget_ceiling", None)
-            self._budget_ceiling = BudgetCeiling(max_steps, max(1.0, float(seconds)))
+            self._budget_ceiling = BudgetCeiling(
+                max_steps, None if seconds is None else max(1.0, float(seconds))
+            )
             try:
                 return self._analyze_isr_guarded(data)
             finally:
@@ -4453,11 +6018,15 @@ class BaseAnalyst(BudgetMeter, ABC):
             return float(_SYNTHESIS_MIN_SECONDS)
         return pace.reserve()
 
-    def _seconds_the_last_loop_left(self, fallback: float) -> float:
-        """What is left of the last loop's time, or ``fallback`` when no loop has run."""
+    def _seconds_the_last_loop_left(self, fallback: float | None) -> float | None:
+        """What is left of the last loop's time, ``fallback`` when no timed loop has run.
+
+        ``None`` is no time limit: the last loop had none, and neither does
+        the fallback.
+        """
         deadline = getattr(self, "_last_loop_deadline", None)
         if not isinstance(deadline, int | float):
-            return float(fallback)
+            return None if fallback is None else float(fallback)
         return float(deadline) - time.monotonic()
 
     def _note_on_last_loop(self, key: str, value: Any) -> None:
@@ -4503,6 +6072,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 if salvaged is not None and salvaged.claims:
                     isr = salvaged
             return self._validate_isr(self._apply_consistency_gate(isr, truncated), truncated)
+        except SampleNotOpened:
+            # Nothing to salvage: every call the loop made was against no
+            # program, and writing it up would be a report about nothing.
+            raise
         except AnalystError:
             salvaged = self._salvaged_isr(truncated)
             if salvaged is not None:
@@ -4594,7 +6167,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             for isr in answers
             if isr is not None
         ]
-        prompt = self._system_prompt("")
+        # Tools-free, and the turn below says so: the prompt must not say otherwise.
+        prompt = self._system_prompt("", tools=())
         messages: list[Any] = []
         if prompt:
             messages.append(SystemMessage(content=prompt))
@@ -4611,7 +6185,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
         )
         try:
-            text = self._invoke_llm_with_timeout(messages, _SYNTHESIS_MIN_SECONDS)
+            text = self._invoke_llm_with_timeout(
+                messages, _SYNTHESIS_MIN_SECONDS, what="forced synthesis"
+            )
         except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves the failure
             self.logger.error(
                 "%s: synthesis from the answered asks failed: %s",
@@ -4647,15 +6223,60 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         chunk_isrs: list[AgentISR] = []
         errors: list[str] = []
+        # Where this analysis's own ledger entries begin: a later chunk is told
+        # the calls the earlier ones made, and its loop does not make them again.
+        entries = getattr(self, "_evidence_entries", None)
+        first_entry = len(entries) if isinstance(entries, list) else 0
 
         for chunk in chunks:
-            prompt_text = f"{chunk.to_prompt_header()}\n\n{chunk.content}"
+            # No new chunk once the job's spend ceiling is reached: what the
+            # chunks so far gathered is merged, and the degradation says why.
+            if spend_reached(self):
+                errors.append(f"chunk {chunk.index + 1}: not started, the spend ceiling is reached")
+                continue
+            entries = getattr(self, "_evidence_entries", None)
+            earlier = list(entries[first_entry:]) if isinstance(entries, list) else []
+            block = earlier_chunks_block(earlier)
+            prompt_text = f"{chunk.to_prompt_header()}\n\n" + (
+                f"{block}\n\n{chunk.content}" if block else chunk.content
+            )
             try:
                 # Each chunk's loop under this agent's lock, so an ask of it
                 # cannot run inside one: an ask drives the same buffers, the
                 # same budget and the same call chain this loop is using.
                 with lock_for(self):
-                    isr = self.analyze_isr(prompt_text)
+                    self._prior_chunk_calls = earlier
+                    try:
+                        isr = self.analyze_isr(prompt_text)
+                        cut = getattr(self, "_last_answer_cut", None)
+                        ended = bool(getattr(self, "_last_answer_ended", False))
+                    finally:
+                        self._prior_chunk_calls = []
+                        # Taken whether the chunk answered or raised: a cut
+                        # left here would be read as the next chunk's.
+                        self._last_answer_cut = None
+                        self._last_answer_ended = False
+                    repeat_margin = getattr(
+                        getattr(get_settings(), "validation", None), "claim_repeat_margin", None
+                    )
+                    repeats = claims_repeated(
+                        isr.answer_text or isr.unparsed_answer or "",
+                        None if repeat_margin is None else int(repeat_margin),
+                    )
+                    if cut is not None or repeats is not None:
+                        # A cut, or an answer that repeated its claims, is
+                        # answered inside the chunk it happened in:
+                        # this chunk's answer is asked for a whole one over
+                        # this chunk's own input, and what comes back stands
+                        # for this chunk alone in the merge.
+                        self._last_answer_cut = cut
+                        self._last_answer_ended = ended
+                        isr = self._validate_isr(
+                            isr,
+                            prompt_text,
+                            chunk=f"chunk {chunk.index + 1} of {chunk.total}",
+                            only_cut=True,
+                        )
                 chunk_isrs.append(isr)
                 self.logger.debug(
                     "Chunk %d/%d analyzed: %d claims.",
@@ -4663,6 +6284,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                     chunk.total,
                     len(isr.claims),
                 )
+            except SampleNotOpened:
+                # The sample did not open, so no later chunk can read it either.
+                raise
             except Exception as exc:
                 errors.append(f"chunk {chunk.index + 1}: {exc}")
                 self.logger.warning("Chunk %d/%d failed: %s.", chunk.index + 1, chunk.total, exc)
@@ -4686,7 +6310,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         # multi-chunk evidence (a claim from one chunk grounded by another is
         # still grounded in the sample). No-op when the gate is off.
         evidence = "\n".join(c.content for c in chunks)
-        return self._validate_isr(self._apply_consistency_gate(merged, evidence), evidence)
+        # Under the agent's lock, as the single-chunk path runs it: the
+        # validation turn marks and slices the findings buffer in ``_parse``,
+        # and a delegated ask of this agent landing between the mark and the
+        # slice would move its own findings onto this ISR, or these onto its.
+        with lock_for(self):
+            return self._validate_isr(self._apply_consistency_gate(merged, evidence), evidence)
 
     # ------------------------------------------------------------------
     # View-decomposition (findings-log §3.6) — text path only
@@ -4898,7 +6527,14 @@ class BaseAnalyst(BudgetMeter, ABC):
     # Inline consistency gate (findings-log §4 Item 4)
     # ------------------------------------------------------------------
 
-    def _validate_isr(self, isr: AgentISR, evidence: str) -> AgentISR:
+    def _validate_isr(
+        self,
+        isr: AgentISR,
+        evidence: str,
+        *,
+        chunk: str = "",
+        only_cut: bool = False,
+    ) -> AgentISR:
         """Tell the analyst what is wrong with its own answer, once.
 
         The ATT&CK check that used to run in the judge node, as a pass that
@@ -4910,6 +6546,11 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         Never raises: a validation loop that could fail a run would be a worse
         failure mode than the one it replaces.
+
+        ``only_cut`` asks about the output cap alone: the turn a chunk of a
+        chunked analysis gets when its own answer was cut, before the merge,
+        whose other questions the merged answer is asked. ``chunk`` names the
+        chunk ("chunk 1 of 2") in the question and in what is recorded.
         """
         try:
             from maljan.tools import knowledge
@@ -4928,6 +6569,19 @@ class BaseAnalyst(BudgetMeter, ABC):
         ]
         ledger_ids.extend(
             str(i) for i in (getattr(self, "pack_ledger_ids", None) or []) if str(i).strip()
+        )
+        # The functions this analyst's own calls decompiled: any no claim of
+        # the answer names by address or name is listed to it, once.
+        decompiled = decompiled_functions(getattr(self, "_evidence_entries", None) or [])
+        # The image bases the run read, the analyst's own calls' and the
+        # pack's: an offset and a virtual address are matched by them.
+        image_bases = tuple(
+            dict.fromkeys(
+                [
+                    *image_bases_in(getattr(self, "_evidence_entries", None) or []),
+                    *(getattr(self, "pack_image_bases", None) or ()),
+                ]
+            )
         )
 
         # The validity check answers from the vendored id universe; a box
@@ -4969,18 +6623,68 @@ class BaseAnalyst(BudgetMeter, ABC):
         # the question describes it.
         # Keyed by the parsed answer, because the loop checks the kept answer
         # again after choosing it, and that may be the first one.
-        cuts: dict[int, tuple[int, str] | None] = {id(isr): getattr(self, "_last_answer_cut", None)}
+        # Each cut is ``(cap, text, chunk)``, the chunk named when the answer
+        # checked is one chunk's.
+        loop_answer_cut = getattr(self, "_last_answer_cut", None)
+        cuts: dict[int, list[tuple[int, str, str]]] = {
+            id(isr): [(*loop_answer_cut, chunk)] if loop_answer_cut is not None else []
+        }
         # Read once: the next model call records its own.
         self._last_answer_cut = None
+        # Whether each answer checked was ended while it streamed, keyed as the
+        # cuts are: its repeated-claims question says so.
+        ended_by: dict[int, bool] = {id(isr): bool(getattr(self, "_last_answer_ended", False))}
+        self._last_answer_ended = False
+
+        # Whether the answer being checked wrote the same claims again past
+        # the margin, read off its own text (``validation.claims_repeated``).
+        # Asked the same whole-answer question as a cut answer, once, and not
+        # sent back; keyed by the parsed answer as the cuts are.
+        repeat_margin = getattr(cfg_validation, "claim_repeat_margin", None)
+        repeated_by: dict[int, ClaimsRepeated | None] = {}
+
+        def _repeated(candidate: AgentISR) -> ClaimsRepeated | None:
+            key = id(candidate)
+            if key not in repeated_by:
+                text = candidate.answer_text or candidate.unparsed_answer or ""
+                repeated_by[key] = claims_repeated(
+                    text, None if repeat_margin is None else int(repeat_margin)
+                )
+            return repeated_by[key]
+
+        def _whole_answer_questions(candidate: AgentISR) -> list[Violation]:
+            found = _repeated(candidate)
+            cut = cuts.get(id(candidate)) or []
+            if found is not None:
+                # One question for an answer that repeated, the cut folded in:
+                # the model sees its answer up to the first repeat, and the
+                # cut question's words say it sees none of it.
+                widest = max((cap for cap, _text, _named in cut), default=0)
+                return [
+                    analyst_repeated_violation(
+                        found,
+                        chunk=chunk,
+                        cut=widest or None,
+                        ended=ended_by.get(id(candidate), False),
+                    )
+                ]
+            return [analyst_cut_violation(cap, text, chunk=named) for cap, text, named in cut]
 
         def _validator(candidate: AgentISR) -> list[Violation]:
             first = not asked
             asked.append(True)
+            if only_cut:
+                return _whole_answer_questions(candidate)
             unread = [] if nudged else parse_violations(candidate)
-            cut = cuts.get(id(candidate))
+            undescribed = decompiled_not_described_violation(
+                undescribed_decompiles(candidate, decompiled, image_bases)
+            )
+            library_only = library_only_claims_violation(candidate)
             return [
-                *([analyst_cut_violation(*cut)] if cut is not None else []),
+                *_whole_answer_questions(candidate),
                 *unread,
+                *([undescribed] if undescribed is not None else []),
+                *([library_only] if library_only is not None else []),
                 *validate_isr(
                     candidate,
                     attck=knowledge,
@@ -4993,8 +6697,19 @@ class BaseAnalyst(BudgetMeter, ABC):
                 ),
             ]
 
-        if nudged:
+        if nudged and not only_cut:
             self.validation_findings.extend(parse_violations(isr))
+
+        # The findings and artifacts the answer being checked carried are its
+        # own from here on: a retry's are kept apart (``_parse``) and go with
+        # the retry only if the retry is the answer kept. A chunk's are left in
+        # the buffers for the merged answer, which is where they are drained.
+        if (
+            not only_cut
+            and isinstance(getattr(self, "_findings_buffer", None), list)
+            and isinstance(getattr(self, "_artifacts_buffer", None), list)
+        ):
+            BaseAnalyst._drain_findings(self, isr)  # type: ignore[arg-type]
 
         try:
             initial = _validator(isr)
@@ -5011,9 +6726,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         timeout, _steps = loop_limits(self.name, getattr(self, "_budget_ceiling", None))
         # Through the class's functions, so a duck-typed analyst that borrows
         # this method alone is held to the same rule.
-        left = BaseAnalyst._seconds_the_last_loop_left(self, float(timeout))  # type: ignore[arg-type]
+        left = BaseAnalyst._seconds_the_last_loop_left(self, timeout)  # type: ignore[arg-type]
         needs = BaseAnalyst.seconds_an_answer_needs(self)  # type: ignore[arg-type]
-        if left < needs:
+        if left is not None and left < needs:
             detail = (
                 f"not asked: {max(0.0, left):.0f}s of the loop's time were left, and an answer "
                 f"needs {needs:.0f}s at the pace this agent's loop measured"
@@ -5031,7 +6746,16 @@ class BaseAnalyst(BudgetMeter, ABC):
                     sentence="",
                     asked=False,
                 )
-                if v.code in (ABSENCE_CLAIM_CODE, CLAIM_DOES_NOT_DESCRIBE_CODE, ANALYST_CUT_CODE)
+                if v.code
+                in (
+                    ABSENCE_CLAIM_CODE,
+                    CLAIM_DOES_NOT_DESCRIBE_CODE,
+                    ANALYST_CUT_CODE,
+                    ANALYST_REPEATED_CODE,
+                    CLAIMS_UNDER_DISPUTES_CODE,
+                    DECOMPILED_NOT_DESCRIBED_CODE,
+                    LIBRARY_ONLY_CLAIMS_CODE,
+                )
                 else v
                 for v in initial
             ]
@@ -5042,7 +6766,10 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        prompt = self._system_prompt("")
+        # The validation turn is one tools-free call over the evidence text: it
+        # asks for a fix to an answer, not for more looking, so the prompt it is
+        # sent with says it carries no tools.
+        prompt = self._system_prompt("", tools=())
         messages: list[BaseMessage] = []
         if prompt:
             messages.append(SystemMessage(content=prompt))
@@ -5057,52 +6784,149 @@ class BaseAnalyst(BudgetMeter, ABC):
             run_state=str(getattr(self, "run_state_block", "") or ""),
         )
 
-        first: list[Any] = [_PriorAnswer(isr)]
+        # An answer that repeated its claims is sent back as written up to the
+        # first claim that repeats, whether or not it was also cut: the model
+        # rewrites its answer with what it wrote in front of it.
+        shown_repeat = _repeated(isr)
+        first: list[Any] = [
+            _PriorAnswer(isr, shown=shown_repeat.before if shown_repeat is not None else None)
+        ]
 
         # A retry that asks for a whole new answer is sent only when the
         # conversation it sends leaves the cap free in the window. Every other
         # question keeps the answer and asks for a fix to it, as it always did.
-        loop_cut = cuts.get(id(isr))
+        loop_cuts = cuts.get(id(isr)) or []
         # Measured with the turn that carries every question of this retry,
         # not the framed conversation alone: fourteen questions are not free.
-        from langchain_core.messages import HumanMessage as _Question
+        from maljan.pipeline.validation import (
+            ANALYST_FEEDBACK_CLOSING,
+            feedback_text,
+            gate_removed_note,
+        )
 
-        from maljan.pipeline.validation import feedback_text
-
-        sent = [*messages, _Question(content=feedback_text(initial))]
-        if loop_cut is not None and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
-            self, sent, loop_cut[0]
+        closing = ANALYST_FEEDBACK_CLOSING
+        if isr.gate_removed and isr.answer_text:
+            closing = f"{gate_removed_note(isr.gate_removed)}\n{closing}"
+        sent = with_question(messages, feedback_text(initial, closing=closing))
+        loop_repeat = _repeated(isr)
+        widest = max((cap for cap, _text, _chunk in loop_cuts), default=0)
+        if loop_repeat is not None:
+            # A whole answer is asked for, and one may take the whole cap.
+            widest = max(widest, int(self.output_cap_tokens() or 0))
+        if (loop_cuts or loop_repeat is not None) and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
+            self, sent, widest
         ):
             detail = (
                 "not asked: the conversation the question is sent in and the "
-                f"{loop_cut[0]}-token answer it asks for do not fit this model's window"
+                f"{widest}-token answer it asks for do not fit this model's window"
             )
             self.logger.warning("%s: the cut-at-cap question was %s.", self.name, detail)
-            unasked_cut = analyst_cut_violation(*loop_cut)
-            self.validation_findings.append(
-                replace(
-                    unasked_cut,
-                    message=f"{unasked_cut.message} {detail[:1].upper()}{detail[1:]}.",
-                    asked=False,
+            for cap, text, named in loop_cuts:
+                unasked_cut = analyst_cut_violation(cap, text, chunk=named)
+                self.validation_findings.append(
+                    replace(
+                        unasked_cut,
+                        message=f"{unasked_cut.message} {detail[:1].upper()}{detail[1:]}.",
+                        asked=False,
+                    )
                 )
-            )
-            cuts[id(isr)] = None
+            if loop_repeat is not None:
+                unasked_repeat = analyst_repeated_violation(
+                    loop_repeat, chunk=chunk, ended=ended_by.get(id(isr), False)
+                )
+                self.validation_findings.append(
+                    replace(
+                        unasked_repeat,
+                        message=f"{unasked_repeat.message} {detail[:1].upper()}{detail[1:]}.",
+                        asked=False,
+                    )
+                )
+            cuts[id(isr)] = []
+            repeated_by[id(isr)] = None
+            # Not asked for a whole answer: the other questions ask for a fix
+            # to the answer, which is sent back whole.
+            shown_repeat = None
+            first[:] = [_PriorAnswer(isr)]
 
         def _run(turns: list[Any]) -> Any:
             if first:
                 return first.pop()
-            return self._invoke_llm_with_timeout(turns, left)
+            # The block moves to the retry's own question, the last message,
+            # and the turn that carried it before is sent as it was written.
+            return self._invoke_llm_with_timeout(
+                frame_messages(turns, run_state=str(getattr(self, "run_state_block", "") or "")),
+                left,
+                what="validation retry",
+            )
 
         def _parse(answer: Any) -> AgentISR:
             if isinstance(answer, _PriorAnswer):
                 return answer.isr
             text = str(getattr(answer, "content", answer))
-            parsed = self._text_to_isr(self._capture_findings(text), isr.revision_round)
-            cuts[id(parsed)] = getattr(self, "_last_answer_cut", None)
+            self.logger.debug(
+                "%s: the validation retry answered %d character(s):\n%s",
+                self.name,
+                len(text),
+                text,
+            )
+            # The retry's findings block is read into the buffers like any
+            # answer's and taken straight back out onto the retry's own ISR, so
+            # an answer ``_keep`` discards takes its findings with it.
+            findings = getattr(self, "_findings_buffer", None)
+            artifacts = getattr(self, "_artifacts_buffer", None)
+            f_mark = len(findings) if isinstance(findings, list) else 0
+            a_mark = len(artifacts) if isinstance(artifacts, list) else 0
+            prose = self._capture_findings(text)
+            parsed = self._text_to_isr(prose, isr.revision_round)
+            if isinstance(findings, list):
+                parsed.findings = findings[f_mark:]
+                del findings[f_mark:]
+            if isinstance(artifacts, list):
+                parsed.artifacts = artifacts[a_mark:]
+                del artifacts[a_mark:]
+            retry_cut = getattr(self, "_last_answer_cut", None)
+            cuts[id(parsed)] = [(*retry_cut, chunk)] if retry_cut is not None else []
             self._last_answer_cut = None
+            ended_by[id(parsed)] = bool(getattr(self, "_last_answer_ended", False))
+            self._last_answer_ended = False
             return parsed
 
         def _keep(first_answer: AgentISR, retried: AgentISR) -> AgentISR:
+            kept = _choose(first_answer, retried)
+            self.logger.info(
+                "Validation: the retry for '%s' answered %d claim(s), the first answer %d; "
+                "the %s answer is kept.",
+                self.name,
+                len(retried.claims),
+                len(first_answer.claims),
+                "retry's" if kept is retried else "first",
+            )
+            # How many claims the retry answered with, beside the first
+            # answer's, on the loop's record: a retry that answered none
+            # is otherwise a warning in a log.
+            BaseAnalyst._note_on_last_loop(  # type: ignore[arg-type]
+                self,
+                "validation_retry",
+                {
+                    "first_claims": len(first_answer.claims),
+                    "retry_claims": len(retried.claims),
+                    "first_findings": len(first_answer.findings or []),
+                    "retry_findings": len(retried.findings or []),
+                    "kept": "retry" if kept is retried else "first",
+                },
+            )
+            if kept is retried and first_answer.findings and not retried.findings:
+                # Findings follow the answer that is kept, and this one wrote
+                # none: the first answer's go with it, and the record says so.
+                self.logger.warning(
+                    "Validation: the kept retry for '%s' carries no findings; the first "
+                    "answer's %d finding(s) are not published.",
+                    self.name,
+                    len(first_answer.findings),
+                )
+            return kept
+
+        def _choose(first_answer: AgentISR, retried: AgentISR) -> AgentISR:
             # A retry that came back with fewer claims than it started with
             # lost work. ``_text_to_isr`` over a garbled second answer parses
             # to an empty ISR just as happily as over a good one, and taking it
@@ -5118,10 +6942,13 @@ class BaseAnalyst(BudgetMeter, ABC):
             # Asked for a whole shorter answer because the first was cut, and
             # given one that ended on its own: that answer is the analyst's,
             # fewer claims and all. The cut one it replaces was never whole.
+            # A first answer that was cut and also repeated is replaced only by
+            # one that does not repeat either.
             if (
-                cuts.get(id(first_answer)) is not None
-                and cuts.get(id(retried)) is None
+                bool(cuts.get(id(first_answer)))
+                and not cuts.get(id(retried))
                 and retried.claims
+                and (_repeated(first_answer) is None or _repeated(retried) is None)
             ):
                 self.logger.info(
                     "Validation: '%s' answered the cut-at-cap question whole; its %d claim(s) "
@@ -5129,6 +6956,58 @@ class BaseAnalyst(BudgetMeter, ABC):
                     self.name,
                     len(retried.claims),
                     len(first_answer.claims),
+                )
+                return retried
+            # Asked for a whole answer because the first repeated its claims,
+            # with the part written before the repetition in front of it, and
+            # given one that is whole and does not repeat: that answer is the
+            # analyst's, as a whole answer to the cut question is.
+            repeated_first = _repeated(first_answer)
+            if (
+                repeated_first is not None
+                and _repeated(retried) is None
+                and not cuts.get(id(retried))
+                and retried.claims
+            ):
+                self.logger.info(
+                    "Validation: '%s' answered the repeated-claims question whole; its %d "
+                    "claim(s) replace the %d the repeating answer began.",
+                    self.name,
+                    len(retried.claims),
+                    repeated_first.begun,
+                )
+                return retried
+            # Asked because the first answer repeated its claims, and answered
+            # with one that repeats as well: what was written first stays, cut
+            # or not, however many claims the retry began.
+            if repeated_first is not None and _repeated(retried) is not None:
+                self.logger.warning(
+                    "Validation: '%s' answered the repeated-claims question with an answer "
+                    "that repeats too; the first answer is kept as written.",
+                    self.name,
+                )
+                return first_answer
+            # Asked to merge or detail the claims that name only a library:
+            # an answer that folds them away stands, as long as it keeps at
+            # least as many other claims as the first answer had. Only where
+            # the question was asked: a chunk's cut turn never asks it.
+            library_first = len(library_only_claims(first_answer))
+            library_retried = len(library_only_claims(retried))
+            if (
+                not only_cut
+                and library_first
+                and retried.claims
+                and len(retried.claims) < len(first_answer.claims)
+                and len(retried.claims) - library_retried
+                >= len(first_answer.claims) - library_first
+            ):
+                self.logger.info(
+                    "Validation: '%s' answered the library-claims question with %d claim(s) "
+                    "against %d, %d of them library-only; its answer is kept.",
+                    self.name,
+                    len(retried.claims),
+                    len(first_answer.claims),
+                    library_first,
                 )
                 return retried
             if len(retried.claims) < len(first_answer.claims):
@@ -5154,7 +7033,12 @@ class BaseAnalyst(BudgetMeter, ABC):
                 agent=str(self.name),
                 stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
                 keep=_keep,
-                drop_answer_for=frozenset({ANALYST_CUT_CODE}),
+                # A repeating answer is sent back up to its first repeat (the
+                # prior answer's own content), even when it was also cut.
+                drop_answer_for=(
+                    frozenset() if shown_repeat is not None else frozenset({ANALYST_CUT_CODE})
+                ),
+                closing=closing,
             )
         except Exception as exc:  # noqa: BLE001 — a retry that fails keeps the first answer
             self.logger.warning("Validation retry failed (%s); keeping the first answer.", exc)
@@ -5163,6 +7047,42 @@ class BaseAnalyst(BudgetMeter, ABC):
         self.validation_retries += retries
         for code, count in tally.by_code.items():
             self.validation_fed_back[code] = self.validation_fed_back.get(code, 0) + count
+
+        # Asked about claim headings under its DISPUTES section, the analyst
+        # kept them there: that is its answer, since the question told it a
+        # peer's claim it disputes stays under the section. The answer kept
+        # says it was asked, so the judge node states no degradation for it,
+        # and the row records what the analyst answered.
+        if CLAIMS_UNDER_DISPUTES_CODE in tally.by_code and revised.claims_under_disputes:
+            revised.note_claims_under_disputes_asked()
+            answered = claims_kept_under_disputes_finding(revised.claims_under_disputes)
+            violations = [
+                answered if v.code == CLAIMS_UNDER_DISPUTES_CODE else v for v in violations
+            ]
+            if all(v.code != CLAIMS_UNDER_DISPUTES_CODE for v in violations):
+                violations.append(answered)
+            self.logger.info("Validation: '%s': %s", self.name, answered.message)
+
+        if only_cut:
+            # A chunk's retry that is kept carries its own findings block; the
+            # merged answer is where findings are drained, so they go back.
+            if revised is not isr:
+                findings = getattr(self, "_findings_buffer", None)
+                artifacts = getattr(self, "_artifacts_buffer", None)
+                if isinstance(findings, list) and revised.findings:
+                    findings.extend(revised.findings)
+                    revised.findings = []
+                if isinstance(artifacts, list) and revised.artifacts:
+                    artifacts.extend(revised.artifacts)
+                    revised.artifacts = []
+            # Still cut after the question: the chunk's answer is kept as it
+            # was cut, and what it did not reach is unread.
+            violations = [
+                replace(v, message=f"{v.message} {chunk_cut_unread_sentence(chunk)}")
+                if v.code == ANALYST_CUT_CODE
+                else v
+                for v in violations
+            ]
 
         if violations:
             mark_invalid_technique_ids(revised, violations)
@@ -5249,7 +7169,13 @@ class BaseAnalyst(BudgetMeter, ABC):
                     len(isr.claims),
                     self.name,
                 )
-            return isr.model_copy(update={"claims": kept})
+            gated = isr.model_copy(update={"claims": kept})
+            if dropped:
+                # The written answer is still shown back whole — its shape is
+                # the one the parser reads — and the question names the claims
+                # of it the gate set aside.
+                gated.note_gate_removed([c.claim for c in isr.claims if c not in kept])
+            return gated
         except Exception as exc:  # noqa: BLE001 — gate must never break the run
             self.logger.warning("Consistency gate skipped (%s).", exc)
             return isr
@@ -5262,19 +7188,33 @@ class BaseAnalyst(BudgetMeter, ABC):
         mediator_feedback: str,
         revision_round: int = 1,
     ) -> tuple[str, AgentISR]:
-        """Wrapper around revise_isr() with error handling.
+        """Wrapper around revise_isr() with error handling, checked like a first answer.
 
         Under this agent's delegation lock, for the reason ``safe_analyze_isr``
         takes it: a revision round is this agent's own loop.
+
+        A revision's answer passes the checks a first answer passes: the
+        consistency gate and the validation turn, with the claim-count and
+        confidence questions among them. The revision's own call decides what
+        the turn reads: the round-0 loop's deadline and whether its answer was
+        nudged are not this answer's, so they are cleared before it is made.
         """
         self.current_round = int(revision_round)
         with lock_for(self):
             try:
                 truncated = self._truncate_input(original_data)
+                self._last_loop_deadline = None
+                self._answer_unstructured = False
                 text, isr = self.revise_isr(
                     truncated, own_report, peer_reports, mediator_feedback, revision_round
                 )
-                return text, self._drain_findings(isr)
+                isr = self._drain_findings(isr)
+                if not isr.answer_text:
+                    isr.note_answer_text(strip_tool_call_scaffolding(str(text or "")))
+                checked = self._validate_isr(
+                    self._apply_consistency_gate(isr, truncated), truncated
+                )
+                return text, self._drain_findings(checked)
             except AnalystError:
                 raise
             except Exception as e:
@@ -5371,6 +7311,67 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         return [c for c in claims if not self._is_meta_claim_text(c.claim)]
 
+    def _read_claims(
+        self, content: str, revision_round: int = 0, *, require_evidence: bool = True
+    ) -> list[ClaimEvidence]:
+        """The claims ``content`` carries, through the one reader, with its shortfall kept.
+
+        Every CLAIM heading the answer began is counted against the claims
+        read (``read_claim_blocks``). A claim begun and not read — a block the
+        reader could not split, or one the stricter reading turned away — is
+        logged, and the sentence naming this analyst and both numbers waits
+        for the ISR built from these claims (:meth:`_parsed_isr`,
+        :meth:`_with_claims_read`), which carries it to the judge node. Blocks
+        that stated no confidence are counted apart: the validation turn asks
+        the analyst about them.
+
+        The stricter reading that finds no claim at all keeps nothing: its
+        caller hands the answer to :meth:`_text_to_isr`, whose own read is the
+        one that counts.
+        """
+        read = read_claim_blocks(content, require_evidence=require_evidence)
+        self._pending_claims_unread = (
+            self._claims_shortfall(read, revision_round) if read.claims else ""
+        )
+        self._pending_under_disputes = read.after_disputes if read.claims else 0
+        return read.claims
+
+    # The shortfall of the last strict read, and the claim headings it found
+    # under the DISPUTES section, until an ISR takes them.
+    _pending_claims_unread: str = ""
+    _pending_under_disputes: int = 0
+
+    def _claims_shortfall(self, read: ClaimRead, revision_round: int) -> str:
+        """The sentence for an answer whose claims were begun and not all read, logged; or ``""``.
+
+        Claim headings written under the DISPUTES section, beside the
+        analyst's own claims read, are not a shortfall: the ISR counts them
+        (``claims_under_disputes``) and the analyst is asked once in its
+        validation turn whether they are its own (``isr.claims_under_disputes``).
+        Until then their status is unknown, so they are logged at info here; the
+        judge node states them as a degradation reason only for an answer in
+        force the question was never put to (``nodes.claims_under_disputes_unasked``).
+        """
+        if read.after_disputes and read.claims:
+            self.logger.info(
+                "%s: %s",
+                self.name,
+                claims_under_disputes_sentence(self.name, read.after_disputes, revision_round),
+            )
+        if not read.unread:
+            return ""
+        sentence = claims_unread_sentence(self.name, read, revision_round)
+        self.logger.warning("%s: %s", self.name, sentence)
+        return sentence
+
+    def _with_claims_read(self, isr: AgentISR) -> AgentISR:
+        """``isr`` with the shortfall of the strict read its claims came from, taken once."""
+        isr.note_claims_unread(self._pending_claims_unread)
+        isr.note_claims_under_disputes(self._pending_under_disputes)
+        self._pending_claims_unread = ""
+        self._pending_under_disputes = 0
+        return isr
+
     def _parsed_isr(
         self, claims: list[ClaimEvidence], content: str, domain: str, revision_round: int = 0
     ) -> AgentISR:
@@ -5378,7 +7379,8 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         With the count of CLAIM blocks the strict parser passed over for
         stating no confidence, which the validation turn asks about: a strict
-        parser that drops a block says nothing, and the analyst wrote it.
+        parser that drops a block says nothing, and the analyst wrote it. And
+        with the read's shortfall, when claims it began were not read.
         """
         isr = AgentISR(
             agent_id=self.name,
@@ -5387,11 +7389,36 @@ class BaseAnalyst(BudgetMeter, ABC):
             dissent_items=[],
             revision_round=revision_round,
         )
-        isr.note_parse(blocks_without_confidence=parse_structured_claims_counted(content)[1])
-        return isr
+        read = read_claim_blocks(content)
+        isr.note_parse(
+            blocks_without_confidence=read.without_confidence,
+            confidence_unreadable=read.confidence_unreadable,
+        )
+        return self._keep_claims_for_function_map(self._with_claims_read(isr))
 
     def _text_to_isr(self, text: str, revision_round: int) -> AgentISR:
-        """Convert a free-text report into a minimal AgentISR."""
+        """Convert a free-text report into a minimal AgentISR.
+
+        The ISR carries the answer it was parsed from as the model wrote it
+        (``AgentISR.answer_text``): the findings block ``_capture_findings``
+        took out of ``text`` is put back, because the validation turn shows the
+        analyst its own answer and the block is part of it.
+        """
+        written = text
+        last = getattr(self, "_last_written_answer", None)
+        if isinstance(last, tuple) and len(last) == 2 and last[0] == text:
+            written = str(last[1])
+        # Read once: the next answer's block is its own.
+        self._last_written_answer = None
+        isr = self._keep_claims_for_function_map(self._parse_answer_text(text, revision_round))
+        # Tool-call markup a model wrote into its answer is not part of it —
+        # the parser reads none of it — and replayed into a tool-free turn it
+        # would be shown back as something to write again.
+        isr.note_answer_text(strip_tool_call_scaffolding(written))
+        return isr
+
+    def _parse_answer_text(self, text: str, revision_round: int) -> AgentISR:
+        """The ISR the claim parser reads out of ``text``, for :meth:`_text_to_isr`."""
         domain = self._infer_domain()
 
         # A model that writes its tool calls into
@@ -5429,8 +7456,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         # prompt asks for it.
         structured: list[ClaimEvidence] = []
         without_confidence = 0
-        if "CLAIM:" in text:
-            structured, without_confidence = parse_structured_claims_counted(text)
+        unreadable: tuple[str, ...] = ()
+        shortfall = ""
+        under_disputes = 0
+        if "CLAIM:" in text or count_claims_begun(text) or count_claims_after_disputes(text):
+            read = read_claim_blocks(text)
+            structured, without_confidence = read.claims, read.without_confidence
+            unreadable = read.confidence_unreadable
+            shortfall = self._claims_shortfall(read, revision_round)
+            under_disputes = read.after_disputes if read.claims else 0
         if structured:
             isr = AgentISR(
                 agent_id=self.name,
@@ -5439,7 +7473,11 @@ class BaseAnalyst(BudgetMeter, ABC):
                 dissent_items=[],
                 revision_round=revision_round,
             )
-            isr.note_parse(blocks_without_confidence=without_confidence)
+            isr.note_parse(
+                blocks_without_confidence=without_confidence, confidence_unreadable=unreadable
+            )
+            isr.note_claims_unread(shortfall)
+            isr.note_claims_under_disputes(under_disputes)
             return isr
 
         # An answer with no claim this parser can read is prose, and prose is
@@ -5455,7 +7493,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             dissent_items=[],
             revision_round=revision_round,
         )
-        isr.note_parse(unparsed_answer=text.strip(), blocks_without_confidence=without_confidence)
+        isr.note_parse(
+            unparsed_answer=text.strip(),
+            blocks_without_confidence=without_confidence,
+            confidence_unreadable=unreadable,
+        )
+        isr.note_claims_unread(shortfall)
         isr.status = NO_STRUCTURED_REPORT_STATUS
         isr.status_reason = UNPARSED_ANSWER_REASON
         return isr
@@ -5529,19 +7572,65 @@ class BaseAnalyst(BudgetMeter, ABC):
         return "static"
 
     def _truncate_input(self, text: str) -> str:
-        """Truncate input text to stay within the configured token limit."""
-        limit = get_settings().max_token_limit
+        """``text`` whole when it fits this analyst's input room, else shortened and said.
+
+        The room is ``max_token_limit`` where an operator set it, and otherwise
+        derived from the window the analyst's model serves
+        (:meth:`_input_room_chars`); with neither, the input goes whole. Input
+        over the room is shortened as a document (:func:`shorten_input`), the
+        text the model reads begins with a notice saying so, and the run's
+        truncation ledger records a sentence the judge node turns into a
+        degradation reason. Never a silent cut.
+        """
+        room = self._input_room_chars(text)
+        if room is None or len(text) <= room:
+            return text
+        shortened, sentence = shorten_input(text, room)
+        if not sentence:
+            return shortened
+        self.logger.warning("%s: %s", self.name, sentence)
+        ledger = getattr(self, "truncation_ledger", None)
+        record = getattr(ledger, "record_input_shortened", None)
+        if callable(record):
+            try:
+                record(f"The {self.name} analyst's input was shortened: {sentence}")
+            except Exception as exc:  # noqa: BLE001 — a record never costs an analysis
+                self.logger.debug("%s: the shortening was not recorded (%s).", self.name, exc)
+        return shortened
+
+    def _input_room_chars(self, text: str) -> int | None:
+        """Characters of input this analyst's prompt has room for, or ``None`` for no bound.
+
+        ``max_token_limit`` where the operator set it, counted in the tokens of
+        this text (its characters a token as ``tiktoken`` measures them).
+        Otherwise the window's room before the reply
+        (``ContextBudget.tool_budget_chars``) less the prompt around the input
+        — the system prompt, the pack, the run-state block and the tool
+        definitions every request carries — and less the share one tool answer
+        is sized from (``ANSWER_SHARE``), so a loop over an input sized to the
+        room still has room for its first answer. The notice a shortened input
+        begins with is kept out of the room in both cases.
+        """
+        configured = getattr(get_settings(), "max_token_limit", None)
+        if isinstance(configured, int) and not isinstance(configured, bool) and configured > 0:
+            try:
+                tokens = len(tiktoken.get_encoding("cl100k_base").encode(text)) or 1
+                per_token = max(1.0, len(text) / tokens)
+            except (KeyError, OSError, ValueError):
+                per_token = float(_CHARS_PER_TOKEN)
+            return max(0, int(configured * per_token) - INPUT_NOTICE_ROOM)
+        from maljan.llm.context_window import ANSWER_SHARE, ContextBudget
+
+        budget = self._context_budget()
+        if not isinstance(budget, ContextBudget) or not budget.derives:
+            return None
         try:
-            enc = tiktoken.get_encoding("cl100k_base")
-            tokens = enc.encode(text)
-            if len(tokens) > limit:
-                self.logger.warning("Input truncated from %d to %d tokens", len(tokens), limit)
-                return enc.decode(tokens[:limit])
-        except (KeyError, OSError, ValueError) as exc:
-            msg = "tiktoken truncation failed (%s); using char-based fallback."
-            self.logger.debug(msg, exc)  # nosemgrep
-            char_limit = limit * 4
-            if len(text) > char_limit:
-                self.logger.warning("Input truncated (fallback) to ~%d tokens", limit)
-                return text[:char_limit]
-        return text
+            framing = len(str(self._system_prompt("") or ""))
+        except Exception:  # noqa: BLE001 — a prompt that cannot be built weighs nothing here
+            framing = 0
+        framing += len(str(getattr(self, "facts_block", "") or ""))
+        framing += len(str(getattr(self, "run_state_block", "") or ""))
+        framing += self._definitions_sent() or tool_definition_chars(list(self.tools or []))
+        room = int(budget.tool_budget_chars())
+        answers = int(room * ANSWER_SHARE)
+        return max(0, room - framing - answers - INPUT_NOTICE_ROOM)

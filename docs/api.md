@@ -34,7 +34,7 @@ HttpOnly cookie scoped to `/api/v1/auth` and is never sent by hand. See
 | `/jobs` | Create an analysis job, list and read jobs, read a job's event history and its evidence ledger, cancel a job. |
 | `/reports` | Everything a finished analysis produces: the report itself, its renderings, its indicators, its signatures, its timeline, and post-hoc enrichment. |
 | `/dashboard` | Aggregate counts for the console's landing page, and `GET /dashboard/tools?limit=` — the per-tool call counts of the caller's last `limit` completed runs (default 20, at most 100), read from each run's `run_summary.evidence.by_tool`. |
-| `/audit` | The audit trail and API-key management. Admin only. |
+| `/audit` | The audit trail, admin only (`/audit/logs`), and API keys (`/audit/api-keys`): any signed-in user mints, lists and revokes their own keys, and a key acts as the account that minted it. |
 | `/settings` | The settings catalog, values, patches, resets, export, import and the connection probes. Admin only. |
 | `/system` | Non-secret pipeline-mode flags for dashboards, and long-term-memory maintenance. |
 
@@ -112,6 +112,18 @@ copy to fall behind it. `POST /reports/{report_id}/enrich` queues
 threat-intelligence enrichment and answers 202 — the lookups run as their own
 job so they never delay a verdict.
 
+A job that failed after its report was built has that report, served by the
+same routes. Its `incomplete_reason` is one sentence saying where the run
+failed, the exception's class and the error id, and the same sentence is among
+its degradation reasons; the job itself stays `failed`. A report of a run that
+completed has `incomplete_reason: null`. `GET /reports` carries the same field
+on each list item. The `stix`, `iocs`, `signatures/{kind}` and `mitre` routes
+serve a kept report's content as it was built, with nothing added to the
+exported bundle: the mark is on the report, its degradation reasons and the
+list item. The dashboard's `verdict_distribution` counts completed jobs only,
+like its average duration and its tool usage; a failed job that kept its
+report is counted under `jobs_by_status.failed` and not by its verdict.
+
 `stix` serves the exported bundle. `stix?source=judge` serves the judge's own
 bundle beside it, as `{"bundle": …, "labels": {…}}`: the bundle as the pipeline
 read it and the map from each id the judge wrote to the id it was published
@@ -137,13 +149,29 @@ Every row carries `kind`, `value`, `is_suspicious`, `notes`, **`source`** —
 `sandbox` for something the sample resolved, reached or requested, `analyst`
 for something an agent put in an artefact, `strings` for a run of bytes in the
 file that has the shape of one, `identity` for the sample's own hashes,
-`judge` for a value the judge's own indicators name — and **`published`**.
+`judge` for a value the judge's own indicators name — **`published`**, and
+**`publish_answer`**: the publish rule's answer as the report's IOC table
+prints it, `yes:` and why the row is published, or `no:` and why not.
+A domain, address or URL the sample hid also carries **`recovered_by`**: the
+tool that recovered it (`floss` by emulation, `decode_string_blobs` from the
+file's bytes), its ledger entry and where in the file, as the report's IOC
+table states it; every other row omits it (`null`).
 A judge value is asked the same publish rule as every other row, with the
 judge not counting as a second source; the exported bundle carries it only
 when the rule publishes it, and this feed says the same. A name only the sample's own byte image knows is not an
 observation of infrastructure, so it is withheld from the default feed and
 labelled in the wider ones rather than shipped looking like one the sandbox
-watched.
+watched. A `sandbox` address is the sample's observation only when the
+sandbox report attributes a flow to it to the sample's process tree; one it
+attributes elsewhere, or does not attribute — every address a CAPE, REST or
+mock report records, since those carry no process on a flow — and a
+well-known benign name the guest resolved, is published only when the judge
+keeps it as an indicator after it was asked once with the sandbox's fact
+(`stix.indicator_unattributed_flow`, recorded answered in
+`run_summary.validation`); a judge's indicator it was never asked about, an
+analyst's artifact listing it and a claim that only mentions it keep nothing. The host of a URL the feed
+publishes is a `domain` row with the URL's decision, added when the report has
+no row for it, unless it is a well-known benign host no model kept.
 
 #### What changed between two runs
 

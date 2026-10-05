@@ -212,6 +212,45 @@ ANNOTATIONS: dict[str, Annotation] = {
         "probe": "llm",
         "advanced": True,
     },
+    "llm.max_spend_usd_per_job": {
+        "title": "Spend ceiling per job (USD)",
+        "description": (
+            "The most one job may spend on its models, in US dollars: a hard bound against "
+            "the platform's prompt estimate (characters over three), nothing is sent that "
+            "could pass it by that measure. Empty, the default, is no ceiling. A call counts "
+            "what it was charged: the cost its provider reported with the answer, else its "
+            "reported usage (cached input, input and output tokens) at the rates in force "
+            "when it was sent, from llm.model_prices first, then the vendored model table, "
+            "time windows such as peak hours included. Before each call its output cap is "
+            "held to what the spend it may use pays for; it is refused only when that is "
+            "below the smallest answer it can give (the largest this job has measured of "
+            "its model, else its own cap). Calls in flight reserve their worst case, and "
+            "the verdict and the report keep a reserve sized from this job's measured "
+            "prompts and answers that the other calls cannot spend. After the first "
+            "refusal every running tool loop writes its answer from what it gathered, no "
+            "further negotiation round, chunk or tool loop starts, and the verdict and the "
+            "report run on the reserve; a degradation reason says so. A model with no "
+            "price is named once in the log and the run summary and its calls are not "
+            "counted, so the figure compared is what the job spent at least."
+        ),
+        "subgroup": "Spend",
+    },
+    "llm.model_prices": {
+        "title": "Model prices (USD per million tokens)",
+        "description": (
+            "Per-model prices for the spend ceiling, keyed by the model name the provider "
+            "serves (for example deepseek-v4-pro): input_usd_per_mtok, "
+            "output_usd_per_mtok, and optionally cached_input_usd_per_mtok (a cached "
+            "input token costs an input token without it), source, and windows: spans of "
+            "the day in UTC (utc_from, utc_to, optional days mon to sun) with their own "
+            "prices and source, for a vendor's peak or off-peak rate; a call is priced at "
+            "the window it was sent in. Empty by default; "
+            "the vendored model table's documented prices answer for a model not named "
+            "here, and a model neither names has no price."
+        ),
+        "subgroup": "Spend",
+        "advanced": True,
+    },
     "llm.fallback_turn_share": {
         "title": "Turn deadline for a model on a fallback list (share of the loop)",
         "description": (
@@ -225,7 +264,10 @@ ANNOTATIONS: dict[str, Annotation] = {
             "loop, because the loop budget is what would otherwise cancel a stalled model "
             "before any timeout inside it: the default of a half leaves the other half of "
             "the loop to the model that took over. The last model on a list has no "
-            "deadline of its own and is bounded by the loop, as a lone model is."
+            "deadline of its own and is bounded by the loop, as a lone model is. A loop "
+            "with no time limit gives no turn deadline: a stalled model is ended at its "
+            "whole-call deadline (the request's sized timeout, enforced over the whole "
+            "call), and the list moves on from that as from any provider failure."
         ),
         "advanced": True,
     },
@@ -527,9 +569,13 @@ ANNOTATIONS: dict[str, Annotation] = {
             "llama.cpp-only request extras (repetition penalty, the n_predict echo of "
             "the output cap, chat_template_kwargs); standard sends OpenAI-standard "
             "fields only, which is what a hosted OpenAI-compatible API accepts — it "
-            "returns 400 Unsupported parameter otherwise. auto reads the base URL "
-            "host: loopback, link-local and private addresses are treated as a local "
-            "llama.cpp server, everything else as a hosted API."
+            "returns 400 Unsupported parameter otherwise. deepseek is DeepSeek's API, "
+            "which ignores the max_completion_tokens field OpenAI's clients send the "
+            "output cap in: it sends the cap as max_tokens as well, and disable_thinking "
+            "as DeepSeek's own thinking.type, with none of the llama.cpp extras. auto "
+            "reads the base URL host: loopback, link-local and private addresses are "
+            "treated as a local llama.cpp server, everything else as a hosted API that "
+            "gets standard fields only."
         ),
         "probe": "llm",
         "subgroup": "OpenAI",
@@ -540,9 +586,10 @@ ANNOTATIONS: dict[str, Annotation] = {
         "description": (
             "When true and base_url points at a local OpenAI-compatible server, "
             "forwards chat_template_kwargs.enable_thinking=false to suppress a "
-            "reasoning model's (e.g. Qwen3) hidden chain-of-thought. Needed on "
-            "constrained local hosts, where thinking otherwise consumes the whole "
-            "output budget; has no effect on vanilla OpenAI."
+            "reasoning model's (e.g. Qwen3) hidden chain-of-thought; with the deepseek "
+            "dialect it sends thinking.type=disabled. Needed on constrained local "
+            "hosts, where thinking otherwise consumes the whole output budget; has no "
+            "effect on vanilla OpenAI."
         ),
         "probe": "llm",
         "subgroup": "OpenAI",
@@ -567,6 +614,19 @@ ANNOTATIONS: dict[str, Annotation] = {
         "probe": "llm",
         "subgroup": "OpenAI",
     },
+    "llm.openai.reasoning_effort": {
+        "title": "OpenAI reasoning effort",
+        "description": (
+            "Sent as reasoning_effort on every request when set, exactly as written, "
+            "so each API's own levels work: DeepSeek takes low, high and max, OpenAI's "
+            "reasoning models minimal to high. Empty sends nothing and leaves the "
+            "endpoint's own default. A value the endpoint does not know is its 400 to "
+            "answer, and the connection test asks with it."
+        ),
+        "probe": "llm",
+        "subgroup": "OpenAI",
+        "advanced": True,
+    },
     "llm.openai.repetition_penalty": {
         "title": "OpenAI repetition penalty",
         "description": (
@@ -578,16 +638,61 @@ ANNOTATIONS: dict[str, Annotation] = {
         "subgroup": "OpenAI",
         "advanced": True,
     },
+    "llm.openai.dry_multiplier": {
+        "title": "DRY sampler multiplier",
+        "description": (
+            "llama.cpp's DRY sampler strength, forwarded to a llama.cpp endpoint via "
+            "extra_body when set; it penalises a token that extends a sequence already "
+            "repeated in the context. Empty, the default, sends nothing; 0 turns it off."
+        ),
+        "subgroup": "OpenAI",
+        "advanced": True,
+    },
+    "llm.openai.dry_base": {
+        "title": "DRY sampler base",
+        "description": (
+            "The base the DRY penalty grows by with each token of a repeat, forwarded to a "
+            "llama.cpp endpoint when set. Empty, the default, sends nothing."
+        ),
+        "subgroup": "OpenAI",
+        "advanced": True,
+    },
+    "llm.openai.dry_allowed_length": {
+        "title": "DRY sampler allowed length",
+        "description": (
+            "How long a repeated sequence may grow before the DRY penalty applies, "
+            "forwarded to a llama.cpp endpoint when set. Empty, the default, sends nothing."
+        ),
+        "subgroup": "OpenAI",
+        "advanced": True,
+    },
+    "llm.openai.dry_penalty_last_n": {
+        "title": "DRY sampler window",
+        "description": (
+            "How many recent tokens the DRY sampler looks back over (-1 the whole context, "
+            "0 off), forwarded to a llama.cpp endpoint when set. Empty, the default, sends "
+            "nothing."
+        ),
+        "subgroup": "OpenAI",
+        "advanced": True,
+    },
     "llm.parallel_analysts": {
         "title": "Run analysts in parallel",
         "description": (
-            "The run mode a team gets when it is still written as a plain list of "
-            "analysts rather than as stages: true runs them concurrently, which is "
-            "correct only for a hosted, multi-slot LLM API, and false (the default) "
-            "runs them one at a time, which is required for a single-slot local "
-            "llama.cpp/Ollama server where parallel requests would clobber each "
-            "other's KV/recurrent state and cause timeouts. A team written as stages "
-            "sets this per analysis stage and ignores this key."
+            "How the analysts of an analysis stage that sets no run mode of its own "
+            "run. auto (the default) decides per job from the endpoints of the models "
+            "the analysts call: a host that resolves only to public addresses runs "
+            "them in parallel; Ollama, or a host that is or resolves to a loopback, "
+            "private, link-local or shared-range address, or a name only a local "
+            "resolver answers (host.docker.internal), runs them one at a time unless "
+            "its llama.cpp /props reports more than one slot; a host that does not "
+            "resolve runs them one at a time. A revision round follows the stages it "
+            "revises. The job logs the mode, the fact that decided it and what each "
+            "stage ran in, and the run summary carries them. true always runs them in "
+            "parallel; false "
+            "always runs them one at a time, which a single-slot local server needs: "
+            "parallel requests there clobber each other's KV/recurrent state and "
+            "cause timeouts. A stage whose own run mode is set keeps it."
         ),
     },
     "llm.provider": {
@@ -621,11 +726,15 @@ ANNOTATIONS: dict[str, Annotation] = {
         "subgroup": "View decomposition",
     },
     "max_token_limit": {
-        "title": "Max token limit",
+        "title": "Analyst input limit (tokens)",
         "description": (
-            "Global token-count ceiling used to truncate prompts before they overflow "
-            "the LLM's context window. Conservative by default for smaller-context "
-            "models; raise it when running on a large-context model such as Gemini."
+            "How many tokens of an analyst's input text may reach its prompt. Empty, the "
+            "default, derives it from the window the analyst's model serves (the room "
+            "before the reply, less the prompt around the input); with no window learned "
+            "the input goes whole. A number set here wins. Input over the limit is "
+            "shortened as a document (a JSON input keeps its keys and loses list "
+            "elements; text keeps its head), the model is told what was left out, and "
+            "the run records a degradation reason."
         ),
         "subgroup": "Limits",
     },
@@ -686,10 +795,11 @@ ANNOTATIONS: dict[str, Annotation] = {
     "negotiation.max_iterations": {
         "title": "Max negotiation rounds",
         "description": (
-            "Hard ceiling on negotiation rounds between agents. Not the expected round "
-            "count — the primary exit is adaptive termination on the rolling standard "
-            "deviation of confidence history; this ceiling only stops a runaway loop "
-            "when that convergence fails."
+            "Hard ceiling on negotiation rounds between agents, kept as an explicit "
+            "setting. Not the expected round count — the primary exit is adaptive "
+            "termination on the rolling standard deviation of confidence history; this "
+            "ceiling stops a runaway loop when that convergence fails. A reached spend "
+            "ceiling also ends the rounds: none is held after it."
         ),
     },
     "openai_api_key": {
@@ -1052,53 +1162,68 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Technique check",
     },
-    "react_agent_max_steps": {
-        "title": "ReAct agent default max steps",
+    "validation.claim_repeat_margin": {
+        "title": "Repeated claims allowed",
         "description": (
-            "Default maximum LangGraph recursion steps for a ReAct agent loop, tuned "
-            "for the network/dynamic analysts' small tool-call count. Per-agent "
-            "overrides live in react_agent_max_steps_overrides."
+            "How many claims an analyst's answer may write again before the analyst is "
+            "asked once for a whole answer, each claim written once, with its answer "
+            "shown back up to the first repeated claim (isr.claims_repeated). Empty, the "
+            "default, derives it from the answer: the number of distinct claims it wrote, "
+            "so a second whole copy is within it. A whole answer that does not repeat "
+            "replaces the repeating one; otherwise the answer stands as written."
+        ),
+        "subgroup": "Technique check",
+    },
+    "react_agent_max_steps": {
+        "title": "Steps per agent loop",
+        "description": (
+            "The deployment's step limit for an agent's tool loop (LangGraph graph steps: "
+            "a model turn is one, a tool round one more). Empty, the default, is no step "
+            "limit: a loop ends when its model answers, when it only repeats itself, when "
+            "its conversation has no room left for a tool answer, or at the job's spend "
+            "ceiling, with the job timeout as the last resort. An agent definition's own "
+            "max_steps wins over this; a number set here is kept to."
         ),
         "subgroup": "Limits",
     },
     "react_agent_max_steps_overrides": {
-        "title": "ReAct agent max-steps overrides",
+        "title": "Steps per loop, by agent name (deprecated)",
         "description": (
-            "Per-agent LangGraph recursion-step overrides, keyed by agent name, "
-            "overriding react_agent_max_steps for agents whose tool-call depth differs "
-            "from the default — the static analyst needs many more steps for its Ghidra "
-            "pass, while network is capped low to keep an optional PCAP tool loop from "
-            "starving synthesis."
+            "Operator-only and deprecated: a step limit per agent name, read after the "
+            "agent definition's own max_steps and before the deployment's value. Ships "
+            "empty. Set a budget on the agent's definition instead."
         ),
         "subgroup": "Limits",
         "advanced": True,
     },
     "react_agent_timeout": {
-        "title": "ReAct agent default timeout (s)",
+        "title": "Seconds per agent loop",
         "description": (
-            "Default wall-clock timeout in seconds for a ReAct agent loop (analyst or "
-            "judge) before it is forced to stop, tuned for the network/dynamic "
-            "analysts. Per-agent overrides live in react_agent_timeout_overrides."
+            "The deployment's time limit, in seconds, for an agent's tool loop (analyst or "
+            "judge). Empty, the default, is no time limit: the loop has no clock of its own "
+            "and each model call waits as long as its answer takes at the model's measured "
+            "pace, with the job timeout as the last resort. An agent definition's own "
+            "timeout_seconds wins over this; a number set here is kept to."
         ),
         "subgroup": "Limits",
     },
     "react_agent_timeout_overrides": {
-        "title": "ReAct agent timeout overrides",
+        "title": "Seconds per loop, by agent name (deprecated)",
         "description": (
-            "Per-agent timeout overrides (in seconds), keyed by agent name (e.g. "
-            "static, dynamic, network, judge), overriding react_agent_timeout for "
-            "agents whose workload needs a different budget — the static analyst's "
-            "Ghidra ReAct loop in particular needs far more time than the default."
+            "Operator-only and deprecated: a time limit in seconds per agent name, read "
+            "after the agent definition's own timeout_seconds and before the deployment's "
+            "value. Ships empty. Set a budget on the agent's definition instead; the judge, "
+            "which is built in, takes its budget from here or from the deployment's value."
         ),
         "subgroup": "Limits",
         "advanced": True,
     },
     "react_agent_tool_call_budget": {
-        "title": "ReAct agent tool-call budget",
+        "title": "Tool calls before a warning",
         "description": (
-            "Soft ceiling on cumulative tool calls in a ReAct loop; exceeding it logs a "
-            "warning rather than stopping the agent, as an early signal that it is "
-            "spinning unproductively."
+            "How many cumulative tool calls of one loop are logged as a warning. A signal "
+            "for an operator reading the log and never a limit: the loop goes on exactly "
+            "as it would have."
         ),
         "subgroup": "Limits",
     },
@@ -1136,9 +1261,13 @@ ANNOTATIONS: dict[str, Annotation] = {
     "reporting.composer_section_max_tokens": {
         "title": "Composer section max tokens",
         "description": (
-            "Output-token cap per report section when composer_enabled is true. 0 derives it "
-            "per model from the context window the model serves (the room an analyst's reply "
-            "is given), and the run summary shows the derivation."
+            "Output-token cap per report section when composer_enabled is true. 0 takes the "
+            "judge's max tokens where set, else the model's declared maximum output, else a "
+            "quarter of the context window the model serves; never more than the model's "
+            "maximum. A positive value gets the reporter's own cap on top for reasoning where "
+            "thinking is left on, held at the model's maximum; with no judge's max tokens set "
+            "that resolves to the model's maximum. The run summary and the worker log show "
+            "the derivation."
         ),
         "subgroup": "Report content",
     },
@@ -1200,21 +1329,16 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Report content",
     },
-    "reporting.narrative_max_tokens": {
-        "title": "Narrative max tokens",
-        "description": (
-            "Hard output-token cap for the NarrativeAgent's LLM round, keeping "
-            "report-generation tail latency predictable."
-        ),
-        "subgroup": "Report content",
-    },
     "reporting.upstream_findings_max_chars": {
         "title": "Upstream findings budget",
         "description": (
             "How many characters of the upstream stages' findings a stage is given "
-            "in its prompt, when its 'inject upstream' setting asks for them. Past "
-            "this the block is cut and says so, so a long pipeline cannot spend a "
-            "late stage's whole context on a summary of the stages before it."
+            "in its prompt, when its 'inject upstream' setting asks for them, and of "
+            "the triage pack every agent reads. 0 derives it from the context window "
+            "the served models were found to have, as the tool-output cap is; with no "
+            "window learned, 6,000. A positive value is used whatever the window. Past "
+            "it the block is cut and says so, so a long pipeline cannot spend a late "
+            "stage's whole context on a summary of the stages before it."
         ),
         "subgroup": "Report content",
     },
@@ -1434,9 +1558,12 @@ ANNOTATIONS.update(
         "static.r2.binary_path": {
             "title": "radare2 MCP binary",
             "description": (
-                "Executable that serves the radare2 MCP tools, looked up on PATH "
-                "when it is a bare name. The provider's connection test reports "
-                "clearly when it is missing."
+                "Executable that serves the radare2 MCP tools. A path is used as it "
+                "is; a bare name is looked up on the worker's PATH, then where "
+                "r2pm -ci r2mcp installs it (R2PM_BINDIR, R2PM_PREFIX/bin, then "
+                "radare2/prefix/bin under the user's data directory). The "
+                "connection test and a run that cannot find it both name every "
+                "place looked."
             ),
             "applies_when": _STATIC_R2,
             "probe": "r2",
@@ -1603,7 +1730,21 @@ ANNOTATIONS.update(
             "title": "Triage timeout (s)",
             "description": (
                 "Maximum seconds to wait for a Triage analysis to reach the reported "
-                "state, queueing behind other tenants included."
+                "state, queueing behind other tenants included. With a run time set "
+                "below, it must be longer than that run time and also cover Triage's "
+                "processing of the run into a report; no margin for the processing is "
+                "guessed, so leave room for it."
+            ),
+            "applies_when": _SANDBOX_TRIAGE,
+        },
+        "sandbox.triage.analysis_seconds": {
+            "title": "Triage run time (s)",
+            "description": (
+                "How long the Triage VM runs the sample, sent with the submission as "
+                "defaults.timeout. Empty, the default, sends nothing and Triage's own "
+                "default applies. A value the account does not allow is refused by Triage, "
+                "and the submission error quotes its words. The run summary states the "
+                "run-time limit Triage set for the task."
             ),
             "applies_when": _SANDBOX_TRIAGE,
         },
@@ -1791,20 +1932,22 @@ ANNOTATIONS.update(
             "title": "Steps one ask gets",
             "description": (
                 "How many graph steps a delegated agent may spend answering one "
-                "ask — about five tool rounds and an answer at the default. It is "
+                "ask. Empty, the default, is no step limit of the ask's own. It is "
                 "the ask's own budget, not a share of the caller's: a callee that "
                 "inherited what its caller had left ran out before it had made a "
                 "tool call. The caller's own step budget is not reduced by what "
-                "its specialists spend; its wall clock is."
+                "its specialists spend; its wall clock, where it has one, is."
             ),
             "group": "agents",
         },
         "agents.delegation_timeout_seconds": {
             "title": "Seconds one ask gets",
             "description": (
-                "How long a delegated agent may take over one ask. An ask is also "
-                "bounded by the time its caller has left, so the caller's own "
-                "stage timeout is what decides how many asks fit in one loop."
+                "How long a delegated agent may take over one ask. Empty, the "
+                "default, is no time limit of the ask's own. An ask is also "
+                "bounded by the time its caller has left where the caller's loop "
+                "has a time limit, and a caller with none waits for a busy callee "
+                "unless that callee is itself waiting on the caller."
             ),
             "group": "agents",
         },

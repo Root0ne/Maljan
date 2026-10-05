@@ -268,8 +268,8 @@ class TestWhenThereIsNothingToReferTo:
         assert_conforms(bundle)
 
 
-class TestTheCapLeavesNothingDangling:
-    def test_a_bundle_over_the_cap_still_conforms(self) -> None:
+class TestABigBundleConforms:
+    def test_a_bundle_of_more_than_fifteen_indicators_conforms(self) -> None:
         report = _report("Malware", summary="It hollows a process.")
         report.network = NetworkIOCs(
             domains=[
@@ -290,5 +290,6 @@ class TestTheCapLeavesNothingDangling:
             report, base_bundle=Bundle.model_validate(_judge_bundle("Malware"))
         )
 
-        assert len(_of_type(bundle, "indicator")) == 15
+        # Every domain, every URL and every URL's host: no count bounds them.
+        assert len(_of_type(bundle, "indicator")) >= 60
         assert_conforms(bundle)

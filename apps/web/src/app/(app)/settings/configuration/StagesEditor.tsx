@@ -59,7 +59,7 @@ const blankStage = (key: string): StageEntry => ({
   agents: [],
   depends_on: [],
   when: "",
-  mode: "sequential",
+  mode: null,
   inject_upstream: "findings",
   debate: null,
   builtin_tools: true,
@@ -648,9 +648,12 @@ function StageCard({
               className={input}
               aria-label={`${label} mode`}
               disabled={fixed}
-              value={stage.mode}
-              onChange={(e) => onPatch({ mode: e.target.value as StageEntry["mode"] })}
+              value={stage.mode ?? ""}
+              onChange={(e) =>
+                onPatch({ mode: (e.target.value || null) as StageEntry["mode"] })
+              }
             >
+              <option value="">auto (follows llm.parallel_analysts)</option>
               <option value="sequential">sequential</option>
               <option value="parallel">parallel</option>
             </select>

@@ -27,6 +27,8 @@ and only the serialised request was wrong.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from maljan.core.config import Settings
@@ -96,3 +98,138 @@ class TestItStaysOffTheWireWhereItWouldBeRejected:
         kwargs = {} if cap is None else {"max_tokens": cap}
         llm = provider.build_model(model="qwen", temperature=0.0, **kwargs)  # type: ignore[arg-type]
         assert "n_predict" not in (llm.extra_body or {})
+
+
+class TestACapForOneCallReachesAnUncappedLocalModel:
+    """A model built without a cap (the function summarizer's in a run, or the
+    provider called directly) holds no cap key in its extras. A cap handed to
+    one call was copied only into keys already there, and so never reached the
+    server: measured on ik_llama.cpp, a call held to 60 output units produced
+    3,732. The container's other models carry a cap derived from the window."""
+
+    ASK = "hi"
+
+    def _uncapped_local(self, **openai_overrides: object) -> Any:
+        provider, _ = _provider(base_url="http://127.0.0.1:8080/v1", **openai_overrides)
+        return provider.build_model(model="qwen", temperature=0.0)
+
+    def _extras(self, llm: Any, **call: object) -> dict[str, Any]:
+        from langchain_core.messages import HumanMessage
+
+        payload = llm._get_request_payload([HumanMessage(content=self.ASK)], stop=None, **call)
+        return dict(payload.get("extra_body") or {})
+
+    def test_the_call_cap_is_sent_under_both_keys(self) -> None:
+        extra = self._extras(self._uncapped_local(), max_tokens=60)
+        assert extra["max_tokens"] == 60
+        assert extra["n_predict"] == 60
+
+    def test_it_is_sent_when_the_model_has_no_other_extra_either(self) -> None:
+        llm = self._uncapped_local(repetition_penalty=1.0, disable_thinking=False)
+        extra = self._extras(llm, max_tokens=60)
+        assert extra["max_tokens"] == 60
+        assert extra["n_predict"] == 60
+
+    def test_a_call_without_a_cap_sends_none(self) -> None:
+        extra = self._extras(self._uncapped_local())
+        assert "max_tokens" not in extra
+        assert "n_predict" not in extra
+
+    @pytest.mark.parametrize("cap", [0, -1, True])
+    def test_a_nonsense_call_cap_is_not_forwarded(self, cap: object) -> None:
+        extra = self._extras(self._uncapped_local(), max_tokens=cap)
+        assert "max_tokens" not in extra
+        assert "n_predict" not in extra
+
+    def test_the_other_extras_are_kept(self) -> None:
+        extra = self._extras(self._uncapped_local(disable_thinking=True), max_tokens=60)
+        assert extra["chat_template_kwargs"]["enable_thinking"] is False
+        assert extra["n_predict"] == 60
+
+    def test_a_model_built_with_a_cap_is_held_to_the_call_cap(self) -> None:
+        provider, _ = _provider(base_url="http://127.0.0.1:8080/v1")
+        llm = provider.build_model(model="qwen", temperature=0.0, max_tokens=8192)
+        extra = self._extras(llm, max_tokens=60)
+        assert extra["max_tokens"] == 60
+        assert extra["n_predict"] == 60
+        assert self._extras(llm)["n_predict"] == 8192
+
+    def test_the_call_deadline_reads_the_cap_that_is_sent(self) -> None:
+        """The deadline's cap-at-pace sizes the call from the cap the server now reads."""
+        import time
+
+        from maljan.llm.generation_rate import _CallDeadline
+
+        llm = self._uncapped_local()
+        sent = self._extras(llm, max_tokens=60)
+        deadline = _CallDeadline(llm, [self.ASK], {"max_tokens": 60}, time.monotonic)
+        assert deadline.cap == sent["max_tokens"] == sent["n_predict"]
+
+    def test_a_bound_call_puts_it_on_the_wire(self) -> None:
+        """Through the request the client sends, by a stand-in transport."""
+        import json
+
+        import httpx
+        from langchain_core.messages import HumanMessage
+
+        from maljan.llm.openai_provider import forget_standard_only
+        from tests.unit.llm.streamed_wire import reply
+
+        bodies: list[dict[str, Any]] = []
+
+        def _server(request: httpx.Request) -> httpx.Response:
+            bodies.append(json.loads(request.content))
+            return reply(
+                request,
+                {
+                    "id": "r1",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": "qwen",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+
+        forget_standard_only()
+        transport = httpx.MockTransport(_server)
+        provider, _ = _provider(base_url="http://127.0.0.1:8080/v1")
+        llm = provider.build_model(
+            model="qwen",
+            temperature=0.0,
+            http_client=httpx.Client(transport=transport),
+            http_async_client=httpx.AsyncClient(transport=transport),
+        )
+        llm.bind(max_tokens=60).invoke([HumanMessage(content=self.ASK)])
+        llm.invoke([HumanMessage(content=self.ASK)])
+
+        assert bodies[0]["max_tokens"] == 60
+        assert bodies[0]["n_predict"] == 60
+        assert "max_tokens" not in bodies[1]
+        assert "n_predict" not in bodies[1]
+        assert "max_completion_tokens" not in bodies[1]
+
+    def test_hosted_openai_and_deepseek_payloads_are_unchanged(self) -> None:
+        from langchain_core.messages import HumanMessage
+
+        ask = [HumanMessage(content=self.ASK)]
+        hosted, _ = _provider(base_url="", compat="standard")
+        payload = hosted.build_model(model="gpt-4o", temperature=0.0)._get_request_payload(
+            ask, stop=None, max_tokens=60
+        )
+        assert payload.get("max_completion_tokens") == 60
+        assert "max_tokens" not in (payload.get("extra_body") or {})
+        assert "n_predict" not in (payload.get("extra_body") or {})
+
+        deepseek, _ = _provider(base_url="https://api.deepseek.example/v1", compat="deepseek")
+        payload = deepseek.build_model(model="ds", temperature=0.0)._get_request_payload(
+            ask, stop=None, max_tokens=60
+        )
+        assert payload.get("max_completion_tokens") == 60
+        assert payload["extra_body"]["max_tokens"] == 60
+        assert "n_predict" not in payload["extra_body"]

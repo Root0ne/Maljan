@@ -163,7 +163,9 @@ def layout_team(stages: list[StageDefinition]) -> TeamLayout:
             agents=tuple(stage.agents),
             when=stage.when,
             reads=stage.inject_upstream,
-            mode=stage.mode,
+            # An unset mode follows the job's resolved analyst mode; the
+            # drawing names it ``auto``.
+            mode=stage.mode or "auto",
             row=row_of[stage.key],
             column=column_of[stage.key],
         )

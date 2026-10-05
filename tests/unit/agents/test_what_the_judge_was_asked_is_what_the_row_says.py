@@ -17,6 +17,7 @@ why, rather than leaving a reader to find no analyst beside it.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -31,7 +32,12 @@ from maljan.reporting.renderers.stix_renderer import (
     UNPUBLISHABLE_CREDIT_CODE,
     ExtendedSTIXRenderer,
 )
-from maljan.schemas.isr_models import JUDGE_ONLY_TECHNIQUE_MARKER, AgentISR, ClaimEvidence
+from maljan.schemas.isr_models import (
+    JUDGE_ONLY_TECHNIQUE_MARKER,
+    AgentISR,
+    ClaimEvidence,
+    judge_and_findings_note,
+)
 from maljan.schemas.stix_models import Bundle
 
 CREDIT = "stix.credit_without_claim"
@@ -275,3 +281,27 @@ class TestAJudgeOnlyTechniqueSaysWhyItIsPublished:
 
         (cell,) = [c for c in cells if c.technique_id == "T1003"]
         assert cell.note == ""
+
+
+class TestAJudgeNamedTechniqueAnAnalystNamedOnAFinding:
+    """Its row names those analysts; it never says no analyst named it.
+
+    The run's corroboration record lists an analyst that named a technique on
+    a finding as a source of it, and the row's own Source column names it: a
+    note saying "claimed by no analyst" contradicted both.
+    """
+
+    def test_the_note_names_the_analysts_that_named_it_on_a_finding(self) -> None:
+        finding = SimpleNamespace(technique_ids=["T1003"], confidence=0.8, title="dumps logons")
+        isrs = {
+            name: SimpleNamespace(agent_id=name, domain="static", claims=[], findings=[finding])
+            for name in ("static", "static_r2")
+        }
+
+        cells, mappings = build_capability_matrix(stix_output=_credited_bundle(), isr_reports=isrs)
+
+        (cell,) = [c for c in cells if c.technique_id == "T1003"]
+        assert cell.note == judge_and_findings_note(["static", "static_r2"])
+        assert "claimed by no analyst" not in cell.note
+        assert "static, static_r2" in cell.note
+        assert "T1003" in [m.technique_id for m in mappings]

@@ -121,6 +121,20 @@ describe("cloning a built-in from what the guide holds", () => {
     });
   }
 
+  it("seeds a clone with the authored prompt, not the sentence about the source's tools", () => {
+    const drawn = displayedDefinitions(stagedAfterAnEdit, saved);
+    const probe = {
+      ok: true,
+      details: {
+        prompt: "BODY\n\nThe tools attached to this request come from the `analysis` server.",
+        authored_prompt: "BODY",
+      },
+    } as unknown as Parameters<typeof cloneDefinition>[3];
+    const cloned = cloneDefinition(drawn, "static_copy", "static", probe);
+
+    expect(cloned.static_copy.prompt).toBe("BODY");
+  });
+
   it("starts a blank agent from the empty definition", () => {
     // The other half of `cloneDefinition`: no source means a new generic
     // agent, which is what the Add button and the guide's blank option make.

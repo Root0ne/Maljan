@@ -108,6 +108,31 @@ class EvidenceCounter:
             return self._seq
 
 
+# What the ledger holds for a call whose answer the conversation had no room
+# for: the call was made and answered, and none of the answer reached the
+# model. A statement of the cut in place of a tool result, on an entry marked
+# ``truncated`` like any entry that is not the whole answer.
+_NOT_SHOWN_HEAD = "[cut] Not shown: the conversation had no room left for this answer of "
+_NOT_SHOWN_RE = re.compile(re.escape(_NOT_SHOWN_HEAD) + r"[\d,]+ characters\.")
+
+
+def not_shown_record(chars: int) -> str:
+    """The ledger's output for an answer of ``chars`` characters none of which reached the model."""
+    return f"{_NOT_SHOWN_HEAD}{max(0, int(chars)):,} characters."
+
+
+def answer_not_shown(entry: Any) -> bool:
+    """Whether ``entry`` is a call whose answer the conversation had no room for.
+
+    Such a call was made and answered, and the model read none of it, so a
+    reader asking whether a function was read skips it. An entry the byte
+    budget blanked was read before it was blanked, and is not one.
+    """
+    if not getattr(entry, "truncated", False):
+        return False
+    return _NOT_SHOWN_RE.fullmatch(str(getattr(entry, "output", "") or "").strip()) is not None
+
+
 def parse_structured(output: str) -> dict[str, Any] | list[Any] | None:
     """The tool's output as JSON when it is JSON, else ``None``.
 
@@ -233,6 +258,7 @@ def build_entry(
     args_repaired: bool = False,
     args_raw: str | None = None,
     model: str | None = None,
+    not_shown: bool = False,
 ) -> LedgerEntry:
     """One entry, with the output trimmed and parsed the same way every time.
 
@@ -266,6 +292,10 @@ def build_entry(
     ``args_raw`` keeps them as the model wrote them. Both so a reader can see
     that a call was made on repaired arguments and check the repair against
     what arrived.
+
+    ``not_shown`` says the conversation had no room for any of the answer:
+    ``output`` is then the statement of the cut (:func:`not_shown_record`),
+    the entry is marked ``truncated`` and nothing is parsed out of it.
     """
     safe_args = dict(args) if isinstance(args, dict) else {}
     full = str(output or "")
@@ -290,8 +320,8 @@ def build_entry(
         error=error,
         remediation=remediation if error else None,
         output=text,
-        truncated=len(text) < len(full),
-        structured=None if repeated_of else parse_structured(full),
+        truncated=bool(not_shown) or len(text) < len(full),
+        structured=None if repeated_of or not_shown else parse_structured(full),
         repeated_of=repeated_of,
         args_repaired=bool(args_repaired),
         args_raw=args_raw if args_repaired else None,

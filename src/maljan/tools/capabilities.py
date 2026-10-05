@@ -108,6 +108,10 @@ class ToolNeeds:
     # The remedy when the requirement is missing, where the code's general one
     # names the wrong thing: an executable is not installed by ``uv sync``.
     remediation: str = ""
+    # A tool whose work grows with the sample and has no wall clock of its own
+    # (capa, FLOSS): a caller waits for it with no deadline unless its operator
+    # set one, and its caller giving up is not the server failing.
+    long_running: bool = False
 
 
 def _cell(tool: ToolNeeds) -> dict[str, Any]:
@@ -124,6 +128,8 @@ def _cell(tool: ToolNeeds) -> dict[str, Any]:
         "reason": "; ".join(reason for _req, reason in missing) if missing else None,
         "timeout_s": tool.timeout_s,
     }
+    if tool.long_running:
+        cell["long_running"] = True
     if missing:
         kinds = {req.kind for req, _reason in missing}
         code = NOT_CONFIGURED if kinds == {"env"} else MISSING_DEPENDENCY

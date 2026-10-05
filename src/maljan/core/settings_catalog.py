@@ -217,3 +217,149 @@ def core_catalog() -> list[CatalogEntry]:
     order = {g: i for i, (g, _) in enumerate(GROUP_ORDER)}
     entries.sort(key=lambda e: (order[e.group], e.order, e.path))
     return entries
+
+
+# An authorization scheme in front of a header's secret: the secret is what
+# follows it.
+_SCHEME_PREFIX = ("bearer ", "basic ", "token ")
+# The last word of a mapping key that names a credential *value* — a tool
+# server's ``VT_API_KEY``, ``DB_PASSWORD``, ``GITLAB_PAT``, an ``Authorization``
+# header — optionally followed by ``value``. An allow-list on the last word: a
+# key that ends in anything else is a setting about the credential
+# (``TOKEN_TTL``, ``PASSWORD_POLICY``, ``SECRET_MANAGER``, ``AUTH_MODE``), not the
+# credential. A key such as ``SECRET_KEY_BASE`` is missed, which costs less than
+# masking a setting's word in every report. ``PWD`` is not on the list: in a tool
+# server's environment it is the shell's working directory.
+_CREDENTIAL_LAST_WORDS = frozenset(
+    {
+        "password",
+        "passwd",
+        "passphrase",
+        "pass",
+        "secret",
+        "key",
+        "apikey",
+        "token",
+        "pat",
+        "credential",
+        "credentials",
+        "authorization",
+        "bearer",
+    }
+)
+# A value that is a number or a switch is a setting whatever its key says.
+_NOT_A_SECRET_VALUE = frozenset({"true", "false", "yes", "no", "on", "off", "none", "null"})
+# The generic REST sandbox's JSONPath maps: each value says where a response
+# keeps a field, not what the field holds. Never read for secrets. Its
+# ``submit_fields`` and ``extra_fields`` are form fields sent with every
+# submission and are read like any other mapping.
+_FIELD_MAPS = frozenset({"field_names", "channels"})
+
+
+def names_a_credential_value(key: str) -> bool:
+    """Whether a mapping key names a credential value rather than a setting about one."""
+    import re
+
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(key))
+    words = [word for word in re.split(r"[^a-z0-9]+", spaced.lower()) if word]
+    if len(words) > 1 and words[-1] == "value":
+        words = words[:-1]
+    return bool(words) and words[-1] in _CREDENTIAL_LAST_WORDS
+
+
+# The query keys a service URL carries a credential under, beside every key
+# ``names_a_credential_value`` reads as one.
+_CREDENTIAL_QUERY_KEYS = frozenset({"api_key", "apikey", "access_token", "token", "key"})
+
+
+def _reads_as_a_credential(value: str) -> bool:
+    """Whether ``value`` has a credential's shape by the event scrub's own rules."""
+    try:
+        from maljan.pipeline.events import _looks_like_a_credential
+
+        return bool(_looks_like_a_credential(value, whole=True))
+    except Exception:  # noqa: BLE001 — unread, the value is kept as a secret
+        return True
+
+
+def _url_secrets(url: str) -> list[str]:
+    """The credentials a configured URL carries: its password of any length, a token
+    written alone in its username slot, and each query value whose key names a credential."""
+    from urllib.parse import parse_qsl, urlsplit
+
+    try:
+        parts = urlsplit(url)
+        password, username = parts.password, parts.username
+        query = parse_qsl(parts.query, keep_blank_values=False)
+        query += parse_qsl(parts.fragment, keep_blank_values=False)
+    except ValueError:
+        return []
+    found: list[str] = []
+    if password:
+        found.append(password)
+    elif username and "@" in parts.netloc and _reads_as_a_credential(username):
+        # Userinfo with no password is a token when it has a token's shape,
+        # the way an MCP or a Git service URL carries one. An ordinary user
+        # name (``administrator``, ``git``) is not, and registered it would be
+        # masked in every event that names it.
+        found.append(username)
+    for key, value in query:
+        if value and (names_a_credential_value(key) or key.lower() in _CREDENTIAL_QUERY_KEYS):
+            found.append(value)
+    return found
+
+
+def configured_secret_values(*sources: Any) -> set[str]:
+    """Every secret-kind value the given settings hold, as the platform would send it.
+
+    What is secret is this catalogue's own secret kind — a ``SecretStr``, or a
+    field named in ``_SECRET_NAMES`` — plus the password inside a service URL
+    (``database_url``, ``redis_url``) and an entry of a mapping whose key names
+    a credential (a tool server's ``env`` or ``headers``). A header value that
+    begins with an authorization scheme contributes what follows the scheme as
+    well. Nothing else is collected: a field or a key that merely mentions a
+    credential (``max_tokens``, ``AUTH_MODE``, ``TOKEN_LIMIT``) holds no secret
+    (``names_a_credential_value``), and the REST sandbox's JSONPath maps are not
+    read. The scrub masks these values by exact value
+    (``pipeline.events.remember_secret_values``).
+    """
+
+    found: set[str] = set()
+
+    def _add(value: str) -> None:
+        text = str(value or "")
+        if not text.strip() or text.strip().isdigit():
+            return
+        if text.strip().lower() in _NOT_A_SECRET_VALUE:
+            return
+        found.add(text)
+        lowered = text.lower()
+        for scheme in _SCHEME_PREFIX:
+            if lowered.startswith(scheme) and text[len(scheme) :].strip():
+                found.add(text[len(scheme) :].strip())
+
+    def _walk(value: Any, name: str, named_secret: bool) -> None:
+        if isinstance(value, SecretStr):
+            _add(value.get_secret_value())
+        elif isinstance(value, BaseModel):
+            fields = dict(type(value).model_fields)
+            for key in fields:
+                if key in _FIELD_MAPS:
+                    continue
+                _walk(getattr(value, key, None), key, key in _SECRET_NAMES)
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                _walk(item, str(key), names_a_credential_value(str(key)))
+        elif isinstance(value, list | tuple | set):
+            for item in value:
+                _walk(item, name, named_secret)
+        elif isinstance(value, str):
+            if named_secret:
+                _add(value)
+            elif "://" in value:
+                for secret in _url_secrets(value):
+                    _add(secret)
+
+    for source in sources:
+        _walk(source, "", False)
+    return found

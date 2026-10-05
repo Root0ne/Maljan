@@ -120,7 +120,7 @@ class TestNetworkIndicators:
             sandbox_report={
                 "network": {
                     "dns": [{"request": "evil-c2.duckdns.org", "answers": []}],
-                    "tcp": [{"dst": "8.8.8.8", "dport": 443}],
+                    "tcp": [{"dst": "185.220.101.9", "dport": 443, "sample_process_tree": True}],
                     "http": [
                         {
                             "host": "evil-c2.duckdns.org",
@@ -140,7 +140,7 @@ class TestNetworkIndicators:
     def test_ip_indicator_pattern(self, report: MalwareReport) -> None:
         bundle = ExtendedSTIXRenderer().render(report, base_bundle=None)
         indicators = [obj for obj in bundle.objects if isinstance(obj, Indicator)]
-        assert any("ipv4-addr:value = '8.8.8.8'" in ind.pattern for ind in indicators)
+        assert any("ipv4-addr:value = '185.220.101.9'" in ind.pattern for ind in indicators)
 
     def test_url_indicator_pattern(self, report: MalwareReport) -> None:
         bundle = ExtendedSTIXRenderer().render(report, base_bundle=None)
@@ -206,6 +206,24 @@ class TestBaseBundlePreserved:
         assert [m.is_family for m in malware_objs] == [True]
         assert judge_malware.is_family is True
 
+    def test_a_kind_and_an_is_family_the_judge_was_asked_about_are_published_as_written(
+        self,
+    ) -> None:
+        # The judge is asked about ``is_family: false`` on an object named for
+        # the family and about a type outside the vocabulary; what it keeps is
+        # published, and nothing edits it on the way.
+        judge_malware = Malware(
+            id="malware--b2c3d4e5-f6a7-8901-bcde-f12345678901",
+            name="Examplefamily",
+            malware_types=["stealer"],
+            is_family=False,
+        )
+        bundle = ExtendedSTIXRenderer().render(
+            _build(), base_bundle=Bundle(objects=[judge_malware])
+        )
+        (kept,) = [o for o in bundle.objects if isinstance(o, Malware)]
+        assert (kept.is_family, kept.malware_types) == (False, ["stealer"])
+
 
 class TestObservedDataAndNote:
     @pytest.fixture
@@ -247,9 +265,8 @@ class TestRoundTrip:
         assert _types(rebuilt) == _types(bundle)
 
 
-class TestTotalIndicatorCap:
-    """Wave 9: cap total indicator count to MAX_TOTAL_INDICATORS with
-    priority hashes > network > file:name."""
+class TestNoCountBoundsTheIndicators:
+    """The export carries every value the publish rule publishes, whatever their number."""
 
     def _packed_report(self) -> MalwareReport:
         from maljan.reporting.models import StaticAnalysis, StringIOC
@@ -272,13 +289,13 @@ class TestTotalIndicatorCap:
         )
         return report
 
-    def test_total_capped_to_15(self) -> None:
-        from maljan.agents._indicator_denylists import MAX_TOTAL_INDICATORS
-
+    def test_every_published_domain_is_carried_past_the_old_cap_of_fifteen(self) -> None:
         report = self._packed_report()
         bundle = ExtendedSTIXRenderer().render(report, base_bundle=None)
         indicators = [obj for obj in bundle.objects if isinstance(obj, Indicator)]
-        assert len(indicators) == MAX_TOTAL_INDICATORS == 15
+        domains = [i for i in indicators if "domain-name:value" in i.pattern]
+        assert len(domains) == 20
+        assert len(indicators) > 15
 
     def test_priority_keeps_hash_and_network_first(self) -> None:
         report = self._packed_report()

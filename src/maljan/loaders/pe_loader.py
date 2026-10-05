@@ -160,7 +160,9 @@ class PELoader:
                 ]
             ):
                 interesting.append(s)
-        return interesting[:50]  # cap at 50 interesting strings
+        # Every one: the analyst's input is sized from its window as a whole
+        # (``BaseAnalyst._truncate_input``), and shortened there with a notice.
+        return interesting
 
     def parse(self) -> dict[str, Any]:
         """Return full PE analysis dict."""
@@ -190,7 +192,11 @@ class PELoader:
         return result
 
     def to_markdown(self) -> str:
-        """Convert parse result to markdown for LLM consumption."""
+        """Convert parse result to markdown for LLM consumption.
+
+        Every import, export and string is listed: the text is an analyst's
+        input, sized from its window as a whole and shortened there, said.
+        """
         data = self.parse()
         lines: list[str] = [
             "### Static PE Analysis\n",
@@ -213,22 +219,20 @@ class PELoader:
             lines.append("- (no sections parsed)")
 
         lines.extend(["", "#### Imports"])
-        for imp in data["imports"][:10]:
-            funcs = ", ".join(imp["functions"][:5])
-            if len(imp["functions"]) > 5:
-                funcs += f", ... ({len(imp['functions'])} total)"
+        for imp in data["imports"]:
+            funcs = ", ".join(imp["functions"])
             lines.append(f"- `{imp['dll']}`: {funcs}")
         if not data["imports"]:
             lines.append("- (no imports parsed)")
 
         lines.extend(["", "#### Exports"])
-        for exp in data["exports"][:10]:
+        for exp in data["exports"]:
             lines.append(f"- `{exp}`")
         if not data["exports"]:
             lines.append("- (no exports)")
 
         lines.extend(["", "#### Interesting Strings"])
-        for s in data["strings"][:20]:
+        for s in data["strings"]:
             lines.append(f"- `{s}`")
         if not data["strings"]:
             lines.append("- (no interesting strings)")

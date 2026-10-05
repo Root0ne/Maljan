@@ -622,6 +622,11 @@ def apk_info(
     still a zip and the zip still says how many dex files there are, which ABIs
     the native libraries target and which certificate files are present — so
     the tool degrades to those facts and says which ones it could not add.
+
+    With androguard installed, every call into it is contained: a manifest it
+    could not parse, or any one of its readers raising, costs only the facts
+    that reader gives. Each is then said as ``no: <reason>``, with the
+    exception's type and never its message, and the zip-level facts stand.
     """
     target = Path(path)
     if not target.is_file():
@@ -636,40 +641,184 @@ def apk_info(
     except ImportError:
         return _degraded(out, "androguard is not installed", remediation=_missing_library_remedy())
 
+    wanted = _apk_facts_wanted(
+        manifest=manifest,
+        permissions=permissions,
+        components=components,
+        certs=certs,
+        dex_strings=dex_strings,
+    )
     try:
         apk = APK(str(target))
     except Exception as exc:  # noqa: BLE001
         # The library is installed and refused the file, so installing it
         # again is not the remedy and saying so would send the operator after
-        # the wrong thing.
-        return _degraded(out, f"androguard parse failed: {type(exc).__name__}: {exc}")
+        # the wrong thing. The exception's type only: its message can quote
+        # the sample's own bytes.
+        kind = type(exc).__name__
+        for key in wanted:
+            out[key] = f"{APK_UNOPENED} ({kind})"
+        return _degraded(out, f"androguard parse failed: {kind}")
+
+    # androguard reads the manifest once, in its constructor, and on a
+    # manifest it could not parse it neither raises there nor says so to its
+    # getters: the lists come back empty, which would read as an APK that
+    # declares nothing, and a getter can raise later (``KeyError: 'Name'``
+    # from the version name). Its own validity flag is the fact, read first.
+    unread = _manifest_unread(apk, present=bool(out.get("manifest_present")))
+
+    def _manifest_fact(read: Any, name: str | None = None) -> Any:
+        if unread is not None:
+            return unread
+        try:
+            value = read()
+            return value if name is None else _within_limit(out, name, value, limit)
+        except Exception as exc:  # noqa: BLE001 — one getter costs its own fact
+            return f"{MANIFEST_UNPARSED} ({type(exc).__name__})"
 
     if manifest:
-        out["package"] = apk.get_package()
-        out["version_name"] = apk.get_androidversion_name()
-        out["version_code"] = apk.get_androidversion_code()
-        out["min_sdk"] = apk.get_min_sdk_version()
-        out["target_sdk"] = apk.get_target_sdk_version()
+        out["package"] = _manifest_fact(apk.get_package)
+        out["version_name"] = _manifest_fact(apk.get_androidversion_name)
+        out["version_code"] = _manifest_fact(apk.get_androidversion_code)
+        out["min_sdk"] = _manifest_fact(apk.get_min_sdk_version)
+        out["target_sdk"] = _manifest_fact(apk.get_target_sdk_version)
     if permissions:
-        out["permissions"] = sorted(apk.get_permissions())[:limit]
+        out["permissions"] = _manifest_fact(apk.get_permissions, "permissions")
     if components:
-        out["activities"] = sorted(apk.get_activities())[:limit]
-        out["services"] = sorted(apk.get_services())[:limit]
-        out["receivers"] = sorted(apk.get_receivers())[:limit]
-        out["providers"] = sorted(apk.get_providers())[:limit]
+        for name in _APK_COMPONENTS:
+            out[name] = _manifest_fact(getattr(apk, f"get_{name}"), name)
     if certs:
         out["signing_schemes"] = {
-            "v1": bool(apk.is_signed_v1()),
-            "v2": bool(apk.is_signed_v2()),
-            "v3": bool(apk.is_signed_v3()),
+            scheme: _androguard_fact(
+                lambda scheme=scheme: bool(getattr(apk, f"is_signed_{scheme}")()),
+                SIGNING_BLOCK_UNREAD,
+            )
+            for scheme in ("v1", "v2", "v3")
         }
-        out["certificates"] = [
-            {"subject": str(cert.subject), "issuer": str(cert.issuer), "sha256": cert.sha256.hex()}
-            for cert in apk.get_certificates()
-        ][:limit]
+        out["certificates"] = _androguard_fact(
+            lambda: _apk_certificates(out, apk, limit), CERTIFICATES_UNREAD
+        )
     if dex_strings:
-        out["dex_strings"] = _apk_dex_strings(apk, limit)
+        out["dex_strings"] = _androguard_fact(lambda: _apk_dex_strings(out, apk, limit), DEX_UNREAD)
+
+    unsaid = [key for key in wanted if _is_unread(out.get(key))]
+    # A list's own strings are the sample's, so a list is never read for
+    # ``no:``; the dex files the reader refused are listed under their own key.
+    if out.get("dex_strings_unread"):
+        unsaid.append("dex_strings_unread")
+    if unsaid:
+        manifest_asked = manifest or permissions or components
+        return _degraded(
+            out,
+            apk_unread_note(unsaid, unread if manifest_asked else None),
+            still=APK_STILL_ANSWERED,
+        )
     return out
+
+
+# What ``apk_info`` says in place of an androguard fact it could not produce.
+# The exception's type follows in brackets where there was one; its message
+# never does, since it can quote the sample.
+APK_UNOPENED = "no: androguard could not open the APK"
+MANIFEST_UNPARSED = "no: the manifest could not be parsed"
+MANIFEST_ABSENT = "no: the archive holds no AndroidManifest.xml"
+SIGNING_BLOCK_UNREAD = "no: the signing block could not be read"
+CERTIFICATES_UNREAD = "no: the certificates could not be read"
+DEX_UNREAD = "no: the dex files could not be read"
+DEX_READER_MISSING = "no: androguard's dex reader could not be loaded"
+DEX_FILE_UNREAD = "no: dex file {number} of the APK could not be read"
+APK_STILL_ANSWERED = "the zip-level facts and every fact not marked no:"
+_APK_UNREAD_REASONS = (
+    APK_UNOPENED,
+    MANIFEST_UNPARSED,
+    MANIFEST_ABSENT,
+    SIGNING_BLOCK_UNREAD,
+    CERTIFICATES_UNREAD,
+    DEX_UNREAD,
+    DEX_READER_MISSING,
+)
+
+_APK_COMPONENTS = ("activities", "services", "receivers", "providers")
+
+
+def apk_unread_note(unsaid: list[str], manifest_unread: str | None) -> str:
+    """The degraded note of an ``apk_info`` answer: which facts androguard did not read, and why."""
+    note = f"androguard could not read {', '.join(unsaid)}"
+    if manifest_unread is not None:
+        note = f"{manifest_unread.removeprefix('no: ')}, so {note}"
+    return note
+
+
+def _apk_facts_wanted(
+    *, manifest: bool, permissions: bool, components: bool, certs: bool, dex_strings: bool
+) -> list[str]:
+    """The keys of the androguard facts one call of ``apk_info`` asks for."""
+    keys: list[str] = []
+    if manifest:
+        keys += ["package", "version_name", "version_code", "min_sdk", "target_sdk"]
+    if permissions:
+        keys.append("permissions")
+    if components:
+        keys += list(_APK_COMPONENTS)
+    if certs:
+        keys += ["signing_schemes", "certificates"]
+    if dex_strings:
+        keys.append("dex_strings")
+    return keys
+
+
+def _is_unread(value: Any) -> bool:
+    """Whether an ``apk_info`` fact, or any part of one, is one of this tool's ``no: <reason>``.
+
+    Matched against the tool's own reasons, not any ``no: `` prefix: a value
+    read from the manifest is the sample's text and may begin that way.
+    """
+    if isinstance(value, dict):
+        return any(_is_unread(part) for part in value.values())
+    return isinstance(value, str) and value.startswith(_APK_UNREAD_REASONS)
+
+
+def _manifest_unread(apk: Any, *, present: bool) -> str | None:
+    """Why the manifest's facts cannot be read, or ``None`` when androguard parsed it."""
+    if not present:
+        return MANIFEST_ABSENT
+    try:
+        parsed = bool(apk.is_valid_APK())
+    except Exception as exc:  # noqa: BLE001
+        return f"{MANIFEST_UNPARSED} ({type(exc).__name__})"
+    return None if parsed else MANIFEST_UNPARSED
+
+
+def _androguard_fact(read: Any, unread: str) -> Any:
+    """``read()``, or ``unread`` with the exception's type when androguard raised."""
+    try:
+        return read()
+    except Exception as exc:  # noqa: BLE001 — one reader costs its own fact
+        return f"{unread} ({type(exc).__name__})"
+
+
+def _apk_certificates(out: dict[str, Any], apk: Any, limit: int) -> list[dict[str, str]]:
+    """The signing certificates' subjects, issuers and digests, the first ``limit`` of them."""
+    every_cert = [
+        {"subject": str(cert.subject), "issuer": str(cert.issuer), "sha256": cert.sha256.hex()}
+        for cert in apk.get_certificates()
+    ]
+    if len(every_cert) > limit:
+        out.setdefault("totals", {})["certificates"] = len(every_cert)
+    return every_cert[:limit]
+
+
+def _within_limit(out: dict[str, Any], name: str, values: Any, limit: int) -> list[Any]:
+    """The first ``limit`` of ``values``, sorted; the full count under ``totals`` when cut.
+
+    ``limit`` is the caller's own argument, and a list it cut says so: the
+    answer's ``totals`` holds how many there were, so a model reads a page as
+    a page and can ask again with a larger ``limit``.
+    """
+    ordered = sorted(values or [])
+    if len(ordered) > limit:
+        out.setdefault("totals", {})[name] = len(ordered)
+    return ordered[:limit]
 
 
 def _apk_zip_facts(target: Path, limit: int, *, native_libs: bool, certs: bool) -> dict[str, Any]:
@@ -697,21 +846,28 @@ def _apk_zip_facts(target: Path, limit: int, *, native_libs: bool, certs: bool) 
     out["dex_count"] = len(out["dex_files"])
     out["abis"] = sorted(abis)
     out["entry_count"] = len(names)
-    out["dex_files"] = sorted(out["dex_files"])[:limit]
-    out["native_libs"] = sorted(out["native_libs"])[:limit]
+    out["dex_files"] = _within_limit(out, "dex_files", out["dex_files"], limit)
+    out["native_libs"] = _within_limit(out, "native_libs", out["native_libs"], limit)
     out["cert_files"] = sorted(out["cert_files"])
     return out
 
 
-def _apk_dex_strings(apk: Any, limit: int) -> list[str]:
-    """Distinct dex string-table entries, best effort and always bounded."""
-    try:
-        from androguard.core.dex import DEX  # type: ignore[import-not-found]
-    except ImportError:
-        return []
+def _apk_dex_strings(out: dict[str, Any], apk: Any, limit: int) -> list[str] | str:
+    """Distinct dex string-table entries, bounded by ``limit``.
+
+    ``DEX_READER_MISSING`` when there is a dex file and androguard's reader of
+    it will not load: an empty list would say the dex files hold no strings. A
+    dex file the reader refuses is said under ``dex_strings_unread``, by its
+    place in the APK and the exception's type, and the other files' strings
+    stand: a list that left it out silently would read as every file's.
+    """
     found: list[str] = []
     seen: set[str] = set()
-    for raw in apk.get_all_dex():
+    for number, raw in enumerate(apk.get_all_dex(), start=1):
+        try:
+            from androguard.core.dex import DEX  # type: ignore[import-not-found]
+        except ImportError:
+            return DEX_READER_MISSING
         try:
             for value in DEX(raw).get_strings():
                 text = value if isinstance(value, str) else str(value)
@@ -720,8 +876,10 @@ def _apk_dex_strings(apk: Any, limit: int) -> list[str]:
                     found.append(text)
                 if len(found) >= limit:
                     return found
-        except Exception:  # noqa: BLE001 — a malformed dex costs its own strings only
-            continue
+        except Exception as exc:  # noqa: BLE001 — a malformed dex costs its own strings only
+            out.setdefault("dex_strings_unread", []).append(
+                f"{DEX_FILE_UNREAD.format(number=number)} ({type(exc).__name__})"
+            )
     return found
 
 

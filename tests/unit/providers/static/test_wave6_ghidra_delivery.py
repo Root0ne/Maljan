@@ -157,7 +157,7 @@ class TestSynthesizedPlaceholderChunk:
             self._STATE,  # type: ignore[arg-type]
         )
         data = out[0].content
-        hint = _extract_load_hint(data)
+        hint = _extract_load_hint(data, frozenset({"load_program"}))
         assert "LOAD THIS BINARY FIRST" in hint
         assert self._STATE["static_sample_path"] in hint
         assert _extract_analysis_path(data) == self._STATE["static_sample_path"]
@@ -172,20 +172,20 @@ class TestExtractLoadHint:
         data = json.dumps(
             {"file": {"sha256": "d" * 64}, "analysis_file_path": "/data/samples/d.apk"}
         )
-        hint = _extract_load_hint(data)
+        hint = _extract_load_hint(data, frozenset({"load_program"}))
         assert "LOAD THIS BINARY FIRST" in hint
         assert 'load_program(file="/data/samples/d.apk")' in hint
 
     def test_returns_empty_when_path_missing(self) -> None:
         data = json.dumps({"file": {"sha256": "e" * 64}})
-        assert _extract_load_hint(data) == ""
+        assert _extract_load_hint(data, frozenset({"load_program"})) == ""
 
     def test_returns_empty_on_non_json_data(self) -> None:
-        assert _extract_load_hint("raw bytes here") == ""
+        assert _extract_load_hint("raw bytes here", frozenset({"load_program"})) == ""
 
     def test_returns_empty_on_empty_input(self) -> None:
-        assert _extract_load_hint("") == ""
+        assert _extract_load_hint("", frozenset({"load_program"})) == ""
 
     def test_returns_empty_when_path_field_is_not_a_string(self) -> None:
         data = json.dumps({"analysis_file_path": 123})
-        assert _extract_load_hint(data) == ""
+        assert _extract_load_hint(data, frozenset({"load_program"})) == ""

@@ -106,9 +106,12 @@ def test_submitting_a_job_is_audited_with_its_sample_and_profile(rows):
     app.dependency_overrides[jobs_module._get_service] = lambda: svc
     client = TestClient(app)
 
-    # The submit-time probe gate reads the database; what is asserted here is
-    # the audit row, so it stands aside.
-    with patch.object(jobs_module, "_unprobed_models_for", AsyncMock(return_value=[])):
+    # The submit-time gates read the database; what is asserted here is the
+    # audit row, so they stand aside.
+    with (
+        patch.object(jobs_module, "_unprobed_models_for", AsyncMock(return_value=[])),
+        patch.object(jobs_module, "_unready_providers_for", AsyncMock(return_value=[])),
+    ):
         response = client.post(
             "/api/v1/jobs",
             json={

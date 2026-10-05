@@ -16,6 +16,7 @@ consumer can iterate a fresh ``SandboxReport()`` without a null check.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit
 
@@ -155,6 +156,11 @@ class SandboxReport(BaseModel):
     screenshots: list[dict[str, Any]] = Field(default_factory=list)
     cti: dict[str, Any] = Field(default_factory=dict)
     unavailable: list[str] = Field(default_factory=list)
+    # The run-time limit the sandbox set for the task, in seconds, as its own
+    # report says (Triage's task ``timeout``): the limit, not a measured
+    # duration, and never the value this platform asked for. ``None`` where the
+    # report says nothing.
+    run_limit_seconds: int | None = None
     # True when no sandbox ran at all and this report stands in for one. A real
     # run that observed nothing is not synthetic: its emptiness is a finding.
     synthetic: bool = Field(default=False)
@@ -390,6 +396,159 @@ def _split_host_port(value: str) -> tuple[str, int | None]:
     return value, None
 
 
+# The key a flow row states its attribution under: ``True`` when the process
+# that made the flow is the sample's or one it started, ``False`` when the
+# report names that process and it is neither, and absent when the report does
+# not say. A platform fact, so it is right or it is not there.
+SAMPLE_TREE_KEY = "sample_process_tree"
+# The image of the process outside the sample's tree that made a flow, on
+# the flow's row: which process reached the address, as the report names it.
+FLOW_PROCESS_KEY = "process"
+
+
+def _basename(path: str) -> str:
+    return re.split(r"[\\/]", path.strip().strip('"').strip("'"))[-1].lower()
+
+
+def _named_files(proc: dict[str, Any]) -> set[str]:
+    """The file names a process record runs: its image, and each path its command line names.
+
+    Whole file names, never slices: a command line's first word and every
+    comma- or space-separated path in it (``rundll32.exe <dll>,#1`` runs the
+    DLL), each cut to its file name.
+    """
+    names = {_basename(str(proc.get("image") or ""))}
+    for token in re.split(r"[\s,]+", str(proc.get("cmd") or "")):
+        cleaned = token.strip().strip('"').strip("'")
+        if cleaned:
+            names.add(_basename(cleaned))
+    return {name for name in names if name}
+
+
+def _is_the_sample(proc: dict[str, Any], sample: dict[str, Any]) -> bool:
+    """Whether a process record with no ``orig`` mark runs the submitted file.
+
+    A file name the process runs equals the name the sample was submitted
+    under, or is the sample's digest with an extension (a sandbox names the
+    staged copy by its hash). An equal name, never a contained one: a guest's
+    ``MicrosoftEdgeUpdate.exe`` is not a sample submitted as ``update.exe``.
+    """
+    target = _basename(str(sample.get("target") or ""))
+    digest = str(sample.get("sha256") or "").strip().lower()
+    for name in _named_files(proc):
+        if target and name == target:
+            return True
+        if digest and name.rsplit(".", 1)[0] == digest:
+            return True
+    return False
+
+
+# Which of the two facts alone names a flow's process as the sample's, on a
+# row whose attribution is therefore not stated: ``"orig"`` when Triage marks
+# it and it runs none of the submitted file's names and descends from none of
+# its processes, ``"file"`` when it runs the submitted file (or descends from a
+# process that does) and Triage marks it not.
+LINEAGE_DISPUTED_KEY = "lineage_disputed"
+
+
+def _reach(parent: dict[Any, Any], roots: set[Any]) -> set[Any]:
+    """Every listed process whose parent chain reaches one of ``roots``, the roots included."""
+    tree: set[Any] = set()
+    for procid in parent:
+        seen: set[Any] = set()
+        current = procid
+        while current and current not in seen:
+            if current in roots:
+                tree.add(procid)
+                break
+            seen.add(current)
+            current = parent.get(current)
+    return tree
+
+
+class _Lineage:
+    """What one task's process records say about the sample's process tree."""
+
+    def __init__(
+        self,
+        tree: set[Any],
+        disputed: dict[Any, str],
+        images: dict[Any, str],
+        stated: bool,
+    ) -> None:
+        self.tree = frozenset(tree)
+        self.disputed = dict(disputed)
+        self.images = dict(images)
+        # Whether either fact names any process, which is what lets a listed
+        # process outside every tree be stated as outside it.
+        self.stated = stated
+
+
+def _sample_process_tree(task: dict[str, Any], sample: dict[str, Any]) -> _Lineage:
+    """The sample's process tree in one task, read from the two facts the report holds.
+
+    The two facts: the processes Triage marks ``orig``, and the processes that
+    run the submitted file (:func:`_is_the_sample`: its name or the digest's,
+    equal and never contained). Each gives a tree, the processes whose parent
+    chain (``procid_parent``) reaches one it names. Where both name processes,
+    a process in both trees is the sample's, a listed process in neither is
+    not, and one in exactly one tree is disputed: the facts disagree, so its
+    attribution is not stated. A desktop process Triage marked, which runs
+    none of the submitted file's names and descends from none of its
+    processes, was read as the sample on the mark alone and the address it
+    reached published as the sample's. Where only one fact names any process,
+    its tree is the answer; where neither does, nothing is stated.
+    """
+    processes = [p for p in task.get("processes") or [] if isinstance(p, dict)]
+    parent = {p.get("procid"): p.get("procid_parent") for p in processes if p.get("procid")}
+    # As the report writes them, for a reader: the case is the file's own.
+    images = {
+        p.get("procid"): re.split(r"[\\/]", str(p.get("image") or p.get("name") or "").strip())[-1]
+        for p in processes
+        if p.get("procid")
+    }
+    marked = {p.get("procid") for p in processes if p.get("procid") and p.get("orig") is True}
+    named = {p.get("procid") for p in processes if p.get("procid") and _is_the_sample(p, sample)}
+    by_mark, by_file = _reach(parent, marked), _reach(parent, named)
+    if marked and named:
+        disputed = {procid: "orig" for procid in by_mark - by_file}
+        disputed.update({procid: "file" for procid in by_file - by_mark})
+        return _Lineage(by_mark & by_file, disputed, images, True)
+    return _Lineage(by_mark or by_file, {}, images, bool(marked or named))
+
+
+def _flow_attribution(flow: dict[str, Any], lineage: _Lineage) -> dict[str, Any]:
+    """What one Triage flow says about the process that made it, and its network facts.
+
+    ``procid`` and ``pid`` as the flow gives them; ``sample_process_tree`` only
+    where the report settles it (see ``SAMPLE_TREE_KEY``); for a listed
+    process outside the tree, or one the two facts disagree about
+    (``LINEAGE_DISPUTED_KEY``), its image (``FLOW_PROCESS_KEY``), which is
+    what the publish rule names when it refuses the row; the destination's AS
+    number, AS organisation and country where Triage recorded them.
+    """
+    out: dict[str, Any] = {}
+    procid = flow.get("procid")
+    if procid not in (None, ""):
+        out["procid"] = procid
+        if procid in lineage.tree:
+            out[SAMPLE_TREE_KEY] = True
+        elif procid in lineage.disputed:
+            out[LINEAGE_DISPUTED_KEY] = lineage.disputed[procid]
+            if lineage.images.get(procid):
+                out[FLOW_PROCESS_KEY] = lineage.images[procid]
+        elif lineage.stated and procid in lineage.images:
+            out[SAMPLE_TREE_KEY] = False
+            if lineage.images.get(procid):
+                out[FLOW_PROCESS_KEY] = lineage.images[procid]
+    if flow.get("pid") not in (None, ""):
+        out["pid"] = flow.get("pid")
+    for key in ("as_num", "as_org", "country"):
+        if flow.get(key) not in (None, ""):
+            out[key] = flow[key]
+    return out
+
+
 def triage_overview_to_sandbox_report(
     overview: dict[str, Any],
     *,
@@ -436,6 +595,7 @@ def triage_overview_to_sandbox_report(
     network = SandboxNetwork()
     hosts_by_ip: dict[str, dict[str, Any]] = {}
     for task in (task_reports or {}).values():
+        lineage = _sample_process_tree(task, sample)
         for proc in task.get("processes") or []:
             if not isinstance(proc, dict):
                 continue
@@ -460,7 +620,8 @@ def triage_overview_to_sandbox_report(
             dst_host, dst_port = _split_host_port(str(flow.get("dst") or ""))
             if not dst_host:
                 continue
-            row = {"dst": dst_host, "dport": dst_port}
+            row: dict[str, Any] = {"dst": dst_host, "dport": dst_port}
+            row.update(_flow_attribution(flow, lineage))
             if proto == "tcp":
                 network.tcp.append(row)
             elif proto == "udp":
@@ -550,5 +711,26 @@ def triage_overview_to_sandbox_report(
         screenshots=[],
         cti={"family": _as_str_list(analysis.get("family")), "score": analysis.get("score")},
         unavailable=list(TriageSandboxProvider.UNAVAILABLE),
+        run_limit_seconds=_triage_run_limit(overview),
         raw=overview,
     )
+
+
+def _triage_run_limit(overview: dict[str, Any]) -> int | None:
+    """The run-time limit Triage set for the task: its behavioural tasks' ``timeout``.
+
+    The overview lists each task with the run-time limit it was given, not how
+    long it ran. ``None`` when no behavioural task carries one, or when two
+    carry different ones: one figure for the run would then be a figure the
+    report does not state.
+    """
+    tasks = overview.get("tasks")
+    rows = list(tasks.values()) if isinstance(tasks, dict) else tasks
+    seen: set[int] = set()
+    for task in rows if isinstance(rows, list) else []:
+        if not isinstance(task, dict) or str(task.get("kind") or "") != "behavioral":
+            continue
+        value = task.get("timeout")
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            seen.add(value)
+    return seen.pop() if len(seen) == 1 else None

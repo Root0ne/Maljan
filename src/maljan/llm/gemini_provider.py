@@ -45,7 +45,21 @@ class GeminiProvider:
                 "Set GOOGLE_API_KEY in your .env file."
             )
 
-        return ChatGoogleGenerativeAI(
+        from maljan.llm.generation_rate import with_sized_request_timeout
+        from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
+
+        # The request timeout every provider is built with, and each request
+        # sized for its own output cap once the model's pace is measured. A
+        # fixed 90 s used to end any answer longer than 90 s.
+        kwargs.setdefault("request_timeout", float(PROVIDER_REQUEST_TIMEOUT_SECONDS))
+        # No request sends a ``functionCall`` without its ``functionResponse``,
+        # whatever the history it was built from (``maljan.llm.tool_replies``).
+        from maljan.llm.tool_replies import with_answered_tool_calls
+
+        chat_class = with_answered_tool_calls(
+            with_sized_request_timeout(ChatGoogleGenerativeAI), "gemini"
+        )
+        return chat_class(  # type: ignore[no-any-return]
             model=model,
             temperature=temperature,
             google_api_key=SecretStr(api_key.get_secret_value()),
@@ -53,7 +67,5 @@ class GeminiProvider:
             # Free tier limit is 5 RPM; Gemini instructs "retry in ~12s".
             # 6 retries covers ~120s of rate-limit windows before giving up.
             max_retries=6,
-            # Per-request HTTP timeout (seconds). Prevents silent hangs on slow responses.
-            request_timeout=90,
             **kwargs,
         )

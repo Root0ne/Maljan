@@ -206,9 +206,7 @@ class TestTheWorkerFailsSuchAJob:
         source = inspect.getsource(analysis_worker.run_analysis)
         raised = source.index("raise AbsentAnalysisError")
 
-        assert raised < source.index("from app.models.report import"), (
-            "no report model is even imported first"
-        )
+        assert raised < source.index("await _store_the_report("), "no report is stored first"
         assert raised < source.index('"phase_change", {"phase": "reporting"}')
         assert raised < source.index('status="completed"')
 

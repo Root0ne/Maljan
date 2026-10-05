@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { isAdvisory, isExportDecision, validationRowText } from "@/lib/validationRows";
+import {
+  isAdvisory,
+  isAnswered,
+  isExportDecision,
+  validationRowClass,
+  validationRowText,
+} from "@/lib/validationRows";
 
 /**
  * Who a run's unresolved rows say acted.
@@ -137,5 +143,34 @@ describe("an advisory row", () => {
     });
 
     expect(text).toBe("static left isr.confidence_range unfixed: a confidence outside 0..1");
+  });
+});
+
+describe("an answered row", () => {
+  const row = {
+    agent: "reverser",
+    code: "isr.claims_under_disputes",
+    message:
+      "Asked, the analyst kept 1 CLAIM heading(s) under its DISPUTES section; they are not read as its own claims.",
+    answered: "true",
+  };
+
+  it("is read from the string the wire carries", () => {
+    expect(isAnswered({ answered: "true" })).toBe(true);
+    expect(isAnswered({ answered: true })).toBe(true);
+    expect(isAnswered({})).toBe(false);
+  });
+
+  it("is drawn muted as the producer's answer, not as an unfixed finding", () => {
+    expect(validationRowClass(row)).toBe("text-text-muted");
+    const text = validationRowText(row);
+    expect(text).toMatch(/^answered by reverser — isr\.claims_under_disputes: Asked, /);
+    expect(text).not.toContain("unfixed");
+  });
+
+  it("leaves an unfixed finding orange", () => {
+    expect(
+      validationRowClass({ agent: "static", code: "isr.confidence_range", message: "x" }),
+    ).toBe("text-status-orange");
   });
 });

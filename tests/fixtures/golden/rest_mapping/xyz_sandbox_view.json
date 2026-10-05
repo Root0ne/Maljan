@@ -7,6 +7,7 @@
         "dll": null,
         "first_args": "",
         "first_seen": "1",
+        "process_count": 1,
         "processes": [
           "loader.exe"
         ]
@@ -17,6 +18,7 @@
         "dll": null,
         "first_args": "",
         "first_seen": "2",
+        "process_count": 1,
         "processes": [
           "loader.exe"
         ]

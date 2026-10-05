@@ -7,10 +7,15 @@ Four tools: `read_pcap_summary`, `extract_dns` and `extract_http` walk packets,
 and `pcap_summary` gives the whole-capture view — external conversations, TLS
 SNI destinations and detected beaconing — from `maljan.tools.pcap`.
 
-Every one of them takes `packet_limit` and reads no more than it says: a
-capture is read into memory, and it is as large as the detonation made it. The
-default and the ceiling are both 5000 packets (`read_pcap_summary` defaults to
-100), so a larger value is answered with the ceiling rather than refused.
+Every one of them reads the whole capture as a stream, one packet in memory at
+a time (`maljan.analysis.pcap_summary.each_packet`). `packet_limit` is
+optional and has no default: a limit applies only when the caller passes one.
+Every answer states how many packets it read and how many the capture holds —
+the text tools on their first line (`14887 of 14887 packets in the capture
+read.`), `pcap_summary` as `packets_read`, `packets_in_capture` and
+`packet_limit`. `read_pcap_summary` with no `packet_limit` answers the whole
+capture's facts, as `pcap_summary` writes them; with one it lists that many
+packets from `offset`, one line each, and names the offset of the next page.
 
 Launched by `maljan.core.config._builtin_servers()` as the `network` server —
 `sys.executable services/network-mcp/server.py`, cwd `services/network-mcp`,
@@ -27,9 +32,18 @@ whose `captures/` child holds the captures fetched for this job — or one of th
 directories listed in `MALJAN_SAMPLE_ROOTS` (separated by `:`, empty by
 default). A capture fetched for another job is refused by every spelling, even
 where a sample root contains the staging base; nothing here writes. The capture a sandbox run produced is in one of them because the
-worker exports the directory it fetched it to. A refusal is `{"error":
-{"code": "path_outside_roots", ...}}` and names no host path; see "Which
-directories a sidecar may read" in `docs/configuration.md`.
+worker exports the directory it fetched it to. A relative `pcap_path` is read
+inside the job's own directory (`captures/<file>`), and a bare file name inside
+its captures.
+
+A refusal is `{"error": {"code": "path_outside_roots" | "no_such_file", ...}}`
+and names no host path. Its remediation lists this run's captures by those
+job-relative names, or says the run holds none; `pcap_path` is required on
+every tool, so it never says to leave the argument out. When a job has exactly
+one capture, the platform hides `pcap_path` from the schema the network tools
+are bound with and fills it in (`maljan.agents.tool_pinning`), the way it fills
+the sample's own path; see "Which directories a sidecar may read" in
+`docs/configuration.md`.
 
 ## Capabilities and errors
 

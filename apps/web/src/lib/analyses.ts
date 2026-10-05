@@ -1,7 +1,8 @@
 /**
  * One list of analyses, from the two endpoints that each held half of it.
  *
- * A report is a completed job. The console had a Jobs page and a Reports page
+ * A report is a completed job's, or one a failed job kept and marked
+ * incomplete. The console had a Jobs page and a Reports page
  * and the second was the first with one status filter already applied — same
  * sample, same link, different columns — so a reader who wanted "the run of
  * that file" had to guess which of the two pages knew about it. The search
@@ -31,6 +32,9 @@ export interface AnalysisRow {
   verdict: string | null;
   confidence: number | null;
   malwareCategory: string | null;
+  /** The sentence a report kept from a failed run carries; `null` for a
+   *  report of a completed run and for a run with no report. */
+  incompleteReason: string | null;
 }
 
 /**
@@ -80,6 +84,7 @@ export function analysisRows(
       verdict: report?.verdict ?? null,
       confidence: report?.overall_confidence ?? null,
       malwareCategory: report?.malware_category ?? null,
+      incompleteReason: report?.incomplete_reason ?? null,
     };
   });
 
@@ -89,12 +94,14 @@ export function analysisRows(
       sampleId: "",
       sample: report.sample_filename || report.job_id.slice(0, 12),
       sha256: null,
-      status: "completed",
+      // A report kept from a failed run is not a completed job's.
+      status: report.incomplete_reason ? "failed" : "completed",
       createdAt: report.created_at,
       durationSeconds: null,
       verdict: report.verdict,
       confidence: report.overall_confidence,
       malwareCategory: report.malware_category,
+      incompleteReason: report.incomplete_reason ?? null,
     });
   }
 

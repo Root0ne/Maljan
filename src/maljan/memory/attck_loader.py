@@ -565,6 +565,17 @@ def technique_entry(technique_id: str) -> VendoredTechnique | None:
     return _technique_table()[0].get(tid) if tid else None
 
 
+def technique_label(technique_id: str) -> str:
+    """``T1027 Obfuscated Files or Information``: the id with the vendored table's name.
+
+    The one place a technique's name is written from. An id the table does not
+    have is its id alone: a name nobody can check is not written beside it.
+    """
+    tid = (technique_id or "").strip().upper()
+    entry = technique_entry(tid)
+    return f"{tid} {entry.name}" if entry is not None and entry.name else tid
+
+
 def technique_ids_named(name: str) -> list[str]:
     """The ids the vendored table gives ``name`` to, compared without case or punctuation.
 
@@ -617,8 +628,49 @@ def _retired_rows() -> dict[str, dict[str, str]]:
 
 
 def retired_ids() -> dict[str, str]:
-    """``{technique_id: release it was retired in}`` from the vendored file."""
-    return {tid: row.get("retired_in") or "unknown" for tid, row in _retired_rows().items()}
+    """``{technique_id: release it was retired in}`` from the vendored file.
+
+    A row the bundle's own revoked or deprecated state put in the set, with no
+    release diff behind it, names no release and is not here
+    (:func:`retired_status` answers for it).
+    """
+    return {
+        tid: row.get("retired_in") or "unknown"
+        for tid, row in _retired_rows().items()
+        if row.get("retired_in") or not row.get("status")
+    }
+
+
+def retired_status(technique_id: str) -> str | None:
+    """``"revoked"`` or ``"deprecated"`` as the bundle marks the id, or ``None``."""
+    row = _retired_rows().get((technique_id or "").strip().upper()) or {}
+    return row.get("status") or None
+
+
+def retired_reason(technique_id: str) -> str | None:
+    """What happened to a retired id, in the words every surface uses; ``None`` otherwise.
+
+    Read from the vendored set alone: the release that retired it, the
+    bundle's own revoked or deprecated mark, and the id that revoked it where
+    the bundle names one. An id the set does not carry has no reason here,
+    and a caller says the catalogue has no entry for it.
+    """
+    release = retired_in(technique_id)
+    status = retired_status(technique_id)
+    successor = revoked_by(technique_id)
+    if release:
+        return f"retired in ATT&CK {release}" + (
+            f" and revoked by {successor}" if successor else ""
+        )
+    if status == "revoked":
+        return (
+            f"revoked by {successor} in the ATT&CK catalogue"
+            if successor
+            else "revoked in the ATT&CK catalogue"
+        )
+    if status == "deprecated":
+        return "deprecated in the ATT&CK catalogue"
+    return None
 
 
 def retired_in(technique_id: str) -> str | None:

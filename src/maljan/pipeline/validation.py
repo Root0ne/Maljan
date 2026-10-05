@@ -29,13 +29,16 @@ from typing import Any, get_args, get_origin
 
 from pydantic import ValidationError
 
+from maljan.agents.claim_headings import claim_blocks, count_claims_begun
+from maljan.agents.run_evidence_corpus import CorpusState, both_searched
+
 # The row helpers live with the shape (``analysis.corroboration``) and are
 # re-exported here, where every reader of a run's validation looks for them.
-from maljan.agents.run_evidence_corpus import CorpusState, both_searched
 from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
 from maljan.analysis.technique_ids import MITRE_ATTACK_SOURCES, TECHNIQUE_ID_EXACT_RE
 from maljan.core.logger import logger
+from maljan.core.spend import validation_retry
 from maljan.pipeline.events import (
     VALIDATION_RESOLVED,
     VALIDATION_RETRIED,
@@ -44,9 +47,10 @@ from maljan.pipeline.events import (
     emit_validation_feedback,
     safe_finding_value,
 )
-from maljan.schemas.evidence import entry_ids_in
+from maljan.schemas.evidence import answer_not_shown, entry_ids_in
 from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
 from maljan.schemas.stix_pattern import read_comparisons
+from maljan.utils.marked_cut import marked_cut
 from maljan.utils.written_forms import written_forms
 
 # How many alternatives a suggestion list carries. Three is what fits in one
@@ -61,16 +65,35 @@ MAX_SUGGESTIONS = 3
 # ``tests/fixtures/attck_alignment_recorded.json`` and docs/architecture.md.
 ALIGNMENT_MARGIN = 0.20
 
-# How many schema complaints one feedback turn carries. A model that answered
-# with the wrong shape produces one error per field, and a wall of them reads
-# as noise rather than as a correction.
-MAX_SCHEMA_VIOLATIONS = 6
+
+# What the question says of the claims the consistency gate set aside from an
+# answer that is shown back whole.
+GATE_REMOVED_LEAD = (
+    "These claims of the answer above were set aside before it was checked, because "
+    "the evidence text holds nothing they cite; they are in your answer again only if "
+    "you write them with evidence it holds:"
+)
+
+
+def gate_removed_note(claims: Sequence[str]) -> str:
+    """The lines naming the claims the consistency gate set aside, as written."""
+    return "\n".join([GATE_REMOVED_LEAD, *(f"- {' '.join(str(c).split())}" for c in claims)])
 
 
 # The sentence the retry turn opens with. A constant because two call sites
 # send it and a test reads it.
 FEEDBACK_PREAMBLE = "Your previous answer had these problems:"
 FEEDBACK_CLOSING = "Fix them and answer again in the same format."
+# The analyst's closing names the format its parser reads. "The same format"
+# was read as the shape of the previous answer as it was shown back, and an
+# answer written in any shape but CLAIM blocks parses into no claim at all.
+ANALYST_FEEDBACK_CLOSING = (
+    "Fix them and write your whole answer again in the format it is read in: every claim "
+    "as its own block of CLAIM:, EVIDENCE:, CONFIDENCE: and TECHNIQUE: lines, the blocks "
+    "separated by a line of three dashes (---), then your fenced maljan-findings block if "
+    "your answer had one. Only CLAIM blocks are read as claims: a claim written another "
+    "way, or left out, is not in the answer."
+)
 
 
 # What joins the agents of a route inside one serialised row. A unit separator
@@ -111,12 +134,25 @@ class Violation:
     # found where no turn was left to ask on. A row that says the producer
     # "kept" something when asked is only true of a row that was asked.
     asked: bool = True
+    # A question the producer was asked and answered as the question allows,
+    # recorded as what it answered rather than as something it left unfixed:
+    # an analyst that keeps a peer's claim under its DISPUTES section when
+    # asked has done what the question told it. Carried as ``"answered":
+    # "true"`` like ``advisory``, and left out of a report's unresolved count.
+    answered: bool = False
     # What the finding is about, by a fact that survives the retry: the
     # technique a credit names, the malware object's name. Two answers of one
     # judge number their objects afresh, and an answer to a credit question
     # renames the credited source — so "was this asked" is keyed on this where
-    # a check sets it, never on the words of the message.
+    # a check sets it, never on the words of the message. Every technique
+    # check sets it to the technique id it is about, and the report attaches
+    # the finding to that technique's row by it: a message can name other ids
+    # (an unknown id's names the closest real ones).
     subject: str = ""
+    # What a renderer prints after each of ``quoted``, in the same order, where
+    # each sentence carries its own label (a value and its publish state).
+    # Never shown to the producer and never stored on the channel.
+    labels: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         # A row written by a validator has no route, and its message is its
@@ -135,6 +171,7 @@ class Violation:
             "sentence": self.sentence,
             "route": ROUTE_SEPARATOR.join(self.route),
             **({} if self.asked else {"asked": "false"}),
+            **({"answered": "true"} if self.answered else {}),
             **({"subject": self.subject} if self.subject else {}),
         }
 
@@ -186,6 +223,7 @@ class ValidationTally:
                 "message": v.message,
                 **({"advisory": "true"} if v.advisory else {}),
                 **({} if asked and v.asked else {"asked": "false"}),
+                **({"answered": "true"} if v.answered else {}),
                 **({"subject": v.subject} if v.subject else {}),
             }
             for v in violations
@@ -225,13 +263,13 @@ Validator = Callable[[Any], list[Violation]]
 # ---------------------------------------------------------------------------
 
 
-def feedback_text(violations: Sequence[Violation]) -> str:
-    """The retry turn's text for a set of violations."""
+def feedback_text(violations: Sequence[Violation], *, closing: str = FEEDBACK_CLOSING) -> str:
+    """The retry turn's text for a set of violations, ending on ``closing``."""
     lines = [FEEDBACK_PREAMBLE]
     for violation in violations:
         where = f" ({violation.path})" if violation.path else ""
         lines.append(f"- [{violation.code}]{where} {violation.message}")
-    lines.append(FEEDBACK_CLOSING)
+    lines.append(closing)
     return "\n".join(lines)
 
 
@@ -248,6 +286,58 @@ UNGROUNDED_TECHNIQUE_CODE = "isr.ungrounded_technique"
 # is still unread after it is recorded.
 UNPARSED_ANSWER_CODE = "isr.unparsed_answer"
 CLAIM_WITHOUT_CONFIDENCE_CODE = "isr.claim_without_confidence"
+# A claim whose TECHNIQUE line is more than one id or NONE. No id is read
+# from it, and the analyst is asked once for one id per claim.
+TECHNIQUE_LINE_UNREAD_CODE = "isr.technique_line_unread"
+# Claim headings under the DISPUTES section, beside the analyst's own claims.
+# Not read as its own: they may be a peer's claims it quotes, or its own
+# written below the label. The analyst is asked once which; the code does not
+# read the label's words to decide.
+CLAIMS_UNDER_DISPUTES_CODE = "isr.claims_under_disputes"
+
+
+def claims_under_disputes_violation(count: int) -> Violation:
+    """What an analyst is asked about claim headings under its DISPUTES section."""
+    return Violation(
+        code=CLAIMS_UNDER_DISPUTES_CODE,
+        message=(
+            f"{int(count)} CLAIM heading(s) stand under your DISPUTES section and are not read "
+            "as your own claims. If they are yours, write them above DISPUTES; a peer's claim "
+            "you dispute stays under it."
+        ),
+    )
+
+
+def claims_kept_under_disputes_finding(count: int) -> Violation:
+    """The analyst's answer to the question about claim headings under its DISPUTES section.
+
+    Recorded when the analyst was asked and kept them there: the question told
+    it a peer's claim it disputes stays under the section, so keeping them is
+    an answer, not a loss, and the row says what the answer was.
+    """
+    return Violation(
+        code=CLAIMS_UNDER_DISPUTES_CODE,
+        message=(
+            f"Asked, the analyst kept {int(count)} CLAIM heading(s) under its DISPUTES section; "
+            "they are not read as its own claims."
+        ),
+        answered=True,
+    )
+
+
+def technique_line_violation(lines: list[str]) -> Violation:
+    """What an analyst is asked about TECHNIQUE lines no single id could be read from."""
+    shown = "; ".join(f'"{safe_finding_value(line)}"' for line in lines)
+    return Violation(
+        code=TECHNIQUE_LINE_UNREAD_CODE,
+        message=(
+            f"{len(lines)} claim(s) have a TECHNIQUE line that is not one technique id or "
+            f"NONE, so no technique is read from them: {shown}. Give each claim one "
+            "technique id, or NONE when it claims none; a claim that holds several "
+            "techniques is written as one claim per technique."
+        ),
+    )
+
 
 _UNPARSED_ANSWER_MESSAGE = (
     "Your answer has no CLAIM block that can be read, so it carries no claim and "
@@ -278,18 +368,48 @@ def parse_violations(isr: Any) -> list[Violation]:
         declined = int(getattr(isr, "blocks_without_confidence", 0) or 0)
     except (TypeError, ValueError):
         declined = 0
-    if declined:
-        found.append(
-            Violation(
-                code=CLAIM_WITHOUT_CONFIDENCE_CODE,
-                message=(
-                    f"{declined} CLAIM block(s) state no CONFIDENCE that reads as a number "
-                    "between 0.0 and 1.0, so they are not claims. Give each the confidence "
-                    "you hold it at, or leave it out."
-                ),
-            )
-        )
+    lines = [
+        str(getattr(claim, "technique_line", "") or "")
+        for claim in getattr(isr, "claims", None) or []
+        if getattr(claim, "technique_line", None)
+    ]
+    if lines:
+        found.append(technique_line_violation(lines))
+    try:
+        under = int(getattr(isr, "claims_under_disputes", 0) or 0)
+    except (TypeError, ValueError):
+        under = 0
+    if under:
+        found.append(claims_under_disputes_violation(under))
+    unreadable = [str(v) for v in (getattr(isr, "confidence_unreadable", None) or [])]
+    if declined or unreadable:
+        found.append(confidence_violation(declined, unreadable))
     return found
+
+
+def confidence_violation(declined: int, unreadable: Sequence[str]) -> Violation:
+    """The one question for the CLAIM blocks whose confidence was not read.
+
+    Blocks that state no CONFIDENCE, and blocks whose CONFIDENCE value reads
+    as neither a number from 0.0 to 1.0 nor a percentage, each value quoted
+    as written: neither is a claim until the analyst gives the number.
+    """
+    parts: list[str] = []
+    if declined:
+        parts.append(f"{int(declined)} CLAIM block(s) state no CONFIDENCE")
+    if unreadable:
+        quoted = ", ".join(repr(safe_finding_value(v)) for v in dict.fromkeys(unreadable))
+        parts.append(
+            f"{len(unreadable)} CLAIM block(s) write a CONFIDENCE that reads as neither a "
+            f"number from 0.0 to 1.0 nor a percentage ({quoted})"
+        )
+    return Violation(
+        code=CLAIM_WITHOUT_CONFIDENCE_CODE,
+        message=(
+            f"{'; '.join(parts)}, so they are not claims. Give each the confidence you hold "
+            "it at, as a number from 0.0 to 1.0, or leave it out."
+        ),
+    )
 
 
 def _techniques_cited_by_findings(isr: Any, citable: set[str]) -> set[str]:
@@ -430,6 +550,7 @@ def validate_isr(
                         "downstream as a finding."
                     ),
                     path=path,
+                    subject=tid,
                 )
             )
         if not tid:
@@ -453,6 +574,10 @@ def validate_isr(
                         "Use one of them, or omit the technique id."
                     ),
                     path=path,
+                    # The id the claim carries: the message also names the
+                    # closest real techniques, and a reader matching on its
+                    # words attached this finding to them.
+                    subject=tid,
                 )
             )
             continue
@@ -467,7 +592,7 @@ def validate_isr(
             mismatch = platform_mismatch_message(tid, attck, scope)
             if mismatch:
                 violations.append(
-                    Violation(code=PLATFORM_MISMATCH_CODE, message=mismatch, path=path)
+                    Violation(code=PLATFORM_MISMATCH_CODE, message=mismatch, path=path, subject=tid)
                 )
             else:
                 # A claim that names the behaviour to say it is absent is asked
@@ -489,7 +614,9 @@ def validate_isr(
             challenge=weak_alignment_challenges and absence is None,
         )
         if weak:
-            violations.append(Violation(code=WEAK_ALIGNMENT_CODE, message=weak, path=path))
+            violations.append(
+                Violation(code=WEAK_ALIGNMENT_CODE, message=weak, path=path, subject=tid)
+            )
 
     return violations
 
@@ -783,6 +910,7 @@ def absence_claim_violation(
             "the technique and say what the sample does."
         ),
         path=path,
+        subject=str(technique_id).strip().upper(),
     )
 
 
@@ -892,7 +1020,49 @@ def claim_does_not_describe_violation(
             "TECHNIQUE: NONE."
         ),
         path=path,
+        subject=str(technique_id).strip().upper(),
     )
+
+
+def undescribed_technique_finding(technique_id: str, attck: Any, claims: int) -> str:
+    """The check's finding on a technique no claim naming which uses the catalogue's terms for it.
+
+    The fact :func:`claim_does_not_describe_violation` raises on each claim,
+    said of the technique as a whole as the term match it is, for the judge's
+    question after its verdict and for the report row that shows its answer.
+    ``""`` without the catalogue's name for the id: nothing is stated that
+    cannot be checked.
+    """
+    name, _stems = _name_terms(technique_id, attck)
+    if not name:
+        return ""
+    tid = safe_finding_value(technique_id)
+    return (
+        "the ATT&CK check found that no claim naming it uses the catalogue's terms for it: "
+        f"none of the {int(claims)} claim sentence(s) naming {tid} {safe_finding_value(name)} "
+        "shares a term with that technique, not its name, its tactic or the words that "
+        "describe it"
+    )
+
+
+def claim_asked_whether_it_describes(
+    claim: Any, technique_id: str, attck: Any, sample: Mapping[str, Any] | None = None
+) -> bool:
+    """Whether the analysts' check asks ``claim`` the does-not-describe question.
+
+    The same order :func:`validate_isr` follows: an id the catalogue does not
+    know, a claim that reads as absence, and an id the sample's platform
+    cannot host are each asked their own question instead, and only a claim
+    past all three is asked this one, when its sentence shares no term.
+    """
+    tid = str(technique_id or "").strip()
+    if not tid or attck is None or not _technique_is_known(tid, attck):
+        return False
+    if absence_claim_violation(claim, tid, attck) is not None:
+        return False
+    if platform_mismatch_message(tid, attck, expected_technique_scope(sample)):
+        return False
+    return claim_does_not_describe_violation(claim, tid, attck) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -1340,16 +1510,39 @@ def _technique_is_known(technique_id: str, attck: Any) -> bool:
 
 
 def _retired_note(technique_id: str, attck: Any) -> str:
-    """`` (retired in ATT&CK 19.2)`` when a previous vendored catalogue had the id."""
-    ask = getattr(attck, "attck_retired_in", None)
-    if ask is None:
-        return ""
+    """`` (retired in ATT&CK 19.2)`` when the vendored retired set carries the id.
+
+    The reason every surface gives (``attck_retired_reason``): the release
+    that retired it, the bundle's own revoked or deprecated mark, and the id
+    that revoked it. A knowledge object with only ``attck_retired_in`` answers
+    the release alone.
+    """
+    reason_of = getattr(attck, "attck_retired_reason", None)
+    release_of = getattr(attck, "attck_retired_in", None)
     try:
-        release = ask(technique_id)
+        if reason_of is not None:
+            reason = reason_of(technique_id)
+            return f" ({reason})" if reason else ""
+        if release_of is None:
+            return ""
+        release = release_of(technique_id)
     except Exception as exc:  # noqa: BLE001 — a note, not a check
         logger.debug("validation: the retired-id lookup for %s failed (%s).", technique_id, exc)
         return ""
     return f" (retired in ATT&CK {release})" if release else ""
+
+
+def _catalogue_rejection(technique_id: str, attck: Any) -> str:
+    """Why the catalogue rejects an id, as the clause after "which".
+
+    A retired id has an entry the catalogue no longer lists as current, so it
+    is said to have no current entry and what happened to it; only an id the
+    retired set does not carry has no entry in any domain.
+    """
+    note = _retired_note(technique_id, attck)
+    if note:
+        return f"the MITRE ATT&CK catalogue has no current entry for it: it was {note[2:-1]}"
+    return "the MITRE ATT&CK catalogue has no entry for in any domain"
 
 
 def _suggest_techniques(claim_text: str, attck: Any) -> list[str]:
@@ -1465,8 +1658,8 @@ def schema_violations(model: Any, payload: Any, *, code: str) -> list[Violation]
     """Pydantic's complaints about ``payload``, in words the model can act on.
 
     The narrative and the report composer answer against a schema with real
-    constraints — three to six key findings, an executive summary
-    between 120 and 1200 characters, six required fields per recommendation —
+    constraints — at least two key findings, an executive summary of at
+    least 120 characters, six required fields per recommendation —
     and the constraints are exactly the things a model gets wrong. Before this
     the whole answer was discarded on the first one and the report shipped the
     deterministic template instead, with nothing telling anyone which rule was
@@ -1484,8 +1677,10 @@ def schema_violations(model: Any, payload: Any, *, code: str) -> list[Violation]
                 message=_schema_message(model, error),
                 path=".".join(str(part) for part in error.get("loc") or ()),
             )
+            # Every complaint: a count cap here hid the seventh broken field,
+            # and the retry then came back with it still broken.
             for error in exc.errors()
-        ][:MAX_SCHEMA_VIOLATIONS]
+        ]
     except Exception as exc:  # noqa: BLE001 — a coercion failure is still a finding
         return [Violation(code=code, message=safe_finding_value(exc))]
     return []
@@ -2100,10 +2295,17 @@ def _base_technique(technique_id: Any) -> str:
 
 
 # How many of a term's technique ids its question names, as examples of what
-# would ground it. Two: every term leads with the ids that describe it most
-# generally, and a longer list only puts more technique ids in front of a report
-# model that has not established any of them.
+# would ground it; the rest are counted. Two: every term leads with the ids
+# that describe it most generally, and naming more only puts more technique ids
+# in front of a report model that has not established any of them.
 _TERM_IDS_SHOWN = 2
+
+
+def _term_ids_said(techniques: Sequence[str]) -> str:
+    """The first ids of a term, and how many more it has ("T1027, T1140 and 3 more")."""
+    said = ", ".join(techniques[:_TERM_IDS_SHOWN])
+    rest = len(techniques) - _TERM_IDS_SHOWN
+    return f"{said} and {rest} more" if rest > 0 else said
 
 
 # A sentence whose assertion is that a rule matched: the matcher, a rule or a
@@ -2195,7 +2397,7 @@ def ungrounded_capabilities(
                 code=code,
                 message=(
                     f"the text claims {label}, which nothing in this run establishes — "
-                    f"no {', '.join(techniques[:_TERM_IDS_SHOWN])} technique, no matching evidence "
+                    f"no {_term_ids_said(techniques)} technique, no matching evidence "
                     f"section, and no analyst said it"
                     f" (in: {safe_finding_value(sentences[0])!r}).{rule_line} "
                     f"{grounding.summary()} Describe what was found, or drop the claim."
@@ -2289,8 +2491,12 @@ def record_flagged_statements(
         for violation in violations:
             if violation.code not in MARKED_IN_PLACE:
                 continue
-            label = violation.path.replace("_", " ")
-            for sentence in violation.quoted:
+            # A sentence with a label of its own (its values and their publish
+            # states) carries that; every other label is a term or a technique
+            # named by the finding's path.
+            default = violation.path.replace("_", " ")
+            for position, sentence in enumerate(violation.quoted):
+                label = violation.labels[position] if position < len(violation.labels) else default
                 key = (sentence, violation.code, label, asked)
                 if key not in seen:
                     seen.add(key)
@@ -2557,11 +2763,8 @@ SECTION_CUT_CODE = "composer.cut_at_output_cap"
 # the retry's whole cap again, and returned no claim at all.
 ANALYST_CUT_CODE = "isr.cut_at_output_cap"
 
-# A claim begun in an analyst's answer: the label every claim block opens with.
-_CLAIM_BEGUN_RE = re.compile(r"^\s*CLAIM:", re.MULTILINE)
 
-
-def analyst_cut_violation(cap: int, text: str = "") -> Violation:
+def analyst_cut_violation(cap: int, text: str = "", *, chunk: str = "") -> Violation:
     """What an analyst the cap cut is told: the cap, what was begun, and the bound.
 
     The cut answer is not sent back (``retry_with_feedback_sync``'s
@@ -2569,9 +2772,10 @@ def analyst_cut_violation(cap: int, text: str = "") -> Violation:
     began — and the length it was cut at is the bound the next answer stays
     under. It asks once for a whole shorter answer, never for fewer findings
     than the evidence holds, and the cap it names is the one in force: nothing
-    here raises it.
+    here raises it. ``chunk`` names the chunk whose answer was cut, as
+    "chunk 1 of 2", when the answer checked is a merge of chunks.
     """
-    begun = len(_CLAIM_BEGUN_RE.findall(text))
+    begun = count_claims_begun(text)
     size = (
         f" It ran to {len(text):,} characters"
         + (f" and began {begun} CLAIM block(s)" if begun else "")
@@ -2580,10 +2784,11 @@ def analyst_cut_violation(cap: int, text: str = "") -> Violation:
         if text
         else ""
     )
+    answer = f"answer to {chunk}" if chunk else "previous answer"
     return Violation(
         code=ANALYST_CUT_CODE,
         message=(
-            f"Your previous answer stopped at the output limit of {int(cap)} tokens before "
+            f"Your {answer} stopped at the output limit of {int(cap)} tokens before "
             f"it ended, so its last claim was cut off.{size} Any reasoning you write counts "
             f"against the same limit. Write the whole answer again so that it ends well inside "
             f"{int(cap)} tokens: the claims the evidence supports best, each written once, "
@@ -2593,7 +2798,698 @@ def analyst_cut_violation(cap: int, text: str = "") -> Violation:
     )
 
 
-# How much of a cut answer its question shows, as a sample of its shape.
+# An analyst's answer that writes the same claims again and again: the same
+# whole-answer question is asked of it, once, with the part written before the
+# repetition shown back.
+ANALYST_REPEATED_CODE = "isr.claims_repeated"
+
+
+@dataclass(frozen=True)
+class ClaimsRepeated:
+    """What an answer's claims say: begun, distinct, the margin they passed, and where it began.
+
+    ``before`` is the answer as written up to the first claim that repeats an
+    earlier one, and ``first_repeat`` that claim's position, 1-based.
+    """
+
+    begun: int
+    distinct: int
+    margin: int
+    chars: int
+    before: str = ""
+    first_repeat: int = 0
+
+    @property
+    def repeated(self) -> int:
+        """The headings begun again after the first of each."""
+        return self.begun - self.distinct
+
+
+def claims_repeated(text: str, margin: int | None = None) -> ClaimsRepeated | None:
+    """The finding for an answer whose repeated claim headings exceed the margin, or ``None``.
+
+    Read off the answer as it arrived (``claim_headings.claim_blocks``): each
+    claim is its whole block, heading and lines, so claims under one label
+    with different sentences or evidence are different claims. The margin is
+    the number of distinct claims, so a second whole copy of the answer is
+    within it; ``margin`` is an operator's own number
+    (``validation.claim_repeat_margin``), and there is none by default.
+    """
+    written = text or ""
+    blocks = claim_blocks(written)
+    begun = len(blocks)
+    distinct = len({key for _start, key in blocks})
+    allowed = distinct if margin is None else max(0, int(margin))
+    if begun - distinct <= allowed:
+        return None
+    seen: set[str] = set()
+    before, first_repeat = written, 0
+    for position, (start, key) in enumerate(blocks, start=1):
+        if key in seen:
+            before, first_repeat = written[:start].rstrip(), position
+            break
+        seen.add(key)
+    return ClaimsRepeated(
+        begun=begun,
+        distinct=distinct,
+        margin=allowed,
+        chars=len(written),
+        before=before,
+        first_repeat=first_repeat,
+    )
+
+
+# What the repeated-claims question adds when the answer was ended while it streamed.
+ENDED_WHILE_STREAMING_SENTENCE = (
+    " It was ended while it streamed, once its repeats passed that margin; what it wrote "
+    "up to there is kept."
+)
+
+
+def analyst_repeated_violation(
+    found: ClaimsRepeated, *, chunk: str = "", cut: int | None = None, ended: bool = False
+) -> Violation:
+    """What an analyst whose answer repeated its claims is told, and the whole-answer question.
+
+    The same whole-answer question the cut-at-cap finding asks, with the fact
+    that raised it: the claims begun, the distinct claims among them and how
+    many were written again. The answer is shown back only up to the first
+    claim that repeats (``ClaimsRepeated.before``, sent as the assistant turn
+    in place of the whole answer), and any whole answer that does not repeat
+    stands. ``cut`` is the output cap an answer that also stopped at it was
+    cut at: the one question then states that fact too, because the model
+    sees the answer up to its first repeat and the cut question's own words
+    would say it sees none of it. ``ended`` says the answer was ended while it
+    streamed (``agents.base_agent.claims_repeat_rule``), so the finding and
+    the events that carry it state it.
+    """
+    answer = f"answer to {chunk}" if chunk else "previous answer"
+    chars, begun, distinct = int(found.chars), int(found.begun), int(found.distinct)
+    repeated, margin = int(found.repeated), int(found.margin)
+    first = int(found.first_repeat)
+    streamed = ENDED_WHILE_STREAMING_SENTENCE if ended else ""
+    limit = (
+        f" It also stopped at the output limit of {int(cut):,} tokens before it ended: the "
+        "whole answer has to end well inside that limit, and any reasoning you write "
+        "counts against it."
+        if cut
+        else ""
+    )
+    return Violation(
+        code=ANALYST_REPEATED_CODE,
+        message=(
+            f"Your {answer} ran to {chars:,} characters and began {begun} CLAIM block(s), "
+            f"{distinct} of them distinct: {repeated} repeat a claim already written, more "
+            f"than the {margin} allowed.{streamed}{limit} It is shown above only up to CLAIM "
+            f"block {first}, "
+            "the first that repeats an earlier one; the rest is not shown to you again. Write "
+            "the whole answer again: the claims shown above and any other the evidence "
+            "supports, each written once, each one sentence with its EVIDENCE, CONFIDENCE and "
+            "TECHNIQUE lines, and nothing between the blocks."
+        ),
+    )
+
+
+def chunk_cut_unread_sentence(chunk: str) -> str:
+    """What a chunk's cut finding adds when the question did not get a whole answer."""
+    return (
+        f"The answer to {chunk} is kept as the limit cut it; what it did not reach of "
+        f"{chunk} is unread."
+    )
+
+
+# ---------------------------------------------------------------------------
+# A function the analyst decompiled that no claim describes
+# ---------------------------------------------------------------------------
+
+# A reverser decompiled two routines that held half of what the analysis
+# needed, kept both in its own ledger, and no claim of its answer described
+# either. The functions its ledger entries decompiled are listed to it, once.
+DECOMPILED_NOT_DESCRIBED_CODE = "isr.decompiled_not_described"
+
+# The argument names a decompile call gives its function under: an address, a
+# list of addresses (a batch), or a name.
+_ADDRESS_ARGUMENTS = ("address", "addr", "function_address", "ea", "va", "start")
+_ADDRESS_LIST_ARGUMENTS = ("functions", "addresses")
+_NAME_ARGUMENTS = ("name", "function_name", "function", "symbol")
+# A decompiler's own name for a function it was given no name for: the address
+# after a fixed prefix (Ghidra's ``FUN_``, radare2's ``fcn.``, IDA's ``sub_``).
+_GENERIC_FUNCTION_NAME = re.compile(
+    r"(?<![0-9A-Za-z_])(?:fun|fcn|sub|func|loc|lab)[_.]([0-9a-f]{1,16})(?![0-9a-z_])",
+    re.IGNORECASE,
+)
+# An address written in a claim: ``0x`` and hex digits.
+_HEX_ADDRESS = re.compile(r"(?<![0-9A-Za-z_])0x([0-9a-f]{1,16})(?![0-9a-z_])", re.IGNORECASE)
+# The same address in an assembler's spelling (``1230h``), and as bare hex
+# digits with at least one digit and one letter in them (``140004560``).
+_SUFFIXED_ADDRESS = re.compile(r"(?<![\w.])([0-9][0-9a-f]{0,15})h(?![\w])", re.IGNORECASE)
+_BARE_ADDRESS = re.compile(
+    r"(?<![\w.])(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])([0-9a-f]{4,16})(?![\w])", re.IGNORECASE
+)
+# A listing's signature: the identifier right before an opening parenthesis,
+# at the start of its line or after a space or a ``*``.
+_SIGNATURE_NAME = re.compile(r"(?:^|(?<=[\s*]))([A-Za-z_$?@][\w.$?@:]*)\s*\(")
+_NOT_A_NAME = frozenset({"if", "while", "for", "switch", "return", "sizeof", "do"})
+# One function of a batch decompile's answer as its text shows it, when the
+# answer is cut and no longer parses: the address key and its listing, which
+# may itself be cut.
+_BATCH_MEMBER = re.compile(r'\s*"([^"\\]*)"\s*:\s*"((?:[^"\\]|\\.)*)(")?')
+# A batch answer's key that is an address: ``0x`` and hex digits, or at least
+# four hex digits.
+_ADDRESS_KEY = re.compile(r"(?:0x([0-9a-fA-F]{1,16})|((?=[0-9a-fA-F]*\d)[0-9a-fA-F]{4,16}))")
+# An image base a tool stated: an unquoted number, or a quoted string.
+_IMAGE_BASE = re.compile(r'"image_base"\s*:\s*(?:(\d+)\b|"([^"]*)")')
+# A letterless run of digits a claim writes, read against a function's own hex
+# spelling exactly.
+_DIGIT_RUN = re.compile(r"(?<![\w.])(\d{1,20})(?![\w])")
+# Where a loaded image's base may sit: a multiple of 64 KiB. With no base
+# known, a claim's address and a decompiled one are one function when they
+# differ by a positive multiple of this (an offset from the image base against
+# the virtual address).
+_IMAGE_BASE_ALIGNMENT = 0x10000
+
+
+@dataclass(frozen=True)
+class DecompiledFunction:
+    """One function an analyst's ledger decompiled: its address, the names it was given, where."""
+
+    address: int | None
+    names: tuple[str, ...]
+    entries: tuple[str, ...]
+
+
+def _hex_value(text: str) -> int | None:
+    match = re.fullmatch(r"\s*(?:0x)?([0-9a-fA-F]{1,16})\s*", str(text or ""))
+    return int(match.group(1), 16) if match else None
+
+
+def _address_value(value: Any) -> int | None:
+    """An address argument: an integer as it is, a string as hex."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    return _hex_value(str(value))
+
+
+def _address_list(value: Any) -> list[int]:
+    """A batch's addresses: a list, or a string with commas between them."""
+    items = value if isinstance(value, list | tuple) else str(value or "").split(",")
+    found = [_address_value(item) for item in items]
+    return [address for address in found if address is not None]
+
+
+def _signature_name(output: str) -> str:
+    """The function name a decompiler's listing prints in its signature, or ``""``.
+
+    Read line by line, comments aside. A line that holds only the return type
+    is passed over; the first line with a parenthesis, a brace or a semicolon
+    decides.
+    """
+    for line in str(output or "").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("//", "/*", "*", "#")):
+            continue
+        found = _SIGNATURE_NAME.search(stripped)
+        if found is not None and found.group(1).lower() not in _NOT_A_NAME:
+            return found.group(1)
+        if any(mark in stripped for mark in "({;"):
+            return ""
+    return ""
+
+
+def _listing_text(output: str) -> str:
+    """The listing an answer carries: a JSON string's own text, the output as it is when
+    it is no JSON, and nothing when it is a JSON object or list whose listing is not
+    known."""
+    try:
+        parsed = json.loads(output)
+    except (ValueError, TypeError):
+        return output
+    if isinstance(parsed, str):
+        return parsed
+    return "" if isinstance(parsed, dict | list) else output
+
+
+def _address_key(key: str) -> int | None:
+    """A batch answer's key as an address: ``0x`` and hex digits, or four hex digits or more."""
+    match = _ADDRESS_KEY.fullmatch(str(key).strip())
+    return int(match.group(1) or match.group(2), 16) if match else None
+
+
+def _cut_batch_items(output: str) -> list[tuple[str, str]]:
+    """The keys and listings a cut batch answer still shows, read from its opening brace.
+
+    Only an answer that begins with ``{`` and a quoted key is read, one
+    member after another; a listing cut short ends the reading with what it
+    held.
+    """
+    opening = re.match(r"\s*\{", output)
+    if opening is None:
+        return []
+    items: list[tuple[str, str]] = []
+    at = opening.end()
+    while True:
+        member = _BATCH_MEMBER.match(output, at)
+        if member is None:
+            break
+        raw, closed = member.group(2), member.group(3)
+        try:
+            text = json.loads(f'"{raw}"')
+        except ValueError:
+            text = ""
+        items.append((member.group(1), str(text)))
+        if not closed:
+            break
+        comma = re.compile(r"\s*,").match(output, member.end())
+        if comma is None:
+            break
+        at = comma.end()
+    return items
+
+
+def _batch_listings(output: str) -> tuple[bool, dict[int, str]]:
+    """``(shown, listings)`` of an answer keyed by address, one function per key.
+
+    ``shown`` is whether the answer is an object every key of which reads as
+    an address (``_address_key``). A key whose listing begins with ``Error``
+    was not decompiled. An answer cut short keeps the functions its text still
+    shows (``_cut_batch_items``). Any other answer is no batch.
+    """
+    try:
+        parsed = json.loads(output)
+    except (ValueError, TypeError):
+        parsed = None
+    if isinstance(parsed, dict):
+        items = [(str(key), str(value)) for key, value in parsed.items()]
+    elif parsed is None:
+        items = _cut_batch_items(output)
+    else:
+        items = []
+    addresses = [_address_key(key) for key, _text in items]
+    if not items or any(address is None for address in addresses):
+        return False, {}
+    listings: dict[int, str] = {}
+    for address, (_key, text) in zip(addresses, items, strict=True):
+        if address is None or text.lstrip().lower().startswith("error"):
+            continue
+        listings[address] = text
+    return True, listings
+
+
+def _entry_functions(entry: Any) -> list[tuple[int | None, list[str]]]:
+    """The ``(address, names)`` of each function one decompile entry holds."""
+    args = getattr(entry, "args", None) or {}
+    output = str(getattr(entry, "output", "") or "")
+    shown, listings = _batch_listings(output)
+    if shown:
+        return [(address, _named(None, text, args={})) for address, text in listings.items()]
+    for argument in _ADDRESS_LIST_ARGUMENTS:
+        if argument in args:
+            addresses = _address_list(args[argument])
+            if len(addresses) > 1:
+                return [(address, []) for address in addresses]
+    address: int | None = None
+    for argument in _ADDRESS_ARGUMENTS:
+        if argument in args and address is None:
+            address = _address_value(args[argument])
+    for argument in _ADDRESS_LIST_ARGUMENTS:
+        if argument in args and address is None:
+            listed = _address_list(args[argument])
+            address = listed[0] if listed else None
+    names = _named(address, _listing_text(output), args=args)
+    if address is None:
+        for name in names:
+            generic = _GENERIC_FUNCTION_NAME.fullmatch(name)
+            if generic is not None:
+                address = int(generic.group(1), 16)
+                break
+    return [(address, names)]
+
+
+def _named(address: int | None, listing: str, *, args: Mapping[str, Any]) -> list[str]:
+    """The names a call gave a function and the name its listing prints."""
+    names: list[str] = []
+    for argument in _NAME_ARGUMENTS:
+        value = str(args.get(argument) or "").strip()
+        if value and _hex_value(value) is None:
+            names.append(value)
+    printed = _signature_name(listing)
+    if printed:
+        names.append(printed)
+    return list(dict.fromkeys(names))
+
+
+def decompiled_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
+    """The functions these ledger entries decompiled, once each, in the order first asked.
+
+    An entry counts when its tool's name says it decompiles and the call
+    answered with something the model read: an answer the conversation had no
+    room for (``schemas.evidence.answer_not_shown``) is no listing read. A
+    batch answer keyed by address is one function per key, its ``Error`` keys
+    left out; a batch whose answer is not keyed takes the
+    addresses it was given. Otherwise the address is the one the call was
+    given (hex with or without ``0x``, or an integer), or the one a
+    decompiler's generic name carries. The names are the one the call was
+    given and the one the listing's signature prints. Entries for one address,
+    and a function asked for by a name that one asked for by address carries,
+    are one function.
+    """
+    found: dict[Any, DecompiledFunction] = {}
+    for entry in entries:
+        tool = str(getattr(entry, "tool", "") or "").lower()
+        if "decompil" not in tool or not getattr(entry, "ok", True) or answer_not_shown(entry):
+            continue
+        entry_id = str(getattr(entry, "id", "") or "")
+        for address, names in _entry_functions(entry):
+            if address is None and not names:
+                continue
+            key: Any = address if address is not None else names[0]
+            known = found.get(key)
+            found[key] = DecompiledFunction(
+                address=address,
+                names=tuple(dict.fromkeys([*(known.names if known else ()), *names])),
+                entries=tuple(
+                    dict.fromkeys(
+                        [*(known.entries if known else ()), *([entry_id] if entry_id else [])]
+                    )
+                ),
+            )
+    # A function asked for by name alone is the one asked for by address that
+    # carries the same name.
+    for key in [key for key in found if isinstance(key, str)]:
+        named = found[key]
+        into = next(
+            (
+                other
+                for other_key, other in found.items()
+                if not isinstance(other_key, str) and set(named.names) & set(other.names)
+            ),
+            None,
+        )
+        if into is None or into.address is None:
+            continue
+        found[into.address] = DecompiledFunction(
+            address=into.address,
+            names=tuple(dict.fromkeys([*into.names, *named.names])),
+            entries=tuple(dict.fromkeys([*into.entries, *named.entries])),
+        )
+        del found[key]
+    return list(found.values())
+
+
+def _base_value(number: str | None, text: str | None) -> int | None:
+    """One stated image base, or ``None`` when it cannot be read without a guess.
+
+    An unquoted number is the number. A quoted string is hex when it says so
+    (``0x…``, ``…h``) or holds a hex letter; a quoted string of decimal digits
+    alone could be either, and is no base.
+    """
+    if number is not None:
+        return int(number)
+    written = str(text or "").strip()
+    prefixed = re.fullmatch(r"0x([0-9a-fA-F]{1,16})", written, re.IGNORECASE)
+    if prefixed:
+        return int(prefixed.group(1), 16)
+    suffixed = re.fullmatch(r"([0-9a-fA-F]{1,16})h", written, re.IGNORECASE)
+    if suffixed:
+        return int(suffixed.group(1), 16)
+    if re.fullmatch(r"[0-9a-fA-F]{1,16}", written) and re.search(r"[a-fA-F]", written):
+        return int(written, 16)
+    return None
+
+
+def image_bases_in(entries: Iterable[Any]) -> tuple[int, ...]:
+    """The image bases these ledger entries' answers state (``"image_base"``), once each.
+
+    Read by ``_base_value``; a value that is not a positive multiple of 64 KiB,
+    where every image base sits, is no base.
+    """
+    bases: list[int] = []
+    for entry in entries:
+        for match in _IMAGE_BASE.finditer(str(getattr(entry, "output", "") or "")):
+            value = _base_value(match.group(1), match.group(2))
+            if value and value % _IMAGE_BASE_ALIGNMENT == 0 and value not in bases:
+                bases.append(value)
+    return tuple(bases)
+
+
+def _one_function(a: int, b: int, bases: Sequence[int] = ()) -> bool:
+    """Whether two addresses are one function.
+
+    Equal, or an offset and its virtual address: they differ by an image base
+    the run read, or, with none known, by a positive multiple of 64 KiB.
+    """
+    low, high = sorted((a, b))
+    if low == high:
+        return True
+    if bases:
+        return high - low in bases
+    return low > 0 and (high - low) % _IMAGE_BASE_ALIGNMENT == 0
+
+
+def _addresses_written(text: str) -> list[int]:
+    """Every address ``text`` writes: ``0x…``, ``…h``, bare hex, or in a generic name."""
+    return [
+        int(match.group(1), 16)
+        for pattern in (_HEX_ADDRESS, _GENERIC_FUNCTION_NAME, _SUFFIXED_ADDRESS, _BARE_ADDRESS)
+        for match in pattern.finditer(text)
+    ]
+
+
+def _named_by(text: str, function: DecompiledFunction, bases: Sequence[int] = ()) -> bool:
+    """Whether ``text`` names ``function`` by an address or by a name the decompiler gave it."""
+    if function.address is not None and any(
+        _one_function(function.address, address, bases) for address in _addresses_written(text)
+    ):
+        return True
+    # A run of digits alone names the function only when it is the function's
+    # own hex spelling, exactly, leading zeros aside.
+    if function.address is not None:
+        spelled = f"{function.address:x}"
+        if spelled.isdigit() and any(
+            run.group(1).lstrip("0") == spelled.lstrip("0") for run in _DIGIT_RUN.finditer(text)
+        ):
+            return True
+    for name in function.names:
+        if _GENERIC_FUNCTION_NAME.fullmatch(name):
+            continue
+        spellings = {name, name.rsplit(".", 1)[-1]} if "." in name else {name}
+        for spelling in spellings:
+            if len(spelling) >= 3 and re.search(
+                r"(?<![\w.])" + re.escape(spelling) + r"(?![\w])", text
+            ):
+                return True
+    return False
+
+
+def undescribed_decompiles(
+    isr: Any, functions: Sequence[DecompiledFunction], image_bases: Sequence[int] = ()
+) -> list[DecompiledFunction]:
+    """The decompiled functions no claim of ``isr`` names in its sentence or evidence line.
+
+    A claim names a function by an address written as ``0x…``, as ``…h``, as
+    bare hex or inside a decompiler's generic name (``FUN_``, ``fcn.``,
+    ``sub_``): the same address, or one that differs from it by an image base
+    the run read (``image_bases``), or, with none known, by a multiple of
+    64 KiB. Or it names it by a name the decompiler gave it. A citation of the
+    ledger entry alone does not name it.
+    """
+    texts = [
+        f"{getattr(claim, 'claim', '') or ''} {getattr(claim, 'evidence_ref', '') or ''}"
+        for claim in (getattr(isr, "claims", None) or [])
+    ]
+    return [f for f in functions if not any(_named_by(text, f, image_bases) for text in texts)]
+
+
+def _decompiled_words(function: DecompiledFunction) -> str:
+    """``0x140001000 (FUN_140001000; ev_0003)``: the address, the names, the entries."""
+    said = [*function.names, *function.entries]
+    head = hex(function.address) if function.address is not None else function.names[0]
+    if function.address is None:
+        said = [*function.names[1:], *function.entries]
+    return f"{head} ({'; '.join(said)})" if said else head
+
+
+def decompiled_not_described_violation(
+    functions: Sequence[DecompiledFunction],
+) -> Violation | None:
+    """The question for the decompiled functions no claim names, or ``None`` when none is left.
+
+    Every such function is listed, with its names and the entries that hold
+    its listing, in one question. What the analyst answers stands; the
+    functions its kept answer still names in no claim are the finding the
+    report prints.
+    """
+    if not functions:
+        return None
+    return Violation(
+        code=DECOMPILED_NOT_DESCRIBED_CODE,
+        message=(
+            f"You decompiled {len(functions)} function(s) that no claim of this answer names "
+            "by a name the decompiler gave it, or by its address or its offset from the "
+            "image base written in hex (with 0x, with a trailing h, as bare hex digits, or "
+            "inside a name such as FUN_); an offset written in decimal digits alone is not "
+            "read as one: "
+            f"{'; '.join(safe_finding_value(_decompiled_words(f)) for f in functions)}. For "
+            "each one that matters to this analysis, write a claim naming it by its address "
+            "and saying what its code does: the checks it makes, the calls it makes and "
+            "their arguments, and the decoded strings and resolved names it uses, citing the "
+            "entry that holds its listing. A function that does nothing this analysis needs "
+            "may stay undescribed."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# A claim that says only that a library or its APIs are used
+# ---------------------------------------------------------------------------
+
+# A reverser's answer was mostly one-line claims of the form "uses `x.dll`
+# APIs for y", each citing only the hash-resolution listing.
+LIBRARY_ONLY_CLAIMS_CODE = "isr.library_only_claims"
+
+_LIBRARY_SUBJECT = (
+    r"(?:(?:the|this)\s+)?(?:sample|binary|file|dll|executable|malware|program|payload|"
+    r"module|loader|it)\s+(?:also\s+)?"
+)
+_LIBRARY_VERB = (
+    r"(?:uses|imports|relies\s+on|calls|references|links\s+(?:to|against)|loads|employs|"
+    r"utili[sz]es|leverages|depends\s+on|makes\s+use\s+of)"
+)
+_LIBRARY_SENTENCE = re.compile(
+    r"\A\s*(?:" + _LIBRARY_SUBJECT + r")?" + _LIBRARY_VERB + r"\s+(?P<rest>.+?)\s*\.?\s*\Z",
+    re.IGNORECASE | re.DOTALL,
+)
+# Where a purpose phrase begins after the object: "for y". A "to" after the
+# object states an action, and such a claim is not one of these.
+_LIBRARY_PURPOSE = re.compile(r"\sfor\s", re.IGNORECASE)
+# A short purpose, and nothing more: at most this many words, no comma or
+# semicolon, no second verb joined by "and" or "or", no quote, digit, address,
+# host or path.
+_LIBRARY_PURPOSE_WORDS = 6
+_PURPOSE_SAYS_MORE = re.compile(
+    r"[,;\"'\d/\\]|\w\.\w|\b(?:and|or)\s+\w+(?:s|es|ed)\b", re.IGNORECASE
+)
+# One piece of the object: a module file name, or a name followed by a word
+# that says it is a library or its interface, or the Windows API itself.
+_LIBRARY_PIECE = re.compile(
+    r"\A(?:(?:the|various|several|multiple|standard|common)\s+)*"
+    r"(?:`?[\w.\-]+\.dll`?(?:\s+(?:apis?|api\s+functions|functions|library|imports|exports))?"
+    r"|`?[\w.\-]+`?\s+(?:apis?|api\s+functions|library|libraries|dlls?)"
+    r"|(?:windows|win32|native)\s+apis?)\Z",
+    re.IGNORECASE,
+)
+_LIBRARY_JOINS = re.compile(r"\s*(?:,\s*(?:and\s+)?|\s+and\s+|\s*&\s*|\s*/\s*)", re.IGNORECASE)
+# The words an import listing's detail may carry besides names: what the
+# listing is. Any other word is a detail beyond it.
+_LISTING_WORDS = frozenset(
+    "resolved resolve resolves resolution api apis import imports imported hash hashes hashed "
+    "name names function functions library libraries dll dlls module modules pe table listing "
+    "list including includes include from via and or the of in by with such as etc at runtime "
+    "run time dynamically dynamic e g eg entries entry".split()
+)
+
+
+def _is_an_import_listing_detail(text: str) -> bool:
+    """Whether ``text`` says nothing an import listing does not: names, counts, listing words."""
+    if '"' in text or "'" in text or _HEX_ADDRESS.search(text):
+        return False
+    for token in re.findall(r"[^\s,;:()\[\]{}`]+", _without_entry_ids(text)):
+        word = token.strip(".").lower()
+        if not word or word.isdigit() or word in _LISTING_WORDS:
+            continue
+        if "!" in token or word.endswith(".dll"):
+            continue
+        # An API name as written: an identifier with a capital after its first letter.
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", token) and re.search(r"[A-Z]", token[1:]):
+            continue
+        return False
+    return True
+
+
+def _without_entry_ids(text: str) -> str:
+    """``text`` with its ledger ids (``ev_0012``) taken out."""
+    return re.sub(r"\bev_\d+\b", " ", str(text or ""), flags=re.IGNORECASE)
+
+
+def _is_library_only(claim: Any) -> bool:
+    text = str(getattr(claim, "claim", "") or "").strip()
+    evidence = str(getattr(claim, "evidence_ref", "") or "")
+    if not text or re.search(r"[.!?]\s+\S", text.rstrip(".!? ")):
+        return False
+    if _HEX_ADDRESS.search(text) or _GENERIC_FUNCTION_NAME.search(text):
+        return False
+    if _HEX_ADDRESS.search(evidence) or _GENERIC_FUNCTION_NAME.search(evidence):
+        return False
+    sentence = _LIBRARY_SENTENCE.match(text)
+    if sentence is None:
+        return False
+    rest = sentence.group("rest")
+    purpose = _LIBRARY_PURPOSE.search(rest)
+    thing = rest[: purpose.start()] if purpose else rest
+    if purpose is not None:
+        said = rest[purpose.end() :]
+        if _PURPOSE_SAYS_MORE.search(said) or len(said.split()) > _LIBRARY_PURPOSE_WORDS:
+            return False
+    thing = re.sub(
+        r"\s*\(([^)]*)\)", lambda m: "" if _is_an_import_listing_detail(m.group(1)) else "|", thing
+    )
+    pieces = [piece for piece in _LIBRARY_JOINS.split(thing.strip()) if piece]
+    if not pieces or not all(_LIBRARY_PIECE.match(piece) for piece in pieces):
+        return False
+    return _is_an_import_listing_detail(evidence)
+
+
+def library_only_claims(isr: Any) -> list[int]:
+    """The positions of the claims that name only a library or its APIs and a short purpose.
+
+    Such a claim is one sentence whose subject (the sample, or none) uses,
+    imports, calls or loads one or more libraries or their APIs, optionally
+    followed by a short "for y" purpose. The purpose has at most six words,
+    and no comma, second verb, quote, digit, address, host or path. A claim
+    whose object runs on with "to" states an action and is not one.
+
+    It names no code location (no ``0x`` address, no decompiler's function
+    name) in its sentence or its evidence line. Its evidence line carries
+    nothing beyond an import listing: ledger ids, library and API names, counts
+    and the words that say what a listing is. A quoted string, an address or
+    any other word is a detail beyond it.
+    """
+    return [
+        index
+        for index, claim in enumerate(getattr(isr, "claims", None) or [])
+        if _is_library_only(claim)
+    ]
+
+
+def library_only_claims_violation(isr: Any) -> Violation | None:
+    """The one question for an answer's library-only claims, or ``None`` when it has none.
+
+    Every such claim is quoted. The analyst is asked once to merge them into
+    the claims whose behaviour they support, or to detail each; what it
+    answers stands, a merge that folds them away included.
+    """
+    claims = list(getattr(isr, "claims", None) or [])
+    found = [claims[index] for index in library_only_claims(isr)]
+    if not found:
+        return None
+    return Violation(
+        code=LIBRARY_ONLY_CLAIMS_CODE,
+        message=(
+            f"{len(found)} CLAIM block(s) name a library or its APIs and at most a purpose, "
+            "with no code location in the sentence or the evidence line and no evidence beyond "
+            "an import listing: "
+            f"{'; '.join(repr(safe_finding_value(getattr(c, 'claim', ''))) for c in found)}. "
+            "Merge them into the claims whose behaviour they support, or give each the code "
+            "location that makes the calls, what the sample does with them and the evidence "
+            "that shows it. What you answer stands."
+        ),
+    )
+
+
+# How much of a cut answer its question shows, as a sample of its shape, marked
+# with … where it is cut.
 SECTION_CUT_HEAD_CHARS = 160
 
 
@@ -2621,7 +3517,7 @@ def section_cut_violation(
             else ""
         )
         + (
-            f", and opened with {safe_finding_value(head[:SECTION_CUT_HEAD_CHARS])!r}."
+            f", and opened with {safe_finding_value(marked_cut(head, SECTION_CUT_HEAD_CHARS))!r}."
             if head
             else "."
         )
@@ -2702,13 +3598,28 @@ def repeated_item_violations(
 
 
 CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
+# A recommendation or hunting note that acts on a value this run does not
+# publish. Asked once with the IOC table's own answer; a value kept after it
+# is recorded beside the recommendation.
+UNPUBLISHED_RECOMMENDATION_CODE = "narrative.unpublished_indicator"
+ENTRY_CONTENTS_MISSTATED_CODE = "report.entry_contents_misstated"
 UNCITED_IDENTIFIER_CODE = "report.identifier_uncited"
+# A table row whose whole value is in none of the entries it cites
+# (``stated_value_violations``). Asked once; a row kept after it is marked
+# beside its evidence.
+STATED_VALUE_UNHELD_CODE = "report.value_not_in_cited_entry"
+# Technical prose naming a network value this run does not publish without
+# that value's publish state (``unpublished_value_violations``). Asked once; a
+# sentence kept after it is marked where it stands with the state.
+UNPUBLISHED_VALUE_CODE = "report.unpublished_value"
 TECHNIQUE_NAME_CODE = "report.technique_name"
 
 # The codes a report round's answer is kept with. A broken shape leaves nothing
 # to print; each of these leaves a printable answer with a finding beside it.
 # The findings whose sentences survive marked where they stand in the report.
-MARKED_IN_PLACE: frozenset[str] = frozenset({UNGROUNDED_CAPABILITY_CODE, RULE_MATCH_AS_ACTION_CODE})
+MARKED_IN_PLACE: frozenset[str] = frozenset(
+    {UNGROUNDED_CAPABILITY_CODE, RULE_MATCH_AS_ACTION_CODE, UNPUBLISHED_VALUE_CODE}
+)
 
 KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
     {
@@ -2718,10 +3629,14 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         UNCITED_CONFIGURATION_CODE,
         CITATION_NOT_EVIDENCE_CODE,
         CITATION_WRONG_ENTRY_CODE,
+        ENTRY_CONTENTS_MISSTATED_CODE,
         UNCITED_IDENTIFIER_CODE,
+        STATED_VALUE_UNHELD_CODE,
+        UNPUBLISHED_VALUE_CODE,
         TECHNIQUE_NAME_CODE,
         RULE_MATCH_AS_ACTION_CODE,
         REPEATED_ITEMS_CODE,
+        UNPUBLISHED_RECOMMENDATION_CODE,
     }
 )
 
@@ -2777,19 +3692,313 @@ def key_finding_citation_violations(payload: Any, known_ids: Iterable[str]) -> l
     return out
 
 
-def flow_voice_violations(payload: Any, sandbox_ids: Iterable[str]) -> list[Violation]:
-    """Execution-flow steps marked ``observed`` that cite no sandbox entry.
+_DOTTED_ADDRESS_RE = re.compile(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w.]*\w)")
+
+
+def _refanged(text: str) -> str:
+    """``text`` with the usual defanging undone: ``[.]``, ``[:]``, ``hxxp``."""
+    out = re.sub(r"\[(\.|:)\]|\((\.)\)", lambda m: m.group(1) or m.group(2), str(text or ""))
+    return re.sub(r"\bhxxp", "http", out, flags=re.IGNORECASE)
+
+
+def network_values_in(text: str) -> list[tuple[str, str]]:
+    """The addresses and hosts a sentence names, ``(kind, value)``, once each, in order.
+
+    A URL is read as its host. An address is any dotted quad that parses as
+    one; a host is what the string sweep's own reader takes for one
+    (``tools.strings.iocs_from_text``), so a file name is not a host.
+    """
+    from maljan.tools.strings import iocs_from_text
+
+    plain = _refanged(text)
+    found: list[tuple[str, str]] = []
+    for match in _DOTTED_ADDRESS_RE.finditer(plain):
+        try:
+            ipaddress.ip_address(match.group(0))
+        except ValueError:
+            continue
+        if ("ip", match.group(0)) not in found:
+            found.append(("ip", match.group(0)))
+    # A sentence's full stop is not part of the host it ends on.
+    for row in (
+        iocs_from_text(re.sub(r"[.,;:!?)]+(?=\s|$)", " ", plain), ["domain"]).get("iocs") or []
+    ):
+        value = str(row.get("value") or "").strip().lower().rstrip(".")
+        if value and ("domain", value) not in found:
+            found.append(("domain", value))
+    return found
+
+
+# What a recommendation's check says of a value no row of the IOC table holds.
+NO_TABLE_ROW = "no row of this run's IOC table holds it"
+# What the publish check says of a value the IOC table could not answer for.
+NO_TABLE_ANSWER = "the IOC table gave no answer for it"
+
+
+def recommendation_indicator_violations(
+    payload: Any, answers: Callable[[str, str], str]
+) -> list[Violation]:
+    """Recommendations that name an address or a host this run does not publish.
+
+    ``answers`` is ``(kind, value) -> the IOC table's answer`` for a value, or
+    ``""`` when no row holds it (``narrative_agent.published_answers``). Every
+    field of a recommendation is read — the action, the rationale and the
+    detection the hunting notes print — and each value the table does not
+    answer ``yes`` for is named with the table's reason, one question per
+    recommendation. Nothing is removed: what the model answers stands.
+    """
+    from maljan.extractors.network_extractor import is_well_known_benign_host
+    from maljan.reporting.renderers.stix_renderer import publishes
+
+    out: list[Violation] = []
+    for index, row in enumerate(_rows_of(payload, "defensive_recommendations")):
+        text = " ".join(str(row.get(key) or "") for key in ("action", "rationale", "detection"))
+        refused: list[str] = []
+        for kind, value in network_values_in(text):
+            answer = str(answers(kind, value) or "")
+            if publishes(answer):
+                continue
+            if not answer and kind == "domain" and is_well_known_benign_host(value):
+                # A reference or vendor host the run never recorded: a place to
+                # read, not an indicator to act on.
+                continue
+            why = answer or f"no: {NO_TABLE_ROW}"
+            said = f"{safe_finding_value(value)} ({safe_finding_value(why)})"
+            if said not in refused:
+                refused.append(said)
+        if not refused:
+            continue
+        out.append(
+            Violation(
+                code=UNPUBLISHED_RECOMMENDATION_CODE,
+                message=(
+                    f"recommendation {safe_finding_value(index + 1)} names a value this run "
+                    "does not publish: "
+                    f"{'; '.join(refused)}. A recommendation acts on the indicators this run "
+                    "publishes. Write it over the published indicators, or without the value."
+                ),
+                path=f"defensive_recommendations.{index}",
+            )
+        )
+    return out
+
+
+# A publish state written beside a value: ``no: <reason>``, as the IOC table
+# prints it.
+_PUBLISH_STATE_RE = re.compile(r"(?<![\w-])no:\s*\S", re.IGNORECASE)
+
+
+def _prose_of_a_section(payload: Any) -> list[str]:
+    """A composer answer's prose, in order: a body or a text, then each step's action.
+
+    Only prose: a table cell (a configuration value, an identifier, an
+    endpoint) is a value, and the report prints its publish state beside it.
+    """
+    data = payload if isinstance(payload, dict) else {}
+    texts = [data.get(key) for key in ("body", "text")]
+    for step in data.get("steps") or []:
+        if isinstance(step, dict):
+            texts.append(step.get("action"))
+    return [text for text in texts if isinstance(text, str) and text.strip()]
+
+
+# How many words of a sentence a question quotes to name it.
+_SENTENCE_START_WORDS = 6
+
+
+def _sentence_start(sentence: str) -> str:
+    """A sentence named by its first words, quoted: ``"It connects to 192.0.2.1 on…"``."""
+    words = sentence.split()
+    start = " ".join(words[:_SENTENCE_START_WORDS])
+    return f'"{start}…"' if len(words) > _SENTENCE_START_WORDS else f'"{start}"'
+
+
+def _unstated_values(
+    sentence: str, answers: Callable[[str, str], str]
+) -> list[tuple[str, str, str]]:
+    """``(kind, value, state)`` for each value of ``sentence`` the table does not publish,
+    written without a ``no: <reason>`` between it and the next value the sentence names."""
+    from maljan.extractors.network_extractor import is_well_known_benign_host
+    from maljan.reporting.renderers.stix_renderer import publishes
+
+    plain = _refanged(sentence).lower()
+    values = network_values_in(sentence)
+    places = sorted((plain.find(value.lower()), kind, value) for kind, value in values if value)
+    out: list[tuple[str, str, str]] = []
+    for position, (start, kind, value) in enumerate(places):
+        end = places[position + 1][0] if position + 1 < len(places) else len(plain)
+        if start >= 0 and _PUBLISH_STATE_RE.search(plain[start + len(value) : max(end, start)]):
+            continue
+        try:
+            answer = str(answers(kind, value) or "")
+        except Exception as exc:  # noqa: BLE001 — a value the table cannot answer is refused
+            logger.debug("validation: no publish answer for a value (%s).", exc)
+            answer = f"no: {NO_TABLE_ANSWER}"
+        if publishes(answer):
+            continue
+        if not answer and kind == "domain" and is_well_known_benign_host(value):
+            continue
+        out.append((kind, value, (answer or f"no: {NO_TABLE_ROW}").split(";", 1)[0].strip()))
+    return out
+
+
+def unpublished_value_violations(
+    payload: Any, answers: Callable[[str, str], str]
+) -> list[Violation]:
+    """Report-model prose naming an address or a host this run does not publish, without its state.
+
+    ``answers`` is ``(kind, value) -> the IOC table's answer``, ``""`` for a
+    value no row holds (``narrative_agent.published_answers``). The section's
+    prose (:func:`_prose_of_a_section`) is read sentence by sentence; a value
+    the table does not answer ``yes`` for, with no ``no: <reason>`` between it
+    and the next value its sentence names, is listed. One question per
+    section names each value with its state — the answer's first clause, the
+    one that says why — and the sentences that name it, numbered in the
+    section's order. A reference host no row holds is a place to read, not an
+    indicator, and raises nothing. Nothing is removed: what the model answers
+    stands, and each sentence it keeps is marked where it stands with its own
+    values' states (``labels``, ``MARKED_IN_PLACE``).
+    """
+
+    # (state, value) -> sentence numbers, in the order first met.
+    named: dict[tuple[str, str], list[int]] = {}
+    quoted: list[str] = []
+    labels: list[str] = []
+    # Each sentence by its number, to name it by its start in the question.
+    written_as: dict[int, str] = {}
+    number = 0
+    for text in _prose_of_a_section(payload):
+        for sentence in _SENTENCE_END_RE.split(text):
+            written = sentence.strip()
+            if not written:
+                continue
+            number += 1
+            written_as[number] = written
+            found = _unstated_values(written, answers)
+            if not found:
+                continue
+            by_state: dict[str, list[str]] = {}
+            for _kind, value, state in found:
+                named.setdefault((state, value), []).append(number)
+                # As written: the renderer escapes and defangs the label.
+                if value not in by_state.setdefault(state, []):
+                    by_state[state].append(value)
+            if written not in quoted:
+                quoted.append(written)
+                labels.append(
+                    "; ".join(
+                        f"{', '.join(values)} ({state})" for state, values in by_state.items()
+                    )
+                )
+    if not named:
+        return []
+    # Each state once, with every value it refuses and the sentences naming them.
+    grouped: dict[str, tuple[list[str], set[int]]] = {}
+    for (state, value), numbers in named.items():
+        values, sentences = grouped.setdefault(state, ([], set()))
+        values.append(value)
+        sentences.update(numbers)
+    said = "; ".join(
+        f"{', '.join(safe_finding_value(value) for value in values)} "
+        f"({safe_finding_value(state)}) in "
+        + ", ".join(
+            safe_finding_value(_sentence_start(written_as[number])) for number in sorted(sentences)
+        )
+        for state, (values, sentences) in grouped.items()
+    )
+    return [
+        Violation(
+            code=UNPUBLISHED_VALUE_CODE,
+            message=(
+                f"the text names values this run does not publish, without their state: "
+                f"{said}. A value this run does not publish is written only with its publish "
+                "state beside it. Write the state beside each value, or write the text "
+                "without the value."
+            ),
+            path="unpublished values",
+            quoted=tuple(quoted),
+            labels=tuple(labels),
+        )
+    ]
+
+
+def _step_order(row: Mapping[str, Any], index: int) -> str:
+    """A step's number as a question names it: its own ``order``, zero included."""
+    order = row.get("order")
+    return str(index + 1 if order is None or order == "" else order)
+
+
+def flow_voice_violations(
+    payload: Any,
+    sandbox_ids: Iterable[str],
+    *,
+    tools: Mapping[str, str] | None = None,
+    flow_fact: Callable[[str, str], str] | None = None,
+) -> list[Violation]:
+    """Execution-flow steps marked ``observed`` that the sandbox did not watch whole.
 
     ``observed`` tells a reader a sandbox watched the step happen. A step read
     from the code is ``assessed``, and the mark is the model's to choose; this
-    only asks, once, when the mark and the citations disagree.
+    only asks, once, when the mark and the citations disagree: a step that
+    cites no sandbox entry; one that also cites an entry that is not a sandbox
+    observation (``tools`` names the tool behind each id), since every
+    statement of an observed step is one the sandbox watched; and one that
+    names an address or a host the sandbox attributes no flow of the sample
+    to (``flow_fact``, :func:`reporting.evidence_bundles.sample_flow_fact`),
+    since a network step is observed for its own value.
     """
     sandbox = {str(value) for value in sandbox_ids}
     out: list[Violation] = []
     for index, row in enumerate(_rows_of(payload, "steps")):
         if str(row.get("voice") or "").strip().lower() != "observed":
             continue
-        if any(value in sandbox for value in _cited(row, "evidence_refs")):
+        cited = _cited(row, "evidence_refs")
+        if any(value in sandbox for value in cited):
+            order = _step_order(row, index)
+            others = [value for value in cited if value not in sandbox]
+            if others:
+                named = _named_ids(
+                    f"{value} ({(tools or {}).get(value)})" if (tools or {}).get(value) else value
+                    for value in others
+                )
+                out.append(
+                    Violation(
+                        code=FLOW_VOICE_CODE,
+                        message=(
+                            f"step {safe_finding_value(order)} is marked observed and also cites "
+                            f"{safe_finding_value(named)}, which are not sandbox entries. A step "
+                            "marked observed says the sandbox watched "
+                            "every part of it. Cite only the sandbox entries that show it and "
+                            "write what the other entries show as an assessed step of its own, "
+                            "or mark the step assessed."
+                        ),
+                        path=f"steps.{index}.voice",
+                    )
+                )
+            unreached = [
+                (value, said)
+                for kind, value in network_values_in(str(row.get("action") or ""))
+                if flow_fact is not None and (said := flow_fact(kind, value))
+            ]
+            if unreached:
+                facts = "; ".join(
+                    f"{safe_finding_value(value)}: {safe_finding_value(said)}"
+                    for value, said in unreached
+                )
+                out.append(
+                    Violation(
+                        code=FLOW_VOICE_CODE,
+                        message=(
+                            f"step {safe_finding_value(order)} is marked observed and names a "
+                            "network value the "
+                            f"sandbox attributes no flow of the sample to ({facts}). A network "
+                            "step is observed only for a value the sample's own process tree "
+                            "reached. Mark the step assessed, or leave the value out of the "
+                            "observed step."
+                        ),
+                        path=f"steps.{index}.voice",
+                    )
+                )
             continue
         where = (
             f"the sandbox answers that recorded something are {_named_ids(sorted(sandbox))}"
@@ -2800,7 +4009,7 @@ def flow_voice_violations(payload: Any, sandbox_ids: Iterable[str]) -> list[Viol
             Violation(
                 code=FLOW_VOICE_CODE,
                 message=(
-                    f"step {safe_finding_value(row.get('order', index + 1))} is marked observed "
+                    f"step {safe_finding_value(_step_order(row, index))} is marked observed "
                     f"but cites no sandbox entry ({safe_finding_value(where)}). Cite the sandbox "
                     "entry that shows "
                     "it, or mark the step assessed."
@@ -2972,6 +4181,9 @@ class EntryTexts:
     # for the model or trimmed by the byte budget. A value absent from one of
     # them may be in the part that is not here, so no absence is read off it.
     partial: frozenset[str] = frozenset()
+    # Each letter-and-digit run of the texts, and the entries it is a whole run
+    # of: built once, on first use, by :meth:`may_hold`.
+    _runs: dict[str, frozenset[str]] = field(default_factory=dict, compare=False, repr=False)
 
     @classmethod
     def from_ledger(cls, ledger: Iterable[Any], corpus: Any = None) -> EntryTexts:
@@ -3009,8 +4221,48 @@ class EntryTexts:
 
         text = self.texts.get(str(entry_id).strip().lower(), "")
         return bool(text) and any(
-            whole_value_in(form, text) for form in written_forms(value.lower())
+            whole_value_in(form, text)
+            for spelling in library_spellings(value)
+            for form in written_forms(spelling)
         )
+
+    def may_hold(self, value: str) -> set[str]:
+        """The entries that may hold ``value`` for :meth:`holds`: never fewer, often far fewer.
+
+        A text holds a value only where every letter-and-digit run of one of
+        its spellings is a whole run of the text — the value's own ends are
+        bounded by characters that end a run, or by an escape, which is why
+        the runs are read both as written and with the escapes taken out. Read
+        once per report into a lookup, so a table of many rows checked against
+        a ledger of many entries costs a set intersection per row, not a scan
+        of every entry's text.
+        """
+        if not self._runs:
+            runs: dict[str, set[str]] = {}
+            for entry_id, text in self.texts.items():
+                lowered = text.lower()
+                for run in {
+                    *_TEXT_RUN_RE.findall(lowered),
+                    *_TEXT_RUN_RE.findall(_ESCAPE_PAIR_RE.sub(" ", lowered)),
+                }:
+                    runs.setdefault(run, set()).add(entry_id)
+            # The empty run marks the lookup as built, for a ledger of no text too.
+            self._runs.update({run: frozenset(ids) for run, ids in runs.items()})
+            self._runs[""] = frozenset()
+        found: set[str] = set()
+        for spelling in library_spellings(value):
+            for form in written_forms(spelling):
+                needed = set(_TEXT_RUN_RE.findall(form.lower()))
+                if not needed:
+                    return set(self.texts)
+                holders: set[str] | None = None
+                for run in needed:
+                    ids = self._runs.get(run, frozenset())
+                    holders = set(ids) if holders is None else holders & ids
+                    if not holders:
+                        break
+                found |= holders or set()
+        return found
 
     def holding(self, value: str) -> list[str]:
         """Every entry whose text holds ``value``, in ledger order; none for an undecidable one."""
@@ -3030,12 +4282,37 @@ class EntryTexts:
 # number inside some longer run. Such a value raises no question and no note.
 # A number: ``0x``-prefixed hex, a hex run with a digit in it (a word spelled
 # only with a–f, ``added``, is a word), or digits with separators.
+# A run of letters and digits, and a two-character escape a JSON text writes:
+# what :meth:`EntryTexts.may_hold` reads a text and a value by.
+_TEXT_RUN_RE = re.compile(r"[a-z0-9]+")
+_ESCAPE_PAIR_RE = re.compile(r'\\[nrtbf"/\\]')
 _ONLY_A_NUMBER_RE = re.compile(
     r"0x[0-9a-f]+|(?=[a-f]*[0-9])[0-9a-f]+|[0-9][0-9.,:]*", re.IGNORECASE
 )
 _WHOLE_DIGEST_RE = re.compile(
     r"[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64}|[0-9a-f]{128}", re.IGNORECASE
 )
+
+
+# A bare library or API name: one word of letters, digits and underscores that
+# is not only a number. The only shape a Windows library is written in without
+# its extension ("WinINet" for ``wininet.dll``).
+_BARE_NAME_RE = re.compile(r"[a-z_][a-z0-9_]*[a-z_][a-z0-9_]*", re.IGNORECASE)
+
+
+def library_spellings(value: str) -> tuple[str, ...]:
+    """``value`` lower-cased, and a bare name with the ``.dll`` a library carries.
+
+    DLL and API names are compared without regard to case: Windows resolves
+    them that way, and a report writes ``WinINet`` for the ``wininet.dll`` a
+    tool prints. A bare word is also the library of that name, so an entry
+    that lists ``wininet.dll`` holds the ``WinINet`` a sentence names; the
+    reverse is not read, since a word in a text is not a library it loads.
+    """
+    lowered = str(value or "").lower()
+    if _BARE_NAME_RE.fullmatch(lowered):
+        return (lowered, f"{lowered}.dll")
+    return (lowered,)
 
 
 def decidable(value: str) -> bool:
@@ -3362,7 +4639,14 @@ def wrong_entry_citations(
         quoted = safe_finding_value(", ".join(repr(value) for value in values[:_MAX_NAMED_IDS]))
         more = len(values) - _MAX_NAMED_IDS
         named = safe_finding_value(", ".join(entries.named(i) for i in cited))
-        holding = safe_finding_value(", ".join(entries.named(i) for i in holders[:_MAX_NAMED_IDS]))
+        holding = safe_finding_value(
+            ", ".join(entries.named(i) for i in holders[:_MAX_NAMED_IDS])
+            + (
+                f" and {len(holders) - _MAX_NAMED_IDS} more"
+                if len(holders) > _MAX_NAMED_IDS
+                else ""
+            )
+        )
         message = (
             f"{quoted} is not in {named}, which the text cites for it; this run's evidence "
             f"holds it in {holding}. Cite the entry that holds the value the text states."
@@ -3374,6 +4658,315 @@ def wrong_entry_citations(
         )
         violations.append(
             Violation(code=CITATION_WRONG_ENTRY_CODE, message=message, path="citation")
+        )
+    return violations
+
+
+# The tables whose rows state one value each, by the list a section answers
+# with, and what a question calls one of their rows and several.
+_STATED_VALUE_ROWS = {
+    "items": ("configuration item", "configuration items"),
+    "identifiers": ("identifier", "identifiers"),
+}
+# A number written alone or with a unit: ``1000``, ``0x3e8``, ``1,000 ms``,
+# ``1000ms``. The unit is one word of ``_UNITS``.
+_NUMBER_WITH_UNIT_RE = re.compile(
+    r"(0x[0-9a-f]+|\d{1,3}(?:,\d{3})+|\d+)(\s*)([a-z]+)?", re.IGNORECASE
+)
+# The units a configuration value's number is written with: time and size.
+_UNITS = frozenset(
+    {
+        "ms", "msec", "msecs", "millisecond", "milliseconds",
+        "s", "sec", "secs", "second", "seconds",
+        "m", "min", "mins", "minute", "minutes",
+        "h", "hr", "hrs", "hour", "hours",
+        "d", "day", "days",
+        "b", "byte", "bytes",
+        "kb", "kib", "kilobytes", "mb", "mib", "megabytes", "gb", "gib", "gigabytes",
+    }
+)  # fmt: skip
+
+
+def _stated_spellings(value: str, *, numbers: bool = False) -> list[str]:
+    """The spellings an entry may hold a stated value in: as written, and a number's two.
+
+    With ``numbers`` (a configuration value), a number is also held when the
+    entry writes it in decimal or in hex, the way a decompiler or a
+    configuration dump does, and a number written with a unit of ``_UNITS``
+    is held by the number. The unit follows a space, or is written against
+    the number only when its first letter is no hex digit: ``1000ms`` is a
+    number and a unit, ``1deadbeef`` and ``2bytes`` are not. A value the
+    conversion cannot read is looked for as written and nothing else.
+    """
+    spellings = [value]
+    if not numbers:
+        return spellings
+    try:
+        number = _NUMBER_WITH_UNIT_RE.fullmatch(value.strip())
+        if number is None:
+            return spellings
+        written, gap, unit = number.group(1).replace(",", ""), number.group(2), number.group(3)
+        if unit is not None and (
+            unit.lower() not in _UNITS or (not gap and unit[0].lower() in "abcdef")
+        ):
+            return spellings
+        amount = int(written, 16) if written.lower().startswith("0x") else int(written)
+        forms = (str(amount), hex(amount))
+    except (ValueError, OverflowError):
+        return spellings
+    spellings.extend(form for form in forms if form not in spellings)
+    return spellings
+
+
+def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Violation]:
+    """Table rows whose whole value is in none of the entries the row cites.
+
+    A configuration item or a host identifier states one value and cites the
+    entries it was read in. The whole value is looked for in each cited entry
+    under the citation check's own normalisation (:meth:`EntryTexts.holds`),
+    a number also in decimal and hex (:func:`_stated_spellings`). Held by one,
+    the row stands. Held by none, the row is asked about once, together with
+    the other rows of its table that cite the same entries; each row is named
+    by its number, which is how the report marks a row kept after it.
+
+    Not asked here: a row citing no entry the run holds text for (the uncited
+    questions ask it), a row with a cited entry known to be partial (the value
+    may be in the part that is not here), a configuration value marked
+    inferred (its own column says it was not read), and a value another entry
+    of the run holds, which :func:`wrong_entry_citations` asks with that entry
+    offered. A number held only by an entry the row does not cite is a
+    coincidence, not a source, so none is offered for it.
+    """
+    if payload is None or entries is None or not entries.texts:
+        return []
+    out: list[Violation] = []
+    # Whether another entry holds a value, once per value however many rows state it.
+    held_elsewhere: dict[str, bool] = {}
+
+    def _held_by(value: str, among: set[str], numbers: bool) -> bool:
+        return any(
+            entries.holds(ref, form)
+            for form in _stated_spellings(value, numbers=numbers)
+            for ref in entries.may_hold(form) & among
+        )
+
+    for list_key, (noun, nouns) in _STATED_VALUE_ROWS.items():
+        unheld: dict[tuple[str, ...], list[tuple[int, str, str]]] = {}
+        for index, row in enumerate(_rows_of(payload, list_key)):
+            value = str(row.get("value") or "").strip()
+            if not value or str(row.get("how_obtained") or "").strip().lower() == "inferred":
+                continue
+            cited = [ref for ref in _ids_in(row.get("evidence_refs")) if ref in entries.texts]
+            if not cited or any(ref in entries.partial for ref in cited):
+                continue
+            try:
+                if _held_by(value, set(cited), list_key == "items"):
+                    continue
+                if value not in held_elsewhere:
+                    held_elsewhere[value] = decidable(value) and any(
+                        entries.holds(ref, value) for ref in entries.may_hold(value)
+                    )
+            except (ValueError, OverflowError, RecursionError) as exc:
+                # A value no reader can take is not decidable: nothing is said of it.
+                logger.debug("validation: a stated value was not read (%s).", type(exc).__name__)
+                continue
+            if held_elsewhere[value]:
+                continue
+            label = str(row.get("key") or row.get("kind") or "").strip()
+            unheld.setdefault(tuple(cited), []).append((index + 1, label, value))
+        for refs, rows in unheld.items():
+            named = safe_finding_value(", ".join(entries.named(ref) for ref in refs))
+            if len(rows) == 1:
+                ((number, label, value),) = rows
+                said = (
+                    f"{noun} {number} ({safe_finding_value(label)}: "
+                    f"{safe_finding_value(value)!r}) is in none of the entries it cites: {named}."
+                )
+            else:
+                values = "; ".join(
+                    f"{number}: {safe_finding_value(value)!r}"
+                    for number, _label, value in rows[:_MAX_NAMED_IDS]
+                )
+                more = len(rows) - _MAX_NAMED_IDS
+                said = (
+                    f"{nouns} {', '.join(str(number) for number, _l, _v in rows)} are each in "
+                    f"none of the entries they cite: {named}. Their values: {values}"
+                    f"{f' and {more} more' if more > 0 else ''}."
+                )
+            out.append(
+                Violation(
+                    code=STATED_VALUE_UNHELD_CODE,
+                    message=(
+                        f"{said} A value in this table is one an entry records as written. "
+                        "Cite the entry that holds the whole value, write the value as that "
+                        "entry records it, or leave the row out."
+                    ),
+                    path=f"{list_key}.value:{','.join(refs)}",
+                )
+            )
+    return out
+
+
+# A statement that an entry holds nothing, or one line and no more. Asked of
+# the entry itself: one live report's key finding said the capture entry
+# "holds only a header line with no parsed flows" about an entry listing its
+# packet count, its protocols and fifteen conversations.
+_HOLDING_VERBS = r"(?:holds|held|contains|contained|carries|carried|has|had|records|recorded|returned|returns|shows|showed|lists|listed)"  # noqa: E501
+_HOLDS_NOTHING_RE = re.compile(
+    rf"\b{_HOLDING_VERBS}\s+(?:nothing|no\s+(?:data|content|contents|output|entries|rows|"
+    r"records|values|lines))\b|\b(?:is|was|came\s+back)\s+empty\b",
+    re.IGNORECASE,
+)
+_HOLDS_ONE_LINE_RE = re.compile(
+    rf"\b{_HOLDING_VERBS}\s+(?:only|just|nothing\s+but|no\s+more\s+than)\s+"
+    r"(?:a|an|one|the|its)?\s*(?:single\s+)?(?:header(?:\s+line)?|heading|line|row|record|"
+    r"value|field)\b",
+    re.IGNORECASE,
+)
+# How many words before the verb name what the statement is about.
+_SUBJECT_WORDS = 6
+# Words a statement uses for an entry that its tool's own name does not carry.
+_TOOL_WORDS: dict[str, tuple[str, ...]] = {
+    "pcap": ("capture", "packet", "packets", "pcap"),
+    "floss": ("decoded", "emulation", "floss"),
+    "sigma": ("sigma", "rule", "rules"),
+    "yara": ("yara", "rule", "rules"),
+}
+
+
+def _held_values(text: str) -> int:
+    """How many values an entry's text holds: its non-empty lines, read through its JSON.
+
+    A zero, an empty string and an empty list hold nothing, so an answer that
+    records an absence (``{"registry": [], "total": 0}``) holds none.
+    """
+    import json as _json
+
+    try:
+        parsed: Any = _json.loads(text)
+    except (ValueError, TypeError):
+        return sum(1 for line in str(text).splitlines() if line.strip())
+
+    def _count(node: Any) -> int:
+        if isinstance(node, dict):
+            return sum(_count(value) for value in node.values())
+        if isinstance(node, list | tuple):
+            return sum(_count(item) for item in node)
+        if isinstance(node, bool) or node is None:
+            return 0
+        if isinstance(node, int | float):
+            return 1 if node else 0
+        return sum(1 for line in str(node).splitlines() if line.strip())
+
+    return _count(parsed)
+
+
+def _tool_words(tool: str) -> set[str]:
+    words = {part for part in re.split(r"[_\W]+", tool.lower()) if len(part) >= 3}
+    for part in list(words):
+        words.update(_TOOL_WORDS.get(part, ()))
+    return words
+
+
+def _statement_subject(
+    entries: EntryTexts, sentence: str, verb_at: int, cited: list[str]
+) -> list[str]:
+    """The cited entries the statement's subject names, and none when it names none.
+
+    Named by its id written in the subject, or by a word for a recorded answer
+    (``entry``, ``output``, ``result``, ``summary``, ``view``, ``answer``)
+    beside a word of the entry's tool. A sentence about the sample — "the
+    config buffer was empty until the routine ran" — names no entry, whatever
+    it cites, and is not judged.
+    """
+    window = sentence[:verb_at].lower()
+    before = re.split(r"[^\w-]+", window)
+    subject = {w for word in before[-_SUBJECT_WORDS:] for w in word.split("-") if w}
+    by_id = [entry_id for entry_id in cited if entry_id.lower() in subject]
+    if by_id:
+        return by_id
+    if not subject & _ENTRY_NOUNS:
+        return []
+    return [
+        entry_id for entry_id in cited if subject & _tool_words(entries.tools.get(entry_id, ""))
+    ]
+
+
+# The words a sentence names a recorded answer by, rather than something the
+# sample holds or does.
+_ENTRY_NOUNS = frozenset({"entry", "output", "result", "summary", "view", "answer", "capture"})
+
+
+def misstated_entry_contents(
+    payload: Any, entries: EntryTexts | None, *, prose: Sequence[str] = ()
+) -> list[Violation]:
+    """Statements that an entry holds nothing, or one line, where the entry holds more.
+
+    Read sentence by sentence under the brackets each sentence cites. The
+    statement is about the cited entry its subject names (``the capture
+    entry`` names the capture summary's, as does its id), and about no other. It is
+    checked against that entry's own text: a statement that it holds nothing is
+    false when the entry holds a value, one that it holds one line when it
+    holds more. An entry whose text is not the whole answer is not judged. The
+    model is asked once; the statement is never rewritten.
+    """
+    if payload is None or entries is None or not entries.texts:
+        return []
+    found: list[tuple[str, str, int, str]] = []
+
+    def _read(text: Any) -> None:
+        for sentence, cited in _sentences_with_citations(str(text or "")):
+            for pattern, most, said in (
+                (_HOLDS_NOTHING_RE, 0, "holds nothing"),
+                (_HOLDS_ONE_LINE_RE, 1, "holds one line and no more"),
+            ):
+                match = pattern.search(sentence)
+                if match is None:
+                    continue
+                known = [i for i in cited if i in entries.texts]
+                for entry_id in _statement_subject(entries, sentence, match.start(), known):
+                    if entry_id in entries.partial:
+                        continue
+                    held = _held_values(entries.texts[entry_id])
+                    if held > most:
+                        found.append((entry_id, said, held, sentence.strip()))
+                break
+
+    def _walk(node: Any, depth: int = 0) -> None:
+        if depth > 4:
+            return
+        if isinstance(node, str):
+            _read(node)
+        elif isinstance(node, list | tuple):
+            for item in node:
+                _walk(item, depth + 1)
+        elif isinstance(node, dict):
+            for value in node.values():
+                _walk(value, depth + 1)
+
+    data = payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {}
+    _walk(data)
+    del prose  # every string is read under the brackets it carries
+
+    violations: list[Violation] = []
+    seen: set[str] = set()
+    for entry_id, said, held, sentence in found:
+        if entry_id in seen:
+            continue
+        seen.add(entry_id)
+        named = safe_finding_value(entries.named(entry_id))
+        violations.append(
+            Violation(
+                code=ENTRY_CONTENTS_MISSTATED_CODE,
+                message=(
+                    f"The text says {named} {safe_finding_value(said)} "
+                    f"({safe_finding_value(marked_cut(sentence, 200))!r}); {named} holds "
+                    f"{safe_finding_value(held)} values in "
+                    "this run. State what the entry holds, or cite the entry the statement is "
+                    "about."
+                ),
+                path="citation",
+            )
         )
     return violations
 
@@ -3461,6 +5054,8 @@ def indicator_type_contradicts_verdict(
 
 UNKNOWN_OBSERVABLE_TYPE_CODE = "stix.unknown_observable_type"
 IS_FAMILY_MISSING_CODE = "stix.is_family_missing"
+IS_FAMILY_CONTRADICTS_FAMILY_CODE = "stix.is_family_contradicts_family"
+MALWARE_TYPE_VOCABULARY_CODE = "stix.malware_type_vocabulary"
 FILE_UNIDENTIFIED_CODE = "stix.file_unidentified"
 UNKNOWN_OBJECT_PATH_CODE = "stix.unknown_object_path"
 STRAY_BACKSLASH_CODE = "stix.unescaped_backslash"
@@ -3480,6 +5075,150 @@ INDICATOR_TYPES = (
     "attribution",
     "unknown",
 )
+
+
+# STIX 2.1's malware-type vocabulary (STIX 2.1 OS, section 10.15, Malware Type
+# Vocabulary, ``malware-type-ov``), vendored as the standard lists it. Open,
+# like the indicator-type vocabulary: a value outside it is legal and published
+# as written. It is asked about because a word outside it (``stealer`` beside
+# ``spyware``) reaches a consumer that filters on the vocabulary as no kind at
+# all. Values are compared exactly, the way such a consumer compares them.
+MALWARE_TYPES = (
+    "adware",
+    "backdoor",
+    "bot",
+    "bootkit",
+    "ddos",
+    "downloader",
+    "dropper",
+    "exploit-kit",
+    "keylogger",
+    "ransomware",
+    "remote-access-trojan",
+    "resource-exploitation",
+    "rogue-security-software",
+    "rootkit",
+    "screen-capture",
+    "spyware",
+    "trojan",
+    "unknown",
+    "virus",
+    "webshell",
+    "wiper",
+    "worm",
+)
+
+
+def _written_object(
+    index: int,
+    obj: Any,
+    written: Mapping[str, Any] | None,
+    origins: Sequence[tuple[int | None, str]] | None,
+) -> Mapping[str, Any] | None:
+    """The object at ``index`` of the checked bundle as the judge wrote it, or ``None``.
+
+    Found by its position in the judge's answer (``origins``): the
+    post-processor mints every published id anew, so the id the checked object
+    carries is never the one the judge wrote. Without ``origins`` the checked
+    bundle is the answer as written, and the object is found by its own id.
+    """
+    objects = written.get("objects") if isinstance(written, Mapping) else None
+    if not isinstance(objects, list):
+        return None
+    if origins is not None:
+        position = origins[index][0] if index < len(origins) else None
+        found = objects[position] if position is not None and position < len(objects) else None
+        return found if isinstance(found, Mapping) else None
+    own = str(getattr(obj, "id", "") or "")
+    for candidate in objects:
+        if isinstance(candidate, Mapping) and own and str(candidate.get("id") or "") == own:
+            return candidate
+    return None
+
+
+def malware_object_violations(
+    obj: Any,
+    *,
+    path: str,
+    family: str,
+    written: Mapping[str, Any] | None = None,
+) -> list[Violation]:
+    """A judge malware object whose ``is_family`` or kind reads against its own answer.
+
+    Two questions, each asked once and answered by the judge; nothing is
+    rewritten, and what the judge keeps is published as written:
+
+    - ``is_family`` false while the object's name is the family the judge
+      attributed, which is the name of an object standing for the family;
+    - ``labels`` written with no ``malware_types`` (the export does not carry
+      ``labels``, so the object reaches it with no kind), or a
+      ``malware_types`` value outside STIX 2.1's vocabulary.
+
+    ``written`` is the object as the judge wrote it, before undeclared keys
+    were dropped; without it only ``malware_types`` is read. A type is compared
+    exactly: ``Spyware`` is not a value of the vocabulary.
+    """
+    out: list[Violation] = []
+    named = str(getattr(obj, "name", "") or "").strip()
+    subject = named or str(getattr(obj, "id", "") or "")
+    if (
+        getattr(obj, "is_family", None) is False
+        and family
+        and named.casefold() == family.strip().casefold()
+    ):
+        out.append(
+            Violation(
+                code=IS_FAMILY_CONTRADICTS_FAMILY_CODE,
+                message=(
+                    f"the malware object {safe_finding_value(named)!r} says is_family false, "
+                    f"and its name is the family you attributed ({safe_finding_value(family)!r}). "
+                    "is_family is true when the object stands for a family and false when it "
+                    "stands for this one sample. Set is_family true, or name the object for "
+                    "this sample, or keep it as written — whichever you answer is what this "
+                    "run publishes."
+                ),
+                path=path,
+                subject=subject,
+            )
+        )
+    types = [str(t).strip() for t in (getattr(obj, "malware_types", None) or [])]
+    labels = (written or {}).get("labels") if isinstance(written, Mapping) else None
+    labels = [str(label) for label in labels] if isinstance(labels, list) else []
+    vocabulary = ", ".join(MALWARE_TYPES)
+    if labels and not types:
+        out.append(
+            Violation(
+                code=MALWARE_TYPE_VOCABULARY_CODE,
+                message=(
+                    f"the malware object {safe_finding_value(subject)!r} gives its kind as "
+                    f"labels {', '.join(repr(safe_finding_value(label)) for label in labels)}, "
+                    "which the export does not carry, and has no malware_types, so the export "
+                    "says nothing of what kind of malware it is. malware_types takes values "
+                    f"from STIX 2.1's malware-type vocabulary: {vocabulary}. Write the ones "
+                    "that fit under malware_types, or leave it out — nothing is filled in "
+                    "for you."
+                ),
+                path=path,
+                subject=subject,
+            )
+        )
+    outside = [t for t in types if t not in MALWARE_TYPES]
+    if outside:
+        out.append(
+            Violation(
+                code=MALWARE_TYPE_VOCABULARY_CODE,
+                message=(
+                    f"the malware object {safe_finding_value(subject)!r} has malware_types "
+                    f"{', '.join(repr(safe_finding_value(t)) for t in outside)}, outside "
+                    f"STIX 2.1's malware-type vocabulary: {vocabulary}. Use the ones that "
+                    "fit, or keep yours — the vocabulary is open, and whichever you answer "
+                    "is what this run publishes."
+                ),
+                path=path,
+                subject=subject,
+            )
+        )
+    return out
 
 
 def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation]:
@@ -3928,8 +5667,14 @@ def validate_verdict_bundle(
     corpus_state: CorpusState | None = None,
     technique_sources: Mapping[str, Sequence[str]] | None = None,
     origins: Sequence[tuple[int | None, str]] | None = None,
+    written: Mapping[str, Any] | None = None,
 ) -> list[Violation]:
     """What is wrong with the judge's answer, in the judge's own terms.
+
+    ``written`` is the answer as the judge wrote it, before properties the
+    platform does not carry were dropped: a malware object's ``labels`` is
+    read there (``malware_object_violations``). ``None`` reads the bundle
+    alone.
 
     ``technique_sources`` is who named which technique in this run, the
     evidence summary as data; a relationship crediting an agent with a
@@ -4009,6 +5754,10 @@ def validate_verdict_bundle(
         for comparison in read_comparisons(str(getattr(obj, "pattern", "") or ""))
         if comparison.operator == "=" and comparison.literal.strip()
     }
+    # The family the judge attributed, which a malware object's name is read
+    # against.
+    _family = getattr(getattr(bundle, "x_maljan_assessment", None), "family", None)
+    attributed = str(getattr(_family, "name", "") or "").strip()
     for index, obj in enumerate(objects):
         where = _object_path(index, origins)
         kind = str(getattr(obj, "type", "") or "")
@@ -4075,6 +5824,15 @@ def validate_verdict_bundle(
                     subject=named or str(getattr(obj, "id", "") or ""),
                 )
             )
+        if kind == "malware":
+            violations.extend(
+                malware_object_violations(
+                    obj,
+                    path=where,
+                    family=attributed,
+                    written=_written_object(index, obj, written, origins),
+                )
+            )
         elif kind == "attack-pattern":
             tid = _attack_pattern_technique_id(obj)
             if not tid:
@@ -4117,12 +5875,12 @@ def validate_verdict_bundle(
                     Violation(
                         code="stix.unknown_technique",
                         message=(
-                            f"the attack-pattern names {safe_finding_value(tid)}, which the "
-                            "MITRE ATT&CK catalogue has no entry for in any domain"
-                            f"{_retired_note(tid, attck)}. Use a real technique id or "
+                            f"the attack-pattern names {safe_finding_value(tid)}, which "
+                            f"{_catalogue_rejection(tid, attck)}. Use a real technique id or "
                             "drop the attack-pattern."
                         ),
                         path=where,
+                        subject=tid.upper(),
                     )
                 )
             elif attck is not None:
@@ -4133,6 +5891,7 @@ def validate_verdict_bundle(
                             code=PLATFORM_MISMATCH_CODE,
                             message=mismatch,
                             path=where,
+                            subject=tid.upper(),
                         )
                     )
 
@@ -5196,20 +6955,24 @@ def _with_feedback(
     violations: Sequence[Violation],
     *,
     keep_answer: bool = True,
+    closing: str = FEEDBACK_CLOSING,
 ) -> list[Any]:
     """The conversation plus the model's answer plus the correction turn.
 
     ``keep_answer=False`` leaves the answer out: the correction describes it
-    instead (a cut section answer, see ``section_cut_violation``).
+    instead (a cut section answer, see ``section_cut_violation``), and with
+    no answer between them the correction is asked at the end of the user
+    turn before it (``with_question``).
     """
-    from langchain_core.messages import AIMessage, HumanMessage
+    from langchain_core.messages import AIMessage
+
+    from maljan.pipeline.turns import with_question
 
     content = getattr(answer, "content", None)
     turns = list(messages)
     if keep_answer:
         turns.append(AIMessage(content=str(content if content is not None else answer)))
-    turns.append(HumanMessage(content=feedback_text(violations)))
-    return turns
+    return with_question(turns, feedback_text(violations, closing=closing))
 
 
 def _announce_feedback(
@@ -5353,6 +7116,7 @@ async def retry_with_feedback[T](
     stage: str = "",
     drop_answer_for: frozenset[str] = frozenset(),
     can_retry: Callable[[list[Any]], bool] | None = None,
+    answered: Callable[[list[Violation], list[Violation]], list[Violation]] | None = None,
 ) -> tuple[T, list[Violation], int]:
     """Run, validate, and give the model one chance to fix what it got wrong.
 
@@ -5377,6 +7141,11 @@ async def retry_with_feedback[T](
     rather than following it, and ``can_retry`` is asked about the retry's
     whole conversation before it is sent: answered no, the loop ends there
     with what it has, and the caller records why.
+
+    ``answered`` maps what is left, given what the producer was shown, before
+    the conversation is told the outcome: a question the producer answered as
+    the question allows (``Violation.answered``) is published ``resolved``,
+    not ``survived``, and the mapped rows are what is returned.
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
@@ -5394,11 +7163,15 @@ async def retry_with_feedback[T](
         shown.extend(violations)
         turns = following
         retries += 1
-        answer = await run(turns)
+        # Counted as a retry by the spend meter, which plans the tail's.
+        with validation_retry():
+            answer = await run(turns)
         parsed = parse(answer)
         violations = _collect(parsed, validators)
+    if answered is not None:
+        violations = answered(violations, shown)
     if feed is not None:
-        feed.outcome(shown, violations, retries)
+        feed.outcome(shown, [v for v in violations if not v.answered], retries)
     return parsed, violations, retries
 
 
@@ -5415,6 +7188,7 @@ def retry_with_feedback_sync[T](
     stage: str = "",
     keep: Callable[[T, T], T] | None = None,
     drop_answer_for: frozenset[str] = frozenset(),
+    closing: str = FEEDBACK_CLOSING,
 ) -> tuple[T, list[Violation], int]:
     """:func:`retry_with_feedback` for the analysts, whose loop is synchronous.
 
@@ -5431,7 +7205,9 @@ def retry_with_feedback_sync[T](
     and recorded unresolved.
 
     ``drop_answer_for`` is :func:`retry_with_feedback`'s: the codes whose
-    correction describes the answer instead of following it.
+    correction describes the answer instead of following it. ``closing`` is
+    the retry turn's last line; the analysts' names the block format their
+    parser reads (``ANALYST_FEEDBACK_CLOSING``).
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
@@ -5445,9 +7221,10 @@ def retry_with_feedback_sync[T](
         _announce_feedback(violations, on_feedback, feed, retries + 1)
         shown.extend(violations)
         keep_answer = not any(v.code in drop_answer_for for v in violations)
-        turns = _with_feedback(turns, answer, violations, keep_answer=keep_answer)
+        turns = _with_feedback(turns, answer, violations, keep_answer=keep_answer, closing=closing)
         retries += 1
-        answer = run(turns)
+        with validation_retry():
+            answer = run(turns)
         parsed = parse(answer)
         violations = _collect(parsed, validators)
     if retries and keep is not None:
@@ -5497,6 +7274,9 @@ def validation_metrics(
                 # And whether the producer was ever shown it: a finding the
                 # answer to the last retry raised first was never a question.
                 **({} if violation.asked else {"asked": "false"}),
+                # And whether it was answered as the question allows, which is
+                # not a finding left unfixed.
+                **({"answered": "true"} if violation.answered else {}),
                 **({"subject": violation.subject} if violation.subject else {}),
             }
         )
@@ -5558,8 +7338,21 @@ def corroboration(
         retired = _retired_release(tid)
         if retired:
             row["retired_in"] = retired
+        reason = _retired_reason(tid)
+        if reason:
+            row["retired_reason"] = reason
         out[tid] = row
     return out
+
+
+def _retired_reason(technique_id: str) -> str | None:
+    """What happened to a retired id (``attck_loader.retired_reason``), or ``None``."""
+    try:
+        from maljan.memory.attck_loader import retired_reason
+
+        return retired_reason(technique_id)
+    except Exception:  # noqa: BLE001 — a note, not a check
+        return None
 
 
 def _retired_release(technique_id: str) -> str | None:
@@ -5615,3 +7408,103 @@ def unsupported_malware_violations(
             path="objects",
         )
     ]
+
+
+# A judge indicator naming a value the sandbox recorded and attributes no flow
+# of the sample to. The judge is asked once, with the sandbox's own fact beside
+# the value; what it answers decides whether the value is published. A keep it
+# was never asked about publishes nothing (``stix_renderer.sandbox_row_kwargs``).
+UNATTRIBUTED_INDICATOR_CODE = "stix.indicator_unattributed_flow"
+
+
+def unattributed_indicator_violations(
+    bundle: Any, facts: Callable[[str, str], str] | None
+) -> list[Violation]:
+    """Indicators that name a value the sandbox attributes no flow of the sample to.
+
+    ``facts`` is ``(kind, value) -> the sandbox's fact`` for a value the
+    sandbox recorded and did not attribute to the sample's process tree, and
+    ``""`` otherwise (``stix_renderer.sandbox_facts_for_the_judge``). Each such
+    value is one question, with the fact written beside it; ``subject`` names
+    the value the fact is about, which is what the report's publish rule reads.
+    Nothing is removed: a keep after the question is the judge's answer.
+    """
+    if facts is None:
+        return []
+    from maljan.reporting.ledger_projection import value_key
+    from maljan.reporting.renderers.stix_renderer import rule_values, url_host
+
+    out: list[Violation] = []
+    seen: set[str] = set()
+    for obj in getattr(bundle, "objects", None) or []:
+        if str(getattr(obj, "type", "") or "") != "indicator":
+            continue
+        name = safe_finding_value(getattr(obj, "name", "") or getattr(obj, "pattern", ""))
+        for value in rule_values(str(getattr(obj, "pattern", "") or "")):
+            if value.kind not in ("ip", "domain", "url"):
+                continue
+            kind, about, host = value.kind, value.value, ""
+            said = facts(kind, about)
+            if kind == "url":
+                # A URL is kept for its host: the judge's URL keeps the address
+                # or the name it is on, and the question is about that host.
+                host = url_host(about).strip("[]")
+                try:
+                    ipaddress.ip_address(host)
+                except ValueError:
+                    kind = "domain"
+                else:
+                    kind = "ip"
+                about = host
+                said = said or (facts(kind, host) if host else "")
+            if not said:
+                continue
+            subject = f"{kind}:{value_key(kind, about)}"
+            if subject in seen:
+                continue
+            seen.add(subject)
+            out.append(
+                Violation(
+                    code=UNATTRIBUTED_INDICATOR_CODE,
+                    message=(
+                        f"the indicator {name!r} names {safe_finding_value(value.value)!r}"
+                        + (f", its host {safe_finding_value(host)!r}," if host else "")
+                        + f" and {safe_finding_value(said)}: the sandbox attributes no flow of the "
+                        "sample to it, and without one it is the analysis machine's own "
+                        "traffic. Keep the indicator only if this run's evidence shows the "
+                        "sample itself reached it, and cite that entry in the indicator's "
+                        "description; otherwise remove the indicator."
+                    ),
+                    path=f"objects.{subject}",
+                    subject=subject,
+                )
+            )
+    return out
+
+
+def kept_after_the_sandbox_fact(violations: Sequence[Violation]) -> list[Violation]:
+    """The unattributed-indicator questions the judge answered by keeping the indicator.
+
+    A question the judge was shown and whose indicator it kept is its answer,
+    recorded as one (``answered``): the value is then published, with the
+    reason. A question it was never shown stays what it is, and publishes
+    nothing. Every other row passes through unchanged.
+    """
+    out: list[Violation] = []
+    for violation in violations:
+        if (
+            violation.code == UNATTRIBUTED_INDICATOR_CODE
+            and violation.asked
+            and not violation.answered
+        ):
+            violation = replace(
+                violation,
+                message=(
+                    "Asked with the sandbox's fact, the judge kept its indicator on "
+                    f"{safe_finding_value(violation.subject.partition(':')[2])}."
+                ),
+                sentence="",
+                answered=True,
+            )
+        out.append(violation)
+    return out

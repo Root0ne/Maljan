@@ -40,14 +40,28 @@ read.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from typing import Any
 
 from maljan.analysis.technique_ids import attack_reference_id, says_no_technique
 from maljan.core.logger import logger
 from maljan.reporting.models import CapabilityCell, TTPMapping
-from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, JUDGE_ONLY_TECHNIQUE_MARKER
-from maljan.schemas.stix_models import stated_confidence
-from maljan.utils.marked_cut import marked_cut
+from maljan.schemas.evidence import ENTRY_ID_RE
+from maljan.schemas.isr_models import (
+    ABSENCE_TECHNIQUE_MARKER,
+    JUDGE_ONLY_TECHNIQUE_MARKER,
+    JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
+    judge_and_findings_note,
+    judge_dropped_reason,
+    judge_kept_note,
+)
+from maljan.schemas.stix_models import (
+    TECHNIQUE_REVIEW_PROPERTY,
+    TechniqueReview,
+    stated_confidence,
+)
 
 # Fallback MITRE ATT&CK Enterprise tactic catalogue (pre-v19 names). Used only
 # when the live bundle's tactic catalogue is unavailable. ``kill_chain_phases``
@@ -103,6 +117,7 @@ def build_capability_matrix(
         return [], []
 
     out_of_scope = _out_of_scope(list(techniques), sample)
+    review = technique_review(stix_output)
 
     cells: list[CapabilityCell] = []
     mappings: list[TTPMapping] = []
@@ -130,6 +145,7 @@ def build_capability_matrix(
         )
         layers = info.get("layers") or []
         valid = bool(info.get("valid", True))
+        independent, identical = independent_statements(info.get("statements") or [])
 
         # Never emit a zero-confidence cell with no evidence and no contributing
         # source — it is an empty claim the UI would render as a "verified"
@@ -148,21 +164,58 @@ def build_capability_matrix(
         # report's ATT&CK section, its References, the STIX attack-patterns and
         # ``/reports/{id}/mitre`` are all built from it — and a technique a
         # check rejected is not one this run found.
+        # The judge's word on a technique it was asked about after its verdict
+        # (``techniques_for_the_judge``): one it dropped is not published and
+        # says so in the judge's words, one it kept is published — a finding's
+        # technique included, since the judge is the check that asked about
+        # it — and one it gave no answer for is what it would have been
+        # without the question, marked as not confirmed.
+        asked = review is not None and tid in review.asked
+        decided = review.decision_for(tid) if review is not None and asked else None
+        # The check's finding the question carried, when it was asked with one.
+        undescribed = (
+            (review.undescribed.get(tid, "") if review is not None else "") if asked else ""
+        )
         if not valid:
-            not_published = "the ATT&CK catalogue has no entry for this id in any domain"
+            not_published = unknown_id_reason(tid)
         elif out_of_scope.get(tid):
             not_published = out_of_scope[tid]
-        elif not info.get("claimed"):
+        elif decided is not None and decided.decision == "drop":
+            not_published = judge_dropped_reason(decided.reason)
+            if undescribed:
+                not_published = f"{not_published}, asked after {undescribed}"
+        elif not info.get("claimed") and not (decided is not None and decided.decision == "keep"):
             not_published = FINDING_ONLY_REASON
         else:
             not_published = ""
+        notes: list[str] = []
+        if info.get("noted") and all(info["noted"]):
+            # Every analyst claim naming it reads as absence and was kept
+            # when asked. Published all the same: the analyst decided.
+            notes.append(ABSENCE_TECHNIQUE_MARKER)
+        elif info.get("judge_named") and not info.get("analyst_claimed") and not not_published:
+            # The judge named it and no analyst claim carries it: published by
+            # the rule for a technique the judge states, and the row says so —
+            # naming the analysts that named it on a finding, where any did,
+            # since the run's corroboration record lists them as its sources.
+            on_findings = info.get("finding_named_by") or []
+            notes.append(
+                judge_and_findings_note(on_findings) if on_findings else JUDGE_ONLY_TECHNIQUE_MARKER
+            )
+        if undescribed and not not_published:
+            notes.append(undescribed)
+        if decided is not None and decided.decision == "keep":
+            notes.append(judge_kept_note(decided.reason))
+        elif asked and decided is None and not not_published:
+            notes.append(JUDGE_UNCONFIRMED_TECHNIQUE_MARKER)
         cells.append(
             CapabilityCell(
                 tactic=tactic_id or "TA0000",
                 tactic_name=tactic_name or "Unknown",
                 technique_id=tid,
                 technique_name=name,
-                evidence=evidence[:6],
+                # Every statement whole: the matrix may wrap, never cut.
+                evidence=list(evidence),
                 confidence=confidence,
                 confidence_source=stated_by,
                 contributing_layers=layers,
@@ -170,19 +223,12 @@ def build_capability_matrix(
                 platforms=platforms,
                 domain=domain,
                 not_published=not_published,
-                # Every analyst claim naming it reads as absence and was kept
-                # when asked. Published all the same: the analyst decided. Or
-                # the judge named it and no analyst claimed it: published by the
-                # rule for a technique the judge states, and the row says so.
-                note=(
-                    ABSENCE_TECHNIQUE_MARKER
-                    if info.get("noted") and all(info["noted"])
-                    else JUDGE_ONLY_TECHNIQUE_MARKER
-                    if info.get("judge_named")
-                    and not info.get("analyst_claimed")
-                    and not not_published
-                    else ""
-                ),
+                note="; ".join(notes),
+                # Each analyst statement naming it, verbatim, by analyst: what
+                # the analysts said is theirs to weigh, never classified here.
+                statements=[f"{who}: {text}" for who, text in info.get("statements") or [] if text],
+                independent_layers=independent,
+                identical_statements=identical,
             )
         )
         if not_published:
@@ -199,11 +245,13 @@ def build_capability_matrix(
                 technique_name=name,
                 tactic=tactic_id,
                 tactic_name=tactic_name,
-                evidence_quotes=evidence[:8],
+                evidence_quotes=list(evidence),
                 confidence=confidence,
                 contributing_layers=layers,
-                is_corroborated=len([lyr for lyr in layers if lyr != _JUDGE_SOURCE]) >= 2,
+                is_corroborated=len(independent) >= 2,
                 technique_id_valid=valid,
+                independent_layers=independent,
+                identical_statements=identical,
             )
         )
 
@@ -219,6 +267,80 @@ def build_capability_matrix(
 # analysts rather than the sample, so counting it would turn one analyst's
 # claim into two agreeing sources.
 _JUDGE_SOURCE = "judge"
+# The layer name the judge contributes under, for renderers that count analyst layers.
+JUDGE_SOURCE = _JUDGE_SOURCE
+
+
+def normalised_statement(text: str) -> str:
+    """A statement as it is compared for repetition: case, markup and punctuation out."""
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).split())
+
+
+# The share of the shorter statement's words the longer one has to hold for the
+# two to count once (the overlap coefficient over their normalised word sets).
+# A copy cut short, or with a word put in or taken out, holds all or nearly all
+# of them; two analysts reading one tool's output in their own words hold far
+# fewer.
+REPEATED_WORDS_SHARE = 0.9
+
+
+def repeats(later: str, earlier: str) -> bool:
+    """Whether two normalised statements are one statement written twice.
+
+    The same text; one inside the other, word for word; or the overlap
+    coefficient over their word sets, ``|A∩B| / min(|A|, |B|)``, at least
+    :data:`REPEATED_WORDS_SHARE`.
+    """
+    if later == earlier:
+        return True
+    short, long = sorted((later, earlier), key=len)
+    if f" {short} " in f" {long} ":
+        return True
+    a, b = set(later.split()), set(earlier.split())
+    if not a or not b:
+        return False
+    return len(a & b) / min(len(a), len(b)) >= REPEATED_WORDS_SHARE
+
+
+def independent_statements(statements: Sequence[tuple[str, str]]) -> tuple[list[str], int]:
+    """The layers that said something of their own, and how many statements repeated one.
+
+    ``statements`` is ``(layer, text)`` in the order the layers wrote them.
+    A repeat is the shorter statement of a pair: the statements are read
+    longest first (normalised word count, then normalised text, then layer, so
+    the order depends on what was written and not on who was read first), and
+    each is
+    compared by its normalised text (:func:`normalised_statement`) with the
+    ones already kept. One that :func:`repeats` a kept statement is counted as
+    identical or near-identical and credits nobody; every other is kept and
+    credits its layer. Each group of repeats is so credited to the layer of
+    its longest statement (the same text from two layers credits the first
+    layer by name), and a short statement read first can no longer absorb two
+    longer ones that share only its words. The count, the credited layers and
+    the repeats are a function of the set of statements alone, a chain of
+    equal-length near-copies included. The credited layers are
+    returned in the order they first wrote. The judge is not a layer here: it
+    read the analysts.
+    """
+    written = [
+        (index, str(layer), key)
+        for index, (layer, text) in enumerate(statements)
+        if str(layer) != _JUDGE_SOURCE and (key := normalised_statement(text))
+    ]
+    kept: list[str] = []
+    credited: set[str] = set()
+    identical = 0
+    for _index, layer, key in sorted(
+        written, key=lambda row: (-len(row[2].split()), row[2], row[1])
+    ):
+        if any(repeats(key, longer) for longer in kept):
+            identical += 1
+            continue
+        kept.append(key)
+        credited.add(layer)
+    order = list(dict.fromkeys(layer for _index, layer, _key in written))
+    return [layer for layer in order if layer in credited], identical
+
 
 # Why an id that reached the report on a finding alone is not published. A
 # claim is questioned in its analyst's own loop — its technique id is asked
@@ -427,7 +549,8 @@ def _collect_techniques(
                     row["layers"].append(str(layer))
                 quote = getattr(claim, "claim", None) or getattr(claim, "evidence_ref", None) or ""
                 if quote and quote not in row["evidence"]:
-                    row["evidence"].append(marked_cut(str(quote), 200))
+                    row["evidence"].append(str(quote))
+                row.setdefault("statements", []).append((str(layer), str(quote)))
             # 3. The findings' own technique ids. An ISR carries ids in two
             # places, and this was the one no check ever saw: the report's
             # Findings table and the corroboration metric are both built from
@@ -441,7 +564,6 @@ def _collect_techniques(
             # and published nowhere; see ``FINDING_ONLY_REASON``.
             for finding in getattr(isr, "findings", None) or []:
                 stated = getattr(finding, "confidence", None)
-                title = str(getattr(finding, "title", "") or "")
                 layer = getattr(isr, "domain", None) or agent_name or "agent"
                 for raw in getattr(finding, "technique_ids", None) or []:
                     tid = str(raw or "").strip().upper()
@@ -455,8 +577,19 @@ def _collect_techniques(
                         row["stated_by"].append(f"the {layer} analyst, on a finding")
                     if layer and str(layer) not in row["layers"]:
                         row["layers"].append(str(layer))
-                    if title and title not in row["evidence"]:
-                        row["evidence"].append(marked_cut(title, 200))
+                    named_by = str(getattr(isr, "agent_id", "") or agent_name or "")
+                    if named_by and named_by not in row.setdefault("finding_named_by", []):
+                        row["finding_named_by"].append(named_by)
+                    # A finding's title names it, and says nothing a second
+                    # layer could confirm or a reader could take as the
+                    # procedure: an analyst's one summary title was listed as a
+                    # statement under five techniques. What the finding says
+                    # is its detail.
+                    detail = str(getattr(finding, "detail", "") or "").strip()
+                    if detail:
+                        if detail not in row["evidence"]:
+                            row["evidence"].append(detail)
+                        row.setdefault("statements", []).append((str(layer), detail))
 
     # The catalogue question, asked of every id still standing. A claim was
     # asked it in the analyst's own loop and carries the answer; an id that
@@ -510,7 +643,7 @@ def unmapped_behaviours(stix_output: dict[str, Any] | None) -> list[str]:
             # reads; it is a mapped technique and belongs to the matrix.
             continue
         if name and name not in names:
-            names.append(name[:200])
+            names.append(name)
     return names
 
 
@@ -600,3 +733,204 @@ def _resolve_tactic(tactic_slug: str, domain: str = "") -> tuple[str, str]:
     if tactic is not None and tactic.tactic_id:
         return tactic.tactic_id, _TACTIC_NAME_BY_ID.get(tactic.tactic_id, tactic.name)
     return _TACTIC_BY_SLUG.get(tactic_slug, ("", tactic_slug))
+
+
+@dataclass
+class TechniqueQuestion:
+    """One technique the judge is asked about after its verdict, with what names it.
+
+    ``kind`` is ``claimed`` for a technique an analyst claimed that the judge's
+    bundle does not carry, ``finding`` for one named only on a finding, and
+    ``undescribed`` for one the bundle carries that no claim naming it
+    describes. Each mention is ``(agent, the claim's or the finding's text, its
+    evidence ids)``, the text as the analyst wrote it. ``check`` is the ATT&CK
+    check's finding when no claim naming the technique describes it
+    (``validation.undescribed_technique_finding``), shown with the question,
+    and ``""`` otherwise.
+    """
+
+    technique_id: str
+    kind: str
+    mentions: list[tuple[str, str, list[str]]] = field(default_factory=list)
+    check: str = ""
+
+
+def technique_review(stix_output: dict[str, Any] | None) -> TechniqueReview | None:
+    """The judge's answer about the techniques it was asked, from its bundle, or ``None``."""
+    raw = (stix_output or {}).get(TECHNIQUE_REVIEW_PROPERTY)
+    if raw is None:
+        return None
+    try:
+        return raw if isinstance(raw, TechniqueReview) else TechniqueReview.model_validate(raw)
+    except Exception as exc:  # noqa: BLE001 — an unreadable answer decides nothing
+        logger.debug("capability_matrix: the judge's technique answer is unreadable (%s)", exc)
+        return None
+
+
+def bundle_technique_ids(stix_output: dict[str, Any] | None) -> set[str]:
+    """Every technique id the judge's bundle carries, on an attack-pattern or an edge."""
+    return {tid.upper() for tid in _judge_technique_ids(stix_output)} | {
+        tid.upper() for tid, _c in _judge_relationship_rows(stix_output)
+    }
+
+
+# Why a technique the judge's question would name is left out of it: the
+# report does not publish it whatever the judge says.
+NOT_ASKED_UNKNOWN_ID = "not asked: the ATT&CK catalogue has no entry for this id in any domain"
+
+# Why an id the catalogue rejects is not published, when no retired row says more.
+NO_ENTRY_IN_ANY_DOMAIN = "the ATT&CK catalogue has no entry for this id in any domain"
+
+
+def unknown_id_reason(technique_id: str) -> str:
+    """Why an id the catalogue rejects is not published, retired or never catalogued.
+
+    A retired id says what happened to it (``attck_loader.retired_reason``):
+    the release that retired it, or the bundle's own revoked or deprecated
+    mark, and the id that revoked it. Only an id the vendored retired set does
+    not carry has "no entry in any domain".
+    """
+    try:
+        from maljan.memory.attck_loader import retired_reason
+
+        retired = retired_reason(technique_id)
+    except Exception:  # noqa: BLE001 — a reason unread is the plain one
+        retired = None
+    if retired:
+        return f"the ATT&CK catalogue has no current entry for this id: it was {retired}"
+    return NO_ENTRY_IN_ANY_DOMAIN
+
+
+def not_asked_unknown_id(technique_id: str) -> str:
+    """The not-asked note for an id the catalogue rejects (:func:`unknown_id_reason`)."""
+    return f"not asked: {unknown_id_reason(technique_id)}"
+
+
+def judge_questions(
+    stix_output: dict[str, Any] | None,
+    isr_reports: dict[str, Any] | None,
+    sample: dict[str, Any] | None = None,
+    *,
+    attck: Any = None,
+) -> tuple[list[TechniqueQuestion], dict[str, str]]:
+    """The techniques to put to the judge after its verdict, and the ones left out, with why.
+
+    With ``attck``, the catalogue the analysts' check reads, (c) each
+    technique every claim naming which the check says does not describe it
+    (``validation.claim_does_not_describe_violation``) is asked about too,
+    once, with the check's finding: as ``undescribed`` when the bundle carries
+    it, and on its ``claimed`` question when it does not.
+
+    (a) Each technique an analyst claimed that the judge's bundle carries
+    neither as an attack-pattern nor on an edge, and (b) each technique named
+    only on a finding — on no claim and not in the bundle; in the order they
+    were named. An id the catalogue rejects — on the claim's own flag or asked
+    here, as the matrix asks it — or one the routed sample cannot host is not
+    asked: the matrix keeps it out of the published list before any answer is
+    read. Those come back as ``{id: "not asked: <reason>"}``.
+    """
+    in_bundle = bundle_technique_ids(stix_output)
+    questions: dict[str, TechniqueQuestion] = {}
+    claimed: set[str] = set()
+    flagged: set[str] = set()
+    # Every claim naming each technique, in the order named, for the check below.
+    by_technique: dict[str, list[tuple[str, Any, tuple[str, str, list[str]]]]] = {}
+    for agent_name, isr in (isr_reports or {}).items():
+        agent = str(getattr(isr, "agent_id", "") or agent_name)
+        for claim in getattr(isr, "claims", None) or []:
+            tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
+            if not tid or says_no_technique(tid):
+                continue
+            claimed.add(tid)
+            if not getattr(claim, "technique_id_valid", True):
+                flagged.add(tid)
+            evidence = str(getattr(claim, "evidence_ref", "") or "")
+            mention = (
+                agent,
+                str(getattr(claim, "claim", "") or ""),
+                list(dict.fromkeys(found.lower() for found in ENTRY_ID_RE.findall(evidence))),
+            )
+            by_technique.setdefault(tid, []).append((agent, claim, mention))
+            if tid in in_bundle:
+                continue
+            questions.setdefault(tid, TechniqueQuestion(tid, "claimed")).mentions.append(mention)
+    if attck is not None:
+        for tid, rows in by_technique.items():
+            check = _undescribed(tid, [claim for _agent, claim, _mention in rows], attck, sample)
+            if not check:
+                continue
+            question = questions.get(tid)
+            if question is None:
+                question = TechniqueQuestion(
+                    tid, "undescribed", [mention for _agent, _claim, mention in rows]
+                )
+                questions[tid] = question
+            question.check = check
+    for agent_name, isr in (isr_reports or {}).items():
+        agent = str(getattr(isr, "agent_id", "") or agent_name)
+        for finding in getattr(isr, "findings", None) or []:
+            title = str(getattr(finding, "title", "") or "")
+            detail = str(getattr(finding, "detail", "") or "")
+            text = f"{title} — {detail}" if title and detail else title or detail
+            ids = [str(i) for i in (getattr(finding, "evidence_ids", None) or []) if str(i)]
+            for raw in getattr(finding, "technique_ids", None) or []:
+                tid = str(raw or "").strip().upper()
+                if not tid or says_no_technique(tid) or tid in claimed or tid in in_bundle:
+                    continue
+                questions.setdefault(tid, TechniqueQuestion(tid, "finding")).mentions.append(
+                    (agent, text, ids)
+                )
+    ids = list(questions)
+    unknown = flagged | _unknown_to_the_catalogue(ids)
+    out_of_scope = _out_of_scope(ids, sample)
+    not_asked: dict[str, str] = {}
+    for tid in ids:
+        if tid in unknown:
+            not_asked[tid] = not_asked_unknown_id(tid)
+        elif out_of_scope.get(tid):
+            not_asked[tid] = f"not asked: {out_of_scope[tid]}"
+    return [q for tid, q in questions.items() if tid not in not_asked], not_asked
+
+
+def _undescribed(
+    technique_id: str, claims: list[Any], attck: Any, sample: dict[str, Any] | None = None
+) -> str:
+    """The check's finding when every claim in ``claims`` is asked the does-not-describe question.
+
+    Asked as the analysts' check asks it (``claim_asked_whether_it_describes``):
+    a claim that reads as absence, or whose id the catalogue does not know or
+    the sample cannot host, is asked its own question instead, and a
+    technique with such a claim carries no finding. ``""`` otherwise.
+    """
+    try:
+        from maljan.pipeline.validation import (
+            claim_asked_whether_it_describes,
+            undescribed_technique_finding,
+        )
+
+        if not claims or not all(
+            claim_asked_whether_it_describes(claim, technique_id, attck, sample) for claim in claims
+        ):
+            return ""
+        return undescribed_technique_finding(technique_id, attck, len(claims))
+    except Exception as exc:  # noqa: BLE001 — a check that cannot run asks nothing
+        logger.debug(
+            "capability_matrix: the describe check for %s did not run (%s)", technique_id, exc
+        )
+        return ""
+
+
+def techniques_for_the_judge(
+    stix_output: dict[str, Any] | None,
+    isr_reports: dict[str, Any] | None,
+    sample: dict[str, Any] | None = None,
+    *,
+    attck: Any = None,
+) -> list[TechniqueQuestion]:
+    """The techniques :func:`judge_questions` puts to the judge, given the same catalogue.
+
+    ``JudgeAgent.decide_techniques`` passes the vendored catalogue, which adds
+    the techniques no claim naming which uses its terms; without it those are
+    not listed.
+    """
+    return judge_questions(stix_output, isr_reports, sample, attck=attck)[0]

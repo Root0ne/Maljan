@@ -76,8 +76,11 @@ _MESSAGE_LIMIT = 300
 
 def _one_line(text: str, limit: int = _MESSAGE_LIMIT) -> str:
     """A provider's sentence, made safe to put in a log line or a job row."""
-    flattened = " ".join(str(text or "").split())
-    return flattened[:limit]
+    from maljan.utils.marked_cut import marked_cut
+
+    # Marked where it is cut: the job row's reader can tell a cut from an
+    # ending, and the run's log holds the provider's sentence whole.
+    return marked_cut(" ".join(str(text or "").split()), limit)
 
 
 # What is taken off a written verdict before it is compared: the punctuation

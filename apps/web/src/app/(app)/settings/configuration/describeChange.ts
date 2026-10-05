@@ -341,7 +341,7 @@ function describeStage(profile: string, before: StageEntry, after: StageEntry): 
   if (before.when !== after.when) {
     lines.push(`${field}: condition ${before.when || "always"} → ${after.when || "always"}`);
   }
-  if (before.mode !== after.mode) lines.push(`${field}: runs ${after.mode}`);
+  if (before.mode !== after.mode) lines.push(`${field}: runs ${after.mode ?? "auto"}`);
   if (before.inject_upstream !== after.inject_upstream) {
     lines.push(`${field}: upstream findings ${after.inject_upstream}`);
   }

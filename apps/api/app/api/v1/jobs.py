@@ -92,29 +92,38 @@ async def _unprobed_models_for(db: AsyncSession, config: dict[str, Any]) -> list
     return await unprobed_models(db, settings, _everyone_the_run_can_reach(settings, named))
 
 
+async def _unready_providers_for(db: AsyncSession, config: dict[str, Any]) -> list[str]:
+    """Every agent of this job's team whose non-degrading static provider is not ready.
+
+    The same team the probe gate reads — the profile the job names, or the
+    stored default — and the static provider the job names, when it names one,
+    because that is the one its agents without a provider of their own open.
+    """
+    from app.services.provider_readiness import unready_static_providers
+    from app.services.settings_service import effective_core_settings
+
+    settings = await effective_core_settings(db)
+    profile = str(config.get("profile") or settings.agents.profile)
+    static_provider = config.get("static_provider")
+    return await unready_static_providers(
+        settings,
+        profile,
+        global_provider=str(static_provider) if static_provider else None,
+    )
+
+
 def _everyone_the_run_can_reach(settings: Any, named: list[str]) -> list[str]:
     """The stages' agents, and every agent they can ask, and so on.
 
     The lead team names one agent in its only analysis stage: the specialists
     that do the work sit in no stage and are reached through ``ask_<key>``.
     Checking the stages alone would skip exactly the definitions most likely
-    to carry a model of their own. The reference graph is acyclic — the
-    settings model refuses a self-reference and the run refuses a cycle — so
-    the closure terminates; it is written as one anyway, because a set that
-    grows is the honest way to say "and so on".
+    to carry a model of their own. ``composition.reachable_agents`` is the one
+    closure; the worker's sample mirror follows the same one.
     """
-    definitions = settings.agents.definitions
-    reached = list(dict.fromkeys(named))
-    pending = list(reached)
-    while pending:
-        definition = definitions.get(pending.pop())
-        for ref in getattr(definition, "tools", None) or []:
-            callee = str(getattr(ref, "agent", "") or "")
-            if getattr(ref, "kind", "") != "agent" or not callee or callee in reached:
-                continue
-            reached.append(callee)
-            pending.append(callee)
-    return reached
+    from maljan.agents.composition import reachable_agents
+
+    return reachable_agents(settings, named)
 
 
 # The config keys an audit row may carry. A job config is operator-supplied and
@@ -159,6 +168,14 @@ async def create_job(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=refusal_sentence(unprobed),
+        )
+    unready = await _unready_providers_for(db, body.config or {})
+    if unready:
+        from app.services.provider_readiness import refusal_sentence as provider_refusal
+
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=provider_refusal(unready),
         )
     profile = (body.config or {}).get("profile")
     if profile is not None:

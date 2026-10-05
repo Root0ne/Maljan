@@ -193,6 +193,29 @@ class TestTheReportPrintsIt:
         assert "ev_0012" in row and row.replace("\\|", "").count("|") == 5
         assert "These rows are not published" in text
 
+    def test_a_purpose_the_model_gave_none_is_said_to_be_not_stated(self) -> None:
+        """A dash read as a cell nobody filled in, which is not what an empty purpose is."""
+        report = _report(
+            technical_analysis=TechnicalAnalysis(
+                host_identifiers=[
+                    HostIdentifier(kind="File", value=VALUE, evidence_refs=["ev_0012"])
+                ]
+            )
+        )
+
+        text = MarkdownRenderer().render(report)
+
+        row = next(line for line in text.splitlines() if VALUE in line)
+        assert "| not stated |" in row
+
+    def test_the_section_is_asked_to_carry_a_purpose_an_analyst_stated(self) -> None:
+        from maljan.reporting.composer import _INSTRUCTIONS
+
+        assert (
+            "an analyst claim above says what the sample uses the value for"
+            in (_INSTRUCTIONS["host_identifiers"])
+        )
+
     def test_a_row_the_model_kept_uncited_says_so(self) -> None:
         report = _report(
             technical_analysis=TechnicalAnalysis(

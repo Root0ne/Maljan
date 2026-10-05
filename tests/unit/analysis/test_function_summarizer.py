@@ -15,9 +15,12 @@ Kapsam (8 test):
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from typing import Any
+from unittest.mock import MagicMock, patch
 
-from maljan.analysis.function_summarizer import FunctionSummarizer
+from langchain_core.messages import AIMessage
+
+from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE, FunctionSummarizer
 
 # ---------------------------------------------------------------------------
 # Mock LLM factory
@@ -80,15 +83,28 @@ class TestSummarizeChunk:
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_chunk_truncated_at_8000_chars(self) -> None:
+    def test_a_chunk_the_window_holds_is_sent_whole(self) -> None:
         llm = _make_mock_llm("summary")
-        summarizer = FunctionSummarizer(llm=llm)
-        large_chunk = "A" * 20_000
-        summarizer.summarize_chunk(large_chunk)
-        # invoke edilen mesajin iceriginde 8000 karakter sınırı uygulanmali
+        summarizer = FunctionSummarizer(llm=llm, room_chars=lambda: 1_000_000)
+        summarizer.summarize_chunk("A" * 20_000)
+        call_args = llm.invoke.call_args[0][0]
+        full_prompt = " ".join(str(m.content) for m in call_args)
+        assert "A" * 20_000 in full_prompt
+
+    def test_a_chunk_past_the_window_is_shortened_and_says_so(self) -> None:
+        llm = _make_mock_llm("summary")
+        summarizer = FunctionSummarizer(llm=llm, room_chars=lambda: 8_000)
+        summarizer.summarize_chunk("A" * 20_000)
         call_args = llm.invoke.call_args[0][0]
         full_prompt = " ".join(str(m.content) for m in call_args)
         assert "A" * 20_000 not in full_prompt
+        assert "NOTE: only the first" in full_prompt and "…" in full_prompt
+
+    def test_with_no_window_the_chunk_is_whole(self) -> None:
+        llm = _make_mock_llm("summary")
+        FunctionSummarizer(llm=llm).summarize_chunk("A" * 20_000)
+        full_prompt = " ".join(str(m.content) for m in llm.invoke.call_args[0][0])
+        assert "A" * 20_000 in full_prompt
 
 
 class TestSummarizeChunks:
@@ -147,3 +163,83 @@ class TestSummarizeChunks:
         # Merge hatasinda concat fallback devreye girmeli
         assert isinstance(result, str)
         assert len(result) > 0
+
+
+class _Capped:
+    """A summariser model built with ``max_tokens``, answering each call from a queue."""
+
+    def __init__(self, replies: list[Any], max_tokens: int | None = None) -> None:
+        self.max_tokens = max_tokens
+        self.replies = list(replies)
+        self.calls: list[dict[str, Any]] = []
+
+    def invoke(self, messages: Any, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        return self.replies.pop(0)
+
+
+def _answer(text: str, tokens: int, finish: str = "stop") -> AIMessage:
+    return AIMessage(
+        content=text,
+        usage_metadata={"input_tokens": 50, "output_tokens": tokens, "total_tokens": 50 + tokens},
+        response_metadata={"finish_reason": finish},
+    )
+
+
+class TestACutSummaryIsMarkedCut:
+    """A summary that ended at its output limit reads as whole unless it is said:
+    it becomes an analyst's input, and the analyst takes it as the chunk's
+    account. The same rule as an analyst's answer (``answer_cut_at_cap``):
+    the server's ``length``, or a count that reached the cap in force, which
+    is the call's held cap where it was held and the model's own otherwise."""
+
+    def test_a_summary_at_the_built_cap_is_marked_and_recorded(self) -> None:
+        ledger = MagicMock()
+        llm = _Capped([_answer("It injects into expl", 100)], max_tokens=100)
+        summarizer = FunctionSummarizer(llm=llm, truncation_ledger=ledger)  # type: ignore[arg-type]
+
+        result = summarizer.summarize_chunk("code")
+
+        assert result.startswith(SUMMARY_CUT_NOTE.format(cap=100))
+        assert result.endswith("It injects into expl")
+        (sentence,) = [c.args[0] for c in ledger.record_input_shortened.call_args_list]
+        assert "100-token output limit" in sentence
+
+    def test_a_server_that_says_length_is_believed(self) -> None:
+        llm = _Capped([_answer("It injects", 12, finish="length")])
+        result = FunctionSummarizer(llm=llm).summarize_chunk("code")  # type: ignore[arg-type]
+        assert result.startswith("NOTE: this summary ended at its")
+
+    def test_a_summary_short_of_the_cap_is_whole(self) -> None:
+        ledger = MagicMock()
+        llm = _Capped([_answer("It injects into explorer.", 60)], max_tokens=100)
+        summarizer = FunctionSummarizer(llm=llm, truncation_ledger=ledger)  # type: ignore[arg-type]
+
+        assert summarizer.summarize_chunk("code") == "It injects into explorer."
+        ledger.record_input_shortened.assert_not_called()
+
+    def test_a_held_call_is_checked_against_its_held_cap(self) -> None:
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _held(*_args: Any, **_kwargs: Any) -> Any:
+            yield 40
+
+        llm = _Capped([_answer("It injects", 40), _answer("It reads.", 30)])
+        summarizer = FunctionSummarizer(llm=llm)  # type: ignore[arg-type]
+        with patch("maljan.core.spend.admitted", _held):
+            cut = summarizer.summarize_chunk("code")
+            whole = summarizer.summarize_chunk("code")
+
+        assert llm.calls[0] == {"max_tokens": 40}
+        assert cut.startswith(SUMMARY_CUT_NOTE.format(cap=40))
+        assert whole == "It reads."
+
+    def test_a_cut_merge_is_marked_too(self) -> None:
+        replies = [_answer(f"summary {n}", 5) for n in range(1, 5)]
+        replies.append(_answer("merged and cu", 100))
+        llm = _Capped(replies, max_tokens=100)
+
+        result = FunctionSummarizer(llm=llm).summarize_chunks(["a", "b", "c", "d"])  # type: ignore[arg-type]
+
+        assert result.startswith(SUMMARY_CUT_NOTE.format(cap=100))

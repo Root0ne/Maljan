@@ -15,11 +15,25 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import httpx2
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from pydantic import SecretStr
 
 from maljan.agents.base_agent import without_unanswered_calls
 
 TEXT = "Let me read a few more strings."
+
+_ANTHROPIC_REPLY = {
+    "id": "msg_1",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-4-5",
+    "content": [{"type": "text", "text": "done"}],
+    "stop_reason": "end_turn",
+    "stop_sequence": None,
+    "usage": {"input_tokens": 1, "output_tokens": 1},
+}
 
 
 def _conversation(unrun: AIMessage, *, ran_id: str, ran_shape: dict[str, Any]) -> list[Any]:
@@ -97,12 +111,32 @@ class TestAnthropic:
             },
         )
 
-    def test_the_unrun_call_leaves_the_request(self) -> None:
-        from langchain_anthropic.chat_models import _format_messages
+    def test_the_unrun_call_leaves_the_request(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from langchain_anthropic import ChatAnthropic
+
+        # The request ``ChatAnthropic.invoke`` sends, read off the transport of
+        # the HTTP library the ``anthropic`` SDK is built on (``httpx2``): the
+        # body its own formatter wrote, with nothing leaving the process (the
+        # host is unresolvable should the transport ever change).
+        sent: list[dict[str, Any]] = []
+
+        def _answer(_transport: Any, request: httpx2.Request) -> httpx2.Response:
+            sent.append(json.loads(request.read()))
+            return httpx2.Response(200, json=_ANTHROPIC_REPLY)
+
+        monkeypatch.setattr(httpx2.HTTPTransport, "handle_request", _answer)
+        model = ChatAnthropic(
+            model_name="claude-sonnet-4-5",
+            api_key=SecretStr("unused"),
+            base_url="https://anthropic.invalid",
+            max_retries=0,
+        )
 
         cleaned, dropped = without_unanswered_calls(self._messages())
-        _system, wire = _format_messages(cleaned)
+        model.invoke(cleaned)
 
+        assert len(sent) == 1
+        wire = sent[0]["messages"]
         assert dropped == 1
         blocks = [
             block

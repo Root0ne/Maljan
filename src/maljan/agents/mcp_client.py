@@ -25,6 +25,21 @@ from pydantic import create_model
 
 from maljan.core.logger import logger
 
+
+def tool_error_marker(kind: str, tool: str, **fields: str) -> str:
+    """The marker an MCP call's failure is handed on in, as JSON the ledger reads.
+
+    ``{"tool_error": <kind>, "tool": <name>, ...}``, written with ``json.dumps``
+    so any text in it survives: the markers used to be f-strings, and an
+    ``isError`` reply's content written as a Python repr, or an exception
+    message with a quote in it, was not JSON. ``tools.errors.error_parts``
+    then read no failure and the ledger filed the call as ok.
+    """
+    import json
+
+    return json.dumps({"tool_error": kind, "tool": tool, **fields})
+
+
 # What a character cut leaves behind, and the room kept back for it.
 #
 # The marker goes *inside* the limit rather than after it, which is the same
@@ -40,6 +55,45 @@ TRUNCATION_MARKER = "\n\n[OUTPUT TRUNCATED]"
 def truncation_target(limit: int) -> int:
     """How much of an answer a character cut keeps, so the marker fits the limit."""
     return max(0, int(limit) - len(TRUNCATION_MARKER))
+
+
+def next_request_id(session: Any) -> Any:
+    """The id the session will give its next request, or ``None`` where it cannot say.
+
+    The ``mcp`` client has no public way to learn a request's id, so this is
+    the one place its private counter is read: ``BaseSession._request_id``,
+    which ``send_request`` takes as the request's id before its first await,
+    and ``ClientSession.call_tool`` reaches ``send_request`` with no await in
+    between. Read immediately before the call, it is that call's id, which is
+    how a call this client gives up on is cancelled at the server by name. A
+    test pins that behaviour to the installed version.
+    """
+    value = getattr(session, "_request_id", None)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+async def _cancel_at_the_server(session: Any, request_id: Any, reason: str) -> None:
+    """Tell the server to stop the request this client gave up on. Never raises.
+
+    The client library abandons a request it times out or is cancelled on and
+    says nothing to the server, which then works on with no one waiting — a
+    capa or FLOSS child of a large sample for as long as it takes. The server
+    cancels the request's work when told, and a long-running tool kills its
+    child process with it (``tools.children``).
+    """
+    if request_id is None:
+        return
+    try:
+        from mcp import types
+
+        note = types.ClientNotification(
+            types.CancelledNotification(
+                params=types.CancelledNotificationParams(requestId=request_id, reason=reason)
+            )
+        )
+        await asyncio.shield(asyncio.wait_for(session.send_notification(note), 5.0))
+    except BaseException as exc:  # noqa: BLE001 — a notice that cannot be sent changes nothing
+        logger.debug("the cancellation of request %s was not sent (%s).", request_id, exc)
 
 
 class MCPLangChainToolkit:
@@ -177,10 +231,20 @@ class MCPLangChainToolkit:
             await stack.aclose()
         except RuntimeError as exc:
             # anyio raises this when the stack is closed from a task other than
-            # the one that entered it — the ordinary case here, since agents
-            # enter on the shared agent loop and may be closed from elsewhere.
+            # the one that entered it — the ordinary case here, since a
+            # registry's close runs as a task of its own on the owning loop.
+            # The refusal is anyio's task-group bookkeeping, not the transport:
+            # the stack's exits still run, a stdio transport still closes the
+            # server's stdin, waits for it and terminates it if it does not
+            # exit, and no process or task is left behind
+            # (``tests/unit/agents/test_mcp_cleanup_from_another_task.py``).
             if "cancel scope" in str(exc).lower():
-                logger.warning("MCP cleanup cancel-scope warning (non-fatal): %s", exc)
+                logger.info(
+                    "MCP connection closed from a different task than the one that "
+                    "opened it; anyio reported %r, and the transport's own shutdown "
+                    "still ran, so nothing is left open.",
+                    str(exc),
+                )
             else:
                 logger.warning("MCP cleanup failed (non-fatal): %s", exc)
         except BaseException as exc:  # noqa: BLE001 — teardown must not propagate
@@ -248,7 +312,7 @@ class MCPLangChainToolkit:
             if not self.session:
                 # Structured marker so the agent prompt can detect "no session"
                 # without parsing free-form text.
-                return f'{{"tool_error": "mcp_session_inactive", "tool": "{tool_name}"}}'
+                return tool_error_marker("mcp_session_inactive", tool_name)
             # LangChain fills every declared field before invoking, so an
             # argument the agent never mentioned still arrives here — as the
             # schema default when there is one, and as ``None`` when there is
@@ -311,7 +375,7 @@ class MCPLangChainToolkit:
         try:
             session = self.session
             if session is None:
-                return f'{{"tool_error": "mcp_session_inactive", "tool": "{tool_name}"}}'
+                return tool_error_marker("mcp_session_inactive", tool_name)
             deadline = guard.call_timeout(tool_name) if guard is not None else None
             # The client library answers a call past its deadline with its own
             # request-timeout error, which is a transport failure. Only named
@@ -319,26 +383,42 @@ class MCPLangChainToolkit:
             timing: dict[str, Any] = (
                 {"read_timeout_seconds": timedelta(seconds=deadline)} if deadline else {}
             )
+            long_running = guard is not None and guard.long_running(tool_name)
+            request_id = next_request_id(session)
             try:
                 result = await session.call_tool(tool_name, arguments=args, **timing)
             except asyncio.CancelledError:
-                # The caller's own budget ran out while this call was with the
-                # server: a call the server did not answer in the time there
-                # was, counted as one rather than let go as abandoned.
-                if guard is not None and not settled:
+                await _cancel_at_the_server(session, request_id, "the caller stopped waiting")
+                # A long-running tool still at work when its caller stopped
+                # waiting is not a server that failed to answer.
+                if guard is not None and not settled and not long_running:
+                    # The caller's own budget ran out while this call was with
+                    # the server: a call the server did not answer in the time
+                    # there was, counted as one rather than let go as abandoned.
                     guard.failed(
                         "the call did not finish within its caller's budget",
                         trial=trial,
                     )
                     settled = True
                 raise
+            except Exception as exc:
+                if transport_failure(exc) is not None:
+                    await _cancel_at_the_server(session, request_id, "the client gave up")
+                if long_running and guard is not None and not settled:
+                    # Its own deadline passed: the server was still working.
+                    guard.abandoned(trial=trial)
+                    settled = True
+                raise
             if guard is not None:
                 guard.answered()
                 settled = True
             if result.isError:
-                return (
-                    f'{{"tool_error": "tool_returned_error", "tool": "{tool_name}", '
-                    f'"detail": {result.content!r}}}'
+                return tool_error_marker(
+                    "tool_returned_error",
+                    tool_name,
+                    detail="\n".join(
+                        str(getattr(c, "text", "") or "") for c in result.content or []
+                    ).strip(),
                 )
             output = "\n".join(c.text for c in result.content if hasattr(c, "text"))
             # On a thread: shortening a five-megabyte answer is CPU-bound
@@ -355,9 +435,8 @@ class MCPLangChainToolkit:
                     guard.failed(reason, trial=trial)
                 settled = True
             logger.warning("MCP tool '%s' raised %s: %s", tool_name, type(exc).__name__, exc)
-            return (
-                f'{{"tool_error": "exception", "tool": "{tool_name}", '
-                f'"type": "{type(exc).__name__}", "detail": "{exc}"}}'
+            return tool_error_marker(
+                "exception", tool_name, type=type(exc).__name__, detail=str(exc)
             )
         finally:
             if guard is not None and not settled:
@@ -424,8 +503,9 @@ class MCPLangChainToolkit:
 
         A limit of zero is not "cut to nothing": it is the conversation having
         no room left for a tool answer at all. The model is handed one sentence
-        saying so — a deterministic fact about this conversation — and the
-        whole answer stays on the evidence ledger under the call's own id.
+        saying so — a deterministic fact about this conversation — and the call
+        is said to be cut (``note_answer_not_shown``), so its ledger entry is
+        recorded as cut rather than as a successful empty answer.
 
         If the output exceeds it:
           1. Call ``_output_guardrail`` (e.g. FunctionSummarizer) when available.
@@ -469,12 +549,13 @@ class MCPLangChainToolkit:
             Potentially shortened output.
         """
         from maljan.agents.output_shortening import shorten_json_document, shorten_target
-        from maljan.llm.context_window import output_limit
+        from maljan.llm.context_window import note_answer_not_shown, output_limit
 
         chars_in = len(output)
         limit = output_limit(self._max_output_chars, self._context_budget)
 
         if limit <= 0:
+            note_answer_not_shown(chars_in)
             said = self._no_room(chars_in)
             self._record_guardrail(chars_in, len(said), over_limit=True, no_room=True, limit=limit)
             return said

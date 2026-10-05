@@ -112,13 +112,13 @@ def _report() -> MalwareReport:
         sample_file_type="pe",
         evidence_ledger=[],
     ).build_deterministic()
-    # What a sandbox recorded: the second source the one publish rule asks of
+    # What the sample reached in a sandbox: the second source the one publish rule asks of
     # every judge value, as it asks it of the report's own rows.
     report.network = NetworkIOCs(
         domains=[NetworkDomain(fqdn=C2_DOMAIN, source="sandbox")],
         ips=[
-            NetworkIP(address=C2_ADDRESS, source="sandbox"),
-            NetworkIP(address="10.0.0.5", source="sandbox"),
+            NetworkIP(address=C2_ADDRESS, source="sandbox", sample_process_tree=True),
+            NetworkIP(address="10.0.0.5", source="sandbox", sample_process_tree=True),
         ],
         urls=[NetworkURL(url=f"https://{C2_DOMAIN}/x?next=domain-name:value", source="sandbox")],
     )
@@ -462,6 +462,8 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
             "stix.indicator_type_vocabulary",
             "stix.credit_without_claim",
             "stix.is_family_missing",
+            "stix.is_family_contradicts_family",
+            "stix.malware_type_vocabulary",
             "stix.annotation_out_of_schema",
             "stix.duplicate_label",
             "stix.unknown_object_path",
@@ -469,6 +471,7 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
             "stix.pattern_refused",
             "stix.shape_names_a_value",
             "stix.file_unidentified",
+            "stix.indicator_unattributed_flow",
         }
     )
 

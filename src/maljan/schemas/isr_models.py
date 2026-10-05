@@ -36,6 +36,39 @@ JUDGE_ONLY_TECHNIQUE_MARKER = (
 )
 
 
+def judge_and_findings_note(agents: list[str]) -> str:
+    """The note on a technique the judge named and analysts named on findings only.
+
+    The judge's rule publishes it; no analyst claim carries it, and the
+    analysts that named it on a finding are named, since they are the
+    sources the run's corroboration record lists for it. Said instead of
+    ``JUDGE_ONLY_TECHNIQUE_MARKER``, which would deny that any analyst named it.
+    """
+    named = ", ".join(dict.fromkeys(str(a) for a in agents if str(a).strip()))
+    return (
+        f"stated by the judge; named on a finding, not on a claim, by {named}; a technique "
+        "the judge states is published as its own claim"
+    )
+
+
+# The note on a technique the judge was asked about after its verdict and gave
+# no answer for: it is published, or not, as it would have been without the
+# question, and the row says the judge did not confirm it.
+JUDGE_UNCONFIRMED_TECHNIQUE_MARKER = "not confirmed by the judge"
+
+
+def judge_dropped_reason(reason: str) -> str:
+    """Why a technique the judge dropped when asked is not published, in its own words."""
+    said = str(reason or "").strip()
+    return f"the judge dropped it ({said})" if said else "the judge dropped it"
+
+
+def judge_kept_note(reason: str) -> str:
+    """The note on a technique the judge kept when asked, with the reason it gave."""
+    said = str(reason or "").strip()
+    return f"kept by the judge when asked ({said})" if said else "kept by the judge when asked"
+
+
 class ClaimEvidence(BaseModel):
     """A single verifiable claim with supporting evidence.
 
@@ -60,6 +93,15 @@ class ClaimEvidence(BaseModel):
         None,
         description="MITRE ATT&CK technique ID if applicable, e.g. 'T1055.001'.",
         pattern=r"^T\d{4}(\.\d{3})?$",
+    )
+    # The claim's TECHNIQUE line as written, when it is more than one id or
+    # NONE: a qualifier, a negation, several ids. No id is read from it —
+    # "T1027.002 not supported" is not a claim of T1027.002 — and the
+    # validation turn asks the analyst for one id per claim
+    # (``pipeline.validation.TECHNIQUE_LINE_UNREAD_CODE``).
+    technique_line: str | None = Field(
+        default=None,
+        description="The claim's TECHNIQUE line as written, when no single id could be read.",
     )
     # Whether that id survived validation. ``pipeline.validation`` sets this
     # ``False`` when the analyst kept an id the ATT&CK catalogue does not have,
@@ -209,6 +251,35 @@ class AgentISR(BaseModel):
     # nobody stated is not put on one.
     _unparsed_answer: str = PrivateAttr(default="")
     _blocks_without_confidence: int = PrivateAttr(default=0)
+    # The CONFIDENCE values the parse found and could not read, one per block,
+    # as written: those blocks stated a confidence, so they are asked about
+    # with the value quoted rather than as blocks that stated none.
+    _confidence_unreadable: list[str] = PrivateAttr(default_factory=list)
+    # The answer this ISR was parsed from, as the model wrote it: its CLAIM
+    # blocks and its findings block included. What the validation turn shows
+    # the analyst as its own previous answer; a rendering of the parsed claims
+    # in another shape is copied back in that shape, and the parser reads none
+    # of it.
+    _answer_text: str = PrivateAttr(default="")
+    # The claims of that answer the consistency gate set aside, as written:
+    # the answer is shown back whole, and the question says which of its
+    # claims no longer stand.
+    _gate_removed: list[str] = PrivateAttr(default_factory=list)
+    # Why claims this answer began are not in its findings, as the reader
+    # found it (``BaseAnalyst._claims_shortfall``), or ``""``. Kept with the
+    # answer rather than the run, so the judge node states it only for an
+    # answer in force: a retry or a later round that replaced this answer
+    # carries its own.
+    _claims_unread_reason: str = PrivateAttr(default="")
+    # The claim headings this answer wrote under its DISPUTES section beside
+    # its own claims read: a peer's claims quoted, or its own written in the
+    # wrong place. The validation turn asks once which.
+    _claims_under_disputes: int = PrivateAttr(default=0)
+    # Whether this answer is the one the validation turn kept after asking
+    # about those headings. Asked and kept, they are the analyst's answer; a
+    # question never put leaves their status unknown, and the judge node
+    # states them as a degradation reason (``nodes.claims_under_disputes_unasked``).
+    _claims_under_disputes_asked: bool = PrivateAttr(default=False)
 
     @property
     def unparsed_answer(self) -> str:
@@ -216,14 +287,71 @@ class AgentISR(BaseModel):
         return self._unparsed_answer
 
     @property
+    def answer_text(self) -> str:
+        """The answer this ISR was parsed from, as written, or ``""`` when it has none."""
+        return self._answer_text
+
+    def note_answer_text(self, text: str) -> None:
+        """Record the answer this ISR was parsed from, as the model wrote it."""
+        self._answer_text = str(text or "")
+
+    @property
+    def gate_removed(self) -> list[str]:
+        """The claims of the written answer the consistency gate set aside."""
+        return list(self._gate_removed)
+
+    def note_gate_removed(self, claims: list[str]) -> None:
+        """Record the claims of the written answer the consistency gate set aside."""
+        self._gate_removed = [str(c) for c in claims]
+
+    @property
+    def claims_unread_reason(self) -> str:
+        """Why claims this answer began are not in its findings, or ``""``."""
+        return self._claims_unread_reason
+
+    def note_claims_unread(self, reason: str) -> None:
+        """Record why claims this answer began are not in its findings."""
+        self._claims_unread_reason = str(reason or "")
+
+    @property
+    def claims_under_disputes(self) -> int:
+        """How many claim headings stand under this answer's DISPUTES section, beside its own."""
+        return self._claims_under_disputes
+
+    def note_claims_under_disputes(self, count: int) -> None:
+        """Record the claim headings under the DISPUTES section, beside the answer's own."""
+        self._claims_under_disputes = max(0, int(count or 0))
+
+    @property
+    def claims_under_disputes_asked(self) -> bool:
+        """Whether the analyst was asked about those headings and this answer kept them."""
+        return self._claims_under_disputes_asked
+
+    def note_claims_under_disputes_asked(self) -> None:
+        """Record that the analyst was asked about those headings and kept them there."""
+        self._claims_under_disputes_asked = True
+
+    @property
     def blocks_without_confidence(self) -> int:
         """How many CLAIM blocks of the parsed answer stated no confidence."""
         return self._blocks_without_confidence
 
-    def note_parse(self, *, unparsed_answer: str = "", blocks_without_confidence: int = 0) -> None:
+    @property
+    def confidence_unreadable(self) -> list[str]:
+        """The CONFIDENCE values of the parsed answer that could not be read, as written."""
+        return list(self._confidence_unreadable)
+
+    def note_parse(
+        self,
+        *,
+        unparsed_answer: str = "",
+        blocks_without_confidence: int = 0,
+        confidence_unreadable: Any = (),
+    ) -> None:
         """Record what the parse of this ISR's answer could not read."""
         self._unparsed_answer = str(unparsed_answer or "")
         self._blocks_without_confidence = max(0, int(blocks_without_confidence or 0))
+        self._confidence_unreadable = [str(v) for v in (confidence_unreadable or ())]
 
     @property
     def mean_confidence(self) -> float:

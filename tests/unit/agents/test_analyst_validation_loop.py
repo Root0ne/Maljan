@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from maljan.agents.base_agent import BaseAnalyst
-from maljan.pipeline.validation import FEEDBACK_PREAMBLE
+from maljan.pipeline.validation import ANALYST_FEEDBACK_CLOSING, FEEDBACK_PREAMBLE
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 
@@ -50,7 +50,7 @@ class _Analyst(BaseAnalyst):
     def analyze_isr(self, data: str) -> AgentISR:
         return self._first
 
-    def _invoke_llm_with_timeout(self, messages: list, timeout: int) -> str:
+    def _invoke_llm_with_timeout(self, messages: list, timeout: int, **_: Any) -> str:
         self.seen_turns.append(list(messages))
         return self._replies.pop(0)
 
@@ -108,7 +108,7 @@ class TestTheAnalystGetsOneTurnToFixIt:
         assert feedback.startswith(FEEDBACK_PREAMBLE)
         assert "T9999" in feedback
         assert "T1055" in feedback
-        assert feedback.rstrip().endswith("answer again in the same format.")
+        assert feedback.rstrip().endswith(ANALYST_FEEDBACK_CLOSING)
 
     def test_the_analysts_first_answer_is_in_the_conversation_it_is_asked_to_fix(self) -> None:
         analyst = _Analyst(_isr(_claim("T9999")), [_GOOD_ANSWER])
@@ -179,7 +179,7 @@ class TestTheAnalystGetsOneTurnToFixIt:
 
     def test_a_retry_that_raises_keeps_the_first_answer(self) -> None:
         class _Broken(_Analyst):
-            def _invoke_llm_with_timeout(self, messages: list, timeout: int) -> str:
+            def _invoke_llm_with_timeout(self, messages: list, timeout: int, **_: Any) -> str:
                 raise RuntimeError("the model is unreachable")
 
         analyst = _Broken(_isr(_claim("T9999")), [])
@@ -202,3 +202,234 @@ class TestWhatTheNodeDrains:
         # once the analyst goes on to fix it.
         assert fed_back == {"attck.unknown_id": 1}
         assert analyst.drain_validation_findings() == ([], 0, {})
+
+
+def _fenced(*titles: str) -> str:
+    """A findings block carrying one finding per title."""
+    import json
+
+    body = json.dumps({"findings": [{"title": t, "technique_ids": ["T1003"]} for t in titles]})
+    return f"```maljan-findings\n{body}\n```"
+
+
+_BLOCK_ANSWER = (
+    "CLAIM: allocates memory in another process\n"
+    "EVIDENCE: API call: VirtualAllocEx @ 0x401234\n"
+    "CONFIDENCE: 0.8\n"
+    "TECHNIQUE: T9999\n"
+    "---\n"
+    "CLAIM: writes into the memory it allocated\n"
+    "EVIDENCE: API call: WriteProcessMemory @ 0x401250\n"
+    "CONFIDENCE: 0.7\n"
+    "TECHNIQUE: T1055\n"
+)
+
+
+class _WrittenAnalyst(_Analyst):
+    """An analyst whose first answer is parsed from text, as a real loop's is."""
+
+    def __init__(self, written: str, replies: list[str]) -> None:
+        super().__init__(_isr(), replies)
+        self._written = written
+
+    def analyze_isr(self, data: str) -> AgentISR:
+        return self._text_to_isr(self._capture_findings(self._written), 0)
+
+
+def _replayed(analyst: _Analyst) -> list[str]:
+    """The answers the retry's conversation carries as the analyst's own turns."""
+    return [
+        str(turn.content) for turn in analyst.seen_turns[0] if getattr(turn, "type", "") == "ai"
+    ]
+
+
+class TestTheRetryIsShownTheAnswerAsWritten:
+    def test_the_first_answer_goes_back_with_its_claim_blocks_and_its_findings_block(
+        self,
+    ) -> None:
+        written = f"{_BLOCK_ANSWER}\n{_fenced('first finding')}"
+        analyst = _WrittenAnalyst(written, [_BLOCK_ANSWER.replace("T9999", "T1055")])
+
+        analyst.safe_analyze_isr("raw data")
+
+        assert _replayed(analyst) == [written]
+
+    def test_the_closing_line_names_the_blocks_the_parser_reads(self) -> None:
+        analyst = _WrittenAnalyst(_BLOCK_ANSWER, [_BLOCK_ANSWER])
+
+        analyst.safe_analyze_isr("raw data")
+
+        closing = str(analyst.seen_turns[0][-1].content).splitlines()[-1]
+        for word in ("CLAIM:", "EVIDENCE:", "CONFIDENCE:", "TECHNIQUE:", "maljan-findings"):
+            assert word in closing
+
+    def test_a_retry_that_answers_in_blocks_keeps_its_claims(self) -> None:
+        analyst = _WrittenAnalyst(_BLOCK_ANSWER, [_BLOCK_ANSWER.replace("T9999", "T1055")])
+
+        result = analyst.safe_analyze_isr("raw data")
+
+        assert [c.technique_id for c in result.claims] == ["T1055", "T1055"]
+        assert "attck.unknown_id" not in {v.code for v in analyst.validation_findings}
+
+    def test_the_retry_s_claim_count_is_recorded_on_the_loop(self) -> None:
+        analyst = _WrittenAnalyst(_BLOCK_ANSWER, ["Claim 1: allocates memory | Evidence: x"])
+        analyst._budget_records = [{"agent": "static"}]
+
+        analyst.safe_analyze_isr("raw data")
+
+        assert analyst._budget_records[-1]["validation_retry"] == {
+            "first_claims": 2,
+            "retry_claims": 0,
+            "first_findings": 0,
+            "retry_findings": 0,
+            "kept": "first",
+        }
+
+    def test_an_answer_with_no_text_of_its_own_is_shown_as_its_summary(self) -> None:
+        analyst = _Analyst(_isr(_claim("T9999")), [_GOOD_ANSWER])
+
+        analyst.safe_analyze_isr("raw data")
+
+        assert len(_replayed(analyst)) == 1
+        assert "T9999" in _replayed(analyst)[0]
+
+
+class TestFindingsFollowTheKeptAnswer:
+    def test_a_discarded_retry_s_findings_are_not_published(self) -> None:
+        written = f"{_BLOCK_ANSWER}\n{_fenced('first finding')}"
+        # The retry loses a claim, so the first answer is kept.
+        retry = (
+            "CLAIM: allocates memory in another process\n"
+            "EVIDENCE: API call: VirtualAllocEx @ 0x401234\n"
+            "CONFIDENCE: 0.8\n"
+            "TECHNIQUE: T1055\n"
+            f"{_fenced('retry finding one', 'retry finding two')}"
+        )
+        analyst = _WrittenAnalyst(written, [retry])
+
+        result = analyst.safe_analyze_isr("raw data")
+
+        assert len(result.claims) == 2
+        assert [f.title for f in result.findings] == ["first finding"]
+        assert analyst._findings_buffer == []
+
+    def test_a_kept_retry_carries_its_own_findings_only(self) -> None:
+        written = f"{_BLOCK_ANSWER}\n{_fenced('first finding')}"
+        retry = f"{_BLOCK_ANSWER.replace('T9999', 'T1055')}\n{_fenced('retry finding')}"
+        analyst = _WrittenAnalyst(written, [retry])
+
+        result = analyst.safe_analyze_isr("raw data")
+
+        assert [f.title for f in result.findings] == ["retry finding"]
+        assert analyst._findings_buffer == []
+
+    def test_a_later_drain_after_a_discarded_retry_keeps_the_first_findings(self) -> None:
+        written = f"{_BLOCK_ANSWER}\n{_fenced('first finding')}"
+        analyst = _WrittenAnalyst(written, [f"prose only\n{_fenced('retry finding')}"])
+
+        result = analyst._drain_findings(analyst.safe_analyze_isr("raw data"))
+
+        assert [f.title for f in result.findings] == ["first finding"]
+
+    def test_a_kept_retry_without_findings_is_recorded(self, caplog) -> None:
+        written = f"{_BLOCK_ANSWER}\n{_fenced('first finding')}"
+        analyst = _WrittenAnalyst(written, [_BLOCK_ANSWER.replace("T9999", "T1055")])
+        analyst._budget_records = [{"agent": "static"}]
+
+        result = analyst.safe_analyze_isr("raw data")
+
+        assert result.findings == []
+        record = analyst._budget_records[-1]["validation_retry"]
+        assert (record["first_findings"], record["retry_findings"], record["kept"]) == (
+            1,
+            0,
+            "retry",
+        )
+        assert "carries no findings" in caplog.text
+
+
+class TestTheReplayIsTheAnswerWithoutScaffolding:
+    def test_tool_call_markup_is_not_replayed(self) -> None:
+        call = '<tool_call>{"name": "strings", "arguments": {}}</tool_call>'
+        analyst = _WrittenAnalyst(f"{call}\n{_BLOCK_ANSWER}", [_BLOCK_ANSWER])
+
+        analyst.safe_analyze_isr("raw data")
+
+        [replayed] = _replayed(analyst)
+        assert "<tool_call>" not in replayed
+        assert "CLAIM: allocates memory in another process" in replayed
+
+    def test_the_stored_block_is_read_once(self) -> None:
+        analyst = _WrittenAnalyst(_BLOCK_ANSWER, [])
+        analyst._text_to_isr(analyst._capture_findings(f"{_BLOCK_ANSWER}\n{_fenced('x')}"), 0)
+
+        again = analyst._text_to_isr(_BLOCK_ANSWER.strip(), 0)
+
+        assert "maljan-findings" not in again.answer_text
+
+
+class TestTheGatedAnswerIsShownWhole:
+    def test_the_gate_keeps_the_written_answer_and_names_what_it_set_aside(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from types import SimpleNamespace
+
+        from maljan.agents import base_agent
+
+        monkeypatch.setattr(
+            base_agent,
+            "get_settings",
+            lambda: SimpleNamespace(preprocessing=SimpleNamespace(use_claim_consistency_gate=True)),
+        )
+        analyst = _WrittenAnalyst(_BLOCK_ANSWER, [])
+        isr = analyst._text_to_isr(_BLOCK_ANSWER, 0)
+
+        gated = analyst._apply_consistency_gate(isr, "VirtualAllocEx 0x401234 T9999")
+
+        assert [c.claim for c in gated.claims] == ["allocates memory in another process"]
+        assert gated.answer_text == _BLOCK_ANSWER
+        assert gated.gate_removed == ["writes into the memory it allocated"]
+
+    def test_the_question_names_the_claims_the_gate_set_aside(self) -> None:
+        from maljan.pipeline.validation import GATE_REMOVED_LEAD
+
+        analyst = _WrittenAnalyst(_BLOCK_ANSWER, [_BLOCK_ANSWER])
+        first = analyst._text_to_isr(_BLOCK_ANSWER, 0)
+        first.note_gate_removed(["writes into the memory it allocated"])
+        analyst.analyze_isr = lambda data: first  # type: ignore[method-assign]
+
+        analyst.safe_analyze_isr("raw data")
+
+        assert _replayed(analyst) == [_BLOCK_ANSWER]
+        question = str(analyst.seen_turns[0][-1].content)
+        assert GATE_REMOVED_LEAD in question
+        assert "- writes into the memory it allocated" in question
+
+
+class TestTheRetryIsLabelledOnTheLedger:
+    def test_a_retry_that_reports_no_usage_is_named_as_the_validation_retry(self) -> None:
+        from langchain_core.messages import AIMessage
+
+        from maljan.core.token_ledger import TokenLedger
+
+        class _Model:
+            async def ainvoke(self, messages: list) -> AIMessage:
+                return AIMessage(content=_BLOCK_ANSWER.replace("T9999", "T1055"))
+
+        class _Plain(BaseAnalyst):
+            def analyze(self, data: str) -> str:  # pragma: no cover - unused
+                return ""
+
+            def revise(self, *args: Any, **kwargs: Any) -> str:  # pragma: no cover - unused
+                return ""
+
+            def analyze_isr(self, data: str) -> AgentISR:
+                return self._text_to_isr(_BLOCK_ANSWER, 0)
+
+        analyst = _Plain(llm=_Model(), name="static")
+        analyst.token_ledger = TokenLedger()
+
+        analyst.safe_analyze_isr("raw data")
+
+        calls = [row["call"] for row in analyst.token_ledger.snapshot().get("unreported", [])]
+        assert calls == ["validation retry"]

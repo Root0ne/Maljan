@@ -91,6 +91,43 @@ class TestBinaryBuilders:
         assert "android.permission.READ_SMS" in sections["apk_permissions"].items
         assert ["service", "com.example.evil.Beacon"] in sections["apk_components"].rows
 
+    def test_an_apk_fact_androguard_could_not_read_is_no_list(self) -> None:
+        """``apk_info`` says an unread fact as ``no: <reason>``; a string is not
+        a list of permissions or components, one character a row."""
+        unread = "no: the manifest could not be parsed (KeyError)"
+        answer = {
+            "manifest_present": True,
+            "dex_count": 1,
+            "package": "org.example.app",
+            "version_name": unread,
+            "permissions": unread,
+            "activities": ["org.example.app.Main"],
+            "services": unread,
+        }
+        sections = _by_key(build_sections([_entry("apk_info", answer)]))
+        assert "apk_permissions" not in sections
+        assert sections["apk_components"].rows == [["activitie", "org.example.app.Main"]]
+        assert ["version name", unread] in sections["apk_header"].rows
+
+    def test_the_static_projection_takes_an_unread_permission_list_as_no_permissions(
+        self,
+    ) -> None:
+        """An APK's permissions become the static block's exports; the string
+        ``no: <reason>`` iterated there would be one export per character."""
+        from maljan.reporting.ledger_projection import static_from_ledger
+        from maljan.schemas.evidence import LedgerEntry
+
+        def _static(permissions: object) -> list[str]:
+            answer = {"manifest_present": True, "permissions": permissions}
+            static = static_from_ledger(
+                [LedgerEntry(id="ev_0001", agent="static", tool="apk_info", structured=answer)]
+            )
+            assert static is not None
+            return list(static.exports)
+
+        assert _static("no: the manifest could not be parsed") == []
+        assert _static(["android.permission.INTERNET"]) == ["android.permission.INTERNET"]
+
     def test_two_calls_of_the_same_tool_merge_and_cite_both(self) -> None:
         sections = _by_key(build_sections([_entry("pe_info"), _entry("pe_info", seq=2)]))
         assert len(sections["pe_sections"].rows) == 2
@@ -185,6 +222,50 @@ class TestOtherToolBuilders:
         assert len(sections["functions_examined"].items) == 2
         assert "FUN_00401310" in sections["functions_examined"].items[0]
 
+    def test_functions_examined_says_the_function_map_s_coverage_in_one_line(self) -> None:
+        hashes = {
+            "image_base": "0x400000",
+            "hits": [
+                {
+                    "readings": [{"set": "exports", "name": "OpenThing"}],
+                    "occurrences": [{"function": "0x1310"}, {"function": "0x2000"}],
+                }
+            ],
+        }
+        entries = [
+            _entry("resolve_api_hashes", hashes, agent="pipeline"),
+            _entry(
+                "decompile_function",
+                "void FUN_00401310() { }",
+                seq=2,
+                args={"name": "FUN_00401310"},
+            ),
+        ]
+
+        text = _by_key(build_sections(entries))["functions_examined"].text
+
+        assert text == (
+            "Function map: 1 function visited (1 decompiled); 2 functions reach artefacts "
+            "the analysis server tied to them, 1 of them visited."
+        )
+
+    def test_the_coverage_line_counts_one_function_once_whatever_the_spelling(self) -> None:
+        program = {"image_base": "0x400000", "name": "a.exe"}
+        entries = [
+            _entry("get_current_program_info", program, agent="reverser"),
+            _entry("decompile_function", "void f() { }", seq=2, args={"address": "0x1310"}),
+            _entry("decompile_function", "void f() { }", seq=3, args={"address": "0x401310"}),
+        ]
+
+        text = _by_key(build_sections(entries))["functions_examined"].text
+
+        assert text.startswith("Function map: 1 function visited (1 decompiled);")
+
+    def test_a_run_that_read_no_function_has_no_coverage_line(self) -> None:
+        sections = _by_key(build_sections([_entry("list_functions", "a\nb")]))
+
+        assert sections["functions_examined"].text == ""
+
 
 class TestGenericFallbacks:
     def test_an_unknown_json_object_becomes_a_kv_block(self) -> None:
@@ -200,8 +281,25 @@ class TestGenericFallbacks:
 
     def test_unknown_prose_becomes_a_capped_text_section(self) -> None:
         sections = _by_key(build_sections([_entry("notes", "x" * 9000)]))
+        text = sections["tool_notes"].text
         assert sections["tool_notes"].kind == "text"
-        assert len(sections["tool_notes"].text) == 4000
+        assert text.startswith("x" * 3000) and "…" in text
+        assert "Cut here at 4,000 of 9,000 characters; the evidence endpoint carries it" in text
+
+    def test_a_table_past_its_rows_says_how_many_it_left_out(self) -> None:
+        from maljan.reporting.ledger_report import _Sections
+
+        acc = _Sections()
+        section = acc.get("k", "Table", "table", columns=["a"])
+        section.evidence_ids.append("ev_0007")
+        for i in range(205):
+            acc.add_row(section, [str(i)])
+        (result,) = acc.result()
+        assert len(result.rows) == 200
+        assert "5 more rows not shown here; the evidence endpoint carries every one" in (
+            result.text
+        )
+        assert "ev_0007" in result.text
 
     def test_a_failed_call_builds_no_section(self) -> None:
         entry = build_entry(

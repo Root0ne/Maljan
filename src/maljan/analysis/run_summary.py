@@ -34,6 +34,10 @@ from maljan.analysis.corroboration import (
     published_count,
     technique_label,
 )
+from maljan.pipeline.mediation_models import (
+    CONTRADICTIONS_BLOCK_MISSING_NOTE,
+    CONTRADICTIONS_BLOCK_MIXED_NOTE,
+)
 
 # ---------------------------------------------------------------------------
 # Sub-components
@@ -80,6 +84,13 @@ class NegotiationMetrics:
     sycophancy_events: int
     confidence_history: list[float]
     final_confidence: float | None
+    # One sentence per revision that stood with fewer claims than the answer
+    # it replaced (``nodes.revision_replacement_sentence``).
+    revision_replacements: list[str] = field(default_factory=list)
+    # The platform's sentences about the mediation rounds, once each: a
+    # mediation that gave no final ``CONTRADICTIONS:`` block when asked, and one
+    # whose block listed contradictions and also said none stands.
+    mediation_notes: list[str] = field(default_factory=list)
 
     @property
     def consensus_applicable(self) -> bool:
@@ -106,10 +117,9 @@ class ISRAgentStats:
     # one says the run was thin, the other says the analyst failed — and they
     # were reported identically until BUG 12.
     #
-    # A flag rather than a second degradation-reason string, deliberately:
-    # readers partition on the literal "analysts produced no claims:" to strip
-    # the starved analysts out of a static-only run. A new reason string would
-    # have made every such run record an unexplained incidental degradation.
+    # A flag as well as a reason: the degradation reasons name a skipped
+    # analyst as "analysts skipped (<why>):", and this row lets a reader that
+    # has only the stats tell the two apart.
     no_data: bool = False
     # What the analyst says about its own answer, when the claim count cannot
     # say it: ``no_claims`` for one that read its data and whose model ended
@@ -145,8 +155,13 @@ class TokenUsageMetrics:
     Their tokens are not in the sums and are not estimated: a sum is what the
     providers reported, and the calls that reported nothing are said to have
     reported nothing. ``cost`` is present only where a provider reported one,
-    over ``cost_calls`` calls; there is no price table. ``per_agent`` holds
-    the same figures for each agent, and the models that answered it.
+    over ``cost_calls`` calls; there is no price table. ``cached_input_tokens``
+    (the part of the input read from the provider's prompt cache) and
+    ``reasoning_tokens`` (the part of the output spent reasoning) are present
+    only where a provider reported them, over ``cached_calls`` and
+    ``reasoning_calls`` calls. ``per_agent`` holds the same figures for each
+    agent, and the models that answered it. ``unreported`` names each call that
+    reported no usage — the agent, the call and the model — one row per call.
     """
 
     input_tokens: int
@@ -154,9 +169,36 @@ class TokenUsageMetrics:
     total_tokens: int
     llm_calls: int
     unreported_calls: int = 0
+    cached_input_tokens: int | None = None
+    cached_calls: int = 0
+    reasoning_tokens: int | None = None
+    reasoning_calls: int = 0
     cost: float | None = None
     cost_calls: int = 0
     per_agent: dict[str, dict[str, Any]] = field(default_factory=dict)
+    unreported: list[dict[str, str]] = field(default_factory=list)
+
+
+def _unreported_clause(rows: Any) -> str:
+    """`` (<agent>: <call> on <model>, …)`` for the calls that reported no usage, or ``""``.
+
+    Identical rows are said once with their count. A summary stored before the
+    rows were recorded has none, and the count stands alone.
+    """
+    if not isinstance(rows, list):
+        return ""
+    counted: dict[str, int] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        agent = str(row.get("agent") or "an unnamed agent")
+        call = str(row.get("call") or "a call")
+        model = str(row.get("model") or "")
+        said = f"{agent}: {call}" + (f" on {model}" if model else "")
+        counted[said] = counted.get(said, 0) + 1
+    if not counted:
+        return ""
+    return " (" + ", ".join(said if n == 1 else f"{said} ×{n}" for said, n in counted.items()) + ")"
 
 
 def tokens_sentence(tokens: dict[str, Any] | None) -> str | None:
@@ -183,13 +225,22 @@ def tokens_sentence(tokens: dict[str, Any] | None) -> str | None:
     unreported = int(tokens.get("unreported_calls") or 0)
     reported = calls - unreported
     if reported <= 0:
-        return f"Tokens: not reported by the provider for any of {calls} model {noun}."
+        return (
+            f"Tokens: not reported by the provider for any of {calls} model {noun}"
+            f"{_unreported_clause(tokens.get('unreported'))}."
+        )
     text = (
         f"Tokens: {int(tokens.get('input_tokens') or 0):,} in and "
         f"{int(tokens.get('output_tokens') or 0):,} out over {calls} model {noun}"
     )
     if unreported:
-        text += f"; not reported for {unreported} of them"
+        text += (
+            f"; not reported for {unreported} of them{_unreported_clause(tokens.get('unreported'))}"
+        )
+    text += _part_clause(
+        tokens, "cached_input_tokens", "cached_calls", "of the input read from the prompt cache"
+    )
+    text += _part_clause(tokens, "reasoning_tokens", "reasoning_calls", "of the output reasoning")
     cost = tokens.get("cost")
     cost_calls = int(tokens.get("cost_calls") or 0)
     if isinstance(cost, int | float) and cost_calls:
@@ -200,6 +251,24 @@ def tokens_sentence(tokens: dict[str, Any] | None) -> str | None:
             f"{cost_calls} {'call' if cost_calls == 1 else 'calls'}"
         )
     return text + "."
+
+
+def _part_clause(tokens: dict[str, Any], key: str, calls_key: str, what: str) -> str:
+    """``"; N of the … (reported for K calls)"``, or ``""`` where no call reported it."""
+    calls = int(tokens.get(calls_key) or 0)
+    value = tokens.get(key)
+    if calls <= 0 or not isinstance(value, int | float) or isinstance(value, bool):
+        return ""
+    noun = "call" if calls == 1 else "calls"
+    return f"; {int(value):,} {what} (reported for {calls} {noun})"
+
+
+def _reported_part(snapshot: dict[str, Any], key: str, calls_key: str) -> int | None:
+    """A part's token count from a ledger snapshot, or ``None`` where no call reported it."""
+    value = snapshot.get(key)
+    if not int(snapshot.get(calls_key, 0) or 0) or not isinstance(value, int | float):
+        return None
+    return int(value)
 
 
 def spend_blocks(snapshot: dict[str, Any] | None) -> dict[str, Any]:
@@ -323,6 +392,24 @@ class TruncationMetrics:
             or self.react_step_cap_hits
             or self.judge_token_cap_hits
         )
+
+
+def _largest_limit(rows: Any, key: str) -> float | int | None:
+    """The largest of an agent's per-loop limits under ``key``, ``None`` when a loop had none.
+
+    A loop with no limit in a dimension records ``None`` under the key; one
+    such loop makes the agent's figure ``None`` too, because the largest limit
+    it ran under was no limit at all. A row without the key recorded nothing
+    and counts as zero, as it always did.
+    """
+    largest: float | int = 0
+    for row in rows:
+        if key in row and row[key] is None:
+            return None
+        value = row.get(key)
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            largest = max(largest, value)
+    return largest
 
 
 def _recorded_calls(latency: Any) -> int:
@@ -507,7 +594,7 @@ def generation_lines(generation: Any) -> list[str]:
     """Each model's measured generation rate and each call timeout it produced.
 
     One line per model and one per sized call, so a reader can check the
-    arithmetic: the budget, the rate, the margin, the ceiling, and what the
+    arithmetic: the budget, the rate, the margin, and what the
     call was finally given. Nothing measured contributes nothing.
     """
     if not isinstance(generation, dict):
@@ -533,37 +620,112 @@ def generation_lines(generation: Any) -> list[str]:
                 f"{float(row.get('prompt_seconds') or 0.0):.1f}s; from {read_from})"
             )
     margin = generation.get("margin")
-    ceiling = generation.get("ceiling_s")
     for call, row in sorted((generation.get("timeouts") or {}).items()):
         if not isinstance(row, dict):
             continue
         if row.get("budget"):
             lines.append(f"Output budget of `{call}`: {row['budget']}")
+        unlimited = row.get("configured_s") is None
         configured = float(row.get("configured_s") or 0.0)
         applied = float(row.get("applied_s") or 0.0)
         if row.get("derived_s") is None:
             lines.append(
-                f"Timeout of `{call}`: {applied:.0f}s, the configured value "
+                f"Timeout of `{call}`: none of its own — no time limit is configured and no "
+                "rate is measured for its model yet (or there is no output budget), so the "
+                "request's own timeout bounds it"
+                if unlimited
+                else f"Timeout of `{call}`: {applied:.0f}s, the configured value "
                 "(no rate measured for its model yet, or no output budget)"
             )
             continue
+        # With no configured limit the derived time is the whole of it.
+        larger_of = "" if unlimited else f"the larger of {configured:.0f}s configured and "
         if row.get("prompt_tokens_per_second") is not None:
             lines.append(
-                f"Timeout of `{call}`: {applied:.0f}s — the larger of {configured:.0f}s "
-                f"configured and ({int(row.get('prompt_tokens') or 0)} prompt tokens read at "
+                f"Timeout of `{call}`: {applied:.0f}s — {larger_of}"
+                f"({int(row.get('prompt_tokens') or 0)} prompt tokens read at "
                 f"{float(row['prompt_tokens_per_second']):.2f} tokens/s + "
                 f"{int(row.get('max_tokens') or 0)} tokens written at "
                 f"{float(row.get('tokens_per_second') or 0.0):.2f} tokens/s) × {margin} "
-                f"= {float(row['derived_s']):.0f}s, at most {float(ceiling or 0.0):.0f}s"
+                f"= {float(row['derived_s']):.0f}s"
             )
             continue
         lines.append(
-            f"Timeout of `{call}`: {applied:.0f}s — the larger of {configured:.0f}s configured "
-            f"and {int(row.get('max_tokens') or 0)} tokens at "
+            f"Timeout of `{call}`: {applied:.0f}s — {larger_of}"
+            f"{int(row.get('max_tokens') or 0)} tokens at "
             f"{float(row.get('tokens_per_second') or 0.0):.2f} tokens/s (prompt read included) "
-            f"× {margin} = {float(row['derived_s']):.0f}s, at most {float(ceiling or 0.0):.0f}s"
+            f"× {margin} = {float(row['derived_s']):.0f}s"
         )
     return lines
+
+
+def spend_lines(spend: Any) -> list[str]:
+    """The spend ceiling, what the run spent against it, and every model it could not price."""
+    if not isinstance(spend, dict) or spend.get("ceiling_usd") is None:
+        return []
+    ceiling = float(spend.get("ceiling_usd") or 0.0)
+    spent = float(spend.get("spent_usd") or 0.0)
+    unreported = int(spend.get("unreported_calls") or 0)
+    lines = [
+        (
+            f"Spent at least {spent:.4f} USD of the {ceiling:.4f} USD ceiling; {unreported} "
+            "call(s) reported no usage and are not counted"
+            if unreported
+            else f"Spent {spent:.4f} USD of the {ceiling:.4f} USD ceiling"
+        )
+        + (
+            " — reached, and the tool phases still running ended there"
+            if spend.get("reached")
+            else (
+                f" — exhausted at {float(spend.get('exhausted_at_usd') or 0.0):.4f} USD by "
+                f"{spend.get('exhausted_by') or 'a refusal'}: no further loop, chunk, ask or "
+                "round was started"
+            )
+            if spend.get("exhausted")
+            else ""
+        )
+    ]
+    estimated = int(spend.get("estimated_calls") or 0)
+    if estimated:
+        lines.append(
+            f"Of it, {float(spend.get('estimated_usd') or 0.0):.4f} USD is estimated for "
+            f"{estimated} call(s) ({spend.get('estimated_source') or 'estimated'}): the "
+            "prompt as uncached input and the generated pieces as output"
+        )
+    for model, source in sorted((spend.get("prices_from") or {}).items()):
+        if source == "llm.model_prices":
+            lines.append(f"Prices of `{model}`: the operator's (llm.model_prices)")
+        elif source == "provider-reported":
+            lines.append(f"Cost of `{model}`'s calls: as its provider reported it with each answer")
+        else:
+            lines.append(
+                f"`{model}` priced at the rates in force when each call was sent ({source})"
+            )
+    if spend.get("reserve_usd") is not None:
+        lines.append(
+            "Still kept for the verdict and the report when this was written: "
+            f"{float(spend['reserve_usd']):.4f} USD"
+        )
+    if spend.get("note"):
+        lines.append(f"Not counted: {spend['note']}")
+    refused = int(spend.get("refused_calls") or 0)
+    if refused:
+        lines.append(
+            f"Refused under the ceiling: {refused} call(s)"
+            + (
+                ""
+                if spend.get("exhausted")
+                else "; smaller calls still fitted what was left, so the job went on"
+            )
+        )
+    for said in spend.get("held_calls") or []:
+        lines.append(f"Before the call: {said}")
+    return lines
+
+
+def _sandbox_name(provider: str) -> str:
+    """A sandbox provider's name as a reader knows it."""
+    return {"triage": "Triage", "cape2": "CAPE", "cuckoo": "Cuckoo"}.get(provider, provider)
 
 
 def tool_latency_lines(latency: Any) -> list[str]:
@@ -619,7 +781,10 @@ class RunSummary:
         file_hash:          Sample identifier.
         file_name:          Human-readable filename (if provided).
         final_decision:     Pipeline verdict (Malware / Benign / Suspicious).
-        stix_object_count:  Number of objects in the STIX Bundle.
+        stix_object_count:  Number of objects in the exported STIX bundle once
+                            the report node has built it; the judge's bundle
+                            size until then.
+        judge_stix_object_count: Number of objects in the judge's own bundle.
         negotiation:        Negotiation loop metrics.
         agent_stats:        Per-agent ISR statistics.
         validation:         What the validation loop found (None if it never ran).
@@ -652,6 +817,10 @@ class RunSummary:
     # Per technique id, ``{asserted_by: [deterministic sources], claimed_by:
     # [agents]}``. Two flat lists and no score.
     corroboration: dict[str, dict[str, list[str]]] = field(default_factory=dict)
+    # The judge's own bundle size. ``stix_object_count`` is the exported
+    # bundle's once the report node has built it, and the two differ by every
+    # object the export adds.
+    judge_stix_object_count: int = 0
     tokens: TokenUsageMetrics | None = None
     truncation: TruncationMetrics | None = None
     timestamp: float = field(default_factory=time.time)
@@ -671,8 +840,12 @@ class RunSummary:
     # which a reader has to be able to tell from a pack that wrote nothing.
     triage: dict[str, Any] | None = None
     # How the final-answer nudge had to be sent, per analyst, when the plain
-    # way failed: ``{"retry_mode": {"static": "invalid_tool_calls_dropped"}}``.
-    # ``None`` when no analyst needed a different way.
+    # way failed: ``{"retry_mode": {"static": "invalid_tool_calls_dropped"}}``;
+    # and the analysts whose first answer called no tool and were asked once
+    # whether to call one, per loop the question was asked in, with what
+    # followed: ``{"no_tool_call": {"triage": [{"tool_calls_after": 0,
+    # "followed": "answered_without_tools"}]}}``. ``None`` when neither
+    # happened.
     nudge: dict[str, Any] | None = None
     # The budget meter, per agent: ``{loops, steps_used, max_steps,
     # elapsed_s, timeout_s, delegated_steps, caps}`` summed over the agent's
@@ -700,10 +873,16 @@ class RunSummary:
     # ran, or the report is a recorded fixture. ``None`` when a sandbox
     # observed the run, which needs no sentence.
     sandbox: dict[str, str] | None = None
+    # The run-time limit the sandbox set for the task, and which sandbox set
+    # it (``run_limit`` in the report); ``None`` where its report says nothing.
+    sandbox_run_limit: dict[str, Any] | None = None
     # Each model's measured generation rate and each per-call timeout it
     # produced (``llm.generation_rate.GenerationRates.snapshot``). ``None`` on
     # a run that measured no answer and sized no call.
     generation: dict[str, Any] | None = None
+    # The operator's spend ceiling and what the run spent against it
+    # (``core.spend.SpendMeter.snapshot``). ``None`` with no ceiling set.
+    spend: dict[str, Any] | None = None
     # ``dedupe`` is deliberately not a field here. What the report folded is
     # counted while the report's sections are built, which happens after this
     # object exists, so the report builder writes ``dedupe`` onto the summary
@@ -721,6 +900,14 @@ class RunSummary:
             tid: corroboration_row(row) for tid, row in (self.corroboration or {}).items()
         }
 
+    def _judge_bundle_note(self) -> str:
+        """The judge's bundle size beside the exported one, when the two differ."""
+        if self.judge_stix_object_count and (
+            self.judge_stix_object_count != self.stix_object_count
+        ):
+            return f" (the judge's bundle: {self.judge_stix_object_count})"
+        return ""
+
     def to_markdown(self) -> str:
         """Render the full run summary as a human-readable Markdown report."""
         sample_label = f"{self.file_hash}"
@@ -732,9 +919,17 @@ class RunSummary:
             "",
             f"**Sample**: `{sample_label}`  ",
             f"**Verdict**: {self.final_decision}  ",
-            f"**STIX objects**: {self.stix_object_count}  ",
+            f"**STIX objects**: {self.stix_object_count}{self._judge_bundle_note()}  ",
             f"**Elapsed**: {self.elapsed_seconds:.1f}s  ",
             *([f"**Sandbox**: {self.sandbox['statement']}  "] if self.sandbox else []),
+            *(
+                [
+                    f"**Sandbox run-time limit**: {self.sandbox_run_limit['seconds']} s, "
+                    f"the run-time limit {self.sandbox_run_limit['set_by']} set for the task  "
+                ]
+                if self.sandbox_run_limit
+                else []
+            ),
             *stage_duration_lines(self.stages),
             *tool_latency_lines(self.tool_latency),
             "",
@@ -779,6 +974,13 @@ class RunSummary:
         if n.confidence_history:
             history_str = " → ".join(f"{c:.2f}" for c in n.confidence_history)
             lines.append(f"**Confidence history**: {history_str}")
+            lines.append("")
+        if n.revision_replacements:
+            lines += ["**Revisions that replaced an answer with fewer claims:**", ""]
+            lines += [f"- {sentence}" for sentence in n.revision_replacements]
+            lines.append("")
+        if n.mediation_notes:
+            lines += [f"- {sentence}" for sentence in n.mediation_notes]
             lines.append("")
 
         # Agent ISR statistics
@@ -924,6 +1126,10 @@ class RunSummary:
         if generation:
             lines += ["## Generation Rate", "", *(f"- {line}" for line in generation), ""]
 
+        spend = spend_lines(self.spend)
+        if spend:
+            lines += ["## Spend Ceiling", "", *(f"- {line}" for line in spend), ""]
+
         if self.truncation:
             trunc = self.truncation
             lines += [
@@ -1005,9 +1211,17 @@ class RunSummary:
             "unreported_calls": tok.unreported_calls,
             "per_agent": {agent: dict(row) for agent, row in sorted(tok.per_agent.items())},
         }
+        if tok.cached_input_tokens is not None and tok.cached_calls:
+            out["cached_input_tokens"] = tok.cached_input_tokens
+            out["cached_calls"] = tok.cached_calls
+        if tok.reasoning_tokens is not None and tok.reasoning_calls:
+            out["reasoning_tokens"] = tok.reasoning_tokens
+            out["reasoning_calls"] = tok.reasoning_calls
         if tok.cost is not None and tok.cost_calls:
             out["cost"] = round(tok.cost, 6)
             out["cost_calls"] = tok.cost_calls
+        if tok.unreported:
+            out["unreported"] = [dict(row) for row in tok.unreported]
         out["sentence"] = tokens_sentence(out) or ""
         return out
 
@@ -1019,6 +1233,7 @@ class RunSummary:
             "file_name": self.file_name,
             "final_decision": self.final_decision,
             "stix_object_count": self.stix_object_count,
+            "judge_stix_object_count": self.judge_stix_object_count,
             "elapsed_seconds": round(self.elapsed_seconds, 3),
             "timestamp": self.timestamp,
             "negotiation": {
@@ -1036,6 +1251,12 @@ class RunSummary:
                     if n.consensus_applicable and n.final_confidence is not None
                     else {}
                 ),
+                **(
+                    {"revision_replacements": list(n.revision_replacements)}
+                    if n.revision_replacements
+                    else {}
+                ),
+                **({"mediation_notes": list(n.mediation_notes)} if n.mediation_notes else {}),
             },
             "agent_stats": [
                 {
@@ -1068,6 +1289,8 @@ class RunSummary:
             "tool_latency": dict(self.tool_latency) if self.tool_latency else None,
             "sandbox": dict(self.sandbox) if self.sandbox else None,
         }
+        if self.sandbox_run_limit:
+            result["sandbox_run_limit"] = dict(self.sandbox_run_limit)
 
         if self.validation:
             result["validation"] = {
@@ -1084,6 +1307,9 @@ class RunSummary:
 
         if self.generation:
             result["generation"] = dict(self.generation)
+
+        if self.spend:
+            result["spend"] = dict(self.spend)
 
         if self.truncation:
             t = self.truncation
@@ -1137,6 +1363,28 @@ class RunSummary:
 # ---------------------------------------------------------------------------
 
 
+def tool_asks_of(
+    records: dict[str, list[dict[str, Any]]] | None,
+) -> dict[str, list[dict[str, Any]]]:
+    """The no-tool-call questions the budget records hold, per agent, in loop order.
+
+    ``records`` is the state channel the nodes write (``budget_records``): one
+    row per loop, and a loop whose analyst was asked whether to call a tool
+    carries ``tool_ask`` (``BaseAnalyst.execute_tool_loop``). Agents with none
+    are left out.
+    """
+    out: dict[str, list[dict[str, Any]]] = {}
+    for agent, rows in (records or {}).items():
+        asks = [
+            dict(row["tool_ask"])
+            for row in (rows or [])
+            if isinstance(row, dict) and isinstance(row.get("tool_ask"), dict)
+        ]
+        if asks:
+            out[str(agent)] = asks
+    return out
+
+
 class RunSummaryBuilder:
     """Constructs a RunSummary from pipeline state and phase-specific results.
 
@@ -1170,11 +1418,13 @@ class RunSummaryBuilder:
         self._techniques_by_layer: dict[str, int] = {}
         self._tokens: TokenUsageMetrics | None = None
         self._generation: dict[str, Any] | None = None
+        self._spend: dict[str, Any] | None = None
         self._truncation: TruncationMetrics | None = None
         self._profile: dict[str, Any] | None = None
         self._stages: list[dict[str, Any]] = []
         self._triage: dict[str, Any] | None = None
         self._sandbox: dict[str, str] | None = None
+        self._sandbox_run_limit: dict[str, Any] | None = None
         self._nudge: dict[str, Any] | None = None
         self._budget: dict[str, Any] | None = None
         self._tool_latency: dict[str, Any] | None = None
@@ -1209,9 +1459,10 @@ class RunSummaryBuilder:
             out[str(agent)] = {
                 "loops": len(loops),
                 "steps_used": sum(int(row.get("steps_used") or 0) for row in loops),
-                "max_steps": max(int(row.get("max_steps") or 0) for row in loops),
+                # ``None`` when any loop of the agent had no limit.
+                "max_steps": _largest_limit(loops, "max_steps"),
                 "elapsed_s": round(sum(float(row.get("elapsed_s") or 0.0) for row in loops), 1),
-                "timeout_s": max(float(row.get("timeout_s") or 0.0) for row in loops),
+                "timeout_s": _largest_limit(loops, "timeout_s"),
                 "delegated_steps": sum(int(row.get("delegated_steps") or 0) for row in loops),
                 # The largest of its loops: a figure sent with every request
                 # of a loop, not an amount spent, so it is not summed.
@@ -1272,10 +1523,26 @@ class RunSummaryBuilder:
         self._tool_latency = rows or None
         return self
 
-    def set_nudge(self, retry_modes: dict[str, str] | None) -> RunSummaryBuilder:
-        """Which analysts needed the nudge sent another way, and which way."""
+    def set_nudge(
+        self,
+        retry_modes: dict[str, str] | None,
+        *,
+        no_tool_call: dict[str, list[dict[str, Any]]] | None = None,
+    ) -> RunSummaryBuilder:
+        """Which analysts needed the nudge sent another way, and which way.
+
+        ``no_tool_call`` is the question asked of an analyst whose first answer
+        called no tool, per agent (:func:`tool_asks_of`): that it was asked,
+        and what the model did next.
+        """
         modes = {str(k): str(v) for k, v in (retry_modes or {}).items() if v}
-        self._nudge = {"retry_mode": modes} if modes else None
+        asks = {str(k): [dict(row) for row in v] for k, v in (no_tool_call or {}).items() if v}
+        nudge: dict[str, Any] = {}
+        if modes:
+            nudge["retry_mode"] = modes
+        if asks:
+            nudge["no_tool_call"] = asks
+        self._nudge = nudge or None
         return self
 
     def set_triage(self, facts: dict[str, Any] | None) -> RunSummaryBuilder:
@@ -1303,6 +1570,20 @@ class RunSummaryBuilder:
             None
             if found.status == OBSERVED
             else {"status": found.status, "statement": found.statement}
+        )
+        limit = report.get("run_limit") if isinstance(report, dict) else None
+        seconds = limit.get("seconds") if isinstance(limit, dict) else None
+        self._sandbox_run_limit = (
+            {
+                "seconds": int(seconds),
+                "set_by": _sandbox_name(str(limit.get("set_by") or "the sandbox")),
+            }
+            if found.status == OBSERVED
+            and isinstance(limit, dict)
+            and isinstance(seconds, int)
+            and not isinstance(seconds, bool)
+            and seconds > 0
+            else None
         )
         return self
 
@@ -1333,9 +1614,18 @@ class RunSummaryBuilder:
             total_tokens=int(snapshot.get("total_tokens", 0)),
             llm_calls=int(snapshot.get("llm_calls", 0)),
             unreported_calls=int(snapshot.get("unreported_calls", 0)),
+            cached_input_tokens=_reported_part(snapshot, "cached_input_tokens", "cached_calls"),
+            cached_calls=int(snapshot.get("cached_calls", 0) or 0),
+            reasoning_tokens=_reported_part(snapshot, "reasoning_tokens", "reasoning_calls"),
+            reasoning_calls=int(snapshot.get("reasoning_calls", 0) or 0),
             cost=float(cost) if isinstance(cost, int | float) else None,
             cost_calls=int(snapshot.get("cost_calls", 0) or 0),
             per_agent={str(name): dict(row) for name, row in agents.items()},
+            unreported=[
+                {str(k): str(v) for k, v in row.items()}
+                for row in (snapshot.get("unreported") or [])
+                if isinstance(row, dict)
+            ],
         )
         models: dict[str, Any] = {}
         for name, row in agents.items():
@@ -1363,6 +1653,12 @@ class RunSummaryBuilder:
         """
         if isinstance(snapshot, dict) and (snapshot.get("models") or snapshot.get("timeouts")):
             self._generation = dict(snapshot)
+        return self
+
+    def set_spend(self, snapshot: dict[str, Any] | None) -> RunSummaryBuilder:
+        """Record the spend ceiling and what the run spent against it; ``None`` leaves it unset."""
+        if isinstance(snapshot, dict) and snapshot:
+            self._spend = dict(snapshot)
         return self
 
     def set_truncation(self, snapshot: dict[str, Any] | None) -> RunSummaryBuilder:
@@ -1441,17 +1737,27 @@ class RunSummaryBuilder:
         self._stages = [dict(row) for row in stages]
         return self
 
-    def set_profile(self, name: str, analysts: list[str], custom: list[str]) -> RunSummaryBuilder:
+    def set_profile(
+        self,
+        name: str,
+        analysts: list[str],
+        custom: list[str],
+        *,
+        analyst_mode: dict[str, Any] | None = None,
+    ) -> RunSummaryBuilder:
         """Record which ensemble ran (spec §5).
 
         ``custom`` is the subset of ``analysts`` that is not one of the four
         built-in definitions — what the report and the pipeline panel badge, so
         a reader can tell a measured run from an operator's own arrangement.
+        ``analyst_mode`` is the run mode the job resolved for its analysts
+        (``mode``, ``setting``, ``reason``), present when one was recorded.
         """
         self._profile = {
             "name": name,
             "analysts": list(analysts),
             "custom": list(custom),
+            **({"analyst_mode": dict(analyst_mode)} if analyst_mode else {}),
         }
         return self
 
@@ -1461,6 +1767,11 @@ class RunSummaryBuilder:
         return self
 
     def set_verdict(self, final_decision: str, stix_object_count: int) -> RunSummaryBuilder:
+        """The verdict and the judge's bundle size.
+
+        The size is both counts until the report node builds the export and
+        writes the exported bundle's size over ``stix_object_count``.
+        """
         self._final_decision = final_decision
         self._stix_object_count = stix_object_count
         return self
@@ -1508,7 +1819,7 @@ class RunSummaryBuilder:
             termination_reason = MEDIATION_FAILED
         elif is_consensus:
             termination_reason = "consensus"
-        elif len(confidence_history) >= 3:
+        elif len(confidence_history) >= 3 and not getattr(last_mediator, "contradictions", None):
             recent = confidence_history[-3:]
             std = _rolling_std(recent)
             termination_reason = "convergence" if std < 0.02 else "hard_limit"
@@ -1529,6 +1840,18 @@ class RunSummaryBuilder:
             # nothing in it measured nothing, and 0.0 would say it had.
             final_confidence=(
                 confidence_history[-1] if applicable and confidence_history else None
+            ),
+            revision_replacements=[
+                str(sentence) for sentence in (state.get("revision_replacements") or [])
+            ],
+            mediation_notes=list(
+                dict.fromkeys(
+                    str(getattr(arg, "note", ""))
+                    for arg in discussion_history
+                    if getattr(arg, "agent_name", "") == "Mediator"
+                    and getattr(arg, "note", "")
+                    in (CONTRADICTIONS_BLOCK_MISSING_NOTE, CONTRADICTIONS_BLOCK_MIXED_NOTE)
+                )
             ),
         )
         return self
@@ -1612,6 +1935,7 @@ class RunSummaryBuilder:
             file_name=self._file_name,
             final_decision=self._final_decision,
             stix_object_count=self._stix_object_count,
+            judge_stix_object_count=self._stix_object_count,
             negotiation=self._negotiation,
             agent_stats=self._agent_stats,
             validation=self._validation,
@@ -1632,7 +1956,9 @@ class RunSummaryBuilder:
             budget=self._budget,
             tool_latency=self._tool_latency,
             sandbox=self._sandbox,
+            sandbox_run_limit=self._sandbox_run_limit,
             generation=self._generation,
+            spend=self._spend,
         )
 
 

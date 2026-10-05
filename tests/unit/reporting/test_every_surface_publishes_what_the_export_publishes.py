@@ -35,6 +35,7 @@ from maljan.reporting.renderers.stix_renderer import (
     exported_indicator_values,
     indicator_publish_reason,
     publish_answer,
+    publishes,
     rule_values,
 )
 from maljan.schemas.stix_models import Bundle
@@ -44,6 +45,12 @@ SWEPT = "crl.example-authority.org"
 SHA256 = "a" * 64
 DROPPED = "b" * 64
 FOREIGN = "d" * 64
+# These reports are built without the build's search of the tool answers,
+# so the refusal says only the answers such a report keeps were searched.
+JUDGE_ONLY = (
+    "no: named only by the judge's indicator; no tool answer this report keeps holds it, and "
+    "no second source records it"
+)
 
 
 def _indicator(index: int, pattern: str) -> dict[str, Any]:
@@ -134,7 +141,26 @@ class TestAJudgeValueTheRuleRefuses:
 
         row = _row(report, "only-judge.example.net")
 
-        assert (row.source, row.published) == ("judge", "no: seen only in the file's strings")
+        # The file's strings do not hold it: the judge's indicator is its only source.
+        assert (row.source, row.published) == (
+            "judge",
+            JUDGE_ONLY,
+        )
+
+    def test_a_judge_value_the_file_s_strings_hold_is_said_to_be_seen_there(self) -> None:
+        from maljan.reporting.models import StaticAnalysis, StringIOC
+
+        judge = _judge("[domain-name:value = 'only-judge.example.net']")
+        report = _report(
+            judge,
+            static=StaticAnalysis(
+                interesting_strings=[StringIOC(kind="domain", value="only-judge.example.net")]
+            ),
+        )
+
+        assert _row(report, "only-judge.example.net").published == (
+            "no: seen only in the file's strings"
+        )
 
 
 class TestAJudgeValueTheRulePublishes:
@@ -144,13 +170,13 @@ class TestAJudgeValueTheRulePublishes:
         exported, renderer = _export(report, judge)
 
         assert OBSERVED in str(exported)
-        assert _row(report, OBSERVED).published == "yes"
+        assert publishes(_row(report, OBSERVED).published)
         assert not [code for code, _why in renderer.declined if code == UNPUBLISHED_VALUE_CODE]
 
 
 class TestTheKindsTheRuleNowAnswers:
     def test_the_sample_s_own_hash_is_published(self) -> None:
-        assert publish_answer("hash", SHA256, "identity") == "yes"
+        assert publishes(publish_answer("hash", SHA256, "identity"))
 
     def test_a_hash_no_second_source_records_is_not(self) -> None:
         judge = _judge(f"[file:hashes.'SHA-256' = '{FOREIGN}']")
@@ -158,7 +184,7 @@ class TestTheKindsTheRuleNowAnswers:
         exported, renderer = _export(report, judge)
 
         assert FOREIGN not in str(exported)
-        assert _row(report, FOREIGN).published == "no: seen only in the file's strings"
+        assert _row(report, FOREIGN).published == JUDGE_ONLY
 
     def test_a_hash_of_a_file_the_sandbox_saw_dropped_is(self) -> None:
         judge = _judge(f"[file:hashes.'SHA-256' = '{DROPPED}']")
@@ -210,7 +236,7 @@ class TestOneDecision:
         report.stix_bundle_extended = exported
         table = build_consolidated_iocs(report)
 
-        published = {(r.kind, r.value.lower()) for r in table if r.published == "yes"}
+        published = {(r.kind, r.value.lower()) for r in table if publishes(r.published)}
         carried = {(v.kind, v.value.lower()) for v in exported_indicator_values(exported)}
         judged = {(j.kind, j.value.lower()) for j in report.judge_indicators}
         # Every value any exported indicator names, whatever its operator.
@@ -259,4 +285,4 @@ class TestEveryOperatorIsAskedTheRule:
         exported, _renderer = _export(report, judge)
 
         assert pattern in str(exported)
-        assert _row(report, OBSERVED).published == "yes"
+        assert publishes(_row(report, OBSERVED).published)

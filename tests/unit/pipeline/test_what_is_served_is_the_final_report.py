@@ -78,6 +78,9 @@ def _state() -> dict[str, Any]:
         # that stopped when the verdict did.
         "run_summary": {
             "elapsed_seconds": 11.5,
+            # The judge's bundle size, which the export does not equal.
+            "stix_object_count": 0,
+            "judge_stix_object_count": 0,
             "corroboration": {
                 PUBLISHED: {"asserted_by": [], "claimed_by": ["static"]},
                 CLAIMED_ONLY: {"asserted_by": [], "claimed_by": ["static"]},
@@ -124,8 +127,13 @@ def _published_and_marked(report: MalwareReport) -> MalwareReport:
     return report
 
 
-async def _run(container: Any) -> tuple[dict[str, Any], dict[str, Any]]:
-    """The node's result, and the summary the worker stores in its own column."""
+async def _run(
+    container: Any, *, corroborated: bool = False
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The node's result, and the summary the worker stores in its own column.
+
+    ``corroborated`` has a second source name the published technique.
+    """
     from maljan.pipeline.nodes import make_report_node
     from maljan.reporting.builder import MalwareReportBuilder
 
@@ -139,7 +147,10 @@ async def _run(container: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     stage = next(step for step in container.active_profile().stages if step.kind == "report")
     with patch.object(MalwareReportBuilder, "build_deterministic", _build):
         node = make_report_node(container, stage=stage, announces=False)
-        result = await node(_state())  # type: ignore[arg-type]
+        state = _state()
+        if corroborated:
+            state["run_summary"]["corroboration"][PUBLISHED]["asserted_by"] = ["capa"]
+        result = await node(state)  # type: ignore[arg-type]
     return result, result.get("run_summary") or {}
 
 
@@ -257,3 +268,78 @@ class TestTheRunTotalIncludesTheReportStage:
         assert "Tokens: 150 in and 15 out over 2 model calls." in MarkdownRenderer().render(
             MalwareReport.model_validate(result["malware_report"])
         )
+
+
+@pytest.mark.asyncio
+class TestOneCountOfEachThing:
+    """The run summary counts what the run published, on both surfaces."""
+
+    async def test_the_stix_object_count_is_the_export_s(self, container: Any) -> None:
+        result, column = await _run(container)
+        stored = (result["malware_report"] or {}).get("run_summary") or {}
+        exported = len((result["stix_bundle_extended"] or {}).get("objects") or [])
+
+        assert exported > 0, "the harness must build an export"
+        assert column["stix_object_count"] == exported
+        assert stored["stix_object_count"] == exported
+        # The judge's own bundle size is kept under its own name.
+        assert column["judge_stix_object_count"] == 0
+        assert stored["judge_stix_object_count"] == 0
+
+    async def test_the_memory_case_stores_the_published_techniques(self, container: Any) -> None:
+        from maljan.memory.long_term_memory import StoredCase
+
+        container.pending_memory_case = StoredCase(
+            sample_id="e" * 64,
+            summary_text="claims",
+            technique_ids=[PUBLISHED, CLAIMED_ONLY],
+            total_techniques=2,
+        )
+
+        await _run(container, corroborated=True)
+
+        case = container.pending_memory_case
+        assert case.technique_ids == [PUBLISHED]
+        assert case.total_techniques == 1
+
+    async def test_a_case_thin_in_what_was_published_is_not_stored(
+        self, container: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The thin-evidence gate reads the published set: one uncorroborated technique."""
+        from maljan.memory.long_term_memory import StoredCase
+
+        container.pending_memory_case = StoredCase(
+            sample_id="e" * 64,
+            summary_text="claims",
+            technique_ids=[PUBLISHED, CLAIMED_ONLY],
+            corroborated_count=2,
+            total_techniques=2,
+        )
+
+        await _run(container)
+
+        assert container.pending_memory_case is None
+
+    async def test_a_corroborated_published_case_is_kept(self, container: Any) -> None:
+        from maljan.memory.long_term_memory import StoredCase
+
+        container.pending_memory_case = StoredCase(
+            sample_id="e" * 64,
+            summary_text="claims",
+            technique_ids=[PUBLISHED, CLAIMED_ONLY],
+            corroborated_count=2,
+            total_techniques=2,
+        )
+
+        await _run(container, corroborated=True)
+
+        case = container.pending_memory_case
+        assert case is not None
+        assert (case.technique_ids, case.corroborated_count) == ([PUBLISHED], 1)
+
+    async def test_no_case_held_is_left_alone(self, container: Any) -> None:
+        container.pending_memory_case = None
+
+        await _run(container)
+
+        assert container.pending_memory_case is None

@@ -94,7 +94,7 @@ def _report(ledger: list[Any]) -> MalwareReport:
         evidence_ledger=ledger,
     ).build_deterministic()
     report.network = network_from_ledger(ledger)
-    report.static = static_from_ledger(ledger, {}) or StaticAnalysis()
+    report.static = static_from_ledger(ledger) or StaticAnalysis()
     return report
 
 
@@ -129,6 +129,11 @@ class TestTheStringScanAsksTheSameRule:
                 "sandbox_network",
                 {
                     "hosts": [{"ip": "185.99.133.7"}, {"ip": "10.0.0.5"}],
+                    # The sample's own process tree made both flows.
+                    "tcp": [
+                        {"dst": "185.99.133.7", "dport": 443, "sample_process_tree": True},
+                        {"dst": "10.0.0.5", "dport": 445, "sample_process_tree": True},
+                    ],
                     "dns": [{"request": "c2.example.com"}],
                 },
             ),

@@ -24,20 +24,32 @@ import time
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
+from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
 from maljan.llm.context_window import answering_for
+from maljan.llm.stream_watch import watching
 from maljan.pipeline.events import (
     EventSink,
     emit_tool_call_finished,
     emit_tool_call_started,
+    remember_resolved_names,
     summarize_args,
     summarize_result,
 )
-from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, build_entry
+from maljan.schemas.evidence import (
+    EvidenceCounter,
+    LedgerEntry,
+    build_entry,
+    not_shown_record,
+)
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
+
+# The servers whose ``resolve_api_hashes`` is this platform's own: the triage
+# pack (recorded as ``pipeline``) and the analysis server.
+_RESOLVING_SERVERS = frozenset({"pipeline", "analysis"})
 
 # The closers a repair may append, and nothing else. A repair that deleted a
 # character, changed one or inserted one anywhere but the end would be this
@@ -277,8 +289,15 @@ class EvidenceRecorder:
         remediation: str | None = None,
         args_repaired: bool = False,
         args_raw: str | None = None,
+        not_shown: int | None = None,
     ) -> LedgerEntry:
-        """Append one entry and return it, so the caller can quote its id."""
+        """Append one entry and return it, so the caller can quote its id.
+
+        ``not_shown`` is the length of an answer the conversation had no room
+        for: the entry is recorded as cut (``schemas.evidence.not_shown_record``)
+        and ``output``, what the model was handed instead, is what the run's
+        corpus remembers.
+        """
         entry_id, seq = self.counter.next_id()
         entry = build_entry(
             entry_id=entry_id,
@@ -287,7 +306,7 @@ class EvidenceRecorder:
             tool=tool,
             args=args,
             server=server,
-            output=output,
+            output=output if not_shown is None else not_shown_record(not_shown),
             ok=ok,
             error=error,
             started_at=started_at,
@@ -298,8 +317,15 @@ class EvidenceRecorder:
             args_repaired=args_repaired,
             args_raw=args_raw,
             model=self.model or None,
+            not_shown=not_shown is not None,
         )
         self.entries.append(entry)
+        # The function names a hash resolution read are names, and the event
+        # and transcript scrub keeps them as written for the rest of the job.
+        # Only this platform's own resolver answers them: the pack's call and
+        # the analysis server's tool. Another server's tool of that name is not.
+        if tool == "resolve_api_hashes" and entry.ok and server in _RESOLVING_SERVERS:
+            remember_resolved_names(output)
         # ``output``, the text the model was handed, and not ``entry.output``,
         # which the ledger has already trimmed and the byte budget may blank
         # to nothing. What the run saw is what a grounding check must search.
@@ -377,6 +403,90 @@ class RepeatGuard:
         # different answers twice each is in the same place as one that asks
         # for one answer three times.
         self.served_repeats = 0
+        # The calls earlier chunks of the same analysis made (``seed``), kept
+        # apart so a replayed conversation forgets its own calls and not these.
+        self._seeded: dict[str, str] = {}
+        self._seeded_failures: set[str] = set()
+        # The earlier calls whose result the run did not keep whole (the byte
+        # budget blanked it): nothing recorded can answer them, so one ask is
+        # run, as a failure's retry is.
+        self._seeded_reruns: set[str] = set()
+        # What each answered earlier call recorded, by entry id: the result a
+        # later chunk's identical call is answered with.
+        self._recorded: dict[str, str] = {}
+        # The seeded calls this conversation has already been answered about:
+        # the first answer is the first time this model hears of the earlier
+        # call, and only asking again after it is a repeat.
+        self._told: set[str] = set()
+
+    def _seeded_count(self, key: str) -> int:
+        """Where a seeded call's count starts: one served retry for a failure or an unkept result."""
+        entry = self._seeded.get(key)
+        return 1 if entry in self._seeded_failures | self._seeded_reruns else self.SERVED
+
+    def seed(
+        self,
+        tool: str,
+        kwargs: dict[str, Any],
+        entry_id: str,
+        *,
+        failed: bool = False,
+        recorded: str | None = None,
+        rerun: bool = False,
+    ) -> None:
+        """A call an earlier chunk made: an identical one is answered from its entry, not run.
+
+        A later chunk is a new conversation, and its loop re-ran the calls the
+        earlier chunks had made. An answered call is seeded as already asked the
+        served number of times, so the first identical call is answered without
+        running: with the result its entry recorded when ``recorded`` is given
+        (:meth:`recorded_answer`), and otherwise with ``repeat_notice`` naming
+        the entry. A failed one (``failed``), and one whose result the run did
+        not keep (``rerun``), is seeded as asked once, so one retry is served,
+        as the guard serves any retry after a failure. No first touch counts
+        toward the loop's repeats (:meth:`first_touch_of_seed`).
+        """
+        key = self._key(tool, kwargs)
+        self._seeded.setdefault(key, str(entry_id))
+        if failed:
+            self._seeded_failures.add(str(entry_id))
+        elif rerun:
+            self._seeded_reruns.add(str(entry_id))
+        elif recorded is not None:
+            self._recorded.setdefault(str(entry_id), str(recorded))
+        self._first.setdefault(key, str(entry_id))
+        self._count[key] = max(self._count.get(key, 0), self._seeded_count(key))
+
+    def recorded_answer(self, tool: str, kwargs: dict[str, Any]) -> tuple[str, str] | None:
+        """``(entry id, recorded result)`` for this conversation's first ask of an earlier call.
+
+        Only for a call an earlier chunk made and answered, whose result was
+        kept; the ask is marked as told, and it is not a repeat. ``None``
+        otherwise, and for every later ask of it.
+        """
+        key = self._key(tool, kwargs)
+        entry = self._seeded.get(key)
+        if entry is None or entry not in self._recorded or key in self._told:
+            return None
+        self._told.add(key)
+        return entry, self._recorded[entry]
+
+    def first_touch_of_seed(self, tool: str, kwargs: dict[str, Any]) -> bool:
+        """Whether this is the conversation's first ask of a seeded call; marks it asked.
+
+        That ask is answered (refused with its entry, or a failure's one retry
+        served) and not counted as a repeat: the model has not yet been told
+        in this conversation. An ask after it counts as any repeat does.
+        """
+        key = self._key(tool, kwargs)
+        if key not in self._seeded or key in self._told:
+            return False
+        self._told.add(key)
+        return True
+
+    def seeded_failure(self, entry_id: str) -> bool:
+        """Whether a seeded entry recorded a failure."""
+        return str(entry_id) in self._seeded_failures
 
     @staticmethod
     def _key(tool: str, kwargs: dict[str, Any]) -> str:
@@ -433,8 +543,9 @@ class RepeatGuard:
         are not repeats: from the model's point of view it is asking for the
         first time, and counting them ended an analyst for a dropped socket.
         """
-        self._first = {}
-        self._count = {}
+        self._first = dict(self._seeded)
+        self._count = {key: self._seeded_count(key) for key in self._seeded}
+        self._told = set()
         self.served_repeats = 0
 
     def ending_the_loop(self) -> bool:
@@ -449,7 +560,59 @@ class RepeatGuard:
         """Record that the call ran, and which entry first answered it."""
         key = self._key(tool, kwargs)
         self._count[key] = self._count.get(key, 0) + 1
+        # A retry of an earlier chunk's failure, or of a call whose result the
+        # run did not keep, answers for the call from here on: its entry is
+        # the one a later refusal names.
+        retried = self._seeded_failures | self._seeded_reruns
+        if self._first.get(key) in retried and key in self._seeded:
+            self._first[key] = entry_id
         self._first.setdefault(key, entry_id)
+
+
+def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
+    """A loop's repeat guard, seeded with the calls earlier chunks made (``RepeatGuard.seed``).
+
+    An answered call is seeded with the result its entry recorded, which is
+    what a later identical call is answered with. A call whose entry holds no
+    whole result — the byte budget blanked it, or a ceiling cut it — has
+    nothing recorded to answer with and is served once more.
+    """
+    guard = RepeatGuard()
+    for entry in entries or ():
+        tool = str(getattr(entry, "tool", "") or "")
+        entry_id = str(getattr(entry, "id", "") or "")
+        args = getattr(entry, "args", None)
+        if not (tool and entry_id and isinstance(args, dict)):
+            continue
+        if not bool(getattr(entry, "ok", True)):
+            guard.seed(tool, args, entry_id, failed=True)
+            continue
+        output = str(getattr(entry, "output", "") or "")
+        if not output or bool(getattr(entry, "truncated", False)):
+            guard.seed(tool, args, entry_id, rerun=True)
+            continue
+        guard.seed(tool, args, entry_id, recorded=output)
+    return guard
+
+
+def earlier_chunk_answer(
+    tool: str, entry_id: str, recorded: str, narrowing: Sequence[str] = ()
+) -> str:
+    """What a later chunk's call an earlier chunk made is answered with.
+
+    The result as its entry recorded it, stamped with that entry's id the way
+    a call's own answer is stamped, and one sentence saying where it came
+    from. No tool runs and nothing is written to the ledger: the entry that
+    holds the result already exists, and it is the one to cite.
+    """
+    # The notice the original answer carried when it was shortened, read off
+    # the recorded text the same way (``_stamp``).
+    shortened = shortened_notice(recorded, narrowing=narrowing)
+    return (
+        f"[{entry_id}]\n{recorded}{shortened}\n\n"
+        f"This call to {tool} with these arguments was made in an earlier chunk of this "
+        f"input and is not run again: the text above is the result recorded in [{entry_id}]."
+    )
 
 
 # What the model is told when its call ran on arguments that were closed off.
@@ -665,7 +828,8 @@ def _record_tool(
     Fail-safe in both directions: a tool this cannot rebuild faithfully is
     returned exactly as it was, and a tool that raises is recorded as a failed
     entry whose error text goes back to the model rather than being turned
-    into an exception the loop has to survive.
+    into an exception the loop has to survive. The one exception handed on
+    after it is filed is :class:`SampleNotOpened`, which ends the loop.
     """
     from langchain_core.tools import StructuredTool
 
@@ -760,7 +924,14 @@ def _record_tool(
         first = repeats.answered_by(name, kwargs)
         if first is None:
             return None
-        repeats.note_repeat()
+        # An earlier chunk's call, asked for the first time in this
+        # conversation: answered with the result that call recorded, not run
+        # and not a repeat.
+        recorded = repeats.recorded_answer(name, kwargs)
+        if recorded is not None:
+            return earlier_chunk_answer(name, *recorded, narrowing)
+        if not repeats.first_touch_of_seed(name, kwargs):
+            repeats.note_repeat()
         # Told to the model, written nowhere. No tool ran: an entry here would
         # be a successful call that made none, and the id on it would be an
         # evidence id a report could cite for evidence that does not exist.
@@ -769,7 +940,7 @@ def _record_tool(
             first,
             narrowing,
             last_warning=repeats.warning_of_the_end(),
-            failed=recorder.entry_failed(first),
+            failed=recorder.entry_failed(first) or repeats.seeded_failure(first),
         )
 
     def _note(kwargs: dict[str, Any], entry_id: str) -> None:
@@ -795,6 +966,10 @@ def _record_tool(
             return None
         repeated = repeats.repeat_of(name, kwargs)
         if repeated is not None:
+            # An earlier chunk's failure, retried for the first time in this
+            # conversation: served as a first call, with no steering.
+            if repeats.first_touch_of_seed(name, kwargs):
+                return None
             repeats.note_repeat()
         return repeated
 
@@ -820,7 +995,12 @@ def _record_tool(
         return repairs.take(name, kwargs) if repairs is not None else None
 
     def _stamp(
-        kwargs: dict[str, Any], started: float, wall_clock: float, value: Any, repeated: str | None
+        kwargs: dict[str, Any],
+        started: float,
+        wall_clock: float,
+        value: Any,
+        repeated: str | None,
+        not_shown: int | None = None,
     ) -> str:
         text = result_text(value)
         raw = _was_repaired(kwargs)
@@ -833,6 +1013,7 @@ def _record_tool(
             duration_ms=int((time.monotonic() - started) * 1000),
             args_repaired=raw is not None,
             args_raw=raw,
+            not_shown=not_shown,
         )
         _note(kwargs, entry.id)
         # Read off the answer itself, before any notice is appended to it: a
@@ -858,12 +1039,13 @@ def _record_tool(
         wall_clock: float,
         exc: Exception,
         repeated: str | None,
+        sent: dict[str, Any] | None = None,
     ) -> str:
         message = f"{type(exc).__name__}: {exc}"
         raw = _was_repaired(kwargs)
         entry = recorder.record(
             tool=name,
-            args=kwargs,
+            args=sent if sent is not None else kwargs,
             server=server,
             output=message,
             ok=False,
@@ -875,6 +1057,28 @@ def _record_tool(
         )
         _note(kwargs, entry.id)
         return f"[{entry.id}] tool call failed: {message}{_steering(kwargs, repeated, failed=True)}"
+
+    def _stopped(
+        kwargs: dict[str, Any],
+        started: float,
+        wall_clock: float,
+        exc: SampleNotOpened,
+        repeated: str | None,
+    ) -> str:
+        """File a call that met an unopenable sample, and end this loop if it is this agent's.
+
+        The entry is a failed call with the provider's sentence, as any raised
+        call is. Then the exception goes on and ends this agent's loop — unless
+        it already ended another agent's: an ask of an agent whose sample did
+        not open is a failed ask for the agent that asked, which carries on.
+        The entry records the arguments the call was actually sent with when
+        the platform held them to its own path, not the ones the model wrote.
+        """
+        stamped = _stamp_error(kwargs, started, wall_clock, exc, repeated, sent=exc.sent_args)
+        if exc.stopped_agent in (None, recorder.agent):
+            exc.stopped_agent = recorder.agent
+            raise exc
+        return stamped
 
     wrapped_func = None
     wrapped_coroutine = None
@@ -901,9 +1105,14 @@ def _record_tool(
             started, wall_clock = time.monotonic(), time.time()
             repeated = _served_again(kwargs)
             try:
-                with answering_for(recorder.agent):
+                # Outside the analyst's repeated-claims watch: a model a tool
+                # calls (a summariser, another agent asked) is not the
+                # analyst's answer (``BaseAnalyst._claims_watched``).
+                with answering_for(recorder.agent) as call_answer, watching(None):
                     value = func(**kwargs)
-                return _stamp(kwargs, started, wall_clock, value, repeated)
+                return _stamp(kwargs, started, wall_clock, value, repeated, call_answer.not_shown)
+            except SampleNotOpened as exc:
+                return _stopped(kwargs, started, wall_clock, exc, repeated)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
                 return _stamp_error(kwargs, started, wall_clock, exc, repeated)
 
@@ -928,9 +1137,11 @@ def _record_tool(
                 # charges this answer to the conversation it is entering. The
                 # name survives the ``asyncio.to_thread`` both tool paths hand
                 # the guardrail to, because that copies the context.
-                with answering_for(recorder.agent):
+                with answering_for(recorder.agent) as call_answer, watching(None):
                     value = await coroutine(**kwargs)
-                return _stamp(kwargs, started, wall_clock, value, repeated)
+                return _stamp(kwargs, started, wall_clock, value, repeated, call_answer.not_shown)
+            except SampleNotOpened as exc:
+                return _stopped(kwargs, started, wall_clock, exc, repeated)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
                 return _stamp_error(kwargs, started, wall_clock, exc, repeated)
 

@@ -284,8 +284,24 @@ def test_fetch_maps_overview_and_task_report_into_a_sandbox_report():
         {"request": "update-relay-c9f2.net", "type": "A", "answers": [{"data": "45.33.32.23"}]}
     ]
     assert report.network.domains == ["update-relay-c9f2.net"]
-    assert report.network.tcp == [{"dst": "45.33.32.23", "dport": 443}]
-    assert report.network.udp == [{"dst": "10.0.2.3", "dport": 53}]
+    # Each flow carries the process that made it and whether that process is
+    # the sample's tree (the submitted invoice.exe, procid 1000), and the AS
+    # facts where Triage recorded them.
+    assert report.network.tcp == [
+        {
+            "dst": "45.33.32.23",
+            "dport": 443,
+            "procid": 1000,
+            "sample_process_tree": True,
+            "pid": 2100,
+            "as_num": 63949,
+            "as_org": "EXAMPLE-HOSTING",
+            "country": "United States",
+        }
+    ]
+    assert report.network.udp == [
+        {"dst": "10.0.2.3", "dport": 53, "procid": 1000, "sample_process_tree": True, "pid": 2100}
+    ]
     assert {h["ip"] for h in report.network.hosts} == {"45.33.32.23", "10.0.2.3"}
     assert report.network.http == [
         {

@@ -123,12 +123,16 @@ __all__ = [
     "learn_window",
     "model_family",
     "no_room_sentence",
+    "note_answer_not_shown",
+    "CallAnswer",
     "output_limit",
     "probe_plan",
     "probe_window",
     "reply_reserve_tokens",
     "derived_reply",
     "output_cap_for",
+    "record_built_cap",
+    "built_output_cap",
     "table_window",
     "tool_definition_chars",
     "window_full_error",
@@ -380,8 +384,8 @@ def no_room_sentence(chars_in: int) -> str:
     """
     return (
         f"This tool answered with {chars_in:,} characters and none of them could be added: "
-        "the conversation has no room left for a tool answer. Nothing was left out of the "
-        "record — the evidence ledger holds the whole answer under this call's id. "
+        "the conversation has no room left for a tool answer. The evidence ledger records "
+        "this call under its id as cut. "
         "The tool phase of this stage ends here; answer from what has already been gathered."
     )
 
@@ -551,6 +555,54 @@ def window_from_llama_props(payload: Any, _model: str = "") -> int:
     return 0
 
 
+def slots_from_llama_props(payload: Any) -> int:
+    """llama.cpp's ``/props``: how many requests the server serves at once, or ``0``.
+
+    ``total_slots`` is the number of slots the server was started with
+    (``--parallel``). Read from the same answer the window is, so knowing it
+    costs no request of its own.
+    """
+    if not isinstance(payload, dict):
+        return 0
+    value = payload.get("total_slots")
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return 0
+    return value
+
+
+_slots_lock = threading.Lock()
+# Server root -> (when it was read, the slot count its ``/props`` reported).
+_slots: dict[str, tuple[float, int]] = {}
+
+
+def _note_slots(props_url: str, slots: int) -> None:
+    """Remember the slot count the ``/props`` at ``props_url`` reported."""
+    if slots <= 0:
+        return
+    root = props_url[: -len(LLAMA_PROPS_PATH)] if props_url.endswith(LLAMA_PROPS_PATH) else ""
+    if not root:
+        return
+    with _slots_lock:
+        _slots[root.rstrip("/")] = (time.monotonic(), slots)
+
+
+def reported_slots(endpoint: object) -> int:
+    """The slot count the llama.cpp server at ``endpoint`` last reported, or ``0``.
+
+    Known only from a window probe that read its ``/props``, and believed for
+    as long as that probe's window is (:data:`WINDOW_CACHE_SECONDS`).
+    """
+    root = _root_of(endpoint).rstrip("/")
+    with _slots_lock:
+        held = _slots.get(root)
+    if held is None:
+        return 0
+    stamp, slots = held
+    if time.monotonic() - stamp > WINDOW_CACHE_SECONDS:
+        return 0
+    return slots
+
+
 def window_from_model_list(payload: Any, model: str = "") -> int:
     """An OpenAI-compatible model list: the entry for ``model``, if it says.
 
@@ -669,6 +721,10 @@ def _body_within_bounds(answer: httpx.Response, what: str) -> bytes | None:
     legitimate one is a couple of megabytes, and a broken or hostile endpoint's
     is unbounded. Checking the length after ``.content`` would already have
     downloaded whatever was sent, on a machine that is also running a model.
+
+    For an answer a synchronous client sent. One an ``httpx.AsyncClient`` sent
+    carries an asynchronous stream, which ``iter_bytes`` refuses, and is read
+    by ``_abody_within_bounds``.
     """
     held = bytearray()
     for chunk in answer.iter_bytes():
@@ -676,6 +732,24 @@ def _body_within_bounds(answer: httpx.Response, what: str) -> bytes | None:
         if len(held) > MAX_METADATA_BYTES:
             logger.debug("context window: %s answered with more than the probe reads", what)
             answer.close()
+            return None
+    return bytes(held)
+
+
+async def _abody_within_bounds(answer: httpx.Response, what: str) -> bytes | None:
+    """``_body_within_bounds`` for an answer an ``httpx.AsyncClient`` sent.
+
+    The settings probe runs on the API's loop and its answers stream
+    asynchronously. Read with the synchronous reader, every one of them raised
+    inside the probe's catch-all, and the console showed the fallback window
+    for a model whose server reports its own.
+    """
+    held = bytearray()
+    async for chunk in answer.aiter_bytes():
+        held.extend(chunk)
+        if len(held) > MAX_METADATA_BYTES:
+            logger.debug("context window: %s answered with more than the probe reads", what)
+            await answer.aclose()
             return None
     return bytes(held)
 
@@ -691,7 +765,19 @@ def _read_answer(ask: Ask, answer: httpx.Response, model: str) -> tuple[int, str
     if answer.status_code >= 400:
         answer.close()
         return 0, ""
-    body = _body_within_bounds(answer, ask.what)
+    return _window_in(ask, _body_within_bounds(answer, ask.what), model)
+
+
+async def _aread_answer(ask: Ask, answer: httpx.Response, model: str) -> tuple[int, str]:
+    """``_read_answer`` for an answer an ``httpx.AsyncClient`` sent."""
+    if answer.status_code >= 400:
+        await answer.aclose()
+        return 0, ""
+    return _window_in(ask, await _abody_within_bounds(answer, ask.what), model)
+
+
+def _window_in(ask: Ask, body: bytes | None, model: str) -> tuple[int, str]:
+    """The window a read body reports, or zero, and the sentence for a refused one."""
     if body is None:
         return 0, ""
     try:
@@ -702,6 +788,8 @@ def _read_answer(ask: Ask, answer: httpx.Response, model: str) -> tuple[int, str
         reported = ask.read(payload, model)
     except Exception:  # noqa: BLE001 — a shape nobody anticipated is not a window
         return 0, ""
+    if ask.read is window_from_llama_props:
+        _note_slots(ask.url, slots_from_llama_props(payload))
     if ask.read is window_from_model_list:
         try:
             from maljan.llm.model_output_limits import note_from_model_list
@@ -811,7 +899,7 @@ async def aprobe_window(
                 except httpx.HTTPError as exc:
                     logger.debug("context window: %s did not answer (%s)", ask.what, type(exc))
                     continue
-                tokens, said = _read_answer(ask, answer, model)
+                tokens, said = await _aread_answer(ask, answer, model)
                 if tokens > 0:
                     return _probed(ask, tokens)
                 refused = refused or said
@@ -892,6 +980,8 @@ def forget_learned_windows() -> None:
     """Drop every cached answer. For a test, and for a settings import."""
     with _learned_lock:
         _learned.clear()
+    with _slots_lock:
+        _slots.clear()
 
 
 def learn_window(
@@ -1317,12 +1407,241 @@ def reply_budget(settings: Any, assignment: Any, *, probe: bool = True) -> Outpu
     return OutputBudget(tokens=tokens, window=window, generation_cap=cap, derivation=sentence)
 
 
+def model_maximum_output(window: WindowFact, model: object) -> tuple[int, str]:
+    """``(tokens, where from)`` for the most one answer of ``model`` can be, or ``(0, "")``.
+
+    The maximum output its provider declares (:func:`declared_output`), and no
+    more than the context window it serves, because an answer is written into
+    that window. With neither known, zero: nothing is stated about it.
+    """
+    from maljan.llm.model_output_limits import declared_output
+
+    declared, where = declared_output(model)
+    learned = window.source != FALLBACK and window.tokens > 0
+    if declared > 0 and (not learned or declared <= window.tokens):
+        return declared, f"the model's declared maximum output of {declared} ({where})"
+    if learned:
+        return window.tokens, f"the model's {window.tokens}-token context window ({window.source})"
+    return 0, ""
+
+
+def call_output_bound(cap: int, window_tokens: int, prompt_chars: int) -> int | None:
+    """The ``max_tokens`` one call is sent with when its budget would pass the window, or ``None``.
+
+    A call's answer is written into the window its prompt already fills, so the
+    most it can be is the window less the prompt, at :data:`CHARS_PER_TOKEN`
+    characters a token. ``None`` — the budget stands — when the window is not
+    known (``window_tokens`` 0: nothing to bound by) or the budget already fits.
+    Never below one token: a prompt that fills the window is the caller's
+    degradation to record, not a request for nothing.
+    """
+    if int(window_tokens) <= 0 or int(cap) <= 0:
+        return None
+    left = int(window_tokens) - -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+    if int(cap) <= left:
+        return None
+    return max(1, left)
+
+
+# The field a per-call output cap is passed under, by chat model type. Each
+# client reads its own name: ``ChatOpenAI`` and ``ChatAnthropic`` take
+# ``max_tokens`` (the OpenAI client renames it on the wire, and the provider
+# carries it into DeepSeek's and llama.cpp's own fields), and
+# ``ChatGoogleGenerativeAI`` takes ``max_output_tokens`` — its request config
+# refuses any other name. ``None``: the client takes no per-call cap at all —
+# Ollama's reads its cap only inside ``options`` and refuses an unknown keyword.
+_PER_CALL_CAP_FIELD: dict[str, str | None] = {
+    "ChatOllama": None,
+    "ChatGoogleGenerativeAI": "max_output_tokens",
+}
+_DEFAULT_PER_CALL_CAP_FIELD = "max_tokens"
+
+
+def _per_call_cap_field(llm: Any) -> str | None:
+    """The field ``llm`` takes one call's output cap under, or ``None`` when it takes none.
+
+    Over a fallback list the one field every model takes, since the list hands
+    the same keywords to whichever model answers; ``None`` when they differ.
+    """
+    models = getattr(llm, "models", None)
+    if isinstance(models, list) and models:
+        fields = {_per_call_cap_field(model) for model in models}
+        return fields.pop() if len(fields) == 1 else None
+    for cls in type(llm).__mro__:
+        if cls.__name__ in _PER_CALL_CAP_FIELD:
+            return _PER_CALL_CAP_FIELD[cls.__name__]
+    return _DEFAULT_PER_CALL_CAP_FIELD
+
+
+def accepts_output_bound(llm: Any) -> bool:
+    """Whether one call of ``llm`` can be handed its own output cap (every model of a list)."""
+    return _per_call_cap_field(llm) is not None
+
+
+def output_bound_kwargs(llm: Any, bound: int) -> dict[str, Any]:
+    """The keyword one call of ``llm`` is held to ``bound`` output tokens with, or ``{}``."""
+    field = _per_call_cap_field(llm)
+    return {} if field is None else {field: int(bound)}
+
+
+def prompt_overflow_sentence(what: str, prompt_chars: int, window_tokens: int) -> str | None:
+    """A sentence for a prompt larger than the whole known window, or ``None``.
+
+    Such a prompt is not refused by every server: Ollama cuts it from the front
+    to fit ``num_ctx``, which can drop the system prompt and with it the
+    round's rules, and says nothing. The platform knows the window, so it says
+    it instead.
+    """
+    if int(window_tokens) <= 0:
+        return None
+    tokens = -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+    if tokens <= int(window_tokens):
+        return None
+    return (
+        f"The {what} prompt (about {tokens} tokens at {CHARS_PER_TOKEN} characters a token) "
+        f"is larger than its model's {int(window_tokens)}-token context window; a server "
+        "that fits it by cutting it from the front, as Ollama does, loses its opening, "
+        "the system prompt included."
+    )
+
+
+def report_output_budget(
+    settings: Any,
+    assignment: Any,
+    configured: int,
+    configured_said: str,
+    *,
+    setting: str = "llm.judge_max_tokens",
+    probe: bool = True,
+) -> OutputBudget:
+    """How long one answer of the report stage may run on one model, and why.
+
+    The report stage writes the report, and a report is as long as its
+    evidence needs; a quarter of the window is the analysts' rule, which keeps
+    room in a conversation that is still gathering. So, in this order:
+
+    1. ``configured`` above 0 is the operator's value (``configured_said`` says
+       which setting, and what was added to it), used as set;
+    2. else the model's declared maximum output — the endpoint's model list or
+       the vendored table's sourced row;
+    3. else the analysts' derivation (:func:`derived_reply`), with ``setting``
+       named as the cap that was not set.
+
+    Never more than the model's maximum (:func:`model_maximum_output`); a value
+    held at it says so. The window is still learned: a section's evidence room
+    is what the window leaves after this budget.
+    """
+    from maljan.llm.model_output_limits import declared_output_limit
+
+    window = window_for_assignment(settings, assignment, probe=probe)
+    model = getattr(assignment, "model", "")
+    maximum, maximum_said = model_maximum_output(window, model)
+    configured = int(configured or 0)
+    if configured > 0:
+        tokens = min(configured, maximum) if maximum > 0 else configured
+        sentence = f"{tokens} tokens — {configured_said}"
+        if tokens < configured:
+            sentence += f", held at {maximum_said}"
+    elif declared_output_limit(model) > 0:
+        tokens, sentence = maximum, f"{maximum} tokens — {maximum_said}"
+    else:
+        tokens, sentence = derived_reply(
+            window, 0, model, setting, local=serves_locally(assignment, window)
+        )
+    return OutputBudget(
+        tokens=tokens, window=window, generation_cap=configured, derivation=sentence
+    )
+
+
 @dataclass(frozen=True)
 class OutputCap:
     """One agent's output cap in tokens, and the sentence that says how it was reached."""
 
     tokens: int
     sentence: str
+
+
+# Where a built model keeps the output cap it was built with.
+_BUILT_CAP_ATTR = "_maljan_output_cap"
+
+
+def record_built_cap(llm: Any, cap: OutputCap) -> Any:
+    """Keep on ``llm`` the output cap it was built with; returns ``llm``.
+
+    Recorded once, where the model is built (``ServiceContainer``), and read by
+    every consumer of the cap through :func:`built_output_cap`: the cut check,
+    the spend meter and the judge. A cap derived again later is derived from
+    whatever the window cache holds by then, and after the cache expired that
+    was the documented fallback rather than the cap the call carried. Never
+    raises: a model object that takes no attribute keeps no record.
+    """
+    if llm is None:
+        return llm
+    try:
+        object.__setattr__(llm, _BUILT_CAP_ATTR, cap)
+    except Exception:  # noqa: BLE001 — a record that cannot be kept is no record
+        logger.debug("output cap: %s keeps no record", type(llm).__name__)
+    return llm
+
+
+def built_output_cap(llm: Any) -> OutputCap | None:
+    """The output cap ``llm`` was built with, or ``None`` for a model built without one."""
+    cap = getattr(llm, "__dict__", {}).get(_BUILT_CAP_ATTR) if llm is not None else None
+    return cap if isinstance(cap, OutputCap) else None
+
+
+# Where a built model keeps the window of the model it calls, where one is known.
+_BUILT_WINDOW_ATTR = "_maljan_window"
+
+# The sources of a window that are facts about the server that serves it.
+_SERVED = (DECLARED, PROBED)
+
+
+def record_built_window(llm: Any, fact: WindowFact | None) -> Any:
+    """Keep on ``llm`` the window its model serves, when it is a known fact; returns ``llm``.
+
+    The window the settings declare or the server reported, never the table's
+    figure for a model family or the fallback: neither is a fact about this
+    server. Read by a call with no output cap, whose deadline is sized from the
+    room the window leaves after its prompt (``generation_rate._CallDeadline``).
+    Never raises.
+    """
+    if llm is None or fact is None or fact.source not in _SERVED or int(fact.tokens) <= 0:
+        return llm
+    try:
+        object.__setattr__(llm, _BUILT_WINDOW_ATTR, fact)
+    except Exception:  # noqa: BLE001 — a record that cannot be kept is no record
+        logger.debug("context window: %s keeps no record", type(llm).__name__)
+    return llm
+
+
+def built_window(llm: Any) -> WindowFact | None:
+    """The known window ``llm``'s model serves, or ``None`` where none was recorded."""
+    fact = getattr(llm, "__dict__", {}).get(_BUILT_WINDOW_ATTR) if llm is not None else None
+    return fact if isinstance(fact, WindowFact) else None
+
+
+def known_window(settings: Any, provider: str, endpoint: object, model: str) -> WindowFact | None:
+    """The window already known for one model at one endpoint, without a request.
+
+    What the settings declare or what a probe learned, combined as every
+    window is (:func:`learn_window` with ``probe=False``); ``None`` where only
+    the vendored table or the fallback is left. Never raises.
+    """
+    try:
+        declared, is_default = declared_window(settings, provider)
+        fact = learn_window(
+            provider,
+            endpoint=endpoint,
+            model=model,
+            declared=declared,
+            declared_is_default=is_default,
+            probe=False,
+        )
+    except Exception as exc:  # noqa: BLE001 — an unreadable window is no window
+        logger.debug("context window: none known for %s (%s)", model, exc)
+        return None
+    return fact if fact.source in _SERVED else None
 
 
 def output_cap_for(
@@ -1459,14 +1778,44 @@ def current_agent() -> str:
     return _ANSWERING_FOR.get()
 
 
+@dataclass
+class CallAnswer:
+    """What the tool-output guardrail did to the answer of the call being answered.
+
+    ``not_shown`` is the length of an answer none of which reached the
+    conversation, because it had no room left (:func:`note_answer_not_shown`);
+    ``None`` while the answer, or a shortened form of it, was handed over.
+    """
+
+    not_shown: int | None = None
+
+
+_CALL_ANSWER: ContextVar[CallAnswer | None] = ContextVar("maljan_call_answer", default=None)
+
+
 @contextlib.contextmanager
-def answering_for(agent: str) -> Iterator[None]:
-    """Name the agent whose call is being answered, for the length of the call."""
+def answering_for(agent: str) -> Iterator[CallAnswer]:
+    """Name the agent whose call is being answered, for the length of the call.
+
+    Yields the call's :class:`CallAnswer`, which the guardrail fills in two
+    layers down; the context is copied into the thread it runs on, and the
+    object with it.
+    """
     token = _ANSWERING_FOR.set(str(agent or ""))
+    answer = CallAnswer()
+    answer_token = _CALL_ANSWER.set(answer)
     try:
-        yield
+        yield answer
     finally:
+        _CALL_ANSWER.reset(answer_token)
         _ANSWERING_FOR.reset(token)
+
+
+def note_answer_not_shown(chars: int) -> None:
+    """Say, for the call being answered, that none of its ``chars`` reached the conversation."""
+    answer = _CALL_ANSWER.get()
+    if answer is not None:
+        answer.not_shown = max(0, int(chars))
 
 
 def tool_definition_chars(tools: Iterable[Any]) -> int:
@@ -1773,6 +2122,41 @@ def budget_for_settings(settings: Any, agents: list[str], *, probe: bool = True)
     return ContextBudget(
         window_for_settings(settings, agents, probe=probe),
         reply_tokens=generation_reserve(settings),
+    )
+
+
+def upstream_block_chars(configured: int, budget: Any) -> tuple[int, str]:
+    """``(characters, how)`` a stage's upstream findings block and triage pack may take.
+
+    The same three answers as a tool answer's cap (:func:`output_limit`): a
+    positive ``configured`` is the operator's
+    ``core.reporting.upstream_findings_max_chars``, used unchanged; a budget
+    over a measured window derives it — the share one answer may take of what
+    the window leaves after the reply room, measured before the conversation
+    holds anything, because the block is read before a stage starts; and
+    anything else is the documented constant, stated as the fallback.
+    """
+    if int(configured) > 0:
+        chars = int(configured)
+        return chars, f"{chars} characters — reporting.upstream_findings_max_chars is set"
+    if isinstance(budget, ContextBudget) and budget.derives:
+        chars = derive_tool_output_chars(
+            window_tokens=budget.window.tokens,
+            reply_tokens=budget.reply_tokens,
+            chars_per_token=budget.chars_per_token,
+            share=budget.share,
+            floor=budget.floor,
+        )
+        if chars > 0:
+            return chars, (
+                f"{chars} characters — derived from the {budget.window.tokens}-token "
+                f"window ({budget.window.source}) less {budget.reply_tokens} tokens of "
+                f"reply room, at {budget.chars_per_token} characters a token and a "
+                f"share of {budget.share}"
+            )
+    return UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS, (
+        f"{UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS} characters — the documented fallback: no "
+        f"window was learned ({UNKNOWN_WINDOW_REMEDY})"
     )
 
 

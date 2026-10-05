@@ -78,7 +78,8 @@ class TestWhereItIsShown:
 
         assert f"{'z' * 10}{CUT_MARK}" in text
 
-    def test_the_attack_table_marks_a_cut_procedure(self) -> None:
+    def test_the_attack_table_shows_a_long_procedure_whole(self) -> None:
+        """The matrix may wrap a statement; it never cuts one, so there is no mark to add."""
         from maljan.extractors.capability_matrix import build_capability_matrix
 
         claim = SimpleNamespace(
@@ -92,4 +93,5 @@ class TestWhereItIsShown:
 
         cells, _mappings = build_capability_matrix(stix_output=None, isr_reports={"static": isr})
 
-        assert all(quote.endswith(CUT_MARK) for quote in cells[0].evidence)
+        assert cells[0].evidence == ["w" * 400]
+        assert not any(quote.endswith(CUT_MARK) for quote in cells[0].evidence)

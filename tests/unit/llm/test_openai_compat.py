@@ -504,7 +504,7 @@ class TestTheSettingIsOfferedToAnOperator:
         from maljan.core.settings_catalog import core_catalog
 
         entry = next(f for f in core_catalog() if f.path == "llm.openai.compat")
-        assert entry.choices == ["auto", "llama_cpp", "standard"]
+        assert entry.choices == ["auto", "llama_cpp", "standard", "deepseek"]
         assert entry.default == "auto"
         assert "400" in (entry.description or "")
 

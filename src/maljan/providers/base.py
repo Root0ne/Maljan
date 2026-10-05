@@ -93,6 +93,33 @@ class ProviderProbe:
     latency_ms: int = 0
 
 
+# The provider-neutral instructions every static provider fragment opens with:
+# what a claim must cite and which techniques to look for. A provider with no
+# tools of its own, and one whose tools did not attach, say only this and what
+# the provider is.
+STATIC_EVIDENCE_INSTRUCTIONS = (
+    "Analyze the deterministic static evidence you are given. "
+    "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
+    "string offset (.data+0xNN), API import, or hex pattern. "
+    "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
+    "T1055 (Process Injection), T1140 (Deobfuscation)."
+)
+
+
+def absent_provider_fragment(label: str, guidance: str = STATIC_EVIDENCE_INSTRUCTIONS) -> str:
+    """The static fragment for a provider none of whose tools reached the request.
+
+    The provider's tool-independent ``guidance`` — what a claim cites, the
+    confidence discipline — and the sentence saying it is not attached.
+    """
+    return (
+        guidance.rstrip()
+        + "\n\n"
+        + f"The {label} static provider is configured, but none of its tools is "
+        "attached to this request, so no disassembler or decompiler comes with it."
+    )
+
+
 class StaticProvider(ABC):
     """One static-analysis tool, as the pipeline sees it.
 
@@ -115,6 +142,37 @@ class StaticProvider(ABC):
     async def probe(self) -> ProviderProbe:
         return ProviderProbe(ok=True, detail="no connection test for this provider")
 
+    async def readiness(self) -> ProviderProbe:
+        """Whether a job that needs this provider can start, without analysing anything.
+
+        Asked before a job is accepted, for a provider that does not degrade
+        (``capabilities.degrade_on_failure`` false): a run that cannot open it
+        fails mid-way, so the submit is refused instead. The connection test by
+        default; a provider overrides it where its connection test is not the
+        whole answer (a transport with nothing to reach before the job).
+        """
+        return await self.probe()
+
+    def address(self) -> str:
+        """Where this provider is reached, safe to show any user: ``""`` when nowhere."""
+        return ""
+
+    def pin_sample(self, path: str | None) -> None:
+        """The path this provider's tools open the sample by, set after an early attach.
+
+        A no-op by default; a provider whose tools take the sample path and
+        can hold a model to it overrides this.
+        """
+        return None
+
+    def switched_off(self) -> bool:
+        """Whether the operator turned this provider off, so it attaches nothing.
+
+        A provider switched off does not fail a run; the analyst runs without
+        its tools and its prompt says the provider is not attached.
+        """
+        return False
+
     def open(self, job: StaticJobContext) -> None:
         """Attach to the tool for one sample. Idempotent."""
         return None
@@ -123,8 +181,32 @@ class StaticProvider(ABC):
         return []
 
     def prompt_fragment(self) -> str:
-        """The tool-facing body of the static system prompt for this provider."""
+        """The tool-facing body of the static system prompt, with this provider attached."""
         return ""
+
+    @property
+    def label(self) -> str:
+        """What a prompt calls this provider."""
+        return self.id or "static"
+
+    def absent_fragment(self) -> str:
+        """The body of the static system prompt when none of this provider's tools is attached.
+
+        A provider whose tools did not reach the request — disabled, degraded,
+        or not yet opened — is not described by ``prompt_fragment``, which
+        walks the model through calls it cannot make. This says what the
+        provider is and that it is not attached; what the request does carry is
+        said by the tool statement beside it.
+        """
+        return absent_provider_fragment(self.label, self.guidance_fragment())
+
+    def guidance_fragment(self) -> str:
+        """What this provider's fragment says about claims, whatever the tools.
+
+        The part of ``prompt_fragment`` that is not a tool workflow: every
+        call on a run with this provider carries it, the tools-free ones too.
+        """
+        return STATIC_EVIDENCE_INSTRUCTIONS
 
     def collect_evidence(self, sample_path: str) -> StaticEvidenceBundle | None:
         return None

@@ -34,11 +34,13 @@ from maljan.pipeline.outcome import (
 )
 from maljan.reporting.dedupe import MergeTally
 from maljan.reporting.ledger_projection import (
+    analyst_listed_values,
     dynamic_from_ledger,
     identity_from_ledger,
     network_from_ledger,
     persistence_from_ledger,
     static_from_ledger,
+    tool_sightings,
 )
 from maljan.reporting.ledger_report import build_sections
 from maljan.reporting.models import (
@@ -136,6 +138,7 @@ class MalwareReportBuilder:
         from maljan.reporting.renderers.stix_renderer import (
             emulation_from_ledger,
             exported_indicator_values,
+            recovered_network_values,
         )
 
         identity = identity_from_ledger(
@@ -147,12 +150,39 @@ class MalwareReportBuilder:
             platform=self.sample_platform or "unknown",
         )
         # The typed blocks are projections, not a second analysis: each is
-        # filled from the tools that were actually called and the artifacts the
-        # analysts actually established, and each stays empty otherwise.
-        static = static_from_ledger(self.evidence_ledger, self.isr_reports)
-        dynamic = dynamic_from_ledger(self.evidence_ledger, self.isr_reports)
-        network = network_from_ledger(self.evidence_ledger, self.isr_reports)
-        persistence = persistence_from_ledger(self.evidence_ledger, self.isr_reports)
+        # filled from the tools that were actually called, and each stays
+        # empty otherwise. The network block also reads which values the
+        # analysts listed, which it states and never publishes on alone.
+        static = static_from_ledger(self.evidence_ledger)
+        dynamic = dynamic_from_ledger(self.evidence_ledger)
+        # What only a recovering tool read. Each domain, address and URL in it
+        # is a candidate row of its own, whether or not a model named it: a
+        # C2 URL FLOSS and the static decoder both recovered once had no row
+        # anywhere, not even a refused one, while the record gave it standing.
+        emulated = emulation_from_ledger(self.evidence_ledger)
+        # Where the run's tools saw each value an analyst listed: a listed
+        # value stands on the answer that holds it, and "no tool saw it" is
+        # said only when this search of the whole ledger found none.
+        # The judge's indicator values too: a value it names and no row
+        # publishes is said to be the judge's alone only after this search.
+        sightings, queries = tool_sightings(
+            self.evidence_ledger,
+            [
+                *analyst_listed_values(self.isr_reports),
+                *(
+                    (value.kind, value.value)
+                    for value in exported_indicator_values(self.stix_output)
+                ),
+            ],
+        )
+        network = network_from_ledger(
+            self.evidence_ledger,
+            self.isr_reports,
+            sandbox_report=self.sandbox_report,
+            recovered=recovered_network_values(emulated),
+            sightings=sightings,
+        )
+        persistence = persistence_from_ledger(self.evidence_ledger)
         cells, mappings = build_capability_matrix(
             stix_output=self.stix_output,
             isr_reports=self.isr_reports,
@@ -199,7 +229,9 @@ class MalwareReportBuilder:
                 for value in exported_indicator_values(self.stix_output)
             ],
             rule_match_strings=yara_rule_strings(self.evidence_ledger),
-            emulated_strings=emulation_from_ledger(self.evidence_ledger),
+            emulated_strings=emulated,
+            tool_sightings=sightings,
+            tool_queries=queries,
             references=references,
         )
         # The sections the report is actually made of, and the index of the
@@ -467,7 +499,7 @@ class MalwareReportBuilder:
         # the techniques, plus deduped per-technique links keyed by technique id.
         seen_tids: set[str] = set()
         tech_notes: list[str] = []
-        for mapping in mappings[:10]:
+        for mapping in mappings:
             tid = mapping.technique_id
             if not tid or tid in seen_tids:
                 continue
@@ -563,21 +595,40 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     (:func:`~maljan.reporting.renderers.stix_renderer.publish_answer`), asked
     with the arguments ``/reports/{id}/iocs`` and the STIX export ask it with.
     Values are stored live; the human-readable renderings defang them by kind.
+    The report's lookups are built once for the whole table (``one_reading``).
     """
+    from maljan.reporting.renderers.stix_renderer import one_reading
+
+    with one_reading(report):
+        return _build_consolidated_iocs(report)
+
+
+def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     from maljan.extractors.network_extractor import url_host
+    from maljan.reporting.ledger_projection import listed_non_network_values
+    from maljan.reporting.ledger_report import artifact_sections, listed_rows
     from maljan.reporting.renderers.stix_renderer import (
         corroborating_values,
         emulation_kwargs,
         emulation_record,
+        listed_value_sightings,
         path_names_a_file,
         publish_answer,
+        query_answers,
+        recovered_by_words,
+        yes_because,
     )
 
     rows: list[ConsolidatedIOC] = []
     seen: set[tuple[str, str]] = set()
+    judged = {
+        (str(item.kind or ""), str(item.value or "").strip().lower())
+        for item in report.judge_indicators or []
+    }
     corroborating = corroborating_values(report)
-    # What the run's FLOSS entry recovered by emulation: a network value it
-    # holds is a source of its own under the one rule.
+    # What the run's FLOSS entry recovered by emulation and the static decoder
+    # read out of the file's bytes: a network value it holds is a source of
+    # its own under the one rule.
     emulated = emulation_record(report)
 
     def _add(
@@ -631,7 +682,9 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         ("ssdeep", h.ssdeep),
         ("TLSH", h.tlsh),
     ):
-        _add(label, "hash", digest or "", "identity", "the sample", published="yes")
+        _add(
+            label, "hash", digest or "", "identity", "the sample", published=yes_because("identity")
+        )
 
     static = report.static
     dynamic = report.dynamic
@@ -707,8 +760,41 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         if row.source == "strings" and row.kind in ("path", "registry", "mutex", "command"):
             row.published = _from_strings(row.kind, row.value)
 
+    # What the analysts listed that no tool recorded: each value its own row,
+    # in the analyst's name and with the rule's refusal, after every tool row
+    # so a value a tool recorded keeps the tool's row. A value the judge names
+    # is the judge's row.
+    for kind, section in artifact_sections(report.sections):
+        for analyst, _cited, cells in listed_rows(section):
+            for ioc_kind, value, _payload in listed_non_network_values(kind, [cells]):
+                if (ioc_kind, value.strip().lower()) in judged:
+                    continue
+                listed = f"an artifact of the {analyst} analyst" if analyst else ""
+                sighted, searched = listed_value_sightings(report, ioc_kind, value)
+                _add(
+                    _LISTED_LABELS.get(ioc_kind, ioc_kind)
+                    if ioc_kind != "path"
+                    else ("File path" if path_names_a_file(value) else "Directory"),
+                    ioc_kind,
+                    value,
+                    "analyst",
+                    f"listed by the {analyst} analyst" if analyst else "listed by an analyst",
+                    published=publish_answer(
+                        ioc_kind,
+                        value,
+                        "analyst",
+                        listed_by=listed,
+                        seen_in=sighted,
+                        tool_search=searched,
+                        asked_in="" if sighted else query_answers(report, ioc_kind, value),
+                    ),
+                )
+
     net = report.network
     reputations: dict[str, Any] = {}
+    # A fingerprint and a user agent are the sandbox's own records of the
+    # traffic; no string sweep produces one, and the reason says so.
+    _seen = yes_because("sandbox")
     if net:
         for d in net.domains:
             reputations[d.fqdn.strip().lower().rstrip(".")] = d.reputation
@@ -728,7 +814,20 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 is_network=True,
             )
         for ip in net.ips:
-            where = [f"port {ip.port}" if ip.port else "", ip.transport or "", ip.asn or ""]
+            where = [
+                f"port {ip.port}" if ip.port else "",
+                ip.transport or "",
+                f"AS {ip.asn}" if ip.asn else "",
+                "public DNS resolver" if ip.public_resolver else "",
+                _process_tree_words(
+                    ip.sample_process_tree,
+                    ip.outside_processes,
+                    ip.marked_only_processes,
+                    ip.file_only_processes,
+                )
+                if ip.source == "sandbox"
+                else "",
+            ]
             _add(
                 "IPv6" if ":" in ip.address else "IPv4",
                 "ip",
@@ -766,11 +865,11 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 is_network=True,
             )
         for ua in net.user_agents:
-            _add("User-Agent", "user_agent", ua, "sandbox", published="yes", is_network=True)
+            _add("User-Agent", "user_agent", ua, "sandbox", published=_seen, is_network=True)
         for ja3 in net.ja3_fingerprints:
-            _add("JA3", "ja3", ja3, "sandbox", published="yes", is_network=True)
+            _add("JA3", "ja3", ja3, "sandbox", published=_seen, is_network=True)
         for ja3s in net.ja3s_fingerprints:
-            _add("JA3S", "ja3s", ja3s, "sandbox", published="yes", is_network=True)
+            _add("JA3S", "ja3s", ja3s, "sandbox", published=_seen, is_network=True)
 
     labels = {"url": "URL", "domain": "Domain", "email": "Email"}
     for s in strings:
@@ -786,7 +885,24 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 is_network=True,
             )
 
-    return _with_the_judge_s_values(rows, report)
+    table = _with_the_hosts_of_published_urls(_with_the_judge_s_values(rows, report), report)
+    # Which tool recovered each network value the sample hid, and where: the
+    # table states it on every row the record holds, whoever recorded the row.
+    return [
+        row.model_copy(update={"recovered_by": said})
+        if (said := recovered_by_words(emulated, row.kind or "", row.value))
+        else row
+        for row in table
+    ]
+
+
+# The table's type for each non-network kind an analyst's table lists.
+_LISTED_LABELS = {
+    "mutex": "Mutex",
+    "registry": "Registry key",
+    "scheduled_task": "Scheduled task",
+    "service": "Service",
+}
 
 
 # The table's type for each kind a judge indicator can name.
@@ -863,6 +979,48 @@ def _with_the_judge_s_values(
     return out
 
 
+def _with_the_hosts_of_published_urls(
+    rows: list[ConsolidatedIOC], report: MalwareReport
+) -> list[ConsolidatedIOC]:
+    """The table with a Domain row for the host of each URL it publishes.
+
+    A published URL's host follows the URL's decision
+    (``stix_renderer.published_url_hosts``): one live run published two C2
+    URLs and neither of their names, because the judge wrote URL indicators
+    only and nothing carried a URL's host to a row. A host the table already
+    has a row for keeps that row, asked the same rule.
+    """
+    from maljan.reporting.renderers.stix_renderer import (
+        emulation_kwargs,
+        publish_answer,
+        published_url_hosts,
+    )
+
+    hosts = published_url_hosts(report)
+    if not hosts:
+        return rows
+    out = list(rows)
+    listed = {row.value.strip().lower().rstrip(".") for row in out if row.kind == "domain"}
+    for host, (url, source) in hosts.items():
+        if host in listed:
+            continue
+        out.append(
+            ConsolidatedIOC(
+                type="Domain",
+                kind="domain",
+                value=host,
+                source=source,
+                context=f"the host of {url}",
+                description=f"the host of {url}",
+                published=publish_answer(
+                    "domain", host, source, **emulation_kwargs(report, "domain", host)
+                ),
+                is_network=True,
+            )
+        )
+    return out
+
+
 _PIPE_PREFIXES = ("\\\\.\\pipe\\", "//./pipe/")
 
 
@@ -879,6 +1037,25 @@ def _spawned(roots: list[Any]) -> list[Any]:
             out.append(child)
             out.extend(_spawned([child]))
     return out
+
+
+def _process_tree_words(
+    attributed: bool | None,
+    outside: list[str] | None = None,
+    marked_only: list[str] | None = None,
+    file_only: list[str] | None = None,
+) -> str:
+    """What the sandbox report says about which process reached an address."""
+    if attributed is True:
+        return "reached by the sample's process tree"
+    if attributed is False:
+        named = f" ({', '.join(outside)})" if outside else ""
+        return f"reached by a process outside the sample's process tree{named}"
+    if marked_only or file_only:
+        from maljan.reporting.renderers.stix_renderer import disputed_flow_reason
+
+        return disputed_flow_reason(list(marked_only or []), list(file_only or []))
+    return "the sandbox report does not say which process reached it"
 
 
 def _domain_context(d: Any) -> str:

@@ -60,6 +60,8 @@ def _container(sink: Any, agents: list[str] | None = None) -> Any:
 
     container.agent_role.side_effect = lambda n: n
     container.active_profile.return_value = paper_profile(agents or ["network"])
+    # No agent carries a label of its own: every line names it by its key.
+    container.config.agents.definitions = {}
     # The node asks for its stage's data through one call; the tests below set
     # ``load_chunked`` because that is what the container reaches for, so the
     # double forwards rather than answering twice.

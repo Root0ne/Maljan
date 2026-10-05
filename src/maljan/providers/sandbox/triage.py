@@ -219,11 +219,34 @@ class TriageSandboxProvider(SandboxProvider):
         return self._http
 
     @staticmethod
-    def _raise_for_status(response: httpx.Response, operation: str) -> None:
-        if response.status_code >= 400:
-            raise ProviderError(
-                f"Triage {operation} failed (HTTP {response.status_code}): {response.text[:200]}"
-            )
+    def _raise_for_status(response: httpx.Response, operation: str, sent: str = "") -> None:
+        """A refusal as Triage worded it: its ``error`` and ``message`` fields, else its body.
+
+        ``sent`` names what this platform chose to send, where an operator's
+        setting shaped the request, so a refusal of it points at the setting.
+        """
+        if response.status_code < 400:
+            return
+        said = response.text[:200]
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if isinstance(body, dict):
+            words = [str(body[key]) for key in ("error", "message") if body.get(key)]
+            if words:
+                said = ": ".join(words)[:400]
+        raise ProviderError(
+            f"Triage {operation} failed (HTTP {response.status_code}): {said}"
+            + (f" (sent {sent})" if sent else "")
+        )
+
+    def _submit_settings_said(self) -> str:
+        """The operator's settings the submission carries, for a refusal to name."""
+        seconds = self._cfg.analysis_seconds
+        if seconds is None:
+            return ""
+        return f"defaults.timeout={seconds} from sandbox.triage.analysis_seconds"
 
     def _profile_for(self, path: Path) -> str:
         """The VM profile this sample's format asks for, else the plain default.
@@ -242,6 +265,10 @@ class TriageSandboxProvider(SandboxProvider):
         profile = self._profile_for(path)
         if profile:
             payload["profiles"] = [{"profile": profile, "pick": "default"}]
+        # How long the VM runs the sample: the operator's, or nothing sent and
+        # Triage's own default.
+        if self._cfg.analysis_seconds is not None:
+            payload["defaults"] = {"timeout": int(self._cfg.analysis_seconds)}
         with open(path, "rb") as fh:
             return self._get_http().post(
                 SUBMIT_PATH,
@@ -342,7 +369,7 @@ class TriageSandboxProvider(SandboxProvider):
             # Anything else the retry raises is left exactly as it is: only a
             # dropped transport is this path's business, and rewriting an
             # unrelated failure into "Triage submit failed" would hide it.
-        self._raise_for_status(response, "submit")
+        self._raise_for_status(response, "submit", self._submit_settings_said())
         data = response.json()
         sample_id = data.get("id")
         if not sample_id:

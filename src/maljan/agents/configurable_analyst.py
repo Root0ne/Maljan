@@ -29,7 +29,12 @@ from maljan.agents.base_agent import (
     revision_messages,
 )
 from maljan.agents.composition import ResolvedAgent
-from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
+from maljan.agents.prompt_fragments import (
+    CLAIM_FORMAT_FRAGMENT,
+    PROVIDER_FAMILY,
+    tool_families,
+)
+from maljan.core.exceptions import SampleNotOpened
 from maljan.pipeline.events import describe_exception
 from maljan.schemas.isr_models import AgentISR
 
@@ -136,6 +141,38 @@ class ConfigurableAnalyst(BaseAnalyst):
             return data
         return _PATH_HEADER.format(path=path) + data
 
+    def _priority_hint(self, data: str) -> str:
+        """The static provider's priority-functions hint, for an agent that reads Ghidra.
+
+        The same load and sink-reachability pre-pass the static analyst runs,
+        for a generic agent whose own provider is Ghidra and whose request
+        carries Ghidra's tools — the reverser a team puts on Ghidra reads the
+        call graph's ranking as the static analyst does. Computed on the chunk
+        that carries the sample path (the head chunk), once per sample, and
+        ``""`` for every other agent, provider and chunk. A sample Ghidra
+        cannot open raises :class:`SampleNotOpened` here, before the loop.
+        """
+        if _analysis_path_in(data) is None:
+            return ""
+        if PROVIDER_FAMILY not in tool_families(self.tools):
+            return ""
+        provider_id = str(getattr(self._resolved, "static_provider_id", "") or "")
+        if provider_id != "ghidra":
+            return ""
+        path = self._analysis_file_path or _analysis_path_in(data) or ""
+        container = getattr(self, "_container", None)
+        cfg = getattr(container, "config", None)
+        if cfg is None:
+            from maljan.core.config import get_settings
+
+            cfg = get_settings()
+        from maljan.providers.static.ghidra import prepare_sample
+
+        hint = prepare_sample(
+            cfg, provider_id, path, self.logger, provider=self._own_static_provider()
+        )
+        return f"{hint}\n" if hint else ""
+
     # ------------------------------------------------------------------
     # Text interface
     # ------------------------------------------------------------------
@@ -150,6 +187,10 @@ class ConfigurableAnalyst(BaseAnalyst):
         """
         try:
             return _Run(text=str(self.execute_tool_loop(prompt_messages)), degraded=False)
+        except SampleNotOpened:
+            # Not a thinner ensemble: the agent's provider cannot read the
+            # sample, and the stage records the failure as the agent's own.
+            raise
         except Exception as exc:  # noqa: BLE001 — a custom analyst never fails a job
             # The reason travels: it is appended to the run's degradation
             # reasons and returned as this agent's report, which is published.
@@ -166,7 +207,10 @@ class ConfigurableAnalyst(BaseAnalyst):
     def analyze(self, data: str) -> str:
         self.logger.info("Executing '%s' analysis (%d tools).", self.name, len(self.tools))
         return self._run(
-            [("system", self._resolved.prompt), ("human", self._with_path_header(data))],
+            [
+                ("system", self._resolved.prompt),
+                ("human", self._priority_hint(data) + self._with_path_header(data)),
+            ],
             "analysis",
         ).text
 
@@ -220,7 +264,12 @@ class ConfigurableAnalyst(BaseAnalyst):
         run = self._run(
             [
                 ("system", self._resolved.prompt),
-                ("human", _ISR_FORMAT_INSTRUCTION + self._with_path_header(data)),
+                (
+                    "human",
+                    _ISR_FORMAT_INSTRUCTION
+                    + self._priority_hint(data)
+                    + self._with_path_header(data),
+                ),
             ],
             "ISR analysis",
         )

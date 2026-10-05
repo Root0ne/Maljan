@@ -54,11 +54,12 @@
     }
   ],
   "generation": {
-    "ceiling_s": null,
     "margin": null,
     "models": "<data-keyed map>",
-    "timeouts": "<data-keyed map>"
+    "timeouts": "<data-keyed map>",
+    "unmeasured_request_timeout_s": null
   },
+  "judge_stix_object_count": null,
   "models": "<data-keyed map>",
   "negotiation": {
     "confidence_history": [
@@ -119,6 +120,13 @@
     "per_agent": "<data-keyed map>",
     "sentence": null,
     "total_tokens": null,
+    "unreported": [
+      {
+        "agent": null,
+        "call": null,
+        "model": null
+      }
+    ],
     "unreported_calls": null
   },
   "tool_latency": null,

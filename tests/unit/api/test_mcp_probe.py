@@ -178,7 +178,11 @@ def test_the_probe_is_registered_under_its_own_name():
 @pytest.mark.asyncio
 async def test_the_r2_probe_speaks_the_same_handshake(monkeypatch):
     from app.services.settings_probes import probe_r2
+    from maljan.providers.static import r2
 
+    monkeypatch.setattr(
+        r2, "resolve_r2_binary", lambda configured, env=None: r2.R2Binary(configured, ())
+    )
     result = await probe_r2({"binary_path": "r2mcp"})
     assert result.ok is True and result.tools == ["open_file", "analyze", "list_imports"]
     assert _Handle.made[-1].config.command == "r2mcp"

@@ -58,7 +58,9 @@ of waiting out the access token.
 
 Two roles are enforced: `admin` and `analyst` (the role a registration gets).
 Admin gates the configuration surface — the settings schema, values, patches,
-resets, export and import — plus the audit log and API-key management. A
+resets, export and import — plus the audit log. API keys are not admin-gated:
+any signed-in user mints, lists and revokes only their own, and a key acts as
+the account that minted it. A
 refusal names the caller's actual role so the console can hide admin-only
 navigation rather than guess. There is no endpoint that grants admin; the first
 one is promoted in the database.

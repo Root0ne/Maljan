@@ -259,6 +259,8 @@ def attck_lookup(technique_id: str) -> dict[str, Any]:
         domain_of,
         platforms_for,
         retired_in,
+        retired_reason,
+        revoked_by,
         technique_entry,
         valid_ids,
     )
@@ -283,14 +285,20 @@ def attck_lookup(technique_id: str) -> dict[str, Any]:
     }
     if technique is None:
         retired = retired_in(tid)
-        out["reason"] = (
-            f"retired in ATT&CK {retired}"
-            if retired
-            else "the ATT&CK catalogue has no entry for this id"
-        )
+        successor = revoked_by(tid)
+        out["reason"] = retired_reason(tid) or "the ATT&CK catalogue has no entry for this id"
         if retired:
             out["retired_in"] = retired
+        if successor:
+            out["revoked_by"] = successor
     return out
+
+
+def attck_retired_reason(technique_id: str) -> str | None:
+    """What happened to a retired id (``attck_loader.retired_reason``); ``None`` otherwise."""
+    from maljan.memory.attck_loader import retired_reason
+
+    return retired_reason(technique_id)
 
 
 def attck_retired_in(technique_id: str) -> str | None:
@@ -324,7 +332,7 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
     which costs a file read. Nothing here loads a STIX bundle, so this is
     cheap enough to call inside an analyst's own loop.
     """
-    from maljan.memory.attck_loader import retired_in, valid_ids
+    from maljan.memory.attck_loader import retired_in, retired_reason, revoked_by, valid_ids
 
     known = valid_ids()
     unknown = [t for t in (str(raw).strip().upper() for raw in ids or []) if t and t not in known]
@@ -338,6 +346,14 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
         retired = retired_in(tid)
         if retired:
             row["retired_in"] = retired
+        # What happened to it, as every surface says it, and what replaced it
+        # where the bundle names a replacement.
+        reason = retired_reason(tid)
+        if reason:
+            row["reason"] = reason
+        successor = revoked_by(tid)
+        if successor:
+            row["revoked_by"] = successor
         # The parent of a bogus sub-technique is the single most likely intent,
         # and it is a string operation rather than a search — a suggestion that
         # cost an embedding model would be worse than no suggestion.
@@ -364,11 +380,17 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+# How a name the caller resolved from a stored value, rather than read in the
+# import table, is said wherever the answer and the report name it.
+RESOLVED_AT_RUNTIME = "resolved at runtime from hashes"
+
+
 def api_capability(
     api_names: list[str],
     behaviour_map: str = DEFAULT_API_BEHAVIOUR_MAP,
     attck_map: str = DEFAULT_API_ATTCK_MAP,
     platform: str = "windows",
+    resolved_names: list[str] | None = None,
 ) -> dict[str, Any]:
     """What each named API does, and which techniques the catalogue associates it with.
 
@@ -384,12 +406,10 @@ def api_capability(
     imports them. What comes back is an association a reader may weigh; it
     is never counted as a rule match or a source.
 
-    The whole import set is matched once and every row points back into it, so
-    a rule fires on the set and not on the name the row happens to hang under.
-    Almost every rule needs two or more names; the exception is a rule whose
-    single name *is* the act it describes, which says so by setting
-    ``min_apis`` to one. An API the table has never heard of comes back with
-    empty lists rather than a guess.
+    The whole set is matched once, so a rule fires on the set and not on the
+    name a row hangs under. Almost every rule needs two or more names; a rule
+    whose one name *is* the act sets ``min_apis`` to one. An API the table has
+    never heard of gets empty lists, not a guess.
 
     Read every measured number in the one direction it was measured in: it says
     how often this *rule* fires on software that is not a sample. None of them
@@ -401,16 +421,17 @@ def api_capability(
     measured carries no ``measured`` key rather than a zero — an absent key is
     "not measured" and never "never fires".
 
-    ``catalog_flags`` carries the catalog's own labels — ``suspicious`` for an
-    API in a category the catalogue tiers high or medium, and then only where
-    the category's ``flags_with`` combination is in the same import set —
-    named for where they come from rather than presented as this tool's
-    finding. A bare ``suspicious: true`` would be a verdict, and the tools
-    state facts.
+    ``catalog_flags`` carries the catalogue's own labels (``suspicious`` for a
+    category it tiers high or medium, where its ``flags_with`` combination is
+    in the set too), named as the catalogue's. A bare ``suspicious: true``
+    would be a verdict, and the tools state facts. ``corroborated_by`` lists
+    the APIs that would give weight to a row whose category means nothing on
+    its own (drawing, a message queue).
 
-    ``corroborated_by`` appears on a row whose category means nothing on its
-    own — drawing to a device context, pumping a message queue — and lists the
-    APIs whose presence beside it would give it weight.
+    ``resolved_names`` are names got by resolving the file's stored values
+    (``resolve_api_hashes``), not read in the import table: matched with the
+    rest and marked, ``obtained`` on the row and ``resolved_at_runtime_from_hashes``
+    in the answer, since a function resolved at runtime is not an import.
     """
     from maljan.analysis.api_capability_db import (
         canonical_name,
@@ -419,6 +440,9 @@ def api_capability(
     )
 
     names = [str(n).strip() for n in (api_names or []) if str(n).strip()]
+    resolved = [str(n).strip() for n in (resolved_names or []) if str(n).strip()]
+    names = list(dict.fromkeys([*names, *resolved]))
+    resolved_set = set(resolved)
     wanted = str(platform or "").strip().lower() or "windows"
     behaviours = load_api_behaviour_db(str(resolve_data(behaviour_map)), wanted)
     techniques = load_api_attck_map(str(resolve_data(attck_map)), wanted)
@@ -462,6 +486,8 @@ def api_capability(
             "techniques": cited,
             "catalog_flags": ["suspicious"] if suspicious else [],
         }
+        if name in resolved_set:
+            row["obtained"] = RESOLVED_AT_RUNTIME
         corroborators = behaviours.corroborated_by(category) if behaviours else ()
         if corroborators:
             row["corroborated_by"] = list(corroborators)
@@ -474,6 +500,8 @@ def api_capability(
             corpora.update(rate.corpora())
         rows.append(row)
     out: dict[str, Any] = {"capabilities": rows, "platform": wanted}
+    if resolved:
+        out["resolved_at_runtime_from_hashes"] = list(dict.fromkeys(resolved))
     if behaviour_rates:
         out["behaviour_rates"] = behaviour_rates
     if corpora:

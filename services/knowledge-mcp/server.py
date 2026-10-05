@@ -154,13 +154,16 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
 @mcp.tool()
 @says_unquoted("api_names")
 @_described_by(knowledge_tools.api_capability)
-def api_capability(api_names: list[str], platform: str = "windows") -> dict[str, Any]:
+def api_capability(
+    api_names: list[str], platform: str = "windows", resolved_names: list[str] | None = None
+) -> dict[str, Any]:
     return _guard(
         "api_capability",
         knowledge_tools.api_capability,
         searched={"api_names": "api_names"},
         api_names=api_names,
         platform=platform,
+        resolved_names=resolved_names,
     )
 
 

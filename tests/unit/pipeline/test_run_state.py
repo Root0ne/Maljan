@@ -1,10 +1,11 @@
-"""The run-state block is derived, regenerated, and never trimmed away.
+"""The run-state block is derived, regenerated, and sent last.
 
-It sits in the system turn between two markers. Framing a conversation twice
-leaves one block, the newer; the per-turn refresher rewrites only the budget
-line; and the forced-synthesis trim, which drops whole tool exchanges to fit
-a budget, keeps the system turn and the first human turn — which is where the
-block and the pack are.
+It travels between two markers at the end of a request's last message.
+Framing a conversation twice leaves one block, the newer, at the end; the
+per-turn refresher regenerates it on the latest turn, so every earlier byte of
+the request is the previous turn's; and the forced-synthesis trim, which drops
+whole tool exchanges to fit a budget, keeps the system turn and the first
+human turn, where the pack is.
 """
 
 from __future__ import annotations
@@ -141,8 +142,10 @@ class TestOneBlockPerPrompt:
         messages = [SystemMessage(content="sys"), HumanMessage(content="task")]
         once = frame_messages(messages, facts_block=f"{PACK_HEADING}\n[ev_0001] x", run_state="s1")
         twice = frame_messages(once, facts_block=f"{PACK_HEADING}\n[ev_0001] x", run_state="s2")
-        assert str(twice[0].content).count(RUN_STATE_BEGIN) == 1
-        assert "s2" in str(twice[0].content) and "s1" not in str(twice[0].content)
+        assert len(twice) == 2
+        assert twice[0].content == "sys"
+        assert str(twice[-1].content).endswith(f"task\n\n{RUN_STATE_BEGIN}\ns2\n{RUN_STATE_END}")
+        assert sum(str(m.content).count(RUN_STATE_BEGIN) for m in twice) == 1
         assert str(twice[1].content).count(PACK_HEADING) == 1
         assert str(twice[1].content).startswith(PACK_HEADING)
 
@@ -174,7 +177,7 @@ class TestTheBlockSurvivesTrimming:
         msgs = self._conversation(10)
         trimmed = _trim_for_synthesis(msgs, 5000)
         assert len(trimmed) < len(msgs)
-        assert RUN_STATE_BEGIN in str(trimmed[0].content)
+        assert str(trimmed[0].content) == "You are an analyst."
         assert str(trimmed[1].content).startswith(PACK_HEADING)
 
 
@@ -198,8 +201,11 @@ class TestThePerTurnRefresh:
         agent = _Analyst()
         agent.run_state_block = "sample: c"
         refresh = agent._run_state_refresher(max_steps=10, timeout=600.0, started=time.monotonic())
-        first = refresh({"messages": [SystemMessage(content="sys"), HumanMessage(content="t")]})
-        line = re.search(r"budget remaining: (\d+) model turns, (\d+) s", str(first[0].content))
+        opening = [SystemMessage(content="sys"), HumanMessage(content="t")]
+        first = refresh({"messages": opening})
+        assert first[0] == opening[0]
+        assert str(first[1].content).startswith("t\n\n" + RUN_STATE_BEGIN)
+        line = re.search(r"budget remaining: (\d+) model turns, (\d+) s", str(first[-1].content))
         assert line is not None
         # recursion_limit=10 is five model turns: a turn that calls a tool
         # costs two graph steps, so the first turn reads half the limit.
@@ -208,17 +214,18 @@ class TestThePerTurnRefresh:
         later = refresh(
             {
                 "messages": [
-                    *first,
+                    *opening,
                     AIMessage(content="", tool_calls=[{"name": "t", "args": {}, "id": "1"}]),
                     ToolMessage(content="r", tool_call_id="1"),
                     AIMessage(content="b"),
+                    HumanMessage(content="go on"),
                 ]
             }
         )
         # One tool round (two steps) and one plain assistant turn (one step)
         # leave seven of ten, which is four model turns at most.
-        assert "budget remaining: 4 model turns" in str(later[0].content)
-        assert str(later[0].content).count(RUN_STATE_BEGIN) == 1
+        assert "budget remaining: 4 model turns" in str(later[-1].content)
+        assert sum(str(m.content).count(RUN_STATE_BEGIN) for m in later) == 1
 
     def test_a_real_executor_calls_the_refresher_before_the_model(self) -> None:
         """The whole mechanism rides on langgraph's ``prompt`` hook; this pins it."""
@@ -253,8 +260,9 @@ class TestThePerTurnRefresh:
         )
         executor.invoke({"messages": [SystemMessage(content="sys"), HumanMessage(content="t")]})
         assert seen
-        system = str(seen[0][0].content)
-        assert RUN_STATE_BEGIN in system and "budget remaining: 5 model turns" in system
+        assert str(seen[0][0].content) == "sys"
+        block = str(seen[0][-1].content)
+        assert RUN_STATE_BEGIN in block and "budget remaining: 5 model turns" in block
 
     def test_an_agent_without_a_block_hands_the_turn_back_untouched(self) -> None:
         agent = _Analyst()

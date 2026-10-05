@@ -415,6 +415,7 @@ def _submit(client: TestClient, refusals: list[str]) -> Any:
     with (
         patch("app.api.v1.jobs.AnalysisService.create_job", AsyncMock(return_value=created)),
         patch("app.api.v1.jobs._unprobed_models_for", AsyncMock(return_value=refusals)),
+        patch("app.api.v1.jobs._unready_providers_for", AsyncMock(return_value=[])),
         patch("app.api.v1.jobs.SettingsService.load_overrides", AsyncMock(return_value={})),
     ):
         return client.post("/api/v1/jobs", json={"sample_id": str(uuid.uuid4())})

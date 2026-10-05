@@ -19,8 +19,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from maljan.agents.dynamic_analyst import _ISR_SYSTEM as DYNAMIC_ISR_SYSTEM
-from maljan.agents.static_analyst import _ISR_SYSTEM as STATIC_ISR_SYSTEM
+from maljan.agents.dynamic_analyst import assemble_dynamic_prompt
+from maljan.agents.prompt_fragments import format_fragment
+from maljan.agents.static_analyst import assemble_static_prompt
+from maljan.core.config import Settings
+from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
 from maljan.providers.sandbox_tools import (
     sandbox_api_calls,
     sandbox_dropped_files,
@@ -31,6 +34,7 @@ from maljan.providers.sandbox_tools import (
     sandbox_services_and_tasks,
     sandbox_signatures,
 )
+from maljan.providers.static.ghidra import GhidraStaticProvider
 
 ROOT = Path(__file__).resolve().parents[2]
 PROMPTS = ROOT / "tests" / "fixtures" / "prompts"
@@ -38,18 +42,43 @@ GOLDEN = ROOT / "tests" / "fixtures" / "golden"
 CAPE_GLOBS = ("data/cape_reports/*.json", "data/samples/dynamic/sample_1.json")
 
 
+def _prompts() -> tuple[str, str]:
+    """The static prompt on Ghidra and the dynamic prompt on CAPEv2, each with its tools.
+
+    The prompts are built for the tools a request carries; these two are the
+    ones sent with the provider's tools attached and no registry server, which
+    is what the file names say.
+    """
+    neutral = format_fragment("unknown", "unknown")
+    static = assemble_static_prompt(
+        GhidraStaticProvider.from_settings(Settings(_env_file=None)),
+        neutral,
+        (),
+        provider_expected=True,
+    )
+    dynamic = assemble_dynamic_prompt(
+        neutral,
+        (),
+        provider_fragment=CAPE2SandboxProvider.CAPE_PROMPT_FRAGMENT,
+        provider_label="the CAPEv2 tool server",
+        provider_expected=True,
+    )
+    return static, dynamic
+
+
 def main() -> None:
     PROMPTS.mkdir(parents=True, exist_ok=True)
+    static_prompt, dynamic_prompt = _prompts()
     (GOLDEN / "sandbox_tools").mkdir(parents=True, exist_ok=True)
 
     # With the trailing newline the repository's own end-of-file hook would
     # add anyway; without it every run of this script and every commit after
     # it flip the same two bytes back and forth.
     (PROMPTS / "static_isr_system_ghidra.txt").write_text(
-        STATIC_ISR_SYSTEM.rstrip("\n") + "\n", encoding="utf-8"
+        static_prompt.rstrip("\n") + "\n", encoding="utf-8"
     )
     (PROMPTS / "dynamic_system_cape2.txt").write_text(
-        DYNAMIC_ISR_SYSTEM.rstrip("\n") + "\n", encoding="utf-8"
+        dynamic_prompt.rstrip("\n") + "\n", encoding="utf-8"
     )
 
     for pattern in CAPE_GLOBS:

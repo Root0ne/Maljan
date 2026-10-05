@@ -22,7 +22,7 @@ import { formatStageDuration, stageTiming } from "@/components/analysis/stageTim
 import { getErrorMessage } from "@/lib/errors";
 import { ENRICH_BUTTON_LABEL, ENRICH_STATUS_MESSAGE } from "@/lib/enrichment";
 import { degradedBannerText } from "@/lib/degradedBanner";
-import { validationRowText } from "@/lib/validationRows";
+import { validationRowClass, validationRowText } from "@/lib/validationRows";
 import EvidenceChips from "@/components/analysis/EvidenceChips";
 import TechnicalAnalysisPanel from "@/components/analysis/TechnicalAnalysisPanel";
 import {
@@ -32,7 +32,7 @@ import {
   noSummaryReason,
 } from "@/components/analysis/reportProse";
 import { severityTone } from "@/lib/severity";
-import type { FpWarning, MalwareReport } from "@/types/malware-report";
+import type { FpWarning, MalwareReport, NoToolCallAsk } from "@/types/malware-report";
 
 function countNetworkIOCs(mr: MalwareReport): {
   domains: number;
@@ -595,6 +595,7 @@ function RunRecord({
   const triage = runSummary.triage ?? null;
   const validation = runSummary.validation ?? null;
   const retryMode = Object.entries(runSummary.nudge?.retry_mode ?? {});
+  const toolAsks = Object.entries(runSummary.nudge?.no_tool_call ?? {});
   const bundleLoss = bundleLossSentence(runSummary.truncation ?? null);
   const partialGrounding = partialGroundingSentence(runSummary.truncation ?? null);
   const corpusHeld = corpusHeldSentence(runSummary.truncation ?? null);
@@ -661,7 +662,7 @@ function RunRecord({
             {partialGrounding && <li className="text-text-muted">{partialGrounding}</li>}
             {corpusHeld && <li className="text-text-muted">{corpusHeld}</li>}
             {(validation?.unresolved ?? []).map((item, i) => (
-              <li key={i} className="text-status-orange">
+              <li key={i} className={validationRowClass(item)}>
                 {validationRowText(item)}
               </li>
             ))}
@@ -670,11 +671,29 @@ function RunRecord({
                 {agent} needed the final-answer nudge sent as {mode}.
               </li>
             ))}
+            {toolAsks.flatMap(([agent, asks]) =>
+              asks.map((ask, i) => (
+                <li key={`tool-ask-${agent}-${i}`} className="text-text-muted">
+                  {noToolCallSentence(agent, ask)}
+                </li>
+              )),
+            )}
           </ul>
         </div>
       </div>
     </details>
   );
+}
+
+function noToolCallSentence(agent: string, ask: NoToolCallAsk): string {
+  const head = `${agent} answered without calling a tool and was asked once whether to call one`;
+  if (ask.followed === "called_tools") {
+    return `${head}; it then made ${ask.tool_calls_after} tool call(s).`;
+  }
+  if (ask.followed === "answered_without_tools") {
+    return `${head}; it answered again without calling one.`;
+  }
+  return `${head}; no answer followed.`;
 }
 
 function Stat({
@@ -816,7 +835,7 @@ function DownloadBar({
       <button
         onClick={downloadJson("iocs")}
         disabled={!reportId || busy === "iocs"}
-        title="Every indicator the report holds, as JSON"
+        title="Every indicator the report holds, as JSON, with the tool that recovered each hidden network value"
         className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted disabled:text-text-disabled disabled:cursor-not-allowed"
       >
         {busy === "iocs" ? "fetching..." : "\u2193 IOC list"}

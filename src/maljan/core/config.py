@@ -74,6 +74,14 @@ class OpenAIConfig(BaseModel):
     # ID-recall loops observed in live runs. Only applied when base_url is
     # set, so vanilla OpenAI (which would 400 on the param) stays untouched.
     repetition_penalty: Annotated[float, Field(ge=0)] = 1.0
+    # llama.cpp's DRY sampler ("don't repeat yourself"), forwarded the same way
+    # when set: it penalises a token that extends a sequence already repeated
+    # in the context. Each is sent only when set, and none is set by default;
+    # ``dry_penalty_last_n`` of -1 is the whole context, 0 turns it off.
+    dry_multiplier: Annotated[float, Field(ge=0)] | None = None
+    dry_base: Annotated[float, Field(ge=1)] | None = None
+    dry_allowed_length: Annotated[int, Field(ge=1)] | None = None
+    dry_penalty_last_n: Annotated[int, Field(ge=-1)] | None = None
     # Disable a local reasoning model's chain-of-thought (Qwen3 ``<think>``)
     # by forwarding ``chat_template_kwargs.enable_thinking=false`` via extra_body.
     # On constrained hosts the reasoning model otherwise spends the whole decode
@@ -91,7 +99,20 @@ class OpenAIConfig(BaseModel):
     # asked here instead of inferred from one. ``auto`` reads the host: a
     # loopback, link-local or private address is a local server, anything else
     # is a hosted API that gets standard fields only.
-    compat: Literal["auto", "llama_cpp", "standard"] = "auto"
+    #
+    # ``deepseek`` is a hosted dialect of its own, named because no body works
+    # for both it and OpenAI: DeepSeek ignores ``max_completion_tokens``, the
+    # only cap field langchain-openai sends (measured: a cap of 5 produced 88
+    # and 138 tokens), and reads ``max_tokens``, which OpenAI's own API refuses
+    # beside ``max_completion_tokens`` for its reasoning models. It sends the
+    # cap as ``max_tokens`` too, and the thinking switch as DeepSeek's own
+    # ``thinking.type``; none of the llama.cpp extras.
+    compat: Literal["auto", "llama_cpp", "standard", "deepseek"] = "auto"
+    # The reasoning effort sent as ``reasoning_effort`` on every request, as
+    # written, so each API's own levels work (DeepSeek: ``low``, ``high``,
+    # ``max``; OpenAI's reasoning models: ``minimal`` … ``high``). Empty sends
+    # nothing and leaves the endpoint's own default.
+    reasoning_effort: str = ""
     # The context window the server behind ``base_url`` was started with, in
     # tokens. Zero means it is not known, which is the honest default: an
     # OpenAI-compatible endpoint does not report it and guessing one is worse
@@ -310,6 +331,63 @@ class FrontierConfig(FrontierArm):
     arms: dict[str, FrontierArm] = Field(default_factory=dict)
 
 
+_PRICE_WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+_UTC_CLOCK = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+
+class ModelPriceWindow(BaseModel):
+    """A span of the day (UTC) when a model is priced otherwise, as its vendor documents it.
+
+    ``utc_from`` is in the window and ``utc_to`` is not; a window whose end is
+    before its start runs past midnight, and ``days`` (``mon`` … ``sun``, empty
+    for every day) names the day it opens on. ``source`` is where the figures
+    were read.
+    """
+
+    utc_from: Annotated[str, Field(pattern=_UTC_CLOCK)]
+    utc_to: Annotated[str, Field(pattern=_UTC_CLOCK)]
+    days: list[str] = Field(default_factory=list)
+    input_usd_per_mtok: Annotated[float, Field(ge=0.0)]
+    output_usd_per_mtok: Annotated[float, Field(ge=0.0)]
+    cached_input_usd_per_mtok: Annotated[float, Field(ge=0.0)] | None = None
+    source: str = ""
+
+    @field_validator("days")
+    @classmethod
+    def _known_days(cls, days: list[str]) -> list[str]:
+        named = [str(day).strip().lower() for day in days]
+        unknown = [day for day in named if day not in _PRICE_WEEKDAYS]
+        if unknown:
+            raise ValueError(
+                f"unknown weekday(s) {', '.join(unknown)}: use {', '.join(_PRICE_WEEKDAYS)}"
+            )
+        return named
+
+    @model_validator(mode="after")
+    def _not_empty(self) -> "ModelPriceWindow":
+        if self.utc_from == self.utc_to:
+            raise ValueError("a price window's utc_from and utc_to must differ")
+        return self
+
+
+class ModelPrice(BaseModel):
+    """What one model's tokens cost, in US dollars per million, as its vendor prices them.
+
+    ``cached_input_usd_per_mtok`` is the price of an input token the provider
+    read from its prompt cache; ``None`` prices a cached token as an ordinary
+    input token. ``source`` is where the figures were read, kept with them so
+    a reader can check them. ``windows`` are the spans of the day the vendor
+    prices otherwise (a peak or an off-peak rate); a call is priced at the
+    window its request was sent in, and at these figures outside every window.
+    """
+
+    input_usd_per_mtok: Annotated[float, Field(ge=0.0)]
+    output_usd_per_mtok: Annotated[float, Field(ge=0.0)]
+    cached_input_usd_per_mtok: Annotated[float, Field(ge=0.0)] | None = None
+    source: str = ""
+    windows: list[ModelPriceWindow] = Field(default_factory=list)
+
+
 class LLMConfig(BaseModel):
     """Top-level LLM configuration grouping provider selection and per-provider settings.
 
@@ -333,6 +411,21 @@ class LLMConfig(BaseModel):
     # cancel the stall first: at a half, a first model that stops answering
     # leaves the other half of the loop to the model that stays for it.
     fallback_turn_share: Annotated[float, Field(gt=0.0, lt=1.0)] = 0.5
+
+    # The operator's spend ceiling for one job, in US dollars; ``None`` (the
+    # default) is none. Spend is the provider-reported usage of every call —
+    # cached input, input and output tokens — at the prices of the model that
+    # answered: ``model_prices`` first, then a price the vendored model table
+    # carries for it. When it is reached, every running tool loop ends its
+    # tool phase and its agent writes its answer from what it gathered; the
+    # judge's verdict and the report still run, tool-free, so the report is
+    # never lost, and a degradation reason says the ceiling ended the tool
+    # phases. A model with no price makes the ceiling impossible to compute:
+    # the log and the run summary say so once, and nothing is guessed.
+    max_spend_usd_per_job: Annotated[float, Field(gt=0.0)] | None = None
+    # Per-model prices, keyed by the model name as the provider reports it
+    # (``deepseek-v4-pro``). Empty by default: no price is assumed.
+    model_prices: dict[str, ModelPrice] = Field(default_factory=dict)
 
     # Whether a job is refused when an agent names a model no probe has
     # reached. A model name is the one part of a definition nothing validates
@@ -362,37 +455,41 @@ class LLMConfig(BaseModel):
     # above 0 is the operator's and is used as set.
     judge_max_tokens: Annotated[int, Field(ge=0)] = 0
 
-    # When True, analysts run in parallel —
-    # correct for hosted multi-slot LLMs. When False (the default), the
-    # pipeline runs analysts sequentially so a single-slot
-    # local llama-server gives each analyst exclusive slot use for its
-    # per-agent timeout budget instead of letting them choke each other in the
-    # request queue. Set ``LLM__PARALLEL_ANALYSTS=true`` only for a hosted
-    # multi-slot API with real per-request isolation.
+    # Whether the analysts of a stage that sets no run mode of its own, and the
+    # revision round, run at once or one after another. Three values:
     #
-    # 2026-07-13 ROOT-CAUSE (supersedes the "SWA re-prefill" misdiagnosis in
-    # findings-log): the served Qwen3.6-35B-A3B is a HYBRID Gated-DeltaNet
-    # (recurrent) + attention MoE — NOT a sliding-window model. On a single
-    # llama-server slot, "parallel" analysts interleave their requests and each
-    # one CLOBBERS the others' per-slot recurrent DeltaNet state; llama.cpp /
-    # ik_llama cannot restore the recurrent context checkpoint (open bug
-    # ik_llama#1762 / ggml-org#20225), so every ReAct step then does a FULL
-    # prompt re-processing → minutes/turn → the revision round hit
-    # request_timeout (900s) and runs took ~41 min. Sequential (False) gives
-    # each analyst exclusive slot use, so its recurrent state survives across
-    # its own ReAct steps → only new tokens are processed → no re-prefill, no
-    # timeout. MEASURED on sample 11e77149 + CAPE: parallel 2480s (revision
-    # timed out) → sequential 743s (3.3×, zero timeouts).
+    # * ``"auto"`` (the default) decides per job from the endpoints of the
+    #   models the analysts call (``pipeline.analyst_mode``): a host that
+    #   resolves only to public addresses is a hosted API and runs them in
+    #   parallel; Ollama, or a host that is or resolves to a local address or
+    #   is a name only a local resolver answers, runs them one at a time
+    #   unless its llama.cpp ``/props`` reports more than one slot; a host that
+    #   does not resolve runs them one at a time. The mode and why are logged
+    #   and in the run summary.
+    # * ``"true"`` always runs them in parallel.
+    # * ``"false"`` always runs them one after another.
     #
-    # Honoured in BOTH phases: the initial fan-out (pipeline/builder.py —
-    # parallel edges vs a sequential chain) AND the revision node
-    # (pipeline/nodes.py — concurrent asyncio.gather vs a sequential await
-    # loop). The default flipped True→False (2026-07-13) so a run WITHOUT a
-    # local .env (CI, fresh clone, deploy) is safe by default — otherwise
-    # parallel + the restored deep static budget = the exact uncapped
-    # re-prefill the old caps once masked. Do NOT re-enable on a single-slot
-    # hybrid-model deployment.
-    parallel_analysts: bool = False
+    # Why a single-slot local server needs them one at a time: a hybrid
+    # recurrent model (Qwen3.6-35B-A3B, Gated-DeltaNet and attention) keeps
+    # per-slot recurrent state that concurrent requests on one llama-server
+    # slot clobber, and llama.cpp cannot restore it from a context checkpoint,
+    # so every ReAct step re-processes its whole prompt. Measured on one sample
+    # with CAPE: parallel 2,480 s with the revision round timing out,
+    # sequential 743 s with none.
+    #
+    # A stored JSON boolean keeps its meaning: ``true`` and ``false`` are the
+    # explicit choices they always were.
+    parallel_analysts: Literal["auto", "true", "false"] = "auto"
+
+    @field_validator("parallel_analysts", mode="before")
+    @classmethod
+    def _a_boolean_is_the_same_choice(cls, value: Any) -> Any:
+        """A stored JSON boolean is the explicit choice it always was."""
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, str) and value.strip().lower() in ("auto", "true", "false"):
+            return value.strip().lower()
+        return value
 
     # View-decomposition pilot (findings-log §3.6). 0 = off (today's single
     # monolithic analyst call). N > 0 splits the analyst's text-evidence into N
@@ -1191,6 +1288,104 @@ def _without_the_empty_builtin_tool_list(entry: dict[str, Any]) -> dict[str, Any
     return entry
 
 
+# The prompts a seeded definition shipped with before its current one, by
+# SHA-256 of the exact text. A save stores the whole definition map, seeds
+# included, so a database holds each seeded row as it was on the day of its
+# last save; when a release rewrites a seed's prompt, that stored row stops
+# matching its seed, and the key migration takes it for an operator's own agent
+# on a name the product later reserved and renames it (`reverser` ->
+# `reverser_custom`, every reference rewritten). A stored prompt that is one
+# the seed itself shipped is the seed's, and is read as not set. An operator's
+# own text is never one of these, so it is still renamed out of the way.
+FORMER_SEED_PROMPT_DIGESTS: dict[str, frozenset[str]] = {
+    "reverser": frozenset(
+        {
+            "c596c81df2fc88cf47e23dd2431cbdd4e8fa1258d3abe4eb948b8929bccbb953",
+            "3f843ad560c68f70869031d79e600cad9ef9a3f77468efb41cbeb67d23f6be60",
+            "3e0c00643b9359a348bfcdd9f9947d80b49395218351befdf292c4a962919afc",
+            "6a73348166297c3296f6f829727799b5929c4ec55049e281edb44b7f6b810267",
+            "486bffd12746ef38cdd4bcdc94413e03584a5009abb2e4f5bfde6a6d6d3e2875",
+            "f0add93b08ffd9897fdb84d80f16f8b956681e28c2c3fbce8276f2746c6388b7",
+        }
+    ),
+    "triage": frozenset(
+        {
+            "548dbd4f8a38495320ccfc5076a6b81df32581e2748d794003cb27702c948583",
+            "8222ed6448b01cae52ff39debdbef1abe0283fa9450120db24829f46c57c9409",
+        }
+    ),
+    "android_static": frozenset(
+        {
+            "22e4389d96dd022526f33c0bb95c5edd75b51f3a4ce53cfbe3806397efa83609",
+            "19a98551834f425c1af85400754d7c22c26f88b6160cab4567d0ca7ba308873e",
+        }
+    ),
+    "lead": frozenset(
+        {
+            "31d93bd9c5a3b5f5d679deb2803b7d10f3bfe4f05613ac00c0b99972428c1f26",
+            "8fdf07ee5a05a50c45e365a751ffc37b7197b71e11cbe05b922f6cd6860d814e",
+        }
+    ),
+}
+
+
+def as_stored_builtin(key: str, entry: dict[str, Any]) -> dict[str, Any]:
+    """A stored built-in row with what only means "the seed" taken out.
+
+    Two things read as not set, so the seed's own value applies: an empty tool
+    list (``_without_the_empty_builtin_tool_list``) and a prompt the seed
+    itself shipped with in an earlier release (``FORMER_SEED_PROMPT_DIGESTS``).
+    Every place that compares a stored built-in with its seed reads it
+    through here, so the settings model, the settings API and the key
+    migration agree on what an edit is.
+    """
+    out = _without_the_empty_builtin_tool_list(entry)
+    prompt = out.get("prompt")
+    if isinstance(prompt, str):
+        import hashlib
+
+        digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        if digest in FORMER_SEED_PROMPT_DIGESTS.get(key, frozenset()):
+            out = {k: v for k, v in out.items() if k != "prompt"}
+    return out
+
+
+def with_the_role_seed_tools(entry: dict[str, Any]) -> dict[str, Any]:
+    """An operator's definition with no ``tools`` key, given its role's seeded tools.
+
+    The rule for a definition that is not a built-in: a tool list that is
+    **absent** means "what the role's own seed has", and a list that is
+    **present** is the operator's, an empty one included, which means none. A
+    clone of ``static`` written as ``{"role": "static", "static_provider":
+    "r2"}`` — by a script, an import or a hand-edited export — keeps the
+    analysis, knowledge and VirusTotal servers the static seed reads, the same
+    as a clone the console copies with its list; one written with ``"tools":
+    []`` asked for no server and gets none. Only a role with exactly one seed
+    of its own (``static``, ``dynamic``, ``network``, ``report``, ``lead``)
+    has a seed to inherit from; ``generic`` has three and none of them is the
+    role's, so a generic definition's missing list stays empty.
+
+    Unlike ``_without_the_empty_builtin_tool_list``, an empty list here is not
+    read as missing. A built-in's stored ``[]`` predates the tool sidecars and
+    cannot be an edit (a built-in's tools cannot be edited); an operator's
+    ``[]`` can only be what they wrote.
+    """
+    if "tools" in entry:
+        return entry
+    seed = _role_seeds().get(str(entry.get("role") or ""))
+    if seed is None:
+        return entry
+    return {**entry, "tools": [ref.model_dump() for ref in seed.tools]}
+
+
+def _role_seeds() -> dict[str, "AgentDefinition"]:
+    """Each role that exactly one seeded definition plays, with that definition."""
+    by_role: dict[str, list[AgentDefinition]] = {}
+    for definition in _builtin_definitions().values():
+        by_role.setdefault(str(definition.role), []).append(definition)
+    return {role: seeds[0] for role, seeds in by_role.items() if len(seeds) == 1}
+
+
 def _a_whole_number(value: Any) -> Any:
     """``value`` as the integer it names, or ``value`` itself.
 
@@ -1244,10 +1439,9 @@ class AgentDefinition(BaseModel):
     # How long one loop of this agent may run and how many steps it may take.
     # ``None`` means the deployment-wide ``react_agent_timeout`` /
     # ``react_agent_max_steps``, by way of the deprecated per-agent override
-    # maps. A budget is a property of the agent, not of the deployment: an
-    # operator who clones the lead gets a definition that asks six specialists
-    # and, without this, the default ten steps to do it in — the clone starves
-    # and nothing in the card they edited said why.
+    # maps, and those are no limit unless an operator set one. A budget is a
+    # property of the agent, not of the deployment, so an operator who wants
+    # one for a single agent sets it here.
     max_steps: Annotated[int, Field(ge=1)] | None = None
     timeout_seconds: Annotated[int, Field(ge=1)] | None = None
 
@@ -1298,6 +1492,12 @@ class StageDefinition(BaseModel):
     deterministic tools over the sample and writing each result to the
     evidence ledger before any analyst starts (``pipeline.triage_pack``), so
     the facts a model may or may not ask for exist either way.
+
+    ``mode`` is how an analysis stage runs its agents. Set, it is the
+    operator's and is used as set. Unset (``None``, the default), the stage
+    follows the job's resolved analyst mode (``llm.parallel_analysts``, see
+    ``pipeline.analyst_mode``); read without a job, an unset stage is
+    sequential.
     """
 
     key: Annotated[str, Field(pattern=SERVER_KEY_PATTERN)]
@@ -1306,7 +1506,7 @@ class StageDefinition(BaseModel):
     agents: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
     when: str = ""
-    mode: Literal["parallel", "sequential"] = "sequential"
+    mode: Literal["parallel", "sequential"] | None = None
     inject_upstream: Literal["none", "findings", "full"] = "findings"
     debate: DebateOptions | None = None
     builtin_tools: bool = True
@@ -1403,10 +1603,27 @@ def triage_stage() -> StageDefinition:
     )
 
 
+def explicit_parallel(value: Any) -> bool | None:
+    """What ``llm.parallel_analysts`` says for itself: ``True``, ``False``, or ``None`` for auto.
+
+    Read tolerantly, because the value arrives as the validated string, as a
+    stored JSON boolean, or from a caller that assigned a boolean after
+    validation.
+    """
+    if isinstance(value, bool):
+        return value
+    said = str(value or "").strip().lower()
+    if said == "true":
+        return True
+    if said == "false":
+        return False
+    return None
+
+
 def stages_from_analysts(
     analysts: list[str],
     *,
-    parallel: bool = False,
+    parallel: bool | None = None,
     max_rounds: int = 3,
     consensus_threshold: float = 0.8,
     triage: bool = True,
@@ -1422,6 +1639,10 @@ def stages_from_analysts(
     ``triage`` puts the deterministic triage pack in front of the four. It is
     on for every team but the measurement baseline, whose whole purpose is to
     show what the models do with nothing established for them.
+
+    ``parallel`` is the analysis stage's run mode: ``True`` or ``False`` when
+    ``llm.parallel_analysts`` says so, ``None`` (unset) when it is ``auto`` and
+    the job decides.
     """
     head = [triage_stage()] if triage else []
     return [
@@ -1431,7 +1652,7 @@ def stages_from_analysts(
             label="Analysis",
             kind="analysis",
             agents=list(analysts),
-            mode="parallel" if parallel else "sequential",
+            mode=None if parallel is None else ("parallel" if parallel else "sequential"),
             inject_upstream="none",
         ),
         StageDefinition(
@@ -2008,17 +2229,6 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             role="lead",
             label="Lead analyst",
             prompt=LEAD_PROMPT,
-            # A lead spends its steps on asks and on reading what comes back,
-            # and each ask is two of them — the turn that calls the tool and
-            # the node that runs it. Six asks and the turns to weigh them is
-            # forty, and at the default 300 s per ask 1800 s fits those six
-            # with the lead's own turns around them; that is the number
-            # ``delegation._asks_that_fit`` computes and the number the
-            # ``ask_<key>`` tool's description gives the model. The
-            # specialists' own budgets are their own and do not come out of
-            # these.
-            max_steps=40,
-            timeout_seconds=1800,
             tools=[
                 ToolRef(kind="agent", agent="static"),
                 ToolRef(kind="agent", agent="dynamic"),
@@ -2344,16 +2554,19 @@ def convert_builtin_profile_document(name: str, entry: Any) -> Any:
 
 
 def _profile_stage_identity(stages: Any) -> Any:
-    """A built-in profile's stages with the two editable fields taken out.
+    """A built-in profile's stages with the fields that are not its architecture taken out.
 
     Used only by the identity check: ``debate`` options and ``builtin_tools``
     are what an operator may tune on a seeded profile, so they are removed from
     both sides of the comparison rather than compared and forgiven afterwards.
+    ``mode`` is how a stage runs its agents on the deployment's models, not
+    which agents it runs: a stored built-in that says ``sequential`` (what an
+    unset mode used to be written as) is the same team as its seed.
     """
     if not isinstance(stages, list):
         return stages
     return [
-        {k: v for k, v in stage.items() if k not in ("debate", "builtin_tools")}
+        {k: v for k, v in stage.items() if k not in ("debate", "builtin_tools", "mode")}
         if isinstance(stage, dict)
         else stage
         for stage in stages
@@ -2373,22 +2586,22 @@ class AgentsConfig(BaseModel):
     a callee derived from what its caller had left ran out of steps before it
     had made a tool call — the live proof watched a static specialist die at a
     recursion limit of five, and every later ask refused with "0 s and 3 steps
-    remain". An ask is bounded by the caller's remaining wall clock and by
-    nothing else, because the wall clock is the one thing the two really
-    share: the ask runs inside the caller's own timeout.
+    remain". Both are ``None`` unless an operator sets them, which is no
+    limit of the delegation's own. An ask is also bounded by the caller's
+    remaining wall clock where the caller's loop has one, because the wall
+    clock is the one thing the two really share: the ask runs inside the
+    caller's own timeout.
     """
 
     profile: str = "default"
     profiles: dict[str, ProfileDefinition] = Field(default_factory=_builtin_profiles)
     definitions: dict[str, AgentDefinition] = Field(default_factory=_builtin_definitions)
     delegation_depth: Annotated[int, Field(ge=1)] = 2
-    # Twelve steps is about five tool rounds and an answer — what a specialist
-    # needs to open the sample, look at two or three things and write a claim.
-    delegation_steps: Annotated[int, Field(ge=2)] = 12
-    # Five minutes per ask on a local model: a specialist with tools spends
-    # most of it waiting for its own tool calls, and a lead with a long stage
-    # timeout can still make several asks inside one loop.
-    delegation_timeout_seconds: Annotated[int, Field(ge=1)] = 300
+    # What one ask gets, when an operator sets it; ``None`` is no limit of the
+    # delegation's own. An ask is still held to the time its caller has left
+    # when the caller's loop has a clock.
+    delegation_steps: Annotated[int, Field(ge=2)] | None = None
+    delegation_timeout_seconds: Annotated[int, Field(ge=1)] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -2454,8 +2667,10 @@ class AgentsConfig(BaseModel):
         for key, entry in definitions.items():
             seed = seeds.get(key)
             if seed is not None and isinstance(entry, dict):
-                entry = _without_the_empty_builtin_tool_list(entry)
+                entry = as_stored_builtin(str(key), entry)
                 merged[key] = {**seed.model_dump(), **entry}
+            elif isinstance(entry, dict):
+                merged[key] = with_the_role_seed_tools(entry)
             else:
                 merged[key] = entry
         return {**data, "definitions": merged}
@@ -2678,9 +2893,11 @@ def builtin_profile_changed(name: str, profile: ProfileDefinition) -> bool:
     # The stages of a built-in are the paper's architecture and stay
     # fixed, with two exceptions an operator legitimately needs: how
     # hard the debate argues, and whether a stage gets the built-in
-    # tool servers. Everything else about a stage — its kind, its
-    # agents, what it depends on, when it runs — is the architecture
-    # itself, and editing it means cloning the profile.
+    # tool servers. A stage's run mode is not compared either: it is how
+    # the stage runs on this deployment's models, not the architecture.
+    # Everything else about a stage — its kind, its agents, what it
+    # depends on, when it runs — is the architecture itself, and editing
+    # it means cloning the profile.
     current_profile["stages"] = _profile_stage_identity(current_profile.get("stages"))
     expected_profile["stages"] = _profile_stage_identity(expected_profile.get("stages"))
     return current_profile != expected_profile
@@ -2834,6 +3051,11 @@ class SandboxTriageConfig(BaseModel):
     file type, so an APK reaches an Android profile rather than the Windows
     one every other sample uses. ``timeout_seconds`` is generous because a
     Triage run queues behind other tenants' work.
+
+    ``analysis_seconds`` is how long the Triage VM runs the sample, sent as
+    the submission's ``defaults.timeout``; unset, nothing is sent and Triage's
+    own default applies. ``timeout_seconds`` is how long this platform polls
+    for the finished report, so it must be longer than the run it waits for.
     """
 
     base_url: str = "https://tria.ge/api/v0"
@@ -2843,6 +3065,17 @@ class SandboxTriageConfig(BaseModel):
     timeout_seconds: Annotated[int, Field(ge=1)] = 900
     poll_interval_seconds: Annotated[int, Field(ge=1)] = 15
     fetch_pcap: bool = True
+    analysis_seconds: Annotated[int, Field(ge=1)] | None = None
+
+    @model_validator(mode="after")
+    def _the_poll_outlasts_the_run(self) -> "SandboxTriageConfig":
+        if self.analysis_seconds is not None and self.timeout_seconds <= self.analysis_seconds:
+            raise ValueError(
+                f"sandbox.triage.timeout_seconds ({self.timeout_seconds}) must be longer than "
+                f"sandbox.triage.analysis_seconds ({self.analysis_seconds}): the poll waits "
+                "for the sample's run and for Triage to process it into a report"
+            )
+        return self
 
 
 class SandboxUploadConfig(BaseModel):
@@ -2968,32 +3201,28 @@ class ReportingConfig(BaseModel):
     - ``include_extended_stix``: emit the extended Bundle (Identity / Note /
       Report SDOs). Disable to halve serialization cost when consumers only
       need the minimal judge bundle.
-    - ``narrative_max_tokens``: hard cap for the NarrativeAgent LLM round.
-      Keeps tail latency predictable.
     - ``auto_generate_detection_rules``: template-based YARA/Sigma/Suricata
       generation.
     """
 
     enabled: bool = True
     include_extended_stix: bool = True
-    narrative_max_tokens: Annotated[int, Field(ge=1)] = 1500
     # How much of the upstream stages' findings a stage is handed. A pipeline
     # of six stages would otherwise put the whole run into every prompt after
     # the second one, and the last stage would spend its context on a summary
     # of a summary instead of on the sample.
     #
-    # The third copy of the six thousand the tool-output cap used to be, and it
-    # is the one that stays. The two it is not: the guardrail's number bounded
-    # a prompt and is now derived from the served window; the evidence ledger's
-    # bounded a *record* silently and is gone, because a stored prefix that
-    # does not say it is one cannot be cited. This bounds a prompt, like the
-    # first, and it announces itself — the block a stage reads ends in
-    # "[upstream findings truncated]" — and nothing is lost, because the whole
-    # findings stay in the run state, the transcript and the report. What it
-    # shares with the first is being a constant where the served window is
-    # knowable, and deriving it belongs with that cap rather than bolted on
-    # here.
-    upstream_findings_max_chars: Annotated[int, Field(ge=0)] = 6000
+    # Zero, the default, derives it from the window this job's models serve,
+    # the way the tool-answer cap is (``preprocessing.max_tool_output_chars``):
+    # the share one answer may take of what the window leaves after the reply
+    # room (``context_window.upstream_block_chars``). A window nothing reported
+    # derives nothing and the documented fallback of 6,000 applies. A positive
+    # value is the operator's own, used as set. The cut announces itself — the
+    # block a stage reads ends in "[upstream findings truncated]" — and nothing
+    # is lost, because the whole findings stay in the run state, the
+    # transcript and the report. The triage pack every agent reads is cut at
+    # the same bound.
+    upstream_findings_max_chars: Annotated[int, Field(ge=0)] = 0
     auto_generate_detection_rules: bool = True
 
     # --- Report-reshaping (professional-report front-matter + Composer) ---
@@ -3007,13 +3236,15 @@ class ReportingConfig(BaseModel):
     # legacy single-round NarrativeAgent. Bounded per-section prompts + hard
     # per-section timeout keep the local SWA model from stalling.
     composer_enabled: bool = True
-    # What one report section may generate, in tokens. 0, the default, derives
-    # it per model: the room an analyst's reply is given on that model — the
-    # larger of ``expert_max_tokens`` and ``judge_max_tokens``, at most a
-    # quarter of the context window the model serves — with the derivation
-    # printed in the run summary. A positive value is an operator's own budget
-    # and is used as it always was. A fixed 900 dropped a section of a live
-    # report when the model reasoned past it.
+    # What one report section may generate, in tokens. 0, the default, takes
+    # the report stage's own order per model: the reporter's
+    # ``judge_max_tokens`` where the operator set it, else the model's
+    # declared maximum output, else a quarter of the context window the model
+    # serves; never more than the model's maximum, with the derivation printed
+    # in the run summary and the worker log. A positive value is an operator's
+    # own budget, plus the reporter's cap as reasoning room where thinking is
+    # left on, held at the model's maximum. A fixed budget dropped a section of
+    # a live report when the model's answer outgrew it.
     composer_section_max_tokens: Annotated[int, Field(ge=0)] = 0
     composer_per_section_timeout: Annotated[int, Field(ge=1)] = 120
     # Server-side HTML→PDF export.
@@ -3161,6 +3392,10 @@ class ValidationConfig(BaseModel):
     alignment_threshold: Annotated[float, Field(ge=0.0, le=1.0)] = 0.05
     alignment_margin: Annotated[float, Field(ge=0.0, le=1.0)] = 0.20
     weak_alignment: bool = False
+    # How many claim headings an analyst's answer may write again before it is
+    # asked once for a whole answer (``isr.claims_repeated``). ``None`` derives
+    # it from the answer: the number of distinct headings it wrote.
+    claim_repeat_margin: Annotated[int, Field(ge=0)] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -3261,124 +3496,36 @@ class Settings(BaseSettings):
             return (init_settings,)
         return (init_settings, env_settings, dotenv_settings, file_secret_settings)
 
-    # Token overflow protection (128K is conservative for Gemini 1M+ context)
-    max_token_limit: Annotated[int, Field(ge=1)] = 128_000
+    # How many tokens of an analyst's input text may reach its prompt. ``None``,
+    # the default, derives it from the window the analyst's model serves: what
+    # the window holds before the reply room, less the prompt around the input.
+    # An operator's number wins. Input that does not fit is shortened as a
+    # document, the model is told, and the run records a degradation.
+    max_token_limit: Annotated[int, Field(ge=1)] | None = None
 
-    # ReAct agent execution limits
-    react_agent_timeout: Annotated[int, Field(ge=1)] = 180  # seconds before agent loop times out
-    react_agent_max_steps: Annotated[int, Field(ge=1)] = 10  # max LangGraph recursion steps
-    # Tool-call budget.
-    # When an analyst's ReAct loop exceeds this many cumulative tool calls
-    # we log a WARNING. Not a hard limit (LangGraph's recursion_limit is
-    # the structural cap); this is the early signal that an analyst is
-    # spinning unproductively on tool calls. Set via env
-    # ``REACT_AGENT_TOOL_CALL_BUDGET``.
+    # ReAct agent execution limits. ``None`` is no limit, and it is the
+    # default: a loop ends when its model answers, when it only repeats itself
+    # (``RepeatGuard``), when its conversation has no room left for a tool
+    # answer, or when the operator's spend ceiling
+    # (``llm.max_spend_usd_per_job``) is reached — and the arq job timeout is
+    # the last resort. Each model call still waits only as long as its answer
+    # takes at the model's measured pace (``llm.generation_rate``). An
+    # operator's number, here or on an agent's definition, is a limit the loop
+    # keeps to.
+    react_agent_timeout: Annotated[int, Field(ge=1)] | None = None
+    react_agent_max_steps: Annotated[int, Field(ge=1)] | None = None
+    # How many cumulative tool calls of one loop are logged as a warning. A
+    # signal for an operator reading the log, never a limit: nothing about the
+    # loop changes when it is passed.
     react_agent_tool_call_budget: Annotated[int, Field(ge=1)] = 20
 
-    # Deprecated: a budget belongs to the agent that spends it, so
-    # ``agents.definitions.<key>.timeout_seconds`` is where one is set now and
-    # a definition's own value wins. This map is still read until the release
-    # after the next promotion to main, so a deployment that set a budget here
-    # keeps it.
-    # Per-agent timeout overrides. The default ``react_agent_timeout`` is
-    # tuned for the network/dynamic analysts (~1-3 tool calls). The
-    # static analyst attaches the Ghidra MCP server with many tools, so
-    # we give it more headroom by default. The judge agent also needs a
-    # larger budget on local models (Qwen3.6-35B on llama.cpp took 180+s
-    # to formulate the final verdict in the 2026-05-23 E2E run, hitting
-    # the previous ``max(timeout, 120)`` ceiling and triggering the
-    # fallback path). Override via env, e.g.
-    # ``REACT_AGENT_TIMEOUT_OVERRIDES__static=600``.
-    react_agent_timeout_overrides: dict[str, int] = Field(
-        default_factory=lambda: {
-            # The static analyst runs a
-            # full ReAct loop against Ghidra MCP (load_program → auto-
-            # analyze → behaviour scan → decompile). On the local 35B Qwen
-            # at ~4.6 tok/s output the previous 600s ceiling fired
-            # *during* Ghidra auto-analysis (live trace job 3450f9cd
-            # 2026-05-28 — Ghidra logged ``Loaded program`` for the target
-            # before the budget expired). 1200s covers a cold-cache cycle
-            # end-to-end while still leaving headroom under the arq
-            # 3600s job timeout once we add dynamic (600s) + network
-            # (300s) + negotiation + judge. Reduce to 600s for hosted
-            # multi-slot APIs.
-            #
-            # 2026-07-13 — restored 300 -> 1500 (per *chunk*). The 2026-07-11 cut
-            # to 300 blamed "SWA re-prefill" (a MISDIAGNOSIS — see
-            # max_tool_output_chars / parallel_analysts): the 1200s blow-ups were
-            # parallel analysts clobbering the single slot's recurrent state, now
-            # fixed by the sequential topology. This per-chunk wall-clock is the
-            # BINDING constraint on depth — the restored static max_steps=40 is
-            # inert unless the timeout moves with it (at ~15-20s/step, 300s fits
-            # only ~15-20 steps). 40 steps ~= 600-800s when a rich chunk uses them
-            # all; 1500 (hard cap timeout+30 = 1530s) is generous headroom so the
-            # net never fires on a *progressing* chunk ("a timeout is a bug").
-            # safe_analyze_isr_chunked still tolerates a genuinely wedged chunk.
-            # Override via ``REACT_AGENT_TIMEOUT_OVERRIDES__static=1500``.
-            "static": 1500,
-            # Judge budget bumped 300 → 600 for the same reason — the
-            # final-verdict LLM call on Qwen 35B repeatedly bottlenecked
-            # at 180-300s in the 2026-05-28 sequential live runs.
-            "judge": 600,
-            # A single-slot llama-server serialises
-            # all three analyst LLM calls — when the static analyst holds the
-            # slot for ~600s the dynamic / network analysts spend most of
-            # their budget queueing. Bump them so they don't time out before
-            # the LLM ever sees their request.
-            "dynamic": 600,
-            "network": 300,
-        }
-    )
-
-    # Deprecated, as ``react_agent_timeout_overrides`` is: set a step budget on
-    # the agent's own definition (``agents.definitions.<key>.max_steps``),
-    # which wins over this map. Read until the release after the next promotion
-    # to main, so a deployment that set one here keeps it.
-    # Per-agent ReAct recursion-step overrides. The default
-    # ``react_agent_max_steps`` (10) suits the network/dynamic analysts (0-3
-    # tool calls), but the static analyst runs a full Ghidra MCP ReAct loop
-    # (load_program -> list functions -> decompile -> imports/strings) that
-    # needs far more than ~4 tool calls. With only 10 recursion steps it was
-    # cut off mid-analysis and LangGraph returned the "Sorry, need more steps
-    # to process this request." stop message instead of real claims (live job
-    # 3be3ba0e, 2026-06-23: ReAct "completed" in 17.3s after just 4 tool calls,
-    # hitting the step cap while its 1200s *time* budget was barely touched —
-    # the per-agent timeout override added earlier missed the parallel step
-    # cap). Override via env, e.g. ``REACT_AGENT_MAX_STEPS_OVERRIDES__static=40``.
-    # ``network`` is capped LOW: with a real CAPE PCAP the analyst can enter a
-    # read_pcap_summary/extract_* tool loop whose large per-packet output is slow
-    # to prefill+decode on a constrained local model, over-running the 330s
-    # analyst budget (live task 8, 2026-07-11). The structured flows are handed
-    # to it up front (see network_analyst.analyze_isr), so a tight cap keeps the
-    # optional PCAP peek from starving synthesis. ~6 steps ≈ 2-3 tool calls.
-    # 2026-07-13 — static RESTORED 8 -> 40 (its original designed depth). The
-    # 2026-07-11 cuts (40 -> 12 -> 8) blamed "SWA re-prefill": every step
-    # re-prefilling ~58k tokens of growing Ghidra context, so late steps cost
-    # 50-90s and chunks blew their cap. That was a MISDIAGNOSIS — the model is a
-    # hybrid Gated-DeltaNet (recurrent) MoE, and the re-prefill was actually
-    # parallel analysts clobbering the single slot's recurrent state, now fixed
-    # by parallel_analysts=False (+ the revision node serialised; see LLMConfig).
-    # With sequential analysts each step reuses the prior context (only new
-    # tokens processed), so a deep loop is cheap again. 40 (~20 tool calls) is
-    # the full Ghidra pass (load_program -> auto-analyze -> enumerate -> decompile
-    # the sink-reachability priority functions -> xrefs -> strings -> imports ->
-    # malware-specific tools). MEASURED (E2E 2026-07-13, sample 11e77149): static
-    # did 19 tool calls -> 7 claims (vs 3 calls at cap=8), zero re-prefill, 120.9s
-    # < 1500s. The small local model tends to keep tool-calling to the cap rather
-    # than self-terminating, so the forced-synthesis salvage still fires — but now
-    # it synthesises DEEP (19-call) evidence, not shallow (3-call). Depth is the
-    # win; the salvage is the conclusion mechanism, not a bug. Raising the cap
-    # further mostly adds tool calls + salvage time (diminishing returns).
-    # MUST move with the static timeout (1500) — the per-chunk wall-clock is the
-    # binding constraint. Context-safe: 40 steps * ~1500 tok (max_tool_output_
-    # chars=6000) ~= 90-95k peak, ~36k under n_ctx=131072. Override via
-    # ``REACT_AGENT_MAX_STEPS_OVERRIDES__static=40``.
-    react_agent_max_steps_overrides: dict[str, int] = Field(
-        default_factory=lambda: {
-            "static": 40,
-            "network": 6,
-        }
-    )
+    # Deprecated, and operator-only: a budget belongs to the agent that spends
+    # it, so ``agents.definitions.<key>.timeout_seconds`` and ``.max_steps``
+    # are where one is set now, and a definition's own value wins. These maps
+    # ship empty; an entry an operator writes is still read, after the
+    # definition and before the deployment-wide value above.
+    react_agent_timeout_overrides: dict[str, int] = Field(default_factory=dict)
+    react_agent_max_steps_overrides: dict[str, int] = Field(default_factory=dict)
 
     @field_validator(
         "react_agent_timeout_overrides", "react_agent_max_steps_overrides", mode="before"
@@ -3524,7 +3671,7 @@ class Settings(BaseSettings):
                 continue
             profile.stages = stages_from_analysts(
                 list(profile.analysts),
-                parallel=bool(self.llm.parallel_analysts),
+                parallel=explicit_parallel(self.llm.parallel_analysts),
                 max_rounds=self.negotiation.max_iterations,
                 consensus_threshold=self.negotiation.consensus_threshold,
                 triage=has_triage_stage(profile.stages),

@@ -38,6 +38,7 @@ from maljan.reporting.models import (
     RegistryMod,
     SandboxSignature,
 )
+from maljan.utils.marked_cut import marked_cut
 
 # yara-python is an optional dependency (C extension). When absent we still
 # build the rule body — only the compile-time validation is skipped.
@@ -50,8 +51,16 @@ except ImportError:
     _YARA_AVAILABLE = False
 
 
+# How many strings one drafted YARA rule matches on, and how many indicators of
+# each kind one Suricata draft writes rules for: the shape of a rule a reviewer
+# can read and deploy, not a cut of the evidence. A draft that leaves any
+# published indicator out says so in a comment of its own, and the IOC table
+# (and the JSON report) carries every one.
 _MAX_YARA_STRINGS = 25
 _MAX_SURICATA_RULES = 12
+LEFT_OUT_COMMENT = (
+    "{rest} more published {what} are not in this draft; the report's IOC table carries every one."
+)
 _SAFE_RULE_NAME_RE = re.compile(r"[^A-Za-z0-9_]+")
 
 
@@ -151,7 +160,18 @@ def _published_rows(report: MalwareReport) -> list[Any]:
         from maljan.reporting.builder import build_consolidated_iocs
 
         rows = build_consolidated_iocs(report)
-    return [row for row in rows if str(getattr(row, "published", "") or "") == "yes"]
+    from maljan.reporting.renderers.stix_renderer import publishes
+
+    return [row for row in rows if publishes(getattr(row, "published", ""))]
+
+
+def _why_published(row: Any) -> str:
+    """``<value>: published because <reason>``, one line a draft's comment carries."""
+    answer = str(getattr(row, "published", "") or "")
+    why = answer.split(":", 1)[1].strip() if ":" in answer else "the publish rule published it"
+    said = f"{getattr(row, 'value', '')}: published because {why}"
+    # A comment is one line: no control character reaches it.
+    return "".join(c if c >= " " else " " for c in said)
 
 
 # Names that assert an attribution the report does not actually have. A rule
@@ -269,16 +289,15 @@ def _build_yara(report: MalwareReport) -> DetectionRule | None:
 
     imphash = report.identity.hashes.imphash
     strings: list[tuple[str, str]] = []  # (slot, value)
+    reasons: dict[str, str] = {}  # slot -> why the value is published
     sources: list[str] = [f"sha256:{sha256}"]
 
-    for row in _published_rows(report):
-        if len(strings) >= _MAX_YARA_STRINGS:
-            break
-        if not _yara_string_eligible(row):
-            continue
+    eligible = [row for row in _published_rows(report) if _yara_string_eligible(row)]
+    for row in eligible[:_MAX_YARA_STRINGS]:
         slot = f"$s{len(strings)}"
         strings.append((slot, row.value))
-        sources.append(f"string:{row.kind}:{row.value[:80]}")
+        reasons[slot] = _why_published(row)
+        sources.append(f"string:{row.kind}:{row.value}")
 
     # Gated above when the seed is a placeholder, so this normally uses the real
     # family; _rule_name_component keeps the name honest anyway should the gate
@@ -293,14 +312,19 @@ def _build_yara(report: MalwareReport) -> DetectionRule | None:
         family=report.attribution.family or report.malware_category or "unknown",
         verdict=report.verdict,
         generated_at_iso=report.generated_at.isoformat(),
+        reasons=reasons,
     )
 
+    if len(eligible) > _MAX_YARA_STRINGS:
+        body += "\n// " + LEFT_OUT_COMMENT.format(
+            rest=len(eligible) - _MAX_YARA_STRINGS, what="strings"
+        )
     compile_error = _validate_yara(body)
     return DetectionRule(
         kind="yara",
         name=rule_name,
         body=body,
-        source_evidence=sources[:20],
+        source_evidence=sources,
         compile_error=compile_error,
     )
 
@@ -314,6 +338,7 @@ def _render_yara(
     family: str,
     verdict: str,
     generated_at_iso: str,
+    reasons: dict[str, str] | None = None,
 ) -> str:
     lines: list[str] = []
     imports = ['import "hash"']
@@ -335,7 +360,11 @@ def _render_yara(
     if strings:
         lines.append("    strings:")
         for slot, value in strings:
-            lines.append(f'        {slot} = "{_escape_yara(value)}" ascii wide nocase')
+            why = (reasons or {}).get(slot)
+            lines.append(
+                f'        {slot} = "{_escape_yara(value)}" ascii wide nocase'
+                + (f"  // {why}" if why else "")
+            )
     lines.append("    condition:")
 
     conditions: list[str] = [f'hash.sha256(0, filesize) == "{_escape_yara(sha256)}"']
@@ -396,10 +425,10 @@ def _build_sigma(report: MalwareReport) -> DetectionRule | None:
     A Sigma selection is a value too, and it is held to the drafts' rule
     (:func:`sigma_admits`): a registry key or an image path is selected on only
     when the IOC table publishes it or a sandbox watched it, and the sandbox's
-    own signature names only when a sandbox recorded them. An analyst's
-    persistence target the table does not publish selects nothing: it is the
-    analyst's reading, not a value this run publishes. With no such source
-    there is no Sigma draft.
+    own signature names only when a sandbox recorded them. Persistence an
+    analyst listed selects nothing: it is printed in §5.4 as assessed and is an
+    ``analyst`` row the table refuses, the analyst's reading and not a value
+    this run publishes. With no such source there is no Sigma draft.
     """
     admitted = frozenset(_registry_form(item) for item in sigma_admits(report))
     registry_targets = _collect_registry_targets(report, admitted)
@@ -473,7 +502,7 @@ def _build_sigma(report: MalwareReport) -> DetectionRule | None:
         kind="sigma",
         name=f"Maljan_AutoGen_Sigma_{safe_name}",
         body=body,
-        source_evidence=sources[:20],
+        source_evidence=sources,
         compile_error=compile_error,
     )
 
@@ -485,18 +514,25 @@ def sigma_admits(report: MalwareReport) -> frozenset[str]:
     publishes (``yes``) is the run's published indicator, and a row a sandbox
     recorded is the run's own observation of the sample, which is what a
     Sigma rule over process and registry events describes. Nothing else — a
-    string sweep's row, an analyst's persistence target the table did not
-    publish — reaches a selection.
+    string sweep's row, an ``analyst`` row the table refuses — reaches a
+    selection.
     """
+    from maljan.reporting.renderers.stix_renderer import publishes
+
     rows = list(getattr(report, "consolidated_iocs", None) or [])
     if not rows:
         from maljan.reporting.builder import build_consolidated_iocs
 
         rows = build_consolidated_iocs(report)
+    # A network row the sandbox recorded is admitted on the table's own answer:
+    # a flow the report does not attribute to the sample's process tree is the
+    # guest's traffic, not the sample's, until the judge keeps it — and one live
+    # run drafted rules over a public resolver the guest asked.
     return frozenset(
         row.value.strip().lower()
         for row in rows
-        if str(row.published or "") == "yes" or str(row.source or "") == "sandbox"
+        if publishes(row.published)
+        or (str(row.source or "") == "sandbox" and row.kind not in _DRAFT_NETWORK_KINDS)
     )
 
 
@@ -623,14 +659,14 @@ def _collect_signature_names(report: MalwareReport) -> list[str]:
         if not text or text.lower() in seen:
             continue
         seen.add(text.lower())
-        out.append(text[:80])
+        out.append(marked_cut(text, 80))
     return out
 
 
 def _sigma_tags(report: MalwareReport) -> list[str]:
     tags: list[str] = []
     seen: set[str] = set()
-    for mapping in report.ttp_mappings[:10]:
+    for mapping in report.ttp_mappings:
         tid = mapping.technique_id
         if not tid:
             continue
@@ -638,7 +674,7 @@ def _sigma_tags(report: MalwareReport) -> list[str]:
         if tag not in seen:
             seen.add(tag)
             tags.append(tag)
-    for cell in report.capability_matrix[:10]:
+    for cell in report.capability_matrix:
         name = cell.tactic_name.lower().replace(" ", "_").replace("&", "and")
         tag = f"attack.{name}" if name else ""
         if tag and tag not in seen:
@@ -673,6 +709,7 @@ _SURICATA_MAX_BODY_BYTES = 16_000
 def _build_suricata(report: MalwareReport) -> DetectionRule | None:
     """Alert rules over the network indicators this run publishes, and no others."""
     published = [row for row in _published_rows(report) if row.kind in _DRAFT_NETWORK_KINDS]
+    why = {(row.kind, row.value): _why_published(row) for row in published}
     domains = [NetworkDomain(fqdn=row.value) for row in published if row.kind == "domain"]
     ips = [NetworkIP(address=row.value) for row in published if row.kind == "ip"]
     urls = [NetworkURL(url=row.value) for row in published if row.kind == "url"]
@@ -701,6 +738,7 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
     for domain in domains[:_MAX_SURICATA_RULES]:
         rule = _suricata_dns_rule(domain, sid, sha256, family)
         if rule is not None:
+            lines.append(f"# {why.get(('domain', domain.fqdn), domain.fqdn)}")
             lines.append(rule)
             sources.append(f"domain:{domain.fqdn}")
             sid += 1
@@ -708,6 +746,9 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
     if ips:
         rule = _suricata_ip_rule(ips[:_MAX_SURICATA_RULES], sid, sha256, family)
         if rule is not None:
+            lines.extend(
+                f"# {why.get(('ip', ip.address), ip.address)}" for ip in ips[:_MAX_SURICATA_RULES]
+            )
             lines.append(rule)
             sources.append("ips:" + ",".join(ip.address for ip in ips[:_MAX_SURICATA_RULES]))
             sid += 1
@@ -715,20 +756,30 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
     for url in urls[:_MAX_SURICATA_RULES]:
         rule = _suricata_http_rule(url, sid, sha256, family)
         if rule is not None:
+            lines.append(f"# {why.get(('url', url.url), url.url)}")
             lines.append(rule)
-            sources.append(f"url:{url.url[:80]}")
+            sources.append(f"url:{url.url}")
             sid += 1
+
+    for what, rows in (("domains", domains), ("addresses", ips), ("URLs", urls)):
+        if len(rows) > _MAX_SURICATA_RULES:
+            lines.append(
+                "# " + LEFT_OUT_COMMENT.format(rest=len(rows) - _MAX_SURICATA_RULES, what=what)
+            )
 
     body = "\n".join(lines)
     if len(body.encode("utf-8")) > _SURICATA_MAX_BODY_BYTES:
-        body = body[:_SURICATA_MAX_BODY_BYTES] + "\n# (truncated)"
+        body = (
+            body[:_SURICATA_MAX_BODY_BYTES]
+            + "\n# (cut at the draft's size; the report's IOC table carries every indicator)"
+        )
 
     compile_error = _validate_suricata(body)
     return DetectionRule(
         kind="suricata",
         name=rule_name,
         body=body,
-        source_evidence=sources[:20],
+        source_evidence=sources,
         compile_error=compile_error,
     )
 
@@ -838,7 +889,7 @@ def _validate_suricata(body: str) -> str | None:
             and _SURICATA_MSG_RE.search(line)
             and _SURICATA_END_RE.search(line)
         ):
-            bad.append(line[:80])
+            bad.append(marked_cut(line, 80))
     if bad:
         return f"sanity check failed for {len(bad)} line(s); first: {bad[0]}"
     return None

@@ -24,6 +24,7 @@ import ast
 import pathlib
 from typing import Any
 
+from maljan.pipeline.events import safe_finding_value
 from maljan.pipeline.validation import (
     Violation,
     schema_violations,
@@ -34,6 +35,7 @@ from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from maljan.schemas.stix_models import Bundle
 from tests.credential_shapes import prefixed_key
 from tests.unit.pipeline._source_names import called_name, names_reaching
+from tests.unit.pipeline.test_live_event_schema import _every_key_shape
 from tests.unit.pipeline.test_validation import _Attck
 
 SRC = pathlib.Path(__file__).resolve().parents[3] / "src" / "maljan"
@@ -119,6 +121,45 @@ class TestTheRowsThatQuoteAJudge:
         row = next(v for v in violations if v.code == "attribution.ungrounded_family")
         assert secret not in row.message
         assert len(row.message) < MESSAGE_LIMIT
+
+
+class TestARowKeepsWordsAndMasksKeys:
+    """A row's words survive the scrub; no key shape does.
+
+    The length rule used to take a run of words with separators between them
+    for a key, and a claim reading ``anti-debugging/environment detection``
+    was stored as ``*** detection``. Lifting that must not lift a key: every
+    shape the scrub reads is run through the row helper here.
+    """
+
+    def test_every_key_shape_is_masked_in_a_row(self) -> None:
+        for value in _every_key_shape():
+            row = safe_finding_value(f"the analyst quoted {value} as the key")
+            assert value not in row, value
+            assert row == "the analyst quoted *** as the key", value
+
+    def test_a_row_is_not_cut_inside_a_digest(self) -> None:
+        """A row that reaches the event feed is scrubbed again, and half a digest is a key there."""
+        import hashlib
+
+        from maljan.pipeline.events import FINDING_VALUE_LIMIT, scrub
+
+        digest = hashlib.sha256(b"a sample").hexdigest()
+        text = "word " * ((FINDING_VALUE_LIMIT - 20) // 5) + digest + " and the rest of it"
+        assert text.index(digest) < FINDING_VALUE_LIMIT < text.index(digest) + len(digest)
+
+        row = safe_finding_value(text)
+
+        assert digest in row
+        assert scrub(row) == row
+
+    def test_the_word_runs_of_a_report_are_kept_in_a_row(self) -> None:
+        for words in (
+            "anti-debugging/environment",
+            "x_maljan_contributing_agents",
+            "all_tools_reverser_ghidra",
+        ):
+            assert safe_finding_value(f"for {words} detection") == f"for {words} detection"
 
 
 class TestTheRowsThatQuoteAnAnalyst:
@@ -207,6 +248,11 @@ CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
     ("pipeline/validation.py", "platform_mismatch_message"): frozenset(
         {"platforms", "expected_platforms", "domain", "expected_domain"}
     ),
+    # The table's own nouns and row numbers, and the section's own sentence
+    # numbers and states, around values each wrapped in the helper where the
+    # sentence is built.
+    ("pipeline/validation.py", "stated_value_violations"): frozenset({"said"}),
+    ("pipeline/validation.py", "unpublished_value_violations"): frozenset({"said"}),
     # A join of this module's own vocabulary of unsupported claims.
     ("pipeline/validation.py", "unsupported_benign_violations"): frozenset({"listed"}),
     ("pipeline/validation.py", "unsupported_malware_violations"): frozenset({"listed"}),
@@ -249,6 +295,15 @@ CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
     # itself. The tool names beside it are wrapped, because a tool name comes
     # from a server rather than from this repository.
     ("pipeline/validation.py", "partial_evidence_note"): frozenset({"state"}),
+    # Which chunk of a chunked analysis was cut, as the pipeline numbers its
+    # chunks ("chunk 1 of 2"), and the words this function picks around it.
+    ("pipeline/validation.py", "analyst_cut_violation"): frozenset({"chunk", "answer"}),
+    # The same chunk wording, and the counts the platform read off the answer:
+    # numbers, never the answer's text; ``streamed`` is this module's own
+    # sentence saying the answer was ended while it streamed, or nothing.
+    ("pipeline/validation.py", "analyst_repeated_violation"): frozenset(
+        {"answer", "chars", "begun", "distinct", "repeated", "margin", "streamed"}
+    ),
 }
 
 # A builtin that answers about its argument in this interpreter's own words: a
@@ -270,7 +325,20 @@ BUILTIN_NAMES: frozenset[str] = BUILTIN_ANSWERS | frozenset(
 # ``_object_problem`` answers in the same way: its sentence is this codebase's,
 # and every value of the judge's it quotes goes through the helper inside it.
 CODE_OWNED_CALLS: frozenset[str] = (
-    frozenset({"_retired_note", "_object_path", "_object_problem"}) | BUILTIN_ANSWERS
+    # ``_term_ids_said`` joins the grounding check's own technique ids;
+    # ``count_claims_begun`` answers a number of claim headings; ``_catalogue_rejection``
+    # answers in the retired set's own words, as ``_retired_note`` does.
+    frozenset(
+        {
+            "_retired_note",
+            "_catalogue_rejection",
+            "_object_path",
+            "_object_problem",
+            "_term_ids_said",
+            "count_claims_begun",
+        }
+    )
+    | BUILTIN_ANSWERS
 )
 
 # The functions that build a message for somebody else to put in a Violation.

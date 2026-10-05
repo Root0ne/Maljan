@@ -1,0 +1,87 @@
+{
+ "version": 1,
+ "source": "Published name-hash algorithms a Windows program uses to find a function by a 32-bit value instead of by its name. Each entry names the primitive (implemented in maljan.tools.api_hashes), the encoding the name is hashed in, the case it is folded to first, whether its terminating NUL is hashed too, and, for the forms that add a hash of the module's name, how that name is hashed.",
+ "algorithms": [
+  {
+   "id": "crc32_ascii",
+   "primitive": "crc32",
+   "encoding": "ascii",
+   "case": "as-is",
+   "terminator": false,
+   "description": "CRC-32 (the zlib/IEEE polynomial, reflected 0xEDB88320) of the ASCII function name"
+  },
+  {
+   "id": "crc32_ascii_lower",
+   "primitive": "crc32",
+   "encoding": "ascii",
+   "case": "lower",
+   "terminator": false,
+   "description": "CRC-32 of the lower-cased ASCII function name"
+  },
+  {
+   "id": "crc32_utf16le",
+   "primitive": "crc32",
+   "encoding": "utf16le",
+   "case": "as-is",
+   "terminator": false,
+   "description": "CRC-32 of the function name as UTF-16LE"
+  },
+  {
+   "id": "crc32_utf16le_lower",
+   "primitive": "crc32",
+   "encoding": "utf16le",
+   "case": "lower",
+   "terminator": false,
+   "description": "CRC-32 of the lower-cased function name as UTF-16LE"
+  },
+  {
+   "id": "ror13",
+   "primitive": "ror13",
+   "encoding": "ascii",
+   "case": "as-is",
+   "terminator": false,
+   "description": "rotate the 32-bit sum right by 13 bits, then add the next byte of the ASCII function name"
+  },
+  {
+   "id": "ror13_module_add",
+   "primitive": "ror13",
+   "encoding": "ascii",
+   "case": "as-is",
+   "terminator": true,
+   "module": {"encoding": "utf16le", "case": "upper", "terminator": true},
+   "description": "ror13 of the ASCII function name with its NUL, added to ror13 of the upper-cased UTF-16LE module name with its NUL, the form common position-independent code uses to look a function up in every loaded module at once"
+  },
+  {
+   "id": "djb2",
+   "primitive": "djb2",
+   "encoding": "ascii",
+   "case": "as-is",
+   "terminator": false,
+   "description": "djb2 (start at 5381, multiply by 33 and add each byte) of the ASCII function name, 32 bits"
+  },
+  {
+   "id": "djb2_lower",
+   "primitive": "djb2",
+   "encoding": "ascii",
+   "case": "lower",
+   "terminator": false,
+   "description": "djb2 of the lower-cased ASCII function name"
+  },
+  {
+   "id": "fnv1a32",
+   "primitive": "fnv1a32",
+   "encoding": "ascii",
+   "case": "as-is",
+   "terminator": false,
+   "description": "FNV-1a 32-bit (offset basis 0x811C9DC5, prime 0x01000193) of the ASCII function name"
+  },
+  {
+   "id": "fnv1a32_lower",
+   "primitive": "fnv1a32",
+   "encoding": "ascii",
+   "case": "lower",
+   "terminator": false,
+   "description": "FNV-1a 32-bit of the lower-cased ASCII function name"
+  }
+ ]
+}

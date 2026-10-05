@@ -40,6 +40,8 @@ from maljan.reporting.dedupe import (
     merge_cell,
 )
 from maljan.reporting.models import EvidenceSection
+from maljan.schemas.evidence import answer_not_shown
+from maljan.utils.marked_cut import marked_cut
 
 if TYPE_CHECKING:
     from maljan.schemas.evidence import LedgerEntry
@@ -47,12 +49,32 @@ if TYPE_CHECKING:
 
 # A text section never becomes the report. Anything longer than this is a tool
 # output that wants reading in the evidence endpoint, not pasting into a
-# document.
+# document; a text cut here ends in the cut mark and says where it is whole.
 MAX_TEXT_CHARS = 4000
 
 # How many rows one generated table may carry. A strings dump or a busy process
-# list would otherwise turn a report into a log file.
+# list would otherwise turn a report into a log file. A table that reaches it
+# says how many rows it left out and where they are (``ROWS_LEFT_OUT``).
 MAX_ROWS = 200
+
+# How much of one cell a table prints; a longer cell ends in the cut mark.
+CELL_CHARS = 400
+
+ROWS_LEFT_OUT = (
+    "{rest:,} more rows not shown here; the evidence endpoint carries every one under {ids}."
+)
+TEXT_CUT = (
+    "Cut here at {shown:,} of {total:,} characters; the evidence endpoint carries it "
+    "whole under {ids}."
+)
+
+
+def _cut_text(text: str, ids: str) -> str:
+    """``text`` whole, or cut to ``MAX_TEXT_CHARS`` with the sentence saying where it is whole."""
+    if len(text) <= MAX_TEXT_CHARS:
+        return text
+    shown = marked_cut(text, MAX_TEXT_CHARS)
+    return f"{shown}\n\n{TEXT_CUT.format(shown=len(shown), total=len(text), ids=ids)}"
 
 
 class _Sections:
@@ -72,6 +94,15 @@ class _Sections:
         # row whose identity is not the whole row: an indicator and a finding.
         self._merged: dict[str, dict[tuple[str, str], int]] = {}
         self.merges = merges if merges is not None else MergeTally()
+        # Rows a table could not carry past ``MAX_ROWS``, per section, said
+        # under it when the sections are handed over.
+        self._left_out: dict[str, int] = {}
+
+    def _full(self, section: EvidenceSection, size: int) -> bool:
+        if size < MAX_ROWS:
+            return False
+        self._left_out[section.key] = self._left_out.get(section.key, 0) + 1
+        return True
 
     def get(
         self,
@@ -119,11 +150,11 @@ class _Sections:
         note_if_shortened(section, entry.structured)
 
     def add_row(self, section: EvidenceSection, row: list[str]) -> None:
-        if len(section.rows) >= MAX_ROWS:
-            return
         fingerprint = tuple(row)
         seen = self._seen.setdefault(section.key, set())
         if fingerprint in seen:
+            return
+        if self._full(section, len(section.rows)):
             return
         seen.add(fingerprint)
         section.rows.append(row)
@@ -148,7 +179,7 @@ class _Sections:
         index = self._merged.setdefault(section.key, {})
         at = index.get(fingerprint)
         if at is None:
-            if len(section.rows) >= MAX_ROWS:
+            if self._full(section, len(section.rows)):
                 return
             index[fingerprint] = len(section.rows)
             section.rows.append(row)
@@ -160,10 +191,17 @@ class _Sections:
         counted()
 
     def add_item(self, section: EvidenceSection, item: str) -> None:
-        if item and item not in section.items and len(section.items) < MAX_ROWS:
+        if item and item not in section.items and not self._full(section, len(section.items)):
             section.items.append(item)
 
     def result(self) -> list[EvidenceSection]:
+        for key, rest in self._left_out.items():
+            section = self._by_key[key]
+            ids = ", ".join(section.evidence_ids) or "this run's ledger"
+            said = ROWS_LEFT_OUT.format(rest=rest, ids=ids)
+            if said not in (section.text or ""):
+                section.text = f"{section.text}\n\n{said}".strip() if section.text else said
+        self._left_out = {}
         return [
             self._by_key[key]
             for key in self._order
@@ -194,6 +232,15 @@ def section_is_grounded(section: EvidenceSection) -> bool:
     return source in _GROUNDED_SOURCES or source.startswith("artifact:")
 
 
+def _whole_text(value: Any) -> str:
+    """``value`` as text with no cell's cut, for a text section cut by ``_cut_text``."""
+    if isinstance(value, list | tuple):
+        return ", ".join(_whole_text(v) for v in value)
+    if isinstance(value, dict):
+        return ", ".join(f"{k}={_whole_text(v)}" for k, v in value.items())
+    return _text(value) if isinstance(value, bool) or value is None else str(value)
+
+
 def _text(value: Any) -> str:
     """One cell, as a string a table can hold."""
     if value is None:
@@ -201,10 +248,10 @@ def _text(value: Any) -> str:
     if isinstance(value, bool):
         return "yes" if value else "no"
     if isinstance(value, list | tuple):
-        return ", ".join(_text(v) for v in value)[:400]
+        return marked_cut(", ".join(_text(v) for v in value), CELL_CHARS)
     if isinstance(value, dict):
-        return ", ".join(f"{k}={_text(v)}" for k, v in value.items())[:400]
-    return str(value)[:400]
+        return marked_cut(", ".join(f"{k}={_text(v)}" for k, v in value.items()), CELL_CHARS)
+    return marked_cut(str(value), CELL_CHARS)
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +394,7 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
             "table",
             columns=["Name", "Virtual address", "Virtual size", "Raw size", "Entropy"],
         )
-        for row in sections[:MAX_ROWS]:
+        for row in sections:
             if not isinstance(row, dict):
                 continue
             acc.add_row(
@@ -370,7 +417,7 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
             "table",
             columns=["Library", "Function"],
         )
-        for row in imports[:MAX_ROWS]:
+        for row in imports:
             if not isinstance(row, dict):
                 continue
             acc.add_row(table, [_text(row.get("dll")), _text(row.get("function"))])
@@ -387,21 +434,21 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
             "table",
             columns=["Name", "Ordinal", "RVA"],
         )
-        for row in export_rows[:MAX_ROWS]:
+        for row in export_rows:
             acc.add_row(
                 table, [_text(row.get("name")), _text(row.get("ordinal")), _text(row.get("rva"))]
             )
         acc.credit(table, entry)
     elif isinstance(exports, list) and exports:
         listing = acc.get(f"{prefix}_exports", f"{prefix.upper()} exports", "list")
-        for name in exports[:MAX_ROWS]:
+        for name in exports:
             acc.add_item(listing, _text(name))
         acc.credit(listing, entry)
 
     permissions = data.get("permissions")
     if isinstance(permissions, list) and permissions:
         listing = acc.get("apk_permissions", "Declared permissions", "list")
-        for name in permissions[:MAX_ROWS]:
+        for name in permissions:
             acc.add_item(listing, _text(name))
         acc.credit(listing, entry)
 
@@ -409,7 +456,9 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
     if any(isinstance(data.get(k), list) and data.get(k) for k in component_keys):
         table = acc.get("apk_components", "Declared components", "table", columns=["Kind", "Name"])
         for kind in component_keys:
-            for name in (data.get(kind) or [])[:MAX_ROWS]:
+            # One kind androguard could not read is a ``no: <reason>`` string.
+            names = data.get(kind)
+            for name in names if isinstance(names, list) else []:
                 acc.add_row(table, [kind[:-1], _text(name)])
         acc.credit(table, entry)
 
@@ -418,7 +467,7 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
         table = acc.get(
             "packer_signatures", "Packer section matches", "table", columns=["Packer", "Sections"]
         )
-        for row in packers[:MAX_ROWS]:
+        for row in packers:
             if isinstance(row, dict):
                 acc.add_row(table, [_text(row.get("name")), _text(row.get("sections"))])
             else:
@@ -436,7 +485,7 @@ def _iocs(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
         "table",
         columns=["Kind", "Value", "Notes", "Evidence"],
     )
-    for row in rows[:MAX_ROWS]:
+    for row in rows:
         if not isinstance(row, dict):
             continue
         # Fingerprinted rather than compared whole: the same endpoint read by
@@ -458,7 +507,7 @@ def _strings(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     if not isinstance(rows, list) or not rows:
         return
     table = acc.get("strings", "Printable strings", "table", columns=["Offset", "Encoding", "Text"])
-    for row in rows[:MAX_ROWS]:
+    for row in rows:
         if not isinstance(row, dict):
             continue
         acc.add_row(
@@ -472,7 +521,7 @@ def _yara(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     if not isinstance(matches, list) or not matches:
         return
     table = acc.get("yara_matches", "YARA rule matches", "table", columns=["Rule", "Tags", "Where"])
-    for row in matches[:MAX_ROWS]:
+    for row in matches:
         if not isinstance(row, dict):
             continue
         acc.add_row(
@@ -496,7 +545,7 @@ def _sigma(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
         "table",
         columns=["Rule", "Level", "Technique", "Matched fields"],
     )
-    for row in matches[:MAX_ROWS]:
+    for row in matches:
         if not isinstance(row, dict):
             continue
         raw_meta = row.get("meta")
@@ -523,7 +572,7 @@ def _capa(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
         "table",
         columns=["Namespace", "Rule", "ATT&CK", "MBC"],
     )
-    for row in rows[:MAX_ROWS]:
+    for row in rows:
         if not isinstance(row, dict):
             continue
         acc.add_row(
@@ -548,7 +597,7 @@ def _sandbox_processes(acc: _Sections, entry: LedgerEntry, data: dict[str, Any])
         "table",
         columns=["PID", "Parent", "Name", "Command line"],
     )
-    for row in rows[:MAX_ROWS]:
+    for row in rows:
         if not isinstance(row, dict):
             continue
         acc.add_row(
@@ -575,7 +624,7 @@ def _sandbox_network(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -
         rows = data.get(kind)
         if not isinstance(rows, list):
             continue
-        for row in rows[:MAX_ROWS]:
+        for row in rows:
             endpoint, detail = _endpoint_of(kind, row)
             if not endpoint:
                 continue
@@ -609,7 +658,7 @@ def _sandbox_signatures(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]
         "table",
         columns=["Name", "Severity", "Description"],
     )
-    for row in rows[:MAX_ROWS]:
+    for row in rows:
         if not isinstance(row, dict):
             continue
         acc.add_row(
@@ -629,7 +678,7 @@ def _sandbox_dropped(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -
         "table",
         columns=["Name", "Path", "Size", "SHA-256"],
     )
-    for row in rows[:MAX_ROWS]:
+    for row in rows:
         if not isinstance(row, dict):
             continue
         acc.add_row(
@@ -654,7 +703,7 @@ def _sandbox_registry(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) 
         "table",
         columns=["Key", "Operation", "Value"],
     )
-    for row in rows[:MAX_ROWS]:
+    for row in rows:
         if not isinstance(row, dict):
             continue
         acc.add_row(
@@ -674,7 +723,7 @@ def _sandbox_apis(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> N
         "table",
         columns=["API", "Calls", "Processes", "First arguments"],
     )
-    for row in rows[:MAX_ROWS]:
+    for row in rows:
         if not isinstance(row, dict):
             continue
         acc.add_row(
@@ -694,7 +743,7 @@ def _sandbox_mutexes(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -
     if not isinstance(names, list) or not names:
         return
     listing = acc.get("sandbox_mutexes", "Mutexes", "list")
-    for name in names[:MAX_ROWS]:
+    for name in names:
         acc.add_item(listing, _text(name))
     acc.credit(listing, entry)
 
@@ -728,7 +777,7 @@ def _sandbox_section(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -
         return
     if rows or value:
         section = acc.get(f"sandbox_{name}", f"Sandbox: {name}", "text")
-        section.text = _text(rows or value)[:MAX_TEXT_CHARS]
+        section.text = _cut_text(_whole_text(rows or value), entry.id)
         acc.credit(section, entry)
 
 
@@ -743,7 +792,7 @@ def _sandbox_status(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) ->
     if not statement:
         return
     section = acc.get("sandbox_status", "Sandbox", "text")
-    section.text = statement[:MAX_TEXT_CHARS]
+    section.text = _cut_text(statement, entry.id)
     acc.credit(section, entry)
 
 
@@ -752,7 +801,7 @@ def _pcap(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     if not summary:
         return
     section = acc.get("pcap_summary", "Capture summary", "text")
-    section.text = str(summary)[:MAX_TEXT_CHARS]
+    section.text = _cut_text(str(summary), entry.id)
     acc.credit(section, entry)
 
 
@@ -773,10 +822,17 @@ _FUNCTION_TOOLS = frozenset(
 _FUNCTION_LIST_TOOLS = frozenset({"list_functions", "get_functions", "afl", "list_methods"})
 
 
+# What a function's line says when the conversation had no room for the answer.
+FUNCTION_NOT_SHOWN = "answer not shown: no room left in the conversation"
+
+
 def _functions_examined(acc: _Sections, entry: LedgerEntry, _data: Any) -> None:
     section = acc.get("functions_examined", "Functions examined", "list")
     label = entry.symbol or entry.tool
-    acc.add_item(section, f"{label} ({entry.tool})")
+    if answer_not_shown(entry):
+        acc.add_item(section, f"{label} ({entry.tool}; {FUNCTION_NOT_SHOWN})")
+    else:
+        acc.add_item(section, f"{label} ({entry.tool})")
     acc.credit(section, entry)
 
 
@@ -867,7 +923,7 @@ def _generic_table(
     for column in columns:
         if column not in section.columns:
             section.columns.append(column)
-    for row in dicts[:MAX_ROWS]:
+    for row in dicts:
         acc.add_row(section, [_text(row.get(column)) for column in section.columns])
     acc.credit(section, entry)
 
@@ -908,7 +964,7 @@ def _generic_text(acc: _Sections, entry: LedgerEntry) -> None:
         return
     section = acc.get(f"tool_{entry.tool}", entry.tool.replace("_", " ").capitalize(), "text")
     if not section.text:
-        section.text = entry.output[:MAX_TEXT_CHARS]
+        section.text = _cut_text(entry.output, entry.id)
     acc.credit(section, entry)
 
 
@@ -924,7 +980,7 @@ def _fallback(acc: _Sections, entry: LedgerEntry) -> None:
             section = acc.get(
                 f"tool_{entry.tool}", entry.tool.replace("_", " ").capitalize(), "list"
             )
-            for item in data[:MAX_ROWS]:
+            for item in data:
                 acc.add_item(section, _text(item))
             acc.credit(section, entry)
         return
@@ -937,35 +993,128 @@ def _fallback(acc: _Sections, entry: LedgerEntry) -> None:
 
 
 def _artifact_sections(acc: _Sections, isrs: dict[str, Any]) -> None:
-    """The tables the analysts established, grouped by the kind they named."""
+    """The tables the analysts established, grouped by the kind they named.
+
+    A kind more than one artifact listed rows under is one table whose first
+    columns say which analyst listed each row and the evidence that row's
+    artifact cites (``LISTED_BY_COLUMN``, ``EVIDENCE_COLUMN``), so a merged
+    table never loses whose row is whose or which ids stand behind it.
+    """
+    by_kind: dict[str, list[tuple[str, Any]]] = {}
     for agent, isr in (isrs or {}).items():
         for artifact in list(getattr(isr, "artifacts", None) or []):
             kind = (getattr(artifact, "kind", "") or "artifact").strip() or "artifact"
-            columns = list(getattr(artifact, "columns", None) or [])
+            source = str(getattr(artifact, "source", "") or agent)
+            by_kind.setdefault(kind, []).append((source, artifact))
+    for kind, listed in by_kind.items():
+        merged = len(listed) > 1
+        for source, artifact in listed:
             rows = list(getattr(artifact, "rows", None) or [])
-            label = getattr(artifact, "label", "") or kind
-            source = getattr(artifact, "source", "") or agent
-            if rows:
-                section = acc.get(
-                    f"artifact_{kind}",
-                    kind.replace("_", " ").capitalize(),
-                    "table",
-                    columns=columns or ["Value"],
-                )
-                section.source = f"artifact:{source}"
-                for row in rows[:MAX_ROWS]:
-                    acc.add_row(section, [_text(cell) for cell in row])
-            else:
-                section = acc.get(
-                    f"artifact_{kind}",
-                    kind.replace("_", " ").capitalize(),
-                    "table",
-                    columns=["Label", "Value"],
-                )
-                section.source = f"artifact:{source}"
-                acc.add_row(section, [_text(label), _text(getattr(artifact, "value", ""))])
+            columns = list(getattr(artifact, "columns", None) or []) or ["Value"]
+            if not rows:
+                label = getattr(artifact, "label", "") or kind
+                rows = [[label, getattr(artifact, "value", "")]]
+                columns = ["Label", "Value"]
+            section = acc.get(
+                f"artifact_{kind}",
+                kind.replace("_", " ").capitalize(),
+                "table",
+                columns=[LISTED_BY_COLUMN, EVIDENCE_COLUMN, *columns] if merged else columns,
+            )
+            _listed_by(section, source)
+            cited = ", ".join(str(i) for i in getattr(artifact, "evidence_ids", None) or [])
+            for row in rows:
+                cells = [_text(cell) for cell in row]
+                acc.add_row(section, [_text(source), cited, *cells] if merged else cells)
             for entry_id in getattr(artifact, "evidence_ids", None) or []:
                 acc.cite(section, str(entry_id))
+
+
+# The first two columns of an artifact table more than one artifact listed rows in.
+LISTED_BY_COLUMN = "Listed by"
+EVIDENCE_COLUMN = "Evidence"
+
+# The sources of an evidence section an analyst wrote: its tables, its findings.
+ANALYST_SECTION_SOURCES = ("artifact:", "finding", "agent")
+
+
+def listed_rows(section: Any) -> list[tuple[str, str, list[str]]]:
+    """Each row of an artifact section, with the analyst who listed it and the ids it cites.
+
+    Read from the ``Listed by`` and ``Evidence`` columns of a merged table, or
+    from the section's one analyst and its ids otherwise. A merged table a
+    report stored with only a ``Listed by`` column reads the section's ids.
+    """
+    analysts = listed_by(section)
+    columns = [str(c) for c in getattr(section, "columns", None) or []]
+    rows = [[str(cell) for cell in row] for row in getattr(section, "rows", None) or []]
+    cited = ", ".join(str(i) for i in getattr(section, "evidence_ids", None) or [])
+    if columns[:2] == [LISTED_BY_COLUMN, EVIDENCE_COLUMN]:
+        return [(row[0], row[1], row[2:]) for row in rows if len(row) > 1]
+    if columns[:1] == [LISTED_BY_COLUMN]:
+        return [(row[0], cited, row[1:]) for row in rows if row]
+    one = analysts[0] if analysts else ""
+    return [(one, cited, row) for row in rows]
+
+
+def artifact_sections(sections: Any) -> list[tuple[str, Any]]:
+    """Each Appendix A section an analyst's artifact filled, with the kind it names."""
+    return [
+        (str(getattr(section, "key", "")).removeprefix("artifact_"), section)
+        for section in sections or []
+        if listed_by(section) and str(getattr(section, "key", "")).startswith("artifact_")
+    ]
+
+
+def analyst_persistence(sections: Any) -> list[dict[str, str]]:
+    """The persistence the analysts listed, row by row, read from their Appendix A tables.
+
+    ``kind``, ``target`` and ``payload`` by position, as an analyst's
+    persistence table is shaped, with the analyst that listed the row and the
+    ids that row's artifact cites. Never read from ``MalwareReport.persistence``, which
+    is the tools' and which the IOC table, the detection drafts, the
+    corroboration corpus and the counts read; a stored report carries the same
+    tables, so it reads the same rows.
+    """
+    out: list[dict[str, str]] = []
+    for kind, section in artifact_sections(sections):
+        if kind.strip().lower() != "persistence":
+            continue
+        for analyst, cited, row in listed_rows(section):
+            cells = [cell.strip() for cell in row]
+            if not any(cells):
+                continue
+            out.append(
+                {
+                    "kind": cells[0] if len(cells) > 1 else "",
+                    "target": cells[1] if len(cells) > 1 else cells[0],
+                    "payload": cells[2] if len(cells) > 2 else "",
+                    "listed_by": analyst,
+                    "evidence": cited,
+                }
+            )
+    return out
+
+
+# What an artifact section's ``source`` starts with; the analysts who listed
+# its rows follow, comma-separated.
+ARTIFACT_SOURCE = "artifact:"
+
+
+def _listed_by(section: Any, analyst: str) -> None:
+    """Name ``analyst`` among the analysts whose rows an artifact section holds."""
+    named = listed_by(section)
+    if analyst and analyst not in named:
+        named.append(analyst)
+    section.source = ARTIFACT_SOURCE + ", ".join(named)
+
+
+def listed_by(section: Any) -> list[str]:
+    """The analysts whose rows an artifact section holds, or nothing for any other section."""
+    source = str(getattr(section, "source", "") or "")
+    if not source.startswith(ARTIFACT_SOURCE):
+        return []
+    return [name for name in source.removeprefix(ARTIFACT_SOURCE).split(", ") if name]
 
 
 # What the Techniques column writes beside an id this run did not publish. The
@@ -1089,6 +1238,28 @@ def build_sections(
             continue
         _fallback(acc, entry)
 
+    _function_map_coverage(acc, ledger or [])
     _artifact_sections(acc, isrs or {})
     _findings_section(acc, isrs or {}, published_techniques)
     return acc.result()
+
+
+def _function_map_coverage(acc: _Sections, ledger: list[LedgerEntry]) -> None:
+    """One line under "Functions examined": functions visited against functions reaching artefacts.
+
+    Read from the whole ledger the way the analysts' function map reads it
+    (``agents.function_map``); absent when no function was visited.
+    """
+    from maljan.agents.function_map import build_function_map
+
+    section = acc._by_key.get("functions_examined")
+    if section is None:
+        return
+    try:
+        found = build_function_map(ledger, None, [])
+    except Exception:  # noqa: BLE001 — a line of the report never costs the section
+        return
+    if not found.visited:
+        return
+    line = f"Function map: {found.coverage()}."
+    section.text = f"{section.text}\n\n{line}".strip() if section.text else line

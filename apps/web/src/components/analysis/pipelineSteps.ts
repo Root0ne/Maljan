@@ -98,6 +98,7 @@ export const CAP_LABEL: Record<string, string> = {
   steps: "ended at its step cap",
   time: "ended at its time cap",
   repeats: "ended on repeated calls",
+  spend: "ended at the spend ceiling",
   budget_seconds: "ended at the pack's budget",
 };
 

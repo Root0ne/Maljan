@@ -264,6 +264,100 @@ class TestNoSurfacePrintsAnAgreement:
         assert summary["termination_reason"] == "not_applicable"
 
 
+class _Scripted:
+    """A mediator model that answers in turn from a script."""
+
+    def __init__(self, *answers: str) -> None:
+        self.answers = list(answers)
+        self.calls = 0
+
+    async def ainvoke(self, _messages: Any, **_kw: Any) -> AIMessage:
+        self.calls += 1
+        return AIMessage(content=self.answers.pop(0) if self.answers else "")
+
+
+# The run's shape: bullets drafted, some argued away, a final block with two
+# that still stand, and full agreement written beneath it.
+RUN_SHAPE = (
+    "- static: a library written beside the file — dynamic saw none\n"
+    "- network: a host contacted — ev_0012 holds no such flow\n"
+    "- triage: a packer — static names none\n"
+    "The third is withdrawn on a closer reading.\n\n"
+    "CONTRADICTIONS:\n"
+    "- static: a library written beside the file — dynamic: no such file\n"
+    "- network: a host contacted — ev_0012 holds no such flow\n"
+    "agreement_confidence: 1.0"
+)
+
+CLAIMING_STATE: dict[str, Any] = {
+    "iteration_count": 0,
+    "reports": {"static": "found things", "dynamic": "saw things"},
+    "isr_reports": {"static": _isr("static", 2), "dynamic": _isr("dynamic", 1)},
+}
+
+
+def _round_with(model: _Scripted) -> dict[str, Any]:
+    container = _container((AgentArgument(agent_name="Mediator", finding="x"), True))
+    judge = JudgeAgent(llm=model)  # type: ignore[arg-type]
+    container.get_judge_agent.return_value = judge
+    with (
+        patch.object(judge, "_supports_structured_output", return_value=False),
+        patch("maljan.pipeline.nodes.detect_sycophancy", return_value=False),
+    ):
+        return asyncio.run(make_negotiation_node(container)(CLAIMING_STATE))
+
+
+class TestListedContradictionsSendTheAnalystsToRevise:
+    def test_the_run_s_shape_routes_to_revision(self) -> None:
+        from maljan.core.config import Settings
+
+        result = _round_with(_Scripted(RUN_SHAPE))
+
+        assert result["is_consensus"] is False
+        argument = result["discussion_history"][0]
+        assert argument.confidence_score == pytest.approx(1.0)
+        state = {**CLAIMING_STATE, **result}
+        assert ConsensusRouter(Settings()).should_continue(state) == "revision"
+
+    def test_none_at_full_agreement_goes_to_the_judge(self) -> None:
+        from maljan.core.config import Settings
+
+        result = _round_with(_Scripted("CONTRADICTIONS: NONE\nagreement_confidence: 1.0"))
+
+        assert result["is_consensus"] is True
+        state = {**CLAIMING_STATE, **result}
+        assert ConsensusRouter(Settings()).should_continue(state) == "judge"
+
+    def test_a_missing_block_is_asked_for_and_the_summary_states_it_when_still_missing(
+        self,
+    ) -> None:
+        from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MISSING_NOTE
+
+        model = _Scripted("aligned\nagreement_confidence: 1.0", "agreement_confidence: 1.0")
+        result = _round_with(model)
+
+        assert model.calls == 2
+        summary = (
+            RunSummaryBuilder(start_time=0.0)
+            .set_negotiation({**CLAIMING_STATE, **result}, max_iterations=3)
+            .build()
+        )
+        assert CONTRADICTIONS_BLOCK_MISSING_NOTE in summary.to_markdown()
+        negotiation = summary.to_dict()["negotiation"]
+        assert negotiation["mediation_notes"] == [CONTRADICTIONS_BLOCK_MISSING_NOTE]
+        assert CONTRADICTIONS_BLOCK_MISSING_NOTE in _appendix_text(summary.to_dict())
+
+    def test_a_block_given_leaves_the_summary_silent(self) -> None:
+        result = _round_with(_Scripted(RUN_SHAPE))
+        summary = (
+            RunSummaryBuilder(start_time=0.0)
+            .set_negotiation({**CLAIMING_STATE, **result}, max_iterations=3)
+            .build()
+        )
+
+        assert "mediation_notes" not in summary.to_dict()["negotiation"]
+
+
 def _appendix_text(run_summary: dict) -> str:
     """The report's run-summary appendix for a report carrying ``run_summary``."""
     from maljan.reporting.models import MalwareReport
@@ -273,3 +367,96 @@ def _appendix_text(run_summary: dict) -> str:
         {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": run_summary}
     )
     return MarkdownRenderer()._appendix_run(report)
+
+
+class TestTheRevisionIsToldWhatStillStands:
+    """Router into the revision node: each analyst's revision carries the block's lines."""
+
+    def test_the_block_s_lines_reach_every_revising_analyst(self) -> None:
+        from dataclasses import dataclass
+
+        from maljan.core.config import Settings
+        from maljan.pipeline.nodes import make_revision_node
+
+        result = _round_with(_Scripted(RUN_SHAPE))
+        state = {**CLAIMING_STATE, **result, "file_hash": "abc123"}
+        assert ConsensusRouter(Settings()).should_continue(state) == "revision"
+
+        @dataclass
+        class _Chunk:
+            content: str = "PE32 executable, 9 sections, imports VirtualAllocEx."
+            index: int = 0
+            total: int = 1
+
+            def to_prompt_header(self) -> str:
+                return "[chunk 1/1]"
+
+        agents: dict[str, MagicMock] = {}
+        for name in ("static", "dynamic"):
+            agent = MagicMock()
+            isr = MagicMock()
+            isr.claims = [MagicMock()]
+            isr.dissent_items = []
+            agent.safe_revise_isr.return_value = (f"{name} revised", isr)
+            agents[name] = agent
+        container = MagicMock()
+        container.is_mock = False
+        container.agent_registry.list_agents.return_value = list(agents)
+        container.analyst_keys.return_value = list(agents)
+        container.agent_role.side_effect = lambda n: n
+        container.config.llm.parallel_analysts = False
+        container.get_agent.side_effect = lambda n: agents[n]
+        container.load_chunked.side_effect = lambda _h, _n: [_Chunk()]
+        container.load_data.side_effect = lambda _h, _n: _Chunk().content
+
+        asyncio.run(make_revision_node(container)(state))
+
+        for agent in agents.values():
+            sent = " ".join(str(a) for a in agent.safe_revise_isr.call_args.args)
+            assert "static: a library written beside the file — dynamic: no such file" in sent
+            assert "network: a host contacted — ev_0012 holds no such flow" in sent
+
+
+class TestStableAgreementDoesNotEndTheDebateOverStandingContradictions:
+    def _state(self, contradictions: list[str]) -> dict[str, Any]:
+        return {
+            "iteration_count": 3,
+            "is_consensus": False,
+            "consensus_applicable": True,
+            "confidence_history": [0.9, 0.9, 0.9],
+            "discussion_history": [
+                AgentArgument(
+                    agent_name="Mediator",
+                    finding="x",
+                    confidence_score=0.9,
+                    contradictions=contradictions,
+                )
+            ],
+        }
+
+    def _router(self) -> ConsensusRouter:
+        from maljan.core.config import Settings
+
+        settings = Settings()
+        settings.negotiation.max_iterations = 10
+        return ConsensusRouter(settings)
+
+    def test_standing_contradictions_keep_the_debate_going(self) -> None:
+        assert self._router().should_continue(self._state(["a: x — ev_0001"])) == "revision"
+
+    def test_with_none_standing_stable_agreement_still_ends_it(self) -> None:
+        assert self._router().should_continue(self._state([])) == "judge"
+
+    def test_the_summary_does_not_call_it_convergence(self) -> None:
+        state = self._state(["a: x — ev_0001"])
+        summary = RunSummaryBuilder(start_time=0.0).set_negotiation(state, max_iterations=3)
+        assert summary.build().negotiation.termination_reason == "hard_limit"
+        summary = RunSummaryBuilder(start_time=0.0).set_negotiation(
+            self._state([]), max_iterations=3
+        )
+        assert summary.build().negotiation.termination_reason == "convergence"
+
+    def test_the_mediator_s_argument_carries_the_list(self) -> None:
+        result = _round_with(_Scripted(RUN_SHAPE))
+        argument = result["discussion_history"][0]
+        assert len(argument.contradictions) == 2

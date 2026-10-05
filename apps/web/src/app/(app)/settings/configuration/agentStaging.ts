@@ -159,7 +159,10 @@ export function cloneDefinition(
       ? {
           ...source,
           label: source.label ? `${source.label} (copy)` : key,
-          prompt: source.prompt ?? resolvedDetails?.prompt ?? null,
+          // The authored text, not the sent one: the sentence about tools
+          // describes the source's list, and the clone is resolved with its own.
+          prompt:
+            source.prompt ?? resolvedDetails?.authored_prompt ?? resolvedDetails?.prompt ?? null,
           tools: source.tools.map((t) => ({ ...t })),
         }
       : { ...EMPTY_DEFINITION },

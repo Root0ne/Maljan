@@ -13,7 +13,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from maljan.providers.base import StaticCapabilities, StaticProvider
+from maljan.providers.base import (
+    STATIC_EVIDENCE_INSTRUCTIONS,
+    StaticCapabilities,
+    StaticProvider,
+)
 from maljan.providers.registry import register_static_provider
 
 if TYPE_CHECKING:
@@ -25,22 +29,24 @@ class NullStaticProvider(StaticProvider):
     """No static tool at all.
 
     The honest choice when a deployment has no reverse-engineering server: the
-    analyst reasons over the deterministic PE extraction it already receives,
-    and nothing pretends a tool loop happened. Its prompt fragment keeps the
-    provider-neutral instructions (cite a concrete artifact, the four ATT&CK
-    techniques) and drops every tool name, so the model is not told to call
-    tools it does not have.
+    analyst reasons over the deterministic extraction it already receives and
+    over whatever tool servers its definition binds. Its prompt fragment keeps
+    the provider-neutral instructions (cite a concrete artifact, the four
+    ATT&CK techniques), says no disassembler or decompiler comes with it, and
+    says nothing about the agent's other tools: that sentence is built from
+    the tool list the request carries.
     """
 
-    NO_TOOLS_FRAGMENT: ClassVar[str] = (
-        "Analyze the deterministic static evidence you are given. "
-        "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
-        "string offset (.data+0xNN), API import, or hex pattern. "
-        "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
-        "T1055 (Process Injection), T1140 (Deobfuscation).\n\n"
-        "You have no analysis tools in this configuration. Do not describe tool "
-        "calls you did not make, and do not claim analysis was impossible: the "
-        "extracted imports, sections and strings are real evidence."
+    # What the provider is, and nothing about the agent's tools: the static
+    # analyst is bound to tool servers of its own under every provider, and the
+    # sentence about those is built from the list the request carries
+    # (``prompt_fragments.tools_statement``). The fragment this replaced told
+    # the model it had no tools while the same request carried 36.
+    NO_PROVIDER_FRAGMENT: ClassVar[str] = (
+        STATIC_EVIDENCE_INSTRUCTIONS
+        + "\n\n"
+        + "No static provider is attached, so no disassembler or decompiler comes with "
+        "this analyst."
     )
 
     @classmethod
@@ -52,4 +58,7 @@ class NullStaticProvider(StaticProvider):
         return StaticCapabilities(degrade_on_failure=True)
 
     def prompt_fragment(self) -> str:
-        return self.NO_TOOLS_FRAGMENT
+        return self.NO_PROVIDER_FRAGMENT
+
+    def absent_fragment(self) -> str:
+        return self.NO_PROVIDER_FRAGMENT

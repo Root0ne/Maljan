@@ -250,6 +250,12 @@ class StaticAnalysis(BaseModel):
     # from, so the profile line in the report points at rows a reader can open.
     api_capabilities: dict[str, int] = Field(default_factory=dict)
     api_capabilities_evidence_ids: list[str] = Field(default_factory=list)
+    # The same profile over the names the run resolved at runtime from stored
+    # values rather than read in the import table (``resolve_api_hashes``),
+    # counted apart so a function the program looks up at runtime is never
+    # printed as an import; empty on a report stored before the field existed.
+    api_capabilities_resolved: dict[str, int] = Field(default_factory=dict)
+    api_capabilities_resolved_evidence_ids: list[str] = Field(default_factory=list)
     # {behaviour_category: share of a named benign corpus the category appears
     # on}, recorded from the same answer. A count of imports in a category is
     # not a fact about the sample until a reader knows that ``execution`` is on
@@ -352,13 +358,27 @@ class NetworkDomain(BaseModel):
     is_punycode: bool = False
     homograph_target: str | None = None
     # Where the name came from. ``sandbox`` is a resolution or a request the
-    # sample actually made, ``analyst`` an agent's own artefact, ``strings`` a
-    # run of bytes in the file that has the shape of a hostname — which is a
-    # far weaker claim and was being published as though it were the same one.
-    # ``None`` for a producer that does not record it.
+    # sample actually made, ``strings`` a run of bytes in the file that has the
+    # shape of a hostname — which is a far weaker claim and was being published
+    # as though it were the same one — and ``analyst`` a name only an agent's
+    # own artefact lists, which no tool saw and which is published only when
+    # the judge names it. ``None`` for a producer that does not record it.
     source: Literal["sandbox", "analyst", "strings"] | None = None
     # Filled asynchronously by the threat-intel enrichment worker.
     reputation: dict[str, Any] | None = None
+    # Which analysts listed this value as an indicator (an artifact of
+    # endpoints, network values or IOCs), in the words the publish rule
+    # reports. Stated in the reason a row is not published; a listing
+    # publishes nothing — a sandbox row the rule would not publish on the
+    # observation alone waits for the judge (``stix_renderer.sandbox_row_kwargs``).
+    kept_by: list[str] = Field(default_factory=list)
+    # Which analysts' claims mention the value without keeping it. Stated in
+    # the reason a row is not published; it publishes nothing.
+    mentioned_by: list[str] = Field(default_factory=list)
+    # Whether only the capture's TLS names recorded this name, with no DNS or
+    # HTTP view naming it: a TLS name says nothing about which process made
+    # the connection, so the row waits for the judge.
+    capture_only: bool = False
 
 
 class NetworkIP(BaseModel):
@@ -380,6 +400,28 @@ class NetworkIP(BaseModel):
     # ``None`` for a producer that does not record it.
     source: Literal["sandbox", "analyst", "strings"] | None = None
     reputation: dict[str, Any] | None = None
+    # Whether the sandbox saw the sample's own process tree reach this address:
+    # ``True`` when a flow to it came from the sample or a process it started,
+    # ``False`` when every flow the report attributes came from another
+    # process, ``None`` when the report does not say. A platform fact read
+    # from the sandbox report's own process records, right or absent.
+    sample_process_tree: bool | None = None
+    # The processes outside the sample's tree that the report says made flows
+    # to it, as ``<image> (procid N)``: what the publish rule names when it
+    # refuses the row. Empty when the report names none.
+    outside_processes: list[str] = Field(default_factory=list)
+    # The processes the two lineage facts disagree about that made flows to
+    # it, as ``<image> (procid N)``: the ones only Triage's ``orig`` mark names
+    # as the sample's, and the ones only the submitted file's own process tree
+    # does. Their flows state no attribution, and the publish rule says why.
+    marked_only_processes: list[str] = Field(default_factory=list)
+    file_only_processes: list[str] = Field(default_factory=list)
+    # Whether the address is a public DNS resolver's, which a sandbox guest
+    # reaches whatever the sample does.
+    public_resolver: bool = False
+    # Who listed the value, and who only mentioned it; see ``NetworkDomain``.
+    kept_by: list[str] = Field(default_factory=list)
+    mentioned_by: list[str] = Field(default_factory=list)
 
 
 class NetworkURL(BaseModel):
@@ -388,7 +430,10 @@ class NetworkURL(BaseModel):
     model_config = _STRICT_CONFIG
 
     url: str
-    method: str = "GET"
+    # The HTTP method the evidence records for the request, ``None`` when no
+    # record holds one: a URL read out of the file's bytes was made by no
+    # request anybody saw, and a default "GET" contradicted a POST beacon.
+    method: str | None = None
     status: int | None = None
     user_agent: str | None = None
     # Where the URL came from, with the same three answers and the same weight
@@ -523,6 +568,19 @@ class CapabilityCell(BaseModel):
     # technique when asked (``isr_models.ABSENCE_TECHNIQUE_MARKER``). It
     # changes nothing about the row's publication.
     note: str = ""
+    # Each analyst statement naming the technique, verbatim, labelled by the
+    # analyst's layer ("static: …"): printed where a rule matched only names
+    # resolved at runtime, so a reader weighs what the analysts said.
+    statements: list[str] = Field(default_factory=list)
+    # The analyst layers that named the technique in a statement of their own:
+    # each distinct statement, compared by its normalised text, credited to the
+    # first layer that wrote it (``capability_matrix.independent_statements``).
+    # A layer that only repeated another's words, or named the technique only on
+    # a finding's title, is not in it. Corroboration is two of these.
+    independent_layers: list[str] = Field(default_factory=list)
+    # How many analyst statements naming the technique repeated one written
+    # before them, word for word once normalised, and were counted once.
+    identical_statements: int = 0
 
 
 class TTPMapping(BaseModel):
@@ -541,6 +599,9 @@ class TTPMapping(BaseModel):
     is_corroborated: bool = False
     # See ``CapabilityCell.technique_id_valid``.
     technique_id_valid: bool = True
+    # See ``CapabilityCell.independent_layers`` and ``identical_statements``.
+    independent_layers: list[str] = Field(default_factory=list)
+    identical_statements: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -861,13 +922,49 @@ class C2Channel(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
+class RecoveredValue(BaseModel):
+    """Which tool recovered one hidden value, from which entry, and where in the file.
+
+    ``tool`` is ``floss`` (emulation) or ``decode_string_blobs`` (a static
+    decoding of the file's own bytes); ``entry`` is the ledger entry that
+    holds the tool's answer. ``scheme`` is FLOSS's string kind (``decoded``,
+    ``stack``, ``tight``) or the decoder's scheme with any base64 layer under
+    it (``xor8``, ``xor8+base64``); ``offset`` the decoded blob's file offset;
+    ``functions`` the functions the tool names around the code that uses the
+    text, and ``sites`` the addresses of that code. Each is what the tool's
+    own answer states, or empty.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    tool: str
+    entry: str = ""
+    scheme: str = ""
+    offset: str = ""
+    functions: list[str] = Field(default_factory=list)
+    sites: list[str] = Field(default_factory=list)
+    # The calls the decoder joined a use of the text to, each in the words of
+    # ``call_sites.passed_to_words`` ("the address of its encoded bytes is
+    # argument 1 of the call at …; the frame slot …, given to that call as
+    # argument 2, is then argument 2 of the call at …; it is not followed past
+    # that call"); empty where it joined none, or on a record stored before it.
+    passed_to: list[str] = Field(default_factory=list)
+
+
 class EmulatedStrings(BaseModel):
-    """What emulation alone recovered in a run: network-shaped values and their entry.
+    """What only a recovering tool read in a run: network-shaped values and their entry.
 
     ``values`` maps a recovered value (lower case; a URL adds its host) to the
-    FLOSS entry that recovered it, with every value the static string sweep
-    also read held out into ``plain`` (value to the sweep's entry). ``partial``
-    says why the record may not be the run's whole, or is empty.
+    entry that recovered it first — a FLOSS entry, or a ``decode_string_blobs``
+    entry for an indicator the decoder read out of the file's bytes — with
+    every value the static string sweep also read held out into ``plain``
+    (value to the sweep's entry). ``recovered_by`` lists, for each value in
+    ``values``, every tool that recovered it and where; a record stored before
+    it existed has none, and its values are FLOSS's. ``partial`` says why the
+    record may not be the run's whole, or is empty. ``spelled`` maps each value
+    to the spelling the recovering tool wrote first: the keys are folded to
+    match values, and a URL's path is case-sensitive, so a row the builder
+    makes of a value carries the tool's spelling.
     """
 
     model_config = _STRICT_CONFIG
@@ -875,6 +972,30 @@ class EmulatedStrings(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
     plain: dict[str, str] = Field(default_factory=dict)
     partial: str = ""
+    recovered_by: dict[str, list[RecoveredValue]] = Field(default_factory=dict)
+    spelled: dict[str, str] = Field(default_factory=dict)
+
+
+class ClaimNotDiscussed(BaseModel):
+    """An analyst claim in force whose code locations or API names the body does not name.
+
+    Listed by ``reporting.claim_coverage`` after the body is composed, with
+    the claim as the analyst wrote it and what the check found: ``missing``,
+    the names the body never names, as the claim wrote them; or, for a claim
+    that names none, how many of its words the body carries.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    agent: str
+    claim_number: int
+    claim: str
+    evidence_ref: str = ""
+    confidence: float | None = None
+    missing: list[str] = Field(default_factory=list)
+    carried: int = 0
+    named: int = 0
+    counted: str = "names"
 
 
 class FlaggedStatement(BaseModel):
@@ -929,6 +1050,11 @@ class ConsolidatedIOC(BaseModel):
     source: str | None = None
     context: str = ""
     published: str | None = None
+    # For a network value a tool recovered from text the sample hid: which
+    # tool, its ledger entry and where in the file (``floss``, emulation;
+    # ``decode_string_blobs``, a static decoding of the file's bytes). Empty
+    # for every other row.
+    recovered_by: str = ""
 
 
 class Figure(BaseModel):
@@ -1128,6 +1254,10 @@ class MalwareReport(BaseModel):
     # about and the retry left standing, marked in place by the renderers;
     # empty on a report stored before the field existed.
     flagged_statements: list[FlaggedStatement] = Field(default_factory=list)
+    # The analyst claims in force the body neither cites nor discusses, listed
+    # after the body is composed (``reporting.claim_coverage``) and printed in
+    # a section of their own; empty on a report stored before the field existed.
+    claims_not_discussed: list[ClaimNotDiscussed] = Field(default_factory=list)
     # For each technique a YARA rule of this run asserted, the rules and how
     # many of each rule's own strings matched (``{"rule", "strings"}``), as the
     # scan answered. Read by the ATT&CK table's "rule match only" note and by
@@ -1137,6 +1267,17 @@ class MalwareReport(BaseModel):
     # entries at build time; ``None`` on a report stored before it existed,
     # which is then read from its kept section rows and said to be partial.
     emulated_strings: EmulatedStrings | None = None
+    # For every value an analyst's artifact lists, lower-cased: the tool
+    # answers of the run that hold it whole, as ``(entry id, tool)``, and an
+    # empty list when the ledger search found none. Built at build time from
+    # the whole ledger; ``None`` on a report stored before it existed, whose
+    # kept tool sections are then searched instead.
+    tool_sightings: dict[str, list[tuple[str, str]]] | None = None
+    # For the same values: the entries whose call arguments hold the value, so
+    # their answer holds it because it was asked about it — a lookup's echo, a
+    # search that returns its own query. Not sightings; stated in the reason
+    # so the report never says no tool saw a value an answer holds.
+    tool_queries: dict[str, list[tuple[str, str]]] | None = None
     misp_attributes: list[dict[str, Any]] | None = None
 
     # --- References ---

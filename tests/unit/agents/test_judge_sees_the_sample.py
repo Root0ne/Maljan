@@ -95,6 +95,13 @@ class TestTheIdentityBlock:
         assert "putty.exe === VERDICT (established) === Malware" in block
 
 
+def _reputation_tool() -> Any:
+    """A tool as the registry hands it over: stamped with its server."""
+    return type(
+        "_Tool", (), {"name": "get_file_report", "metadata": {"maljan_server": "virustotal"}}
+    )()
+
+
 class TestBothPromptsCarryIt:
     def _judge(self, seen: list[str]) -> JudgeAgent:
         judge = JudgeAgent.__new__(JudgeAgent)
@@ -165,11 +172,11 @@ class TestBothPromptsCarryIt:
             seen.append("\n".join(str(content) for _role, content in messages))
             return "Contradictions: none\nagreement_confidence: 0.9"
 
-        async def _no_client() -> None:
-            return None
+        async def _attach() -> None:
+            judge.tools = [_reputation_tool()]
 
         judge.execute_tool_loop = _loop  # type: ignore[method-assign]
-        judge._initialize_mcp_client = _no_client  # type: ignore[method-assign]
+        judge._initialize_mcp_client = _attach  # type: ignore[method-assign]
 
         asyncio.run(
             judge.mediate(
@@ -196,11 +203,11 @@ class TestBothPromptsCarryIt:
             seen.append("\n".join(str(content) for _role, content in messages))
             return "Contradictions: none\nagreement_confidence: 0.9"
 
-        async def _no_client() -> None:
-            return None
+        async def _attach() -> None:
+            judge.tools = [_reputation_tool()]
 
         judge.execute_tool_loop = _loop  # type: ignore[method-assign]
-        judge._initialize_mcp_client = _no_client  # type: ignore[method-assign]
+        judge._initialize_mcp_client = _attach  # type: ignore[method-assign]
 
         asyncio.run(
             judge.mediate(
@@ -214,6 +221,39 @@ class TestBothPromptsCarryIt:
 
         assert "Look the sample up once" in seen[0]
         assert "sha256 is" not in seen[0]
+
+    def test_a_reference_that_did_not_attach_is_not_told_it_has_reputation_tools(self) -> None:
+        """The server is referenced, but nothing attached: the prompt says what was."""
+        from maljan.agents.prompt_fragments import NO_TOOLS_STATEMENT
+
+        seen: list[str] = []
+        judge = self._judge(seen)
+        judge._definition_tool_refs = lambda: [  # type: ignore[method-assign]
+            type("_R", (), {"server": "virustotal", "kind": "mcp", "name": None})()
+        ]
+
+        async def _loop(messages: Any, *args: Any, **kwargs: Any) -> str:
+            seen.append("\n".join(str(content) for _role, content in messages))
+            return "Contradictions: none\nagreement_confidence: 0.9"
+
+        async def _nothing_attached() -> None:
+            return None
+
+        judge.execute_tool_loop = _loop  # type: ignore[method-assign]
+        judge._initialize_mcp_client = _nothing_attached  # type: ignore[method-assign]
+
+        asyncio.run(
+            judge.mediate(
+                reports={"static": "text"},
+                history=[],
+                isr_reports=_isr(),
+                ledger_servers={"analysis"},
+                sample=SAMPLE,
+            )
+        )
+
+        assert "You have reputation tools" not in seen[0]
+        assert NO_TOOLS_STATEMENT in seen[0]
 
     def test_the_debate_and_verdict_stages_both_build_it_from_the_state(self) -> None:
         from maljan.pipeline.nodes import _sample_identity

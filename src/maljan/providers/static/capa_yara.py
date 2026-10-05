@@ -46,7 +46,6 @@ from maljan.core.logger import logger
 from maljan.core.paths import resolve_data
 from maljan.providers.base import StaticCapabilities, StaticEvidenceBundle, StaticProvider
 from maljan.providers.registry import register_static_provider
-from maljan.schemas.tool_evidence import MAX_OUTPUT_CHARS, trim_output
 
 if TYPE_CHECKING:
     from maljan.core.config import Settings, StaticCapaConfig, StaticYaraConfig
@@ -162,13 +161,48 @@ def measured_capa_peak_bytes() -> int | None:
         return _CAPA_PEAK_BYTES
 
 
+# How often a wait with no budget looks at whether its child is still alive.
+_CHILD_POLL_SECONDS = 1.0
+
+
+def _next_message(
+    queue: Any, process: Any, timeout_seconds: float | None, started: float
+) -> tuple[str, Any]:
+    """The child's next message, within the budget left, or raise when there is none to come.
+
+    With no budget the wait polls, so a child that died without writing — the
+    server killed it, or it crashed — ends the wait instead of hanging it.
+    """
+    import queue as queue_module
+
+    while True:
+        if timeout_seconds is None:
+            wait = _CHILD_POLL_SECONDS
+        else:
+            left = timeout_seconds - (time.monotonic() - started)
+            if left <= 0:
+                raise TimeoutError("capa exceeded its budget")
+            wait = min(_CHILD_POLL_SECONDS, left)
+        try:
+            message: tuple[str, Any] = queue.get(timeout=wait)
+            return message
+        except queue_module.Empty:
+            if not process.is_alive():
+                # One last look: a child can write and exit between two polls.
+                try:
+                    message = queue.get(timeout=0.1)
+                    return message
+                except queue_module.Empty:
+                    raise RuntimeError("the capa worker exited without an answer") from None
+
+
 def run_capa_document(
     *,
     sample_path: str,
     rules_dir: str,
     signatures_dir: str,
     backend_name: str,
-    timeout_seconds: float,
+    timeout_seconds: float | None,
     target: _CapaWorker | None = None,
 ) -> dict[str, Any] | None:
     """Run the capa pipeline in a subprocess, killed if it overruns its budget.
@@ -199,6 +233,15 @@ def run_capa_document(
         daemon=True,
     )
     process.start()
+    # The server kills this child when every caller of its run has gone
+    # (``tools.children``); the wait below then sees it die rather than
+    # waiting on a queue nothing will write to.
+    from maljan.tools import children
+
+    # Only while it is alive: a reaped child's pid can be another process's.
+    children.register(
+        lambda: children.kill_process_group(int(process.pid or 0)) if process.is_alive() else None
+    )
     try:
         # Read before joining: the child's result is routinely well over the OS
         # pipe buffer (a full capa ResultDocument), and a child that has put a
@@ -209,19 +252,26 @@ def run_capa_document(
         # is thrown away. Draining the queue first lets that feeder thread
         # unblock and the child exit on its own well within the same budget.
         started = time.monotonic()
-        kind, payload = queue.get(timeout=timeout_seconds)
+        kind, payload = _next_message(queue, process, timeout_seconds, started)
         # A child may say what it cost before it answers; the answer still has
         # the rest of the same budget.
         while kind == "peak":
             note_capa_peak(payload)
-            left = max(0.001, timeout_seconds - (time.monotonic() - started))
-            kind, payload = queue.get(timeout=left)
-    except Exception:  # noqa: BLE001 - stdlib queue.Empty, or a crashed child
-        logger.warning(
-            "capa on %s exceeded its %ss budget; terminating the worker process.",
-            sample_path,
-            timeout_seconds,
-        )
+            kind, payload = _next_message(queue, process, timeout_seconds, started)
+    except Exception as exc:  # noqa: BLE001 - stdlib queue.Empty, or a crashed child
+        if isinstance(exc, RuntimeError):
+            # It died on its own, or was killed with its run: not a budget.
+            logger.warning(
+                "capa on %s: the worker process exited without an answer (exit code %s).",
+                sample_path,
+                process.exitcode,
+            )
+        else:
+            logger.warning(
+                "capa on %s exceeded its %ss budget; terminating the worker process.",
+                sample_path,
+                timeout_seconds,
+            )
         process.terminate()
         process.join(5.0)
         if process.is_alive():
@@ -439,21 +489,25 @@ class CapaYaraStaticProvider(StaticProvider):
 
 
 def _render_table(rows: list[dict[str, str]]) -> str:
-    """Render capa rule hits as a compact Markdown table, capped like every
-    other captured tool output (``schemas.tool_evidence.MAX_OUTPUT_CHARS``)."""
+    """Render capa rule hits as a compact Markdown table, every hit.
+
+    Whole: the table is a ledger entry the evidence budget stores and a model
+    reads through the context budget, which sizes it with a notice. A fixed
+    6,000 characters used to end it mid-row with no word of what was left out.
+    """
     lines = ["| rule | namespace |", "| --- | --- |"]
     for row in rows:
         lines.append(f"| {row.get('rule', '')} | {row.get('namespace', '')} |")
-    return trim_output("\n".join(lines), MAX_OUTPUT_CHARS)
+    return "\n".join(lines)
 
 
 def _render_yara(hits: list[dict[str, Any]]) -> str:
-    """Render YARA hits as a compact Markdown table, capped the same way."""
+    """Render YARA hits as a compact Markdown table, every hit, whole."""
     lines = ["| rule | strings |", "| --- | --- |"]
     for hit in hits:
         strings = ", ".join(str(s) for s in hit.get("strings") or [])
         lines.append(f"| {hit.get('rule', '')} | {strings} |")
-    return trim_output("\n".join(lines), MAX_OUTPUT_CHARS)
+    return "\n".join(lines)
 
 
 def ledger_entries(

@@ -169,3 +169,47 @@ class TestJudgePerAgentOverride:
         container._llm_registry.build_model_for_agent.assert_called_once_with(
             "judge", fallback_role="judge", max_tokens=derived.tokens
         )
+
+
+class TestTheCapAModelWasBuiltWithIsKeptOnIt:
+    """One source for a call's output cap: the record the build leaves on the model."""
+
+    class _Built:
+        """A built model: an object with no cap record until the container keeps one."""
+
+    def _container(self, config: Settings) -> ServiceContainer:
+        container = ServiceContainer(config=config, mock=True)
+        container._llm_registry = MagicMock()
+        container._llm_registry.build_model_for_agent.side_effect = lambda *a, **k: self._Built()
+        container._llm_registry.build_model.side_effect = lambda *a, **k: self._Built()
+        return container
+
+    def test_an_analyst_s_model_carries_the_cap_it_was_built_with(self) -> None:
+        from maljan.llm.context_window import built_output_cap
+
+        config = Settings()
+        config.llm.expert_max_tokens = 12_345
+        container = self._container(config)
+
+        built = container.get_agent_llm("static")
+
+        container._llm_registry.build_model_for_agent.assert_called_once_with(
+            "static", max_tokens=12_345
+        )
+        cap = built_output_cap(built)
+        assert cap is not None and cap.tokens == 12_345
+        assert "llm.expert_max_tokens is set to 12345" in cap.sentence
+
+    def test_the_expert_and_judge_models_carry_theirs(self) -> None:
+        from maljan.llm.context_window import built_output_cap
+
+        config = Settings()
+        config.llm.expert_max_tokens = 3_000
+        config.llm.judge_max_tokens = 5_000
+        container = self._container(config)
+
+        expert = built_output_cap(container.get_expert_llm())
+        judge = built_output_cap(container.get_judge_llm())
+
+        assert expert is not None and expert.tokens == 3_000
+        assert judge is not None and judge.tokens == 5_000

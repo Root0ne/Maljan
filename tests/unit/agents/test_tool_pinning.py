@@ -13,7 +13,7 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.tool_pinning import is_path_argument, pin_paths, server_of
+from maljan.agents.tool_pinning import is_path_argument, names_the_sample, pin_paths, server_of
 
 LOCAL = "/data/samples/abc123.exe"
 REMOTE = "/remote/staging/abc123.exe"
@@ -27,6 +27,13 @@ HOST = "/data/samples/evil.exe"
 class _Args(BaseModel):
     file_path: str = ""
     query: str = ""
+
+
+class _ProgramArgs(BaseModel):
+    """A decompiler tool's arguments: ``program`` is a name in its project."""
+
+    program: str = ""
+    address: str = ""
 
 
 class _PcapArgs(BaseModel):
@@ -62,7 +69,13 @@ class TestIsPathArgument:
         )
 
     def test_the_exact_set_covers_names_that_hold_a_file_without_saying_so(self) -> None:
-        assert all(is_path_argument(n) for n in ("binary", "sample", "target", "program"))
+        assert all(is_path_argument(n) for n in ("binary", "sample", "target"))
+
+    def test_a_program_argument_names_a_program_in_a_project_not_a_file(self) -> None:
+        """Ghidra's tools take ``program`` as the name a program has in its
+        project; a file path there names no program at all."""
+        assert not is_path_argument("program")
+        assert not names_the_sample("program")
 
     def test_free_text_arguments_are_left_alone(self) -> None:
         assert not any(is_path_argument(n) for n in ("query", "input", "text", "rule"))
@@ -113,6 +126,21 @@ class TestPinPaths:
         pinned[0].invoke({"file_path": "/elsewhere/other.exe"})
 
         assert seen[0]["file_path"] == "/elsewhere/other.exe"
+
+    def test_a_program_name_the_model_gives_a_decompiler_reaches_it_unchanged(self) -> None:
+        """The server was given the sample at its own path, and knows the
+        program by its file name. Rewriting that name into the path made every
+        call that named the program fail."""
+        seen: list[dict[str, Any]] = []
+        pinned = pin_paths(
+            [_tool("decompile_function", seen, server="ghidra", schema=_ProgramArgs)],
+            default_path=HOST,
+            path_by_server={"ghidra": "/data/samples/.work/evil.exe"},
+        )
+
+        pinned[0].invoke({"program": "evil.exe", "address": "0x1000"})
+
+        assert seen == [{"program": "evil.exe", "address": "0x1000"}]
 
     def test_a_free_text_argument_holding_the_name_is_not_rewritten(self) -> None:
         seen: list[dict[str, Any]] = []

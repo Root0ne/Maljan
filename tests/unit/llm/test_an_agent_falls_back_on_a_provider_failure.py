@@ -501,7 +501,11 @@ class TestTheDeadlineIsTheLoopsOwn:
         restart_models(chain, loop_seconds=300.0, share=0.5)
         assert chain.turn_deadline == 150.0
         restart_models(chain, loop_seconds=None)
-        assert chain.turn_deadline == 150.0, "no budget named leaves the deadline as it was"
+        # A loop with no time limit has no share of a clock to take: no turn
+        # deadline, and none left over from the loop before it. A stalled
+        # model is ended by its own request timeout, a provider failure.
+        assert chain.turn_deadline == 0.0
+        assert chain._deadline(0) is None
 
     def test_a_stall_late_in_a_loop_is_replaced_before_the_loop_ends(self) -> None:
         """A share of what is left, not of the whole: a stall at 70 % of the loop."""

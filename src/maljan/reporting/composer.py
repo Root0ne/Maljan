@@ -32,6 +32,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.config import REPORTER_AGENT_KEY
 from maljan.core.logger import logger
+from maljan.core.spend import (
+    SpendCeilingStop,
+    admitted,
+    spend_bound,
+    spend_ceiling_set,
+    spend_left_said,
+    spend_preview,
+    spend_release,
+)
 from maljan.core.token_ledger import structured_answer
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
@@ -47,6 +56,7 @@ from maljan.pipeline.validation import (
     flow_voice_violations,
     identifier_citation_violations,
     keep_known_keys,
+    misstated_entry_contents,
     pack_line_ids,
     quoted_values,
     record_flagged_statements,
@@ -55,10 +65,17 @@ from maljan.pipeline.validation import (
     schema_violations,
     section_capability_violations,
     section_cut_violation,
+    stated_value_violations,
     technique_name_violations,
+    unpublished_value_violations,
     wrong_entry_citations,
 )
-from maljan.reporting.evidence_bundles import bundle_for, is_empty, sandbox_entry_ids
+from maljan.reporting.evidence_bundles import (
+    bundle_for,
+    is_empty,
+    sample_flow_fact,
+    sandbox_entry_ids,
+)
 from maljan.reporting.models import (
     C2Channel,
     CliFlag,
@@ -86,13 +103,13 @@ class _StructuredOutputUnavailable(Exception):
 
 class _ProseOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    body: str = Field("", max_length=2500)
+    body: str = Field("")
     evidence_refs: list[str] = Field(default_factory=list)
 
 
 class _IntroOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    text: str = Field("", max_length=1800)
+    text: str = Field("")
 
 
 class _CliFlagsOut(BaseModel):
@@ -162,7 +179,7 @@ _SYSTEM = (
     "3. A fact marked 'complete list' is exhaustive. Anything absent from it is "
     "absent from the binary, and a claim that relies on it is false.\n"
     "4. If the evidence does not support a field, leave it empty/null. Never guess.\n"
-    "5. Be concise and technical; cite concrete artifacts (function name, API, "
+    "5. Write technically; cite concrete artifacts (function name, API, "
     "string, tool output) where possible.\n"
     "6. Cite the ev_ ids of the entries a statement rests on: in the evidence_refs "
     "list where the object has one, and in square brackets in prose, e.g. [ev_0007]. "
@@ -195,7 +212,7 @@ _MAX_NAMED_KEYS = 6
 # model is shown: a checklist of the evaluation key's own items ("campaign id",
 # "sleep interval") is a hint as surely as an example is.
 _INSTRUCTIONS: dict[str, str] = {
-    "introduction": "Write a 2-4 sentence intro.",
+    "introduction": "Write the introduction.",
     "execution_flow": (
         "List what the sample does from its entry point to its steady state, in order."
     ),
@@ -212,8 +229,9 @@ _INSTRUCTIONS: dict[str, str] = {
         "value is: a registry key or value only when it is written under a registry hive "
         "or from one of its top keys (Software\\, System\\) or the entry records it as a "
         "registry access, and 'String' when the entry does "
-        "not show what the value is. Give its purpose in a short phrase where the evidence "
-        "says, and leave the purpose empty where it does not."
+        "not show what the value is. Give its purpose where the evidence or an analyst "
+        "claim above says what the sample uses the value for, in that claim's sense, and "
+        "leave the purpose empty where neither says."
     ),
     "commands": "Extract the commands the sample accepts from its operator.",
     "encryption_scheme": "Extract the encryption scheme.",
@@ -233,6 +251,22 @@ _PROSE_SECTIONS: dict[str, str] = {
     "command_and_control": "Command and Control",
     "payloads": "Payloads and Dropped Files",
 }
+
+# Every section ``ReportComposer.compose`` writes, in its order: one call each
+# unless its answer is asked again. The spend ceiling keeps what these calls
+# will cost aside from the start of the job (``SpendMeter.plan_tail``).
+COMPOSED_SECTIONS: tuple[str, ...] = (
+    "introduction",
+    "execution_flow",
+    *_PROSE_SECTIONS,
+    "configuration",
+    "host_identifiers",
+    "commands",
+    "encryption_scheme",
+    "cli_flags",
+    "ransom_note",
+    "communications",
+)
 
 # One example answer per section shape, shown under the object the answer has
 # to be. The object alone names the keys; the example shows what goes in them
@@ -444,10 +478,11 @@ def _bundle_text(
         lines.append("")
     claims = bundle.get("claims") or []
     if claims:
-        lines.append("ANALYST CLAIMS (claim — evidence):")
+        lines.append(ANALYST_CLAIMS_HEADING)
         for c in claims:
             claim = f"{c.get('claim', '')} — {c.get('evidence_ref', '')}"
-            lines.append(f"- {_within(claim, item_chars)}" + _where_quoted(claim, entries))
+            label = f"[{c['label']}] " if c.get("label") else ""
+            lines.append(f"- {label}{_within(claim, item_chars)}" + _where_quoted(claim, entries))
         lines.append("")
     tools = bundle.get("tool_outputs") or []
     if tools:
@@ -459,6 +494,10 @@ def _bundle_text(
         lines.append("")
     return "\n".join(lines)
 
+
+# The heading of a section's analyst claims, each shown under its label: the
+# analyst and the claim's number in its answer in force.
+ANALYST_CLAIMS_HEADING = "ANALYST CLAIMS ([analyst claim number] claim — evidence):"
 
 # What a section is shown in place of a claim or a tool answer its window has
 # no room for.
@@ -660,6 +699,9 @@ class ReportComposer:
         # Each ledger entry's text, set per ``compose`` call; ``None`` judges
         # no citation against an entry and annotates no claim.
         self._entries: EntryTexts | None = None
+        # The IOC table's answers, set per ``compose`` call; ``None`` asks no
+        # section about a value's publish state.
+        self._answers: Any = None
         # What this report lost or had trimmed, in the words the report's own
         # degradation reasons are written in. A section dropped after its
         # retries used to leave the report with no conclusion and nothing
@@ -704,6 +746,9 @@ class ReportComposer:
         # text, where a sample's decoded string can carry any.
         self._citable = list(citable_ids) if citable_ids is not None else pack_line_ids(facts_block)
         self._entries = evidence
+        # The IOC table's answer for each value, so a section naming a value
+        # this run does not publish is asked to write its state beside it.
+        self._answers = _published_answers(report)
         # What this run established, read once and asked of every section, so
         # a conclusion cannot be the first place "command-and-control" appears.
         self._grounding = CapabilityGrounding.from_report(report, isr_reports)
@@ -721,6 +766,11 @@ class ReportComposer:
         # configuration value said to be decrypted one of the first.
         known_ids = [row.id for row in report.evidence_index]
         sandbox_ids = sandbox_entry_ids(report)
+        # Which tool answered each entry, so a question names what a step
+        # cites; and what the sandbox says about a flow to each value a step
+        # names.
+        entry_tools = {row.id: str(row.tool or "") for row in report.evidence_index}
+        flow_fact = sample_flow_fact(report)
 
         # 2. The execution flow, entry to steady state.
         flow = await self._author(
@@ -729,10 +779,14 @@ class ReportComposer:
             isr_reports,
             _FlowOut,
             _INSTRUCTIONS["execution_flow"],
-            validators=[lambda p: flow_voice_violations(p, sandbox_ids)],
+            validators=[
+                lambda p: flow_voice_violations(
+                    p, sandbox_ids, tools=entry_tools, flow_fact=flow_fact
+                )
+            ],
         )
         if flow and isinstance(flow, _FlowOut) and flow.steps:
-            ta.execution_flow = self._kept("execution_flow", flow.steps, 20)
+            ta.execution_flow = list(flow.steps)
             authored += 1
 
         # 3. Free-prose technical subsections (only when evidence exists).
@@ -746,7 +800,7 @@ class ReportComposer:
             )
             if out and isinstance(out, _ProseOut) and out.body.strip():
                 sub = TechnicalSubsection(
-                    title=title, body=out.body.strip(), evidence_refs=out.evidence_refs[:8]
+                    title=title, body=out.body.strip(), evidence_refs=list(out.evidence_refs)
                 )
                 setattr(ta, section, sub)
                 authored += 1
@@ -759,10 +813,13 @@ class ReportComposer:
             isr_reports,
             _ConfigOut,
             _INSTRUCTIONS["configuration"],
-            validators=[lambda p: configuration_citation_violations(p, known_ids)],
+            validators=[
+                lambda p: configuration_citation_violations(p, known_ids),
+                lambda p: stated_value_violations(p, self._entries),
+            ],
         )
         if config and isinstance(config, _ConfigOut) and config.items:
-            ta.configuration = self._kept("configuration", config.items, 30)
+            ta.configuration = list(config.items)
             authored += 1
 
         identifiers = await self._author(
@@ -771,7 +828,10 @@ class ReportComposer:
             isr_reports,
             _HostIdentifiersOut,
             _INSTRUCTIONS["host_identifiers"],
-            validators=[lambda p: identifier_citation_violations(p, known_ids)],
+            validators=[
+                lambda p: identifier_citation_violations(p, known_ids),
+                lambda p: stated_value_violations(p, self._entries),
+            ],
         )
         if identifiers and isinstance(identifiers, _HostIdentifiersOut) and identifiers.identifiers:
             # All of them: the section holds what the model writes.
@@ -786,7 +846,7 @@ class ReportComposer:
             _INSTRUCTIONS["commands"],
         )
         if commands and isinstance(commands, _CommandsOut) and commands.commands:
-            ta.commands = self._kept("commands", commands.commands, 40)
+            ta.commands = list(commands.commands)
             authored += 1
 
         enc = await self._author(
@@ -804,7 +864,7 @@ class ReportComposer:
             "cli_flags", report, isr_reports, _CliFlagsOut, _INSTRUCTIONS["cli_flags"]
         )
         if cli and isinstance(cli, _CliFlagsOut) and cli.flags:
-            ta.cli_flags = self._kept("cli_flags", cli.flags, 30)
+            ta.cli_flags = list(cli.flags)
             authored += 1
 
         note = await self._author(
@@ -819,7 +879,7 @@ class ReportComposer:
             "communications", report, isr_reports, _C2Out, _INSTRUCTIONS["communications"]
         )
         if c2 and isinstance(c2, _C2Out) and c2.channels:
-            report.c2_channels = self._kept("communications", c2.channels, 6)
+            report.c2_channels = list(c2.channels)
             authored += 1
 
         if _has_content(ta):
@@ -873,6 +933,12 @@ class ReportComposer:
             [*head, instruction, contract, _bundle_text(section, bundle, entries, item_chars=-1)]
         )
         prompt_chars = len(_SYSTEM) + len(without)
+        logger.info(
+            "ReportComposer: section '%s' output budget: %s.",
+            section,
+            str(getattr(self, "budget_note", "") or "")
+            or f"{int(getattr(self, 'output_cap', 0) or 0)} tokens",
+        )
         room = self._room_chars()
         if room is not None and prompt_chars > room:
             # The facts enter whole: a section that cannot hold them says so.
@@ -899,6 +965,10 @@ class ReportComposer:
                 self._invoke(messages, schema, section=section, validators=validators or []),
                 timeout=timeout,
             )
+        except SpendCeilingStop as stop:
+            logger.warning("ReportComposer: section '%s' is not written: %s.", section, stop)
+            self._note_degradation(f"report section '{section}' is not written: {stop}")
+            return None
         except TimeoutError:
             logger.warning("ReportComposer: section '%s' timed out; skipping.", section)
             self._note_degradation(
@@ -934,7 +1004,9 @@ class ReportComposer:
     def _room_chars(self) -> int | None:
         """The characters a section's whole prompt may take, or ``None`` with no window known.
 
-        ``(window − output budget) × chars per token``.
+        ``(window − output budget) × chars per token``, and never below zero: a
+        budget that takes the whole window leaves no room, not a debt. A window
+        nothing reported is passed as 0 and sizes nothing.
         """
         window = int(getattr(self, "window_tokens", 0) or 0)
         if window <= 0:
@@ -942,7 +1014,60 @@ class ReportComposer:
         from maljan.llm.context_window import CHARS_PER_TOKEN
 
         reply = int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0)
-        return (window - reply) * CHARS_PER_TOKEN
+        return max(0, (window - reply) * CHARS_PER_TOKEN)
+
+    def _call_bound(self, turns: Sequence[BaseMessage]) -> int | None:
+        """The ``max_tokens`` one call of this section is held to, or ``None``.
+
+        Where the window is known and the section's budget would not fit
+        beside the prompt, the call may write what the window leaves after it
+        (``context_window.call_output_bound``): a longer answer would be refused
+        by a hosted API, and cut by a runtime we run. The spend ceiling is
+        asked without anything being reserved (:meth:`_call_limit` reserves).
+        """
+        return self._call_limit(turns, preview=True)[0]
+
+    def _call_limit(
+        self, turns: Sequence[BaseMessage], *, slot: Any = None, preview: bool = False
+    ) -> tuple[int | None, str]:
+        """The ``max_tokens`` one call of this section is held to, and the limit that set it.
+
+        ``(None, why)`` for the section's own output budget. The limit is the
+        smallest of three, named as it applied: the section's output budget
+        (the operator's cap and how it was derived), what the model's window
+        leaves after the prompt, and the spend ceiling's hold. With ``slot``
+        the spend ceiling reserves the call's worst case under it; with
+        ``preview`` it is only asked. Raises :class:`SpendCeilingStop` when
+        the spend ceiling does not admit the call.
+        """
+        from maljan.llm.context_window import (
+            accepts_output_bound,
+            call_output_bound,
+            prompt_overflow_sentence,
+        )
+
+        cap = int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0)
+        chars = sum(len(_message_text(message)) for message in turns)
+        window = int(getattr(self, "window_tokens", 0) or 0)
+        overflow = prompt_overflow_sentence("report section's", chars, window)
+        if overflow is not None:
+            self._note_degradation(overflow)
+        budget_note = str(getattr(self, "budget_note", "") or "")
+        why = f"its output budget of {cap} tokens" + (f" ({budget_note})" if budget_note else "")
+        bound = call_output_bound(cap, window, chars)
+        if bound is not None:
+            why = f"what its {window}-token window leaves after the prompt"
+        ledger = getattr(self, "token_ledger", None)
+        if preview:
+            held = spend_preview(ledger, self.llm, chars, cap)
+        else:
+            held = spend_bound(ledger, self.llm, chars, cap, slot=slot)
+        if held is not None and (bound is None or held < bound):
+            bound = held
+            why = f"the spend ceiling's hold: what {spend_left_said(ledger)} pays for"
+        if bound is None or not accepts_output_bound(self.llm):
+            return None, why
+        return bound, why
 
     def _start_the_section_clock(self, seconds: float) -> None:
         """Measure the model list's turn deadline against this section's clock.
@@ -962,6 +1087,13 @@ class ReportComposer:
             share = _configured_share()
         if share > 0:
             enter(float(seconds), float(share))
+
+    def _cap_said(self, answer: Any) -> str:
+        """The limit a call sent with no held cap ran to, in words."""
+        note = str(getattr(self, "budget_note", "") or "")
+        return f"its output budget of {self._cap_of(answer)} tokens" + (
+            f" ({note})" if note else ""
+        )
 
     def _cap_of(self, answer: Any) -> int:
         """The output cap of the model that gave ``answer``."""
@@ -1020,18 +1152,39 @@ class ReportComposer:
         citable = list(getattr(self, "_citable", None) or [])
         prose = _PROSE_FIELDS.get(schema, ())
         entries = getattr(self, "_entries", None)
+        answers = getattr(self, "_answers", None)
         try:
-            if not structured_output_supported_for_llm(self.llm):
+            # A call that has to be held under its budget goes by the manual
+            # path, where the hold can be passed with the call.
+            # Under a spend ceiling every call goes by the manual path, where
+            # its held cap is sent with it.
+            if (
+                not structured_output_supported_for_llm(self.llm)
+                or spend_ceiling_set(getattr(self, "token_ledger", None))
+                or self._call_bound(messages)
+            ):
                 raise _StructuredOutputUnavailable
             structured = self.llm.with_structured_output(schema, include_raw=True)
-            result = structured_answer(
-                await retry_on_connection_error(
-                    lambda: structured.ainvoke(messages), what="ReportComposer structured"
-                ),
+            # Taken only with no spend ceiling set, and admitted like every
+            # model call: at its whole cap, the structured path taking none.
+            with admitted(
                 self.token_ledger,
-                agent=REPORTER_AGENT_KEY,
+                kind="report",
+                llm=self.llm,
                 model=self.model_label,
-            )
+                prompt_chars=sum(len(_message_text(message)) for message in messages),
+                cap_tokens=int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0),
+                holdable=False,
+            ):
+                result = structured_answer(
+                    await retry_on_connection_error(
+                        lambda: structured.ainvoke(messages), what="ReportComposer structured"
+                    ),
+                    self.token_ledger,
+                    agent=REPORTER_AGENT_KEY,
+                    model=self.model_label,
+                    call="report section",
+                )
             if isinstance(result, dict):
                 result = schema.model_validate(result)
             if isinstance(result, schema):
@@ -1044,8 +1197,10 @@ class ReportComposer:
                     *section_capability_violations(answer, self._grounding),
                     *citation_violations(answer, citable, prose=prose),
                     *wrong_entry_citations(answer, entries, prose=prose),
+                    *misstated_entry_contents(answer, entries, prose=prose),
                     *technique_name_violations(answer),
                     *repeated_item_violations(answer, _ITEM_IDENTITY.get(schema, {})),
+                    *(unpublished_value_violations(answer, answers) if answers else []),
                 ]
                 for extra in validators or []:
                     found.extend(extra(answer))
@@ -1063,41 +1218,70 @@ class ReportComposer:
         cut_at = 0
         cut_shapes: list[str] = []
         cut_text = ""
+        cut_why = ""
         retry_unfit = False
+        # Why a cut section is not asked again, when it is not: the limit that
+        # held its first call leaves no more room for a second.
+        no_more_room = ""
+
+        from maljan.llm.context_window import output_bound_kwargs
 
         async def _run(turns: list[BaseMessage]) -> Any:
-            nonlocal cut, cut_at, cut_text
-            raw = await retry_on_connection_error(
-                lambda: self.llm.ainvoke(turns), what="ReportComposer raw"
-            )
+            nonlocal cut, cut_at, cut_text, cut_why
+            slot = object()
+            bound, why = self._call_limit(turns, slot=slot)
+            if bound is not None:
+                logger.info(
+                    "ReportComposer: section '%s' output limit on this call: %d — %s.",
+                    section or schema.__name__,
+                    bound,
+                    why,
+                )
+            try:
+                raw = await retry_on_connection_error(
+                    (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
+                    if bound is not None
+                    else (lambda: self.llm.ainvoke(turns)),
+                    what="ReportComposer raw",
+                )
+                # On the ledger before the reservation goes.
+                if self.token_ledger is not None:
+                    try:
+                        from maljan.core.token_ledger import record_response_usage
+
+                        record_response_usage(
+                            self.token_ledger,
+                            raw,
+                            agent=REPORTER_AGENT_KEY,
+                            model=self.model_label,
+                            call="report section",
+                        )
+                        from maljan.pipeline.events import announce_model_fallback
+
+                        announce_model_fallback(
+                            getattr(self, "event_sink", None), raw, agent="reporter", stage="report"
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
+                        logger.debug("ReportComposer: token usage not recorded (%s).", exc)
+            finally:
+                spend_release(getattr(self, "token_ledger", None), slot)
             # Per answer: a retry that closes inside the cap is not a cut one.
-            cut = _reached_the_cap(raw, self._cap_of(raw))
+            held = self._cap_of(raw) if bound is None else min(self._cap_of(raw), bound)
+            cut = _reached_the_cap(raw, held)
             if cut:
-                cut_at = self._cap_of(raw)
+                cut_at = held
                 cut_text = _message_text(raw)
+                cut_why = why if bound is not None and held == bound else self._cap_said(raw)
                 shape = cut_answer_shape(cut_text)
                 cut_shapes.append(shape)
                 logger.warning(
-                    "ReportComposer: section '%s' was cut at its output cap (%d) — %s.",
+                    "ReportComposer: section '%s' was cut at its output cap (%d, %s) — %s.",
                     section or schema.__name__,
                     cut_at,
+                    cut_why,
                     shape,
                 )
-            if self.token_ledger is not None:
-                try:
-                    from maljan.core.token_ledger import record_response_usage
-
-                    record_response_usage(
-                        self.token_ledger, raw, agent=REPORTER_AGENT_KEY, model=self.model_label
-                    )
-                    from maljan.pipeline.events import announce_model_fallback
-
-                    announce_model_fallback(
-                        getattr(self, "event_sink", None), raw, agent="reporter", stage="report"
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
-                    logger.debug("ReportComposer: token usage not recorded (%s).", exc)
             return raw
 
         def _parse(answer: Any) -> Any:
@@ -1150,8 +1334,10 @@ class ReportComposer:
                 *section_capability_violations(payload, self._grounding),
                 *citation_violations(payload, citable, prose=prose),
                 *wrong_entry_citations(payload, entries, prose=prose),
+                *misstated_entry_contents(payload, entries, prose=prose),
                 *technique_name_violations(payload),
                 *repeated_item_violations(payload, _ITEM_IDENTITY.get(schema, {})),
+                *(unpublished_value_violations(payload, answers) if answers else []),
             ]
             for extra in validators or []:
                 found.extend(extra(payload))
@@ -1163,9 +1349,28 @@ class ReportComposer:
             # short turn leave the section's output budget free in the window.
             # Every other question keeps the answer and asks for a fix to it,
             # and is sent as it always was.
-            nonlocal retry_unfit
+            nonlocal retry_unfit, no_more_room
             if not cut:
                 return True
+            if not cut_text.strip():
+                # A cut with no text is the model's reasoning taking the whole
+                # allowance: asked again it needs more room, not a question.
+                # Asked only when the second call would have more.
+                next_bound, _next_why = self._call_limit(turns, preview=True)
+                cap = int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0)
+                next_room = cap if next_bound is None else next_bound
+                if next_room <= cut_at:
+                    no_more_room = (
+                        f"its answer was cut at {cut_at} tokens with no text written (the "
+                        "model's reasoning took the whole allowance), and a second call "
+                        f"would have {next_room} tokens, no more room; the limit was {cut_why}"
+                    )
+                    logger.warning(
+                        "ReportComposer: section '%s' is not asked again: %s.",
+                        section or schema.__name__,
+                        no_more_room,
+                    )
+                    return False
             room = self._room_chars()
             if room is None:
                 return True
@@ -1218,6 +1423,11 @@ class ReportComposer:
                 "y" if retries == 1 else "ies",
                 "; ".join(f"{v.path}: {v.message}" for v in broken),
             )
+            if cut and no_more_room:
+                self._note_degradation(
+                    f"report section '{section or schema.__name__}' is not written: {no_more_room}"
+                )
+                return None
             if cut:
                 # The cap ended the answer, not the model: the schema only
                 # failed because the JSON was cut off. Said as what it was.
@@ -1272,20 +1482,6 @@ class ReportComposer:
         )
         return schema.model_validate(payload)
 
-    def _kept[T](self, section: str, rows: list[T], limit: int) -> list[T]:
-        """The first ``limit`` of a model's list, and a record when that cut any.
-
-        A list the report prints is capped so one runaway answer cannot fill
-        it; a reader is told the cap applied rather than shown a page of the
-        answer as if it were the whole.
-        """
-        if len(rows) > limit:
-            self._note_degradation(
-                f"report section '{section}' was trimmed: the report keeps the first "
-                f"{limit} of the {len(rows)} items the report model wrote"
-            )
-        return list(rows[:limit])
-
     def _note_degradation(self, reason: str) -> None:
         """One sentence about what this report lost, once."""
         if reason not in self.degradations:
@@ -1309,6 +1505,26 @@ class ReportComposer:
         )
         self.validation_tally.record_unresolved(f"composer:{section}", violations, asked=asked)
         record_flagged_statements(getattr(self, "_report", None), violations, asked=asked)
+
+
+def _published_answers(report: MalwareReport) -> Any:
+    """The IOC table's answer for a value (``narrative_agent.published_answers``).
+
+    When the table cannot be read, every value is refused for that reason, so
+    a section naming one is asked once and told the table could not be read.
+    """
+    try:
+        from maljan.reporting.narrative_agent import published_answers
+
+        return published_answers(report)
+    except Exception as exc:  # noqa: BLE001 — every value is then refused
+        logger.debug("ReportComposer: the IOC table was not read (%s).", exc)
+        return _table_not_read
+
+
+def _table_not_read(kind: str, value: str) -> str:
+    """The publish answer for every value when the IOC table could not be read."""
+    return "no: the IOC table could not be read"
 
 
 def _section_declined(payload: Any, schema: type[BaseModel]) -> bool:

@@ -39,7 +39,7 @@ def _analyst(turn_seconds: float) -> tuple[_Analyst, list[float]]:
     analyst._note_budget({"stage": "analysis", "cap": "time"})
     given: list[float] = []
 
-    def _answer(messages: list, timeout: float) -> str:
+    def _answer(messages: list, timeout: float, **_: Any) -> str:
         given.append(timeout)
         return GOOD
 

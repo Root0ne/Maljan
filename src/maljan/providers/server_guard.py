@@ -103,6 +103,7 @@ class ServerGuard:
         call_timeout_seconds: float = 0.0,
         on_open: Callable[[dict[str, Any]], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
+        explicit_call_timeout: bool = False,
     ) -> None:
         self.server = server
         self.failures_to_open = max(1, int(failures_to_open))
@@ -112,7 +113,12 @@ class ServerGuard:
         # grace; a tool the server's own manifest declares a longer budget
         # for gets that one. Zero sends calls with no deadline of their own.
         self.call_timeout_seconds = max(0.0, float(call_timeout_seconds))
+        # Whether the operator set that budget (``mcp.breaker.call_timeout_seconds``)
+        # rather than it being derived. Only an operator's number bounds a
+        # long-running tool.
+        self.explicit_call_timeout = bool(explicit_call_timeout)
         self._declared: dict[str, float] = {}
+        self._long_running: frozenset[str] = frozenset()
         self._on_open = on_open
         self._clock = clock
         self._lock = threading.Lock()
@@ -126,12 +132,21 @@ class ServerGuard:
     def declare(self, tools: dict[str, dict[str, Any]]) -> None:
         """Keep the budgets the server's own ``capabilities`` manifest declares, per tool."""
         declared: dict[str, float] = {}
+        long_running: set[str] = set()
         for name, cell in (tools or {}).items():
             value = cell.get("timeout_s") if isinstance(cell, dict) else None
             if isinstance(value, int | float) and not isinstance(value, bool) and value > 0:
                 declared[str(name)] = float(value)
+            elif isinstance(cell, dict) and cell.get("long_running") is True:
+                long_running.add(str(name))
         with self._lock:
             self._declared = declared
+            self._long_running = frozenset(long_running)
+
+    def long_running(self, tool: str) -> bool:
+        """Whether the server's manifest declares ``tool`` long-running with no wall clock."""
+        with self._lock:
+            return tool in self._long_running
 
     def call_timeout(self, tool: str) -> float | None:
         """How long one call of ``tool`` may take before it is a transport failure, or ``None``.
@@ -143,6 +158,10 @@ class ServerGuard:
         grace is a server that did not answer.
         """
         if self.call_timeout_seconds <= 0:
+            return None
+        if self.long_running(tool) and not self.explicit_call_timeout:
+            # The server runs it with no clock of its own, so a client deadline
+            # would only abandon a call the server is still working on.
             return None
         with self._lock:
             declared = self._declared.get(tool, 0.0)
@@ -286,6 +305,7 @@ def guard_from_settings(
         max_concurrent_calls=int(getattr(breaker, "max_concurrent_calls", 4)),
         call_timeout_seconds=deployment_call_budget(cfg),
         on_open=on_open,
+        explicit_call_timeout=float(getattr(breaker, "call_timeout_seconds", 0.0) or 0.0) > 0,
     )
 
 

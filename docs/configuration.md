@@ -53,7 +53,19 @@ same contract in short form.
 | `AUTH_DISABLED_USER_ID` / `_EMAIL` / `_FULL_NAME` | no | seeded dev admin | Only read when the bypass is on. |
 | `SAMPLES_DIR` | no | `data/samples` | Host directory bind-mounted into the Ghidra container. |
 | `UPLOAD_TEMP_DIR` | no | `data/uploads/.tmp` | Scratch directory for uploads and worker tempfiles. |
-| `GHIDRA_CONTAINER_SAMPLES_PATH` | no | `/data/samples` | Must match the samples bind mount in `docker/docker-compose.yml`. |
+| `GHIDRA_CONTAINER_SAMPLES_PATH` | no | `/data/samples` | The samples directory as the Ghidra container sees it: the path INSIDE the container, the right-hand side of the samples bind mount (`../data/samples:/data/samples` in `docker/docker-compose.yml`). Not the host directory. |
+
+`GHIDRA_CONTAINER_SAMPLES_PATH` is the one path in this table that names a place
+inside another container. The worker copies each sample under `SAMPLES_DIR` on
+its own host and hands Ghidra the same file under this path, so it has to be
+where the Ghidra container sees that directory. The common mistake is setting
+it to the host directory (for example `/home/<user>/Maljan/data/samples`) when
+the worker runs outside Compose: Ghidra then answers every load with
+`File not found`, and the Ghidra agent stops with "Ghidra could not open the
+job's sample". With the shipped Compose file the value is `/data/samples`
+whether or not the worker itself runs in Compose. The worker states the value
+it uses, and whether it came from the environment or the default, in one line
+at start (`Ghidra samples path: ...`).
 
 One warning does not block startup: `COOKIE_SECURE` false outside debug, which
 means the refresh cookie crosses the wire unencrypted unless a trusted proxy
@@ -150,7 +162,9 @@ replaced before the loop cancels it; a share of the loop because the loop is
 what would otherwise cancel a stalled model first. The reporter's list starts
 over before the narrative round, against its 600 s, and again before the
 composer sections, against `core.reporting.composer_per_section_timeout` —
-and every provider's client has a 1800 s request timeout. A 429 or 503 whose
+and every provider's client has a 1800 s request timeout until the model's
+pace is measured, after which each request is sized for its own output cap
+(see *A call waits as long as its answer takes*). A 429 or 503 whose
 `Retry-After` (seconds or an HTTP date) asks for at most thirty seconds is waited out on the same model
 once before the list moves on. Once the list has moved, the model that answered
 stays for the rest of that loop (a stalled first model costs one deadline, not
@@ -173,16 +187,121 @@ the `n_predict` echo of the output cap that llama.cpp reads where it ignores
 `max_completion_tokens`, and `chat_template_kwargs.enable_thinking` — and a
 hosted API answers all three with `400 Unsupported parameter`.
 
+llama.cpp's DRY sampler is a fourth, opt-in: `llm.openai.dry_multiplier`,
+`dry_base`, `dry_allowed_length` and `dry_penalty_last_n` are forwarded in the
+same `extra_body` when set, each on its own, and none is set by default. It
+penalises a token that extends a sequence already repeated in the context.
+
 | Value | What is sent |
 | --- | --- |
 | `auto` (default) | `llama_cpp` when the base URL host is loopback, link-local, `.local` or a private address; `standard` otherwise |
 | `llama_cpp` | the three extras, whatever the host — for a local server reached through a public name |
 | `standard` | OpenAI-standard fields only — for a hosted API, or a local vLLM that validates its body |
+| `deepseek` | DeepSeek's API: the output cap as `max_tokens` as well, and `disable_thinking` as `thinking.type: disabled`; none of the llama.cpp extras |
 
 An endpoint that rejects one of the extras anyway is retried once without them,
 recorded for the rest of the process, and named in a warning that says to set
 this value explicitly. `base_url` unset means api.openai.com, which never
 receives them in any mode.
+
+`deepseek` is a value of its own because no one body serves both APIs. OpenAI's
+clients send the output cap as `max_completion_tokens`, which DeepSeek's chat
+completions ignore (measured: a cap of 5 came back as 88 tokens with thinking
+off and 138 with it on, both ending `stop`); DeepSeek reads `max_tokens`, with
+reasoning counted against it, which OpenAI's own API refuses beside
+`max_completion_tokens` for its reasoning models. Under `auto` a DeepSeek base
+URL is a hosted API like any other, so no cap reaches it: the value is set, not
+guessed from the host. DeepSeek also accepts `chat_template_kwargs` and ignores
+it, so `deepseek` is the only value under which `disable_thinking` reaches it.
+
+A DeepSeek thinking model returns its reasoning as `reasoning_content` beside
+`content`, and on a request that carries tools that reasoning has to be sent
+back on its assistant turn in every later request: DeepSeek's thinking-mode
+guide (https://api-docs.deepseek.com/guides/thinking_mode, on tool calls) says
+the API answers 400 otherwise. The OpenAI client reads it from no answer and
+writes it into no request, so under `deepseek` the provider keeps each turn's
+`reasoning_content` exactly as returned and sends it back on that turn, on
+every request that carries tools. A request without tools is sent without it:
+the guide says it is not needed there and is ignored if sent, so it would only
+be input read for nothing. The answer's `content` is untouched, and a turn sent
+again is sent byte for byte, so the request's front stays what DeepSeek has
+cached. The reasoning sent back counts toward the conversation's size in the
+window budget, and its tokens are in the run's counts (`reasoning_tokens`); its
+text stays with the turn in the loop's conversation and is not published. The
+cap goes out as `max_tokens` on each request, so a cap bound for one call
+reaches DeepSeek as the model's own does.
+
+On every provider the pipeline builds its models from (`openai` under every
+`compat` value and through either OpenAI API, `anthropic`, `gemini` and
+`ollama`), no request sends a tool call without its reply. A turn can hold a
+call no tool ran (its arguments were cut inside a string, so the call stays in
+`invalid_tool_calls`, which the loop's tool node does not run and the OpenAI
+client still writes into the request), and every provider's API refuses a
+history with a call left unanswered: DeepSeek answers 400, the Responses API
+wants a `function_call_output` for every `function_call`, Anthropic wants each
+`tool_use` block answered by a `tool_result` block at the front of the next
+user turn, and Gemini wants as many `functionResponse` parts as the model turn
+has `functionCall` parts. Each request is completed as it is sent, in the
+provider's own message shape (`maljan.llm.tool_replies`): a call with no reply
+anywhere in the conversation gets one saying no reply was recorded (and, for a
+call whose arguments did not parse, that it was not run), and a warning says
+how many.
+
+| Provider | Where the reply goes |
+|---|---|
+| `openai`, chat completions (every `compat`) | a `tool` message after the turn; the turn's tool messages are put in the order of its calls, after DeepSeek's reasoning passback |
+| `openai`, Responses API (a model the client sends there: a `codex` or `pro` model, or `reasoning`, `include`, `text`, `truncation` or `context_management` set) | a `function_call_output` item right after the run of call and output items the call stands in, in call order; a call counts as answered wherever its output stands |
+| `ollama` | the same `tool` message as chat completions, in the shape the Ollama client writes its own |
+| `anthropic` | a `tool_result` block at the front of the next user turn, after the results it already has and before its text; a turn followed by another assistant turn gets a user turn holding only the replies |
+| `gemini` | a tool reply in the conversation before the client serializes it, placed so the turn's `functionResponse` parts come out in call order: Gemini's parts carry no id and pair by name and order. A call counts as answered when any tool reply in the conversation carries its id, the client's own rule, so a request the client already builds right is sent unchanged |
+
+A reply that was recorded is never said missing. Chat completions, Ollama and
+Anthropic pair a call only with the replies right after its turn. A reply
+recorded further on, where it answers no call of the turn it follows, is
+moved to its call when only platform messages (a nudge, a user turn) stand
+between them, and a warning names the calls moved. When a model turn stands
+between them, the reply is not moved: that would put the model's later words
+after a result it had not seen when it wrote them. Nothing is written for that
+call either; it is sent as the client built it, the provider may refuse the
+request, and a warning names the call. Anthropic's client joins every reply
+and user message between two assistant turns into one user turn, so there a
+reply standing elsewhere is always after a model turn and is never moved.
+
+The completion never changes who speaks last in a request: a history that ends
+on the model's turn of calls would end on their replies once completed, so it
+is sent as the client built it, and a warning names the calls left without a
+reply.
+
+The Anthropic, Gemini and Ollama clients do not write a call whose arguments
+did not parse into the request at all, so there it needs no reply; a
+`tool_use` block the turn itself holds is answered like any other, and said
+not run when its input did not parse. The call stays in the turn as the model
+wrote it, a history that is already well formed is sent as it was, and the
+loop's own conversation is not changed. The one model built outside the
+providers, the evaluation harness's frontier comparison arm
+(`core/frontier.py`), is a plain OpenAI client and is not completed.
+
+`llm.openai.compat`, like every `llm.openai` setting, is global: it applies to
+every model built on the `openai` provider, per-agent entries and fallbacks at
+their own endpoints included. Under `deepseek`, an `openai` entry pointing at a
+local llama.cpp server gets DeepSeek's fields and none of the llama.cpp extras,
+so a run that mixes the two keeps its local entries on another provider
+(`ollama`) or runs them under `llama_cpp` in a separate configuration.
+
+### Reasoning effort
+
+`llm.openai.reasoning_effort` is sent as the request's top-level
+`reasoning_effort` field, on every request of every dialect, exactly as written:
+DeepSeek takes `low`, `high` and `max` (its thinking-mode guide,
+https://api-docs.deepseek.com/guides/thinking_mode, maps `xhigh` to `high` and
+`ultra` to `max`), OpenAI's reasoning models `minimal` to `high`. Empty, the
+shipped value, sends nothing and leaves the endpoint's own default (`high` on
+DeepSeek). A value the endpoint does not know is its own 400, and the `llm`
+connection test asks with the value, so it is found there rather than on a
+job's first call. The setting is global, sent to every `openai`-provider model
+including per-agent entries and fallbacks: a per-agent model entry names a
+provider, a model and an endpoint, and carries none of the provider's request
+settings.
 
 ### Setup guides
 
@@ -350,6 +469,43 @@ gate — neither a job nor a save can ask to skip it. It is there for an
 air-gapped batch run, where the endpoint is known good and nobody is at a
 console to press a button.
 
+### A team that needs Ghidra waits for it
+
+A static provider that degrades (r2, a generic MCP server, capa/YARA) costs a
+run some evidence when it is missing, and the run says so. Ghidra does not
+degrade: a static run with no decompiler is a confident report grounded in
+nothing, so the agent that needs it fails the run when it starts — minutes and
+a paid model call after the sample was accepted.
+
+So `POST /api/v1/jobs` asks first, in the same place as the model gate and
+with the same 422 (`apps/api/app/services/provider_readiness.py`). Every agent
+the chosen team can run — its stages' agents and every agent they can ask —
+that opens a static provider is resolved to the provider it would open, as the
+run resolves it: the team's forced provider, the definition's own
+`static_provider`, the job's `static_provider`, or `core.static.provider`.
+Each distinct provider that does not degrade is asked whether it is ready:
+Ghidra over http answers when `GET <url>/mcp/schema` with the configured token
+returns below 400, which loads and analyses nothing. Ghidra over stdio is
+started by the job itself, so what is checked is that `core.static.ghidra.command`
+is set and names an executable the API host finds (by its last path segment in
+the refusal). The check runs where the API runs, on its PATH and filesystem, so for a worker on another host or in another container it says only what the API can see. The shipped transport is `stdio` with no command, so an operator
+who switches Ghidra on without setting `transport` to `http` is told that here
+rather than when the agent starts. The refusal
+names each agent, the provider and its address as scheme and host:
+
+```
+A static provider this team needs is not ready, and a run without it fails when
+that agent starts. Start it, switch it on or correct its address, or choose a
+team that does not need it. agent 'all_tools_reverser_ghidra' needs static provider
+'ghidra' at http://ghidra-mcp:8089, which is not ready: ConnectError: ...
+```
+
+Ghidra switched off (`core.static.ghidra.enabled` false) attaches nothing and
+fails nothing, and it is the shipped default, so it is refused only for an
+agent that was given it by name — by its definition, by the team or by the
+job's `static_provider`. The loud failure inside the run stays; this is a check
+before it.
+
 ### Format routing and the sandbox
 
 No sample is refused for its format. Routing detects the file type from magic
@@ -375,6 +531,17 @@ Each sandbox is asked for the options its format needs:
 - **Hatching Triage.** `sandbox.triage.profile_by_format` maps a file type to a
   VM profile, with `*` as its fallback and `sandbox.triage.profile` behind
   that, so an operator who never touches the map keeps the profile they had.
+  `sandbox.triage.analysis_seconds` is how long the VM runs the sample, sent
+  as the submission's `defaults.timeout`; empty, the default, sends nothing
+  and Triage's own default applies. `sandbox.triage.timeout_seconds`, how long
+  the platform waits for the report, must be longer: the wait covers the run
+  and Triage's processing of it, and settings validation refuses one that is
+  not; no margin for the processing is guessed, so leave room for it. A value
+  the account does not allow is refused by Triage, and the submission error
+  quotes Triage's own words and names the setting. The run summary states the
+  run-time limit Triage set for the task (its behavioural tasks' `timeout` in
+  the overview): a limit, not a measured duration, and never the value that was
+  asked for.
 - **The REST DSL.** `sandbox.rest.submit.submit_fields` is passed through
   verbatim as extra multipart fields, beside the existing `extra_fields`.
   `sandbox.rest.mapping.channels` maps an operator-chosen channel name to a
@@ -732,8 +899,8 @@ and the cap is derived from then on.
 ### A call waits as long as its answer takes at the model's pace
 
 Two calls have an output budget of their own: the judge's verdict
-(`core.llm.judge_max_tokens`, derived from the window by default, under the judge definition's
-timeout — 600 s in the shipped team) and each composer section
+(`core.llm.judge_max_tokens`, derived from the window by default, under the judge's
+own time limit where an operator set one — none by default) and each composer section
 (`core.reporting.composer_section_max_tokens`, under
 `core.reporting.composer_per_section_timeout`, 120 s). A timeout chosen for a
 fast model cuts a slow one off: at 3.8 tokens a second only about 2,280 of the
@@ -745,7 +912,9 @@ which derives each agent's cap in three cases (`context_window.derived_reply`): 
 output is declared — by the probe's model list (`max_output_tokens`,
 `max_completion_tokens`, OpenRouter's `top_provider.max_completion_tokens`) or
 by a vendored `max_output` row, each carrying the vendor page it is documented
-on (gpt-4o and gpt-4o-mini 16,384, gpt-4.1 32,768) — the smaller of that and a
+on (gpt-4o and gpt-4o-mini 16,384, gpt-4.1 32,768, DeepSeek's `deepseek-flash`
+and `deepseek-v4-pro` 393,216, written 384K on DeepSeek's Models & Pricing page)
+— the smaller of that and a
 quarter of the window; for a runtime we run — one that answered the window
 probe as a runtime: llama.cpp `/props`, Ollama `/api/show` or TGI `/info` — a
 quarter of the window, since no API limits its output (a loopback address alone
@@ -756,32 +925,85 @@ window), which a quarter of a hosted model's window is routinely past.
 On a local 32,768-token window that is 8,192; on a local 131,072, 32,768; on
 the shipped gpt-4o, 16,384.
 A window nothing reported derives nothing: the documented fallback of 8,192
-applies and the sentence says the window is unknown. The reply reserve and the
-composer's section budget follow the same rule, bounded by an operator's
-generation cap where one is set. A value above 0 is
+applies and the sentence says the window is unknown. The reply reserve follows
+the same rule, bounded by an operator's generation cap where one is set; the
+report stage has an order of its own, below. A value above 0 is
 the operator's and is used as set; a stored setting keeps its value. Each
 derivation is logged and recorded in `run_summary.generation.output_caps`
 (`{agent: {tokens, derivation}}`), and the judge's is printed beside the
 verdict wait. 0 no longer means unbounded.
 
-A section's budget is not a fixed number. `composer_section_max_tokens` ships
-at **0**, which derives it for each model of the reporter's list the way an
-analyst's reply room is derived: the larger of `llm.expert_max_tokens` and
-`llm.judge_max_tokens` where an operator set them, and the model's declared
-maximum output where there is one, at most a quarter of the
-context window that model serves (learned as the tool-output cap's window is:
-declared, probed, the vendored table, then the fallback). On a 32,768-token
-window that is 8,192 tokens; on a 16,384-token window, 4,096. Reasoning is
-spent inside it. The run summary prints the derivation beside the section's
-wait ("Output budget of `composer:section`: 8192 tokens — the generation cap of
-8192 tokens …, at most a quarter (8192) of the model's 32768-token context
-window (probed) …"). A positive value is the operator's own budget and behaves
-as the fixed value always did, including the reasoning room below. A fixed 900
-tokens dropped a live report's payloads section when the model reasoned past
-it.
+**The report stage writes up to the model's own maximum.** A report is as
+long as its evidence needs, so the report stage — each composer section and
+the narrative round — does not take the analysts' quarter of the window. For
+each model of the reporter's list, in order:
 
-So each of those calls waits
-`max(configured, min(derived, 1800 s))`. Where the model's reading rate is
+1. the operator's value: `composer_section_max_tokens` above 0 for a section
+   (plus the reporter's own cap for reasoning, below), otherwise
+   `llm.judge_max_tokens` above 0 — the reporter runs on the judge role and
+   has always been built with the judge's cap; `llm.expert_max_tokens` is the
+   analysts' and no longer reaches the report stage;
+2. else the model's declared maximum output (the probe's model list, then the
+   vendored `max_output` row);
+3. else the analysts' derivation above: a quarter of the window for a runtime
+   we run, the documented 8,192 for a hosted API that declares nothing.
+
+It is never more than the model's maximum — its declared maximum output, or
+the window it serves when it declares none — and a value held at it says so;
+the reasoning room is inside that bound too. With thinking left on and no
+`llm.judge_max_tokens`, the reasoning room is the model's whole maximum, so
+any positive `composer_section_max_tokens` resolves to the model's maximum.
+On DeepSeek's `deepseek-flash` with nothing set, a section may write 393,216
+tokens, and the 1,048,576-token window leaves the remaining 655,360 for the
+section's evidence.
+
+A section's evidence is sized against the window only when the window was
+learned. The 8,192-token fallback a failed probe leaves is a number printed
+beside the word `fallback`, not a fact: the section's claims and tool answers
+are then shown whole, and its budget is the operator's value, else the
+model's declared maximum, else the documented 8,192. Where the window is
+known, the evidence room is the window less the budget, never below zero,
+and each call is held to what the window leaves after that call's own prompt
+(at three characters a token) when its budget would not fit beside it — a
+hosted API refuses a request whose prompt and `max_tokens` pass the window.
+The call's cap is lowered for that call alone, under the field each server
+reads — `max_completion_tokens` for OpenAI, `max_tokens` for DeepSeek and
+Anthropic, `max_tokens` and `n_predict` in llama.cpp's request extras
+(whether or not the model was built with a cap: the models the container
+builds for a run carry a cap derived from the window and already sent these
+keys, and a model built without one — the function summarizer's, or the
+provider called directly — is now held to the call's cap too),
+`max_output_tokens` for Gemini — and the worker log says so. An Ollama model
+keeps the cap it was built with, since its client takes no per-call cap; a
+model the llama.cpp self-heal rebuilt without the extras is sent the cap only
+as `max_completion_tokens`, which ik_llama.cpp does not read. A prompt larger
+than the whole window is recorded as a degradation: Ollama fits such a prompt
+to `num_ctx` by cutting it from the front, which can drop the system prompt
+and the round's rules, and says nothing. A budget that fills the
+window — a gateway that declares its window as its maximum output, a local
+`llm.judge_max_tokens` at or past the window — so leaves the section no room
+for claims and tool answers. A section whose facts do not fit what the window
+leaves records the degradation "the section's prompt without its claims and
+tool answers … exceeds the … its model's context window leaves after the
+reply", its claims and tool answers are shown as the no-room sentence, and
+the section is still asked.
+
+Every list a section's model writes — flow steps, configuration items,
+commands, flags, C2 channels, citations — is kept whole; no count cuts it.
+
+The narrative round (the executive summary, key findings and recommendations)
+takes the same budget, is held per call the same way, and waits the way a
+composer section does: 600 s until the reporter's pace is measured, then the
+time its budget takes at that pace for each call it may make (its answer, the
+one retry, and the structured attempt where the endpoint supports one).
+Appendix B prints it as `narrative:round`. The worker log prints one line per section ("ReportComposer: section
+'…' output budget: …"), and the run summary prints the derivation beside the
+section's wait ("Output budget of `composer:section`: 393216 tokens — the
+model's declared maximum output of 393216 (the vendored table's
+'deepseek-flash' row, from …)"). A fixed budget dropped a live report's
+section when the model's answer outgrew it.
+
+So each of those calls waits `max(configured, derived)`. Where the model's reading rate is
 measured and the call gives its prompt size (a composer section, the verdict),
 `derived = (prompt_tokens / reading rate + max_tokens / generation rate) × 1.5`;
 otherwise `derived = max_tokens / rate × 1.5` with the rate that includes the
@@ -796,17 +1018,38 @@ rate is lower than the server's and the wait longer). The reading rate is
 Ollama's `prompt_eval_count` over `prompt_eval_duration` or llama.cpp's
 `timings.prompt_n` over `prompt_ms`. The margin, 1.5, covers the spread between
 turns, and the prompt read where it is not timed on its own.
-The ceiling, 1,800 s, is the HTTP request timeout every provider's client is
-built with (`PROVIDER_REQUEST_TIMEOUT_SECONDS`), so no derived wait outlives the
-request carrying it. A configured value above the ceiling is not lowered, but
-the request timeout still ends any single call at 1,800 s. At 3.8 tokens a
-second the judge's budget needs 8,192 / 3.8 × 1.5 ≈ 3,234 s, so the verdict
-call is held at 1,800 s and can receive about 6,840 tokens (3.8 × 1,800) where
-600 s allowed about 2,280. A composer section is its answer and the one retry
-its validation allows, so its wait holds two calls of its output cap. At 3.8
-tokens a second the derived budget of 8,192 tokens on a 32,768-token window
-needs 2 × min(8,192 / 3.8 × 1.5, 1,800) = 3,600 s; an operator's budget of 900
-with the reporter's `disable_thinking` on needs 2 × 900 / 3.8 × 1.5 ≈ 710 s.
+The HTTP request carrying a call is sized the same way. Every provider's
+client is built with a 1,800 s request timeout
+(`PROVIDER_REQUEST_TIMEOUT_SECONDS`; Gemini's was a fixed 90 s and is now the
+same). httpx reads it as the longest silence it waits through, not as a
+deadline for the whole answer, so it ended an answer only on a server that
+sends nothing until it has finished — a non-streaming llama.cpp server, whose
+answers it held to about 1,800 s of generation (a llama.cpp server's
+answer is now read as a stream; see *Loops have no default limit* below). A
+streamed answer, and DeepSeek's, which sends keep-alive lines while it
+generates, were not ended by it. Once the model's pace is measured, an
+OpenAI-compatible (chat
+completions or Responses API), Anthropic or Gemini request whose output cap
+takes longer at that pace than its client allows carries its own timeout, the
+SDK's per-request option: that time, by the same arithmetic and margin, its
+prompt counted at three characters a token. Any other request keeps its
+client's timeout. So no derived wait is held under 1,800 s any more: at 3.8
+tokens a second the judge's 8,192 tokens need 8,192 / 3.8 × 1.5 ≈ 3,234 s and
+get it, where 600 s allowed about 2,280 of them, and a 393,216-token section
+at 40 tokens a second gets 393,216 / 40 × 1.5 ≈ 14,746 s. The Ollama client
+streams every answer, so its 1,800 s bounds the silence between two pieces of
+an answer. The function summariser's wait follows its request's.
+
+These waits have no upper bound of their own. A server that stays connected
+but stops generating, or a call left running on a single-slot llama.cpp
+server after its loop gave up on it, is held for the whole derived time — at
+3.8 tokens a second 32,768 tokens take about 12,900 s — where 1,800 s used to
+release it. The last resort is the analysis job's own arq timeout, 8 hours
+(`job_timeout` in `apps/api/app/worker/analysis_worker.py`). A composer section is its answer and the one retry its validation
+allows, so its wait holds two calls of its output cap: at 3.8 tokens a second
+a budget of 8,192 needs 2 × 8,192 / 3.8 × 1.5 ≈ 6,467 s; an operator's budget
+of 900 with the reporter's `disable_thinking` on needs 2 × 900 / 3.8 × 1.5 ≈
+710 s.
 A fast model's derived time falls under its
 configured one, which then stands. Until a model has answered once, and for a
 call with no output budget, the configured value stands. Rates are kept per
@@ -820,13 +1063,14 @@ holds for the rest of the report stage.
 
 The section budget is also the section's real cap, and a model's reasoning
 counts against it: Ollama's `num_predict` and llama.cpp's `n_predict` include
-the thinking channel. The derived budget already is the model's whole reply
+the thinking channel. The budget at 0 already is the model's whole reply
 room. With an operator's own `composer_section_max_tokens`, where the
 reporter's provider has been told to keep reasoning out
 (`llm.ollama.disable_thinking` or `llm.openai.disable_thinking`), the
 composer's model is capped at that value alone; where it has not, the cap is
-that value plus the reporter's own output cap (`judge_max_tokens`, or derived) for the
-reasoning. Each model of the reporter's list is capped by its
+that value plus the reporter's own output cap (`judge_max_tokens`, else the
+model's declared maximum, else derived) for the reasoning, and the sum is held
+at the model's maximum. Each model of the reporter's list is capped by its
 own provider's switch, and the wait is sized from the largest cap: the platform
 cannot tell a reasoning tag from its name, and sending `think: false` to a
 model that does not reason is an error on Ollama. A section the cap cut is
@@ -842,6 +1086,321 @@ where the server reports one (`prompt_tokens_per_second`, `prompt_tokens`,
 `prompt_seconds`, `prompt_sources`), and for each sized call
 the configured value, the budget, the rate, the derived and the applied
 seconds; the report's Run Summary prints the same numbers.
+
+### Loops have no default limit
+
+No agent loop has a step or time limit unless you set one.
+`core.react_agent_max_steps` and `core.react_agent_timeout` are empty by
+default, the two deprecated `core.react_agent_*_overrides` maps ship empty, no
+built-in agent definition carries `max_steps` or `timeout_seconds`, and an
+ask's `core.agents.delegation_steps` / `delegation_timeout_seconds` are empty
+too. A number you set — on an agent's card, in a map, or deployment-wide — is
+kept to exactly as before. The judge's tool loop reads its budget the same way
+every agent's loop does (`loop_limits("judge")`): the `judge` entries of the
+maps, then the deployment's values.
+
+A loop with no limit ends when its model answers, or at one of the stops that
+are not a count: the repeat guard (a model re-asking for answers it already
+has), the conversation's room (a tool answer that no longer fits the window),
+and the job's spend ceiling below. The arq job timeout is the last resort. A
+loop with no time limit has no clock of its own. Every model request still has
+a whole-call deadline Maljan enforces itself: the request timeout sized in the
+section above (its output cap at the model's measured pace, prompt read
+included), or the client's own timeout — `PROVIDER_REQUEST_TIMEOUT_SECONDS`,
+1,800 s — where nothing is measured. The client's timeout stays as a second
+guard, on silence: httpx reads it as the longest gap it waits through, so a
+server that trickles keep-alive bytes or answers slowly but steadily was held
+by nothing else. A model list gives no turn deadline in such a loop; a
+stalled model is ended at its whole-call deadline, which the list reads as a
+provider failure and moves on from. The run-state block says `budget
+remaining: no step limit, no time limit` rather than a number, and the run
+summary's `budget` rows carry `max_steps` / `timeout_s` as `null`.
+
+Where nothing is measured, the 1,800 s bounds only the silence before the
+first generated piece of an answer. A generated piece is a streamed chunk that
+carries text, reasoning or a tool call; the opening chunk that names only the
+role, and a closing chunk with only a finish reason or usage, are not. Once
+two pieces arrive, the call has a pace of its own, from its first piece to its
+last; the time before the first piece is the prompt read and is never counted
+as generating. Its deadline becomes the time to its first piece and its output
+cap at that pace, times 1.5, wherever that is longer than the deadline it
+started with. A call with no output cap is sized the same way from the room
+its model's window leaves after the prompt, where the window is declared in
+the settings or reported by the server. A call that keeps producing is
+therefore never cut by the unmeasured value, and one that stops is cut when
+the deadline its pace set passes. Where a producing call has nothing to size
+from (one piece so far, or no output cap and no known window), it is held
+only to the silence after its last piece: the provider's request timeout. A
+piece is one chunk, and chunks and generated units differ by a few in either
+direction: a unit a server holds back sends no chunk, and a server may send
+two chunks for one unit; the margin covers the difference.
+
+The pace of a call that is cut, fails or is ended from outside is recorded
+for its model as a generation rate, so a retry is sized from it. A call with
+fewer than two pieces records nothing, and the next call keeps the rule it
+had. On a streamed answer (and Ollama's, which its client streams), the
+connection's own read timeout after pieces have arrived is the same deadline,
+the silence after the last piece, and ends the call as one (a failed turn the
+loop salvages from, not a dropped connection); before the first piece it is
+raised as it always was. The deadline message
+says which rule applied — the model's measured pace, the pace measured in this
+call, silence before the first generated piece, or silence after the last —
+and its numbers.
+
+Pieces are seen only where the answer is streamed. A llama.cpp server's answer
+is read as a stream for this reason, with its usage on the closing chunk and
+`langchain-openai`'s own 120 s gap limit off. The chunks are joined, as they
+arrive and holding none of them, into the
+answer the server would have sent whole: the same text, finish reason,
+`timings` and usage (the last the stream sent, wherever it came, since
+ik_llama.cpp repeats a running total on every chunk), and tool calls read as
+strictly as a whole answer's, so a call cut mid-argument stays an invalid
+call. A server error sent inside the stream is raised as the status error it
+is on a whole answer, and a connection that drops while the answer streams as
+the `APIConnectionError` it is on a whole answer. Ollama's client streams every
+answer. DeepSeek (`compat: deepseek`) is read as a stream too, its reasoning
+kept and sent back, so its calls take the streamed deadline: the pace of the
+call's own pieces, silence before the first piece and after the last. Another
+hosted API's answer is read whole, as before, and its first piece is its whole
+answer, so there the provider's timeout still bounds the call until the model's
+pace is measured.
+
+The other fixed limits were decided one by one: `core.negotiation.max_iterations`
+stays an explicit setting (5), the runaway stop on a negotiation that never
+converges; `core.react_agent_tool_call_budget` only ever logs a warning;
+capa and FLOSS on the analysis server have no wall clock of their own and run
+for as long as their caller asks (the triage pack passes
+`core.static.capa.timeout_seconds` and what is left of
+`core.triage.budget_seconds`), and their manifest declares none and marks them
+`long_running`. A model's call of either is waited for with no client deadline
+unless you set `core.mcp.breaker.call_timeout_seconds`; a timeout or a
+cancellation of such a call is not counted by the breaker; a call the client
+gives up on, or a job that ends, is cancelled at the server, which kills the
+tool's child process with its process group; and a second call of the same
+run (the same tool, sample and arguments) joins the one already going instead
+of starting another child;
+`ANSWER_SHARE`, the share of the window one tool answer is sized from, stays a
+documented derivation constant; the Ghidra sink pre-pass — run for every agent
+whose own static provider is Ghidra, the static analyst, a clone of it and a
+generic agent given Ghidra's tools alike — waits one tool call's
+deployment budget (`core.mcp.breaker.call_timeout_seconds`, derived as that
+row says), or as long as Ghidra takes with none.
+
+**The spend ceiling.** `core.llm.max_spend_usd_per_job` is the most one job may
+spend on its models, in US dollars. It has no default: while it is empty a job
+has no spend ceiling, nothing is priced against one, and no call is held or
+refused for spend. Set it on a paid provider. It is a hard
+bound against the platform's own measure of a prompt — its characters over
+three, the measure the window accounting uses — so nothing is sent that could
+take the job past it by that measure. A prompt that tokenises denser than that
+(long runs of hex or base64) costs more input than was reserved for it, and the
+job can pass the ceiling by that difference; the charged cost is what is
+settled either way.
+
+*What a call costs* is what it was charged. Where the provider reports the
+call's cost in its answer (an OpenRouter-style `cost`), that figure is used and
+no price is read. Otherwise the call's provider-reported usage — the input
+tokens read from the prompt cache, the other input tokens and the output
+tokens, reasoning included — is priced at the rates in force *when its request
+was sent* (every model client stamps its answers with that time), from
+`core.llm.model_prices` first, keyed by the model name the provider serves:
+
+```json
+{"deepseek-v4-pro": {"input_usd_per_mtok": 0.66,
+                     "cached_input_usd_per_mtok": 0.022,
+                     "output_usd_per_mtok": 1.98,
+                     "source": "our contract",
+                     "windows": [{"utc_from": "01:00", "utc_to": "04:00",
+                                  "days": ["mon", "tue", "wed", "thu", "fri"],
+                                  "input_usd_per_mtok": 1.32,
+                                  "cached_input_usd_per_mtok": 0.044,
+                                  "output_usd_per_mtok": 3.96,
+                                  "source": "our contract, peak hours"}]}}
+```
+
+then a `prices` row of the vendored model table
+(`data/model_context_windows_v1.json`), which carries DeepSeek's documented
+prices for `deepseek-flash` and `deepseek-v4-pro` with the page they are
+documented on — data, not a limit. A row's own figures are its price outside
+every window; a window is a span of the day in UTC (its start in it, its end
+not; a window whose end is before its start runs past midnight), on the
+weekdays it names (none is every day), with its own figures and source. The
+vendored rows carry DeepSeek's peak hours, 01:00–04:00 and 06:00–10:00 UTC
+Monday to Friday, at twice the off-peak rate of every other hour. DeepSeek
+also takes Chinese public holidays out of its peak hours, which no window
+names, so a call in a peak window on such a day is counted at the peak rate,
+above what it cost; its page does not say whether a request is timed at its
+start or its end, and the platform times it at its start. A price key keeps a
+model's tag (`qwen3:8b` and `qwen3:32b` are two models); the base name answers
+only where no row names the tag. `run_summary.spend.prices_from` names, per
+model, every rate its calls were priced at, or `provider-reported`. A call
+whose provider reported no usage is counted, and the spend is then said as "at
+least X; N calls reported no usage"; a model that never reports usage cannot
+trip the ceiling, and the log says so once. A model with no price and no
+reported cost is named once in the log and in `run_summary.spend`
+(`unpriced_models`), and its calls are not counted: the figure compared is what
+the job spent at least. Nothing is guessed.
+
+*Before each call* — every model call the platform makes, each tool-loop turn,
+revision, mediation, verdict, report section and function summary — its output
+cap is held to what the spend it may use pays for at its model's output price,
+after its prompt priced as uncached input, both at the highest rate in force
+between now and the call's own deadline — the deadline its caller gives it,
+else the whole-call deadline its request is sent with (so a call sent across a
+window's edge never settles above its reservation). The call is refused only when that is
+below the smallest answer it can give, measured per group: for a tool-loop turn
+the largest turn (reasoning and answer together) this job has measured of that
+model, for any other call the largest single-shot or verdict/report answer
+measured of it, and with none of its group measured the call's own configured
+output cap — there is no fixed floor; a report call's is the answer planned
+for it (below). The judge's mediation turns are held as an analyst's turns
+are: the model is bound to its tools before the loop starts and each turn's
+held cap is set on that binding. A call that cannot be handed a cap of its own
+(a model that takes no output cap per call, the structured technique question
+and mediation extraction) is made only at its whole cap, and the refusal says
+so. A call the ceiling refuses is not sent: a revision leaves
+the analyst's answer in force, the mediator's fast path leaves no reasoning
+(no agreement), the extraction falls back to reading the text, a summary keeps
+the raw text, a report section is recorded as not written, and a verdict the
+ceiling refuses takes the judge node's fallback for a verdict call that fails:
+a conservative Suspicious verdict written by the pipeline, not a model, with
+the run marked degraded and the report saying why. Each hold and each refusal is logged with its numbers and
+listed in `run_summary.spend.held_calls`. Every admitted call reserves its
+worst case — its prompt and its held cap — until it returns and is settled at
+what it was charged, so calls running at the same time never spend the same
+remainder. A tool loop's turn also keeps room for the loop's closing answer:
+it is sent only when what is left after it still pays for the smallest answer.
+
+*The reserve for the verdict and the report.* A job plans its verdict call and
+its report calls (one per section the composer writes, and the narrative
+round) and keeps aside, for each of them, what its admission will demand: its
+prompt as uncached input and the answer planned for it, at the rates in force.
+The reserve is therefore never below what the tail needs to be made, and it is
+sized from this job's own calls rather than from the window, with no fixed
+fraction:
+
+- a planned call's prompt is the prompt it will be sent: the largest prompt of
+  its own kind once one was sent; before that the largest single-shot prompt
+  this job has sent (a revision's prompt carries the same reports), else the
+  largest opening prompt of a conversation (a tool loop's first turn); each
+  bounded by what the window accounting allows that kind of call (its model's
+  window less its report-stage output budget). The allowance alone is used only
+  while no prompt has been sent at all. A tool loop's conversation is never
+  used;
+- the verdict's answer is what its admission demands: its configured cap until
+  a single-shot answer is measured, then the largest such answer;
+- a report call's answer is the mean answer of the report calls measured of
+  its model once one returned, and before that the mean answer of the model's
+  other single-shot calls (the verdict's is left out, so the verdict does not
+  move the report's plan), else its largest tool-loop turn. It is also the
+  smallest answer a report call's admission demands, so what is kept for a
+  report call is what makes it. With no answer measured the reserve is not
+  sized;
+- each kind also keeps its validation retries (the correction turn a
+  validation loop sends when an answer breaks a rule): one per planned call
+  until a call of the kind is made, then `(retries + 1) / (calls + 1)` of this
+  job's own count for the kind, so a call whose retry has not been asked yet
+  is never planned without one. A retry is planned with the answer it corrects
+  in its prompt. The rows say how many retries are kept and from what
+  (`retries`, `retries_from`, `retry_prompt_tokens`).
+
+*Before anything is measured the reserve is at its largest.* Until a
+single-shot answer has been measured, the verdict is kept at its whole
+configured output cap, and until a verdict call has been made, with one retry
+at that cap as well: the verdict's cap is kept twice. On `deepseek-flash`
+(a 393,216-token cap) that is about 0.47 USD at the off-peak rate and about
+0.94 USD at the peak rate, before any report call is counted. Early tool-loop
+turns spend only above it, so under a low ceiling at peak rates the first
+turns are held short or refused until the first single-shot answer (a
+revision, a chunk) is measured; the reserve then shrinks to what this job's
+calls measure. A ceiling well above twice the verdict's cap at peak rates, or
+an operator-set `llm.judge_max_tokens` that caps the verdict, avoids it. With
+no ceiling none of this applies.
+
+Each row of `run_summary.spend.reserve` also states its expected charge
+(`expected_usd`): the first call of a kind with its prompt uncached, and the
+ones after it, which share its prefix, at this job's cache-hit share for the
+model — cached input tokens over input tokens, measured only over calls that
+were not the first of their conversation (a tool loop's turns after its
+first), since a conversation's first call has nothing cached to read — and at
+the model's cached rate while no such share is measured. The reserve does not
+count on that share, because each call's admission prices its prompt uncached.
+Tool-loop turns, revisions, negotiation rounds, asks and summaries spend only
+above the whole reserve; a verdict or report call spends above the reserve of
+the planned calls after it, so the verdict cannot take the report's share and
+an unplanned retry spends only what is left above the plan.
+`run_summary.spend.reserve` shows the derivation, row by row, as it stood when
+the summary was written.
+
+*A refusal is not exhaustion.* A call that does not fit only because other
+calls in flight hold their worst case — a parallel analyst's turn held to what
+was left — waits for them to settle, since they usually settle far below what
+they reserved, for as long as its own deadline allows. A call the ceiling
+refuses is not sent, its refusal is logged with its numbers and counted
+(`run_summary.spend.refused_calls`), and its caller takes its salvage path: a
+tool loop whose next turn is refused ends its tool phase and its agent writes
+its answer from what it gathered, and the budget record says which call was
+refused. The job goes on while a call of any kind made since the latest stage
+began — each at the smallest prompt it was sent with, with its own cap — would
+still be admitted: a mediation turn refused at its whole cap does not stop the
+revisions after it. A refusal made while other calls are in flight never
+exhausts the spend; the question is asked again once none is. The spend is
+*exhausted* when the ceiling is reached, or when, with no call in flight, a
+refusal leaves nothing else that fits. From then on every
+gate reads it, `run_summary.spend` says `exhausted` with when and why, no
+further negotiation round, chunk or tool loop is started, an ask is refused,
+every running tool loop ends its tool phase and its agent writes its answer
+from what it gathered, and only the verdict, the report and a loop's closing
+answer are made, each where it fits. A revision that is not made leaves the
+analyst's answer in force standing. A report section whose call is refused is
+recorded as not written, with the refusal's numbers. The run summary's
+degradation reasons say the ceiling ended the tool phases.
+
+A report section's call is held to the smallest of three limits, and the log
+line for the call names the one that applied: the section's output budget
+(and how it was derived), what the model's window leaves after the prompt, or
+the spend ceiling's hold. A section whose answer is cut at that limit with no
+text written — a reasoning model that spent the whole allowance thinking — is
+asked again only when the second call would have more room; otherwise it is
+recorded as not written, with the limit and where it came from. The platform
+does not lower a model's reasoning effort to make an answer fit.
+
+**What the judge and the pack are shown.** The judge's verdict prompt and its
+technique question show every analyst's report, the evidence summary (every
+technique and every source), the negotiation history and each remembered
+case's summary whole when the judge's window, less its output cap, holds them.
+When it does not, the largest parts are shortened first to one shared width,
+each ending in `…`, the prompt says which parts and to what width, and the run
+records it as a degradation reason. The triage pack is rendered whole when it
+fits its room (the upstream bound, `core.reporting.upstream_findings_max_chars`,
+derived from the window by default); when it does not, the detail every line
+shows — names listed, characters of a text, decoded strings and detection
+labels — is derived from that room, the most at which the pack fits, and each
+line says what it left out and that the rest is a tool call away.
+
+**An analyst's input.** `core.max_token_limit` (was 128,000 tokens) is
+empty by default: an analyst's input text may take the room its window holds
+before the reply, less the system prompt, the pack and the run-state block
+around it. With no window learned the input goes whole; a number you set wins.
+Input over the room is shortened as a document — a JSON input keeps every key
+and loses elements off its largest lists, text keeps its head and ends in
+`…` — the text the model reads begins with a note saying so, and the run
+records a degradation reason ("The static analyst's input was shortened: …").
+The function summariser's prompts are held to the same window room and say
+when they were shortened; the PE loader's markdown lists every import, export
+and string, and the generic MCP provider's prompt names every tool.
+
+**What the report leaves out, it says.** The markdown report keeps its layout
+bounds — a long table value is cut to fit the page, a long list shows its
+first rows — and every one now says what it left out and where the whole is:
+a cut value ends in `…` and the methodology appendix says the JSON report and
+the evidence ledger carry it whole; a list shown in part ends with "N more …
+not shown here; the JSON report carries every one." The evidence sections do
+the same ("N more rows not shown here; the evidence endpoint carries every one
+under ev_…", a long text "Cut here at … characters"), a figure's legend counts
+what it did not draw, a drafted YARA or Suricata rule says in a comment how
+many published indicators it does not match on, and the STIX export carries
+every process root.
 
 ### The evidence budget
 
@@ -917,7 +1476,12 @@ with `uv sync --extra tools` (the backend image already does); without them
 `apk_info` falls back to the zip-level facts and `macho_info`, the OLE2 half of
 `document_info` and the 7z half of `archive_list` answer
 `{"error": "<module> is not installed"}`. Nothing else changes, and the server
-starts either way.
+starts either way. With androguard installed, an APK whose manifest it cannot
+parse still gets the zip-level facts: each fact androguard could not read is
+answered as `no: <reason>` (the manifest could not be parsed, with the
+exception's type only), and the answer's `degraded` note names them. A dex
+file androguard's reader refuses is listed under `dex_strings_unread`, beside
+the strings of the files it read.
 
 `floss`, the emulating string decoder, runs FLOSS (Apache-2.0) as FLARE's
 pinned standalone Linux build, v3.1.1 (zip sha256
@@ -961,6 +1525,35 @@ in the analysts' own attach path, so they apply to a custom team too:
 `static_provider` overrides every member's provider at once. A single stage can
 withhold every built-in server from its own agents with
 `builtin_tools: false`, which stacks on top of whatever the team excludes.
+
+### Where r2mcp is looked for
+
+`core.static.r2.binary_path` defaults to the bare name `r2mcp`. `r2pm -ci
+r2mcp` installs it under radare2's own prefix and does not touch PATH, so the
+provider resolves the name when it starts: a value with a directory in it is
+used as it is; a bare name is looked up on the worker's PATH, then in
+`$R2PM_BINDIR`, `$R2PM_PREFIX/bin` and `radare2/prefix/bin` under the user's
+data directory (`$XDG_DATA_HOME`, else `~/.local/share`) — where r2pm puts it.
+Nothing past those is guessed. Not found, r2 degrades as it always has: the
+run goes on without it, the log names every place looked, and the run summary
+carries `static provider 'r2' unavailable: …` with the remedy (install it with
+`r2pm -ci r2mcp`, or set `binary_path` to the executable's absolute path). The
+connection test resolves the same way and names the same places.
+
+### Running Ghidra lighter
+
+The `ghidra-mcp` service reads three variables from `docker/.env`, each
+defaulting to the value it has always had: `GHIDRA_JAVA_OPTS` (the JVM's
+options, `-Xmx4g -XX:+UseG1GC`), `GHIDRA_MEM_LIMIT` (the container's memory
+and swap limit together, `6g`) and `GHIDRA_RESTART` (`unless-stopped`). Keep
+the memory limit about 2g above the heap: Ghidra's database is memory-mapped
+and its direct buffers live outside the heap. A host short of memory runs it
+with `GHIDRA_JAVA_OPTS="-Xmx2g -XX:+UseG1GC"` and `GHIDRA_MEM_LIMIT=4g`, and
+`GHIDRA_RESTART=no` keeps a stopped container stopped across a reboot, for a
+host that starts Ghidra only for the runs that need it
+(`docker compose -f docker/docker-compose.yml up -d ghidra-mcp`, then `stop`).
+A binary larger than the lighter heap can analyse fails its Ghidra calls
+rather than the host.
 
 ### VirusTotal's own MCP server
 
@@ -1043,10 +1636,63 @@ pipeline → Teams) is an ordered list of stages. Each stage is:
 | `agents` | Definition keys this stage runs. Empty on a triage or debate stage. |
 | `depends_on` | Earlier stage keys this one runs after. |
 | `when` | Condition deciding whether it runs. Empty means always. |
-| `mode` | `sequential` (default) or `parallel`, for an analysis stage. |
+| `mode` | `parallel` or `sequential`, for an analysis stage. Unset (the default), the stage follows the job's analyst mode (below). |
 | `inject_upstream` | `none`, `findings` (default) or `full`. |
 | `debate` | Round limit, consensus threshold and sycophancy check, for a debate stage. |
 | `builtin_tools` | `false` withholds every built-in server (`analysis`, `knowledge`, `network`, `threatintel`, `virustotal`) from this stage's agents. |
+
+### How an analysis stage runs its agents
+
+`core.llm.parallel_analysts` is `auto` (the default), `true` or `false`. It
+decides how the agents of every analysis stage whose own `mode` is unset run —
+all at once, or one after another. A stage whose `mode` is set keeps it,
+whatever this key says. A debate's revision round runs the way the stages it
+revises run: in parallel only when every one of them does.
+
+- `true` always runs them in parallel; `false` always runs them one after
+  another.
+- `auto` is decided per job from the endpoints of the models the analysts call
+  (every model an analyst may call, its fallbacks included):
+  - a model served by Ollama is a runtime on one machine, taken to serve one
+    request at a time;
+  - an OpenAI-compatible endpoint's host is resolved. A loopback, private,
+    link-local or shared-range (`100.64.0.0/10`) address — written as one, or
+    what the name resolves to (a compose service name, a Tailscale name) — and
+    a name only a local resolver answers (`localhost`, `*.local`,
+    `*.internal`, `host.docker.internal`, `host.containers.internal`) is a
+    local server. Its `/props` is asked for `total_slots` (the request the
+    context-window probe makes anyway): more than one slot runs the analysts
+    in parallel; one slot, or no answer, one after another;
+  - a host that resolves only to public addresses is a hosted API and runs
+    them in parallel, unless its `/props` reports exactly one slot;
+  - a host that does not resolve runs them one after another: it could not be
+    told whether the endpoint is hosted;
+  - the Anthropic and Gemini APIs are hosted.
+
+  One model taken to serve one request at a time makes the whole job
+  sequential, because concurrent analysts on a single-slot server clobber
+  each other's per-slot state and every step re-processes its prompt. The
+  worker resolves the mode on a thread before it builds the job. A mock job
+  runs its analysts one after another.
+
+The job logs the mode and the fact that decided it (`Analysts run in parallel
+by default for this job: …`), then one line per analysis stage and per
+revision round saying what it runs in and why: set on the stage, the job's
+mode, a debate hands over to it (an unset stage a debate hands over to stays
+one node, because a parallel stage of two agents is two nodes), or the mode of
+the stages it revises. `run_summary.profile.analyst_mode` carries `mode`,
+`setting` and `reason`, and `stages`: `{stage, round, mode, from}` per
+analysis stage (`round: analysis`) and per debate (`round: revision`).
+
+A stored `true` or `false` (a JSON boolean) keeps its meaning. Stages used to
+be written with `sequential` whether or not anybody chose it; the database
+revision `20261002000000` takes that word off every analysis stage, so the
+stage follows the job, except where `core.llm.parallel_analysts` is stored
+`true` (there a `sequential` stage was running one after another while the key
+said parallel, and it is left as written). It logs each team and stage it
+rewrote at WARNING. A team still derived from its analyst list is rebuilt from
+the key on every load and is not touched. Pick `sequential` on a stage card to
+pin a stage.
 
 ### Checking a team before it is saved
 
@@ -1148,6 +1794,14 @@ the sample's own domain and another tactic must beat the claimed id before it
 is questioned). The measurement behind the default off is in *The technique
 check* in [architecture.md](architecture.md).
 
+`validation.claim_repeat_margin` (empty) is how many claims an analyst's
+answer may write again before it is asked once for a whole answer
+(`isr.claims_repeated`), with the answer shown back up to its first repeated
+claim. Empty derives the margin from the answer itself: the number of distinct
+claims it wrote. A whole answer that does not repeat replaces the repeating
+one; otherwise the answer stands as written. On a streamed path (llama.cpp,
+Ollama, DeepSeek) the same margin ends the answer while it streams.
+
 `mobile` and `deep_static` are built from three seeded generic agent
 definitions — `triage`, `android_static` and `reverser` — whose prompts live in
 `src/maljan/agents/prompts/`. A generic agent has no class: it is a definition,
@@ -1183,6 +1837,81 @@ without the decompiler.
 Like every built-in team, all five are editable only in their debate options,
 their `builtin_tools` switches and `exclude_servers`. Everything else means
 cloning the team, which the console does in one click.
+
+The reverser is handed addresses to start from. The triage pack every agent
+reads names each decoded string with the routine that produced it and its call
+site, and each capa rule with the places it matched, all as offsets from the
+image base; the seeded prompt tells it to go there first, to confirm or refute
+each upstream finding at function level, and then to look for what only
+reading the code shows: command dispatch, environment checks, persistence and
+cleanup, the logic that decides when and how it contacts a remote host, and
+the routines that decode its data. An agent on Ghidra — the reverser given
+`static_provider: "ghidra"` included — also gets the sink-reachability
+pre-pass's priority functions on its first turn, and the sample is mirrored for
+its provider even when that is not the deployment's global one.
+
+### An all-tools team
+
+`docs/examples/profiles/all-tools.json` is a team to import rather than one
+that ships: the triage pack and `triage`; one `static` stage of three analysts
+on three tools — `static` (the analysis, knowledge and VirusTotal servers, on
+the global provider), `all_tools_static_r2` (`static_provider: "r2"` with the analysis
+and knowledge servers) and `all_tools_qu1cksc0pe` (a generic agent on the
+`qu1cksc0pe` server); `reversing` with `all_tools_reverser_ghidra`, the seeded reverser
+prompt on `static_provider: "ghidra"`; `dynamic` when there is a sandbox
+report; `network` when there is a capture or a sandbox report; then `debate`,
+`verdict` and `report`. The later stages depend on every earlier analysis
+stage and read their findings (`inject_upstream: findings`).
+
+It is a settings import document (`maljan-settings/1`) holding
+`core.agents.definitions` and `core.agents.profiles`. Each of those is one
+setting holding a whole map, and an import replaces what it names, so merge the
+document into your own export first. The document's keys are all `all_tools_*`
+(the team is `all_tools`), so it adds entries and replaces none of yours:
+
+```bash
+curl -s http://localhost:8000/api/v1/settings/export \
+  -H "Authorization: Bearer $TOKEN" > current.json
+jq -s '{format: "maljan-settings/1", values: {
+  "core.agents.definitions": ((.[0].values["core.agents.definitions"] // {})
+                              + .[1].values["core.agents.definitions"]),
+  "core.agents.profiles":    ((.[0].values["core.agents.profiles"] // {})
+                              + .[1].values["core.agents.profiles"])}}' \
+  current.json docs/examples/profiles/all-tools.json > merged.json
+curl -s -X POST http://localhost:8000/api/v1/settings/import \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d @merged.json
+```
+
+What the team needs besides the document: an enabled `qu1cksc0pe` entry under
+`core.mcp.servers` (the import refuses a reference to a server that does not
+exist); Ghidra with `core.static.ghidra.enabled` true, `transport` set to
+`http` explicitly (its shipped value is `stdio`), `url` the address the worker
+reaches it at — `http://localhost:8089` for a worker on the host,
+`http://ghidra-mcp:8089` for one inside the compose network — and `auth_token`
+the container's `GHIDRA_MCP_AUTH_TOKEN` (see *A team that needs Ghidra waits
+for it* above); `core.static.r2.enabled` on and r2mcp findable by the worker —
+setting `core.static.r2.binary_path` to its absolute path is the sure way, since
+where r2pm put it depends on the environment r2pm ran in (see *Where r2mcp is
+looked for*; switched off or not found, r2 attaches nothing and the clone runs
+on its two servers alone); and, so that each static analyst reads a
+tool of its own, `core.static.provider` set to `none` — with the global
+provider on Ghidra the `static` analyst opens Ghidra as well. Run it by naming it on the job (`{"config": {"profile":
+"all_tools"}}`) or by making it `core.agents.profile`. A test
+(`tests/api/test_the_all_tools_team_document.py`) loads the document through
+the import's validation and resolves every agent against stub servers.
+
+### What a clone is given when it names no tools
+
+A definition that is not a built-in and has no `tools` key takes the tool list
+of its role's seed: a clone written as `{"role": "static", "static_provider":
+"r2"}` — by a script, an import or a hand-edited export — keeps the analysis,
+knowledge and VirusTotal servers the `static` seed reads, as a clone the
+console copies does. A `tools` key that is present is the operator's, and an
+empty list means no server at all. The roles with a seed of their own are
+`static`, `dynamic`, `network`, `report` and `lead`; a `generic` definition
+has none to inherit and keeps what it wrote. The settings API stores the list
+it resolved, so what the console shows is what the run reads.
 
 ### Delegation
 
@@ -1223,33 +1952,32 @@ specialist asking another is depth 2, and an ask that would go deeper is
 refused with a message the model reads. It bounds the nesting, never the
 number of asks.
 
-`agents.delegation_steps` (12) and `agents.delegation_timeout_seconds` (300)
-are what one ask gets. They are the delegation's own budget, not a share of
-the caller's: an ask carries them whole, whatever the caller has spent, and
-the caller's own step budget is not reduced by what its specialists do. The
-one thing the two really share is the wall clock — the caller waits inside its
-own timeout — so an ask is cut to what the caller has left, and an ask is
-refused only when that is below the floor a first model turn needs. A callee
-that reaches its step cap writes up what it gathered, the way an analyst at
-its own cap does.
+`agents.delegation_steps` and `agents.delegation_timeout_seconds` are what
+one ask gets, and both are empty — no limit — unless you set them. They are
+the delegation's own budget, not a share of the caller's: an ask carries them
+whole, whatever the caller has spent, and the caller's own step budget is not
+reduced by what its specialists do. The one thing the two really share is the
+wall clock: where the caller's loop has a time limit, the caller waits inside
+it, so an ask is cut to what the caller has left and refused only when that is
+below the floor a first model turn needs. A caller with no time limit waits
+for a busy callee until it frees up, unless that callee is itself waiting on
+the caller, which is refused in words the model reads. A callee that reaches a
+step limit writes up what it gathered, the way an analyst at its own does.
 
-That makes the caller's stage timeout the thing that decides how many asks fit
-in one loop: the seeded `lead` carries `timeout_seconds: 1800` and
-`max_steps: 40` on its own definition, which is room for six asks and
-the turns to weigh them — 1800 s over the default 300 s per ask, and two steps
-per ask. A budget is part of the definition, so a clone of a team carries the
-budget its agents need; the console draws the two as **Steps per loop** and
-**Seconds per loop** on the agent's card, and a blank box inherits the
-deployment's `react_agent_max_steps` / `react_agent_timeout`. The two
-`react_agent_*_overrides` maps are deprecated and are deleted in the release
-after the next promotion to main: until then they are still read for an
-agent whose definition sets neither, so a deployment that configured a budget
-there keeps it, and a definition's own value wins over them. A map entry that
-is not a whole number of at least one is dropped with a warning when the
-settings are built, the same bound the definition's own fields carry.
-The `ask_<key>` tool's description gives the model the same number,
-computed by `delegation._asks_that_fit` from the caller's own timeout rather
-than written down twice. See *Delegation* in [architecture.md](architecture.md) for
+A budget is part of the definition, so a clone of a team carries the budget
+its agents need; the console draws the two as **Steps per loop** and **Seconds
+per loop** on the agent's card, and a blank box inherits the deployment's
+`react_agent_max_steps` / `react_agent_timeout` — both empty, no limit, by
+default. No built-in definition carries a budget: the seeded `lead` has none
+either. The `ask_<key>` tool's description says what an ask gets ("no step
+limit and no time limit of its own", or the numbers you set) and, where both
+the caller and the ask have a time limit, how many asks fit
+(`delegation._asks_that_fit`). The two `react_agent_*_overrides` maps are
+deprecated and operator-only: they ship empty, and an entry you write is still
+read for an agent whose definition sets neither, before the deployment's
+value; a definition's own value wins over them. A map entry that is not a
+whole number of at least one is dropped with a warning when the settings are
+built, the same bound the definition's own fields carry. See *Delegation* in [architecture.md](architecture.md) for
 what the ledger and the transcript record.
 
 ### A name a later release takes
@@ -1267,6 +1995,14 @@ entry under `llm.agents`, each server's `agents` binding and both
 `react_*_overrides` maps. The rename is logged once at warning level, and
 `alembic upgrade head` writes it into the stored document so the console shows
 the new name rather than renaming the same document on every read.
+
+A seeded definition whose prompt a later release rewrote is not such an entry.
+A save stores the whole definition map, seeds included, so a database holds
+each seeded row with the prompt it had on the day of its last save; a prompt
+the seed itself shipped with before (`FORMER_SEED_PROMPT_DIGESTS` in
+`maljan.core.config`, by SHA-256 of the exact text) is read as the seed's, and
+the row loads as the seed rather than being renamed. A release that rewrites a
+seeded prompt adds the one it replaced to that list.
 
 This applies only to names a release newly reserved. `static`, `dynamic`,
 `network`, `judge`, `reporter`, `default` and `measurement` have been reserved
@@ -1286,12 +2022,15 @@ conditional edge, and a conditional edge has one destination per branch, so a
 debate may not feed two stages — and may not feed a parallel analysis stage
 with more than one agent, which is two nodes even though it is one stage. A
 sequential stage of any size is one node and is fine. This is refused when the
-team is saved, not when the first job builds its graph.
+team is saved, not when the first job builds its graph. A stage with no mode of
+its own is one node when the team is checked, and runs one after another
+wherever a debate hands over to it, whatever the job's analyst mode.
 
 A team stored as a plain list of analysts — every team written before stages
 existed — is read as the four stages that list has always meant: `analysis`
-(those analysts, in `llm.parallel_analysts`' mode) → `debate` (with the round
-limit and threshold from `negotiation.*`) → `verdict` (the judge) → `report`
+(those analysts, in the mode `llm.parallel_analysts` gives — unset on `auto`, so
+the job decides) → `debate` (with the round limit and threshold from
+`negotiation.*`) → `verdict` (the judge) → `report`
 (the reporter). The stored `analysts` list is kept alongside the stages it
 produced; the model reads the stages.
 
@@ -1309,11 +2048,132 @@ day when parallel was on. The console clears the mark on the first stage edit
 
 ### Long agent keys in the conversation
 
-An agent key is a slug of at most 32 characters. Keep it well under that, for
-one reason: everything the live feed publishes as prose is scrubbed by the
-publisher, and a run of 24 or more letters, digits, `_` and `-` is the shape a
-credential has. A key that long is redacted to `***` **inside a sentence** —
-`"windows_pe_static_analyst failed"` reaches a reader as `"*** failed"`.
+An agent key is a slug of at most 32 characters. Everything the live feed
+publishes as prose is scrubbed by the publisher, and a run of 24 or more
+letters, digits, `_` and `-` is the shape a credential has. A run made of words
+— two or more pieces split on `_`, `-` or `/`, each only letters written the
+way a word is (all lower case, all capitals, or one capital in front) and each
+shorter than 24 — is read as words and travels whole:
+`"windows_pe_static_reverse_engineer failed"` reaches a reader as written. A
+key of 24 or more characters with a digit in one of its pieces does not have
+that shape and is redacted to `***` **inside a sentence** —
+`"windows_pe_static_analyst2 failed"` reaches a reader as `"*** failed"`.
+
+What the word rule costs, stated: no shape tells a passphrase
+(`three-plain-words-together`) from a hyphenated phrase, nor a letters-only
+grouped code (a base32 recovery code, a product key in letter groups) from
+words in capitals, so a secret of that shape is published as written unless
+something else catches it. Two things do. A run that begins with a known
+vendor prefix (`glpat-`, `xoxp-`, `xoxb-`, `xapp-`, `ghs_`, `ghp_`, `gho_`,
+`github_pat_`, `hf_`, `rk_live_`, `sk_live_`, `pk_live_`, `npm_`, `gocspx-` and
+the rest of `events._PREFIXED_KEY_FORMATS`) with at least 20 characters after
+it is a key whatever its body reads like. Mailgun's `key-` begins ordinary
+phrases, so a `key-` run is a key only when its body is not words: a 32-hex
+body is masked, `key-derivation-function-parameters` is not. And every secret
+value the platform holds is masked by exact value wherever the scrub runs,
+whatever its shape (`events.remember_secret_values`, filled from
+`settings_catalog.configured_secret_values`):
+
+- what is collected is a secret *value*: a `SecretStr` or a setting the
+  catalogue marks secret, the password inside a service URL, and an entry of a
+  mapping (a tool server's `env` or headers, the REST sandbox's
+  `submit_fields` and `extra_fields`) whose key's last word names a credential
+  — `password`, `passwd`, `passphrase`, `pass`, `secret`, `key`,
+  `apikey`, `token`, `pat`, `credential(s)`, `authorization`, `bearer`,
+  optionally followed by `value` (`VT_API_KEY`, `DB_PASSWORD`, `GITLAB_PAT`). A
+  key ending in anything else is a setting about a credential and is not read
+  (`AUTH_MODE`, `TOKEN_TTL`, `PASSWORD_POLICY`, `SECRET_MANAGER`, and `PWD`,
+  the shell's working directory); nor is a
+  value that is all digits or a switch word (true, false, yes, no, on, off,
+  none, null), nor the REST sandbox's JSONPath maps (`field_names`,
+  `channels`). `SECRET_KEY_BASE` is missed by this rule, which costs less than
+  masking a setting's word in every report;
+- a value is masked only where no letter, digit or underscore touches it —
+  the end of an escape sequence (`\n`, `\t`, `\u00a0`) in JSON text counts
+  as a boundary: `minioadmin` configured leaves `minioadministrator` as
+  written, and a passphrase after `\n` in a tool answer is masked;
+- the values are held per scope, and a scope registered again replaces what it
+  held. The worker registers its own database, Redis and object-store
+  credentials and its starting settings under `process` when it starts, and
+  each job's settings under `job` when the job installs them, so a secret
+  removed from the settings is not masked in the next job. The command line
+  registers its settings when it builds the app (`app`); the worker's app
+  leaves that to the job's registration;
+- a configured value shorter than 8 characters is not masked by value, because
+  masking it everywhere would take the word it spells out of every sentence.
+
+A secret the platform does not hold — one a sample carries, or one a tool
+answer quotes from elsewhere — of passphrase shape is the remaining cost.
+
+A Windows function name is a name, not a key, though a long one has the
+length rule's shape (`ZwSetInformationJobObject`, `InternetGetSecurityInfoByURL`).
+So are hash-algorithm ids joined by a slash (`ror13_module_add/fnv1a32_lower`).
+
+Three sets of names travel as written:
+
+- every name the vendored export-name catalogue
+  (`data/windows_export_names_v1.json`) holds;
+- every hash-algorithm id of the vendored algorithm catalogue
+  (`data/api_hash_algorithms_v1.json`);
+- every name this job's hash resolution read. The resolution is the pack's
+  `resolve_api_hashes` call or the analysis server's tool; another server's
+  tool of that name adds nothing. A name is taken only when it is an
+  identifier with both cases in it, and the set is forgotten when the next job
+  installs its settings.
+
+A name travels alone, or joined to other such names by `/`, `|`, `+` or `&`. A
+module in front of a name (`kernel32.dll!Name`) is split off at the `!`, so the
+module and the name are read apart.
+
+A key is still a key:
+
+- after a module and a `!`;
+- joined to any text by `/`, `|`, `+` or `&`, or with a token inside the run:
+  the key is masked together with the whole stretch of base64 and base64url
+  characters (`A-Za-z0-9+/_-`) around it, so none of its fragments travels. Any
+  other character (a dot, `%`, `|`, `&`, `!`, `:`, a space) ends the stretch:
+  `example.com/gate/<key>/x.php` reads `example.***.php`, and
+  `host.example|<key>|x.php` reads `host.example|***|x.php`;
+- followed by base64 padding: the stretch of base64 characters the run ends
+  with, when it is 24 characters or more and no name the scrub keeps, is
+  masked, even when the key's own `/` and `+` cut it into short fragments or it
+  begins with a slash as a path does. Padding is one or two `=` followed by the
+  end of the text or by a character no value starts with: whitespace, a closing
+  quote, bracket, brace or tag, `,`, `;`, `:`, `.`, or a joiner (`/`, `|`, `+`,
+  `&`, `!`). One or two `=` followed by anything else (a letter, a digit, `-`,
+  `_`, an opening quote) are an assignment, not padding, unless the stretch and
+  its `=` signs together are a multiple of 4 characters long, as a base64
+  value is;
+- after a word, in the shape of a MIME type. Only a registered top-level type
+  (`application`, `text`, `image` and the rest, or an `x-` type) with a
+  subtype that is no key is kept as a MIME type;
+- after a vendor prefix, which is still asked first;
+- as a configured value, which is still masked by value before any rule is
+  read.
+
+None of these sets lets a credential through. Two costs follow from
+masking the stretch, and both are accepted, because the events and the
+transcript are not what the analysts read and a key fragment costs more than a
+directory name:
+
+- the readable text in the same stretch as a key is masked with it:
+  `samples/extracted/<key>/payload.bin` reads `***.bin`, and a directory or
+  host label next to the key goes too;
+- a readable segment of 24 or more characters that is no word and no catalogue
+  name (a random directory or file name, a long method name) reads as a key by
+  its shape, and is masked with its stretch.
+
+A run that reads as a key as a whole is masked whole, as before.
+
+The names the scrub keeps (words, catalogue names, the platform's own variable
+names, digests, identifiers and MIME types, alone or joined by `/`; catalogue
+names also joined by `|`, `+` or `&`) are asked before the padding rule, so a
+kept name stays readable in front of an assignment: `ZwSetInformationJobObject=1`,
+`GHIDRA_CONTAINER_SAMPLES_PATH=/x` and an argument summary's
+`anti_debugging_techniques_seen=3` travel as written. Words are never joined by
+`+`, so a key that `+` cuts into letter-only pieces is still masked.
+A path's shape is not asked before the padding rule, because a key can begin
+with a slash; a path is still kept when no padding follows it.
 
 Nothing is lost but the name in that sentence. The identity fields a line is
 filed under — `speaker`, `agent`, `stage`, `label`, `display_name` — are
@@ -1381,8 +2241,13 @@ not triage.has_signature and triage.reputation_malicious != None and triage.repu
 have never seen each other's work before the debate. `findings` gives it each
 upstream agent's claims with their technique, confidence and evidence id.
 `full` adds each upstream agent's prose report. Both are capped by
-`core.reporting.upstream_findings_max_chars` (6000 by default), and a block
-that is cut says so.
+`core.reporting.upstream_findings_max_chars`, and a block that is cut says so.
+It ships at **0**, which derives the cap from the window this job's models
+serve the way a tool answer's cap is: the share one answer may take (an
+eighth) of what the window leaves after the reply room, at three characters a
+token — 294,912 characters on a 1,048,576-token window with a 262,144-token
+reply room. A window nothing reported derives nothing, and the documented
+6,000 applies. A positive value is the operator's, used whatever the window.
 
 The block arrives as an `upstream_findings` field inside the stage's first
 chunk when that chunk is a JSON document, and in front of it when it is not. A
@@ -1542,6 +2407,21 @@ anything that lands outside the directories they were given:
 This job's, not the base: a path that resolves into another job's staging
 directory is refused even when a sample root happens to contain the base, so
 the job directory is the boundary whatever the roots are configured as.
+
+A capture is named relative to the job's own directory wherever a model sees
+it (`captures/<file>`), never by host path. When the job has exactly one
+capture, `pcap_path` is hidden from the schema the built-in servers' tools are
+bound with and filled in by the platform, the way the sample's own path is
+(`agents.tool_pinning`); with several it stays the model's to give, a relative
+value is read inside the job's directory, and a refusal lists the job's
+captures by those names — or says there is none — instead of advising a caller
+to leave out an argument the tool requires. A filled-in capture the server
+cannot read comes back as that failure, naming the capture by its job-relative
+name and saying the platform filled it in. Every capture tool reads the whole
+capture as a stream and states the packets it read and the packets in the
+capture; `packet_limit` has no default and applies only when a caller passes
+it, and `read_pcap_summary` with none answers the capture's facts rather than
+a line per packet.
 
 `carved_path` on the `analysis` sidecar is narrower than both, because it is
 the one file argument a *model* chooses rather than the platform: it is held to

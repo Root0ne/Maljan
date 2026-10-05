@@ -25,6 +25,14 @@ class AgentArgument(BaseModel):
             "produced claims, so there was no agreement to measure."
         ),
     )
+    contradictions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "For the mediator: the contradictions its final CONTRADICTIONS: block "
+            "lists as still standing. While any stands, a stable agreement number "
+            "does not end the debate."
+        ),
+    )
     note: str = Field(
         default="",
         description=(
@@ -319,3 +327,9 @@ class AnalysisState(TypedDict):
     # leftovers alone reported ``{}`` beside a non-zero retry count. Counts
     # add across the analysts that ran in parallel.
     validation_fed_back: Annotated[dict[str, int], _merge_counts]
+
+    # A revision that stood with fewer claims than the answer it replaced, one
+    # sentence each (``nodes.revision_replacement_sentence``). Append-only:
+    # every round adds its own; the judge reads them into
+    # ``run_summary.negotiation.revision_replacements``.
+    revision_replacements: Annotated[list[str], operator.add]

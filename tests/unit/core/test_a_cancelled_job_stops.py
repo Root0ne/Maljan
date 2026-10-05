@@ -250,7 +250,10 @@ class TestTheGraphStopsBetweenNodes:
 
         source = inspect.getsource(builder)
         assert source.count("_node(") >= 8
-        assert "instrument_node(name, stops_when_cancelled(name, fn))" in source
+        assert (
+            "instrument_node(name, stops_when_cancelled(name, _names_its_failure(name, fn)))"
+            in source
+        )
 
 
 class TestTheWorker:

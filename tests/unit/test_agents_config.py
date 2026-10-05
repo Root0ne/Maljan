@@ -35,7 +35,7 @@ def _paper_stages() -> list[dict]:
     """
     common = {
         "when": "",
-        "mode": "sequential",
+        "mode": None,
         "inject_upstream": "none",
         "debate": None,
         "builtin_tools": True,
@@ -90,7 +90,7 @@ def _triage_pack_stage() -> dict:
         "agents": [],
         "depends_on": [],
         "when": "",
-        "mode": "sequential",
+        "mode": None,
         "inject_upstream": "none",
         "debate": None,
         "builtin_tools": True,

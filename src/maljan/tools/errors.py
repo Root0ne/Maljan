@@ -39,6 +39,11 @@ NOT_CONFIGURED = "not_configured"
 SERVER_RESTING = "server_resting"
 TOOL_FAILED = "tool_failed"
 
+# How much of a server's own error text a failure marker or a failure
+# sentence quotes. A quote length for text about a failure, not a limit on
+# anything a model reads whole.
+SERVER_WORDS_LIMIT = 300
+
 
 REMEDIATIONS: dict[str, str] = {
     MISSING_DEPENDENCY: (
@@ -80,6 +85,18 @@ REMEDIATIONS: dict[str, str] = {
         "read the message; if it names nothing you can change, report it with the server log"
     ),
 }
+
+# What a capture tool says when the capture it was asked for is not one it may
+# read. Its own sentences, because ``pcap_path`` is required on every tool that
+# takes one and the general advice to leave a path argument out sent a live
+# analyst after a call that cannot be made; the captures are listed by the
+# names a caller can pass back, never by host path.
+NO_CAPTURE_REMEDIATION = (
+    "this run holds no packet capture, so there is nothing for {argument} to name; read "
+    "the sandbox's network view instead"
+)
+CAPTURES_REMEDIATION = "pass {argument} as one of this run's captures, exactly as written: {names}"
+
 
 # What a flat error text says about its own cause. Ordered: the first
 # pattern that matches names the code, and the last is the catch-all.

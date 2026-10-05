@@ -210,6 +210,20 @@ class _Item:
     derived_note: str | None = None
 
 
+# An indicator row's reason is shown and not compared: the decision is.
+_REASON_SHOWN: dict[str, Any] = {
+    "derived": frozenset({"publish_reason"}),
+    "derived_note": "the reason the publish rule states for it differs",
+}
+
+
+def publishes(answer: Any) -> bool:
+    """Whether a stored publish answer publishes (``stix_renderer.publishes``)."""
+    from maljan.reporting.renderers.stix_renderer import publishes as _publishes
+
+    return _publishes(answer)
+
+
 # ── Small readers ────────────────────────────────────────────────────────────
 
 
@@ -530,20 +544,30 @@ def _indicator_items(run: RunRecord) -> tuple[list[_Item], list[_Item], bool, st
             value = _text(row.get("value"))
             kind = _text(row.get("kind")).lower()
             type_label = _text(row.get("type"))
+            answer = row.get("published")
             fields = {
                 "type": type_label or None,
-                "published": row.get("published"),
+                # The decision is compared; the reason the rule states is shown
+                # beside it, and a reason worded otherwise for the same
+                # decision is noted rather than counted.
+                "published": None if answer is None else publishes(answer),
+                "publish_reason": answer,
                 "source": row.get("source"),
             }
             if not value:
                 continue
             if kind:
                 key = f"{kind}|{canonical_value(kind, value)}"
-                by_kind.append(_Item(key, f"{kind}: {value}", fields))
+                by_kind.append(_Item(key, f"{kind}: {value}", fields, **_REASON_SHOWN))
             elif type_label:
                 # As stored: the type label and the value, defanged or not.
                 by_type.append(
-                    _Item(f"type:{type_label}|{value}", f"{type_label}: {value}", fields)
+                    _Item(
+                        f"type:{type_label}|{value}",
+                        f"{type_label}: {value}",
+                        fields,
+                        **_REASON_SHOWN,
+                    )
                 )
         return by_kind, by_type, True, None
     network = mr.get("network")

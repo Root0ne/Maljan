@@ -217,16 +217,22 @@ class TestTheLines:
 
         line = render_pack([entry], 0)
 
+        # With no bound every distinct label is on the line.
         assert line.startswith(
             "[ev_0017] reputation: VirusTotal: 52 of 75 engines flag it as malicious, "
             "52 detection labels, "
-            "47 distinct (engines per label, most first, 20 shown): "
+            "47 distinct (engines per label, most first): "
             "Gen:Variant.Ulise.482338 ×4, Trojan ( 005ef6721 ) ×2, Troj/Loader-CB ×2, "
             "W32.Malware.D0BC8737 ×1, Trojan.Win32.Latrodectus.m!c ×1, "
         )
-        assert line.endswith("(+27 more distinct labels)")
-        shown = line.split(": ", 2)[2].rsplit(" (+", 1)[0]
-        assert len(shown.split(" ×")) - 1 == 20
+        assert "more distinct labels" not in line
+        assert len(line.split("most first): ", 1)[1].split(" ×")) - 1 == 47
+
+        # Within a room that cannot hold them all, as many as fit, the rest counted.
+        bounded = render_pack([entry], len(line) // 2)
+        assert len(bounded) <= len(line) // 2
+        assert bounded.endswith("more distinct labels)")
+        assert "shown): Gen:Variant.Ulise.482338" in bounded
 
     def test_every_label_is_shown_when_they_fit_the_bound(self) -> None:
         answer = {
@@ -251,11 +257,15 @@ class TestTheLines:
                 "last_analysis_stats": {"malicious": 2, "undetected": 8},
             }
         }
-        line = render_pack([_entry("get_file_report", answer, server="virustotal")], 0)
+        entry = _entry("get_file_report", answer, server="virustotal")
+        whole = render_pack([entry], 0)
+        assert whole.split("most first): ", 1)[1] == f"{long_label} ×2"
 
+        line = render_pack([entry], 300)
+
+        assert len(line) <= 300
         shown = line.split("most first): ", 1)[1]
         assert shown.endswith("… ×2")
-        assert len(shown) == 80 + len(" ×2")
 
     def test_the_threat_intel_prose_is_read_for_its_count(self) -> None:
         entry = _entry(
@@ -351,3 +361,37 @@ class TestABudgetTrimmedEntry:
         assert entry.truncated and entry.output == ""
         line = render_pack([entry], 0)
         assert line == "[ev_0001] capa: output dropped (evidence byte budget); call the tool for it"
+
+
+class TestThePackShowsWhatItsRoomHolds:
+    """The pack's shown counts derive from its room, not from fixed heads."""
+
+    @staticmethod
+    def _yara_entry(rules: int, seq: int = 1) -> Any:
+        answer = {
+            "matches": [{"rule": f"Rule_{i:02d}"} for i in range(rules)],
+            "rule_count": 900,
+        }
+        return _entry("yara_scan", answer, seq=seq)
+
+    def test_every_rule_is_named_when_the_room_holds_them(self) -> None:
+        line = render_pack([self._yara_entry(30)], 100_000)
+        assert "Rule_29" in line and "more" not in line
+
+    def test_more_room_shows_more(self) -> None:
+        entry = self._yara_entry(30)
+        whole = render_pack([entry], 0)
+        tight = render_pack([entry], len(whole) // 2)
+        roomier = render_pack([entry], len(whole) - 20)
+        assert len(tight) <= len(whole) // 2 and len(roomier) <= len(whole) - 20
+
+        def named(line: str) -> int:
+            return line.count("Rule_")
+
+        assert 0 < named(tight) < named(roomier) < 30
+        assert tight.endswith(f"(+{30 - named(tight)} more))")
+
+    def test_a_room_too_small_for_any_detail_leaves_whole_entries_out_and_says_so(self) -> None:
+        entries = [self._yara_entry(30, seq=1), self._yara_entry(30, seq=2)]
+        block = render_pack(entries, 90)
+        assert "1 more pack entry not shown here" in block

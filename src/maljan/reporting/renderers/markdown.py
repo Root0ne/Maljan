@@ -50,6 +50,12 @@ from maljan.analysis.run_summary import (
 )
 from maljan.core.logger import logger
 from maljan.reporting.defang import ProseDefanger, defang
+from maljan.reporting.ledger_projection import cell_network_values, listing_kind
+from maljan.reporting.ledger_report import (
+    ANALYST_SECTION_SOURCES,
+    analyst_persistence,
+    listed_by,
+)
 from maljan.reporting.models import (
     CapabilityCell,
     ConsolidatedIOC,
@@ -350,8 +356,10 @@ class MarkdownRenderer:
         if top:
             named = ", ".join(f"{m.technique_id} {m.technique_name}" for m in top)
             lines.append(_item(f"Top published techniques: {named} _({ASSESSED})_"))
+        from maljan.reporting.renderers.stix_renderer import publishes
+
         published = sum(
-            1 for row in ctx.iocs if row.kind in _NETWORK_KINDS and row.published == "yes"
+            1 for row in ctx.iocs if row.kind in _NETWORK_KINDS and publishes(row.published)
         )
         lines.append(_item(f"Published network indicators: {published} _({MEASURED})_"))
         return "\n".join(lines)
@@ -411,9 +419,7 @@ class MarkdownRenderer:
             lines.append(_row("Signature chain", "valid" if signing.signature_valid else "invalid"))
         static = report.static
         if static is not None and (static.packer_matches or static.packer_hint):
-            names = ", ".join(
-                str(m.get("name") or "not recorded") for m in static.packer_matches[:4]
-            )
+            names = ", ".join(str(m.get("name") or "not recorded") for m in static.packer_matches)
             lines.append(_row("Packer signatures", names or static.packer_hint))
         lines.append(_row("Reputation", _reputation_line(report)))
         lines.append(_row("Report generated", report.generated_at.isoformat()))
@@ -575,13 +581,13 @@ class MarkdownRenderer:
             # A confidence column only where a match states one: a column of
             # "not recorded" under "Measured" reads as a measurement too.
             rated = any(
-                isinstance(pm.get("confidence"), int | float) for pm in static.packer_matches[:6]
+                isinstance(pm.get("confidence"), int | float) for pm in static.packer_matches
             )
             head = ["Name", "Kind", *(["Confidence"] if rated else []), "Method", "Evidence"]
             measured.append(_row(*head))
             measured.append(_divider(len(head)))
-            for pm in static.packer_matches[:6]:
-                evidence = ", ".join(f"`{e}`" for e in (pm.get("evidence") or [])[:4])
+            for pm in static.packer_matches:
+                evidence = ", ".join(f"`{e}`" for e in (pm.get("evidence") or []))
                 stated = pm.get("confidence")
                 cells = [pm.get("name") or "not recorded", pm.get("kind") or "-"]
                 if rated:
@@ -613,6 +619,7 @@ class MarkdownRenderer:
                 measured.append(
                     _row(sig.name, sig.severity, _truncate(sig.description, _CELL_LIMIT))
                 )
+            measured.extend(_left_out(len(evasive), 10, "evasion signatures"))
         blocks.append(
             _subsection(
                 "5.1",
@@ -641,7 +648,7 @@ class MarkdownRenderer:
         ]
         if resolving:
             names = ", ".join(
-                f"{_one_line(h.get('name'))} ({_one_line(h.get('source'))})" for h in resolving[:8]
+                f"{_one_line(h.get('name'))} ({_one_line(h.get('source'))})" for h in resolving
             )
             measured.append(f"_{MEASURED}:_ rule hits {names}.")
         measured.extend(_capa_table(capa, _is_resolution_rule))
@@ -666,14 +673,11 @@ class MarkdownRenderer:
                 how = item.how_obtained + (
                     " (unresolved: report.configuration_uncited)" if unresolved else ""
                 )
-                body.append(
-                    _row(
-                        ctx.cell(item.key),
-                        ctx.cell(item.value),
-                        how,
-                        ", ".join(item.evidence_refs) or "no evidence cited",
-                    )
-                )
+                cited = ", ".join(item.evidence_refs) or "no evidence cited"
+                if index + 1 in ctx.config_unheld:
+                    cited += " (unresolved: report.value_not_in_cited_entry)"
+                value = ctx.cell(item.value) + ctx.publish_state(item.value)
+                body.append(_row(ctx.cell(item.key), value, how, cited))
             blocks.append("\n".join(body))
         else:
             blocks.append(
@@ -702,8 +706,39 @@ class MarkdownRenderer:
                         mech.evidence_ref or "-",
                     )
                 )
+            measured.extend(_left_out(len(report.persistence), 40, "persistence mechanisms"))
         elif ctx.sandbox_watched_persistence:
             measured.append(f"_{OBSERVED}:_ no persistence observed." + ctx.partial_sentence())
+        listed = analyst_persistence(report.sections)
+        if listed:
+            # What the analysts listed, in their voice and apart from the tools'
+            # rows: no count, rule match or detection draft reads it.
+            if measured:
+                measured.append("")
+            measured.extend(
+                [
+                    f"_{ASSESSED}:_ persistence the analysts listed (not observed; no count, "
+                    "rule match or detection draft reads it)",
+                    "",
+                    _row("Kind", "Target", "Payload", "Listed by", "Evidence"),
+                    _divider(5),
+                ]
+            )
+            for listed_row in listed[:40]:
+                measured.append(
+                    _row(
+                        listed_row["kind"] or "-",
+                        f"`{_truncate(listed_row['target'], _CELL_LIMIT)}`",
+                        f"`{_truncate(listed_row['payload'], _CELL_LIMIT)}`"
+                        if listed_row["payload"]
+                        else "-",
+                        f"the {listed_row['listed_by']} analyst"
+                        if listed_row["listed_by"]
+                        else "-",
+                        listed_row["evidence"] or "no evidence cited",
+                    )
+                )
+            measured.extend(_left_out(len(listed), 40, "listed persistence rows"))
         blocks.append(
             _subsection(
                 "5.4",
@@ -726,6 +761,7 @@ class MarkdownRenderer:
             measured.append(_divider(2))
             for node in commands[:20]:
                 measured.append(_row(node.pid, f"`{_truncate(node.command_line, _CELL_LIMIT)}`"))
+            measured.extend(_left_out(len(commands), 20, "commands"))
         blocks.append(
             _subsection(
                 "5.5",
@@ -799,7 +835,7 @@ class MarkdownRenderer:
                     _row(
                         ctx.cell(ch.name),
                         ctx.cell(ch.protocol or "-"),
-                        "; ".join(_endpoint(e) for e in ch.endpoints) or "-",
+                        "; ".join(_endpoint_with_state(e, ctx) for e in ch.endpoints) or "-",
                         ctx.cell(ch.encryption or "-"),
                         ctx.cell(fmt or "-"),
                         ", ".join(dict.fromkeys(refs)) or "no evidence cited",
@@ -814,15 +850,16 @@ class MarkdownRenderer:
             for u in observed_urls[:20]:
                 measured.append(
                     _row(
-                        u.method,
+                        u.method or "-",
                         f"`{defang(_truncate(u.url, _CELL_LIMIT), 'url')}`",
                         u.status or "-",
                         _truncate(u.user_agent or "-", _CELL_LIMIT),
                     )
                 )
+            measured.extend(_left_out(len(observed_urls), 20, "requests"))
         if net is not None and (net.ja3_fingerprints or net.ja3s_fingerprints):
-            prints = [f"JA3 `{_one_line(j)}`" for j in net.ja3_fingerprints[:6]]
-            prints += [f"JA3S `{_one_line(j)}`" for j in net.ja3s_fingerprints[:6]]
+            prints = [f"JA3 `{_one_line(j)}`" for j in net.ja3_fingerprints]
+            prints += [f"JA3S `{_one_line(j)}`" for j in net.ja3s_fingerprints]
             measured.extend(["", f"_{OBSERVED}:_ TLS fingerprints " + ", ".join(prints) + "."])
         prose = [ta.command_and_control, ta.message_packet_structure] if ta else []
         blocks.append(
@@ -870,6 +907,8 @@ class MarkdownRenderer:
                         "dropped (sandbox)",
                     )
                 )
+            measured.extend(_left_out(len(carved), 10, "carved payloads"))
+            measured.extend(_left_out(len(dropped), 20, "dropped files"))
         blocks.append(
             _subsection(
                 "5.8",
@@ -945,6 +984,7 @@ class MarkdownRenderer:
                         op.get("api", "-"),
                     )
                 )
+            lines.extend(_left_out(len(files), 40, "file operations"))
             lines.append("")
 
         if dyn.registry_mods:
@@ -957,6 +997,7 @@ class MarkdownRenderer:
                 ]
             )
             lines.extend(_registry_row(reg) for reg in dyn.registry_mods[:40])
+            lines.extend(_left_out(len(dyn.registry_mods), 40, "registry modifications"))
             lines.append("")
 
         mutexes = [
@@ -967,6 +1008,7 @@ class MarkdownRenderer:
         if mutexes:
             lines.extend([_plain_heading("Mutexes"), ""])
             lines.extend(_item(f"`{name}`") for name in mutexes[:40])
+            lines.extend(_left_out(len(mutexes), 40, "mutexes"))
             lines.append("")
 
         services = next((s for s in report.sections if s.key == "sandbox_services_and_tasks"), None)
@@ -991,6 +1033,7 @@ class MarkdownRenderer:
                             count if isinstance(count, int) else "not recorded",
                         )
                     )
+            lines.extend(_left_out(len(dyn.notable_apis), 20, "notable APIs"))
             lines.append("")
 
         if dyn.sandbox_signatures:
@@ -1003,6 +1046,7 @@ class MarkdownRenderer:
                 ]
             )
             lines.extend(_signature_row(sig) for sig in dyn.sandbox_signatures[:30])
+            lines.extend(_left_out(len(dyn.sandbox_signatures), 30, "sandbox signatures"))
             lines.append("")
 
         if len(lines) <= 4:
@@ -1060,6 +1104,7 @@ class MarkdownRenderer:
                     shown = ", ".join(f"`{f}`" for f in functions[:12])
                     more = f" and {len(functions) - 12} more" if len(functions) > 12 else ""
                     lines.append(_row(f"`{dll}`", shown + more))
+                lines.extend(_left_out(len(by_dll), 40, "libraries"))
                 lines.append("")
             if static.api_capabilities:
                 ordered = sorted(static.api_capabilities.items(), key=lambda kv: -kv[1])
@@ -1088,16 +1133,30 @@ class MarkdownRenderer:
                         ]
                     )
                 lines.append("")
+        if static.api_capabilities_resolved:
+            from maljan.tools.knowledge import RESOLVED_AT_RUNTIME
+
+            ordered = sorted(static.api_capabilities_resolved.items(), key=lambda kv: -kv[1])
+            cited = _ids(static.api_capabilities_resolved_evidence_ids)
+            lines.append(
+                f"**Capability profile of the names {RESOLVED_AT_RUNTIME}** (not imports"
+                + (f"; {cited}" if cited else "")
+                + "): "
+                + ", ".join(f"{_one_line(cat)} ×{count}" for cat, count in ordered)
+            )
+            lines.append("")
 
         if static.export_rows or static.exports:
             lines.extend([_plain_heading("Exports"), ""])
             lines.append(_row("Name", "Ordinal", "RVA"))
             lines.append(_divider(3))
             if static.export_rows:
-                for exp in _distinct(static.export_rows, lambda e: (e.name, e.ordinal, e.rva))[:60]:
+                distinct = _distinct(static.export_rows, lambda e: (e.name, e.ordinal, e.rva))
+                for exp in distinct[:60]:
                     lines.append(
                         _row(f"`{exp.name or '(unnamed)'}`", exp.ordinal or "-", exp.rva or "-")
                     )
+                lines.extend(_left_out(len(distinct), 60, "exports"))
                 rvas = [
                     exp.rva
                     for exp in _distinct(static.export_rows, lambda e: (e.name, e.ordinal, e.rva))
@@ -1108,8 +1167,10 @@ class MarkdownRenderer:
                         ["", f"All {len(rvas)} exports share one address, {_one_line(rvas[0])}."]
                     )
             else:
-                for name in list(dict.fromkeys(static.exports))[:60]:
+                names = list(dict.fromkeys(static.exports))
+                for name in names[:60]:
                     lines.append(_row(f"`{name}`", "-", "-"))
+                lines.extend(_left_out(len(names), 60, "exports"))
             lines.append("")
 
         if static.embedded_resources:
@@ -1120,6 +1181,7 @@ class MarkdownRenderer:
                     kind = res.get("type") or res.get("kind") or "resource"
                     size = res.get("size")
                     lines.append(_item(f"{kind}" + (f" ({size} bytes)" if size else "")))
+                lines.extend(_left_out(len(plain), 20, "resources"))
                 lines.append("")
 
         rules = [s for s in report.sections if s.key in _RULE_SECTIONS]
@@ -1143,7 +1205,7 @@ class MarkdownRenderer:
             lines.append(_row("Value", "Kind", "Notes", "Published"))
             lines.append(_divider(4))
             for ioc in static.interesting_strings[:60]:
-                published = answers.get((ioc.kind, ioc.value.strip().lower())) or "-"
+                published = ctx.plain(answers.get((ioc.kind, ioc.value.strip().lower())) or "-")
                 lines.append(
                     _row(
                         f"`{_truncate(ioc.value, _CELL_LIMIT)}`",
@@ -1152,6 +1214,7 @@ class MarkdownRenderer:
                         published,
                     )
                 )
+            lines.extend(_left_out(len(static.interesting_strings), 60, "strings"))
             lines.append("")
 
         if static.pdb_path:
@@ -1233,9 +1296,7 @@ class MarkdownRenderer:
             seen.add(tid)
             folded = rules_by_tid.get(tid, [])
             procedure = (
-                ctx.cell(_truncate(mapping.evidence_quotes[0], 160))
-                if mapping.evidence_quotes
-                else "-"
+                ctx.cell(str(mapping.evidence_quotes[0])) if mapping.evidence_quotes else "-"
             )
             lines.append(
                 _row(
@@ -1248,7 +1309,7 @@ class MarkdownRenderer:
                     ", ".join(mapping.contributing_layers) or "-",
                     _stated(mapping.confidence, ""),
                     "published"
-                    + (", corroborated" if mapping.is_corroborated else "")
+                    + _corroborated_words(mapping, folded)
                     + (f"; {ctx.rule_only[tid]}" if tid in ctx.rule_only else ""),
                     ", ".join(
                         dict.fromkeys(
@@ -1263,6 +1324,7 @@ class MarkdownRenderer:
             if tid in seen:
                 continue
             lines.append(_rule_only_row(tid, folded, mappings, capa_ids))
+        lines.extend(_resolved_only_lines(sorted(cells, key=_tactic_key), rules_by_tid, ctx))
         if hits:
             lines.extend(
                 [
@@ -1306,7 +1368,7 @@ class MarkdownRenderer:
                         f"`{row.value}`",
                         row.context or "-",
                         row.source or "-",
-                        row.published or "-",
+                        ctx.plain(row.published or "-"),
                     )
                 )
             if any(not row.published for row in host):
@@ -1333,9 +1395,17 @@ class MarkdownRenderer:
                     row.type,
                     f"`{defang(row.value, row.kind or '')}`",
                     _port_or_path(row, report),
-                    row.context or "-",
+                    "; ".join(
+                        part
+                        for part in (
+                            row.context,
+                            f"recovered by {row.recovered_by}" if row.recovered_by else "",
+                        )
+                        if part
+                    )
+                    or "-",
                     row.source or "-",
-                    row.published or "-",
+                    ctx.plain(row.published or "-"),
                 ]
                 if reputation:
                     cells.append(reputation.get(row.value.strip().lower().rstrip("."), "-"))
@@ -1360,11 +1430,14 @@ class MarkdownRenderer:
             body = [_subheading("10.1", "Rules that matched this sample", MEASURED), ""]
             for section in rules:
                 at = section.columns.index("Rule") if "Rule" in section.columns else 0
-                names = [_one_line(row[at]) for row in section.rows if len(row) > at][:20]
+                every = [_one_line(row[at]) for row in section.rows if len(row) > at]
+                names = every[:20]
                 ids = f" ({_ids(section.evidence_ids)})" if section.evidence_ids else ""
+                more = f" and {len(every) - 20} more (§7)" if len(every) > 20 else ""
                 body.append(
                     _item(
-                        f"{section.title}{ids}: " + (", ".join(f"`{n}`" for n in names) or "none")
+                        f"{section.title}{ids}: "
+                        + ((", ".join(f"`{n}`" for n in names) + more) or "none")
                     )
                 )
             body.extend(
@@ -1495,9 +1568,10 @@ class MarkdownRenderer:
                 ]
             )
             for match in attr.function_hash_matches[:10]:
-                examples = (
-                    ", ".join(f"`{f}`" for f in (match.get("example_functions") or [])[:3]) or "-"
-                )
+                example_functions = list(match.get("example_functions") or [])
+                examples = ", ".join(f"`{f}`" for f in example_functions[:3]) or "-"
+                if len(example_functions) > 3:
+                    examples += f" and {len(example_functions) - 3} more"
                 stated = match.get("confidence")
                 similarity.append(
                     _row(
@@ -1509,6 +1583,9 @@ class MarkdownRenderer:
                         examples,
                     )
                 )
+            similarity.extend(
+                _left_out(len(attr.function_hash_matches), 10, "function-hash matches")
+            )
             similarity.append("")
         if attr.family_rag_candidates:
             similarity.extend(
@@ -1529,6 +1606,7 @@ class MarkdownRenderer:
                         cand.get("sample_count") or "-",
                     )
                 )
+            similarity.extend(_left_out(len(attr.family_rag_candidates), 10, "candidates"))
             similarity.append("")
         # A similar sample is a measurement only with its distance; one the
         # memory returned without a score is counted, not listed as similar.
@@ -1558,6 +1636,7 @@ class MarkdownRenderer:
                         sample.get("source") or "-",
                     )
                 )
+            similarity.extend(_left_out(len(scored), 10, "similar samples"))
             similarity.append("")
         if unscored:
             similarity.append(
@@ -1670,6 +1749,10 @@ class MarkdownRenderer:
         unresolved = [row for row in (validation.get("unresolved") or []) if isinstance(row, dict)]
         exports = [row for row in unresolved if str(row.get("code", "")).startswith("stix.")]
         others = [row for row in unresolved if row not in exports]
+        # A question the producer answered as it allows is not left unresolved:
+        # it is listed after the count, marked, and not counted in it.
+        answered = [row for row in others if row.get("answered")]
+        others = [row for row in others if row not in answered]
         if validation:
             not_run = validation.get("not_run") or []
             lines.append(
@@ -1684,10 +1767,17 @@ class MarkdownRenderer:
                 lines.append(
                     _item(
                         f"`{row.get('code', '')}` ({row.get('agent', '')}){advisory}: "
-                        f"{row.get('message') or ''}"
+                        f"{_finding_text(row)}"
                     )
                 )
-            if others:
+            for row in answered:
+                lines.append(
+                    _item(
+                        f"`{row.get('code', '')}` ({row.get('agent', '')}) (answered): "
+                        f"{_finding_text(row)}"
+                    )
+                )
+            if others or answered:
                 lines.append("")
         if exports:
             lines.extend(["**Export decisions:**", ""])
@@ -1699,6 +1789,7 @@ class MarkdownRenderer:
             "returned them. Assessed sections are the models' conclusions, reported as "
             "they wrote them; the checks above are the platform's comments on them."
         )
+        lines.extend(_claims_not_discussed_lines(report, ctx))
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
@@ -1712,7 +1803,9 @@ class MarkdownRenderer:
         block, a list or a paragraph, and this renders that, so a tool server
         added tomorrow prints without a renderer change.
         """
-        lines = [_appendix_heading("A", "Evidence index", MEASURED), ""]
+        # Each section carries its own voice: a tool's answer is measured, and
+        # an analyst's table or finding is the analyst's, never under Measured.
+        lines = [_appendix_heading("A", "Evidence index", PER_SUBSECTION), ""]
         if not report.evidence_index and not report.sections:
             lines.append("No tool call is recorded in this report.")
             return "\n".join(lines)
@@ -1733,7 +1826,13 @@ class MarkdownRenderer:
                 )
             lines.append("")
         for section in report.sections:
-            lines.extend([_plain_heading(section.title), ""])
+            lines.extend([_evidence_heading(section), ""])
+            analysts = listed_by(section)
+            if analysts:
+                # A model's table, said as one before its rows: nothing in it
+                # was measured, and no count, match or profile reads it.
+                kind = str(section.key or "").removeprefix("artifact_")
+                lines.extend([analyst_list_note(analysts, kind), ""])
             lines.extend(_evidence_body(section, ctx.plain))
             if section.evidence_ids:
                 lines.extend(["", f"_Evidence: {_ids(section.evidence_ids)}_"])
@@ -1778,6 +1877,10 @@ class MarkdownRenderer:
                     lines.append(_item(f"Final confidence: {float(final_conf):.3f}"))
                 except (TypeError, ValueError):
                     pass
+            for sentence in negotiation.get("revision_replacements") or []:
+                lines.append(_item(str(sentence)))
+            for sentence in negotiation.get("mediation_notes") or []:
+                lines.append(_item(str(sentence)))
         for line in generation_lines(run_summary.get("generation")):
             lines.append(_item(line))
         ungrounded = run_summary.get("sections_without_evidence")
@@ -1857,7 +1960,7 @@ class MarkdownRenderer:
             "This report was produced by an automated team of language-model analysts "
             "working over tool servers. The analysts' claims were negotiated, a judge "
             "stated the verdict and the STIX bundle, and a report model wrote the "
-            "assessed prose. Every tool call is in Appendix A."
+            "assessed prose. Every tool call is in Appendix A. " + CUT_CELL_SENTENCE
         )
         lines.append("")
         profile = summary.get("profile") or {}
@@ -1964,6 +2067,14 @@ class _Context:
                 self.unresolved, "report.configuration_uncited", r"configuration item (\d+)"
             )
         }
+        # The rows whose whole value is in none of the entries they cite, kept
+        # after the question: marked beside their evidence.
+        self.config_unheld = _rows_named_in(
+            self.unresolved, "report.value_not_in_cited_entry", "configuration item"
+        )
+        self.identifier_unheld = _rows_named_in(
+            self.unresolved, "report.value_not_in_cited_entry", "identifier"
+        )
         net = report.network
         # What the run knows about a sandbox, in four answers: it recorded
         # something; its tools were called and returned nothing; none was
@@ -2028,6 +2139,11 @@ class _Context:
             indicators += [(d.fqdn, "domain") for d in net.domains]
             indicators += [(ip.address, "ip") for ip in net.ips]
             indicators += [(u.url, "url") for u in net.urls]
+        # Every value a recovering tool decoded, row or not, so a decoded C2
+        # printed in a FLOSS or decoder table is never printed live.
+        recovered = report.emulated_strings
+        for key in recovered.recovered_by if recovered is not None else {}:
+            indicators += [(value, kind) for kind, value in cell_network_values(key, None)]
         self.indicators = indicators
         self._defang = ProseDefanger(indicators)
         self.reputations = _reputations(report)
@@ -2037,9 +2153,16 @@ class _Context:
         marks: dict[str, list[str]] = {}
         for row in getattr(report, "flagged_statements", None) or []:
             if row.sentence.strip():
-                mark = _flag_mark(row.code, row.label, asked=row.asked)
+                try:
+                    label = _inline_safe(row.label, pipes=False)
+                except Exception as exc:  # noqa: BLE001 — the sentence is marked all the same
+                    logger.debug("markdown: a mark's label was not written (%s).", exc)
+                    label = STATE_UNKNOWN
+                mark = _flag_mark(row.code, label, asked=row.asked)
                 if mark not in marks.setdefault(row.sentence, []):
                     marks[row.sentence].append(mark)
+        # The IOC table's answers, read on first use by ``publish_state``.
+        self._answers: Any = None
         self.flagged = sorted(
             ((sentence, " ".join(found)) for sentence, found in marks.items()),
             key=lambda pair: -len(pair[0]),
@@ -2116,6 +2239,41 @@ class _Context:
         for end, mark in sorted(inserts, reverse=True):
             text = f"{text[:end]} {mark}{text[end:]}"
         return text
+
+    def publish_state(self, text: Any) -> str:
+        """`` (no: <why>)`` for each value of a table cell this run does not publish, or ``""``.
+
+        The platform states the IOC table's answer beside the value; nothing
+        is asked. A reference host no row holds is no indicator and gets
+        nothing. The state is the answer's first clause, as the prose marks
+        print it; one value alone is not named again. Written defanged and
+        with Markdown's own characters escaped (:func:`_inline_safe`). Fails
+        closed: a table that cannot be read states every value refused for
+        that reason, and a lookup that fails says the state is unknown.
+        """
+        try:
+            from maljan.pipeline.validation import _unstated_values
+            from maljan.reporting.defang import defang
+
+            if self._answers is None:
+                try:
+                    from maljan.reporting.narrative_agent import published_answers
+
+                    self._answers = published_answers(self.report)
+                except Exception as exc:  # noqa: BLE001 — every value is then refused
+                    logger.debug("markdown: the IOC table was not read (%s).", exc)
+                    self._answers = lambda kind, value: TABLE_NOT_READ
+            found = _unstated_values(str(text or ""), self._answers)
+            if not found:
+                return ""
+            if len(found) == 1:
+                said = found[0][2]
+            else:
+                said = "; ".join(f"{defang(value, kind)}: {state}" for kind, value, state in found)
+            return f" ({_inline_safe(said, pipes=False)})"
+        except Exception as exc:  # noqa: BLE001 — the cell says what is not known
+            logger.debug("markdown: a cell's publish state was not read (%s).", exc)
+            return f" ({STATE_UNKNOWN})" if _names_a_network_value(text) else ""
 
     def plain(self, text: str) -> str:
         """A value with the run's network indicators defanged and nothing else changed."""
@@ -2218,15 +2376,36 @@ def _named_in(rows: list[dict[str, Any]], code: str, pattern: str) -> set[str]:
     return found
 
 
+def _rows_named_in(rows: list[dict[str, Any]], code: str, noun: str) -> set[int]:
+    """The row numbers the unresolved rows of one code name at their start.
+
+    ``identifier 3 (…)`` names one row; ``identifiers 3, 4, 9 are …`` names
+    several.
+    """
+    pattern = re.compile(rf"^{re.escape(noun)}s? (\d+(?:, \d+)*)\b")
+    found: set[int] = set()
+    for row in rows:
+        if row.get("code") != code:
+            continue
+        match = pattern.search(str(row.get("message") or ""))
+        if match:
+            for number in match.group(1).split(", "):
+                try:
+                    found.add(int(number))
+                except ValueError:
+                    continue
+    return found
+
+
 class _AnalystStates:
     """What each analyst of the run did, from the stage and agent records.
 
     ``failed``: the run's failed-analyst list. ``skipped``: an analyst the
     analysis stage records a reason for, or whose own record says it had no
     data, with that reason. ``silent``: an analyst that ran and claimed
-    nothing. A report stored before those records falls back to the two
-    reasons the pipeline writes, ``analyst failures:`` and ``analysts produced
-    no claims:``.
+    nothing. A report stored before those records falls back to the reasons
+    the pipeline writes: ``analyst failures:``, ``analysts skipped (<why>):``
+    and ``analysts produced no claims:``.
     """
 
     def __init__(self, report: MalwareReport) -> None:
@@ -2246,6 +2425,10 @@ class _AnalystStates:
             agent = str(row.get("agent_id") or row.get("domain") or "")
             if agent and row.get("no_data") and agent not in self.failed:
                 skipped.setdefault(agent, "")
+        for why, names in _skipped_after(report.degradation_reasons):
+            for agent in names:
+                if agent not in self.failed:
+                    skipped.setdefault(agent, why)
         self.skipped = skipped
         if stats:
             silent = [
@@ -2284,6 +2467,20 @@ class _AnalystStates:
                 f"the {_joined(self.silent)} analyst{'s' if many else ''} produced no claims"
             )
         return out
+
+
+_SKIPPED_REASON_RE = re.compile(r"^analysts skipped \((?P<why>[^)]*)\): (?P<names>.+)$")
+
+
+def _skipped_after(reasons: list[str]) -> list[tuple[str, list[str]]]:
+    """Each ``analysts skipped (<why>): a, b`` reason, as its cause and its names."""
+    out: list[tuple[str, list[str]]] = []
+    for reason in reasons:
+        match = _SKIPPED_REASON_RE.match(str(reason))
+        if match:
+            names = [n.strip() for n in match.group("names").split(",") if n.strip()]
+            out.append((match.group("why").strip(), names))
+    return out
 
 
 def _named_after(reasons: list[str], prefix: str) -> list[str]:
@@ -2337,7 +2534,89 @@ def _degraded_sentence(report: MalwareReport, ctx: _Context) -> str:
 _FLAG_WORDS = {
     "narrative.ungrounded_capability": "not established by this run",
     "report.rule_match_as_action": "a rule match only, stated as an action",
+    "report.unpublished_value": "not published by this run",
 }
+
+
+# What a cell says of a value whose publish state could not be read, and the
+# state of every value when the IOC table itself could not be read.
+STATE_UNKNOWN = "publish state unknown: the IOC table's answer could not be read"
+TABLE_NOT_READ = "no: the IOC table could not be read"
+# The findings this report's own checks write about a value: printed defanged
+# and escaped wherever the report prints their messages.
+_VALUE_FINDING_CODES = frozenset({"report.value_not_in_cited_entry", "report.unpublished_value"})
+# The table separator, named rather than written: a literal one in this module
+# is a table row assembled by hand (``test_a_table_row_is_never_assembled_by_hand``).
+_PIPE = chr(124)
+# A URL and a mailbox in free text, for defanging what no indicator list holds.
+_URL_IN_TEXT = re.compile(
+    r"(?i)\b(?:https?" + _PIPE + r"ftp" + _PIPE + r"hxxps?)://[^\s<>()\[\]`'\"" + _PIPE + r"]+"
+)
+_EMAIL_IN_TEXT = re.compile(r"(?<![\w.+-])[\w.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
+# The characters that make Markdown of a sample's text: a code span, a link or
+# image, an HTML tag, a table cell, emphasis, and the backslash itself.
+_INLINE_META = re.compile(r"([\\`\[\]<>*" + _PIPE + r"])")
+_INLINE_META_NO_PIPE = re.compile(r"([\\`\[\]<>*])")
+
+
+def _defanged_text(text: str) -> str:
+    """``text`` with every URL, mailbox, address and host in it defanged, as the report does."""
+    from maljan.pipeline.validation import network_values_in
+    from maljan.reporting.defang import defang_text
+
+    indicators = [(found.group(0), "url") for found in _URL_IN_TEXT.finditer(text)]
+    indicators += [(found.group(0), "email") for found in _EMAIL_IN_TEXT.finditer(text)]
+    indicators += [(value, kind) for kind, value in network_values_in(text)]
+    return defang_text(text, indicators)
+
+
+def _inline_safe(text: Any, *, pipes: bool = True) -> str:
+    """A value this report's checks wrote about the sample: escaped, then defanged.
+
+    Markdown's own characters are escaped first, so a sample's value cannot
+    open a link, a tag or a code span; ``pipes=False`` leaves the table
+    separator to the row, which escapes it itself (:func:`_cell`).
+    """
+    meta = _INLINE_META if pipes else _INLINE_META_NO_PIPE
+    return _defanged_text(meta.sub(r"\\\1", str(text or "")))
+
+
+def _names_a_network_value(text: Any) -> bool:
+    """Whether a cell names an address, a host, a URL or a mailbox; true when that is unknown."""
+    try:
+        from maljan.pipeline.validation import network_values_in
+
+        plain = str(text or "")
+        return bool(
+            network_values_in(plain) or _URL_IN_TEXT.search(plain) or _EMAIL_IN_TEXT.search(plain)
+        )
+    except Exception:  # noqa: BLE001 — unread, the cell is taken to name one
+        return True
+
+
+def _code_span(text: str) -> str:
+    """``text`` as one code span, fenced longer than any backtick run inside it.
+
+    A value holding a backtick closed a one-backtick span and let what
+    followed render as Markdown, a live link included.
+    """
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    if not longest:
+        return f"`{text}`"
+    fence = "`" * (longest + 1)
+    return f"{fence} {text} {fence}"
+
+
+def _finding_text(row: dict[str, Any]) -> str:
+    """A finding's message as the report prints it: the value findings defanged and escaped."""
+    message = str(row.get("message") or "")
+    if row.get("code") not in _VALUE_FINDING_CODES:
+        return message
+    try:
+        return _inline_safe(message)
+    except Exception as exc:  # noqa: BLE001 — never the raw values
+        logger.debug("markdown: a finding was not written (%s).", exc)
+        return STATE_UNKNOWN
 
 
 def _flag_mark(code: str, label: str, *, asked: bool = True) -> str:
@@ -2356,7 +2635,7 @@ def _findings_beside(rows: list[dict[str, str]]) -> list[str]:
     if not rows:
         return []
     lines = ["", f"_The platform's unresolved findings on this section ({MEASURED}):_", ""]
-    lines.extend(_item(f"`{row['code']}`: {row['message']}") for row in rows)
+    lines.extend(_item(f"`{row['code']}`: {_finding_text(row)}") for row in rows)
     return lines
 
 
@@ -2424,6 +2703,32 @@ def _title_heading(title: str) -> str:
     return f"# {_one_line(title)}"
 
 
+def _claims_not_discussed_lines(report: MalwareReport, ctx: _Context) -> list[str]:
+    """The claims in force whose code the body does not name, each whole, with what it lacks."""
+    from maljan.reporting.claim_coverage import COVERAGE_RULE, carried_sentence, claim_label
+
+    rows = list(getattr(report, "claims_not_discussed", None) or [])
+    if not rows:
+        return []
+    lines = ["", _subheading("13.1", CLAIMS_NOT_DISCUSSED_TITLE, MEASURED), "", COVERAGE_RULE, ""]
+    for row in rows:
+        stated = (
+            f"confidence {row.confidence:.2f}; " if isinstance(row.confidence, int | float) else ""
+        )
+        evidence = f" Evidence: {row.evidence_ref}" if row.evidence_ref.strip() else ""
+        lines.append(
+            _item(
+                f"**{claim_label(row.agent, row.claim_number)}** ({stated}"
+                f"{carried_sentence(row)}): {ctx.plain(row.claim)}{ctx.plain(evidence)}"
+            )
+        )
+    return lines
+
+
+# The heading of the list of claims in force the body does not discuss.
+CLAIMS_NOT_DISCUSSED_TITLE = "Claims whose code locations or API names the body does not name"
+
+
 def _heading(number: int, title: str, voice: str) -> str:
     """An H2 with its section number and its voice tag."""
     return f"## {number}. {_one_line(title)} · _{voice}_"
@@ -2438,6 +2743,29 @@ def _subheading(number: str, title: str, voice: str) -> str:
     """An H3 with its subsection number and its voice tag."""
     label = f"{number} {title}" if number else title
     return f"### {_one_line(label)} · _{voice}_"
+
+
+def _evidence_heading(section: Any) -> str:
+    """An Appendix A section's H3 with its voice: a tool's is Measured, an analyst's Assessed."""
+    source = str(getattr(section, "source", "") or "").strip().lower()
+    voice = ASSESSED if source.startswith(ANALYST_SECTION_SOURCES) else MEASURED
+    return f"{_plain_heading(section.title)} · _{voice}_"
+
+
+def analyst_list_note(analysts: list[str], kind: str = "") -> str:
+    """The line an analyst's table is printed under in Appendix A, saying where else it is shown."""
+    who = ", ".join(f"the {_one_line(name)} analyst" for name in analysts)
+    shown = {
+        "persistence": " Its rows are in §5.4 under Assessed, and its Run keys, tasks and "
+        "services in §9 as the analyst's, each with the publish rule's answer.",
+        "values": " Each value it types as an indicator is in §9 as the analyst's, with the "
+        "publish rule's answer.",
+    }
+    where = shown.get(listing_kind(kind), "")
+    return (
+        f"_Listed by {who}: a model's table, not a tool's output.{where} No measured table, "
+        "count, rule match or capability profile reads it._"
+    )
 
 
 def _plain_heading(title: Any) -> str:
@@ -2593,12 +2921,14 @@ def _encrypts_files(enc: Any) -> bool:
     The ransomware block is family-specific: a file marker, an extension, a
     partial-encryption threshold or a per-file key make it one. A loader's
     string or traffic cipher is not, and prints beside the anti-analysis prose.
+    ``per_file_key: false`` says the model saw no per-file key, which names no
+    file encryption; only ``true`` does.
     """
     return bool(
         _said(enc.file_marker)
         or _said(enc.extension)
         or _said(enc.partial_threshold)
-        or enc.per_file_key is not None
+        or enc.per_file_key is True
     )
 
 
@@ -2757,7 +3087,7 @@ def _reputation_line(report: MalwareReport) -> str:
         said = f"{source}: {flagged} of {engines} engines flag it as malicious"
         return said + (f" (analysis {when}; {where})" if when else f" ({where})")
     facts = [f"{k} {v}" for k, v in rows.items() if k in _REPUTATION_KEYS]
-    return f"{where}: {'; '.join(facts[:6])}" if facts else f"{where}; see Appendix A"
+    return f"{where}: {'; '.join(facts)}" if facts else f"{where}; see Appendix A"
 
 
 def _first_match(pattern: str, text: str) -> str:
@@ -2776,7 +3106,7 @@ def _environment_line(report: MalwareReport) -> str:
             if len(row) >= 2 and str(row[0]).strip().lower() in keys:
                 facts.append(f"{row[0]} {row[1]}")
     if facts:
-        return "Environment: " + "; ".join(facts[:8]) + "."
+        return "Environment: " + "; ".join(facts) + "."
     return "Environment: the sandbox's own report recorded no environment details in this run."
 
 
@@ -2804,6 +3134,16 @@ def _is_address(text: str) -> bool:
 def _names_any(text: str, words: tuple[str, ...]) -> bool:
     lowered = text.lower()
     return any(word in lowered for word in words)
+
+
+def _endpoint_with_state(value: str, ctx: _Context) -> str:
+    """An endpoint as :func:`_endpoint` writes it, with the IOC table's state where it adds one.
+
+    An endpoint already marked as no host outside could answer keeps that
+    mark alone.
+    """
+    written = _endpoint(value)
+    return written + ctx.publish_state(value) if written.endswith("`") else written
 
 
 def _endpoint(value: str) -> str:
@@ -2835,6 +3175,12 @@ def _endpoint(value: str) -> str:
     )
 
 
+# What the purpose cell says when the report model gave none. A dash read as a
+# cell nobody filled in; the model was asked for a purpose where the evidence or
+# an analyst's claim states one, so an empty one is a purpose not stated.
+PURPOSE_NOT_STATED = "not stated"
+
+
 def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
     """The identifiers the report model read, as it wrote them, each with its entries.
 
@@ -2849,11 +3195,13 @@ def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
         cited = ", ".join(item.evidence_refs) or "no evidence cited"
         if index + 1 in ctx.identifier_findings:
             cited += " (unresolved: report.identifier_uncited)"
+        if index + 1 in ctx.identifier_unheld:
+            cited += " (unresolved: report.value_not_in_cited_entry)"
         lines.append(
             _row(
                 ctx.cell(item.kind),
-                f"`{_one_line(item.value)}`",
-                ctx.cell(item.purpose) if item.purpose else "-",
+                _code_span(_defanged_text(_one_line(item.value))) + ctx.publish_state(item.value),
+                ctx.cell(item.purpose) if item.purpose.strip() else PURPOSE_NOT_STATED,
                 cited,
             )
         )
@@ -2891,6 +3239,22 @@ def _tactic_key(cell: CapabilityCell) -> tuple[int, str]:
 # The unresolved codes that are about one technique and print beside its row.
 _TECHNIQUE_FINDING_CODES = ("attck.", "stix.credit_without_claim")
 
+# The technique a finding row stored without a ``subject`` opens with.
+_LEADING_TECHNIQUE_RE = re.compile(r"^\s*TECHNIQUE\s+(T\d{4}(?:\.\d{3})?)\b", re.IGNORECASE)
+
+
+def _finding_technique(row: dict[str, Any]) -> str:
+    """The technique id an unresolved finding row is about, or ``""``.
+
+    Its ``subject`` where the check set one; otherwise only the id the message
+    opens with (``TECHNIQUE <id> …``), never an id named later in it.
+    """
+    subject = str(row.get("subject") or "").strip()
+    if subject:
+        return subject.upper()
+    match = _LEADING_TECHNIQUE_RE.match(str(row.get("message") or ""))
+    return match.group(1).upper() if match else ""
+
 
 def _stated(value: float | None, producer: str) -> str:
     """A stated confidence with its producer, or that the producer is not recorded.
@@ -2919,7 +3283,17 @@ def _attack_row(
     # Every producer that named the technique, each once: the rules that
     # asserted it, the analysts that claimed it, and the matrix's own layers —
     # the judge's verdict among them — which the corroboration does not count.
-    named = [f"{source} (rule match)" for source in dict.fromkeys(asserted + rule_sources)]
+    # A rule that matched only names resolved at runtime says so in its label.
+    runtime_only = {
+        str(hit.get("source") or "rule")
+        for hit in rules
+        if _resolved_only(hit)
+        and all(_resolved_only(h) for h in rules if h.get("source") == hit.get("source"))
+    }
+    named = [
+        f"{source} ({RESOLVED_ONLY_RULE_LABEL if source in runtime_only else 'rule match'})"
+        for source in dict.fromkeys(asserted + rule_sources)
+    ]
     named += [
         str(x) for x in [*claimed, *cell.contributing_layers] if x not in asserted + rule_sources
     ]
@@ -2941,9 +3315,7 @@ def _attack_row(
     elif cell.not_published:
         status = f"claimed, not published: {_truncate(cell.not_published, 200)}"
     else:
-        status = "published" + (
-            ", corroborated" if mapping is not None and mapping.is_corroborated else ""
-        )
+        status = "published" + _corroborated_words(mapping, rules)
         rule_only = ctx.rule_only.get(cell.technique_id)
         if rule_only:
             status += f"; {rule_only}"
@@ -2951,18 +3323,20 @@ def _attack_row(
             status += f"; {cell.note}"
     # The platform's unresolved findings about this technique, beside its
     # row: the ATT&CK checks, and the judge crediting a source that never
-    # named it.
-    names_it = re.compile(rf"(?<![\w.]){re.escape(cell.technique_id)}(?![\w.]\w)")
+    # named it. Matched on what the finding is about (``subject``), because
+    # its message can name other techniques — an unknown id's names the
+    # closest real ones — and those rows are not what it is about.
     notes = [
         str(r.get("code"))
         for r in ctx.unresolved
         if str(r.get("code", "")).startswith(_TECHNIQUE_FINDING_CODES)
-        and names_it.search(str(r.get("message") or ""))
+        and _finding_technique(r) == cell.technique_id.upper()
     ]
     if notes:
         status += "; unresolved: " + ", ".join(dict.fromkeys(notes))
     tactic = f"{cell.tactic_name} ({cell.tactic})" if cell.tactic else cell.tactic_name
-    procedure = ctx.cell(_truncate(cell.evidence[0], 160)) if cell.evidence else "-"
+    # The statement whole: a table cell wraps, it is never cut.
+    procedure = ctx.cell(str(cell.evidence[0])) if cell.evidence else "-"
     evidence = list(dict.fromkeys(_ids_in(cell.evidence) + _rule_ids(rules, capa_ids)))
     return _row(
         tactic,
@@ -2981,10 +3355,132 @@ def _rule_words(hit: dict[str, Any]) -> str:
     matched = ", ".join(f"`{a}`" for a in (hit.get("matched_apis") or [])[:6]) or "-"
     rule = str(hit.get("rule") or hit.get("name") or "").strip()
     # capa names the namespace a rule lives in; the knowledge table names the
-    # imports its rule matched.
-    where = f"namespace {matched}" if hit.get("source") == "capa" else f"imports {matched}"
+    # imports its rule matched, and the names it matched that the run resolved
+    # at runtime from stored values apart from them: those are not imports.
+    where = f"namespace {matched}" if hit.get("source") == "capa" else _matched_names(hit)
     said = (f"rule {rule} ({hit.get('source') or 'rule'}), " if rule else "") + where
     return said + f"; base rate {hit.get('benign_rate') or 'not measured'}"
+
+
+# How a rule that matched only names resolved at runtime is named as a source:
+# a platform fact about the match, and no corroboration of the technique.
+RESOLVED_ONLY_RULE_LABEL = (
+    "rule match on names resolved at runtime from hashes only, no import; not counted as "
+    "corroboration"
+)
+
+
+def _resolved_only(hit: dict[str, Any]) -> bool:
+    """Whether a knowledge-table rule matched only names resolved at runtime."""
+    matched = [str(a) for a in (hit.get("matched_apis") or [])]
+    resolved = {str(a) for a in (hit.get("resolved_apis") or [])}
+    return bool(matched) and all(name in resolved for name in matched)
+
+
+def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
+    """``, corroborated`` for a row two analyst layers named, or ``""``.
+
+    A technique a rule matched only on runtime-resolved names has its analysts'
+    statements listed under the table; its row points there, so a reader of the
+    row alone does not take the word for more than a count of layers.
+
+    The count is of layers with a statement of their own: statements with the
+    same words, or with at least 90% of the shorter one's words in the other,
+    count once (``capability_matrix.repeats``), and the row says how many were
+    identical or near-identical. A row fewer than two layers stand behind that
+    way says it is not corroborated and why. A row stored before statements
+    were counted keeps the count of layers it was stored with.
+    """
+    if mapping is None:
+        return ""
+    from maljan.extractors.capability_matrix import JUDGE_SOURCE
+
+    named = len([lyr for lyr in mapping.contributing_layers if lyr != JUDGE_SOURCE])
+    independent = len(getattr(mapping, "independent_layers", None) or [])
+    identical = int(getattr(mapping, "identical_statements", 0) or 0)
+    repeated = (
+        f"{identical} statement{'' if identical == 1 else 's'} identical or near-identical "
+        "to another, counted once"
+        if identical
+        else ""
+    )
+    listed = rules and all(_resolved_only(hit) for hit in rules)
+    if not mapping.is_corroborated:
+        if named < 2 or not (independent or identical):
+            return ""
+        return (
+            f", not corroborated ({named} analyst layers name it; {independent} of them in a "
+            "statement of its own"
+            + (f"; {repeated}" if repeated else "")
+            + ("; their statements are listed below the table" if listed else "")
+            + ")"
+        )
+    if not independent:
+        # Stored before statements were counted: the layers it was stored with.
+        if listed:
+            return (
+                f", corroborated (named by {named} analyst layers; their statements are listed "
+                "below the table)"
+            )
+        return ", corroborated"
+    parts = [f"named by {independent} analyst layers, each in a statement of its own"]
+    if repeated:
+        parts.append(repeated)
+    if listed:
+        parts.append("their statements are listed below the table")
+    return f", corroborated ({'; '.join(parts)})"
+
+
+def _resolved_only_lines(
+    cells: list[Any], rules_by_tid: dict[str, list[dict[str, Any]]], ctx: Any
+) -> list[str]:
+    """For each technique a rule matched only on runtime-resolved names, the analysts' words.
+
+    The statements naming the technique, verbatim and by analyst, so a reader
+    weighs whether any says the sample does it; nothing here reads them.
+    """
+    lines: list[str] = []
+    for cell in cells:
+        hits = rules_by_tid.get(cell.technique_id) or []
+        if not hits or not all(_resolved_only(hit) for hit in hits):
+            continue
+        said = list(getattr(cell, "statements", None) or [])
+        if not lines:
+            lines.extend(
+                [
+                    "",
+                    "**Techniques a rule matched only on names resolved at runtime from hashes** "
+                    "(the match is not counted as corroboration; each analyst statement naming "
+                    "the technique follows, verbatim):",
+                    "",
+                ]
+            )
+        lines.append(_item(f"{cell.technique_id} {cell.technique_name}:"))
+        lines.extend(f"  - {ctx.line(text)}" for text in said)
+        if not said:
+            lines.append("  - no analyst statement names it")
+    return lines
+
+
+def _matched_names(hit: dict[str, Any]) -> str:
+    """What a knowledge-table rule matched: its imports, and its names resolved at runtime."""
+    from maljan.tools.knowledge import RESOLVED_AT_RUNTIME
+
+    matched = [str(a) for a in (hit.get("matched_apis") or [])]
+    at_runtime = [a for a in matched if a in {str(r) for r in (hit.get("resolved_apis") or [])}]
+    imported = [a for a in matched if a not in at_runtime]
+    if not at_runtime:
+        return f"imports {_quoted_names(imported)}"
+    if not imported:
+        return f"matched only names {RESOLVED_AT_RUNTIME}, no import: {_quoted_names(at_runtime)}"
+    return (
+        f"imports {_quoted_names(imported)}; names {RESOLVED_AT_RUNTIME} "
+        f"{_quoted_names(at_runtime)}"
+    )
+
+
+def _quoted_names(names: list[str]) -> str:
+    return ", ".join(f"`{a}`" for a in names[:6]) or "-"
 
 
 def _with_rules(procedure: str, rules: list[dict[str, Any]]) -> str:
@@ -3291,7 +3787,7 @@ def _mbc_lines(report: MalwareReport) -> list[str]:
             _item(
                 f"{cell.technique_id}"
                 + (f" {name}" if name else "")
-                + (f": {_truncate(cell.evidence[0], 160)}" if cell.evidence else "")
+                + (f": {_one_line(cell.evidence[0])}" if cell.evidence else "")
                 + f" (claimed by {source}"
                 + (f"; {', '.join(said)}" if said else "")
                 + "; not an ATT&CK technique, not published)"
@@ -3389,6 +3885,26 @@ def _cell(value: Any) -> str:
 def _one_line(value: Any) -> str:
     """A value that has to stay on its line: its line breaks become spaces."""
     return " ".join(str(value or "").splitlines())
+
+
+# Said wherever a list is shown in part: how many were left out and where
+# every one is. The page is laid out for a reader; the JSON report (the same
+# report's structured form) and the evidence ledger hold every value whole.
+LEFT_OUT_LINE = "_{rest:,} more {what} not shown here; the JSON report carries every one._"
+# Said once, in the methodology appendix, of a table cell that ends in the cut
+# mark.
+CUT_CELL_SENTENCE = (
+    "A table value that ends in … is cut to fit the page; the JSON report and the "
+    "evidence ledger (Appendix A's ids) carry it whole."
+)
+
+
+def _left_out(total: int, shown: int, what: str) -> list[str]:
+    """The line a list shown in part ends with, or nothing when it is shown whole."""
+    rest = int(total) - int(shown)
+    if rest <= 0:
+        return []
+    return ["", LEFT_OUT_LINE.format(rest=rest, what=what)]
 
 
 def _truncate(value: Any, length: int) -> str:

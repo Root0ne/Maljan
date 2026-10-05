@@ -121,8 +121,9 @@ class TestATeamBuildsTheTopologyItDescribes:
         assert "wide__join->strings_analyst" in shape["edges"]
 
     def test_a_parallel_stage_with_one_downstream_node_needs_no_barrier(self) -> None:
-        """LangGraph already waits for every predecessor; a barrier would be a
-        node in every transcript that stands for nothing."""
+        """The judge is entered through one edge from both agents, which waits
+        for both; a barrier would be a node in every transcript that stands for
+        nothing."""
         stages = [
             {
                 "key": "wide",

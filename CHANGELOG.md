@@ -8,6 +8,232 @@ change landed on `main`.
 
 ### Added
 
+- **An analyst that has read a function sees a function map, kept by the
+  platform.** It is built from the agent's ledger entries of the job, the
+  pack's analysis-server artefacts and its parsed claims. It rides the
+  run-state block on every turn and replaces nothing.
+- **"Functions examined" in the report carries the function map's coverage in
+  one line.**
+
+- **A function an analyst decompiled and no claim describes is listed to it,
+  once.** The functions come from the analyst's own ledger entries that
+  decompiled something and answered:
+  - a batch answer keyed by address gives one function per key, its `Error`
+    keys left out;
+  - otherwise, the address the call was given (hex or an integer) and the names
+    the call and the listing's signature give.
+
+  A claim describes a function when its sentence or its evidence line names it
+  by address or by a name the decompiler gave it. The address may be written as
+  `0x…`, `…h` or bare hex. It must be the same, or differ by the image base the
+  run read; with no base known, a difference of a multiple of 64 KiB counts. A
+  run of digits alone counts only when it is exactly the function's own hex
+  spelling. A quoted image base of decimal digits alone is no base. Citing the
+  entry alone does not count.
+
+  A batch answer is an object keyed by addresses (`0x…`, or four hex digits or
+  more with a decimal digit among them). A plain listing is one function at its requested address, whatever
+  quoted strings it holds.
+
+  The functions no claim names are listed in one question
+  (`isr.decompiled_not_described`), with their names and entries. What the
+  analyst answers stands. The functions its kept answer still names in no claim
+  are the §13 validation line that names them.
+- **Claims that name only a library or its APIs and a short purpose are found
+  and asked about once.** Such a claim is one sentence whose subject uses,
+  imports, calls or loads libraries or their APIs, with at most a short
+  "for y" purpose. It has no code location in the sentence or the evidence
+  line, and no evidence detail beyond an import listing. A claim stating an
+  action ("to …", "and downloads …") is not one.
+
+  `isr.library_only_claims` quotes every such claim and asks once to merge them
+  into the claims they support or to detail each. The answer stands, including
+  a merge that folds them away, provided it keeps as many claims that are not
+  library-only as the first answer had.
+- **The decoded string's second hop.** `decode_string_blobs`'
+  `output_passed_to` now carries its own `output_passed_to`: from the call
+  that received the decoder's output, the next call that receives that call's
+  frame slot or return value, with its callee and argument position, absent on
+  its own when the code does not show it; nothing is followed past it. The
+  pack line and the indicator provenance name both hops.
+- **An analyst whose first answer called no tool is told so and asked once.**
+  The loop states the fact and the tools the analyst has, and asks whether it
+  wants to call any before its answer stands; KEEP keeps the answer as written,
+  and any other answer it writes next stands. Asked only when a whole answer
+  fits (steps, the final-answer reserve, the window, the spend ceiling), once
+  per analyst in its own loops; when no answer follows, the first stands as
+  written. `run_summary.nudge.no_tool_call` records the question, what
+  followed and why.
+- **llama.cpp's DRY sampler can be forwarded.** `llm.openai.dry_multiplier`,
+  `dry_base`, `dry_allowed_length` and `dry_penalty_last_n` go to a llama.cpp
+  endpoint in `extra_body` when set; none is set by default.
+
+- **Every analyst claim in force reaches the report: cited, named, or
+  listed.** Each composer section and, new, the narrative round show every
+  claim in force under its label (`static claim 15`: the analyst and the
+  claim's number in its answer in force); the narrative round is handed every
+  claim whole. After the body is composed, `reporting.claim_coverage` lists
+  every claim not cited by its label whose code locations (function names) or
+  API-style names the body does not all name, with the names it lacks (a
+  claim naming none is read by its words). It is stored
+  (`MalwareReport.claims_not_discussed`), counted
+  (`run_summary.claims_not_discussed`) and printed under §13.1 "Claims whose
+  code locations or API names the body does not name".
+- **An encoded string is joined to the call its bytes go to, and to the next
+  call that receives that call's frame slot or return value.**
+  `decode_string_blobs` states `passed_to` beside a reference: the call the address of the encoded bytes is passed to (usually
+  the program's decoder) with its callee (an import, a function address, or
+  the slot a runtime pointer is read from) and argument position, read
+  statically by `tools.call_sites` from an x64 `lea` into an argument register
+  or an x86 push or stack store; and on x64 `output_passed_to`, the next call
+  in the function that receives the frame slot that call was given as another
+  argument, else its return value, said as a fact about the slot or the
+  register, with nothing followed past it. Absent wherever the code does not
+  show it. The triage pack's decoded-string line and the IOC
+  provenance say both.
+  `pe_image` reads the import table.
+
+- **The platform resolves API hashes and decodes encoded strings, by address.**
+  Two analysis-server tools, run by the triage pack on every PE as its last two
+  steps and shown in the pack every agent reads. `resolve_api_hashes` names the
+  32-bit values a PE holds that are hashes of Windows function names: the
+  named exports of 27 common DLLs are vendored
+  (`data/windows_export_names_v1.json`, generated from the Wine project's DLL
+  spec files by `scripts/knowledge/build_windows_export_names.py`, which
+  records the tag and each spec's sha256), and the algorithms are data
+  (`data/api_hash_algorithms_v1.json`: CRC-32 of the ASCII and UTF-16LE name,
+  ror13 with and without the module-name addition, djb2, FNV-1a, case-folded
+  variants), over function names and a module-name set (each DLL's file name
+  with and without `.dll`, lower and upper case); each reading names its set.
+  Values the caller gives, or the push/mov/cmp immediates in code
+  and the aligned values in data; every reading of a value and every place it
+  stands, with the start of the function the x64 function table puts around
+  it; a value whose algorithm resolves nothing else is a `lone_hits` row.
+  `decode_string_blobs` undoes one key byte, a rising key byte, a repeating
+  key stored in front of the text, a seed-and-length header before a rising
+  key and base64 on top or alone, over the non-executable sections; only text
+  passing a stated readability test is reported, and the results are the
+  decodings some code refers to by address or FLOSS recovered too, each with
+  the function around each reference. The reverser is told to name the
+  function and the text in its findings. Nothing is run or emulated.
+
+- **The operator sets how long the Triage VM runs the sample.**
+  `sandbox.triage.analysis_seconds` (empty by default: nothing is sent and
+  Triage's own default applies) is sent as the submission's
+  `defaults.timeout`. Settings validation refuses a
+  `sandbox.triage.timeout_seconds` that does not outlast it. A refusal is
+  reported in Triage's own words and names the setting. The run-time limit
+  Triage set for its behavioural tasks is `SandboxReport.run_limit_seconds`, and the
+  run summary states it as the run-time limit Triage set for the task
+  (`run_summary.sandbox_run_limit`, **Sandbox run-time limit**): a limit, not a
+  measured duration. `timeout_seconds` must also cover Triage's processing; no
+  margin for it is guessed.
+- **Prices carry their time windows.** A `llm.model_prices` row (and a
+  vendored `prices` row) may carry `windows`: spans of the day in UTC, on
+  named weekdays, with their own prices and source. The vendored DeepSeek rows
+  now carry DeepSeek's documented peak hours (01:00-04:00 and 06:00-10:00 UTC,
+  Monday to Friday) over its off-peak rate, and the legacy name
+  `deepseek-v4-flash` the page still accepts is priced as `deepseek-flash`.
+
+- **The worker states the Ghidra samples path it uses.** One line at start,
+  `Ghidra samples path: <path> (<source>)`, with the source either
+  `GHIDRA_CONTAINER_SAMPLES_PATH` or the default.
+  [configuration.md](docs/configuration.md) and
+  [deployment.md](docs/deployment.md) say that the variable is the path INSIDE
+  the Ghidra container (`/data/samples` with the shipped Compose file) and name
+  the common mistake, the host directory.
+- **An all-tools team to import.** `docs/examples/profiles/all-tools.json` is a
+  settings import document: the triage pack and triage; one static stage of
+  three analysts on three tools (`static` on the sidecars, `all_tools_static_r2` on
+  radare2 with the analysis and knowledge servers, `all_tools_qu1cksc0pe` on the
+  `qu1cksc0pe` server); `all_tools_reverser_ghidra`, the seeded reverser prompt on
+  Ghidra; detonation, network, debate, verdict and report. A test validates it
+  as the import endpoint does and resolves every agent against stub servers
+  and a stub Ghidra. [configuration.md](docs/configuration.md) says how to
+  merge it into an export before importing.
+- **A team that needs Ghidra waits for it.** `POST /jobs` answers 422, before
+  the job exists, when a static provider that does not degrade (Ghidra) is not
+  ready for an agent of the chosen team: its schema endpoint with the
+  configured token did not answer below 400, or it is switched off for an
+  agent that names it. The refusal names the agent, the provider and its
+  address as scheme and host. The shipped default (Ghidra switched off as the
+  global provider) is not refused.
+- **capa says where a rule matched.** capa's rows carry `addresses`, offsets
+  from the image base capa analysed at, and the pack's capa line names them
+  beside each rule.
+- **The Ghidra container's JVM options, memory limit and restart policy are
+  variables:** `GHIDRA_JAVA_OPTS`, `GHIDRA_MEM_LIMIT` (memory and swap) and
+  `GHIDRA_RESTART`, defaulting to `-Xmx4g -XX:+UseG1GC`, `6g` and
+  `unless-stopped`.
+- **An operator's spend ceiling.** `llm.max_spend_usd_per_job` (no default:
+  none) and `llm.model_prices` (empty) price every recorded call from its
+  provider-reported cached input, input and output tokens at the answering
+  model's prices; the vendored model table carries DeepSeek's documented peak
+  prices for `deepseek-flash` and `deepseek-v4-pro`, with their page, as data.
+  At the ceiling every running tool loop ends its tool phase and its agent
+  writes its answer from what it gathered; a loop that starts afterwards
+  answers once without tools, an ask is refused, and the verdict and the
+  report still run. A degradation reason says so, `run_summary.spend` carries
+  the ceiling, the spend, whether it was reached and where each price came
+  from, and the budget meter's cap is `spend`. A model with no price is named
+  once in the log and in `run_summary.spend.unpriced_models`, and its calls
+  are not counted.
+- **The judge decides the techniques its bundle does not carry.** After the
+  verdict the judge is asked once, in one tool-free question sized like the
+  verdict call, about each technique an analyst claimed that its bundle
+  carries on no attack-pattern and no edge, and each one named only on a
+  finding, with the claim or finding text and its evidence ids: keep or drop,
+  with a reason. The question shows what it asks the judge to decide from:
+  the analysts' reports as the verdict call sees them, the verdict and the
+  techniques its bundle carries, and the text of every evidence entry a claim
+  or finding in question cites — shortened to the judge's window, when it does
+  not fit, with a notice in the question and on the record. The answer is asked
+  for as a JSON array (read from the schema where the provider has structured
+  output, from a function call's arguments, or asked once in text when a
+  provider refuses the schema) and read tolerantly otherwise: table rows, a
+  technique name after the id, arrows and a "Decision:" label; a `<think>`
+  block is taken out first and the last answer per id wins. The decision is
+  read from its position — a JSON `decision` of one whole word, or the word
+  straight after the id's separator, else the last standalone keep or drop —
+  never from a word inside the reason, and a slash-written sub-technique is
+  the same id. Each cited entry is shown as stored, with its tool, marked
+  when the run holds only part of it or only its lower-cased search copy. The answer is kept on the judge's bundle
+  (`x_maljan_technique_review`) and the capability matrix publishes per it. A
+  dropped technique reads "not published: the judge dropped it (<reason>)"; a
+  kept one is published, a finding's technique included, with the judge's
+  reason on its row. With no answer nothing is withheld: each technique is
+  what it was before, and a published one is marked "not confirmed by the
+  judge". An id the catalogue rejects or the sample cannot host is not asked
+  about and is recorded as "not asked: <reason>".
+- **A call that reports no usage is named.** The token ledger records the
+  agent, the call and the model of every call whose provider reported no
+  usage; `run_summary.tokens.unreported` carries the rows beside
+  `unreported_calls`, and the token sentence names them.
+- **DeepSeek's declared maximum output.** `deepseek-flash` and
+  `deepseek-v4-pro` have `max_output` rows of 393,216 (384K on
+  https://api-docs.deepseek.com/quick_start/pricing) in the vendored table.
+- **`llm.openai.reasoning_effort`**: sent as the request's `reasoning_effort`
+  field, exactly as written, so each API's own levels work (DeepSeek: `low`,
+  `high`, `max`). Empty, the shipped value, sends nothing. The `llm` connection
+  test asks with it.
+- **`llm.openai.compat: deepseek`**: DeepSeek's API ignores
+  `max_completion_tokens`, the only cap field OpenAI's clients send (measured:
+  a cap of 5 came back as 88 and 138 tokens), so no output cap reached it. The
+  dialect sends the cap as `max_tokens` as well, which DeepSeek honours with
+  reasoning counted, and `disable_thinking` as DeepSeek's `thinking.type`. It is
+  explicit rather than read from the host, because OpenAI's own API refuses
+  `max_tokens` beside `max_completion_tokens` for its reasoning models.
+  It also keeps each assistant turn's `reasoning_content` exactly as DeepSeek
+  returned it and sends it back on that turn in every later request that
+  carries tools, which DeepSeek's thinking-mode guide requires (400 otherwise)
+  and which the OpenAI client does in neither direction; the window budget
+  counts it. A cap bound for one call reaches DeepSeek too. `compat` is global,
+  per-agent `openai` entries included.
+- **Cached input and reasoning tokens are recorded where reported.**
+  `run_summary.tokens` (and each agent's row) carries `cached_input_tokens` and
+  `reasoning_tokens`, each with the calls that reported it, from the client's
+  usage details or DeepSeek's `prompt_cache_hit_tokens`; the token sentence
+  names them. Absent where no call reported them.
 - **An analyst answer cut at its output cap is asked for a whole shorter one**
   (`isr.cut_at_output_cap`), as the judge's and a report section's are: the
   question states the cap, the characters the answer ran to, the CLAIM blocks
@@ -831,6 +1057,250 @@ change landed on `main`.
 
 ### Changed
 
+- **Analysts run in parallel on a hosted API and one after another on a
+  single-slot local server, decided per job.** `llm.parallel_analysts` is now
+  `auto` (the default), `true` or `false`. `auto` resolves each analyst
+  model's endpoint on a thread before the job is built: Ollama, and an
+  OpenAI-compatible host that is a loopback, private, link-local or
+  shared-range address (written or resolved) or a name only a local resolver
+  answers (`host.docker.internal` and its kin), runs them one after another
+  unless its llama.cpp `/props` reports more than one slot; a host that
+  resolves only to public addresses runs them in parallel; a host that does
+  not resolve runs them one after another, saying it could not be told
+  whether it is hosted. One such model makes the whole job sequential. The
+  mode, the fact that decided it, and what every analysis stage and every
+  revision round ran in (set on the stage, the job's, one node for a debate
+  handover, or the stages a revision revises) are logged and in
+  `run_summary.profile.analyst_mode`. A stage's own `mode` wins;
+  `StageDefinition.mode` is unset by default and an unset analysis stage
+  follows the job. A revision round follows the stages it revises. The
+  console's run-mode selector has an `auto` choice. In a 2.00 USD DeepSeek
+  run every stage ran its agents one after another although the API serves
+  requests concurrently.
+- **The reserve for the verdict and the report is the tail's real size, retries
+  included.** Each planned call is kept at what its admission demands, at the
+  prompt it will be sent (the largest of its kind, else the largest
+  single-shot prompt, else a conversation's opening prompt, bounded by the
+  window allowance, which alone is used only before any prompt was sent) and
+  at the answer this job measured (the verdict's largest single-shot answer;
+  a report call's mean report or other single-shot answer, which is also the
+  smallest answer its admission demands). Each also keeps its validation
+  retries: one per planned call until a call of its kind is made, then
+  `(retries + 1) / (calls + 1)` of this job's own count; a retry is planned
+  with the answer it corrects in its prompt. Each row of
+  `run_summary.spend.reserve` adds `retries`, `retries_from`,
+  `retry_prompt_tokens` and `expected_usd`, its charge at the measured
+  cache-hit share. A 2.00 USD DeepSeek run kept 0.90 USD for a tail of 27
+  calls costing about 0.42; the same shape now keeps about 0.72 at the
+  revision round, and all 27 calls are made on it.
+- **The reverser reaches every branch of a dispatcher it finds.** The seeded
+  reverser prompt, and the example team's reverser, ask of a switch or a table
+  over command or message ids that each branch's handler be decompiled or
+  listed as not reached with the reason, one line per id with the handler's
+  address.
+- **The spend ceiling counts what a call was charged and is a hard bound**
+  against the platform's prompt estimate (characters over three). A call is
+  settled at the cost its provider reported with the answer, else at the rates
+  in force when its request was sent (every model client stamps the send time
+  on its answers), and is reserved at the highest rate in force before its
+  deadline. Every model call is admitted first: tool-loop turns, revisions,
+  the mediator's fast path and extraction, the judge's salvage, the verdict,
+  report sections, the narrative and the function summariser. Before a call its
+  output cap is held to what the spend it may use pays for; it is refused only
+  when that is below the smallest answer it can give (the largest of its group
+  this job has measured of the model: tool-loop turns for a loop turn,
+  single-shot and verdict/report answers otherwise; its configured cap until
+  one is measured). A model that takes no per-call output cap is admitted only
+  at its whole cap. `MIN_ANSWER_TOKENS` and its 8,192-token overshoot are gone.
+  Calls in flight reserve their worst case until their cost is on the ledger,
+  and a loop's turn keeps room for its closing answer. The verdict and report
+  calls are planned at the start of the job with their window allowance and
+  output cap; the reserve keeps the verdict at what its admission demands, the
+  first report call uncached and the report calls after it at the job's
+  cache-hit share, measured only over calls that are not the first of their
+  conversation (the cached rate until one is), (`run_summary.spend.reserve`),
+  and a planned call spends only above the share of the ones after it. A call
+  is priced over its own request deadline.
+  `run_summary.spend.prices_from` lists every rate a model's calls were priced
+  at.
+- **Under a spend ceiling the composer and the narrative round use the manual
+  path.** The structured-output path takes no per-call cap, so its calls could
+  not be held to what the spend pays for; with a ceiling set every section and
+  the narrative go by the manual JSON path, where the held cap is sent with the
+  call. Without a ceiling nothing changes.
+- **A report call's log line names the limit that set its cap**: the section's
+  output budget, what the window leaves after the prompt, or the spend
+  ceiling's hold. It used to name the window whatever set it.
+
+- **The reverser reads the code where the static tools pointed.** The seeded
+  prompt starts it at the addresses the pack gives, asks it to confirm or
+  refute each upstream finding at function level, then to look for command
+  dispatch, environment checks, persistence and cleanup, the logic of contact
+  with a remote host and the decoding routines.
+- **The sink-reachability pre-pass follows the agent's own provider.** It runs
+  for every agent on Ghidra over http — a static clone on Ghidra under another
+  global provider, and a generic agent given Ghidra's tools, which now reads
+  the priority functions on its first turn — and for no agent on another
+  provider.
+- **A clone with no tool list takes its role seed's.** An operator's
+  definition with no `tools` key gets the list of its role's seed (`static`,
+  `dynamic`, `network`, `report`, `lead`); a list that is present, empty
+  included, is kept as written.
+- **No agent loop has a default step or time limit.** `react_agent_max_steps`
+  (was 10) and `react_agent_timeout` (was 180 s) are empty, the deprecated
+  `react_agent_*_overrides` maps ship empty (were static 40 steps / 1,500 s,
+  network 6 steps / 300 s, dynamic 600 s, judge 600 s), the seeded `lead`
+  carries no budget (was 40 / 1,800 s) and an ask's `agents.delegation_steps`
+  / `delegation_timeout_seconds` are empty (were 12 / 300 s). An operator's
+  value anywhere is still kept to. `None` is no limit end to end: the loop's
+  budget, langgraph's recursion limit, the hard cap, an ask's ceiling and its
+  tool description, the fallback turn deadline, the validation turn, the
+  salvage and the nudge. The run-state block says "no step limit" / "no time
+  limit" in words; the budget meter's `max_steps` / `timeout_s` are `null`. A
+  loop ends when its model answers, at the repeat guard, at its room, or at
+  the spend ceiling, with the job timeout last; each model call waits what
+  its answer takes at the measured pace.
+- **The judge's loop reads its own budget** through `loop_limits("judge")`,
+  so the override map's `judge` entry reaches it; it read the deployment-wide
+  numbers.
+- **The judge's prompts are sized from its window.** Each analyst report (was
+  cut at 500 characters), the evidence summary (2,000; it also named at most
+  25 techniques and 6 sources each), the negotiation history (800) and each
+  remembered case (200) are whole when the judge's window, less its output
+  cap, holds them; otherwise the largest parts are shortened first, the
+  prompt says which and to what width, and a degradation reason records it.
+  The technique question shares the same reports and rule.
+- **The triage pack shows everything its room holds.** Its fixed heads (six
+  names, 120 characters of text, 100 decoded strings in 3,000 characters at
+  120 each, 20 detection labels at 80 each) are gone: every line is whole when
+  the pack fits, and otherwise one detail level derived from the room applies,
+  each line saying what it left out and that the rest is a tool call away.
+- **capa and FLOSS on the analysis server have no wall clock of their own**
+  (were 300 s and 600 s): a call runs for the timeout its caller passes, the
+  triage pack passing `static.capa.timeout_seconds` for capa — which the
+  server's 300 s used to cut — and what is left of `triage.budget_seconds` for
+  FLOSS. The manifest declares `timeout_s: null` for both.
+- **Nothing a model wrote is dropped for a count.** A chunked analyst's merged
+  ISR keeps every claim (it kept 20), every schema complaint is fed back (six
+  were), the capability matrix and its table show each statement whole (six
+  statements, 200 characters, 160 in the table), a callee's claimless answer
+  reaches its caller whole (2,000 characters), and the dynamic analyst's
+  network table lists every DNS, HTTP, TCP, host and domain row (ten of each).
+- **The Ghidra sink pre-pass** waits one tool call's deployment budget, or as
+  long as Ghidra takes when none is set (was 120 s per request).
+- **An analyst's input is sized from its window.** `max_token_limit` (was
+  128,000 tokens, cut with a log line) is empty by default: the input may take
+  the window's room before the reply less the prompt around it; an operator's
+  number wins. Input over it is shortened as a document (JSON keeps its keys,
+  text its head ending in `…`), the model reads a note saying so, and the run
+  records a degradation reason. The function summariser's prompts (were 8,000
+  and 12,000 characters) are held to the same room and say when they are
+  shortened; the PE loader's markdown lists every import, export and string
+  (were 10, 10, 20 and 50); the generic MCP provider's prompt names every tool
+  (was 20); the capa and YARA evidence tables carry every hit (were cut at
+  6,000 characters mid-row).
+- **What the page leaves out, it says.** Every list the markdown report shows
+  in part ends "N more … not shown here; the JSON report carries every one", a
+  cut table value ends in `…` and the methodology appendix says where it is
+  whole, the JA3, packer, resolution and environment lists are whole, the
+  evidence sections say how many rows they left out and under which ids the
+  evidence endpoint carries them, a cut text section says where it is whole, a
+  figure's legend counts what it did not draw, a drafted YARA or Suricata rule
+  says in a comment how many published indicators it leaves to the IOC table,
+  the STIX export carries every process root (was 20), a job's failure message
+  is marked where it is cut, and a validation question naming a holder list
+  counts the rest.
+- **The report stage writes up to the model's own maximum.** A composer section
+  and the narrative round take, in order, the operator's
+  `reporting.composer_section_max_tokens` (sections) or `llm.judge_max_tokens`
+  (the reporter's cap; `llm.expert_max_tokens` no longer reaches the report
+  stage), else the model's declared maximum output, else the analysts'
+  quarter-of-the-window derivation — never more than the model's maximum, the
+  reasoning room included. On a 1,048,576-token model that declares 393,216 a
+  section was held at 262,144; it now gets 393,216 and the rest of the window
+  for its evidence. Each section logs its budget and where it came from.
+  A learned window is never overrun: a section's evidence room is the window
+  less the budget, never below zero, and a call whose budget would not fit
+  beside its prompt is sent with what the window leaves, under the field each
+  server reads (`max_output_tokens` on Gemini, llama.cpp's `max_tokens` and
+  `n_predict` extras); Ollama, whose client takes no per-call cap, keeps its
+  built cap. A prompt larger than the whole window is recorded, because
+  Ollama cuts such a prompt from the front, system prompt included, without a
+  word. On llama.cpp a cap set for one call now reaches the server's own
+  fields, so a view answer bound to its view's cap is held there where the
+  server used to write on to the built cap. The 8,192-token fallback window a
+  failed probe leaves sizes nothing. The narrative round's wait is sized from its
+  budget and the measured pace like a section's, where it was a fixed 600 s
+  (`narrative:round` in Appendix B).
+  **Upgrading:** a deployment that set `llm.expert_max_tokens` above
+  `llm.judge_max_tokens` and relied on the larger for report sections now gets
+  the judge's. A local deployment that sets `llm.judge_max_tokens` now gives
+  each section that whole cap rather than a quarter of the window, so a
+  section's evidence room shrinks — on a 16,384-token window with 8,192 set,
+  from 36,864 to 24,576 characters, and to none once the cap reaches the
+  window.
+- **No report schema or prompt sets an upper size.** A section's prose
+  (`_ProseOut.body`, 2,500 characters) and introduction (`_IntroOut.text`,
+  1,800), and the narrative's executive summary (1,200), key findings (six) and
+  recommendations (eight) lose their upper bounds; the lower bounds stay. The
+  prompts no longer ask for a number of sentences, characters or entries, nor
+  to be concise; the narrative prompt states the lower bounds the schema
+  holds ("at least 120 characters", "at least two", "at least three"). A live
+  run's evasion section was dropped for running past 2,500 characters after
+  its one retry.
+- **Every list a report model writes is kept whole.** The composer kept the
+  first 20 flow steps, 30 configuration items, 40 commands, 30 flags and 6 C2
+  channels, and silently the first 8 citations of a prose subsection; the
+  report's ATT&CK external references and the Sigma drafts' tags took the
+  first 10 techniques. None of them cuts anything now.
+- **The report models see every published fact.** The narrative round was shown
+  at most 8 techniques (each with its first quote cut to 120 characters), 5
+  sandbox signatures, 8 import categories, 5 capability rules of 4 APIs each, 3
+  domains, 3 IPs, 3 persistence entries (cut to 100 characters) and 5
+  obfuscation indicators; a composer section at most 24 imported DLLs. Each is
+  shown whole now, and the DLL list is always the complete list. The run-state
+  block names every failed tool rather than eight. A narrative prompt larger
+  than what the window leaves after its budget is recorded in the report's
+  degradation reasons, and its calls are held to what the window leaves.
+- **A request's timeout is sized from its output cap and the measured pace.**
+  Every derived wait was held under 1,800 s, the client's request timeout, and
+  that timeout — which httpx reads as the longest silence, not a deadline for
+  the whole answer — ended an answer on a server that sends nothing until it
+  has finished, such as a non-streaming llama.cpp server; streamed answers and
+  DeepSeek's keep-alive'd ones were not ended by it. Once a model's rate is
+  measured, an OpenAI-compatible (chat completions or Responses API),
+  Anthropic or Gemini request whose output cap takes longer at that pace than
+  its client allows carries that time as its own timeout, with the existing
+  margin; any other request keeps its client's. The derived waits are no
+  longer capped: the analysis job's 8-hour arq timeout is the last resort.
+  Gemini's client timeout was a fixed 90 s and is now the 1,800 s every
+  provider has. The function summariser's wait follows its request's, and a
+  model rebuilt by the llama.cpp self-heal keeps the job's rate meter.
+  `run_summary.generation` reports `unmeasured_request_timeout_s` in place of
+  `ceiling_s`, and Appendix B no longer prints "at most 1800s".
+- **`reporting.upstream_findings_max_chars` ships at 0, derived from the served
+  window** like the tool-answer cap, for the upstream findings block and the
+  triage pack; the documented 6,000 applies only when no window was learned. A
+  positive value is the operator's. **Upgrading:** a stored 0 used to mean
+  "no cut" and now means "derived".
+- **The run-state block rides at the end of the last message, so a request's
+  front stays the same.** A tool loop's block, with the budget line that counts
+  down every turn, used to be rewritten at the end of the system turn, and a
+  changed byte there voids a provider's prefix cache (measured on DeepSeek: 0
+  cached tokens of 3,884 with only that line changed, 3,712 with it unchanged)
+  and makes a local server read the whole conversation again. It now ends the
+  request's last message — the task, the latest tool answer, or the question a
+  nudge, a synthesis or a retry asks — and comes off it again, byte for byte,
+  once the message is no longer last: each request is the previous one without
+  its block, plus the new turns and the new block. No request has two user
+  turns in a row or a turn holding only the block. The text is the same.
+- **A question asked right after a user turn ends that turn.** The retries
+  after an answer cut at its cap (an analyst's, a report section's, the
+  verdict's) leave the cut answer out, and a forced synthesis whose trim kept
+  only the task follows the task directly; each used to send its question as
+  a second user turn in a row. The question, its text unchanged, now ends the
+  user turn before it after a blank line (`pipeline.turns.with_question`); after
+  a model's turn or a tool answer it is still a turn of its own.
 - **The analysts' and the judge's output caps are derived from the window.**
   `llm.expert_max_tokens` and `llm.judge_max_tokens` ship at 0, which derives
   each agent's cap in three cases: the model's declared maximum output (a model
@@ -1913,6 +2383,870 @@ change landed on `main`.
   `MALJAN_FLOSS_PATH` to a missing file unless a test names a build.
 
 ### Fixed
+
+- **A table row's whole value is in an entry it cites** (`report.value_not_in_cited_entry`): a host identifier or a configuration value no cited entry holds whole, a number in decimal or hex included, is asked once and marked beside its evidence if kept.
+- **Technical prose names an unpublished value only beside its state** (`report.unpublished_value`): one question per section lists the values of its prose the IOC table does not publish, kept sentences are marked with their values' states, and a table cell carries the state beside the value without a question.
+- **The event scrub's shape rules never reach report text, and no operator credential does:** with configured values registered, a finding row keeps the evidence's words and loses configured values, URL userinfo and credential-named query values; otherwise it is scrubbed as before. In events an exact ATT&CK name such as "Access Token Manipulation" and a slash-joined family name away from a credential label are kept.
+- **An analyst's answer that repeats its claims past the margin is ended while
+  it streams** (llama.cpp, Ollama and DeepSeek, which is now read as a stream),
+  and the whole-answer question is asked of what it wrote; a path that does not
+  stream keeps the check after the answer. The rule is read line by line at a
+  flat cost; the ended answer's question says it was ended, its in-call pace is
+  recorded, and the spend ceiling is charged a stated estimate of its usage.
+  The reader keeps no text: a claim is a 16-byte hash, and no line is buffered.
+  A block still open is read as kept as it arrives and cut back only if it
+  resolves as removed; a tag's closing is read only after its own `>`.
+- **A streamed answer is joined as it arrives, holding no chunk** (llama.cpp,
+  DeepSeek, Ollama): 400,000 chunks join in about 11 s and 12 MB, where adding
+  the chunks took about 141 s and 990 MB; the joined answer is unchanged.
+- **A fenced JSON block nested past the parser's depth is kept as text** by the
+  tool-call strip, as invalid JSON is, rather than raising and losing the answer.
+- **A connection that drops while an answer streams is an `APIConnectionError`**
+  (llama.cpp, DeepSeek, Ollama), as on a whole answer, so the loop's replay and
+  the connection retry read it again.
+- **A tool answer the conversation had no room for is recorded as cut**
+  (`truncated`, with a statement of the cut), never as an ok and empty answer,
+  so the decompiled-not-described check, the function map and the report's
+  functions list do not count it as read.
+
+- **The APK tool survives a manifest androguard cannot parse.** On an APK whose
+  `AndroidManifest.xml` is not valid AXML, androguard raised from a getter
+  (`KeyError: 'Name'` from the version name), outside the one call `apk_info`
+  guarded, and the whole call failed. androguard also answers such a
+  manifest's permissions and components as empty lists, which read as an APK
+  declaring nothing. Every androguard call is now contained: the zip-level
+  facts are always reported, each androguard fact is reported when it is read,
+  and otherwise it is `no: <reason>` (for the manifest, "the manifest could not
+  be parsed", with the exception's type only), named in the `degraded` note.
+  The triage pack and the report read such a fact as no list. A dex file
+  androguard's reader refuses is listed under `dex_strings_unread` as
+  `no: dex file <n> of the APK could not be read (<type>)`, beside the other
+  files' strings, where it used to be skipped with nothing said.
+- **An answer held to a smaller cap for one call is checked against that
+  cap.** ik_llama.cpp reports `stop` for an answer it cut at `n_predict`, so
+  a cut is read from the count reaching the cap. An analyst's answer was
+  checked against the model's built cap, so an ask, salvage, nudge or last
+  loop turn that the spend ceiling held to less read as whole when it was
+  cut; it is now checked against the cap the call was sent with. The function
+  summarizer had no such check: a summary cut at its limit, by the same rule,
+  now begins with a note saying its end is missing, and the cut is recorded
+  with the run's shortened inputs.
+- **A cap handed to one call reaches a llama.cpp server whose model was built
+  without a cap.** The per-call cap was copied only into cap keys the
+  llama.cpp extras already held. The container builds a run's models with a
+  cap derived from the window, so their extras held one and their per-call
+  caps already reached the server; nothing changes for them. A model built
+  without a cap held no such key, and the server never saw its per-call cap:
+  in a run that is the function summarizer's model, and outside one the
+  provider called directly. Measured on ik_llama.cpp with such a model: a call
+  held to 60 output units produced 3,732. On a llama.cpp endpoint a request's
+  own cap is now sent as `max_tokens` and `n_predict` in the extras whether or
+  not the model was built with a cap; a request with no cap sends none.
+  Hosted OpenAI and DeepSeek requests are unchanged.
+- **A model call that is still producing is no longer cut at 1,800 s because
+  nothing was measured yet.** Until a model's pace was measured, every call's
+  whole-call deadline was the provider's request timeout, 1,800 s. A dense
+  local model generating 2.3 units a second was cut there on its first call
+  while it was still decoding. Its retry got the same 1,800 s, because a cut
+  call left no measurement. The rule now:
+  - before any generated piece arrives, silence is the only fact, and the
+    provider's request timeout bounds it. A chunk that names only the role is
+    not a generated piece;
+  - once two pieces arrive, the call's pace from its first piece to its last
+    is measured; the prompt read before the first is never counted as
+    generating. The deadline becomes the time to the first piece and the
+    output cap at that pace, times the same 1.5 margin as a measured model's,
+    wherever that is longer. A call with no output cap is sized from the room
+    its declared or probed window leaves after the prompt. A call that stops
+    producing is cut when that deadline passes;
+  - where a producing call has nothing to size from (one piece, or no cap and
+    no known window), it is held to the silence after its last piece;
+  - the pace of a call that is cut, fails or is ended from outside is recorded
+    for its model as a generation rate, so the next call is sized from it. A
+    call with fewer than two pieces records nothing;
+  - on a streamed answer (Ollama's included), the connection's read timeout
+    after pieces have arrived ends the call as a call deadline (the silence
+    after its last piece), so the loop salvages what it gathered rather than
+    replaying it.
+
+  A llama.cpp server's answer is now read as a stream, because a non-streamed
+  answer sends nothing until it has finished. The chunks are joined into the
+  answer the server would have sent whole: its text, finish reason, `timings`
+  and usage (the last the stream sent, so ik_llama.cpp's running total on each
+  chunk is not added up), and its tool calls read as strictly as a whole
+  answer's, so a call cut mid-argument stays an invalid call. A server error
+  sent inside the stream is raised as the status error it is on a whole
+  answer. A hosted API is read as before. The deadline message names the rule
+  that applied (the model's measured pace, the pace measured in this call, or
+  the silence before the first generated piece or after the last) and its
+  numbers.
+- **Windows API names and hash-algorithm ids are no longer masked in the events
+  and the transcript.** The scrub's length rule read every long export name
+  (`ZwSetInformationJobObject`) as a key, and two algorithm ids joined by a
+  slash as one. These now travel as written, alone or joined to others of their
+  kind by `/`, `|`, `+` or `&`:
+  - a name the vendored export-name catalogue holds;
+  - an id of the vendored algorithm catalogue (`data/api_hash_algorithms_v1.json`);
+  - a name this job's hash resolution read, from the pack's call or the analysis
+    server's tool only. These names are forgotten when the next job installs
+    its settings.
+
+  `!` now splits a value, so `kernel32.dll!<key>` masks the key. A key joined
+  to other text by `/`, `|`, `+` or `&`, a token inside a run, and the base64
+  a run ends with before padding are masked with the whole stretch of base64
+  characters around them, so no fragment of a key travels; a dot or any other
+  character outside those alphabets ends the stretch
+  (`host.example/<key>/x.php` reads `host.***.php`). Padding is one or two `=`
+  followed by the end of the text, whitespace, a closing quote, bracket or tag,
+  `,`, `;`, `:`, `.` or a joiner, or ending a stretch whose length with its
+  `=` signs is a multiple of 4; any other `=` is an assignment, and a kept name
+  (a word chain, a catalogue name, the platform's own variable name) stays
+  readable in front of it. A MIME
+  type is kept only with a registered top-level type and a subtype that is no
+  key. Vendor prefixes are still asked first, and configured values are still
+  masked by value, so every credential shape stays masked.
+- **An answer that writes its claims again past a margin is asked once for a
+  whole one.** Claims begun and distinct, each keyed by its whole block, are
+  counted when the answer arrives; past the margin (the distinct count, or
+  `validation.claim_repeat_margin`) `isr.claims_repeated` states the counts and
+  asks the cut question's whole-answer question, with the answer shown back up
+  to its first repeated claim. Any whole answer that does not repeat stands;
+  otherwise the answer stays as written.
+- **A technique no claim naming it uses the catalogue's terms for goes to the
+  judge with the check's finding.** Asked once in the judge's question after
+  its verdict, only where the analysts' check asks it, keep or drop with a
+  reason; the report row shows the finding, the answer and the reason.
+- **A later chunk's call an earlier chunk made is answered with its recorded
+  result.** Not run again and not counted toward the repeat stop; a result the
+  run did not keep whole is served once more.
+
+- **A value the sandbox attributes no flow of the sample to is the judge's only
+  by its answer to the sandbox's fact.** A CDN address was published as C2 on
+  the judge's indicator alone. An indicator naming such a value is now asked
+  about once through the verdict's own question, with the fact beside it
+  (`stix.indicator_unattributed_flow`); a keep after that question is recorded
+  answered and publishes the value with both facts in its reason, and a keep
+  the judge was never asked about publishes nothing and says which case
+  applies (the value was first written in its last answer, or no question is
+  recorded for the run). A judge URL is asked about its host. **A report stored
+  before this change renders such a value withheld** in the IOC table, `/iocs`
+  and the export, with "no question with this fact is recorded for this run";
+  every published row of it gains its reason, and a run diff against it
+  compares the decision, not the wording. A judge value no row publishes is
+  refused naming the source that holds it: the file's strings when a strings
+  row does, else the tool answers the build's whole-value search finds (the
+  judge's values join the `tool_sightings` search), else "named only by the
+  judge's indicator; no tool answer in this run holds it" — on a report stored
+  before this change, "no tool answer this report keeps holds it". **Every
+  published row says why**: the IOC table prints `yes: <reason>`, `/iocs`
+  carries `publish_answer`, each exported indicator's description ends with
+  "Published because: …", and the YARA and Suricata drafts comment each value
+  with its reason.
+- **Corroboration counts independent statements.** Four analysts writing one
+  sentence word for word made a contradicted technique "corroborated (named by
+  6 analyst layers)". Two statements now count once when their normalised
+  text is the same, one is inside the other word for word, or at least 90% of
+  the shorter one's words are in the other (overlap coefficient). The shorter
+  of a pair is the repeat, read longest first, so each group is credited to
+  the layer of its longest statement (ties by the text, then the layer's
+  name) and the count depends only on what was written, not on the order the
+  analysts are read in (`independent_layers`). The row says
+  how many statements were identical or near-identical
+  (`identical_statements`) and, where fewer than two layers stand behind it,
+  that it is not corroborated. A finding's title is neither a statement nor a
+  procedure; its detail is both. The console's badge and the narrative prompt
+  read the same list.
+- **A recommendation acts only on published indicators.** A hunting note and a
+  P0 recommendation told the reader to block an address the IOC table refused.
+  A recommendation naming an address or a host the table does not publish is
+  asked about once with the table's answer
+  (`narrative.unpublished_indicator`); a value kept after it is recorded.
+- **A URL's HTTP method is read from the evidence.** Every URL defaulted to
+  `GET`, beside a POST beacon; the method is now the one the sandbox request
+  record states, and absent (`null`, printed `-`) on a URL no request carries.
+- **The citation check reads a library name however it is written.** "WinINet"
+  cited to the resolved-hashes entry was said not to be in it; the entry lists
+  `wininet.dll`. DLL and API names are compared without regard to case, and a
+  bare library name is held by an entry that writes it with its `.dll`.
+- **A step marked observed is observed whole.** A step joining the rundll32
+  load the sandbox watched to hashing a static tool read kept "(observed in
+  sandbox)". An observed step citing an entry that is no sandbox observation,
+  or naming an address or a host no flow of the sample's process tree reached
+  (a name judged by its DNS answers, now kept as `resolved_ips`), is asked
+  about once through `report.flow_voice`.
+- **Every technique name comes from the vendored ATT&CK table.** The judge was
+  asked about bare ids and wrote its own names into its drop reasons ("T1547.004
+  (Scheduled Task/Job)"). The technique question, the ids it says the bundle
+  carries and the evidence summary name each id from the table, and the
+  reference back-filled on an attack-pattern reads the same table instead of a
+  short hand-written list.
+
+- **Redaction removes secrets, not words.** A 24-plus run of the base64
+  alphabet was read as a key even when it was words: a claim's
+  `anti-debugging/environment`, a STIX property name and an analyst's roster
+  key were published as `***`. A run that splits on `_`, `-` or `/` into two or
+  more pieces of letters, each written the way a word is and shorter than the
+  floor, is words; every key shape the tests build is still masked. What that
+  costs is a passphrase-shaped secret, which no shape tells from a phrase, so
+  two rules stand in front of it: a run that begins with a known vendor prefix
+  (`glpat-`, `xoxp-`, `ghs_`, `hf_`, `rk_live_` and more) with at least 20
+  characters after it is a key (Mailgun's `key-` only when its body is not
+  words), and every secret value the platform holds — the job's model, sandbox,
+  Ghidra and tool-server credentials, the worker's own database, Redis and
+  object-store ones, and the command line's settings — is masked by exact value
+  as a whole word wherever the scrub runs. The scrub repeats its passes until they change nothing, and an
+  argument summary, the whole summary line, a result headline and a finding row
+  are cut so that a second scrub changes nothing: a digest or an identifier is
+  kept whole (a `<sha256>.exe` stays whole), and a cut inside a URL or after a
+  scheme word moves back to the start of its word.
+- **Informational notes do not make the verdict tentative.** One empty
+  CONFIDENCE among hundreds of read claims set `degraded_mode` and the
+  DEGRADED RUN banner. An unread-claims reason for an analyst that still has
+  claims read, and DISPUTES headings left unasked, are listed in §13 and the
+  header's Notes line and do not degrade the run; an analyst with no claim
+  read, a failed stage and a failed required tool still do.
+- **One technique count and one STIX object count.** `run_summary.stix_object_count`
+  was the judge's bundle size beside a larger export, and the long-term-memory
+  case stored the claimed techniques against fewer published. After the export
+  is built, `stix_object_count` is its object count on the stored summary and
+  the report's; the judge's is `judge_stix_object_count`. The case stores the
+  published techniques, and its total, corroborated count and search text
+  follow them; a case thin in what was published is not stored, and that gate
+  decides alone (the claimed set no longer drops a case). A run with no report
+  node stores the judge's bundle's technique ids, or the claimed ones with a
+  log line saying so when the bundle cannot be read. The judge's
+  log line says "claimed techniques", and the terminal's corroboration line
+  says "technique(s) named".
+- **The judge is asked about its malware object.** `is_family: false` on an
+  object named for the attributed family is asked about
+  (`stix.is_family_contradicts_family`), and so are `labels` with no
+  `malware_types` and a `malware_types` value outside STIX 2.1's
+  `malware-type-ov` vocabulary (`stix.malware_type_vocabulary`), which the
+  question lists; a type is compared exactly. The judge answers; nothing is
+  rewritten. The prompt says when an object stands for the family and names
+  the vocabulary. The object is read at its place in the answer as written,
+  since every published id is minted anew.
+- **A cipher is file encryption only when the model said it is.**
+  `per_file_key: false` put a loader's cipher under "Ransomware behaviour"; only
+  `true` does now, and the cipher renders in §5.1.
+- **A mediation that lists contradictions is not consensus.** The mediator
+  ends with a final `CONTRADICTIONS:` block, one line per contradiction still
+  standing, or `CONTRADICTIONS: NONE`; a claim a ledger entry contradicts is a
+  contradiction. Only that block is read, on the text and structured paths, and
+  a non-empty one is not consensus whatever `agreement_confidence` says (the
+  number is kept and shown), so the analysts revise. A missing block is asked
+  for once; still missing, `run_summary.negotiation.mediation_notes` says so
+  and the number decides as before. A run declared consensus at 1.0 over five
+  contradictions its mediator had listed. Each line of the block is one
+  contradiction, plain or bulleted; a "none" empties it only as its whole
+  content, so "None of the analysts …" is a contradiction.
+- **The cut-at-cap check uses the cap the call was built with.** The container
+  records the output cap on the model it builds, and the analysts' cut check,
+  their spend meter and the judge read it there instead of deriving it again,
+  which after the window cache expired gave 8,192 against calls built with
+  32,768: a false cut on one analyst, a real one named with the wrong number,
+  and a whole-cap answer accepted silently. A chunk's cut is now asked about
+  inside that chunk, over its own input, before the merge, and what comes back
+  replaces that chunk's contribution alone; a chunk still cut is recorded
+  unread, named by its chunk.
+- **A validation finding sits on the technique it is about.** Every technique
+  check sets the finding's `subject` to its technique id and the ATT&CK table
+  matches on it, so the closest real techniques an `attck.unknown_id` message
+  suggests no longer print "unresolved". An id the catalogue rejects says what
+  happened to it where the retired set knows (retired, revoked, deprecated, and
+  by what), and the retired-id generator records the bundle's own revoked and
+  deprecated attack-patterns, and the console's capability heatmap shows the
+  same reason. `data/attck_retired_ids.json` is regenerated
+  from the cached 19.2 bundles (205 revoked or deprecated ids added, every
+  existing row gains its `status`; the id catalogue and the technique table
+  are unchanged). **Upgrading:** to regenerate it offline, from a checkout,
+  run `PYTHONPATH=src python scripts/knowledge/prepare_attck_malware_fixtures.py
+  --no-labeled-sentences --cache-dir ~/.cache/maljan/attck`; without
+  `--cache-dir` the script downloads the current upstream release and may
+  rewrite all three catalogue files.
+- **A later chunk is told what the earlier chunks already called.** Its prompt
+  lists every earlier call as `tool(args) → ev_id` and its repeat guard is
+  seeded with them, so an identical call is answered with the entry that holds
+  it rather than run again. That first answer does not count toward the repeat
+  stop, and a failed earlier call is served once more.
+- **An analyst's table never enters a measured block.** An analyst artifact of
+  imports, IOCs, processes or persistence was merged into the import table,
+  the string table, the process tree and the persistence mechanisms, so one
+  run's §5.2 printed "_Measured:_ 23 static imports" against the tool's 5,
+  §7 listed names resolved from hashes as `KERNEL32.dll` imports with an
+  import capability profile, and §8 said "imports `CreateRemoteThread`" and
+  counted the match as corroboration. The projections now read tool output
+  only; the analyst's table stays in Appendix A under a line naming who
+  listed it and saying no measured table, count, rule match or capability
+  profile reads it. Appendix A is tagged per subsection: a tool's section is
+  *Measured*, an analyst's table or findings *Assessed*. **Upgrading:** `static_from_ledger`,
+  `dynamic_from_ledger` and `persistence_from_ledger` take no analyst
+  reports; a persistence row only an analyst listed is no longer a §5.4
+  mechanism, a published IOC row or a Sigma selection.
+- **A model's list never overrides what the sandbox says about a value.** An
+  analyst's endpoints or IOC artifact published every sandbox conversation
+  the sample's process tree did not make, a public resolver included, and a value
+  only an artifact listed published as `analyst` with nothing else asked. A
+  sandbox row the tree did not make now publishes only when the judge keeps
+  it, and the reason names the analysts that listed it; a public DNS resolver
+  is never published, whoever names it; a listing never lifts a row a tool
+  recorded; and a value only an analyst listed reads `no: named only by an
+  analyst` unless the judge named it. One rule, read by §9, STIX, `/iocs`
+  and the YARA, Suricata and Sigma drafts.
+- **A value the platform decoded is a candidate row.** A C2 URL FLOSS and
+  `decode_string_blobs` both recovered and no model named had no row in §9,
+  `/iocs`, STIX or Suricata, not even a `no:` one, and Appendix A printed it
+  live. Each domain, address and URL the recovery record holds is now a
+  network row of the string sweep's source, decided by the existing emulation
+  gate (refused under a Benign or unstated verdict and for a well-known
+  host) with its recovering tool and entry stated, and every recovered value
+  is defanged wherever the Markdown prints it.
+- **An observed step needs an observation of the sample.** The flow voice
+  check counted any non-empty flow table or capture as a sandbox observation,
+  so a C2 step citing a capture the sandbox did not attribute to the sample
+  passed as "observed in sandbox". A network entry now counts only when the
+  network block holds a sandbox row attributed to the sample's process tree;
+  process, file and registry entries keep their meaning. A
+  `sandbox_report_section` answer is classified by the section it filled.
+- **A listed value stands on the tool answer that holds it.** The capture's
+  conversations and TLS names are now sandbox rows with no attribution, and
+  every value an analyst lists is searched for, whole, in every tool answer
+  of the run (`MalwareReport.tool_sightings`). A row only an artifact created
+  takes that answer's source, a value a tool's text alone holds reads `no:
+  seen only in the text of <entry> (<tool>)`, and "no tool in this run saw
+  it" is said only after the search found nothing. One run's sixteen capture
+  addresses had been told no tool saw them. A report stored before the
+  search is searched in the tool sections it keeps.
+- **Text in a tool's answer is no sandbox observation.** A value an analyst
+  listed that a sandbox signature's description, a command line or the
+  sample's strings a sandbox re-serves held had been made a sandbox row, so a
+  listed domain published without the judge and a listed address read a
+  flow reason with no flow. A text sighting in any answer now gives string
+  standing, naming the entry. A name only the capture's TLS list recorded is
+  `capture_only` and waits for the judge; a lookup's answer echoing its
+  query is no sighting; sightings are keyed with one `value_key`; a stored
+  report's kept capture section is answered as a fresh build answers it;
+  `/iocs?include=all` carries the analysts' listed rows; and each listed row
+  cites its own artifact's evidence.
+- **A value only a query's answer holds says so, and a decoded value the capture
+  holds keeps its standing.** An answer that holds a listed value because it
+  was asked about it (a lookup's echo, a search returning its match) is
+  named in the reason ("only the answer to a query for it holds it") rather
+  than read as no tool seeing it. An address or name FLOSS or the static
+  decoder recovered that the capture also holds is admitted by the recovery
+  before the unattributed hold, under the recovery's existing refusals, with
+  both facts in the reason. `/iocs` reads the stored IOC table for the
+  analysts' rows.
+- **A sandbox URL on an address answers as the address does.** A URL whose
+  host is an unattributed address waits for the judge, and a public
+  resolver's URL is never published; both had published into STIX, `/iocs`
+  and the YARA and Suricata drafts while the address itself was refused.
+- **The analysts' listed rows are shown as theirs in the body.** §5.4 adds an
+  *Assessed* block of the persistence the analysts listed, the narrative is
+  handed it as its own fact, and the IOC table carries an analyst's mutex,
+  path, registry key, task and service as `analyst` rows with the rule's
+  refusal. A merged Appendix A table says which analyst listed each row.
+
+- **A program name given to a decompiler reaches it as written.** The path
+  guard counted an argument named `program` as a file path and rewrote the
+  sample's file name there into the path the server was handed. Ghidra's tools
+  take `program` as the name a program has in its project, so every call that
+  named the program (`get_current_program_info`, `switch_program`,
+  `detect_malware_behaviors`, `analyze_api_call_chains`, `list_imports`) failed
+  in milliseconds. `program` is no longer in `tool_pinning`'s path or sample
+  argument names; `load_program`, which takes the file as `file`, is pinned as
+  before.
+
+- **A confidence is read through the punctuation after it.** A CONFIDENCE
+  value is the number that opens it, from 0 to 1, or a percentage: `0.9.` read
+  as no number, and one analyst's 18-claim revision reached the run as 3
+  claims with nothing unread. A label with anything else after it is an unread
+  claim whose value the unread reason quotes and the validation turn asks
+  about; a bare number above one is no longer held to 1.0.
+- **A revision is checked like a first answer, and one with fewer claims is
+  stated.** A revision round's answer now passes the consistency gate and the
+  validation turn (claim count, confidence, technique lines). A revision the
+  model made with fewer claims still replaces the answer in force, and
+  `run_summary.negotiation.revision_replacements` states it.
+- **Names resolved at runtime from hashes are not imports.** `api_capability`
+  takes `resolved_names` and marks them; the triage pack records one more
+  lookup after `resolve_api_hashes` with the resolved names the import table
+  lacks; the report's projection also reads
+  the ledger's `resolve_api_hashes` answers and counts such names apart
+  (`static.api_capabilities_resolved`, `resolved_apis` on a rule row). The
+  ATT&CK table no longer prints them as "imports". A rule that matched only
+  such names is named as a source "rule match on names resolved at runtime from
+  hashes only, no import; not counted as corroboration", and each analyst
+  statement naming its technique is printed verbatim beside it.
+- **An ATT&CK row no longer says "claimed by no analyst" of a technique
+  analysts named on a finding.** The row names those analysts, the sources the
+  run's corroboration record lists.
+- **One refused call no longer ends the job.** A refusal used to latch the
+  spend as exhausted: in a 2.00 USD DeepSeek run one mediation turn refused at
+  its whole cap stopped every revision after it with 0.12 USD still
+  spendable. A refusal is now recorded (`run_summary.spend.refused_calls`,
+  and the run summary's spend lines) and its caller takes its salvage path. A
+  call that does not fit only because other calls in flight hold their worst
+  case waits for them to settle, for as long as its own deadline allows. The
+  spend is exhausted only when the ceiling is reached, or when, with no call
+  in flight, no call of any kind made since the latest stage began would
+  still be admitted at the smallest prompt it was sent with.
+- **The judge's mediation turns are held like an analyst's.** The mediation
+  loop handed the bare model to the ReAct executor, which bound the tools
+  itself, so no turn could be held and each was admitted only at its whole
+  cap. The model is bound to its tools before the loop and each turn's held
+  cap is set on that binding.
+- **An indicator the static decoder read stands where FLOSS's would.** The
+  publish record (`emulated_strings`) reads `decode_string_blobs` results as
+  a second source of hidden text the platform recovered: each domain, address
+  or URL the existing parsers read in a result's text or in a base64 layer
+  under it is recorded with the decoder's entry and asked the one rule's
+  questions exactly as a FLOSS decoded string is, with the reason "decoded
+  from the file's own bytes (decode_string_blobs), ev_NNNN". A value the
+  static string sweep also read stays the sweep's, and a decoded text holding
+  no indicator is no candidate. The record keeps every tool that recovered a
+  network value (`recovered_by`: tool, entry, scheme, file offset, functions
+  and the addresses of the code that uses the text, each tool with its own
+  facts only; a FLOSS decoded string reads "routine X, called at Y"), and the
+  IOC table states it on the row (`ConsolidatedIOC.recovered_by`, printed in
+  the report's Context cell); `/iocs` carries the same words as an optional
+  `recovered_by`, which the web `IOCRow` type declares. The refusal for a
+  value the sweep also read now ends "so not a value the sample hid", since
+  it answers for both tools. A recovered value still only gives standing to a
+  row the sandbox, the sweep, an analyst or the judge recorded; it creates no
+  row.
+- **FLOSS strings are read by the same indicator reader.** A FLOSS decoded,
+  stack or tight string is still kept whole in the record, and each domain,
+  address or URL the reader finds inside it is now recorded too (in the
+  ledger record and in the kept-rows reading of an older report). A
+  `host:port`, a `Host:` line or a URL inside a sentence recovered by FLOSS
+  was missed and now gets the standing the same text from the static decoder
+  gets, so such a value named by a model may now publish where it did not.
+  Replayed offline on the benchmark's 23 stored runs (their evidence and
+  report, under each run's own verdict and again with the verdict forced to
+  malicious), the one reader added and dropped no published row: on the
+  benign control it finds only a value already kept whole, and on the other
+  runs the hosts it finds were already published through their URLs. No
+  stored run holds a `decode_string_blobs` entry, so the decoder half is not
+  measured by that replay.
+- **A stored reverser row saved under an earlier release loads as the seed again.** The two
+  reverser prompts shipped before the dispatcher-branch and resolved-hash paragraphs were not
+  listed in `FORMER_SEED_PROMPT_DIGESTS`, so a database that had saved the definition map under
+  either of them held a `reverser` row that no longer matched its seed, and every settings save
+  was refused ("'reverser' is built in; clone it to change it"). Both digests are listed, and a
+  test pins them.
+- **Every claim an analyst begins is read, or the run says it was not.** The
+  base analyst's reader split an answer only on `---` lines and kept the first
+  `CLAIM:` of each block, so claims separated by blank lines were read as one:
+  a revision of 13 claims and an answer of 21 each became one, silently. Every
+  path now reads claims through one reader (`base_agent.read_claim_blocks`),
+  which splits at every claim heading, plain, numbered or marked
+  (`agents/claim_headings.py`), and counts the headings the model began
+  against the claims read. Claims begun and not read (a block the reader could
+  not split, one the static, dynamic and network analysts' stricter reading
+  turns away for want of an EVIDENCE line) are logged and recorded as a
+  degradation reason naming the analyst and both numbers, for the answer in
+  force; a block that stated no confidence is counted apart and asked about,
+  as before. Every heading opens a block, so a claim is never read with the
+  next claim's CONFIDENCE, TECHNIQUE or EVIDENCE; list-marker headings count;
+  fields are read in the block's tail, from the first line-start field label,
+  where a label also counts after whitespace (EVIDENCE, CONFIDENCE and
+  TECHNIQUE on one line are all read), and never from the claim sentence.
+  EVIDENCE runs to the next field label that starts a line when one follows,
+  so a label word inside the evidence never cuts it or drops an id after it. The DISPUTES section opens at
+  its case-sensitive label or heading, a one-line `DISPUTES: NONE` opens none,
+  and claims under it are recorded when none of the answer's own was read;
+  beside the answer's own claims, the analyst is asked once whether they are
+  its own (`isr.claims_under_disputes`). Kept there when asked, they are the
+  analyst's answer, recorded in the validation findings as answered (listed
+  "(answered)", not counted as left unresolved, drawn muted in the console)
+  and not a degradation; an answer the question was never put to says so as a
+  degradation reason. The reason is kept on the answer and carried only for
+  the answers in force.
+- **A technique line is one id, or it is kept whole and asked about.**
+  `TECHNIQUE: T1027.002 not supported` was read as a claim of T1027.002, and
+  `T1055, T1106` as T1055 alone. A line that is more than one id or `NONE`
+  now claims no id, is kept on the claim as `technique_line`, and the
+  analyst is asked once for one id per claim (`isr.technique_line_unread`).
+- **No request sends a tool call without its reply, on any provider the
+  pipeline builds its models from.** A turn whose call had arguments cut
+  mid-string kept that call in `invalid_tool_calls`, which the tool node does
+  not run and the OpenAI client still writes into the request; DeepSeek
+  answered the next request of a revision loop with 400 ("An assistant message
+  with 'tool_calls' must be followed by tool messages …") and the analyst was
+  lost for the round. The Responses API (a `function_call` needs a
+  `function_call_output`), Anthropic (a `tool_use` needs a `tool_result` at the
+  front of the next user turn) and Gemini (a `functionCall` needs a
+  `functionResponse`) refuse a call left unanswered the same way. One module
+  (`maljan.llm.tool_replies`) now completes every provider's request in its
+  own shape: a call with no reply anywhere in the conversation gets one saying
+  no reply was recorded, and that it was not run when its arguments did not
+  parse, in the turn's call order — after DeepSeek's reasoning passback on
+  `openai` chat completions, as a `function_call_output` item on the
+  Responses API, as a `tool_result` block on `anthropic`, as a tool reply the
+  Gemini client pairs with the right call, and as a `tool` message on
+  `ollama`. A reply that was recorded is never said missing: where a chat
+  shape needs it right after its turn and it stands further on with only
+  platform messages between, it is moved to its call; after a later model
+  turn it is neither moved nor replaced, and a warning names the call. The
+  completion never changes who speaks last in the request. The call stays in
+  the turn as the model wrote it, and a
+  well-formed history is sent as it was. The evaluation harness's frontier
+  comparison arm, built outside the providers, is not completed.
+- **A guest's desktop process is not the sample.** Where Triage's `orig` mark
+  and the submitted file's own process tree (its name or digest) disagree
+  about a process, the flow's attribution is absent rather than `true`; where
+  they agree it is `true`, and a listed process neither names is `false`. A
+  desktop process that ran none of the sample's files and descends from none
+  of its processes had been read as the sample on the mark alone. Such a flow
+  is refused by the one publish rule unless a model keeps the address, and the
+  `no:` and the IOC table's context name the process and both facts
+  (`… StartMenuExperienceHost.exe (procid 105), which Triage marks as the
+  sample's but which runs none of the submitted file's names …`); STIX,
+  `/iocs`, YARA, Suricata and Sigma read that one answer. A mark that names a
+  process the file's tree does not is no longer the answer on its own.
+- **Each model call is paired with its own admission.** The guard over model
+  calls counted any admission before a call, so one covered any number of
+  calls after it. It now pairs calls one to one in source order (two branches
+  of one choice are one call; a call in a loop needs an admission in the same
+  loop's body), and the judge's technique question in text, asked after a
+  refused schema, is admitted on its own.
+- **A stage-named analyst's debate line reads as a place:** "from analyst 2 of
+  3 in the analysis stage", where it read "from the analysis analyst 2 of 3
+  layer".
+
+- **A revision that is not made leaves the analyst's answer in force.** A
+  revision that failed (a refusal by the spend ceiling among them), wrote no
+  answer (a composed analyst whose loop was not started) or carried no
+  structured report used to replace the analyst's first answer with an empty
+  one, and the judge then weighed no technique. The answer in force now stands
+  whole, the revision's ledger entries and budget rows are still kept, and the
+  debate line names the analyst by its label with its real claim count: a
+  25-character agent key was published as `***` inside the sentence. An agent
+  with no label and a key of 24 characters or more is named by its stage and
+  its place in it (reversing analyst 1 of 2), so no two agents are named alike.
+- **Numbered claims are read.** The claim parser reads `CLAIM 3:`,
+  `CLAIM 4 (REVISED):` and `CLAIM 5 -` headings and claims written one after
+  another with no `---` line between them; a revision written that way was
+  read as having no claims. A heading opens a block only where one can begin
+  (first, after the open block's CONFIDENCE line, or after a separator line),
+  and nothing under DISPUTES is read as the analyst's own claim.
+- **A report section cut with no text is not asked again at the same cap.** It
+  is asked again only when the second call has more room, and is otherwise
+  recorded as not written, with the limit that applied and its source.
+
+- **A stage runs once, after every stage it depends on.** The builder wired one
+  edge per upstream tail, and in LangGraph separate edges into one node are
+  separate triggers. In the all-tools team, detonation (after static and
+  reversing) ran twice and network (after static, reversing and detonation)
+  three times, the first passes without the reverser's findings; negotiation
+  ran three times, the judge twice, and the report shared a superstep with the
+  second judge, so the run ended in `InvalidUpdateError` on `run_summary`
+  after the report was built. A node with more than one upstream tail is now
+  entered through one list edge that waits for all of them, and a debate whose
+  next stage also depends on another stage leaves through its own
+  `<stage>__join`. The seeded teams' graphs are unchanged. `run_summary` keeps
+  no reducer: two verdicts must never be merged into one.
+- **A report that was built survives a later step failing.** The graph ran
+  with `ainvoke` and no checkpointer, and the worker stored a report only on
+  success, so a run that failed after its report node finished lost the report
+  (in the all-tools run, 234,362 characters and 55 STIX objects). The graph now
+  runs as a stream in the modes `ainvoke` uses, the app keeps what the report
+  node returned the moment it returns, and a job whose graph then raises stores
+  that report against the failed job with `analysis_reports.incomplete_reason`
+  (migration `20261001000000`): where the run failed, the exception's class and
+  the error id. The sentence is also among the report's degradation reasons,
+  and the console shows it in the analysis header. The job stays `failed`.
+- **The long-term-memory case is written once, for a completed job.** The
+  judge wrote the case from inside its node, so a failed job still taught the
+  next run its verdict, and a judge that ran twice wrote it twice with two
+  different categories. The judge now holds the case and the worker writes it
+  after the completed row is committed and the `completed` event is published.
+  The function hashes the judge files under its family in the attribution
+  corpus are held and written the same way, so a failed job files none.
+- **radare2's logged errors are failed calls.** r2mcp hands back what radare2
+  logged inside a `<log>…</log>` envelope, and `<log> [ERROR] Cannot find
+  function in 0x00003ce4 </log>` was recorded as a successful
+  `decompile_function`. A reply that is only such an envelope, of radare2 log
+  lines with an `[ERROR]` or `[FATAL]` among them, is now a failed call whose message is
+  radare2's lines.
+- **The tool-call threshold is worded as the warning it is.** The log line read
+  "spent 83 tool calls (budget=20 …)", an overrun of a limit that does not
+  exist; it now reads "made 83 tool calls, past the tool-call warning threshold
+  of 20 (not a limit; …)".
+- **The MCP close from another task says what it means.** Every job ended with
+  "MCP cleanup cancel-scope warning (non-fatal)" once per server. A test that
+  opens a stub stdio server and closes it from another task shows the server
+  process gone (one that ignores its closed stdin is terminated by the
+  transport) and no task left, so nothing leaks: the refusal is anyio's
+  task-group bookkeeping. The line is now an info line saying the connection
+  was closed from a different task and the transport's own shutdown still ran.
+- **A Ghidra that cannot open the job's sample stops its agent.** With
+  `GHIDRA_CONTAINER_SAMPLES_PATH` set to a host path the container cannot see,
+  `load_program` answered HTTP 200 with `{"error": "File not found: ..."}`,
+  every call after it answered "No program loaded", the sink pre-pass was
+  skipped quietly, and with no default loop limits a reverser would have
+  called Ghidra with nothing loaded until the spend ceiling. The load the
+  pre-pass makes is now the precondition of an agent's loop on Ghidra over
+  http, made whether or not the pre-pass is on: a load that opens nothing, or
+  a request that fails, raises `SampleNotOpened` with "Ghidra could not open
+  the job's sample: <the server's words>; check GHIDRA_CONTAINER_SAMPLES_PATH
+  / the container mount" before any model turn. Inside a loop the pinned
+  `load_program` of the held path that answers with an error is filed as a
+  failed call and ends the loop at once, with nothing salvaged. The provider
+  remembers the path, so no later loop of the job (another chunk, an ask)
+  calls Ghidra for it. The stage records the agent as failed with the
+  sentence, the run's degradation reasons name the analyst failure, the rest
+  of the team runs, and an agent that asked the stopped one reads a failed
+  ask. The live feed keeps the variable's name in the sentence
+  (`GHIDRA_CONTAINER_SAMPLES_PATH` is no longer read as a credential).
+  A load that got no answer from Ghidra (a connection that failed twice, a
+  5xx, a refused token) says so instead, naming Ghidra's address and
+  `core.static.ghidra.auth_token`, is retried once for a failed connection,
+  and is not remembered, so a Ghidra that comes back is asked again. The
+  failed entry of a pinned load records the path sent, and a stopped agent is
+  left out of the debate's rounds rather than failing each one.
+- **Every Ghidra error reply is a failed call on the ledger.** A bare
+  "No program loaded" answer (the whole answer, case aside) and an HTTP error are handed on as JSON markers
+  (`tool_error_marker`) with the server's words, the way the MCP client hands
+  on an error reply, so the ledger files them `ok=false`; a
+  `{"error": ...}` reply already was.
+- **The console's context window read the fallback for a model whose server
+  lists its own.** `GET /api/v1/settings/context-window` probes on the API's
+  loop, and its answers stream asynchronously; the body was read with the
+  synchronous reader, the error was swallowed and the probe learned nothing,
+  so DeepSeek showed 8,192 (fallback) where the worker learned 1,048,576. The
+  async probe reads its answers with an async reader under the same bound.
+- **A reverser on Ghidra under another global provider had no sample to
+  load.** The worker mirrored the sample only for the global provider and the
+  `static` role's; a generic agent with a provider reference, and an agent a
+  lead can ask, now count, so the mirror exists for every provider the team
+  opens.
+- **r2mcp installed by r2pm was not found.** `static.r2.binary_path` is
+  resolved when the provider starts: a path as it is, a bare name on PATH and
+  then under `R2PM_BINDIR`, `R2PM_PREFIX/bin` and `radare2/prefix/bin` in the
+  user's data directory. Not found, the run summary says so with the remedy and
+  the log names every place looked; the connection test resolves the same way.
+- **A seeded definition saved before its prompt changed was renamed.** A stored
+  seeded row whose prompt is one the seed shipped with earlier
+  (`FORMER_SEED_PROMPT_DIGESTS`) loads as the seed instead of becoming
+  `reverser_custom` with every reference rewritten.
+- **A degrading static provider that did not attach was a log line only.** It
+  is now a degradation reason on the run summary, with its remedy.
+- **A model call's whole-call deadline is that call failing, not the loop's
+  clock.** In a loop with no time limit a lone model that ran past it ended
+  the analyst with "exceeded hard cap of none" and its gathered evidence
+  unwritten; the tool phase ends there now, the salvage writes the answer, and
+  the budget record's detail says "model call deadline". A fallback list still
+  moves on to its next model.
+- **The spend is exhausted at the first call refused or held for it.** Every
+  gate (new tool loops, chunks, asks, negotiation rounds) and the degradation
+  reason read that latch, not only the ceiling being reached;
+  `run_summary.spend` records `exhausted`, `exhausted_at_usd` and
+  `exhausted_by` ("reached" or "a worst-case refusal"). A held call — the
+  verdict, a report section or a loop's closing answer — is given what the
+  remaining spend pays for and never less than 8,192 output tokens (or its own
+  cap when smaller); the overshoot is listed in `held_calls`. A call refused
+  for spend is reported as the ceiling's reason, not as an analyst failure.
+- The streamed-call deadline applies per chunk, so a consumer between chunks
+  sees `ModelCallDeadline` and no task is left cancelling; the judge's spend
+  admission counts tool calls, reasoning and tool definitions as the analysts'
+  does; a process-group kill never signals the server's own group and skips a
+  child already reaped; a capa worker that exits without an answer is logged
+  as such; the MCP request id is read in one helper with a test pinned to the
+  installed client.
+- **Every model request has a whole-call deadline.** Maljan enforces the
+  request's sized timeout (its output cap at the measured pace, or the
+  client's own 1,800 s where nothing is measured) over the whole call; the
+  client's timeout is only the longest silence httpx waits through, which a
+  server trickling keep-alive bytes never reaches. Ollama is held to it too.
+- **The judge's tool loop has the analysts' repeat guard**, and its running
+  turns are priced under its own model label, so they move the spend and trip
+  the ceiling (a lone model's unstamped turns were priced at nothing).
+- **capa and FLOSS on the analysis sidecar**: the client waits for them with
+  no deadline unless the operator set one, their timeouts and cancellations
+  are not breaker failures, a call the client gives up on or a job that ends
+  is cancelled at the server, which kills the child process with its process
+  group, and a retry of the same run joins the running one.
+- **String IOCs are all returned.** The 120-row cap and the per-kind quotas in
+  `iocs_from_text` / `iocs_from_file` and the static extractor are gone; the
+  tool-answer sizing and paging carry the rest. The report's IOC table grows
+  with them on a sample carrying many paths or URLs; that is intended. `apk_info` states the full
+  count of every list its `limit` cut, a YARA match states its length beside
+  its hex, a sandbox API row states how many processes called it and marks
+  the arguments it cuts, and a carved-file refusal counts the names it does
+  not list.
+- **The spend ceiling ends the run's rounds.** Once it is reached no further
+  negotiation round, chunk or tool loop starts; before any call, one whose
+  worst case would pass the ceiling is not made unless it is the verdict, a
+  report section or a loop's closing answer, which are held to the output the
+  remaining spend pays for and recorded in `run_summary.spend.held_calls`.
+  Price keys keep the model's tag; unreported usage is counted and the spend
+  said as "at least"; the summariser's shortened prompt is a degradation
+  reason; a no-clock delegation wait stops when its job is cancelled.
+- **A chunked analyst's validation turn runs under the agent's lock**, as the
+  single-chunk path's does, so a delegated ask of the same agent cannot land
+  between the findings buffer's mark and slice.
+- **A claim is kept whole.** Both claim parsers stored a claim cut to 300
+  characters with no mark; in a paid run 26 of 40 claims were cut mid-word and
+  every `attck.claim_does_not_describe` question was asked over a cut
+  sentence. The claim is stored as written. A model value quoted in a finding
+  row is still bounded where it is shown, and now ends in the cut mark. A
+  claim's evidence reference cut to its width writes back every id the cut
+  removed, not the first three.
+- **An analyst's validation retry answers in claims.** The retry was shown the
+  first answer as a summary of its parsed claims and told to "answer again in
+  the same format"; the model answered in the summary's shape, the parser read
+  no claim, and the first answer was kept with its findings unresolved. The
+  first answer now goes back as the model wrote it, CLAIM blocks and findings
+  block included, the closing line names the block format the parser reads,
+  the retry's text is logged at debug and its claim count is recorded on the
+  loop's budget record (`validation_retry`). Tool-call markup is left out of
+  the replay; with the consistency gate on, the answer is replayed whole and
+  the question names the claims the gate set aside.
+- **Findings follow the answer that is kept.** A retry's findings block was
+  read into the agent's buffer before the kept answer was chosen, so a
+  discarded retry's findings were published with the first answer. They now
+  travel on the retry's own ISR and go with it only if it is kept; a kept
+  retry that carries none while the first answer had some is logged, and
+  `validation_retry` carries both counts.
+- **The judge's text is kept whole.** The fallback verdict's reasoning was cut
+  to 2,000 characters with its line breaks folded, and the text mediation
+  summary to 500, neither with a mark. Both are stored as written.
+
+- **The network analyst gets the capture.** With exactly one capture in the
+  job, `pcap_path` is hidden from the schema the built-in network tools are
+  bound with and filled in, like the sample's own path; with several it stays
+  the model's, a relative name is read inside the job's directory, and a
+  refusal lists the job's captures (`captures/<file>`) or says there is none,
+  instead of telling the model to leave out an argument the tool requires. A
+  live network analyst lost 8 of its 20 calls inventing capture names. The
+  pack's capture entry and the sandbox report's network section name the
+  capture relative to the job, never by host path, and a filled-in capture the
+  server cannot read is said to be the platform's, by its job-relative name.
+- **Every capture tool reads the whole capture.** The network server read the
+  first 5,000 packets by default and the in-process summary the first 200,000.
+  All of them stream the capture (`analysis.pcap_summary.each_packet`),
+  `packet_limit` has no default, and every answer states the packets read and
+  the packets in the capture (`pcap_summary` as `packets_read`,
+  `packets_in_capture`, `packet_limit`, beside its protocols, every external
+  conversation, SNI names and periodic contacts). `read_pcap_summary` with no
+  limit answers those facts; with one it lists packets from `offset`, paged.
+- **The pack shows what the capture holds.** Its capture line carries the
+  packet count, the protocol counts and the external conversations heaviest
+  first, cut only by the pack's own room with the cut said, where it printed the
+  summary's heading alone and a report then said the entry held only a header
+  line. A key-finding or section sentence whose subject names a cited entry
+  (its id, or a word for a recorded answer beside the entry's tool) and says it
+  holds nothing or one line is checked against that entry and asked once when
+  it holds more (`report.entry_contents_misstated`); a sentence about the
+  sample is never judged, and no sentence is rewritten.
+- **Sandbox background traffic is not published as the sample's C2.** Triage
+  flows carry `procid`, `pid` and AS facts, and each tcp/udp row states
+  `sample_process_tree`: true for the process Triage marks `orig` (only it,
+  when it marks one; otherwise a process running a file named exactly as the
+  submission or the sample's digest) and its descendants, false for another
+  named process, absent when the report does not say. The sandbox view marks
+  public resolvers, and the network block, projected from the job's whole
+  report, carries the attribution, the resolver fact, `kept_by` and
+  `mentioned_by`. A sandbox address the sample's tree did not make, and a
+  well-known benign name the guest resolved, is published only when a model
+  keeps it as an indicator (an analyst's artifact, or the judge's indicator);
+  a claim that mentions it keeps nothing and is named in the reason. Only an
+  `endpoints`, `network`, `iocs` or `c2` artifact keeps; in it a row's one
+  type cell ("C2 domain", "ip:port" and aliases read by their last word)
+  types one value cell, a row typed as a file, path or hash keeps nothing, and
+  every other cell is read untyped, only in an endpoints or C2 list and never
+  as a file name there; a name typed as a
+  domain, host or URL is the model's statement and is kept whatever its TLD. The value is read
+  tolerantly (a port, IPv6 brackets, case, a URL's host), the judge's URL
+  indicator keeps its host, and the analysts' findings block states the
+  `endpoints` row shape. Otherwise
+  the IOC table carries it as `no: <reason>, and no model kept it as an
+  indicator`, and the STIX bundle, `/iocs` and the YARA, Sigma and Suricata
+  drafts read that answer. **Upgrading:** CAPE, REST and mock reports carry no
+  process on a flow, so every address they record now waits for a model to
+  keep it; expect fewer sandbox addresses in `/iocs` on those deployments. A
+  live run published a public resolver and a connectivity check as C2.
+- **A published URL carries its name.** The host of every URL the publish rule
+  publishes follows the URL's decision, unless it is a well-known benign host
+  no model kept; the IOC table, the export and `/iocs` add it as a domain row
+  and indicator where nothing else did. A live run published two C2 URLs from
+  the judge's bundle and neither host.
+- **Nothing cuts the sandbox views or the export.** The sandbox tools answer
+  every row unless a caller pages them (`offset`, `limit`, with the total and
+  the next offset stated), where they cut every view at 200 rows, and their
+  answers go through the same guardrail and context-budget charge as an MCP
+  tool's, so a large view is shortened with a notice naming `offset` and
+  `limit` rather than filling the window. The STIX
+  export carries every value the publish rule publishes — every `yes` row of
+  the IOC table — with no total cap, no band ranking that drops, no cap on
+  file names and no slice of the network block or the string rows. An address
+  a sandbox watched is kept whatever its class, answered `no:`.
+  **Upgrading:** an export used to carry at most 15 indicators
+  (`MAX_TOTAL_INDICATORS`) and 10 file names; a consumer that relied on that
+  bound now receives every published indicator. The two numbers are now only
+  the linter's C4 counts, which warn and drop nothing, and the run summary's
+  "STIX indicators over the cap" reads 0.
+- **Any MCP error reply is a failed ledger entry.** The client's failure
+  markers are JSON (`mcp_client.tool_error_marker`); an `isError` reply was
+  written as a Python repr and an exception message with a quote broke the
+  marker, and both were filed as ok.
+- **A Sigma rule title is never a registry key.** A Sigma match is a
+  persistence row only when it names a T1547 technique and its event names the
+  key (kind by the key, then by the sub-technique); one naming no technique had
+  its title filed as a `registry_run` key and printed in section 9.
+- **An identifier's purpose.** The host-identifier section is asked for a
+  purpose where the evidence or an analyst claim says what the value is for,
+  and an empty purpose prints as `not stated` rather than `-`.
+- **An r2mcp error reply is a failed ledger entry.** r2mcp answers a refused
+  call (an invalid regex, no open file) with an ordinary text result, which
+  the ledger filed as ok; the provider now hands such a reply on in the
+  structured failure shape with r2mcp's own message.
+- **An analyst is told the truth about its tools.** With `static.provider =
+  none` the static analyst's system prompt said "You have no analysis tools in
+  this configuration" while the same request carried 36 tools from the
+  `analysis`, `knowledge` and `virustotal` servers; the model believed the
+  prompt, answered in one turn and called nothing. A provider's fragment now
+  says only what the provider is (`none`: no disassembler or decompiler comes
+  with the analyst; a configured provider whose tools did not attach: that it
+  is configured and not attached), and one sentence about tools is built from
+  the list the request carries — the servers and in-process sources it names,
+  or that there are none. Every built-in analyst, the generic and lead
+  agents and the mediator's tool turn build it the same way, and a
+  tools-free call — a revision, the validation turn, a lead's synthesis — is
+  told it carries none, and the final-answer nudge and the forced synthesis,
+  which resend the loop's conversation, say in the system turn that no tool
+  can be called in this turn. The static human turn offers
+  "decompile, xrefs" only when a decompiling tool is in the list and names
+  `load_program` only when that tool is; the dynamic prompt carries the CAPE
+  workflow only when the sandbox's own server attached; the network PCAP turn
+  names only the packet tools it has; the seeded reverser and lead prompts no
+  longer promise a decompiler or `ask_` tools unconditionally. Nothing forces
+  a tool call: a model that answers from the evidence it was handed is a
+  recorded outcome. A guard test resolves every built-in agent under every
+  static and sandbox provider, in the default and measurement teams, through
+  `aresolve_agent` and the analyst's own prompt builder, and fails on a "no
+  tools" sentence beside a tool list, a tool family the list does not hold, or
+  a generic tool-use instruction ("use the tools") beside an empty list. A
+  provider's fragment is in two parts: its tool workflow, sent only with its
+  tools, and its guidance about claims, sent with every call — a Ghidra
+  revision or validation retry keeps the verification discipline and its
+  confidence caps. The seeded triage and Android prompts no longer say "use
+  the tools"; every seeded prompt asks for the evidence id a fact came from.
+  The sentence is built from the list the loop binds, so a server offering
+  only the sample-delivery tools is not named.
+- **The validation turn stays tools-free, and says so.** It is one call over
+  the evidence text that asks for a fix to an answer — its time is what the
+  loop left, measured against one answer's pace, and the answer it gets is
+  parsed and kept or refused as a whole — not a second loop with its own
+  budget, ledger and recorder. Its system prompt now states that the request
+  carries no tools instead of repeating the loop's tool sentence.
+- **An analyst skipped for want of sandbox data is said to be skipped.** The
+  degradation reason reads "analysts skipped (no sandbox data): dynamic,
+  network" instead of "analysts produced no claims", which read as if they had
+  run; "analysts produced no claims:" names only analysts that ran. The worker
+  log says "skipped: no sandbox data" where it said "no data chunks available".
 
 - **A pattern is kept whatever its comparison operator.** The judge's
   integrity pass kept only patterns containing `=`, so every `LIKE` a judge
@@ -4449,6 +5783,13 @@ change landed on `main`.
 
 ### Removed
 
+- **`reporting.narrative_max_tokens`.** It was described as a hard output cap
+  for the narrative round, but its value only reached a constructor argument
+  (`NarrativeAgent.max_input_tokens`) that nothing read; both are gone. The
+  round's budget is the report stage's (see Changed). Alembic revision
+  `20260930000000` deletes a stored row. **Upgrading:** nothing to do; a
+  stored value is ignored when the settings are built, and the migration
+  removes it so an import does not refuse it as an unknown key.
 - **The static analyst's case-prior hint and its settings.**
   `StaticAnalyst._compute_attck_case_hint`, `analysis.attck_case_rag` and the
   five `preprocessing.attck_case_*` settings; alembic revision
@@ -4585,6 +5926,123 @@ change landed on `main`.
   benign PuTTY control after its verdict fell back.
 
 ### Upgrading
+
+**STIX object counts in the run summary.** `run_summary.stix_object_count` is
+the exported bundle's object count once the report node has built the export,
+on the stored column and on the report's own summary; before, it was the
+judge's bundle size. The judge's count is the new key
+`run_summary.judge_stix_object_count`. A consumer that read
+`stix_object_count` as the judge's should read the new key; a summary stored
+before this release has only `stix_object_count`, and it is the judge's. The
+long-term-memory case a completed run stores holds the published techniques;
+its `total_techniques` and `corroborated_count` count them, its search text
+lists only them, and a case with nothing corroborated and one published
+technique at most is not stored.
+
+**Configured secrets are masked by value.** Every secret value the platform
+holds (the job's model API keys, sandbox, Ghidra and tool-server tokens, a tool
+server's `env` and header entries whose key names a credential value, the
+worker's database, Redis and object-store credentials, and the command line's
+settings) of 8 characters or more is replaced by `***` wherever it appears as a
+whole word — no letter, digit or underscore touching it — in what is published
+and stored: events, finding rows and summaries. A job's secrets are masked for
+that job and replaced by the next job's; the worker's own stay for its life. A
+secret that equals an ordinary word of 8 characters or more takes that word out
+of every sentence as well; choose secrets that are not words.
+
+**Analysts run in parallel on a hosted API.** `llm.parallel_analysts` is `auto`
+by default. A deployment that never set it and calls a host resolving only to
+public addresses now runs its analysts, and the revision round, in parallel;
+one on Ollama, on a local address or name (`host.docker.internal`, a compose
+service name) or on a host that does not resolve keeps running them one after
+another unless the server's `/props` reports more than one slot. A stored
+`true` or `false` keeps its meaning. The database revision `20261002000000`
+takes the `sequential` the old default wrote off every analysis stage of a
+written team, so the stage follows the job, except where
+`llm.parallel_analysts` is stored `true`; it names each team and stage it
+rewrote at WARNING, and `sequential` picked on a stage card pins a stage
+again. Consumers of stage documents should read a missing or `null` `mode` as
+"follows the job", and `run_summary.profile` may carry `analyst_mode` with a
+`stages` list.
+
+**Spend.** The ceiling still has no default: an unset
+`llm.max_spend_usd_per_job` is no ceiling, and nothing is held or refused for
+spend. With one set, a refused call no longer exhausts the spend by itself
+(`run_summary.spend.exhausted` means nothing more fits with no call in
+flight, or the ceiling was reached), a call may wait for calls in flight to
+settle before it is made, `run_summary.spend` may carry `refused_calls`, and
+each reserve row carries `retries`, `retries_from`, `retry_prompt_tokens` and
+`expected_usd`. The reserve follows this job's own call sizes and plans the
+tail's validation retries; before any single-shot answer is measured it holds
+the verdict at its whole cap with one retry, and it shrinks as calls are
+measured.
+
+**The spend ceiling.** `llm.max_spend_usd_per_job` is now a hard bound and
+counts the charged price: the same ceiling allows about twice the work it did
+off-peak on DeepSeek, where the vendored table used to count every call at the
+peak rate, and a job no longer spends past it (it used to by up to 8,192
+output tokens a call once the ceiling latched). A job's report sections may
+now be recorded as not written for the ceiling where they used to be written
+past it; raise the ceiling if the report matters more than the bound. An
+operator's `llm.model_prices` row keeps working as it is; add `windows` to it
+for a vendor's peak or off-peak rate. Consumers of `run_summary.spend` should
+read `prices_from` values as a `; `-joined list of rates, and may find
+`reserve_usd` and `reserve`.
+
+**Triage run time.** Nothing changes until `sandbox.triage.analysis_seconds`
+is set. When setting it, keep `sandbox.triage.timeout_seconds` above it with
+room for Triage's processing, or the settings are refused.
+
+**Importing the all-tools team.** The document holds two whole-map settings,
+and an import replaces what it names, so merge it into an export first (the
+`jq` line is in [configuration.md](docs/configuration.md), *An all-tools
+team*). Its agents are all keyed `all_tools_*` and its team `all_tools`, so
+none of your own definitions or teams is replaced. A job
+naming a team with an agent on Ghidra is now refused while Ghidra is not
+answering — start it before submitting.
+
+**Loops have no default limit.** A deployment that relied on the old defaults
+— ten steps and 180 s per loop, the static analyst's 40 steps and 1,500 s, the
+network analyst's six steps, the dynamic analyst's 600 s, the judge's 600 s,
+the lead's 40 steps and 1,800 s, an ask's 12 steps and 300 s — now runs each
+loop until its model answers or a stop that is not a count ends it, bounded by
+the job timeout. To keep a bound, set it: on an agent's card (**Steps per
+loop**, **Seconds per loop**), in `react_agent_max_steps` /
+`react_agent_timeout`, in the deprecated maps (the only place for the built-in
+judge), or in `agents.delegation_steps` / `delegation_timeout_seconds`. On a
+paid provider, set `llm.max_spend_usd_per_job` (and `llm.model_prices` for a
+model the vendored table does not price). Stored values are untouched; no
+migration runs. Consumers of `budget_tick` events and `run_summary.budget`
+should read `max_steps` / `timeout_s` as nullable. The analysis server's
+manifest now declares `timeout_s: null` for capa and FLOSS, so the MCP call
+deadline for them is the deployment's (`mcp.breaker.call_timeout_seconds`, or
+the capa budget it derives from).
+
+**The judge's technique question adds a call.** Whenever the analysts named a
+technique the verdict's bundle does not carry, or one only on a finding, the
+judge is asked about it once after the verdict — on every profile and every
+provider, with no switch. It is one judge call sized like the verdict, so a
+run's wall-clock time and call count move by one judge turn; the token ledger
+names it `technique question`.
+
+**Degradation reasons for claimless analysts.** An analyst skipped for want of
+input is now named under `analysts skipped (no sandbox data): <names>` (or
+`analysts skipped (no input data): <names>` for a sample-fed role), and
+`analysts produced no claims: <names>` names only analysts that ran. A run
+used to carry `analysts produced no claims: dynamic, network` for the two
+analysts a static-only run skipped; it now carries `analysts skipped (no
+sandbox data): dynamic, network`. `run_summary.agent_stats[*].no_data` is
+unchanged. A reader that partitions degradation reasons on the old prefix —
+to set skipped analysts apart from failed ones — needs to read the new one
+too.
+
+**An operator's prompt gains the platform's sentence about tools.** An
+operator-written prompt (a generic or lead agent, or any definition with its
+own prompt) is now sent with one sentence appended: the tools the request
+carries, or that there are none. The agent probe's `prompt`, `prompt_chars`
+and `prompt_sha256` include it; the new `authored_prompt` is the operator's
+text alone (for a built-in role, its assembly without the provider fragment
+and the sentence), and the console seeds a clone from it.
 
 `llm.expert_max_tokens` and `llm.judge_max_tokens` ship at 0, which now means
 "derived from the window" — no longer "unbounded". A stored setting keeps its

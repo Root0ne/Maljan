@@ -19,6 +19,7 @@ from html import escape
 
 from maljan.reporting.defang import defang
 from maljan.reporting.models import Figure, MalwareReport, ProcessNode
+from maljan.utils.marked_cut import marked_cut
 
 # Kill-chain tactic order for the ATT&CK matrix / infection chain.
 _TACTIC_ORDER: list[tuple[str, str]] = [
@@ -51,6 +52,25 @@ def _svg(width: int, height: int, body: str) -> str:
     )
 
 
+# What one figure holds: a drawing, not the record. Whatever a figure leaves
+# out its legend counts, and the report's tables and its JSON form carry.
+_TREE_ROWS = 40
+_NETWORK_ENDPOINTS = 12
+_LISTING_CHARS = 4000
+_LISTINGS = 4
+
+
+def _figure_left_out(total: int, shown: int, what: str) -> str:
+    """The legend's sentence for what a figure did not draw, or ``""``."""
+    rest = int(total) - int(shown)
+    if rest <= 0:
+        return ""
+    return (
+        f" {rest:,} more {what} are not drawn; the report's tables and the JSON report "
+        "carry every one."
+    )
+
+
 def _text(
     x: int, y: int, s: str, *, fill: str = _INK, size: int = 12, weight: str = "normal"
 ) -> str:
@@ -80,14 +100,17 @@ def build_process_tree(report: MalwareReport) -> Figure | None:
         return None
     rows: list[tuple[int, ProcessNode]] = []
 
+    every: list[tuple[int, ProcessNode]] = []
+
     def _walk(node: ProcessNode, depth: int) -> None:
-        rows.append((depth, node))
-        for child in node.children[:12]:
+        every.append((depth, node))
+        for child in node.children:
             _walk(child, depth + 1)
 
-    for root in dyn.process_tree[:6]:
+    for root in dyn.process_tree:
         _walk(root, 0)
-    rows = rows[:40]
+    # A figure holds forty rows; the rest are counted in its legend.
+    rows = every[:_TREE_ROWS]
     row_h = 24
     height = max(40, len(rows) * row_h + 20)
     parts: list[str] = []
@@ -108,7 +131,8 @@ def build_process_tree(report: MalwareReport) -> Figure | None:
         caption="Process tree (sandbox execution)",
         kind="process_tree",
         content=_svg(720, height, "".join(parts)),
-        legend="Red node = process injection target.",
+        legend="Red node = process injection target."
+        + _figure_left_out(len(every), len(rows), "processes"),
     )
 
 
@@ -195,13 +219,14 @@ def build_network_graph(report: MalwareReport) -> Figure | None:
     net = report.network
     if not net or not (net.domains or net.ips):
         return None
-    endpoints: list[tuple[str, bool]] = []
-    for d in net.domains[:8]:
-        endpoints.append((defang(d.fqdn, "domain"), bool(getattr(d, "is_suspicious", False))))
-    for ip in net.ips[:8]:
+    every: list[tuple[str, bool]] = []
+    for d in net.domains:
+        every.append((defang(d.fqdn, "domain"), bool(getattr(d, "is_suspicious", False))))
+    for ip in net.ips:
         address = defang(ip.address, "ip")
-        endpoints.append((f"{address}:{ip.port}" if ip.port else address, True))
-    endpoints = endpoints[:12]
+        every.append((f"{address}:{ip.port}" if ip.port else address, True))
+    # A figure holds twelve endpoints; the rest are counted in its legend.
+    endpoints = every[:_NETWORK_ENDPOINTS]
     if not endpoints:
         return None
     row_h = 30
@@ -218,13 +243,14 @@ def build_network_graph(report: MalwareReport) -> Figure | None:
         parts.append(f'<line x1="{cx + 26}" y1="{cy}" x2="{bx}" y2="{y + 11}" stroke="{_LINE}"/>')
         col = _DANGER if suspicious else _MUTED
         parts.append(_rect(bx, y, 300, 22, fill="#fff", stroke=col))
-        parts.append(_text(bx + 8, y + 15, label[:44], fill=_INK, size=11))
+        parts.append(_text(bx + 8, y + 15, marked_cut(label, 44), fill=_INK, size=11))
     return Figure(
         id="fig-network",
         caption="Network endpoints (C2 / resolved)",
         kind="network_graph",
         content=_svg(width, height, "".join(parts)),
-        legend="Red border = flagged suspicious.",
+        legend="Red border = flagged suspicious. A label ending in … is cut to fit."
+        + _figure_left_out(len(every), len(endpoints), "endpoints"),
     )
 
 
@@ -275,29 +301,42 @@ def build_infection_chain(report: MalwareReport) -> Figure | None:
 
 
 def build_code_listings(report: MalwareReport) -> list[Figure]:
-    figs: list[Figure] = []
-    ev = report.technical_evidence or {}
-    seq = 0
-    for outputs in ev.values():
+    """The first ``_LISTINGS`` decompiled functions as figures, the rest counted.
+
+    A figure is a drawing of a few functions, not the record: the last one
+    drawn says how many more the run decompiled, and the evidence ledger holds
+    every listing whole.
+    """
+    listed: list[tuple[str, str]] = []
+    for outputs in (report.technical_evidence or {}).values():
         for o in outputs or []:
             if o.get("tool_name") != "decompile_function":
                 continue
             body = str(o.get("output") or "").strip()
-            if not body:
-                continue
-            sym = str(o.get("symbol") or "").strip() or "function"
-            figs.append(
-                Figure(
-                    id=f"fig-listing-{seq}",
-                    caption=f"Decompiled {sym}",
-                    kind="code_listing",
-                    content=f'<pre class="listing">{escape(body[:4000])}</pre>',
-                    legend=None,
-                )
+            if body:
+                listed.append((str(o.get("symbol") or "").strip() or "function", body))
+    figs: list[Figure] = []
+    for seq, (sym, body) in enumerate(listed[:_LISTINGS]):
+        notes: list[str] = []
+        if len(body) > _LISTING_CHARS:
+            notes.append(
+                f"Cut at {_LISTING_CHARS:,} of {len(body):,} characters; the evidence "
+                "ledger and the JSON report carry the listing whole."
             )
-            seq += 1
-            if seq >= 4:
-                return figs
+        if seq == _LISTINGS - 1 and len(listed) > _LISTINGS:
+            notes.append(
+                f"{len(listed) - _LISTINGS} more decompiled functions are not drawn; the "
+                "evidence ledger carries every one."
+            )
+        figs.append(
+            Figure(
+                id=f"fig-listing-{seq}",
+                caption=f"Decompiled {sym}",
+                kind="code_listing",
+                content=f'<pre class="listing">{escape(marked_cut(body, _LISTING_CHARS))}</pre>',
+                legend=" ".join(notes) or None,
+            )
+        )
     return figs
 
 

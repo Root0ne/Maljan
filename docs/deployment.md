@@ -18,7 +18,7 @@ applies both.
 | `redis` | `redis:7-alpine` | Queue, events, rate-limit counters. Password-protected; the healthcheck asserts an actual `PONG`. |
 | `qdrant` | `qdrant/qdrant:v1.18.2` | Vector store, pinned to match the client version. |
 | `minio` | `minio/minio:latest` | Sample storage, with its own console. |
-| `ghidra-mcp` | built from `external/ghidra-mcp` | Static analysis engine. Capped at 6 GB memory and swap, because the JVM's own limit does not bound the container. |
+| `ghidra-mcp` | built from `external/ghidra-mcp` | Static analysis engine. Capped at 6 GB memory and swap, because the JVM's own limit does not bound the container. `GHIDRA_JAVA_OPTS`, `GHIDRA_MEM_LIMIT` and `GHIDRA_RESTART` in `docker/.env` change the JVM options, the cap and the restart policy; see *Running Ghidra lighter* in [configuration.md](configuration.md). |
 | `migrate` | `maljan-backend` | One-shot `alembic upgrade head`. Runs to completion before the API and the worker start; on an upgrade, migrate before restarting either, since a stored built-in team written before a seeding revision loads under a renamed key until the revision has run. |
 | `backend-api` | `maljan-backend` | The FastAPI service. |
 | `backend-worker` | `maljan-backend` | The arq worker. Capped at 8 GB memory and swap; `WORKER_RSS_RESTART_MB` makes it exit between jobs before it gets there, and `restart: unless-stopped` brings it back. |
@@ -54,6 +54,26 @@ ports, `RUN_MIGRATIONS_ON_STARTUP`, `CORS_ORIGINS`, `COOKIE_SECURE`,
 Every published port binds to `BIND_ADDRESS`, which the example file sets to
 `127.0.0.1`. The stack is unreachable from the network until that is changed
 deliberately, behind a firewall or a reverse proxy you control.
+
+## The Ghidra samples path
+
+The worker copies each sample into `data/samples/.work/` on the host, and the
+`ghidra-mcp` service mounts `../data/samples` at `/data/samples` inside its
+container (read-only). `GHIDRA_CONTAINER_SAMPLES_PATH` is the path INSIDE the
+Ghidra container, `/data/samples` with this Compose file, and never the host
+directory. The API and worker services set it; a worker started outside
+Compose (`bootstrap.env`, a supervisor, a shell) needs it set to
+`/data/samples` too, or left unset, since that is the default.
+
+Set to the host path, Ghidra answers every load with `File not found: ...`,
+the Ghidra agent stops before its first model turn with "Ghidra could not open
+the job's sample: ...; check GHIDRA_CONTAINER_SAMPLES_PATH / the container
+mount", and the rest of the team runs without it. The worker's first lines
+say which path it uses and where it came from:
+
+```text
+Ghidra samples path: /data/samples (from GHIDRA_CONTAINER_SAMPLES_PATH). ...
+```
 
 ## Rotating the JWT signing secret
 

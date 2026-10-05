@@ -9,23 +9,32 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
 
 from maljan.agents.base_agent import (
     BaseAnalyst,
-    evidence_ref_text,
     prompt_to_messages,
+    read_claim_blocks,
     strip_tool_call_scaffolding,
 )
 from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
     FINDINGS_BLOCK_FRAGMENT,
+    PROVIDER_FAMILY,
     REPUTATION_LOOKUP_FRAGMENT,
+    has_decompiler,
+    has_xrefs,
+    offered,
+    stamp_source,
+    tool_families,
+    tool_names,
+    tools_statement,
 )
 from maljan.agents.registry import register_agent
-from maljan.providers.base import StaticJobContext
+from maljan.providers.base import StaticJobContext, absent_provider_fragment
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 # The provider- and platform-independent head of the static system prompt.
@@ -51,14 +60,77 @@ _CLAIMS_BEAR_ON_THE_VERDICT = (
 _ISR_TAIL = FINDINGS_BLOCK_FRAGMENT + _CLAIMS_BEAR_ON_THE_VERDICT + REPUTATION_LOOKUP_FRAGMENT
 
 
-def _static_prompt(provider: Any | None = None) -> str:
+def assemble_static_prompt(
+    provider: Any,
+    fragment: str,
+    tools: Sequence[Any],
+    *,
+    provider_expected: bool = False,
+    for_a_clone: bool = False,
+) -> str:
+    """The static system prompt for ``provider``, true of the tool list ``tools``.
+
+    HEAD, the sample's format fragment, the provider's fragment, the sentence
+    about the tools, then TAIL. The provider's fragment walks the model through
+    the provider's own tools, so it is the prompt only when those tools are in
+    the list (or, for a prompt resolved before the analyst attaches them,
+    ``provider_expected``); otherwise the provider says what it is and that it
+    is not attached; either way its tool-independent guidance is there. The
+    sentence about tools is built from ``tools`` alone.
+
+    ``for_a_clone`` leaves out both the provider's fragment and the sentence:
+    the text a clone is seeded with, which is resolved with its own provider
+    and its own tool list.
+    """
+    if for_a_clone:
+        return _ISR_HEAD + fragment + _ISR_TAIL
+    body, statement = static_provider_parts(provider, tools, provider_expected=provider_expected)
+    return _ISR_HEAD + fragment + "\n\n" + body + "\n\n" + statement + _ISR_TAIL
+
+
+def static_provider_parts(
+    provider: Any, tools: Sequence[Any], *, provider_expected: bool = False
+) -> tuple[str, str]:
+    """``(the provider's text, the sentence about tools)`` for a request carrying ``tools``.
+
+    The provider's text is its whole fragment when its tools are in the list
+    (or expected), and otherwise its guidance with the sentence saying it is
+    not attached; a provider that offers no tools always sends its fragment.
+    The built-in assembly and an operator's prompt on a static provider both
+    take these two parts, so the provider says the same thing under either.
+    """
+    attached = provider_expected or PROVIDER_FAMILY in tool_families(tools)
+    label = str(getattr(provider, "label", "") or getattr(provider, "id", "") or "static")
+    offers_tools = bool(getattr(getattr(provider, "capabilities", None), "provides_tools", True))
+    # A provider that offers no tools (``none``, capa/YARA) has nothing to be
+    # absent: its fragment describes it whatever the list holds.
+    if attached or not offers_tools:
+        body = str(provider.prompt_fragment())
+    elif hasattr(provider, "absent_fragment"):
+        body = str(provider.absent_fragment())
+    else:
+        guidance = getattr(provider, "guidance_fragment", None)
+        body = (
+            absent_provider_fragment(label, str(guidance()))
+            if callable(guidance)
+            else absent_provider_fragment(label)
+        )
+    statement = tools_statement(
+        tools,
+        provider_label=f"the {label} static provider",
+        provider_expected=attached,
+    )
+    return body.rstrip(), statement
+
+
+def _static_prompt(provider: Any | None = None, tools: Sequence[Any] = ()) -> str:
     """The neutral static system prompt for ``provider`` (the configured one by default).
 
     Neutral because it carries the format fragment for a sample nothing has
     identified. A running job does not use this: the container resolves the
     agent's prompt with the job's own format (``composition.builtin_prompt``)
-    and ``BaseAnalyst._system_prompt`` reads it. This is the fallback for an
-    analyst built outside a container.
+    and ``BaseAnalyst._system_prompt`` builds it for the tools the request
+    carries. This is the fallback for an analyst built outside a container.
     """
     if provider is None:
         from maljan.core.config import get_settings
@@ -67,13 +139,7 @@ def _static_prompt(provider: Any | None = None) -> str:
         provider = get_static_provider(get_settings())
     from maljan.agents.prompt_fragments import format_fragment
 
-    return (
-        _ISR_HEAD
-        + format_fragment("unknown", "unknown")
-        + "\n\n"
-        + provider.prompt_fragment()
-        + _ISR_TAIL
-    )
+    return assemble_static_prompt(provider, format_fragment("unknown", "unknown"), tools)
 
 
 # Back-compat: several modules and tests import this name. It is the default
@@ -109,7 +175,7 @@ def _reframe_static_raw_data(data: str, has_tools: bool) -> str:
         return (
             "No pre-extracted static fixture is available for this sample. This is "
             "EXPECTED for a freshly analysed binary and does NOT mean static analysis "
-            "is impossible — your live Ghidra tool findings in YOUR ORIGINAL REPORT "
+            "is impossible — the tool findings in YOUR ORIGINAL REPORT "
             "above are the authoritative static evidence. Revise from those findings; "
             "do NOT claim the binary data is missing or that analysis could not be performed."
         )
@@ -163,8 +229,15 @@ class StaticAnalyst(BaseAnalyst):
             self.logger.info("Static provider '%s' exposes no tools.", provider.id)
             self.tools = self._attach_registry_tools("static")
             return
-        provider.open(self._job_context())
-        pool = provider.get_tools()
+        try:
+            provider.open(self._job_context())
+        except Exception as exc:
+            if provider.capabilities.degrade_on_failure:
+                self._record_provider_degradation(provider, exc)
+            raise
+        # Marked as the provider's, so the prompt names them as such rather
+        # than inferring it from the absence of a server key.
+        pool = stamp_source(provider.get_tools(), PROVIDER_FAMILY)
         # No ``self.toolkit`` assignment here: the provider holds its own client
         # privately and closes it itself (``ServiceContainer.aclose`` calls
         # ``get_static_provider().close()``), so there is nothing for this
@@ -176,6 +249,29 @@ class StaticAnalyst(BaseAnalyst):
             ),
         ]
         self.logger.info("Static provider '%s': %d tools attached.", provider.id, len(self.tools))
+
+    def _record_provider_degradation(self, provider: Any, exc: BaseException) -> None:
+        """Say in the run summary that a degrading provider did not attach, and why.
+
+        A degrading provider's failed attach used to reach the log alone: the
+        run went on without the provider's tools and the summary did not say
+        so. The reason is the published form of the failure — its kind and its
+        remedy, never its message, which may name host paths — and goes on the
+        job's registry list, which the run summary reads, once.
+        """
+        from maljan.pipeline.events import describe_exception
+
+        reason = f"static provider '{provider.id}' unavailable: {describe_exception(exc)}"
+        if reason not in self.degradation_reasons:
+            self.degradation_reasons = [*self.degradation_reasons, reason]
+        registry = self._server_registry()
+        reasons = getattr(registry, "degradation_reasons", None)
+        if isinstance(reasons, list) and reason not in reasons:
+            reasons.append(reason)
+
+    def _fallback_prompt(self, tools: Sequence[Any]) -> str:
+        """The prompt of an analyst built outside a container, for ``tools``."""
+        return _static_prompt(self._provider(), tools)
 
     def _job_context(self) -> StaticJobContext:
         from maljan.core.config import get_settings
@@ -207,114 +303,42 @@ class StaticAnalyst(BaseAnalyst):
         return self._provider().capabilities
 
     def _compute_sink_priority_hint(self, file_path: str) -> str:
-        """Maltracker-style pre-pass: rank functions reachable to sensitive sinks.
+        """Open the sample on Ghidra, then rank functions reachable to sensitive sinks.
 
-        Loads + auto-analyses the binary on the Ghidra MCP server, pulls the
-        full call graph, and renders a "priority functions" hint pointing the
-        ReAct loop at the malicious core first. Deterministic and fail-safe:
-        any error (or a stripped binary with no named sink APIs) returns an
-        empty string and the analyst proceeds with its normal behaviour.
+        Runs when *this agent's* static provider is Ghidra, whatever the
+        globally configured one is: a clone of the static analyst on Ghidra in
+        a team whose global provider is r2 is as much a Ghidra run as the
+        default one. Both halves are the Ghidra provider module's
+        (``providers.static.ghidra.prepare_sample``), shared with a generic
+        agent that reads Ghidra. The load is a precondition: a sample Ghidra
+        cannot open raises :class:`SampleNotOpened` before the loop starts.
+        The ranking is fail-safe: any error in it, or a stripped binary with no
+        named sink APIs, returns an empty string.
         """
         from maljan.core.config import get_settings
+        from maljan.providers.static.ghidra import prepare_sample
 
-        cfg = get_settings()
-        if not cfg.preprocessing.use_sink_reachability:
-            return ""
-        # Ghidra-specific by construction: this pre-pass drives the headless
-        # Ghidra REST API directly (load_program / call graph), not a
-        # capability any other static provider could satisfy. Generalising it
-        # behind a capability flag is future work.
-        #
-        # L3 (live-run finding): ``cfg.static.ghidra`` is Ghidra's own
-        # sub-config and keeps its "http" default regardless of which static
-        # provider is actually selected, so gating on its transport alone let
-        # this run its Ghidra-only REST calls against an r2/generic_mcp
-        # profile too — no ``load_program`` tool exists there, so every call
-        # logged "load_program did not yield a program" at WARNING for a
-        # provider this pre-pass was never meant to touch. The provider
-        # selector is the real gate; the transport check stays underneath it
-        # for the one case that still matters — Ghidra itself configured for
-        # stdio, which this REST-only pre-pass cannot speak either.
-        if cfg.static.provider != "ghidra" or cfg.static.ghidra.transport != "http":
-            return ""  # the pre-pass speaks the headless REST API directly
+        return prepare_sample(
+            get_settings(),
+            self._provider_id(),
+            file_path,
+            self.logger,
+            provider=self._own_static_provider(),
+        )
 
-        try:
-            import httpx
+    def _provider_id(self) -> str:
+        """This agent's own static provider id: its resolution's, else the global one.
 
-            from maljan.analysis.sink_reachability import build_priority_hint
+        Read without building the provider, so a bare analyst in a test or a
+        script answers from the settings alone.
+        """
+        resolved = getattr(self, "_resolved", None)
+        provider_id = getattr(resolved, "static_provider_id", None) if resolved else None
+        if provider_id:
+            return str(provider_id)
+        from maljan.core.config import get_settings
 
-            base = cfg.static.ghidra.url.rstrip("/")
-            token = cfg.static.ghidra.auth_token.get_secret_value()
-            headers = {"Authorization": f"Bearer {token}"} if token else {}
-            from maljan.analysis.ghidra_program import (
-                SWITCH_PARAM,
-                SWITCH_PATH,
-                program_name_from_load,
-            )
-
-            with httpx.Client(timeout=120.0, headers=headers) as http:
-                loaded = http.post(f"{base}/load_program", json={"file": file_path})
-                loaded.raise_for_status()
-                # Loading is not looking. `load_program` sets Ghidra's current
-                # program only when nothing is current yet, so from the second
-                # sample of a container's lifetime onwards this pre-pass was
-                # building its hint from the *first* binary — measured
-                # 2026-08-10 as byte-identical call graphs across samples that
-                # shared nothing. The switch is what makes the next two calls
-                # describe the file we were asked about.
-                name = program_name_from_load(loaded.text)
-                if not name:
-                    # A failed load answers **200** with
-                    # {"error": "Failed to load program from: ..."}, so
-                    # raise_for_status sees nothing wrong. Carrying on would
-                    # analyse and describe whichever program is still current —
-                    # a hint about a different binary, handed to the analyst as
-                    # guidance for this one. Measured 2026-08-10: once the
-                    # server began refusing loads, 66 consecutive samples
-                    # produced a call graph of identical length.
-                    #
-                    # No hint is better than a wrong hint; the analyst's
-                    # documented fallback is to proceed without one.
-                    self.logger.warning(
-                        "Sink-reachability pre-pass: load_program did not yield a program "
-                        "for '%s' (%s) — skipping the hint rather than describing whichever "
-                        "binary is still loaded.",
-                        file_path,
-                        " ".join(loaded.text.split())[:200],
-                    )
-                    return ""
-                http.post(f"{base}{SWITCH_PATH}", params={SWITCH_PARAM: name}, json={})
-                http.post(f"{base}/run_analysis", json={}).raise_for_status()
-                resp = http.get(
-                    f"{base}/get_full_call_graph",
-                    params={"format": "json", "limit": 20000},
-                )
-                resp.raise_for_status()
-                graph_text = resp.text
-
-            hint = build_priority_hint(
-                graph_text, max_funcs=cfg.preprocessing.sink_reachability_max_funcs
-            )
-            if hint:
-                self.logger.info(
-                    "Sink-reachability pre-pass: priority-functions hint built "
-                    "(%d chars) for '%s'.",
-                    len(hint),
-                    file_path,
-                )
-            else:
-                self.logger.info(
-                    "Sink-reachability pre-pass: no named sink APIs reachable "
-                    "(stripped/static binary?) — no hint emitted."
-                )
-            return hint
-        except Exception as exc:  # fail-safe: never break analysis over a hint
-            self.logger.warning(
-                "Sink-reachability pre-pass failed (%s: %s); continuing without hint.",
-                type(exc).__name__,
-                exc,
-            )
-            return ""
+        return str(get_settings().static.provider)
 
     def _compute_function_hash_hint(self, file_path: str, sample_hash: str) -> str:
         """Pre-pass: surface known-family code reuse via exact opcode-hash match.
@@ -474,13 +498,17 @@ class StaticAnalyst(BaseAnalyst):
             target_info = f"Static output:\n{data}"
 
         prompt_messages = [
-            ("system", self._system_prompt(lambda: _static_prompt(self._provider()))),
+            ("system", self._system_prompt(self._fallback_prompt)),
             (
                 "human",
                 "Analyze the following target for obfuscation, "
                 "suspicious API imports, and hardcoded C2 patterns. "
-                "Use your tools to deeply analyze the binary if it's a file path.\n"
-                f"{target_info}",
+                + (
+                    "Use your tools to deeply analyze the binary if it's a file path.\n"
+                    if self.tools
+                    else "\n"
+                )
+                + f"{target_info}",
             ),
         ]
 
@@ -588,7 +616,7 @@ class StaticAnalyst(BaseAnalyst):
         # ``analysis_file_path`` on the chunk JSON. When present we hoist
         # it to a separate "Load using" line so the model can't miss it,
         # even on a degraded local 8-9B run.
-        load_hint = _extract_load_hint(data)
+        load_hint = _extract_load_hint(data, tool_names(self.tools))
 
         # Maltracker-style sink-reachability triage: when we have a
         # container-visible path, run a deterministic call-graph pre-pass and
@@ -616,11 +644,11 @@ class StaticAnalyst(BaseAnalyst):
         if host_path:
             rag_hint = self._compute_family_rag_hint(host_path)
         prompt_messages = [
-            ("system", self._system_prompt(lambda: _static_prompt(self._provider()))),
+            ("system", self._system_prompt(self._fallback_prompt)),
             (
                 "human",
                 "Analyze the target binary and return a structured list of findings.\n"
-                "You may use tools to gather more information (decompile, xrefs, etc.).\n"
+                f"{_tool_use_line(self.tools)}"
                 "For each finding state: the claim, the exact artifact "
                 "reference (e.g. 'API import: VirtualAllocEx', 'string at .data+0x20: /bin/sh'), "
                 "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID if applicable.\n\n"
@@ -630,7 +658,7 @@ class StaticAnalyst(BaseAnalyst):
         ]
 
         content = self.execute_tool_loop(prompt_messages)
-        parsed = _parse_claim_blocks(content)
+        parsed = self._read_claims(content)
         # A defeatist "could not be performed / missing binary data"
         # claim parses as a well-formed block but is not a real finding — drop it
         # so static collapses to a zero-claim (degraded) ISR rather than a fake
@@ -682,7 +710,8 @@ class StaticAnalyst(BaseAnalyst):
             [
                 (
                     "system",
-                    self._system_prompt(lambda: _static_prompt(self._provider())) + "\n\n"
+                    # A revision is one tools-free call: the prompt says so.
+                    self._system_prompt(self._fallback_prompt, tools=()) + "\n\n"
                     "You are in a negotiation round. You MUST:\n"
                     "1. List any peer claims you still DISPUTE in a DISPUTES section.\n"
                     "2. Revise your own claims based on new evidence.\n"
@@ -716,7 +745,7 @@ class StaticAnalyst(BaseAnalyst):
             self.ask_the_model(self.frame_messages(messages), what="revision")
         )
 
-        parsed = _parse_claim_blocks(content)
+        parsed = self._read_claims(content, revision_round)
         # Drop defeatist meta-claims ("could not be performed / missing
         # binary data") that parse as well-formed blocks; a no-real-finding
         # revision must collapse to a zero-claim ISR so the run is honestly
@@ -747,6 +776,7 @@ class StaticAnalyst(BaseAnalyst):
             dissent_items=dissent,
             revision_round=revision_round,
         )
+        self._with_claims_read(isr)
         return content, isr
 
 
@@ -755,8 +785,33 @@ class StaticAnalyst(BaseAnalyst):
 # ------------------------------------------------------------------
 
 
-def _extract_load_hint(data: str) -> str:
-    """Return a one-line ``load_program`` hint when the chunk carries a path.
+def _tool_use_line(tools: Sequence[Any]) -> str:
+    """The human turn's line about tools, true of the list the request carries.
+
+    A decompile-and-xrefs example is a promise only a decompiler keeps: a live
+    run on the ``none`` provider was told it could decompile while no tool in
+    its list could. With no tools at all the turn says nothing about them; the
+    system prompt already says there are none.
+    """
+    if not offered(tools):
+        return ""
+    examples = [
+        what
+        for what, present in (("decompile", has_decompiler(tools)), ("xrefs", has_xrefs(tools)))
+        if present
+    ]
+    if examples:
+        return f"You may use tools to gather more information ({', '.join(examples)}, etc.).\n"
+    return "You may use the tools in your tool list to gather more information.\n"
+
+
+# The tool the load line names. Only a provider that opens the sample in a
+# program database (Ghidra) has it; a request without it gets the path alone.
+_LOAD_TOOL = "load_program"
+
+
+def _extract_load_hint(data: str, offered: frozenset[str]) -> str:
+    """Return a one-line sample-path hint when the chunk carries a path.
 
     The analyst-node wrapper splices the
     container-visible sample path into the chunk JSON as
@@ -765,6 +820,11 @@ def _extract_load_hint(data: str) -> str:
     larger ``target`` block. Returns an empty string when the chunk
     isn't JSON (the legacy raw-bytes path) or when no path is present,
     keeping the prompt verbatim with the pre-Wave-6 behaviour.
+
+    ``offered`` is the tool names the request carries. The ``load_program`` line
+    is written only when that tool is among them; without it the line gives
+    the path and names no tool, so a provider with no program database is
+    not told to call one.
     """
     import json as _json
 
@@ -780,11 +840,15 @@ def _extract_load_hint(data: str) -> str:
     path = parsed.get("analysis_file_path")
     if not isinstance(path, str) or not path:
         return ""
-    return (
-        f'LOAD THIS BINARY FIRST: call ``load_program(file="{path}")``.\n'
-        "All subsequent analysis tools operate on the program loaded by "
-        "that call. Do not invent a path — use the one above verbatim.\n\n"
-    )
+    if _LOAD_TOOL in offered:
+        return (
+            f'LOAD THIS BINARY FIRST: call ``load_program(file="{path}")``.\n'
+            "All subsequent analysis tools operate on the program loaded by "
+            "that call. Do not invent a path — use the one above verbatim.\n\n"
+        )
+    if offered:
+        return f"Sample path (use exactly this string wherever a tool asks for a file): {path}\n\n"
+    return f"Sample path: {path}\n\n"
 
 
 def _extract_analysis_path(data: str) -> str | None:
@@ -858,13 +922,6 @@ def _extract_sample_hash(data: str) -> str | None:
     return None
 
 
-# CRLF-tolerant separator that requires the dashes to occupy their own line.
-_BLOCK_SPLIT_RE = re.compile(r"(?:^|\r?\n)\s*-{3,}\s*(?:\r?\n|$)", flags=re.MULTILINE)
-_CLAIM_RE = re.compile(r"CLAIM:\s*(.+?)(?=\s*\n\s*EVIDENCE:|\Z)", flags=re.DOTALL)
-_EVIDENCE_RE = re.compile(r"EVIDENCE:\s*(.+?)(?=\s*\n\s*CONFIDENCE:|\Z)", flags=re.DOTALL)
-_CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*([\d.]+)")
-_TECHNIQUE_RE = re.compile(r"TECHNIQUE:\s*(T\d{4}(?:\.\d{3})?|NONE)", flags=re.IGNORECASE)
-
 # DISPUTES section runs until end-of-string OR the next ALL-CAPS markdown-style
 # header (e.g. ``\nSUMMARY:`` or ``\nFINAL VERDICT:``). The previous greedy
 # pattern silently absorbed whatever followed.
@@ -875,58 +932,14 @@ _DISPUTES_RE = re.compile(
 
 
 def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
-    """Parse structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE blocks from LLM output.
+    """The claims the static, dynamic and network analysts read out of ``text``.
 
-    Tolerates CRLF line endings and varying amounts of whitespace.
+    The one claim reader (``base_agent.read_claim_blocks``) in its stricter
+    reading, which wants an EVIDENCE line on every claim. The caller that
+    turns these into an ISR goes through ``BaseAnalyst._read_claims``, which
+    records any claim the answer began and the reader did not read.
     """
-    claims: list[ClaimEvidence] = []
-    blocks = _BLOCK_SPLIT_RE.split(text)
-    for block in blocks:
-        block = block.strip()
-        if not block or "CLAIM:" not in block:
-            continue
-        claim_match = _CLAIM_RE.search(block)
-        evidence_match = _EVIDENCE_RE.search(block)
-        confidence_match = _CONFIDENCE_RE.search(block)
-        technique_match = _TECHNIQUE_RE.search(block)
-
-        if not (claim_match and evidence_match and confidence_match):
-            continue
-        claim_text = strip_tool_call_scaffolding(claim_match.group(1)).strip()
-        if not claim_text:
-            # The whole claim was model tool-call
-            # scaffolding, which a live static_r2 run showed to an operator as
-            # a finding. An empty finding is worse than none: it reaches the
-            # Pipeline tab as a blank row.
-            continue
-        # The citation gets the same cleaning as the claim, and this parser
-        # already refuses a block with no EVIDENCE at all -- a citation that
-        # was nothing but a tool call leaves the claim unsourced, which is the
-        # same state, so it fails the same requirement.
-        evidence_text = strip_tool_call_scaffolding(evidence_match.group(1)).strip()
-        if not evidence_text:
-            continue
-
-        try:
-            confidence = max(0.0, min(1.0, float(confidence_match.group(1))))
-        except ValueError:
-            # A CONFIDENCE line that is not a number states no confidence, and
-            # a claim carries only the one its analyst stated. The block is
-            # counted by ``BaseAnalyst._parsed_isr`` and asked about.
-            continue
-
-        technique_raw = technique_match.group(1).upper() if technique_match else "NONE"
-        technique_id = None if technique_raw == "NONE" else technique_raw
-
-        claims.append(
-            ClaimEvidence(
-                claim=claim_text[:300],
-                evidence_ref=evidence_ref_text(evidence_text),
-                confidence=confidence,
-                technique_id=technique_id,
-            )
-        )
-    return claims
+    return read_claim_blocks(text, require_evidence=True).claims
 
 
 def _parse_disputes(text: str) -> list[str]:

@@ -45,7 +45,12 @@ NETWORK = {
         },
     ],
     "ips": [
-        {"address": "185.99.133.7", "source": "sandbox", "is_suspicious": True},
+        {
+            "address": "185.99.133.7",
+            "source": "sandbox",
+            "is_suspicious": True,
+            "sample_process_tree": True,
+        },
         {"address": "6.0.0.0", "source": "strings", "is_suspicious": False},
     ],
     "urls": [
@@ -233,7 +238,87 @@ class TestThePublishRuleFailsClosed:
         from app.services import report_service
 
         assert hasattr(report_service, "indicator_publish_reason")
-        body = ast.parse(textwrap.dedent(inspect.getsource(report_service._publishable)))
+        body = ast.parse(textwrap.dedent(inspect.getsource(report_service._published)))
         assert not [
             node for node in ast.walk(body) if isinstance(node, ast.Import | ast.ImportFrom)
         ], "the rule is imported once, at module scope, not per call"
+
+
+class TestAPublishedURLCarriesItsHost:
+    def test_the_host_of_a_published_url_is_a_published_domain_row(self) -> None:
+        """The table, the export and the feed read one decision for the host."""
+        from app.services import report_service
+        from maljan.reporting.models import MalwareReport
+
+        report = MalwareReport.model_validate(
+            {
+                **_malware_report(),
+                "network": {
+                    **NETWORK,
+                    "domains": [],
+                    "urls": [{"url": "http://relay-alpha-7f3c.top/gate", "source": "sandbox"}],
+                },
+            }
+        )
+        out: list[dict[str, Any]] = []
+
+        report_service._with_the_hosts_of_published_urls(out, report, None)
+
+        assert out == [
+            {
+                "kind": "domain",
+                "value": "relay-alpha-7f3c.top",
+                "source": "sandbox",
+                "published": True,
+                "publish_answer": (
+                    "yes: the host of http://relay-alpha-7f3c.top/gate, which this run publishes"
+                ),
+            }
+        ]
+
+
+class TestARecoveredValueNamesItsTool:
+    """A hidden network value carries the tool that recovered it, as the report's table does."""
+
+    @staticmethod
+    def _client(record: dict[str, Any]) -> TestClient:
+        from app.database import get_db
+        from app.deps import get_current_user, require_active_user
+
+        report = MagicMock()
+        report.id = REPORT_ID
+        report.malware_report = {**_malware_report(), "emulated_strings": record}
+        service = module.ReportService(db=AsyncMock())
+        service.get_report = AsyncMock(return_value=report)  # type: ignore[method-assign]
+        app = FastAPI()
+        app.include_router(module.router, prefix="/api/v1")
+        user = MagicMock(id=uuid.uuid4(), email="op@example.com")
+        app.dependency_overrides[get_db] = lambda: AsyncMock()
+        app.dependency_overrides[get_current_user] = lambda: user
+        app.dependency_overrides[require_active_user] = lambda: user
+        app.dependency_overrides[module._get_service] = lambda: service
+        return TestClient(app)
+
+    def test_both_tools_reach_the_client(self) -> None:
+        record = {
+            "values": {"c2.example.com": "ev_0012"},
+            "recovered_by": {
+                "c2.example.com": [
+                    {"tool": "floss", "entry": "ev_0012", "scheme": "decoded"},
+                    {
+                        "tool": "decode_string_blobs",
+                        "entry": "ev_0020",
+                        "scheme": "xor8",
+                        "offset": "0xfd30",
+                    },
+                ]
+            },
+        }
+        rows = _rows(self._client(record), "?include=all&kind=domain")
+        by_value = {row["value"]: row.get("recovered_by") for row in rows}
+
+        assert by_value["c2.example.com"] == (
+            "floss, ev_0012 (decoded string); "
+            "decode_string_blobs, ev_0020 (xor8, at file offset 0xfd30)"
+        )
+        assert by_value["rosoft.com"] is None

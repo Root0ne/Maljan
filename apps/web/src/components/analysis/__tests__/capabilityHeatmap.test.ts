@@ -7,6 +7,7 @@ import {
   isCorroborated,
   orderedTactics,
   parseTechniques,
+  retiredNote,
   tacticHeaderCount,
   tacticOrder,
 } from "../capabilityHeatmap";
@@ -25,6 +26,26 @@ function only(raw: unknown[]) {
   const [tactic] = parseTechniques(raw);
   return tactic.techniques[0];
 }
+
+describe("layers that wrote the same words", () => {
+  it("count once, as the backend counts them", () => {
+    const tech = only([
+      row({
+        contributing_layers: ["static", "dynamic", "network"],
+        independent_layers: ["static"],
+      }),
+    ]);
+    expect(tech.sources).toEqual(["static", "dynamic", "network"]);
+    expect(tech.corroborating).toEqual(["static"]);
+    expect(isCorroborated(tech)).toBe(false);
+  });
+
+  it("leave a row stored before statements were counted as it was", () => {
+    expect(isCorroborated(only([row({ contributing_layers: ["static", "dynamic"] })]))).toBe(
+      true
+    );
+  });
+});
 
 describe("the judge as a source", () => {
   it("is not a badge beside the layers that observed the technique", () => {
@@ -201,5 +222,43 @@ describe("a tactic column's header", () => {
   it("counts none published when the run published none", () => {
     const [tactic] = parseTechniques([row({ not_published: "outside the domain" })]);
     expect(tacticHeaderCount(tactic.techniques)).toBe("0 techniques · 1 claimed, not published");
+  });
+});
+
+describe("retiredNote", () => {
+  it("says what happened to a revoked-only id", () => {
+    const corroboration = {
+      T1024: {
+        asserted_by: ["sigma"],
+        claimed_by: [],
+        retired_reason: "revoked by T1573 in the ATT&CK catalogue",
+      },
+    };
+    expect(retiredNote(corroboration, "T1024")).toBe("revoked by T1573 in the ATT&CK catalogue");
+  });
+
+  it("prefers the reason over the bare release", () => {
+    const corroboration = {
+      "T1562.001": {
+        asserted_by: ["sigma"],
+        claimed_by: [],
+        retired_in: "19.2",
+        retired_reason: "retired in ATT&CK 19.2 and revoked by T1685",
+      },
+    };
+    expect(retiredNote(corroboration, "T1562.001")).toBe(
+      "retired in ATT&CK 19.2 and revoked by T1685"
+    );
+  });
+
+  it("reads a stored row that carries only the release", () => {
+    const corroboration = { T1499: { asserted_by: [], claimed_by: [], retired_in: "19.2" } };
+    expect(retiredNote(corroboration, "T1499")).toBe("retired in ATT&CK 19.2");
+  });
+
+  it("says nothing for a live id or an old list row", () => {
+    expect(retiredNote({ T1055: { asserted_by: [], claimed_by: [] } }, "T1055")).toBeNull();
+    expect(retiredNote({ T1055: ["static"] }, "T1055")).toBeNull();
+    expect(retiredNote(null, "T1055")).toBeNull();
   });
 });

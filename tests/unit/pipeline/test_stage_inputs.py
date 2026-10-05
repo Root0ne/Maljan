@@ -131,6 +131,48 @@ class TestUpstreamFindings:
         assert block.endswith("[upstream findings truncated]")
         assert len(block) < 200
 
+    def test_the_default_budget_is_derived_from_the_served_window(self) -> None:
+        from unittest.mock import patch
+
+        from maljan.llm.context_window import (
+            ANSWER_SHARE,
+            CHARS_PER_TOKEN,
+            ContextBudget,
+            WindowFact,
+        )
+        from maljan.pipeline.nodes import upstream_chars
+
+        container = _container()
+        assert container.config.reporting.upstream_findings_max_chars == 0
+        window = WindowFact(1048576, "probed", "the served model list reported 1,048,576")
+        budget = ContextBudget(window, reply_tokens=262144)
+        with patch.object(container, "get_context_budget", return_value=budget):
+            chars = upstream_chars(container)
+
+        assert chars == int((1048576 - 262144) * CHARS_PER_TOKEN * ANSWER_SHARE)
+
+    def test_an_unknown_window_takes_the_documented_fallback(self) -> None:
+        from unittest.mock import patch
+
+        from maljan.llm.context_window import (
+            UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS,
+            ContextBudget,
+            unknown_window,
+        )
+        from maljan.pipeline.nodes import upstream_chars
+
+        container = _container()
+        budget = ContextBudget(unknown_window())
+        with patch.object(container, "get_context_budget", return_value=budget):
+            assert upstream_chars(container) == UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
+
+    def test_an_operators_value_wins_over_the_window(self) -> None:
+        from maljan.pipeline.nodes import upstream_chars
+
+        container = _container(reporting={"upstream_findings_max_chars": 120})
+
+        assert upstream_chars(container) == 120
+
     def test_the_block_reaches_the_agent_at_the_head_of_its_first_chunk(self) -> None:
         settings = _settings()
         container = MagicMock()
@@ -435,14 +477,14 @@ class TestInjectionKeepsTheHeadChunkAContract:
 
         head = self._head("findings")
         assert head.lstrip().startswith("{")
-        assert "LOAD THIS BINARY FIRST" in _extract_load_hint(head)
+        assert "LOAD THIS BINARY FIRST" in _extract_load_hint(head, frozenset({"load_program"}))
         assert _extract_analysis_path(head) == "/srv/samples/abc123.exe"
 
     def test_the_load_hint_still_fires_with_full_reports_injected(self) -> None:
         from maljan.agents.static_analyst import _extract_load_hint
 
         head = self._head("full")
-        assert "LOAD THIS BINARY FIRST" in _extract_load_hint(head)
+        assert "LOAD THIS BINARY FIRST" in _extract_load_hint(head, frozenset({"load_program"}))
         assert "The full static prose report." in head
 
     def test_the_block_arrives_as_a_field_of_the_document(self) -> None:

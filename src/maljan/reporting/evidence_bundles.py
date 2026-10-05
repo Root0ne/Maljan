@@ -16,6 +16,7 @@ than fabricate — see other/docs/report-reference/ ("state absence explicitly")
 
 from __future__ import annotations
 
+import ipaddress
 from typing import Any
 
 from maljan.reporting.models import MalwareReport
@@ -45,6 +46,11 @@ SECTIONS = (
 # The ledger tools a sandbox answers through. An execution step the report
 # model marks ``observed`` has to cite one of their entries.
 SANDBOX_TOOL_PREFIXES = ("sandbox_", "pcap_summary")
+
+# The sandbox answers about the network: a flow table and a capture. Either
+# holds the guest's traffic as well as the sample's, so it shows a step was
+# observed only when the sandbox attributed a flow to the sample's own tree.
+_NETWORK_SANDBOX_TOOLS = frozenset({"sandbox_network", "pcap_summary"})
 
 # Tool names whose captured output is relevant to each technical section. Used
 # to filter ``technical_evidence`` so e.g. the encryption bundle never sees
@@ -170,18 +176,24 @@ _SECTION_CLAIM_KEYWORDS: dict[str, tuple[str, ...]] = {
 
 
 def _claims_text(report: MalwareReport, isr_reports: dict[str, Any] | None) -> list[dict[str, str]]:
-    """Flatten every ISR claim into ``{claim, evidence_ref, agent}`` dicts."""
-    out: list[dict[str, str]] = []
-    for agent_id, isr in (isr_reports or {}).items():
-        for c in getattr(isr, "claims", None) or []:
-            out.append(
-                {
-                    "claim": str(getattr(c, "claim", "")),
-                    "evidence_ref": str(getattr(c, "evidence_ref", "")),
-                    "agent": str(agent_id),
-                }
-            )
-    return out
+    """Every claim in force as ``{claim, evidence_ref, agent, label}``, in the answers' order.
+
+    ``label`` names the claim by its analyst and its number in the answer in
+    force (``claim_coverage.claim_label``): the name the coverage check reads
+    a citation of the claim by, and the one the report lists it under when the
+    body neither cites nor discusses it.
+    """
+    from maljan.reporting.claim_coverage import claims_in_force
+
+    return [
+        {
+            "claim": claim.claim,
+            "evidence_ref": claim.evidence_ref,
+            "agent": claim.agent,
+            "label": claim.label,
+        }
+        for claim in claims_in_force(isr_reports)
+    ]
 
 
 def _filter_claims(claims: list[dict[str, str]], keywords: tuple[str, ...]) -> list[dict[str, str]]:
@@ -215,9 +227,6 @@ def _filter_tool_outputs(
                     }
                 )
     return picked
-
-
-_MAX_DLLS = 24
 
 
 def binary_facts(report: MalwareReport) -> dict[str, Any]:
@@ -270,14 +279,10 @@ def binary_facts(report: MalwareReport) -> dict[str, Any]:
         # it as unproven: it kept a static-analyst claim that the binary loads
         # `mscoree.dll` while the list plainly did not contain it, and
         # reconciled the two into "a VC++ binary that is also a .NET wrapper".
-        # A truncated list must NOT be called complete — that would trade one
-        # wrong inference for a worse one.
-        if len(ordered) <= _MAX_DLLS:
-            facts[f"imported_dlls (complete list, {len(ordered)} total)"] = ordered
-        else:
-            facts[f"imported_dlls (first {_MAX_DLLS} of {len(ordered)}, NOT exhaustive)"] = ordered[
-                :_MAX_DLLS
-            ]
+        # The list is shown whole, so it is always complete: no count cuts a
+        # fact the section is grounded in, and the composer accounts for the
+        # window it takes (``ReportComposer._room_chars``).
+        facts[f"imported_dlls (complete list, {len(ordered)} total)"] = ordered
         # Stated as its own fact rather than left to be inferred from the list.
         # Deliberately named for what is actually measured: a binary that does
         # not import the CLR shim is not thereby proven managed-code-free, but
@@ -374,6 +379,7 @@ def bundle_for(
             "facts": {
                 "ttps": [f"{m.technique_id} {m.technique_name}" for m in report.ttp_mappings],
                 "persistence": [p.kind for p in report.persistence],
+                "persistence_assessed": _assessed_persistence(report),
                 "has_network": bool(
                     report.network and (report.network.domains or report.network.ips)
                 ),
@@ -407,6 +413,25 @@ def bundle_for(
     }
 
 
+def _assessed_persistence(report: MalwareReport) -> list[str]:
+    """The persistence the analysts listed, one line each, apart from the tools' mechanisms."""
+    from maljan.reporting.ledger_report import analyst_persistence
+
+    return [
+        " ".join(
+            part
+            for part in (
+                row["kind"],
+                row["target"],
+                f"-> {row['payload']}" if row["payload"] else "",
+                f"(listed by the {row['listed_by']} analyst)" if row["listed_by"] else "",
+            )
+            if part
+        )
+        for row in analyst_persistence(report.sections)
+    ]
+
+
 def sandbox_entry_ids(report: MalwareReport) -> list[str]:
     """The ledger ids of the sandbox answers that recorded something, in issue order.
 
@@ -416,20 +441,112 @@ def sandbox_entry_ids(report: MalwareReport) -> list[str]:
     section built from it holds a value: the section builders credit an entry
     only when it added a row, and the generic block's rows are read for a
     value that is not empty.
+
+    A network answer — the flow table, the capture — is an observation of the
+    sample only when the report's network block holds a sandbox row the
+    sandbox attributed to the sample's process tree: without one, what it
+    recorded is the guest's traffic, and a step citing it was not observed.
+    Process, file and registry answers are the sample's by what they record.
     """
+    sample_flow = _sample_tree_made_a_flow(report)
     # The pack's sandbox-status entry states what the sandbox report is; it
     # records no behaviour and is never an observation to cite.
-    sandbox = {
-        row.id
+    tools = {
+        row.id: str(row.tool or "")
         for row in report.evidence_index
         if str(row.tool or "").startswith(SANDBOX_TOOL_PREFIXES) and row.tool != "sandbox_status"
     }
     holding: set[str] = set()
     for section in report.sections:
-        cited = sandbox.intersection(section.evidence_ids)
-        if cited and section_holds_something(section):
-            holding.update(cited)
+        cited = set(tools).intersection(section.evidence_ids)
+        if not cited or not section_holds_something(section):
+            continue
+        if not sample_flow:
+            cited = {eid for eid in cited if not _answers_about_the_network(tools[eid], section)}
+        holding.update(cited)
     return [row.id for row in report.evidence_index if row.id in holding]
+
+
+# The named sections of a sandbox report that record traffic, as the section
+# built from a ``sandbox_report_section`` answer is keyed (``sandbox_<name>``).
+_NETWORK_REPORT_SECTIONS = frozenset(
+    {"network", "dns", "http", "https", "tcp", "udp", "tls", "hosts", "domains", "pcap"}
+)
+
+
+def _answers_about_the_network(tool: str, section: Any) -> bool:
+    """Whether a sandbox answer records traffic: the flow table, the capture, a network section."""
+    if tool in _NETWORK_SANDBOX_TOOLS:
+        return True
+    name = str(getattr(section, "key", "") or "").removeprefix("sandbox_").lower()
+    return tool == "sandbox_report_section" and name in _NETWORK_REPORT_SECTIONS
+
+
+def sample_flow_fact(report: MalwareReport) -> Any:
+    """``(kind, value) -> reason``: why the sandbox shows no flow of the sample to a value.
+
+    ``""`` when a flow to it came from the sample's process tree: an address
+    the tree reached, a name that resolved to one, a URL on either. Otherwise
+    the sandbox's own fact about the value, in the publish rule's words for a
+    row it recorded (``stix_renderer.sandbox_row_kwargs``), or that it
+    recorded no flow to it. A platform fact read from the network block,
+    right or absent; what a step marked observed is asked against.
+    """
+    from maljan.reporting.ledger_projection import value_key
+    from maljan.reporting.renderers.stix_renderer import sandbox_row_kwargs, url_host
+
+    network = report.network
+    ips = {value_key("ip", ip.address): ip for ip in (network.ips if network else [])}
+    names = {
+        value_key("domain", domain.fqdn): domain for domain in (network.domains if network else [])
+    }
+    reached = {key for key, ip in ips.items() if ip.sample_process_tree is True}
+
+    def _address(value: str) -> str:
+        key = value_key("ip", value)
+        if key in reached:
+            return ""
+        row = ips.get(key)
+        if row is not None and row.source == "sandbox":
+            said = sandbox_row_kwargs(report, "ip", value).get("unattributed")
+            if said:
+                return str(said)
+        return "the sandbox records no flow of the sample's process tree to it"
+
+    def _name(value: str) -> str:
+        row = names.get(value_key("domain", value))
+        resolved = [str(a) for a in (row.resolved_ips if row is not None else [])]
+        if any(value_key("ip", address) in reached for address in resolved):
+            return ""
+        if resolved:
+            return (
+                f"none of the addresses it resolved to ({', '.join(resolved)}) has a flow the "
+                "sandbox attributes to the sample's process tree"
+            )
+        return "the sandbox records no address it resolved to that the sample's tree reached"
+
+    def _fact(kind: str, value: str) -> str:
+        text = str(value or "").strip()
+        if kind == "url":
+            text = url_host(text)
+        text = text.strip("[]")
+        if not text:
+            return ""
+        try:
+            ipaddress.ip_address(text)
+        except ValueError:
+            return _name(text)
+        return _address(text)
+
+    return _fact
+
+
+def _sample_tree_made_a_flow(report: MalwareReport) -> bool:
+    """Whether the network block holds a sandbox row attributed to the sample's process tree."""
+    network = report.network
+    return network is not None and any(
+        ip.source == "sandbox" and ip.sample_process_tree is True for ip in network.ips
+    )
 
 
 _EMPTY_VALUES = frozenset({"", "[]", "{}", "0", "none", "null", "-", "false", "no"})
@@ -483,6 +600,16 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     """
     if section == "payloads":
         return _payload_facts(report)
+    if section == "persistence_detail":
+        # The tools' mechanisms and the analysts' listed rows, as two facts:
+        # a run whose static block is empty still has both to state.
+        profile = (report.static.api_capabilities or {}) if report.static else {}
+        return {
+            "persistence_mechanisms": [p.kind for p in report.persistence],
+            "persistence_assessed": _assessed_persistence(report),
+            "persistence_api_count": profile.get("persistence", 0),
+            "registry_api_count": profile.get("registry", 0),
+        }
     if section == "configuration":
         net = report.network
         return {
@@ -560,20 +687,21 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
             "evasion_api_count": caps.get("evasion", 0),
             "evasion_techniques": [t for t in techniques if t in _EVASION_TECHNIQUES],
         }
-    if section == "persistence_detail":
-        return {
-            "persistence_mechanisms": [p.kind for p in report.persistence],
-            "persistence_api_count": caps.get("persistence", 0),
-            "registry_api_count": caps.get("registry", 0),
-        }
     if section == "cli_flags":
         return {"capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1]))}
     if section == "string_resolution":
-        return {
+        resolution: dict[str, Any] = {
             "static_import_count": len(static.imports),
             "interesting_string_count": len(static.interesting_strings),
             "capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1])),
         }
+        if static.api_capabilities_resolved:
+            # The names the run resolved at runtime, apart from the imports:
+            # the section is about how the sample finds them.
+            resolution["capability_profile_of_names_resolved_at_runtime_not_imports"] = dict(
+                sorted(static.api_capabilities_resolved.items(), key=lambda kv: -kv[1])
+            )
+        return resolution
     return {"capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1]))}
 
 

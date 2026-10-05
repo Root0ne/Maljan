@@ -61,20 +61,22 @@ class DynamicParser(BaseParser):
         # 3. Network Indicators (C2 / Exfiltration)
         network = raw_data.get("network", {})
         net_rows: list[list[str]] = []
-        for dns in network.get("dns", [])[:10]:
+        # Every row: the analyst reads the whole observed network, not its
+        # first ten of each kind.
+        for dns in network.get("dns", []):
             req = dns.get("request", dns.get("query", "N/A"))
             net_rows.append(["DNS", str(req), "—"])
-        for http in network.get("http", [])[:10]:
+        for http in network.get("http", []):
             host = http.get("host", "N/A")
             uri = http.get("uri", "/")
             net_rows.append(["HTTP", f"{host}{uri}", str(http.get("status", "?"))])
-        for tcp in network.get("tcp", [])[:10]:
+        for tcp in network.get("tcp", []):
             dst = tcp.get("dst", "N/A")
             dport = tcp.get("dport", "?")
             net_rows.append(["TCP", f"{dst}:{dport}", "—"])
-        for host in network.get("hosts", [])[:10]:
+        for host in network.get("hosts", []):
             net_rows.append(["HOST", str(host), "—"])
-        for domain in network.get("domains", [])[:10]:
+        for domain in network.get("domains", []):
             net_rows.append(["DOMAIN", str(domain), "—"])
 
         net_table = self._format_as_table(headers=["Type", "Indicator", "Status"], rows=net_rows)

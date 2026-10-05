@@ -12,6 +12,12 @@ from maljan.reporting.renderers.stix_renderer import (
     emulation_record,
     indicator_publish_reason,
     judge_indicator_rows,
+    one_reading,
+    publish_answer,
+    published_url_hosts,
+    publishes,
+    recovered_by_words,
+    yes_because,
 )
 from maljan.reporting.run_diff import RunRecord, diff_runs
 from sqlalchemy import select
@@ -82,11 +88,21 @@ def _shorten_hash_like(stem: str) -> str:
 def _publishable(
     kind: str, value: Any, source: Any, reputation: Any, emulated: dict[str, Any] | None = None
 ) -> bool:
-    """Whether the platform's own publish rule would publish this row.
+    """Whether the platform's own publish rule would publish this row (:func:`_published`)."""
+    return bool(_published(kind, value, source, reputation, emulated)["published"])
+
+
+def _published(
+    kind: str, value: Any, source: Any, reputation: Any, emulated: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """``published`` and ``publish_answer`` for one row: the rule's decision and its reason.
 
     The one rule, asked from a second place rather than copied into it: the
     STIX bundle and this feed cannot come to disagree about whether a name only
-    the sample's bytes know is infrastructure.
+    the sample's bytes know is infrastructure. ``publish_answer`` is what the
+    report's IOC table prints for the row — ``yes: <why>`` or ``no: <why>`` —
+    so a consumer of the feed reads why each row is published, not only that
+    it is.
 
     Imported at module scope, like every other core import in this application:
     ``maljan`` is a hard dependency of the API, so a guard around the import
@@ -98,9 +114,12 @@ def _publishable(
     operator notices and can work around with ``include=all``.
     """
     try:
-        return (
-            indicator_publish_reason(kind, str(value or ""), source, reputation, **(emulated or {}))
-            is not None
+        text = str(value or "")
+        admitted = indicator_publish_reason(kind, text, source, reputation, **(emulated or {}))
+        answer = (
+            yes_because(admitted)
+            if admitted is not None
+            else publish_answer(kind, text, source, reputation, **(emulated or {}))
         )
     except Exception as exc:  # noqa: BLE001 — a feed answers, and says what broke
         logger.error(
@@ -110,10 +129,98 @@ def _publishable(
             type(exc).__name__,
             log_safe(exc),
         )
-        return False
+        answer = "no: the publish rule could not answer for this row"
+    return {"published": publishes(answer), "publish_answer": answer}
 
 
-def _with_the_judge_s_values(out: list[dict], mr: dict, kind: str | None) -> None:
+def _typed_report(mr: dict) -> Any:
+    """The stored report as the model the export reads, or the dict when it will not validate.
+
+    A dict the model cannot read still answers the rule's own questions from
+    its fields; the attribution and URL-host answers need the model, and a
+    report that will not validate is said so in the log.
+    """
+    try:
+        from maljan.reporting.models import MalwareReport
+
+        return MalwareReport.model_validate(mr)
+    except Exception as exc:  # noqa: BLE001 — a feed answers, and says what broke
+        logger.error(
+            "the stored report could not be read as a report model; the feed asks the "
+            "publish rule of its fields alone (%s: %s)",
+            type(exc).__name__,
+            log_safe(exc),
+        )
+        return mr
+
+
+def _with_the_analysts_listed_rows(out: list[dict], typed: Any, kind: str | None) -> None:
+    """The mutexes, paths, registry keys, tasks and services the analysts listed, as §9 shows them.
+
+    Read from the report's own IOC table — the stored one, rebuilt
+    (``build_consolidated_iocs``) only for a report stored without it — so a
+    row is here exactly when the report prints it: an ``analyst`` row no tool
+    recorded, carrying the rule's answer as its note. Such a row is never
+    published, so only ``include=all`` and ``include=unpublished`` return it.
+    """
+    from maljan.reporting.builder import build_consolidated_iocs
+    from maljan.reporting.models import MalwareReport
+
+    if not isinstance(typed, MalwareReport):
+        return
+    for row in typed.consolidated_iocs or build_consolidated_iocs(typed):
+        if row.source != "analyst" or row.is_network or (kind and kind != row.kind):
+            continue
+        out.append(
+            {
+                "kind": row.kind,
+                "value": row.value,
+                "source": "analyst",
+                "notes": row.published,
+                "published": publishes(row.published),
+                "publish_answer": row.published,
+            }
+        )
+
+
+def _with_the_hosts_of_published_urls(out: list[dict], typed: Any, kind: str | None) -> None:
+    """Add a domain row for the host of each URL this report publishes, when it has none.
+
+    The host follows the URL's decision (``stix_renderer.published_url_hosts``),
+    as the report's table and the export read it.
+    """
+    if kind and kind != "domain":
+        return
+    try:
+        hosts = published_url_hosts(typed)
+    except Exception as exc:  # noqa: BLE001 — a feed answers, and says what broke
+        logger.error(
+            "the hosts of the published URLs could not be read (%s: %s)",
+            type(exc).__name__,
+            log_safe(exc),
+        )
+        return
+    listed = {
+        str(row.get("value") or "").strip().lower().rstrip(".")
+        for row in out
+        if row.get("kind") == "domain"
+    }
+    for host, (_url, source) in hosts.items():
+        if host in listed:
+            continue
+        out.append(
+            {
+                "kind": "domain",
+                "value": host,
+                "source": source,
+                **_published("domain", host, source, None, emulation_kwargs(typed, "domain", host)),
+            }
+        )
+
+
+def _with_the_judge_s_values(
+    out: list[dict], mr: dict, kind: str | None, typed: Any = None
+) -> None:
     """Add the values the judge's indicators name, each with the one rule's answer.
 
     The export asks the publish rule of every judge indicator before it carries
@@ -122,14 +229,17 @@ def _with_the_judge_s_values(out: list[dict], mr: dict, kind: str | None) -> Non
     a value the export declined is withheld here too and one it carries is
     published. A value the feed already has a row for keeps its row: its answer
     is the same one. Rows are added in place; a stored report the model cannot
-    read adds none, and says so in the log.
+    read adds none, and says so in the log. ``typed`` is the report as the
+    feed's one reading already holds it, so the rule's lookups are the ones
+    that reading built rather than a second set per value.
     """
     if not mr.get("judge_indicators"):
         return
     try:
         from maljan.reporting.models import MalwareReport
 
-        judged = judge_indicator_rows(MalwareReport.model_validate(mr))
+        report = typed if isinstance(typed, MalwareReport) else MalwareReport.model_validate(mr)
+        judged = judge_indicator_rows(report)
     except Exception as exc:  # noqa: BLE001 — a feed answers, and says what broke
         logger.error(
             "the judge's indicator values could not be asked the publish rule; none is "
@@ -153,7 +263,13 @@ def _with_the_judge_s_values(out: list[dict], mr: dict, kind: str | None) -> Non
         ):
             continue
         out.append(
-            {"kind": item.kind, "value": value, "source": "judge", "published": answer == "yes"}
+            {
+                "kind": item.kind,
+                "value": value,
+                "source": "judge",
+                "published": publishes(answer),
+                "publish_answer": answer,
+            }
         )
 
 
@@ -265,6 +381,9 @@ class ReportService:
                     "created_at": report.created_at.isoformat() if report.created_at else None,
                     "techniques_count": len(mitre) if isinstance(mitre, list) else 0,
                     "findings_count": len(findings),
+                    # A report kept from a job that failed after it was built
+                    # says so in the list too; ``None`` for a completed run.
+                    "incomplete_reason": report.incomplete_reason,
                 }
             )
 
@@ -548,95 +667,130 @@ class ReportService:
             if isinstance(dom, dict)
         }
         out: list[dict] = []
-        # What the run's FLOSS entry recovered by emulation, read from the
-        # stored report the way the report's own table reads it.
+        # What only a recovering tool (FLOSS or the static decoder) read, from
+        # the stored report the way the report's own table reads it.
         emulated = emulation_record(mr)
-        identity = mr.get("identity") or {}
-        hashes = identity.get("hashes") or {}
-        for algo, value in hashes.items():
-            if not value or (kind and kind != "hash"):
-                continue
-            # The sample's own identity, established by the router rather than
-            # read out of the bytes: always published.
-            out.append({"kind": "hash", "value": f"{algo}:{value}", "source": "identity"})
-        if not kind or kind == "domain":
-            for dom in network.get("domains") or []:
+        # The rule's report-dependent arguments are asked of the report as the
+        # export reads it: a sandbox row's attribution, the models that named a
+        # value and the published URLs whose hosts follow them.
+        typed = _typed_report(mr)
+        # One reading of the report for the whole feed: the rule asks the same
+        # lookups of every row, and they are built once.
+        with one_reading(typed):
+            identity = mr.get("identity") or {}
+            hashes = identity.get("hashes") or {}
+            for algo, value in hashes.items():
+                if not value or (kind and kind != "hash"):
+                    continue
+                # The sample's own identity, established by the router rather than
+                # read out of the bytes: always published.
                 out.append(
                     {
-                        "kind": "domain",
-                        "value": dom.get("fqdn", ""),
-                        "is_suspicious": bool(dom.get("is_suspicious")),
-                        "notes": dom.get("reason"),
-                        # A name the sandbox resolved and a run of bytes shaped
-                        # like a hostname are not the same claim, and this feed
-                        # presented them identically.
-                        "source": dom.get("source"),
-                        "published": _publishable(
-                            "domain",
-                            dom.get("fqdn"),
-                            dom.get("source"),
-                            dom.get("reputation"),
-                            emulation_kwargs(mr, "domain", str(dom.get("fqdn") or ""), emulated),
-                        ),
+                        "kind": "hash",
+                        "value": f"{algo}:{value}",
+                        "source": "identity",
+                        "publish_answer": yes_because("identity"),
                     }
                 )
-        if not kind or kind == "ip":
-            for ip in network.get("ips") or []:
-                out.append(
-                    {
-                        "kind": "ip",
-                        "value": ip.get("address", ""),
-                        "is_suspicious": bool(ip.get("is_suspicious")),
-                        "source": ip.get("source"),
-                        "published": _publishable(
-                            "ip",
-                            ip.get("address"),
-                            ip.get("source"),
-                            ip.get("reputation"),
-                            emulation_kwargs(mr, "ip", str(ip.get("address") or ""), emulated),
-                        ),
-                    }
+            if not kind or kind == "domain":
+                for dom in network.get("domains") or []:
+                    out.append(
+                        {
+                            "kind": "domain",
+                            "value": dom.get("fqdn", ""),
+                            "is_suspicious": bool(dom.get("is_suspicious")),
+                            "notes": dom.get("reason"),
+                            # A name the sandbox resolved and a run of bytes shaped
+                            # like a hostname are not the same claim, and this feed
+                            # presented them identically.
+                            "source": dom.get("source"),
+                            **_published(
+                                "domain",
+                                dom.get("fqdn"),
+                                dom.get("source"),
+                                dom.get("reputation"),
+                                emulation_kwargs(
+                                    typed, "domain", str(dom.get("fqdn") or ""), emulated
+                                ),
+                            ),
+                        }
+                    )
+            if not kind or kind == "ip":
+                for ip in network.get("ips") or []:
+                    out.append(
+                        {
+                            "kind": "ip",
+                            "value": ip.get("address", ""),
+                            "is_suspicious": bool(ip.get("is_suspicious")),
+                            "source": ip.get("source"),
+                            **_published(
+                                "ip",
+                                ip.get("address"),
+                                ip.get("source"),
+                                ip.get("reputation"),
+                                emulation_kwargs(
+                                    typed, "ip", str(ip.get("address") or ""), emulated
+                                ),
+                            ),
+                        }
+                    )
+            if not kind or kind == "url":
+                for url in network.get("urls") or []:
+                    host = _url_host(url.get("url"))
+                    out.append(
+                        {
+                            "kind": "url",
+                            "value": url.get("url", ""),
+                            "source": url.get("source"),
+                            # ``or "strings"`` exactly as the renderer reads it: a
+                            # URL row that records no source at all is the weakest
+                            # claim there is, and two readings of "unrecorded" is
+                            # how one surface publishes what the other withholds.
+                            **_published(
+                                "url",
+                                url.get("url"),
+                                url.get("source") or "strings",
+                                reputations.get(host),
+                                emulation_kwargs(typed, "url", str(url.get("url") or ""), emulated),
+                            ),
+                        }
+                    )
+            # A fingerprint and a user agent are the sandbox's own observations of
+            # the traffic; there is no string sweep that produces one, so there is
+            # nothing for the publish rule to withhold.
+            for field, row_kind in (
+                ("user_agents", "user_agent"),
+                ("ja3_fingerprints", "ja3"),
+                ("ja3s_fingerprints", "ja3s"),
+            ):
+                if kind and kind != row_kind:
+                    continue
+                for value in network.get(field) or []:
+                    out.append(
+                        {
+                            "kind": row_kind,
+                            "value": value,
+                            "source": "sandbox",
+                            "publish_answer": yes_because("sandbox"),
+                        }
+                    )
+            _with_the_judge_s_values(out, mr, kind, typed)
+            _with_the_hosts_of_published_urls(out, typed, kind)
+            _with_the_analysts_listed_rows(out, typed, kind)
+            rows = [row for row in out if row.get("value")]
+            # Which tool recovered each hidden network value, and where, as
+            # the report's IOC table states it.
+            for row in rows:
+                said = recovered_by_words(
+                    emulated, str(row.get("kind") or ""), str(row.get("value") or "")
                 )
-        if not kind or kind == "url":
-            for url in network.get("urls") or []:
-                host = _url_host(url.get("url"))
-                out.append(
-                    {
-                        "kind": "url",
-                        "value": url.get("url", ""),
-                        "source": url.get("source"),
-                        # ``or "strings"`` exactly as the renderer reads it: a
-                        # URL row that records no source at all is the weakest
-                        # claim there is, and two readings of "unrecorded" is
-                        # how one surface publishes what the other withholds.
-                        "published": _publishable(
-                            "url",
-                            url.get("url"),
-                            url.get("source") or "strings",
-                            reputations.get(host),
-                            emulation_kwargs(mr, "url", str(url.get("url") or ""), emulated),
-                        ),
-                    }
-                )
-        # A fingerprint and a user agent are the sandbox's own observations of
-        # the traffic; there is no string sweep that produces one, so there is
-        # nothing for the publish rule to withhold.
-        for field, row_kind in (
-            ("user_agents", "user_agent"),
-            ("ja3_fingerprints", "ja3"),
-            ("ja3s_fingerprints", "ja3s"),
-        ):
-            if kind and kind != row_kind:
-                continue
-            for value in network.get(field) or []:
-                out.append({"kind": row_kind, "value": value, "source": "sandbox"})
-        _with_the_judge_s_values(out, mr, kind)
-        rows = [row for row in out if row.get("value")]
-        wanted = str(include or "published").strip().lower()
-        if wanted == "all":
-            return rows
-        keep = wanted != "unpublished"
-        return [row for row in rows if bool(row.get("published", True)) is keep]
+                if said:
+                    row["recovered_by"] = said
+            wanted = str(include or "published").strip().lower()
+            if wanted == "all":
+                return rows
+            keep = wanted != "unpublished"
+            return [row for row in rows if bool(row.get("published", True)) is keep]
 
     async def get_malware_report_signature(
         self,

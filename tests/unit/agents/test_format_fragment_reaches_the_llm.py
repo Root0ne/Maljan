@@ -62,7 +62,11 @@ class TestEveryBuiltInRoleResolvesTheJobsFormat:
     def test_a_windows_job_resolves_the_windows_artefacts(self, role: str) -> None:
         agent = _container("pe", "windows").get_agent(role)
         assert format_fragment("pe", "windows") in agent._resolved.prompt
-        assert agent._system_prompt("NEUTRAL-FALLBACK") == agent._resolved.prompt
+        # The analyst builds its prompt again for the tools it sends, through
+        # the same composition; the format fragment is in that one too.
+        sent = agent._system_prompt("NEUTRAL-FALLBACK", tools=list(agent._resolved.tools))
+        assert format_fragment("pe", "windows") in sent
+        assert sent != "NEUTRAL-FALLBACK"
 
     def test_an_android_job_resolves_the_android_artefacts(self, role: str) -> None:
         agent = _container("apk", "android").get_agent(role)

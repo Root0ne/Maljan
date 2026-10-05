@@ -275,6 +275,10 @@ class ReportDetailResponse(BaseModel):
     # produced before the report feature shipped. Frontend tabs fall back
     # to the legacy fields above when this is missing.
     malware_report: dict | None = None
+    # A report kept from a run that failed after the report was built says so
+    # here: where the run failed and the error id. ``None`` on a report of a
+    # completed run.
+    incomplete_reason: str | None = None
     agent_findings: list[AgentFindingResponse]
     # The conversation itself, ordered by ``seq``. Empty for reports written
     # before ``agent_messages`` existed (migration 20260726020000) — the
@@ -308,6 +312,15 @@ class IOCEntry(BaseModel):
     # bundle is built with. A feed another system consumes returns only these
     # by default; ``include`` widens it.
     published: bool = True
+    # The publish rule's answer as the report's IOC table prints it: ``yes:``
+    # and why the row is published, or ``no:`` and why not. Absent on a row
+    # the service did not ask the rule about.
+    publish_answer: str | None = None
+    # For a domain, address or URL a recovering tool read from text the sample
+    # hid: which tool (``floss``, emulation; ``decode_string_blobs``, a static
+    # decoding of the file's bytes), its ledger entry and where in the file,
+    # as the report's IOC table states it. Absent for every other row.
+    recovered_by: str | None = None
 
 
 class IOCListResponse(BaseModel):

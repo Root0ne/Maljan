@@ -54,6 +54,9 @@ class TestTheFragmentPerPlatform:
 
 
 class _Provider:
+    class capabilities:  # noqa: N801 - mirrors the provider attribute shape
+        provides_tools = True
+
     def prompt_fragment(self) -> str:
         return "PROVIDER-FRAGMENT"
 
@@ -76,7 +79,9 @@ class TestTheAssembledPrompt:
     def test_the_static_assembly_keeps_head_fragment_provider_order(self) -> None:
         from maljan.agents.static_analyst import _ISR_HEAD
 
-        prompt = builtin_prompt("static", _Container(("elf", "linux")), "ghidra")
+        prompt = builtin_prompt(
+            "static", _Container(("elf", "linux")), "ghidra", provider_expected=True
+        )
         assert prompt.index(_ISR_HEAD) == 0
         assert prompt.index(format_fragment("elf", "linux")) < prompt.index("PROVIDER-FRAGMENT")
 

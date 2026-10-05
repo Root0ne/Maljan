@@ -74,6 +74,8 @@ def analyze(
     try:
         maljan_app = MaljanApp(config=config, mock=mock)
         result = maljan_app.run(file_hash=file_hash, file_name=file_name, sample_path=sample_path)
+        # The run completed: the case its judge built may now teach the next.
+        maljan_app.remember_the_run()
     except Exception as e:
         logger.error(f"Pipeline execution failed: {e}")
         raise typer.Exit(code=1) from None
@@ -153,8 +155,10 @@ def _print_run_summary_inline(run_summary_dict: dict) -> None:
         from maljan.pipeline.validation import corroboration_sources
 
         multi = sum(1 for row in corroboration.values() if len(corroboration_sources(row)) > 1)
+        # Every id any producer named, claimed or asserted by a rule, and not
+        # the published count: the line says "named" for that reason.
         typer.echo(
-            f"\nCorroboration: {len(corroboration)} technique(s) | "
+            f"\nCorroboration: {len(corroboration)} technique(s) named | "
             f"{multi} named by more than one source"
         )
         # Most sources first, which is the order a reader wants and the same
@@ -260,6 +264,7 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
             file_name=run_summary_dict.get("file_name"),
             final_decision=run_summary_dict.get("final_decision", "Unknown"),
             stix_object_count=run_summary_dict.get("stix_object_count", 0),
+            judge_stix_object_count=run_summary_dict.get("judge_stix_object_count", 0),
             negotiation=negotiation,
             agent_stats=agent_stats,
             validation=validation,
@@ -309,7 +314,7 @@ def info() -> None:
     typer.echo(f"  Expert Model: {config.llm.expert_model}")
     typer.echo(f"  Judge Model: {config.llm.judge_model}")
     typer.echo(f"  Max Iterations: {config.negotiation.max_iterations}")
-    typer.echo(f"  Max Token Limit: {config.max_token_limit}")
+    typer.echo(f"  Max Token Limit: {config.max_token_limit or 'derived from the window'}")
     typer.echo(f"\nActive profile: {container.config.agents.profile}")
     typer.echo(f"Analysts: {container.analyst_keys()}")
     typer.echo(f"Registered Parsers: {parser_reg.list_parsers()}")

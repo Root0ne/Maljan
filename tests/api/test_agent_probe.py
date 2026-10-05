@@ -116,10 +116,18 @@ async def test_a_generic_agent_resolves_to_the_prompt_the_operator_typed():
         "agents.profiles": {"one": {"analysts": ["strings"]}},
         "agents.profile": "one",
     }
+    from maljan.agents.prompt_fragments import NO_TOOLS_STATEMENT
+
     result = await probe_agent({"name": "strings", "settings": staged})
     assert result.ok is True
-    assert result.details["prompt_chars"] == len("read strings")
-    assert result.details["prompt_sha256"] == hashlib.sha256(b"read strings").hexdigest()
+    # What the agent is sent: the operator's text, then the platform's
+    # sentence about its tools — here, that there are none.
+    sent = "read strings\n\n" + NO_TOOLS_STATEMENT
+    assert result.details["prompt"] == sent
+    assert result.details["prompt_chars"] == len(sent)
+    assert result.details["prompt_sha256"] == hashlib.sha256(sent.encode("utf-8")).hexdigest()
+    # What a clone copies: the operator's text alone.
+    assert result.details["authored_prompt"] == "read strings"
     assert result.tools == []
 
 
@@ -311,14 +319,14 @@ async def test_staged_values_win_over_stored_ones():
     stored = {"core.agents.definitions": {"strings": {"role": "generic", "prompt": "stored"}}}
     staged = {"core.agents.definitions": {"strings": {"role": "generic", "prompt": "staged"}}}
     result = await run_agent_probe("strings", staged, stored)
-    assert result.details["prompt_chars"] == len("staged")
+    assert result.details["authored_prompt"] == "staged"
 
 
 @pytest.mark.asyncio
 async def test_a_stored_definition_alone_is_enough():
     stored = {"core.agents.definitions": {"strings": {"role": "generic", "prompt": "stored"}}}
     result = await run_agent_probe("strings", {}, stored)
-    assert result.ok is True and result.details["prompt_chars"] == len("stored")
+    assert result.ok is True and result.details["authored_prompt"] == "stored"
 
 
 def test_the_probe_is_registered_under_its_own_name():

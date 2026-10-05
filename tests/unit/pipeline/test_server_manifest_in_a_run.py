@@ -227,6 +227,12 @@ class TestAStageRecordsWhatItCannotHave:
         assert run_is_degraded([reason, "mcp server 'analysis' unavailable"]) is True
         assert run_is_degraded(["triage.identify_file_failed"]) is True
 
+    def test_an_unavailable_tool_beside_an_informational_note_does_not_degrade(self) -> None:
+        reason = "server.analysis.archive_list_unavailable(py7zr is not installed); install"
+        note = "The x analyst's answer began 2 claim(s), and 1 were read; 1 could not be read."
+        assert run_is_degraded([reason, note], informational=[note]) is False
+        assert run_is_degraded([reason, note]) is True
+
 
 class TestAServerReasonMeetsTheSample:
     """The registry records a withheld tool before any sample is known."""

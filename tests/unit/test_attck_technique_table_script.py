@@ -214,6 +214,72 @@ class TestWhatRevokedAnId:
         }
 
 
+class TestTheBundlesOwnRevokedAndDeprecatedPatterns:
+    """An id the bundle itself carries as revoked or deprecated is retired, not invented."""
+
+    def test_each_revoked_or_deprecated_pattern_is_named_with_its_state(self) -> None:
+        script = _script()
+        objects = [
+            _technique("T1055", ["Windows"]),
+            _technique("T1024", ["Windows"], revoked=True),
+            _technique("T1103", ["Windows"], revoked=True),
+            _technique("T1001", ["Windows"], x_mitre_deprecated=True),
+        ]
+        assert script.bundle_retired_states(objects) == {
+            "T1024": "revoked",
+            "T1103": "revoked",
+            "T1001": "deprecated",
+        }
+
+    def test_the_set_records_them_with_the_replacement_the_bundle_names(self) -> None:
+        script = _script()
+        retired = script.retired_ids(
+            {"enterprise": {"T1055"}},
+            {"enterprise": ["T1055", "T1041"], "mobile": [], "ics": []},
+            "19.2",
+            None,
+            {"T1024": "T1041", "T1103": "T9999"},
+            {"enterprise": {"T1024": "revoked", "T1103": "revoked", "T1001": "deprecated"}},
+        )
+        assert retired == {
+            "T1001": {"domain": "enterprise", "status": "deprecated"},
+            "T1024": {"domain": "enterprise", "status": "revoked", "revoked_by": "T1041"},
+            # T9999 is not in this release, so the row states the revocation alone.
+            "T1103": {"domain": "enterprise", "status": "revoked"},
+        }
+
+    def test_a_release_diff_row_keeps_its_release_and_gains_the_state(self) -> None:
+        script = _script()
+        retired = script.retired_ids(
+            {"enterprise": {"T1055", "T1562.001"}},
+            {"enterprise": ["T1055", "T1685"], "mobile": [], "ics": []},
+            "19.2",
+            None,
+            {"T1562.001": "T1685"},
+            {"enterprise": {"T1562.001": "revoked"}},
+        )
+        assert retired == {
+            "T1562.001": {
+                "domain": "enterprise",
+                "retired_in": "19.2",
+                "status": "revoked",
+                "revoked_by": "T1685",
+            }
+        }
+
+    def test_an_id_live_in_another_domain_is_not_retired(self) -> None:
+        script = _script()
+        retired = script.retired_ids(
+            {},
+            {"enterprise": ["T1055"], "mobile": ["T1400"], "ics": []},
+            "19.2",
+            None,
+            None,
+            {"enterprise": {"T1400": "deprecated"}},
+        )
+        assert retired == {}
+
+
 class TestTheTwoDomainTuplesAgree:
     def test_the_script_and_the_loader_spell_the_domains_the_same(self) -> None:
         from maljan.memory import attck_loader

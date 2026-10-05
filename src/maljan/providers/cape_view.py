@@ -115,4 +115,11 @@ def to_cape_shaped_dict(report: SandboxReport) -> dict[str, Any]:
         rendered["channels"] = {name: list(rows) for name, rows in report.channels.items()}
     if report.network.pcap_local_path:
         rendered["network"]["pcap_local_path"] = report.network.pcap_local_path
+    # The run-time limit the sandbox set for the task, where its report says:
+    # a limit, so not under CAPE's ``info.duration``, which is a measured time.
+    if report.run_limit_seconds is not None:
+        rendered["run_limit"] = {
+            "seconds": int(report.run_limit_seconds),
+            "set_by": report.provider,
+        }
     return rendered

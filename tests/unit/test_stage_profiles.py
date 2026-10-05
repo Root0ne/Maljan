@@ -65,9 +65,11 @@ class TestTheConversion:
         """
         settings = Settings(_env_file=None)
         for name in ("default", "measurement"):
+            # ``llm.parallel_analysts`` is ``auto`` by default: the analysis
+            # stage sets no mode and the job decides.
             expected = stages_from_analysts(
                 ["static", "dynamic", "network"],
-                parallel=False,
+                parallel=None,
                 max_rounds=settings.negotiation.max_iterations,
                 consensus_threshold=settings.negotiation.consensus_threshold,
                 triage=name != "measurement",
@@ -570,7 +572,8 @@ class TestAMigratedTeamAndAFreshOneAgree:
     def test_a_team_the_operator_has_edited_keeps_its_edit(self) -> None:
         """The console clears the marker on the first stage edit."""
         written = [s.model_dump() for s in stages_from_analysts(["static"])]
-        written[0]["mode"] = "sequential"
+        analysis = next(i for i, s in enumerate(written) if s["kind"] == "analysis")
+        written[analysis]["mode"] = "sequential"
         edited = Settings(
             _env_file=None,
             **self._globals(),

@@ -225,6 +225,24 @@ class TestIndicators:
         (changed,) = _rows(diff, "indicators", CHANGED)
         assert [c["field"] for c in changed["changes"]] == ["published"]
 
+    def test_a_reason_added_to_the_same_decision_is_not_a_change(self, stored) -> None:
+        """A run stored before rows stated why reads ``yes``; the same decision since."""
+        edited: list[str] = []
+
+        def edit(doc: dict[str, Any]) -> None:
+            for row in doc["consolidated_iocs"]:
+                if str(row.get("published") or "").startswith("yes:"):
+                    row["published"] = "yes"
+                    edited.append(row["value"])
+
+        diff = _pair(stored, edit)
+
+        assert edited
+        assert _rows(diff, "indicators", CHANGED) == []
+        notes = [row.get("note") for row in _section(diff, "indicators")["rows"] if row.get("note")]
+        assert len(notes) == len(edited)
+        assert all("reason" in note for note in notes)
+
     def test_a_domain_is_the_same_domain_in_another_case(self, stored) -> None:
         def edit(doc: dict[str, Any]) -> None:
             for row in doc["consolidated_iocs"]:
@@ -297,7 +315,7 @@ class TestFindings:
 
         (repeated,) = _rows(diff, "persistence", ADDED)
         assert repeated["note"] == REPEATED_KEY_NOTE
-        assert _section(diff, "persistence")["counts"][UNCHANGED] == 4
+        assert _section(diff, "persistence")["counts"][UNCHANGED] == 3
 
 
 class TestDetection:

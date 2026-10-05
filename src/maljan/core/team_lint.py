@@ -117,7 +117,7 @@ def _placeholder(raw: Any, label: str) -> StageDefinition:
         agents=strings(data.get("agents")),
         depends_on=strings(data.get("depends_on")),
         when=data.get("when") if isinstance(data.get("when"), str) else "",
-        mode="parallel" if data.get("mode") == "parallel" else "sequential",
+        mode=data.get("mode") if data.get("mode") in ("parallel", "sequential") else None,
         inject_upstream="findings",
         debate=None,
         builtin_tools=True,

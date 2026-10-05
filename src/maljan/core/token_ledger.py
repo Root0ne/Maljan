@@ -9,10 +9,20 @@ made the call and the model that answered, and the judge node snapshots it into
 the ``RunSummary``.
 
 A call whose provider reported no usage is counted as a call and as **not
-reported** — never as an estimate. A figure printed as a count is a count the
+reported** — never as an estimate — and recorded by the agent that made it,
+the call it was and the model that answered, so a run summary that says "not
+reported for one call" can also say which one. A figure printed as a count is a count the
 provider gave; where it gave none, the report says so. The same rule holds for
 cost: there is no price table here, and a cost appears only where the provider
 reported one. Recording never raises — telemetry must not break analysis.
+
+Two parts of a call are recorded where the provider reports them, and only
+there: the input tokens it read from its prompt cache, and the output tokens
+its model spent reasoning. Both are parts of the input and output counts, not
+additions to them — a provider that bills cached input at its own rate, or
+counts reasoning inside the output, is read off the same figures. A call that
+did not report a part is not counted as a zero for it: each part carries the
+number of calls that reported it.
 
 Every call also says which model answered it, so the ledger is where a run's
 per-agent model count comes from, and a fallback — a turn another model
@@ -49,11 +59,63 @@ def _cost_of(response: Any) -> float | None:
     return None
 
 
-def turn_usage(response: Any) -> dict[str, Any] | None:
-    """One answer's reported usage as ``{input_tokens, output_tokens[, cost]}``, or ``None``.
+def _count(value: Any) -> int | None:
+    """``value`` as a token count, or ``None`` when it is not one."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return max(0, int(value))
 
-    ``None`` is the provider having reported nothing, which the caller says in
-    words rather than as a zero.
+
+def _raw_usage(response: Any) -> dict[str, Any]:
+    """The usage block as the provider sent it, where the client kept it."""
+    metadata = getattr(response, "response_metadata", None)
+    if not isinstance(metadata, dict):
+        return {}
+    raw = metadata.get("token_usage") or metadata.get("usage")
+    return raw if isinstance(raw, dict) else {}
+
+
+def _cached_input_of(usage: dict[str, Any], raw: dict[str, Any]) -> int | None:
+    """The input tokens the provider read from its prompt cache, or ``None`` unreported.
+
+    LangChain's ``input_token_details.cache_read`` first — every client fills
+    it from its provider's own field (OpenAI's and DeepSeek's
+    ``prompt_tokens_details.cached_tokens``, Anthropic's cache reads) — and
+    DeepSeek's ``prompt_cache_hit_tokens`` where only that was sent.
+    """
+    details = usage.get("input_token_details")
+    if isinstance(details, dict):
+        found = _count(details.get("cache_read"))
+        if found is not None:
+            return found
+    return _count(raw.get("prompt_cache_hit_tokens"))
+
+
+def _reasoning_of(usage: dict[str, Any], raw: dict[str, Any]) -> int | None:
+    """The output tokens the model spent reasoning, or ``None`` unreported.
+
+    ``output_token_details.reasoning`` first, the provider's own
+    ``completion_tokens_details.reasoning_tokens`` where the client left it.
+    """
+    details = usage.get("output_token_details")
+    if isinstance(details, dict):
+        found = _count(details.get("reasoning"))
+        if found is not None:
+            return found
+    completion = raw.get("completion_tokens_details")
+    if isinstance(completion, dict):
+        return _count(completion.get("reasoning_tokens"))
+    return None
+
+
+def turn_usage(response: Any) -> dict[str, Any] | None:
+    """One answer's reported usage, or ``None``.
+
+    ``{input_tokens, output_tokens[, cached_input_tokens][, reasoning_tokens][, cost]
+    [, sent_at]}``: the optional keys are there only when the provider reported
+    them (``sent_at`` when the client stamped the request's send time). ``None``
+    is the provider having reported nothing, which the caller says in words
+    rather than as a zero.
     """
     usage = getattr(response, "usage_metadata", None)
     if not isinstance(usage, dict) or usage.get("input_tokens") is None:
@@ -62,9 +124,23 @@ def turn_usage(response: Any) -> dict[str, Any] | None:
         "input_tokens": max(0, int(usage.get("input_tokens") or 0)),
         "output_tokens": max(0, int(usage.get("output_tokens") or 0)),
     }
+    raw = _raw_usage(response)
+    cached = _cached_input_of(usage, raw)
+    if cached is not None:
+        out["cached_input_tokens"] = min(cached, out["input_tokens"])
+    reasoning = _reasoning_of(usage, raw)
+    if reasoning is not None:
+        out["reasoning_tokens"] = min(reasoning, out["output_tokens"])
     cost = _cost_of(response)
     if cost is not None:
         out["cost"] = cost
+    # When the request was sent, where the model's client stamped it: the
+    # spend ceiling prices a call at the rate in force then. Not a usage
+    # figure, and no tally reads it.
+    metadata = getattr(response, "response_metadata", None)
+    sent = metadata.get("sent_at") if isinstance(metadata, dict) else None
+    if isinstance(sent, int | float) and not isinstance(sent, bool) and sent > 0:
+        out["sent_at"] = float(sent)
     return out
 
 
@@ -72,12 +148,16 @@ class _Tally:
     """One agent's calls: the reported figures, and the calls that reported none."""
 
     __slots__ = (
+        "cached_calls",
+        "cached_input_tokens",
         "calls",
         "cost",
         "cost_calls",
         "input_tokens",
         "models",
         "output_tokens",
+        "reasoning_calls",
+        "reasoning_tokens",
         "unreported",
     )
 
@@ -86,6 +166,10 @@ class _Tally:
         self.unreported = 0
         self.input_tokens = 0
         self.output_tokens = 0
+        self.cached_input_tokens = 0
+        self.cached_calls = 0
+        self.reasoning_tokens = 0
+        self.reasoning_calls = 0
         self.cost = 0.0
         self.cost_calls = 0
         self.models: dict[str, int] = {}
@@ -97,6 +181,21 @@ class _Tally:
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "total_tokens": self.input_tokens + self.output_tokens,
+            # The two parts, each with the calls that reported it, and absent
+            # when none did — for the reason the cost below is.
+            **(
+                {
+                    "cached_input_tokens": self.cached_input_tokens,
+                    "cached_calls": self.cached_calls,
+                }
+                if self.cached_calls
+                else {}
+            ),
+            **(
+                {"reasoning_tokens": self.reasoning_tokens, "reasoning_calls": self.reasoning_calls}
+                if self.reasoning_calls
+                else {}
+            ),
             # Absent rather than zero when no call reported a cost: zero is a
             # figure a provider can report, and "reported nothing" is not it.
             **(
@@ -111,11 +210,15 @@ class _Tally:
 class TokenLedger:
     """Thread-safe tally of what one run's model calls spent, per agent and per model."""
 
-    def __init__(self) -> None:
+    def __init__(self, spend: Any = None) -> None:
         self._lock = threading.Lock()
+        # The job's spend meter (``core.spend.SpendMeter``), handed every
+        # recorded call; ``None`` where nothing prices the run.
+        self.spend = spend
         self._total = _Tally()
         self._agents: dict[str, _Tally] = {}
         self._fallbacks: list[dict[str, str]] = []
+        self._unreported: list[dict[str, str]] = []
 
     def add(
         self,
@@ -124,9 +227,20 @@ class TokenLedger:
         agent: str = "",
         model: str = "",
         fallback: str = "",
+        call: str = "",
+        estimated: dict[str, Any] | None = None,
     ) -> None:
-        """One call: its reported usage, or ``None`` when the provider reported none."""
+        """One call: its reported usage, or ``None`` when the provider reported none.
+
+        ``call`` names what the call was — a tool-loop turn, the verdict, a
+        report section — and is recorded for a call that reported no usage.
+        ``estimated`` is a stated estimate of a call that reported none (an
+        answer ended while it streamed): it is handed to the spend meter only,
+        and the call stays one that reported no usage here.
+        """
         with self._lock:
+            if usage is None:
+                self._unreported.append({"agent": agent, "call": call, "model": model})
             tallies = [self._total]
             if agent:
                 tallies.append(self._agents.setdefault(agent, _Tally()))
@@ -139,11 +253,19 @@ class TokenLedger:
                     continue
                 tally.input_tokens += int(usage.get("input_tokens") or 0)
                 tally.output_tokens += int(usage.get("output_tokens") or 0)
+                if "cached_input_tokens" in usage:
+                    tally.cached_input_tokens += int(usage["cached_input_tokens"] or 0)
+                    tally.cached_calls += 1
+                if "reasoning_tokens" in usage:
+                    tally.reasoning_tokens += int(usage["reasoning_tokens"] or 0)
+                    tally.reasoning_calls += 1
                 if "cost" in usage:
                     tally.cost += float(usage["cost"])
                     tally.cost_calls += 1
             if fallback:
                 self._fallbacks.append({"agent": agent, "model": model, "reason": fallback})
+        if self.spend is not None:
+            self.spend.settle(usage, model, call, estimated=estimated)
 
     @property
     def input_tokens(self) -> int:
@@ -168,6 +290,10 @@ class TokenLedger:
             out.pop("models", None)
             out["agents"] = {name: tally.as_dict() for name, tally in sorted(self._agents.items())}
             out["fallbacks"] = [dict(row) for row in self._fallbacks]
+            # Which calls reported no usage, one row each, present only when
+            # one did: ``unreported_calls`` is their count.
+            if self._unreported:
+                out["unreported"] = [dict(row) for row in self._unreported]
             return out
 
 
@@ -177,25 +303,44 @@ def record_response_usage(
     *,
     agent: str = "",
     model: str = "",
+    call: str = "",
 ) -> None:
     """Add one model answer to ``ledger`` (no-op if ledger is None). Never raises.
 
     ``model`` is the label of the model the caller asked; an answer that says
     which model gave it — a fallback list stamps every answer — wins over it.
+    ``call`` names what the call was, for a call that reported no usage.
     """
     if ledger is None:
         return
     try:
         from maljan.llm.fallback import turn_model
+        from maljan.llm.stream_watch import estimated_usage
 
         answered_by, fallback = turn_model(response, model)
-        ledger.add(turn_usage(response), agent=agent, model=answered_by, fallback=fallback)
+        usage = turn_usage(response)
+        ledger.add(
+            usage,
+            agent=agent,
+            model=answered_by,
+            fallback=fallback,
+            call=call,
+            # An answer ended while it streamed reported nothing, and carries a
+            # stated estimate for the spend ceiling; the reported figures stay
+            # absent.
+            estimated=None if usage is not None else estimated_usage(response),
+        )
     except Exception:  # noqa: BLE001 — telemetry must never break analysis
         return
 
 
 def structured_answer(
-    answer: Any, ledger: TokenLedger | None, *, agent: str = "", model: str = ""
+    answer: Any,
+    ledger: TokenLedger | None,
+    *,
+    agent: str = "",
+    model: str = "",
+    call: str = "",
 ) -> Any:
     """The parsed value of a ``with_structured_output(..., include_raw=True)`` answer.
 
@@ -208,7 +353,7 @@ def structured_answer(
     """
     if not (isinstance(answer, dict) and "raw" in answer and "parsed" in answer):
         return answer
-    record_response_usage(ledger, answer.get("raw"), agent=agent, model=model)
+    record_response_usage(ledger, answer.get("raw"), agent=agent, model=model, call=call)
     error = answer.get("parsing_error")
     if answer.get("parsed") is None and error is not None:
         raise error if isinstance(error, BaseException) else ValueError(str(error))

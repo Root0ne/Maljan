@@ -61,6 +61,8 @@ READS_A_FILE = frozenset(
         "yara_scan",
         "capa",
         "floss",
+        "resolve_api_hashes",
+        "decode_string_blobs",
     }
 )
 CARVED = "carved_path"
@@ -79,7 +81,7 @@ def _advertised_tools(source: Path) -> list[tuple[str, list[str], str]]:
     note = _appended_note(source)
     found: list[tuple[str, list[str], str]] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
         decorators = [ast.unparse(decorator) for decorator in node.decorator_list]
         if not any("mcp.tool" in decorator for decorator in decorators):

@@ -68,6 +68,12 @@ _PUBLIC_RESOLVERS = frozenset(
     }
 )
 
+
+def is_public_resolver(address: Any) -> bool:
+    """Whether ``address`` is one of the public DNS resolvers this list names."""
+    return str(address or "").strip().strip("[]") in _PUBLIC_RESOLVERS
+
+
 # Second-level labels a country code registers names under: ``example.co.uk``
 # is the registered name, not ``co.uk``.
 _SECOND_LEVEL_LABELS = frozenset({"co", "com", "net", "org", "ac", "gov", "edu", "or", "ne"})

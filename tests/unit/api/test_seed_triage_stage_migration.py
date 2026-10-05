@@ -99,7 +99,9 @@ def test_the_revision_follows_the_qdrant_one():
 def test_the_stage_it_inserts_is_the_one_the_settings_model_seeds():
     from maljan.core.config import triage_stage
 
-    assert _load().triage_stage() == triage_stage().model_dump()
+    # A triage stage runs no agents side by side, so its mode means nothing:
+    # the revision wrote ``sequential`` there, and the model now leaves it unset.
+    assert {**_load().triage_stage(), "mode": None} == triage_stage().model_dump()
 
 
 def test_the_pack_goes_in_front_of_every_team_that_lacks_it_and_nowhere_else():

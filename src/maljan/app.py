@@ -28,6 +28,29 @@ from maljan.pipeline.state import AnalysisState
 from maljan.providers.cape_view import to_cape_shaped_dict
 
 
+def _remember_the_secrets_of(config: Settings) -> None:
+    """Register the secret values ``config`` holds with the scrub, under the ``app`` scope.
+
+    Replaced each time an app is built, so a secret no longer configured is not
+    masked by the next one. Never raises: the shape rules still run without it.
+    """
+    try:
+        from maljan.core.settings_catalog import configured_secret_values
+        from maljan.pipeline.events import remember_secret_values
+
+        remember_secret_values(configured_secret_values(config), scope="app")
+    except Exception as exc:  # noqa: BLE001 — never worth an app
+        try:
+            from maljan.pipeline.events import secret_registration_failed
+
+            secret_registration_failed("app")
+        except Exception:  # noqa: BLE001 — the shape rules still run
+            pass
+        logger.warning(
+            "The configured values were not handed to the scrub (%s).", type(exc).__name__
+        )
+
+
 class MaljanApp:
     """High-level application facade.
 
@@ -45,16 +68,35 @@ class MaljanApp:
         samples_dir: str = "data/samples",
         event_sink: EventSink | None = None,
         job_id: str = "",
+        analyst_mode: Any = None,
+        remember_secrets: bool = True,
     ) -> None:
         self.config = config or Settings()
+        # The secrets these settings hold are masked by value wherever the
+        # scrub runs in this process: on the command line this is the one
+        # place that knows them. The worker registers a job's settings itself
+        # (``remember_configured_secrets``) and builds its app without this.
+        if remember_secrets:
+            _remember_the_secrets_of(self.config)
         self.container = ServiceContainer(
             config=self.config,
             mock=mock,
             samples_dir=samples_dir,
             event_sink=event_sink,
             job_id=job_id,
+            # Resolved by the caller off its event loop where it has one
+            # (``pipeline.analyst_mode.resolve_for``): resolving it names
+            # hosts and asks a server for its slot count.
+            resolved_mode=analyst_mode,
         )
         self.graph = build_graph(self.container)
+        # What the report node built, with the state it built it from, as soon
+        # as the node returned: kept so that a run which fails after the report
+        # was built still has it (``_stream_the_graph``). ``None`` until then.
+        self.built_report: dict[str, Any] | None = None
+        # Where the graph failed, when it did: ``node <name>``, or the step
+        # whose writes could not be applied. ``None`` on a run that returned.
+        self.failed_step: str | None = None
 
     async def aclose(self) -> None:
         """Release the container's agents, toolkits and per-job caches.
@@ -72,6 +114,14 @@ class MaljanApp:
             await self.container.aclose()
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
             logger.warning("MaljanApp.aclose failed (non-fatal): %s", exc)
+
+    def remember_the_run(self) -> bool:
+        """Store this run's long-term-memory case, once its job has completed.
+
+        The judge builds the case and holds it; a caller that has recorded the
+        job as completed calls this. Never raises.
+        """
+        return self.container.remember_the_run()
 
     async def __aenter__(self) -> MaljanApp:
         return self
@@ -446,10 +496,76 @@ class MaljanApp:
             "validation_findings": {},
             "validation_retries": 0,
             "validation_fed_back": {},
+            "revision_replacements": [],
             "validation_not_run": [],
             "triage_facts": {},
             "nudge_retry_modes": {},
             "budget_records": {},
         }
 
-        return cast("dict[str, Any]", await self.graph.ainvoke(initial_state))
+        return await self._stream_the_graph(initial_state)
+
+    async def _stream_the_graph(self, initial_state: AnalysisState) -> dict[str, Any]:
+        """Run the graph, watching each node's output as it lands.
+
+        The final state is the one ``ainvoke`` returns: ``ainvoke`` is this
+        same stream in the same two modes with the same output keys, keeping
+        the last ``values`` chunk. What streaming adds is the ``updates``
+        chunks, one per node as it returns. When the report node returns a
+        report it is kept on ``built_report``, merged into the state it was
+        built from through the graph's own reducers, so a later step that
+        raises — including LangGraph refusing the writes of the report's own
+        step — no longer takes a finished report down with it. The graph has
+        no checkpointer, and an ``ainvoke`` that raises returns nothing.
+        """
+        from langgraph.channels.binop import BinaryOperatorAggregate
+
+        from maljan.pipeline.builder import FAILED_NODE_ATTR
+        from maljan.pipeline.topology import REPORT_NODE
+
+        self.built_report = None
+        self.failed_step = None
+        latest: dict[str, Any] = {}
+        # The nodes whose output arrived since the last complete step.
+        step: list[str] = []
+        try:
+            async for mode, payload in self.graph.astream(
+                initial_state,
+                stream_mode=["updates", "values"],
+                output_keys=self.graph.output_channels,
+            ):
+                if mode == "values":
+                    latest = cast("dict[str, Any]", payload)
+                    step = []
+                    continue
+                updates = payload if isinstance(payload, dict) else {}
+                for node, update in updates.items():
+                    step.append(str(node))
+                    if node != REPORT_NODE or not isinstance(update, dict):
+                        continue
+                    if not update.get("malware_report"):
+                        continue
+                    # The state the report was built from is the last complete
+                    # step, and only the report's own update is merged into it.
+                    # With every stage joined on all its upstream stages
+                    # (``pipeline.builder``), the report runs after the verdict
+                    # stage and nothing a team declares runs beside it; a node
+                    # of the same step would not be what the report read.
+                    built = dict(latest)
+                    for key, value in update.items():
+                        channel = self.graph.channels.get(key)
+                        if isinstance(channel, BinaryOperatorAggregate) and key in built:
+                            built[key] = channel.operator(built[key], value)
+                        else:
+                            built[key] = value
+                    self.built_report = built
+        except Exception as exc:
+            node = getattr(exc, FAILED_NODE_ATTR, None)
+            if node:
+                self.failed_step = f"node {node}"
+            elif step:
+                self.failed_step = f"the graph step of nodes {', '.join(step)}"
+            else:
+                self.failed_step = "the graph"
+            raise
+        return latest
