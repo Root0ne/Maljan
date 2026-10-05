@@ -65,6 +65,7 @@ from maljan.pipeline.validation import (
     schema_violations,
     section_capability_violations,
     section_cut_violation,
+    stated_value_violations,
     technique_name_violations,
     wrong_entry_citations,
 )
@@ -805,7 +806,10 @@ class ReportComposer:
             isr_reports,
             _ConfigOut,
             _INSTRUCTIONS["configuration"],
-            validators=[lambda p: configuration_citation_violations(p, known_ids)],
+            validators=[
+                lambda p: configuration_citation_violations(p, known_ids),
+                lambda p: stated_value_violations(p, self._entries),
+            ],
         )
         if config and isinstance(config, _ConfigOut) and config.items:
             ta.configuration = list(config.items)
@@ -817,7 +821,10 @@ class ReportComposer:
             isr_reports,
             _HostIdentifiersOut,
             _INSTRUCTIONS["host_identifiers"],
-            validators=[lambda p: identifier_citation_violations(p, known_ids)],
+            validators=[
+                lambda p: identifier_citation_violations(p, known_ids),
+                lambda p: stated_value_violations(p, self._entries),
+            ],
         )
         if identifiers and isinstance(identifiers, _HostIdentifiersOut) and identifiers.identifiers:
             # All of them: the section holds what the model writes.

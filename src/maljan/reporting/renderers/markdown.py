@@ -673,14 +673,10 @@ class MarkdownRenderer:
                 how = item.how_obtained + (
                     " (unresolved: report.configuration_uncited)" if unresolved else ""
                 )
-                body.append(
-                    _row(
-                        ctx.cell(item.key),
-                        ctx.cell(item.value),
-                        how,
-                        ", ".join(item.evidence_refs) or "no evidence cited",
-                    )
-                )
+                cited = ", ".join(item.evidence_refs) or "no evidence cited"
+                if index + 1 in ctx.config_unheld:
+                    cited += " (unresolved: report.value_not_in_cited_entry)"
+                body.append(_row(ctx.cell(item.key), ctx.cell(item.value), how, cited))
             blocks.append("\n".join(body))
         else:
             blocks.append(
@@ -2070,6 +2066,14 @@ class _Context:
                 self.unresolved, "report.configuration_uncited", r"configuration item (\d+)"
             )
         }
+        # The rows whose whole value is in none of the entries they cite, kept
+        # after the question: marked beside their evidence.
+        self.config_unheld = _rows_named_in(
+            self.unresolved, "report.value_not_in_cited_entry", "configuration item"
+        )
+        self.identifier_unheld = _rows_named_in(
+            self.unresolved, "report.value_not_in_cited_entry", "identifier"
+        )
         net = report.network
         # What the run knows about a sandbox, in four answers: it recorded
         # something; its tools were called and returned nothing; none was
@@ -2326,6 +2330,23 @@ def _named_in(rows: list[dict[str, Any]], code: str, pattern: str) -> set[str]:
         match = re.search(pattern, str(row.get("message") or ""))
         if match:
             found.add(match.group(1))
+    return found
+
+
+def _rows_named_in(rows: list[dict[str, Any]], code: str, noun: str) -> set[int]:
+    """The row numbers the unresolved rows of one code name at their start.
+
+    ``identifier 3 (…)`` names one row; ``identifiers 3, 4, 9 are …`` names
+    several.
+    """
+    pattern = re.compile(rf"^{re.escape(noun)}s? (\d+(?:, \d+)*)\b")
+    found: set[int] = set()
+    for row in rows:
+        if row.get("code") != code:
+            continue
+        match = pattern.search(str(row.get("message") or ""))
+        if match:
+            found.update(int(number) for number in match.group(1).split(", "))
     return found
 
 
@@ -3035,6 +3056,8 @@ def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
         cited = ", ".join(item.evidence_refs) or "no evidence cited"
         if index + 1 in ctx.identifier_findings:
             cited += " (unresolved: report.identifier_uncited)"
+        if index + 1 in ctx.identifier_unheld:
+            cited += " (unresolved: report.value_not_in_cited_entry)"
         lines.append(
             _row(
                 ctx.cell(item.kind),

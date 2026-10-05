@@ -3583,12 +3583,22 @@ CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
 UNPUBLISHED_RECOMMENDATION_CODE = "narrative.unpublished_indicator"
 ENTRY_CONTENTS_MISSTATED_CODE = "report.entry_contents_misstated"
 UNCITED_IDENTIFIER_CODE = "report.identifier_uncited"
+# A table row whose whole value is in none of the entries it cites
+# (``stated_value_violations``). Asked once; a row kept after it is marked
+# beside its evidence.
+STATED_VALUE_UNHELD_CODE = "report.value_not_in_cited_entry"
+# Technical prose naming a network value this run does not publish without
+# that value's publish state (``unpublished_value_violations``). Asked once; a
+# sentence kept after it is marked where it stands with the state.
+UNPUBLISHED_VALUE_CODE = "report.unpublished_value"
 TECHNIQUE_NAME_CODE = "report.technique_name"
 
 # The codes a report round's answer is kept with. A broken shape leaves nothing
 # to print; each of these leaves a printable answer with a finding beside it.
 # The findings whose sentences survive marked where they stand in the report.
-MARKED_IN_PLACE: frozenset[str] = frozenset({UNGROUNDED_CAPABILITY_CODE, RULE_MATCH_AS_ACTION_CODE})
+MARKED_IN_PLACE: frozenset[str] = frozenset(
+    {UNGROUNDED_CAPABILITY_CODE, RULE_MATCH_AS_ACTION_CODE, UNPUBLISHED_VALUE_CODE}
+)
 
 KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
     {
@@ -3600,6 +3610,8 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         CITATION_WRONG_ENTRY_CODE,
         ENTRY_CONTENTS_MISSTATED_CODE,
         UNCITED_IDENTIFIER_CODE,
+        STATED_VALUE_UNHELD_CODE,
+        UNPUBLISHED_VALUE_CODE,
         TECHNIQUE_NAME_CODE,
         RULE_MATCH_AS_ACTION_CODE,
         REPEATED_ITEMS_CODE,
@@ -4441,6 +4453,105 @@ def wrong_entry_citations(
             Violation(code=CITATION_WRONG_ENTRY_CODE, message=message, path="citation")
         )
     return violations
+
+
+# The tables whose rows state one value each, by the list a section answers
+# with, and what a question calls one of their rows and several.
+_STATED_VALUE_ROWS = {
+    "items": ("configuration item", "configuration items"),
+    "identifiers": ("identifier", "identifiers"),
+}
+# A number written alone or with the unit it counts: ``1000``, ``0x3e8``,
+# ``1,000 ms``, ``12 retries``.
+_NUMBER_WITH_UNIT_RE = re.compile(
+    r"(0x[0-9a-f]+|\d{1,3}(?:,\d{3})+|\d+)(?:\s*[a-z]+(?:\s+[a-z]+)?)?", re.IGNORECASE
+)
+
+
+def _stated_spellings(value: str) -> list[str]:
+    """The spellings an entry may hold a stated value in: as written, and a number's two.
+
+    A number is held when the entry writes it in decimal or in hex, the way
+    a decompiler or a configuration dump does; a number written with its unit
+    is held by the number.
+    """
+    spellings = [value]
+    number = _NUMBER_WITH_UNIT_RE.fullmatch(value.strip())
+    if number:
+        written = number.group(1).replace(",", "")
+        amount = int(written, 16) if written.lower().startswith("0x") else int(written)
+        spellings.extend(form for form in (str(amount), hex(amount)) if form not in spellings)
+    return spellings
+
+
+def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Violation]:
+    """Table rows whose whole value is in none of the entries the row cites.
+
+    A configuration item or a host identifier states one value and cites the
+    entries it was read in. The whole value is looked for in each cited entry
+    under the citation check's own normalisation (:meth:`EntryTexts.holds`),
+    a number also in decimal and hex (:func:`_stated_spellings`). Held by one,
+    the row stands. Held by none, the row is asked about once, together with
+    the other rows of its table that cite the same entries; each row is named
+    by its number, which is how the report marks a row kept after it.
+
+    Not asked here: a row citing no entry the run holds text for (the uncited
+    questions ask it), a row with a cited entry known to be partial (the value
+    may be in the part that is not here), a configuration value marked
+    inferred (its own column says it was not read), and a value another entry
+    of the run holds, which :func:`wrong_entry_citations` asks with that entry
+    offered. A number held only by an entry the row does not cite is a
+    coincidence, not a source, so none is offered for it.
+    """
+    if payload is None or entries is None or not entries.texts:
+        return []
+    out: list[Violation] = []
+    for list_key, (noun, nouns) in _STATED_VALUE_ROWS.items():
+        unheld: dict[tuple[str, ...], list[tuple[int, str, str]]] = {}
+        for index, row in enumerate(_rows_of(payload, list_key)):
+            value = str(row.get("value") or "").strip()
+            if not value or str(row.get("how_obtained") or "").strip().lower() == "inferred":
+                continue
+            cited = [ref for ref in _ids_in(row.get("evidence_refs")) if ref in entries.texts]
+            if not cited or any(ref in entries.partial for ref in cited):
+                continue
+            if any(entries.holds(ref, form) for ref in cited for form in _stated_spellings(value)):
+                continue
+            if entries.holding(value):
+                continue
+            label = str(row.get("key") or row.get("kind") or "").strip()
+            unheld.setdefault(tuple(cited), []).append((index + 1, label, value))
+        for refs, rows in unheld.items():
+            named = safe_finding_value(", ".join(entries.named(ref) for ref in refs))
+            if len(rows) == 1:
+                ((number, label, value),) = rows
+                said = (
+                    f"{noun} {number} ({safe_finding_value(label)}: "
+                    f"{safe_finding_value(value)!r}) is in none of the entries it cites: {named}."
+                )
+            else:
+                values = "; ".join(
+                    f"{number}: {safe_finding_value(value)!r}"
+                    for number, _label, value in rows[:_MAX_NAMED_IDS]
+                )
+                more = len(rows) - _MAX_NAMED_IDS
+                said = (
+                    f"{nouns} {', '.join(str(number) for number, _l, _v in rows)} are each in "
+                    f"none of the entries they cite: {named}. Their values: {values}"
+                    f"{f' and {more} more' if more > 0 else ''}."
+                )
+            out.append(
+                Violation(
+                    code=STATED_VALUE_UNHELD_CODE,
+                    message=(
+                        f"{said} A value in this table is one an entry records as written. "
+                        "Cite the entry that holds the whole value, write the value as that "
+                        "entry records it, or leave the row out."
+                    ),
+                    path=f"{list_key}.value:{','.join(refs)}",
+                )
+            )
+    return out
 
 
 # A statement that an entry holds nothing, or one line and no more. Asked of
