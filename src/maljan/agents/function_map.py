@@ -46,6 +46,7 @@ __all__ = [
     "FunctionMap",
     "MapEntry",
     "build_function_map",
+    "keeps_for_the_map",
     "function_artefacts",
     "function_map_block",
 ]
@@ -257,6 +258,21 @@ def _floss_artefacts(found: FunctionArtefacts, data: Mapping[str, Any], entry_id
         found.add(address, Artefact("decoded", str(row["string"]), entry_id), virtual=virtual)
 
 
+def keeps_for_the_map(entry: Any) -> bool:
+    """Whether the map or the ledger answers read this entry: a call that decompiles,
+    disassembles, lists or searches, or one of the analysis server's tools that tie
+    artefacts to functions."""
+    tool = str(getattr(entry, "tool", "") or "").lower()
+    words = [w for w in re.split(r"[^a-z0-9]+", tool) if w]
+    return (
+        "decompil" in tool
+        or _lists_code(tool)
+        or "list" in words
+        or "search" in words
+        or tool in (_HASH_TOOL, _BLOB_TOOL, _FLOSS_TOOL)
+    )
+
+
 # A tool whose name says it disassembles, and one of those whose name says the
 # whole function is what it lists.
 def _lists_code(tool: str) -> bool:
@@ -285,6 +301,26 @@ def _listed_at(entry: Any) -> tuple[int | None, list[str]]:
     return address, names
 
 
+def _merged(pack: FunctionArtefacts | None, own: FunctionArtefacts) -> FunctionArtefacts:
+    """The pack's artefacts and the ones the analyst's own analysis-server calls tied, together.
+
+    An artefact two entries tie to one function stays one per entry: the two
+    entries are two citations of it.
+    """
+    if pack is None:
+        return own
+    if not own.by_function:
+        return pack
+    merged = FunctionArtefacts(
+        by_function={k: list(v) for k, v in pack.by_function.items()},
+        image_bases=tuple(dict.fromkeys([*pack.image_bases, *own.image_bases])),
+        virtual=set(pack.virtual) | set(own.virtual),
+    )
+    for key, tied in own.by_function.items():
+        merged.by_function.setdefault(key, []).extend(tied)
+    return merged
+
+
 def _same(a: int | None, b: int | None, bases: Sequence[int]) -> bool:
     return a is not None and b is not None and _one_function(a, b, bases)
 
@@ -310,7 +346,7 @@ def build_function_map(
     function (``_one_function``: equal, or apart by a stated image base).
     """
     entries = [e for e in own if getattr(e, "ok", True)]
-    found = artefacts or FunctionArtefacts()
+    found = _merged(artefacts, function_artefacts(entries))
     bases = tuple(dict.fromkeys([*image_bases, *found.image_bases, *image_bases_in(entries)]))
     visited: list[MapEntry] = [
         MapEntry(address=f.address, names=f.names, decompiled=f.entries)

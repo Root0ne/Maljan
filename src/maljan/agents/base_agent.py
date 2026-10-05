@@ -3188,6 +3188,10 @@ class BudgetMeter:
         # Why the cap ended it, in the words the stage event carries.
         if cap and detail:
             record["detail"] = detail
+        # The calls the ledger answered instead of running them, by kind.
+        answered = dict(getattr(getattr(self, "_loop_ledger_answers", None), "counts", None) or {})
+        if answered:
+            record["ledger_answers"] = answered
         self._note_budget(record)
         if cap:
             emit_stage_ended_at_cap(
@@ -3269,6 +3273,20 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The calls the earlier chunks of a chunked analysis made, set while a
         # later chunk's loop runs: its repeat guard is seeded with them.
         self._prior_chunk_calls: list[LedgerEntry] = []
+        # The function map's sources for the job named by ``_function_map_job``:
+        # copies of this agent's function-level and listing entries, taken
+        # before the byte budget trims them, and the claims its answers carried.
+        # Kept across loops and drains, because the map and the ledger answers
+        # read every loop of the job; dropped when the job changes.
+        self._function_map_job = ""
+        self._function_map_rows: list[LedgerEntry] = []
+        self._function_map_claims: list[ClaimEvidence] = []
+        # This loop's own entries while it runs, and its reader of the answers
+        # the ledger already holds; ``None`` outside a loop.
+        self._live_map_entries: list[LedgerEntry] | None = None
+        self._loop_ledger_answers: Any = None
+        # What the analysis server tied to each function, briefed by the node.
+        self.pack_function_artefacts: Any = None
         # Bytes of tool output this agent has already kept. The budget is the
         # agent's, not the loop's: a chunked analysis re-enters the loop once
         # per chunk and would otherwise be handed the whole budget again on
@@ -3773,7 +3791,64 @@ class BaseAnalyst(BudgetMeter, ABC):
         line = budget_line(steps_left, seconds_left)
         if line:
             body = f"{body}\n{line}"
-        return f"{body}\n{NO_ROOM_RUN_STATE}" if self._says_no_room() else body
+        if self._says_no_room():
+            body = f"{body}\n{NO_ROOM_RUN_STATE}"
+        found = self._function_map_text()
+        return f"{body}\n{found}" if found else body
+
+    def _function_map_sources(self) -> tuple[list[LedgerEntry], list[ClaimEvidence]]:
+        """This job's kept entries and claims, emptied first when the job has changed."""
+        job = self._job_key()
+        if getattr(self, "_function_map_job", "") != job:
+            self._function_map_job = job
+            self._function_map_rows = []
+            self._function_map_claims = []
+        return self._function_map_rows, self._function_map_claims
+
+    def _function_map_entries(self) -> list[LedgerEntry]:
+        """The entries the map and the ledger answers read: earlier loops', then this loop's."""
+        rows, _claims = self._function_map_sources()
+        live = getattr(self, "_live_map_entries", None) or []
+        return [*rows, *live]
+
+    def _function_map_text(self) -> str:
+        """The function map block for this agent as of now, or ``""``; never raises."""
+        from maljan.agents.function_map import build_function_map, function_map_block
+
+        try:
+            _rows, claims = self._function_map_sources()
+            return function_map_block(
+                build_function_map(
+                    self._function_map_entries(),
+                    getattr(self, "pack_function_artefacts", None),
+                    list(claims),
+                    tuple(getattr(self, "pack_image_bases", None) or ()),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — the map never costs a turn
+            self.logger.debug("%s: function map left out (%s).", self.name, exc)
+            return ""
+
+    def _keep_for_function_map(self, entries: Sequence[LedgerEntry]) -> None:
+        """Copies of the entries the map and the ledger answers read, before any trim."""
+        from maljan.agents.function_map import keeps_for_the_map
+
+        rows, _claims = self._function_map_sources()
+        for entry in entries:
+            if keeps_for_the_map(entry):
+                try:
+                    rows.append(entry.model_copy(deep=True))
+                except Exception:  # noqa: BLE001 — a copy never costs the ledger
+                    continue
+
+    def _keep_claims_for_function_map(self, isr: AgentISR) -> AgentISR:
+        """``isr``, with its claims kept for the map's one-line summaries."""
+        try:
+            _rows, claims = self._function_map_sources()
+            claims.extend(getattr(isr, "claims", None) or [])
+        except Exception:  # noqa: BLE001 — the map never costs an answer
+            pass
+        return isr
 
     def _says_no_room(self) -> bool:
         """Whether this loop's run-state block carries the no-room line.
@@ -3984,6 +4059,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # "need more steps" stop message instead of real claims. Both are
         # capped by a caller's ceiling when this loop answers an ask.
         timeout, max_steps = self._loop_limits()
+        # A record written before this loop's tools are wrapped carries no
+        # count of a reader this loop never had.
+        self._loop_ledger_answers = None
 
         # A model list that moved on in an earlier loop starts this one at its
         # first model again — the switch is sticky for a loop, not for the job
@@ -4069,6 +4147,20 @@ class BaseAnalyst(BudgetMeter, ABC):
         # an identical one is answered with the entry that holds it, as the
         # chunk's prompt lists them (``earlier_chunks_block``).
         repeats = seeded_repeat_guard(getattr(self, "_prior_chunk_calls", None))
+        # The answers the ledger already holds: a listing asked again for a
+        # scope it answered whole, a function decompiled again with nothing
+        # new. Read over this job's earlier loops and this loop's own calls.
+        from maljan.agents.ledger_answers import LedgerAnswers, decoding_tools
+
+        self._live_map_entries = recorder.entries
+        ledger_answers = LedgerAnswers(
+            self._function_map_entries,
+            decoders=decoding_tools(
+                str(getattr(tool, "name", "") or "") for tool in self.pinned_tools()
+            ),
+            image_bases=tuple(getattr(self, "pack_image_bases", None) or ()),
+        )
+        self._loop_ledger_answers = ledger_answers
         # The arguments this loop had to close off, so the ledger entry for
         # such a call says so and keeps what the model actually wrote.
         repairs = ArgumentRepairs()
@@ -4123,6 +4215,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             repairs,
             self._context_budget(),
             on_question=self._count_question,
+            ledger=ledger_answers,
         )
         # Sent with every request of this loop, so counted with its conversation.
         self._tool_definition_chars = tool_definition_chars(recorded)
@@ -5336,6 +5429,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         try:
             entries = list(recorder.entries)
+            # Kept for the map whole, before the byte budget blanks an answer.
+            self._keep_for_function_map(entries)
+            self._live_map_entries = None
             budget = int(getattr(get_settings().reporting, "evidence_budget_bytes", 0) or 0)
             trimmed, self._evidence_bytes_spent = apply_budget(
                 entries, budget, already_spent=self._evidence_bytes_spent
@@ -7235,7 +7331,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             blocks_without_confidence=read.without_confidence,
             confidence_unreadable=read.confidence_unreadable,
         )
-        return self._with_claims_read(isr)
+        return self._keep_claims_for_function_map(self._with_claims_read(isr))
 
     def _text_to_isr(self, text: str, revision_round: int) -> AgentISR:
         """Convert a free-text report into a minimal AgentISR.
@@ -7251,7 +7347,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             written = str(last[1])
         # Read once: the next answer's block is its own.
         self._last_written_answer = None
-        isr = self._parse_answer_text(text, revision_round)
+        isr = self._keep_claims_for_function_map(self._parse_answer_text(text, revision_round))
         # Tool-call markup a model wrote into its answer is not part of it —
         # the parser reads none of it — and replayed into a tool-free turn it
         # would be shown back as something to write again.
