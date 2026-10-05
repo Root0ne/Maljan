@@ -496,6 +496,13 @@ class MarkdownRenderer:
                 )
             elif reason == "consensus":
                 said = f"the analysts reached consensus after {rounds} round(s)"
+                # Agreement over lines the mediator set aside says so.
+                set_aside = int(negotiation.get("not_blocking_at_end") or 0)
+                if set_aside:
+                    said += (
+                        f"; {set_aside} listed line{'s were' if set_aside != 1 else ' was'} "
+                        "marked not blocking by the mediator"
+                    )
             else:
                 said = f"the negotiation ended after {rounds} round(s)" + (
                     f" ({reason})" if reason and reason != "unknown" else ""
@@ -1881,12 +1888,26 @@ class MarkdownRenderer:
                 lines.append(_item(str(sentence)))
             for sentence in negotiation.get("mediation_notes") or []:
                 lines.append(_item(str(sentence)))
-            # What the platform recorded of the debate: values a revision
-            # states nowhere, the lines the mediator marked not blocking and the
-            # ledger counts put to it. Each sentence is written defanged.
-            for key in ("dropped_claims", "not_blocking", "ledger_facts"):
-                for sentence in negotiation.get(key) or []:
-                    lines.append(_item(str(sentence)))
+            # What the platform recorded of the debate: how many values each
+            # revision states nowhere (the claims themselves are in the run
+            # summary), the lines the mediator marked not blocking, the marks
+            # it wrote that were not read, and the ledger counts. Each
+            # sentence is written defanged.
+            for row in negotiation.get("dropped_value_counts") or []:
+                if isinstance(row, dict):
+                    lines.append(
+                        _item(
+                            f"{row.get('agent')}, round {row.get('round')}: "
+                            f"{row.get('values')} values from {row.get('claims')} earlier "
+                            "claims are no longer stated"
+                        )
+                    )
+            for sentence in negotiation.get("not_blocking") or []:
+                lines.append(_item(f"Marked not blocking by the mediator: {sentence}"))
+            for sentence in negotiation.get("unread_marks") or []:
+                lines.append(_item(f"A mark that was not read; the line blocked: {sentence}"))
+            for sentence in negotiation.get("ledger_facts") or []:
+                lines.append(_item(str(sentence)))
         for line in generation_lines(run_summary.get("generation")):
             lines.append(_item(line))
         ungrounded = run_summary.get("sections_without_evidence")

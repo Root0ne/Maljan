@@ -244,6 +244,42 @@ class TestTheRunSummarySaysWhatEndedIt:
         assert as_dict["dropped_claims"] == ["beta states nowhere 0x10."]
         assert as_dict["not_blocking"] and as_dict["ledger_facts"]
 
+    def test_dropped_values_are_counted_per_analyst_and_round(self) -> None:
+        rows = [
+            {"agent": "beta", "round": 2, "missing": ["0x10", "0x20"], "sentence": "s1"},
+            {"agent": "beta", "round": 2, "missing": ["0x30"], "sentence": "s2"},
+            {"agent": "gamma", "round": 3, "missing": ["T1059"], "sentence": "s3"},
+        ]
+        as_dict = (
+            RunSummaryBuilder(start_time=0.0)
+            .set_negotiation(_state(dropped_claims=rows), max_iterations=5)
+            .build()
+            .to_dict()["negotiation"]
+        )
+
+        assert as_dict["dropped_value_counts"] == [
+            {"agent": "beta", "round": 2, "values": 3, "claims": 2},
+            {"agent": "gamma", "round": 3, "values": 1, "claims": 1},
+        ]
+
+    def test_unread_marks_and_the_last_round_s_not_blocking_count_are_recorded(self) -> None:
+        earlier = _mediator([])
+        earlier.not_blocking.extend(["x [not blocking: r]", "y [not blocking: r]"])
+        last = _mediator([])
+        last.not_blocking.append("z [not blocking: r]")
+        last.unread_marks.append("w [not blocking]")
+        as_dict = (
+            RunSummaryBuilder(start_time=0.0)
+            .set_negotiation(
+                _state(is_consensus=True, discussion_history=[earlier, last]), max_iterations=5
+            )
+            .build()
+            .to_dict()["negotiation"]
+        )
+
+        assert as_dict["unread_marks"] == ["w [not blocking]"]
+        assert as_dict["not_blocking_at_end"] == 1
+
 
 # ---------------------------------------------------------------------------
 # The mediation reads the mediator's marks, and puts the ledger's counts to it
@@ -335,6 +371,21 @@ class TestTheMediatorDecides:
 
         assert is_consensus is False
         assert argument.contradictions == [lines[1]]
+
+    def test_a_mark_that_was_not_read_blocks_and_is_kept_on_the_argument(self) -> None:
+        line = f"{COUNT_LINE} [blocking: r] [not blocking: r2]"
+        argument, is_consensus = _mediate(_Model(_block(line)))
+
+        assert is_consensus is False
+        assert argument.contradictions == [line]
+        assert argument.unread_marks == [line]
+
+    def test_a_reason_citing_ledger_ids_in_brackets_is_honoured(self) -> None:
+        line = f"{COUNT_LINE} [not blocking: the entries state both, see [ev_0007] and [ev_0008]]"
+        argument, is_consensus = _mediate(_Model(_block(line)))
+
+        assert is_consensus is True
+        assert argument.unread_marks == []
 
 
 class TestTheLedgerCountsCostNoCall:

@@ -128,3 +128,42 @@ class TestAnAnswerThatDidNotChange:
 
     def test_an_empty_answer_is_never_unchanged(self) -> None:
         assert answer_unchanged("", "") is False
+
+
+class TestADecimalCountsOnlyAsAStatedValue:
+    def test_a_heading_or_a_reference_number_is_not_a_value(self) -> None:
+        values = claim_values(
+            "CLAIM 3 — Round 2 re-read: as in Claim 14/15 and step 4, the gate aborts "
+            "below 75 processes."
+        )
+
+        assert "75" in values
+        assert not {"3", "2", "14", "15", "4"} & values
+
+    def test_a_list_number_opening_the_claim_is_not_a_value(self) -> None:
+        assert "1" not in claim_values("1. The loop sleeps 180 s.")
+        assert "180" in claim_values("1. The loop sleeps 180 s.")
+
+    def test_a_number_inside_a_word_is_not_a_value(self) -> None:
+        assert not {"32", "64", "8"} & claim_values("Calls Win32 APIs on x64 in utf-8.")
+
+    def test_a_reverser_shaped_revision_records_only_the_values_it_lost(self) -> None:
+        in_force = _isr(
+            "[Decoding — CONFIRMED] Round 2 re-read of FUN_10000ae78 (ev_0133, see Claim 4): "
+            "seed `u32@[arg1]`, 7 of 105 texts use key 0x33; the loop at 0x5750 waits 180 s.",
+        )
+        text = (
+            "CLAIM 1 — [Decoding] The decoder at 0xae78 (ev_0333): seed `u32@[arg1]`, key "
+            "0x33, 105 texts; the loop at 0x5750 waits 180 s.\n"
+        )
+
+        dropped = dropped_values(in_force, _isr(text), text, revision_round=3)
+
+        assert [d.missing for d in dropped] == [("7",)]
+
+    def test_the_round_s_own_number_is_not_recorded(self) -> None:
+        in_force = _isr("In round 3 the count read 3 entries and 0x40.")
+
+        dropped = dropped_values(in_force, _isr("Other."), "Other.", revision_round=3)
+
+        assert dropped[0].missing == ("0x40",)

@@ -53,11 +53,27 @@ def _refanged(text: str) -> str:
     return re.sub(r"\bhxxp", "http", out, flags=re.IGNORECASE)
 
 
+# A number that names a place rather than states a value: a claim, round,
+# step or section reference ("Claim 14/15", "round 2", "#3"), and the list
+# number a claim opens with ("1." or "(1)").
+_REFERENCE_NUMBER = re.compile(
+    r"(?i)(?:\b(?:claims?|rounds?|steps?|stages?|phases?|parts?|sections?|items?|lines?|"
+    r"number|no\.?|nr\.?)|#)\s*#?\d+(?:\s*(?:/|,|&|\+|and|to|-|–)\s*#?\d+)*"
+)
+_LIST_NUMBER = re.compile(r"(?m)^\s*\(?\d+[.)](?=\s)")
+
+
 def _without_hex_and_ids(text: str) -> str:
     text = _HEX.sub(" ", text)
     text = _DECOMPILER_NAME.sub(" ", text)
     text = _TECHNIQUE.sub(" ", text)
     return re.sub(r"\bev_\d+\b", " ", text)
+
+
+def _stated_decimals(text: str) -> set[str]:
+    """The decimal numbers a claim states as values, references and list numbers aside."""
+    plain = _LIST_NUMBER.sub(" ", _REFERENCE_NUMBER.sub(" ", _without_hex_and_ids(text)))
+    return {str(int(n)) for n in _DECIMAL.findall(plain)}
 
 
 def claim_values(text: str, technique_id: str | None = "") -> frozenset[str]:
@@ -71,7 +87,7 @@ def claim_values(text: str, technique_id: str | None = "") -> frozenset[str]:
         quoted = (match.group(1) or match.group(2) or "").strip().casefold()
         if len(quoted) >= 2:
             values.add(quoted)
-    values.update(str(int(n)) for n in _DECIMAL.findall(_without_hex_and_ids(plain)))
+    values.update(_stated_decimals(plain))
     return frozenset(values)
 
 
@@ -137,8 +153,14 @@ class DroppedValues:
     missing: tuple[str, ...]
 
 
-def dropped_values(in_force: Any, revision: Any, answer: str = "") -> list[DroppedValues]:
-    """Each claim of ``in_force`` with values ``revision`` states nowhere, in order."""
+def dropped_values(
+    in_force: Any, revision: Any, answer: str = "", revision_round: int | None = None
+) -> list[DroppedValues]:
+    """Each claim of ``in_force`` with values ``revision`` states nowhere, in order.
+
+    The round's own number is never one of them: a claim that names its round
+    states no value by it.
+    """
     if in_force is None or revision is None:
         return []
     searched = _searched(_whole_text(revision, answer))
@@ -147,6 +169,8 @@ def dropped_values(in_force: Any, revision: Any, answer: str = "") -> list[Dropp
         values = claim_values(
             str(getattr(claim, "claim", "") or ""), getattr(claim, "technique_id", None) or ""
         )
+        if revision_round is not None:
+            values = values - {str(int(revision_round))}
         missing = tuple(sorted(v for v in values if not _is_stated(v, searched)))
         if missing:
             dropped.append(

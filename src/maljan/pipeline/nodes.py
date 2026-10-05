@@ -3823,7 +3823,9 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 revised_isrs[name] = isr
                 made += 1
                 identical = identical and answer_unchanged(in_force_text, revised_text)
-                for dropped in dropped_values(kept_isrs.get(name), isr, revised_text):
+                for dropped in dropped_values(
+                    kept_isrs.get(name), isr, revised_text, revision_round=iteration
+                ):
                     sentence = dropped_values_sentence(name, iteration, dropped)
                     logger.info("%s", sentence)
                     dropped_rows.append(

@@ -454,14 +454,40 @@ def test_the_run_appendix_says_what_the_platform_recorded_of_the_debate() -> Non
             "negotiation": {
                 "rounds_completed": 2,
                 "termination_reason": "consensus",
-                "dropped_claims": ["The beta analyst's round-1 revision states nowhere 0x40."],
+                "dropped_claims": [
+                    'The beta analyst\'s round-2 revision states nowhere 0x40, in "A WHOLE CLAIM".'
+                ],
+                "dropped_value_counts": [{"agent": "beta", "round": 2, "values": 13, "claims": 2}],
                 "not_blocking": ["a vs b on a tally [not blocking: a count]"],
                 "ledger_facts": ['For the line "a vs b": entry ev_0007 (t) states total = 41.'],
+                "unread_marks": ["c vs d [not blocking]"],
             },
         }
     )
     md = MarkdownRenderer().render(MalwareReportBuilder.apply_fallback_narrative(report))
 
-    assert "states nowhere 0x40" in md
+    assert "beta, round 2: 13 values from 2 earlier claims are no longer stated" in md
+    assert "A WHOLE CLAIM" not in md
     assert "[not blocking: a count]" in md
     assert "entry ev_0007 (t) states total = 41" in md
+    assert "c vs d [not blocking]" in md
+
+
+def test_the_headline_says_when_listed_lines_were_marked_not_blocking() -> None:
+    report = _build(
+        run_summary={
+            "elapsed_seconds": 1.0,
+            "final_decision": "Malware",
+            "negotiation": {
+                "rounds_completed": 2,
+                "termination_reason": "consensus",
+                "not_blocking_at_end": 2,
+            },
+        }
+    )
+    md = MarkdownRenderer().render(MalwareReportBuilder.apply_fallback_narrative(report))
+
+    assert (
+        "the analysts reached consensus after 2 round(s); 2 listed lines were marked not "
+        "blocking by the mediator" in md
+    )

@@ -41,6 +41,14 @@ class AgentArgument(BaseModel):
             "holds the lines that do."
         ),
     )
+    unread_marks: list[str] = Field(
+        default_factory=list,
+        description=(
+            "For the mediator: the lines of its block written with a mark the platform did "
+            "not honour (one it could not read, one with no reason, or two that conflict). "
+            "They block."
+        ),
+    )
     ledger_facts: list[str] = Field(
         default_factory=list,
         description=(

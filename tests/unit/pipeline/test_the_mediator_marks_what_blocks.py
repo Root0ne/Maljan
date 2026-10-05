@@ -152,6 +152,49 @@ class TestTheMediatorsMarks:
 
         assert marks[0].blocking is False and marks[0].reason == "bookkeeping"
 
+    def test_a_reason_may_cite_a_ledger_id_in_brackets(self) -> None:
+        line = (
+            "BETA Claims 6/7 (the decoded-text count does not close at 45) [ev_0029] — "
+            "contradicted by ledger entry [ev_0021] [not blocking: both totals are stated, "
+            "see [ev_0021] and [ev_0029]]"
+        )
+
+        mark = read_marks([line])[0]
+
+        assert mark.blocking is False and mark.unread is False
+        assert mark.reason == "both totals are stated, see [ev_0021] and [ev_0029]"
+
+    def test_a_blocking_reason_may_cite_a_ledger_id_in_brackets(self) -> None:
+        mark = read_marks(["GAMMA says T1055 [blocking: ev_0021, [ev_0055]]"])[0]
+
+        assert mark.blocking is True and mark.marked is True and mark.unread is False
+
+    def test_a_mark_that_cannot_be_read_blocks_and_is_recorded_as_unread(self) -> None:
+        mark = read_marks(["A vs B [not blocking: see [ev_0021 [nested]]]"])[0]
+
+        assert mark.blocking is True and mark.unread is True
+
+    def test_a_mark_followed_by_more_text_is_unread(self) -> None:
+        mark = read_marks(["A vs B [not blocking: a tally] and more words"])[0]
+
+        assert mark.blocking is True and mark.unread is True
+
+    def test_conflicting_marks_read_as_blocking(self) -> None:
+        mark = read_marks(["A vs B [blocking: r] [not blocking: r2]"])[0]
+
+        assert mark.blocking is True and mark.unread is True
+
+    def test_not_blocking_with_no_reason_is_read_as_unmarked(self) -> None:
+        for line in ("A vs B [not blocking]", "A vs B [not blocking: ]"):
+            mark = read_marks([line])[0]
+
+            assert mark.blocking is True and mark.marked is False and mark.unread is True
+
+    def test_a_line_that_only_mentions_blocking_is_not_unread(self) -> None:
+        mark = read_marks(["A says the gate is blocking; B says it is not"])[0]
+
+        assert mark.blocking is True and mark.unread is False
+
 
 def test_a_fact_goes_to_the_analysts_its_line_names() -> None:
     facts = ledger_count_facts(

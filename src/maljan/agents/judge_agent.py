@@ -2535,6 +2535,12 @@ class JudgeAgent(BudgetMeter):
         marks = read_marks(listed)
         blocking = [m.line for m in marks if m.blocking]
         not_blocking = [m.line for m in marks if not m.blocking]
+        unread_marks = [m.line for m in marks if m.unread]
+        if unread_marks:
+            self.logger.info(
+                "Mediator: %d listed line(s) carry a mark that was not read; they block.",
+                len(unread_marks),
+            )
 
         # A contradiction still standing is not consensus, whatever number the
         # mediator wrote; the number is kept and shown beside the list.
@@ -2567,6 +2573,7 @@ class JudgeAgent(BudgetMeter):
             confidence_score=verdict.confidence,
             contradictions=blocking,
             not_blocking=not_blocking,
+            unread_marks=unread_marks,
             note=(
                 CONTRADICTIONS_BLOCK_MISSING_NOTE
                 if block_missing

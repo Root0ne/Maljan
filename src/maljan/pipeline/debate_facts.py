@@ -41,11 +41,21 @@ _CLAIM_NUMBERS = re.compile(
 _COUNT_KEY = re.compile(r"(?:^|_)(?:total|count)(?:$|_)", re.IGNORECASE)
 _NOT_A_COUNT_KEY = re.compile(r"(?:^|_)(?:seconds?|secs?|ms|millis|bytes?|size|kb|mb)(?:$|_)", re.I)
 # The mark the mediator ends a line with, with any emphasis around it.
+# The reason may hold one level of bracketed text, such as a ledger id
+# written ``[ev_0021]``.
+_REASON = r"(?:[^\[\]]|\[[^\[\]]*\])*"
 _MARK = re.compile(
-    r"\s*[*_`]*\[\s*(?P<kind>not\s+blocking|blocking)\s*(?::\s*(?P<reason>[^\]]*))?\]"
+    r"\s*[*_`]*\[\s*(?P<kind>not\s+blocking|blocking)\s*(?::(?P<reason>" + _REASON + r"))?\]"
     r"[*_`]*\s*\.?\s*$",
     re.IGNORECASE,
 )
+# Any mark the line holds, wherever it stands: two of different kinds conflict.
+_ANY_MARK = re.compile(
+    r"\[\s*(?P<kind>not\s+blocking|blocking)\s*(?::" + _REASON + r")?\]", re.IGNORECASE
+)
+# What a mark opens with: a line that holds it and no mark that reads was
+# written a mark the parser could not read.
+_MARK_OPENING = re.compile(r"\[\s*(?:not\s+)?blocking\b", re.IGNORECASE)
 
 # The head of the facts a revision round is told, after the mediator's feedback.
 LEDGER_FACTS_HEAD = "The evidence ledger states these counts for the lines the mediator listed:"
@@ -170,32 +180,56 @@ def facts_naming(name: str, facts: Iterable[str]) -> list[str]:
 
 @dataclass(frozen=True)
 class Mark:
-    """One listed line as the mediator marked it."""
+    """One listed line as the mediator marked it.
+
+    ``unread`` says the line was written with a mark the platform did not
+    honour: one it could not read, one with no reason, or two that conflict.
+    Such a line blocks, and the run records it.
+    """
 
     line: str
     blocking: bool
     marked: bool
     reason: str = ""
+    unread: bool = False
+
+
+def _kind(match: re.Match[str]) -> str:
+    return " ".join(match.group("kind").lower().split())
 
 
 def read_marks(lines: Iterable[str]) -> list[Mark]:
-    """The mediator's mark on each line; an unmarked line blocks."""
+    """The mediator's mark on each line; an unmarked line blocks.
+
+    - A mark ends its line and gives a reason, which may cite a ledger id in
+      brackets.
+    - A line with marks of both kinds blocks.
+    - ``[not blocking]`` with no reason is no mark: the line blocks.
+    - A line that opens a mark the parser cannot read blocks.
+
+    The last three are recorded as unread.
+    """
     marks: list[Mark] = []
     for line in lines:
         text = str(line)
+        kinds = {_kind(m) for m in _ANY_MARK.finditer(text)}
         match = _MARK.search(text)
-        if match is None:
-            marks.append(Mark(line=text, blocking=True, marked=False))
-            continue
-        kind = " ".join(match.group("kind").lower().split())
-        marks.append(
-            Mark(
-                line=text,
-                blocking=kind == "blocking",
-                marked=True,
-                reason=(match.group("reason") or "").strip(),
+        reason = (match.group("reason") or "").strip() if match is not None else ""
+        if len(kinds) > 1:
+            marks.append(Mark(line=text, blocking=True, marked=True, unread=True))
+        elif match is None or not reason:
+            marks.append(
+                Mark(
+                    line=text,
+                    blocking=True,
+                    marked=False,
+                    unread=bool(_MARK_OPENING.search(text)),
+                )
             )
-        )
+        else:
+            marks.append(
+                Mark(line=text, blocking=_kind(match) == "blocking", marked=True, reason=reason)
+            )
     return marks
 
 

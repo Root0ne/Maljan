@@ -101,6 +101,13 @@ class NegotiationMetrics:
     # One sentence per claim whose values a revision states nowhere
     # (``pipeline.claim_drops``): recorded, never asked.
     dropped_claims: list[str] = field(default_factory=list)
+    # The same, counted: one row per analyst and round with the values and the
+    # earlier claims they came from. What the report prints.
+    dropped_value_counts: list[dict[str, Any]] = field(default_factory=list)
+    # The lines written with a mark the platform did not honour; they blocked.
+    unread_marks: list[str] = field(default_factory=list)
+    # How many lines the last mediation marked not blocking.
+    not_blocking_at_end: int = 0
 
     @property
     def consensus_applicable(self) -> bool:
@@ -1283,6 +1290,13 @@ class RunSummary:
                 **({"not_blocking": list(n.not_blocking)} if n.not_blocking else {}),
                 **({"ledger_facts": list(n.ledger_facts)} if n.ledger_facts else {}),
                 **({"dropped_claims": list(n.dropped_claims)} if n.dropped_claims else {}),
+                **(
+                    {"dropped_value_counts": [dict(r) for r in n.dropped_value_counts]}
+                    if n.dropped_value_counts
+                    else {}
+                ),
+                **({"unread_marks": list(n.unread_marks)} if n.unread_marks else {}),
+                **({"not_blocking_at_end": n.not_blocking_at_end} if n.not_blocking_at_end else {}),
             },
             "agent_stats": [
                 {
@@ -1896,6 +1910,21 @@ class RunSummaryBuilder:
                 for row in (state.get("dropped_claims") or [])
                 if isinstance(row, dict) and row.get("sentence")
             ],
+            dropped_value_counts=_dropped_value_counts(state.get("dropped_claims") or []),
+            unread_marks=[
+                defanged(str(line))
+                for arg in discussion_history
+                if getattr(arg, "agent_name", "") == "Mediator"
+                for line in getattr(arg, "unread_marks", None) or []
+            ],
+            not_blocking_at_end=next(
+                (
+                    len(getattr(arg, "not_blocking", None) or [])
+                    for arg in reversed(discussion_history)
+                    if getattr(arg, "agent_name", "") == "Mediator"
+                ),
+                0,
+            ),
         )
         return self
 
@@ -2008,6 +2037,21 @@ class RunSummaryBuilder:
 # ---------------------------------------------------------------------------
 # Pure-Python helper (avoids importing from routing to prevent circular deps)
 # ---------------------------------------------------------------------------
+
+
+def _dropped_value_counts(rows: list[Any]) -> list[dict[str, Any]]:
+    """One row per analyst and round: how many values, from how many earlier claims."""
+    counted: dict[tuple[str, int], dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        key = (str(row.get("agent") or ""), int(row.get("round") or 0))
+        entry = counted.setdefault(
+            key, {"agent": key[0], "round": key[1], "values": 0, "claims": 0}
+        )
+        entry["values"] += len(list(row.get("missing") or []))
+        entry["claims"] += 1
+    return list(counted.values())
 
 
 def _rolling_std(values: list[float]) -> float:
