@@ -685,9 +685,13 @@ _CATEGORY_NOUN = (
 # behaviour something the sentence asserts after all: a comma (a new clause,
 # "Without encryption, the sample exfiltrates data"; a comma splice), or a
 # coordinator that joins a second statement ("No persistence exists and
-# process injection is used", "lacks persistence and instead injects").
+# process injection is used", "lacks persistence and instead injects"). A dash
+# is read as the comma it stands for ("loops instead of exiting — sandbox
+# evasion via system checks"): an em dash however it is spaced, an en dash
+# only with a space on each side, since "0–7" is a range.
 _ASSERTION_BETWEEN_RE = re.compile(
-    r",|\b(?:and|instead|only|but|yet|so|then|rather|while)\b", re.IGNORECASE
+    r",|—|\s–\s|\b(?:and|instead|only|but|yet|so|then|rather|while)\b",
+    re.IGNORECASE,
 )
 # A cue that opens a phrase asserting the verb after it: "no longer checks",
 # "not merely reads", "never stops beaconing", "not just", "not only".
@@ -2068,8 +2072,10 @@ _NEGATION_RE = re.compile(
 # The phrases that open with a cue and assert the opposite of one. "There is no
 # doubt that the sample exfiltrates data" is a claim, and "not only does it
 # persist" is two. Checked at the cue's own position, so a real cue elsewhere
-# in the window still counts.
-_NOT_A_NEGATION = ("no doubt", "not only")
+# in the window still counts. A hyphenated "never-" opens an adjective ("a
+# complete, never-exercised web C2"), which says how the thing it describes
+# was used and asserts the thing itself.
+_NOT_A_NEGATION = ("no doubt", "not only", "never-")
 
 # How far back a cue is allowed to reach. A negation governs the words next to
 # it, not the whole paragraph: "no persistence was observed and the sample
