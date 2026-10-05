@@ -3411,8 +3411,14 @@ is assembled from what the run gathered rather than recomputed beside it:
   action, rationale or detection names an address or a host the IOC table does
   not publish, a well-known reference host no row holds aside; asked with the
   table's answer), `report.configuration_uncited` (a value said to be decrypted or
-  observed cites no entry) and `report.identifier_uncited` (a host identifier
-  cites no entry of the run). A field a model did not supply is absent from
+  observed cites no entry), `report.identifier_uncited` (a host identifier
+  cites no entry of the run), `report.value_not_in_cited_entry` (a host
+  identifier's or a configuration value's whole value is in none of the entries
+  it cites, a number held in decimal or hex; rows citing the same entries are
+  one question, a kept row marked beside its evidence) and
+  `report.unpublished_value` (a composer sentence names a network value the IOC
+  table does not publish without its `no: <reason>`; one question per sentence,
+  a kept sentence marked in place with the state). A field a model did not supply is absent from
   the report. The recommendation's category is the model's own. The Markdown
   prints the host identifiers in §9 under the report model's voice, unpublished,
   and the console draws them in the technical-analysis panel.
