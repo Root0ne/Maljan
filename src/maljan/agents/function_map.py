@@ -33,8 +33,8 @@ from maljan.pipeline.validation import (
     _NAME_ARGUMENTS,
     DecompiledFunction,
     _address_value,
+    _addresses_written,
     _named_by,
-    _one_function,
     decompiled_functions,
     image_bases_in,
 )
@@ -236,8 +236,26 @@ def _blob_artefacts(found: FunctionArtefacts, data: Mapping[str, Any], entry_id:
             if address is None:
                 continue
             found.add(address, Artefact("text", text, entry_id))
-            if isinstance(place.get("passed_to"), dict):
-                found.add(address, Artefact("call", text, entry_id))
+            fact = _call_fact(text, place.get("passed_to"))
+            if fact:
+                found.add(address, Artefact("call", fact, entry_id))
+
+
+def _call_fact(text: str, passed: Any) -> str:
+    """One call-site fact as counted: the text, the argument position, the call and its callee.
+
+    Two places passing one text to two calls are two facts; the same call
+    recorded by two entries is one.
+    """
+    if not isinstance(passed, dict) or not passed.get("call_at"):
+        return ""
+    callee = passed.get("callee")
+    target = ""
+    if isinstance(callee, dict):
+        target = str(next((v for v in callee.values() if isinstance(v, str) and v), ""))
+    argument = passed.get("argument")
+    said = f"argument {argument} of the call" if argument is not None else "the call"
+    return f"{text}: {said} at {passed['call_at']}" + (f" to {target}" if target else "")
 
 
 def _floss_artefacts(found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str) -> None:
@@ -318,16 +336,19 @@ def _merged(pack: FunctionArtefacts | None, own: FunctionArtefacts) -> FunctionA
 def _same(a: int | None, b: int | None, bases: Sequence[int]) -> bool:
     """Whether two addresses are one function: equal, or apart by an image base the run read.
 
-    With a base known this is the decompiled-not-described check's own rule
-    (``_one_function``). With none known, only equal addresses are one
-    function: the check's 64 KiB fallback is a guess, and the map does not
-    guess.
+    With a base known, the two are an offset (below the base) and its virtual
+    address (not below it). With none known, only equal addresses are one
+    function: the decompiled-not-described check's 64 KiB fallback is a
+    guess, and the map does not guess.
     """
     if a is None or b is None:
         return False
     if a == b:
         return True
-    return bool(bases) and _one_function(a, b, bases)
+    low, high = sorted((a, b))
+    # An offset and its virtual address: exactly one of the two below the
+    # base, and apart by it. Two virtual addresses a base apart are two.
+    return any(low < base <= high and high - low == base for base in bases)
 
 
 def _fold_spellings(visited: list[MapEntry], bases: Sequence[int]) -> list[MapEntry]:
@@ -415,9 +436,8 @@ def build_function_map(
     ]
     texts = [str(getattr(c, "claim", "") or "") for c in claims]
     for entry in visited:
-        function = DecompiledFunction(address=entry.address, names=entry.names, entries=())
         for text, sentence in zip(said, texts, strict=True):
-            if _named_by(text, function, bases):
+            if _claim_names(text, entry, bases):
                 entry.summary = _first_sentence(sentence)
                 break
 
@@ -431,6 +451,22 @@ def build_function_map(
         image_bases=bases,
         virtual=frozenset(found.virtual),
     )
+
+
+def _claim_names(text: str, entry: MapEntry, bases: Sequence[int]) -> bool:
+    """Whether a claim's text names this visited function.
+
+    With an image base known, by the decompiled-not-described check's own
+    reading (``_named_by``). With none, only by the same address written out,
+    or by a name the decompiler gave the function: no address is guessed.
+    """
+    if bases:
+        function = DecompiledFunction(address=entry.address, names=entry.names, entries=())
+        return _named_by(text, function, bases)
+    if entry.address is not None and entry.address in _addresses_written(text):
+        return True
+    named = DecompiledFunction(address=None, names=entry.names, entries=())
+    return bool(entry.names) and _named_by(text, named, ())
 
 
 def _kinds(artefacts: Sequence[Artefact]) -> list[tuple[str, int, list[str]]]:
@@ -453,6 +489,15 @@ def _where(address: int | None, names: Sequence[str]) -> str:
     head = hex(address) if address is not None else (names[0] if names else "unnamed")
     shown = [n for n in names if n != head] if address is not None else list(names[1:])
     return f"{head} ({', '.join(shown)})" if shown else head
+
+
+def _folded(entry: MapEntry) -> str:
+    """A bare visit on the "also visited" line: its address, with the names that are not
+    a decompiler's generic ``FUN_``/``sub_``/``fcn.`` name."""
+    kept = [n for n in entry.names if not _GENERIC_FUNCTION_NAME.fullmatch(n)]
+    if entry.address is None:
+        return _where(None, kept or list(entry.names))
+    return f"{hex(entry.address)} ({', '.join(kept)})" if kept else hex(entry.address)
 
 
 def _visited_line(entry: MapEntry) -> str:
@@ -503,12 +548,7 @@ def function_map_block(found: FunctionMap) -> str:
     if bare:
         # A visit with nothing but its entry id: the transcript already
         # stamps the id on the listing, so the address is enough here.
-        lines.append(
-            "also visited: "
-            + ", ".join(
-                hex(e.address) if e.address is not None else _where(None, e.names) for e in bare
-            )
-        )
+        lines.append("also visited: " + ", ".join(_folded(e) for e in bare))
     if found.unvisited:
         lines.append(
             "not visited, reaching artefacts: "

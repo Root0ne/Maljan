@@ -121,7 +121,7 @@ class TestWhatTheAnalysisServerTiedToEachFunction:
         ]
         assert [(a.kind, a.value) for a in by[0x2200]] == [
             ("text", "first text"),
-            ("call", "first text"),
+            ("call", "first text: argument 1 of the call at 0x2281 to 0xae78"),
             ("text", "second text"),
         ]
         assert [(a.kind, a.value) for a in by[0xAE78]] == [("decoded", "a"), ("decoded", "b")]
@@ -301,7 +301,7 @@ class TestCountsAndAddresses:
             [_decompiled("ev_0031", "0x1360bc02200")], function_artefacts([blobs]), [], (BASE,)
         )
 
-        assert "reaches 1 decoded text (ev_0021), 1 call-site fact (ev_0021)" in (
+        assert "reaches 1 decoded text (ev_0021), 2 call-site facts (ev_0021)" in (
             function_map_block(found)
         )
 
@@ -373,3 +373,84 @@ class TestCountsAndAddresses:
         lines = function_map_block(build_function_map(own, None, [], (BASE,))).splitlines()
 
         assert lines[2:] == ["also visited: 0x1360bc03c7c, 0x1360bc03ce4"]
+
+
+class TestNothingIsGuessed:
+    def test_with_no_base_a_claim_about_one_function_is_not_another_s_summary(self) -> None:
+        own = [_decompiled("ev_0001", "0x401230"), _decompiled("ev_0002", "0x411230")]
+        claim = _claim("0x411230 decrypts the configuration it reads.")
+
+        found = build_function_map(own, None, [claim], ())
+
+        assert [(e.address, e.summary) for e in found.visited] == [
+            (0x401230, ""),
+            (0x411230, "0x411230 decrypts the configuration it reads."),
+        ]
+
+    def test_with_no_base_a_claim_naming_the_decompiler_s_name_is_its_summary(self) -> None:
+        own = [_decompiled("ev_0001", "0x411230")]
+
+        found = build_function_map(own, None, [_claim("FUN_00411230 reads a value.")], ())
+
+        assert found.visited[0].summary == "FUN_00411230 reads a value."
+
+    def test_with_a_base_an_offset_in_a_claim_names_its_function(self) -> None:
+        own = [_decompiled("ev_0001", "0x1360bc0904c")]
+
+        found = build_function_map(own, None, [_claim("0x904c opens the thing.")], (BASE,))
+
+        assert found.visited[0].summary == "0x904c opens the thing."
+
+    def test_two_virtual_addresses_one_base_apart_are_two_functions(self) -> None:
+        own = [_decompiled("ev_0001", "0x401000"), _decompiled("ev_0002", "0x801000")]
+
+        found = build_function_map(own, None, [], (0x400000,))
+
+        assert [e.address for e in found.visited] == [0x401000, 0x801000]
+
+    def test_an_offset_and_its_virtual_address_are_still_one(self) -> None:
+        own = [_decompiled("ev_0001", "0x1000"), _decompiled("ev_0002", "0x401000")]
+
+        found = build_function_map(own, None, [], (0x400000,))
+
+        assert [e.address for e in found.visited] == [0x401000]
+
+
+class TestTheFoldAndTheFacts:
+    def test_the_fold_keeps_a_name_that_is_not_a_decompiler_s_generic_one(self) -> None:
+        own = [
+            _decompiled("ev_0001", "0x1360bc03c7c", "void entry(void)\n{\n}\n"),
+            _decompiled("ev_0002", "0x1360bc03cb4"),
+        ]
+
+        lines = function_map_block(build_function_map(own, None, [], (BASE,))).splitlines()
+
+        assert lines[2:] == ["also visited: 0x1360bc03c7c (entry), 0x1360bc03cb4"]
+
+    def test_one_text_passed_to_two_calls_is_two_call_site_facts(self) -> None:
+        def _place(call_at: str) -> dict[str, Any]:
+            return {
+                "function": "0x2200",
+                "passed_to": {"call_at": call_at, "callee": {"function": "0xae78"}, "argument": 1},
+            }
+
+        output = {
+            "image_base": hex(BASE),
+            "results": [{"text": "one", "references": [_place("0x2281"), _place("0x2301")]}],
+        }
+        blobs = _entry("ev_0021", "decode_string_blobs", {}, json.dumps(output))
+        again = _entry("ev_0032", "decode_string_blobs", {}, json.dumps(output))
+
+        block = function_map_block(
+            build_function_map(
+                [_decompiled("ev_0031", "0x1360bc02200")],
+                function_artefacts([blobs, again]),
+                [],
+                (BASE,),
+            )
+        )
+
+        assert (
+            "reaches 1 decoded text (ev_0021, ev_0032), 2 call-site facts (ev_0021, ev_0032)"
+            in (block)
+        )
