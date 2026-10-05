@@ -21,7 +21,7 @@ The reference sample, 57 core items:
 
 | Run | Model | Found | Partly | Missed | Wrong | Beyond human |
 | :-- | :-- | --: | --: | --: | --: | --: |
-| [All-tools, hosted](scores/latrodectus-all-tools-run4.md) | DeepSeek V4.1 Flash | **45** | 9 | 2 | 1 | **19** |
+| [All-tools, hosted](scores/latrodectus-all-tools-run4.md) | `deepseek-flash` | **45** | 9 | 2 | 1 | **19** |
 | [All-tools, local](scores/latrodectus-all-tools-local6.md) | Qwen3.6-35B | 15 | 21 | 21 | 0 | **12** |
 | [Default, it. 6](scores/latrodectus-iteration6-default.md) | Qwen3.6-35B | 12 | 28 | 17 | 0 | — |
 | [Default, it. 5](scores/latrodectus-iteration5-default.md) | Qwen3.6-35B | 14 | 25 | 18 | 0 | — |
@@ -203,7 +203,7 @@ differences:
   and the report.
 - **Sandbox.** Hatching Triage, with a 600 s run, so the dynamic and network
   analysts had a report and a capture to read.
-- **Models.** The hosted run used DeepSeek-V4.1-Flash through the
+- **Models.** The hosted run used `deepseek-flash` (DeepSeek, hosted) through the
   OpenAI-compatible provider (`compat = deepseek`, thinking on), with a spend
   ceiling. The local runs used Qwen3.6-35B-A3B on ik_llama.cpp with a 131,072-token
   window, on the same laptop as the iterations.
@@ -639,7 +639,7 @@ not stop an analyst's technique from being published. The rest of the report:
 
 | File | Run |
 | :-- | :-- |
-| [latrodectus-all-tools-run4.md](scores/latrodectus-all-tools-run4.md) | All-tools team, hosted DeepSeek-V4.1-Flash, Triage sandbox (`dev` @ `ceb4244a`) |
+| [latrodectus-all-tools-run4.md](scores/latrodectus-all-tools-run4.md) | All-tools team, hosted `deepseek-flash` (DeepSeek), Triage sandbox (`dev` @ `ceb4244a`) |
 | [latrodectus-all-tools-local6.md](scores/latrodectus-all-tools-local6.md) | All-tools team, local Qwen3.6-35B-A3B, Triage sandbox (`dev` @ `4d80c62e`) |
 | [latrodectus-iteration6-default.md](scores/latrodectus-iteration6-default.md) | Default model, iteration 6 (`dev` @ `ed57265b`) |
 | [latrodectus-iteration5-default.md](scores/latrodectus-iteration5-default.md) | Default model, iteration 5 (`dev` @ `2a93b02d`) |

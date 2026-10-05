@@ -4,7 +4,7 @@ The reference sample run under the importable all-tools team with a real
 sandbox, on a hosted model. `dev` @ `ceb4244a`, team `all_tools` (three static
 analysts, a Ghidra reverser, then the dynamic and network stages; see [An
 all-tools team](../../configuration.md#an-all-tools-team)), model
-DeepSeek-V4.1-Flash through the OpenAI-compatible provider with
+`deepseek-flash` (DeepSeek, hosted) through the OpenAI-compatible provider with
 `compat = deepseek`, thinking on and `reasoning_effort = max`, a 1,048,576-token
 window, output caps of 393,216 tokens for every analyst, the judge and the
 report model, and a spend ceiling of 2.00 USD. **Sandbox: Hatching Triage, a
@@ -149,7 +149,7 @@ line.
 11. **This hash's C2 pair**, both on `/live/`, decoded from `.data` and referenced at 0x69b3 and 0x6a1f inside 0x6988 — `ev_0019` `floss`; `ev_0021` `decode_string_blobs`.
 12. VirusTotal: 52 of 75 engines — `ev_0018` `get_file_report`.
 13. The sandbox record: the load as `rundll32.exe <sample>.dll,#1`, an ordinal-1 call, and no dropped file — `ev_0012` `sandbox_processes`; `ev_0015` `sandbox_dropped_files`.
-14. The ntdll resolution block at **0xa59c**: 37 {hash, module, slot} triples against one module-name pointer, resolved through 0x869c — `ev_0204` Ghidra `decompile_function`; the names from `ev_0020` `resolve_api_hashes`.
+14. The ntdll resolution block at **0xa59c**: the routine places 37 {hash, module, slot} triples against one module-name pointer and resolves each through 0x869c — `ev_0204` Ghidra `decompile_function`; the hashes it holds resolve to ntdll names, which is what names the module — `ev_0020` `resolve_api_hashes`.
 15. The decoded C2 URLs are written into a candidate slot array at **0x10568** by 0x6988 — `ev_0090` r2 `decompile_function`; `ev_0182` Ghidra `batch_decompile`.
 16. The C2 reply handlers: `URLS` → **0xccbc**, `CLEARURL` → **0xce20**, `COMMAND` → **0x3cf4** — `ev_0195` and `ev_0171` Ghidra `batch_decompile`.
 17. The command handlers' addresses: the desktop-link collector **0x1a08**, the process-list collector **0x1c38**, the in-memory loader **0x7170** and the self-delete routine **0x3a24** — `ev_0185`, `ev_0193` and `ev_0184` Ghidra `batch_decompile`.

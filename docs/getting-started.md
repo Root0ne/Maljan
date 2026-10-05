@@ -102,7 +102,8 @@ curl -X POST http://localhost:8000/api/v1/auth/register \
 
 A registered account gets the `analyst` role. Settings → Configuration and the
 audit log require `admin` (API keys do not: any signed-in account mints and
-revokes its own), and there is no endpoint that grants it, so promote the first account once, directly in the database:
+revokes its own), and there is no endpoint that grants it, so promote the
+first account once, directly in the database:
 
 ```bash
 docker compose -f docker/docker-compose.yml exec postgres \
