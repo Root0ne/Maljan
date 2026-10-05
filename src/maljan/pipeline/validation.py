@@ -3796,24 +3796,29 @@ def unpublished_value_violations(
 
     ``answers`` is ``(kind, value) -> the IOC table's answer``, ``""`` for a
     value no row holds (``narrative_agent.published_answers``). Every string
-    of the answer is read sentence by sentence; a value the table does not
+    of the answer is read sentence by sentence; the values the table does not
     answer ``yes`` for, in a sentence that does not write a ``no: <reason>``
-    beside it, is one question naming the table's answer and quoting each
-    sentence that names it. A reference host no row holds is a place to read,
-    not an indicator, and raises nothing. Nothing is removed: what the model
-    answers stands, and a sentence it keeps is marked where it stands with
-    the value's state (``MARKED_IN_PLACE``).
+    beside them, are one question per sentence naming each value with its
+    state. The state is the answer's first clause, the one that says why the
+    value is not published; the IOC table prints the whole answer. A
+    reference host no row holds is a place to read, not an indicator, and
+    raises nothing. Nothing is removed: what the model answers stands, and a
+    sentence it keeps is marked where it stands with each value's state
+    (``MARKED_IN_PLACE``).
     """
     from maljan.extractors.network_extractor import is_well_known_benign_host
     from maljan.reporting.defang import defang
     from maljan.reporting.renderers.stix_renderer import publishes
 
-    found: dict[tuple[str, str], tuple[str, list[str]]] = {}
+    out: list[Violation] = []
+    asked: set[str] = set()
     for text in _strings_with_places(payload):
         for sentence in _SENTENCE_END_RE.split(text):
             written = sentence.strip()
-            if not written or _PUBLISH_STATE_RE.search(written):
+            if not written or written in asked or _PUBLISH_STATE_RE.search(written):
                 continue
+            # Each state, in the order first met, with the values it is said of.
+            states: dict[str, list[tuple[str, str]]] = {}
             for kind, value in network_values_in(written):
                 try:
                     answer = str(answers(kind, value) or "")
@@ -3824,27 +3829,36 @@ def unpublished_value_violations(
                     continue
                 if not answer and kind == "domain" and is_well_known_benign_host(value):
                     continue
-                _why, sentences = found.setdefault(
-                    (kind, value), (answer or f"no: {NO_TABLE_ROW}", [])
-                )
-                if written not in sentences:
-                    sentences.append(written)
-    out: list[Violation] = []
-    for (kind, value), (why, sentences) in found.items():
-        out.append(
-            Violation(
-                code=UNPUBLISHED_VALUE_CODE,
-                message=(
-                    f"the text names {safe_finding_value(value)}, which this run does not "
-                    f"publish ({safe_finding_value(why)}), without that state. A value this "
-                    "run does not publish is written only with its publish state beside it. "
-                    "Write the state beside the value, or write the text without the value."
-                ),
-                path=f"{kind}:{value}",
-                quoted=tuple(sentences),
-                subject=f"{defang(value, kind)} {why}",
+                state = (answer or f"no: {NO_TABLE_ROW}").split(";", 1)[0].strip()
+                states.setdefault(state, []).append((kind, value))
+            if not states:
+                continue
+            asked.add(written)
+            said = "; ".join(
+                f"{', '.join(safe_finding_value(value) for _kind, value in values)} "
+                f"({safe_finding_value(state)})"
+                for state, values in states.items()
             )
-        )
+            out.append(
+                Violation(
+                    code=UNPUBLISHED_VALUE_CODE,
+                    message=(
+                        f"the text names {said}, which this run does not publish, without "
+                        "that state. A value this run does not publish is written only with "
+                        "its publish state beside it. Write the state beside each value, or "
+                        "write the text without the value."
+                    ),
+                    path="values:"
+                    + ",".join(
+                        f"{kind}:{value}" for values in states.values() for kind, value in values
+                    ),
+                    quoted=(written,),
+                    subject="; ".join(
+                        f"{', '.join(defang(value, kind) for kind, value in values)} ({state})"
+                        for state, values in states.items()
+                    ),
+                )
+            )
     return out
 
 

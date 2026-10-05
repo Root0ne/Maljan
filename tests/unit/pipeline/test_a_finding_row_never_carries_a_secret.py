@@ -251,6 +251,7 @@ CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
     # The table's own nouns and row numbers, around values each wrapped in the
     # helper where the sentence is built.
     ("pipeline/validation.py", "stated_value_violations"): frozenset({"said"}),
+    ("pipeline/validation.py", "unpublished_value_violations"): frozenset({"said"}),
     # A join of this module's own vocabulary of unsupported claims.
     ("pipeline/validation.py", "unsupported_benign_violations"): frozenset({"listed"}),
     ("pipeline/validation.py", "unsupported_malware_violations"): frozenset({"listed"}),

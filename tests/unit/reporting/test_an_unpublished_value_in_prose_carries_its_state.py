@@ -86,14 +86,14 @@ class TestTheCheck:
         assert found.code == UNPUBLISHED_VALUE_CODE
         assert REFUSAL in found.message
         assert found.quoted == (sentence,)
-        assert found.path == f"ip:{REFUSED}"
+        assert found.path == f"values:ip:{REFUSED}"
 
     def test_a_defanged_address_is_read_as_the_address(self) -> None:
         defanged = REFUSED.replace(".", "[.]")
 
         (found,) = unpublished_value_violations(_body(f"It reaches {defanged}."), _answers())
 
-        assert found.path == f"ip:{REFUSED}"
+        assert found.path == f"values:ip:{REFUSED}"
 
     def test_a_published_value_raises_nothing(self) -> None:
         assert unpublished_value_violations(_body(f"It posts to {PUBLISHED}."), _answers()) == []
@@ -120,12 +120,25 @@ class TestTheCheck:
 
         assert found.quoted == (REFUSED,)
 
-    def test_each_value_is_one_question_with_every_sentence_naming_it(self) -> None:
-        body = f"It reaches {REFUSED}. Later it reaches {REFUSED} again."
+    def test_each_sentence_is_one_question_naming_its_values_by_state(self) -> None:
+        other = "203.0.113.9"
+        body = f"It reaches {REFUSED} and {other} on 443. Later it reaches {REFUSED} again."
 
-        (found,) = unpublished_value_violations(_body(body), _answers())
+        first, second = unpublished_value_violations(_body(body), _answers())
 
-        assert found.quoted == (f"It reaches {REFUSED}.", f"Later it reaches {REFUSED} again.")
+        assert first.quoted == (f"It reaches {REFUSED} and {other} on 443.",)
+        assert f"{REFUSED} ({REFUSAL})" in first.message
+        assert f"{other} (no: {NO_TABLE_ROW})" in first.message
+        assert second.quoted == (f"Later it reaches {REFUSED} again.",)
+
+    def test_the_state_is_the_answer_s_first_clause(self) -> None:
+        def _long(kind: str, value: str) -> str:
+            return f"{REFUSAL}; an analyst artifact lists it"
+
+        (found,) = unpublished_value_violations(_body(f"It reaches {REFUSED}."), _long)
+
+        assert REFUSAL in found.message and "artifact" not in found.message
+        assert found.subject == f"{REFUSED.replace('.', '[.]')} ({REFUSAL})"
 
     def test_the_finding_is_kept_and_marked_in_place(self) -> None:
         assert UNPUBLISHED_VALUE_CODE in KEPT_WITH_A_FINDING
@@ -220,7 +233,7 @@ class TestTheReportStatesTheState:
         line = next(line for line in text.splitlines() if "as C2 [ev_0017]." in line)
         assert "not published by this run" in line
         assert REFUSAL in line
-        assert f"not published by this run: {REFUSED.replace('.', '[.]')} {REFUSAL}" in line
+        assert f"not published by this run: {REFUSED.replace('.', '[.]')} ({REFUSAL})" in line
 
 
 class TestOddAndLargeInput:
