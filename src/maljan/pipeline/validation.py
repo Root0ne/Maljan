@@ -153,6 +153,11 @@ class Violation:
     # each sentence carries its own label (a value and its publish state).
     # Never shown to the producer and never stored on the channel.
     labels: tuple[str, ...] = ()
+    # The answer the finding is about, as the producer wrote it, where the
+    # finding is that none of it could be read (``isr.unparsed_answer``). Kept
+    # on the event that asks, so the run record holds what failed to parse.
+    # Never shown to the producer and never stored on the channel.
+    answer: str = ""
 
     def __post_init__(self) -> None:
         # A row written by a validator has no route, and its message is its
@@ -364,8 +369,14 @@ def parse_violations(isr: Any) -> list[Violation]:
     the analyst's own statement. An ISR built without a parse says nothing.
     """
     found: list[Violation] = []
-    if not getattr(isr, "claims", None) and str(getattr(isr, "unparsed_answer", "") or ""):
-        found.append(Violation(code=UNPARSED_ANSWER_CODE, message=_UNPARSED_ANSWER_MESSAGE))
+    prose = str(getattr(isr, "unparsed_answer", "") or "")
+    if not getattr(isr, "claims", None) and prose:
+        # The answer as written rides with the question to the run record:
+        # without it nobody can read later why it failed to parse.
+        written = str(getattr(isr, "answer_text", "") or "") or prose
+        found.append(
+            Violation(code=UNPARSED_ANSWER_CODE, message=_UNPARSED_ANSWER_MESSAGE, answer=written)
+        )
     try:
         declined = int(getattr(isr, "blocks_without_confidence", 0) or 0)
     except (TypeError, ValueError):
@@ -7086,6 +7097,10 @@ class _FeedbackFeed:
             # fold together and two violations of one code on different claims
             # do not.
             path=str(violation.path),
+            # The answer that could not be read, on the line that asks about
+            # it and on the line that says it survived; the line that says it
+            # was resolved is about the same answer, kept once already.
+            answer=str(violation.answer) if state != VALIDATION_RESOLVED else "",
         )
 
 

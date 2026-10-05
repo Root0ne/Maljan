@@ -1677,6 +1677,7 @@ def emit_validation_feedback(
     retry_index: int,
     state: str = VALIDATION_RETRIED,
     path: str = "",
+    answer: str = "",
 ) -> None:
     """One violation, and what became of it.
 
@@ -1699,6 +1700,10 @@ def emit_validation_feedback(
     judge's bundle — and it is what separates two violations of one code on
     different claims; it is ``""`` for a violation about the answer as a whole,
     where ``(agent, code)`` is already the whole key.
+
+    ``answer`` is the producer's answer as written, for a violation that says
+    none of it could be read: the event is where the run keeps it, whole, so
+    the cause can be read later. Left out when empty.
     """
     emit(
         sink,
@@ -1711,6 +1716,7 @@ def emit_validation_feedback(
             "retry_index": max(0, int(retry_index)),
             "state": str(state),
             "path": str(path),
+            **({"answer": str(answer)} if answer else {}),
         },
     )
 
