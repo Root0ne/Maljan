@@ -269,6 +269,88 @@ class TestAPlainUsernameIsNoSecret:
         assert token in configured_secret_values({"url": f"https://{token}@mcp.example/sse"})
 
 
+def _configured_urls() -> list[str]:
+    """Every userinfo shape a configured URL takes: a user, a token, short and long passwords."""
+    return [
+        "postgresql+asyncpg://administrator@db.internal/maljan",
+        "ssh://" + "git" + "@github.example/org/repo",
+        f"https://{prefixed_key('ghp_', 36)}@mcp.example/sse",
+        f"https://u:{password(3)}@sandbox.example/api",
+        f"https://operator:{password(6, variant=1)}@sandbox.example/api",
+        f"https://operator:{password(24, variant=2)}@sandbox.example/api",
+    ]
+
+
+def _userinfo(url: str) -> str:
+    from urllib.parse import urlsplit
+
+    return urlsplit(url).netloc.rsplit("@", 1)[0]
+
+
+class TestUserinfoIsRemovedWhereverAURLStands:
+    """The userinfo of a URL is removed by its position, registered or not."""
+
+    def test_in_events_with_nothing_registered(self) -> None:
+        for url in _configured_urls():
+            for text in (f"see {url} now", f'{{"url": "{url}"}}'):
+                for scrubbed in (scrub(text), scrub_keeping_layout(text)):
+                    assert f"{_userinfo(url)}@" not in scrubbed, (url, scrubbed)
+
+    def test_in_rows_in_both_modes(self) -> None:
+        for registered in (False, True):
+            ev.forget_secret_values()
+            if registered:
+                from maljan.core.settings_catalog import configured_secret_values
+
+                _registered(
+                    *configured_secret_values({"servers": [{"url": u} for u in _configured_urls()]})
+                )
+            for url in _configured_urls():
+                row = safe_finding_value(f"the indicator names {url}")
+                assert f"{_userinfo(url)}@" not in row, (registered, url, row)
+                assert f"{_userinfo(url)}@" not in _published(row), (registered, url)
+
+    def test_a_word_standing_alone_is_kept_in_events(self) -> None:
+        from maljan.core.settings_catalog import configured_secret_values
+
+        _registered(
+            *configured_secret_values({"servers": [{"url": u} for u in _configured_urls()]})
+        )
+
+        assert scrub("the administrator logged on") == "the administrator logged on"
+
+
+class TestEveryValueDevMaskedIsStillMasked:
+    """Dev registered a configured URL's password; every value it masked is masked here too."""
+
+    @staticmethod
+    def _dev_registered(urls: list[str]) -> set[str]:
+        from urllib.parse import urlsplit
+
+        return {urlsplit(url).password for url in urls if urlsplit(url).password}
+
+    def test_registration_is_a_superset_of_dev_s(self) -> None:
+        from maljan.core.settings_catalog import configured_secret_values
+
+        urls = _configured_urls()
+        branch = configured_secret_values({"servers": [{"url": u} for u in urls]})
+
+        assert self._dev_registered(urls) <= branch
+
+    def test_each_value_dev_masked_is_masked_in_events_and_rows(self) -> None:
+        from maljan.core.settings_catalog import configured_secret_values
+
+        urls = _configured_urls()
+        _registered(*configured_secret_values({"servers": [{"url": u} for u in urls]}))
+        for value in self._dev_registered(urls):
+            if len(value) < ev.CONFIGURED_SECRET_FLOOR:
+                # Dev masked a value under the floor nowhere by value; its URL
+                # position is covered by the userinfo tests above.
+                continue
+            assert value not in scrub(f"echoed {value} alone"), value
+            assert value not in safe_finding_value(f"echoed {value} alone"), value
+
+
 class TestAFailedRegistrationFallsBackToTheWholeScrub:
     def test_nothing_registered_holds_a_row_to_the_scrub(self) -> None:
         key = prefixed_key("ghs_", 36)
