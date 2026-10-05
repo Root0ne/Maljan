@@ -67,6 +67,7 @@ from maljan.agents.judge_agent import (
 )
 from maljan.agents.network_analyst import NO_PACKET_TOOL_LINE, OTHER_TOOLS_THEN_ANALYZE
 from maljan.agents.prompt_fragments import (
+    CLAIM_FORMAT_FRAGMENT,
     ENDPOINTS_ROW_SHAPE,
     NO_TOOLS_STATEMENT,
     TOOL_FREE_TURN_STATEMENT,
@@ -114,6 +115,7 @@ from maljan.pipeline.nodes import (
 )
 from maljan.pipeline.run_state import NO_LIMIT, budget_line
 from maljan.pipeline.validation import (
+    _UNPARSED_ANSWER_MESSAGE,
     ANALYST_FEEDBACK_CLOSING,
     MALWARE_TYPES,
     UNATTRIBUTED_INDICATOR_CODE,
@@ -1066,8 +1068,11 @@ PROMPTS: dict[str, str] = {
         f"{NO_REPLY_RECORDED} {NOT_RUN_REPLY}"
     ),
     "analyst question for technique lines no single id was read from": technique_line_violation(
-        ["T1000 (candidate)", "T1001, T1002"]
+        ["T1000 (candidate)", "T1001 or T1002"]
     ).message,
+    "the claim format the analysts are given and the unparsed-answer question": " ".join(
+        [CLAIM_FORMAT_FRAGMENT, _UNPARSED_ANSWER_MESSAGE]
+    ),
     "the question and the reason for claim headings under DISPUTES": (
         f"{claims_under_disputes_violation(2).message} "
         f"{claims_under_disputes_sentence('reverser', 2, 1)}"

@@ -45,6 +45,9 @@ def _block(line: str) -> str:
         ("`T1071.001`, `T1573.001`.", ["T1071.001", "T1573.001"]),
         # One id written twice is one technique.
         ("T1027, T1027", ["T1027"]),
+        # The block separator written after the line, the next claim on the same line.
+        ("T1027 · ---", ["T1027"]),
+        ("T1027, T1140 ---", ["T1027", "T1140"]),
     ],
 )
 def test_a_list_of_ids_is_one_claim_per_id(line: str, ids: list[str]) -> None:
@@ -82,6 +85,23 @@ def test_a_line_with_anything_but_ids_is_kept_whole_and_asked_about(line: str) -
     isr = AgentISR(agent_id="static", domain="static", claims=[claim])
     (question,) = [v for v in parse_violations(isr) if v.code == TECHNIQUE_LINE_UNREAD_CODE]
     assert line.strip() in question.message
+
+
+def test_a_separator_closing_the_technique_line_is_not_part_of_it() -> None:
+    text = (
+        "CLAIM: The loader decodes its strings.\nEVIDENCE: [ev_0004]\nCONFIDENCE: 0.8\n"
+        "TECHNIQUE: T1140 · ---\nCLAIM: The loader resolves imports by hash.\n"
+        "EVIDENCE: [ev_0005]\nCONFIDENCE: 0.7\nTECHNIQUE: NONE · ---\n"
+    )
+    claims = read_claim_blocks(text).claims
+
+    assert [(c.technique_id, c.technique_line) for c in claims] == [("T1140", None), (None, None)]
+
+
+def test_the_claim_format_asks_for_ids_alone() -> None:
+    from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
+
+    assert "TECHNIQUE: <T-ID, several separated by commas, or NONE>" in CLAIM_FORMAT_FRAGMENT
 
 
 def test_a_list_read_as_ids_is_not_asked_about() -> None:

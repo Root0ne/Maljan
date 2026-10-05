@@ -1515,6 +1515,11 @@ _NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
 # both ("T1027, T1140, and T1106"). No other word: "T1027 or T1140" and
 # "T1027 / T1140" say something about the ids the reader would have to decide.
 _TECHNIQUE_LIST_SEPARATOR_RE = re.compile(r"\s*,\s*(?:and\s+)?|\s+and\s+", re.IGNORECASE)
+# The block separator a model writes after a claim's last field when it puts
+# the next claim on the same line ("TECHNIQUE: T1027 · --- CLAIM: …"): the
+# claim format's own "---", with a dot or bar before it. It ends the line and
+# is no part of what the line claims.
+_TRAILING_BLOCK_SEPARATOR_RE = re.compile(r"[\s·•|]*-{3,}\s*$")
 
 
 def _bare_technique(text: str) -> str:
@@ -1527,7 +1532,8 @@ def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
 
     One id, or a list of ids separated by commas or "and" ("T1027, T1140"),
     and nothing else, is the claimed techniques, each once, in the order
-    written; ``NONE`` or a dash claims none. Anything else — words after an id
+    written; ``NONE`` or a dash claims none. A block separator closing the
+    line (``· ---``) is not part of it. Anything else — words after an id
     ("T1027.002 not supported"), a qualifier ("T1055 (unproven)"), a list
     joined by another word ("T1027 or T1140") — claims no technique the
     reader could name without deciding what the words mean, so no id is read
@@ -1535,7 +1541,7 @@ def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     (``isr.technique_line_unread``).
     """
     text = str(line or "").strip()
-    bare = _bare_technique(text)
+    bare = _bare_technique(_TRAILING_BLOCK_SEPARATOR_RE.sub("", text))
     if bare.upper() in _NO_TECHNIQUE:
         return (), None
     parts = [_bare_technique(part) for part in _TECHNIQUE_LIST_SEPARATOR_RE.split(bare)]

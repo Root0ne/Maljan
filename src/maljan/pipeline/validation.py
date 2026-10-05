@@ -356,7 +356,7 @@ _UNPARSED_ANSWER_MESSAGE = (
     "EVIDENCE: <artifact reference, naming the tool result you read it from, "
     "for example [ev_0002]>\n"
     "CONFIDENCE: <0.0-1.0>\n"
-    "TECHNIQUE: <T-ID or NONE>\n"
+    "TECHNIQUE: <T-ID, several separated by commas, or NONE>\n"
     "---\n"
     "A finding you cannot put a confidence on stays in your prose."
 )
