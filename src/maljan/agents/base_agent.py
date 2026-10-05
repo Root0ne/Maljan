@@ -70,8 +70,10 @@ from maljan.pipeline.validation import (
     analyst_cut_violation,
     analyst_repeated_violation,
     chunk_cut_unread_sentence,
+    claim_block_indexes,
     claims_kept_under_disputes_finding,
     claims_repeated,
+    count_claim_blocks,
     decompiled_functions,
     decompiled_not_described_violation,
     image_bases_in,
@@ -1387,6 +1389,12 @@ async def retry_on_connection_error(
             )
             await asyncio.sleep(wait)
     raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _library_blocks(isr: AgentISR) -> int:
+    """How many claim blocks of ``isr`` are library-only claims, each block once."""
+    blocks = claim_block_indexes(isr.claims)
+    return len({blocks[index] for index in library_only_claims(isr) if index < len(blocks)})
 
 
 def describe_exception_for_log(exc: BaseException) -> str:
@@ -7034,32 +7042,36 @@ class BaseAnalyst(BudgetMeter, ABC):
             # an answer that folds them away stands, as long as it keeps at
             # least as many other claims as the first answer had. Only where
             # the question was asked: a chunk's cut turn never asks it.
-            library_first = len(library_only_claims(first_answer))
-            library_retried = len(library_only_claims(retried))
+            # Counted in the claim blocks the analyst wrote, not in claims: a
+            # block listing several ids is one claim per id, and taking a
+            # rejected id off its line is an answer, not lost work.
+            blocks_first = count_claim_blocks(first_answer.claims)
+            blocks_retried = count_claim_blocks(retried.claims)
+            library_first = _library_blocks(first_answer)
+            library_retried = _library_blocks(retried)
             if (
                 not only_cut
                 and library_first
                 and retried.claims
-                and len(retried.claims) < len(first_answer.claims)
-                and len(retried.claims) - library_retried
-                >= len(first_answer.claims) - library_first
+                and blocks_retried < blocks_first
+                and blocks_retried - library_retried >= blocks_first - library_first
             ):
                 self.logger.info(
-                    "Validation: '%s' answered the library-claims question with %d claim(s) "
-                    "against %d, %d of them library-only; its answer is kept.",
+                    "Validation: '%s' answered the library-claims question with %d claim "
+                    "block(s) against %d, %d of them library-only; its answer is kept.",
                     self.name,
-                    len(retried.claims),
-                    len(first_answer.claims),
+                    blocks_retried,
+                    blocks_first,
                     library_first,
                 )
                 return retried
-            if len(retried.claims) < len(first_answer.claims):
+            if blocks_retried < blocks_first:
                 self.logger.warning(
-                    "Validation: the retry for '%s' returned %d claim(s) against %d; "
+                    "Validation: the retry for '%s' returned %d claim block(s) against %d; "
                     "keeping the first answer and recording what is wrong with it.",
                     self.name,
-                    len(retried.claims),
-                    len(first_answer.claims),
+                    blocks_retried,
+                    blocks_first,
                 )
                 return first_answer
             return retried

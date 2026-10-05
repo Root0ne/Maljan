@@ -131,7 +131,8 @@ def test_every_id_of_a_list_gets_the_checks_a_technique_gets() -> None:
     found = validate_isr(isr, attck=knowledge, sample={"platform": "windows", "file_type": "pe"})
 
     asked = [v for v in found if v.code == CLAIM_DOES_NOT_DESCRIBE_CODE]
-    assert [(v.subject, v.path.rsplit(".", 1)[-1]) for v in asked] == [("T1003", "claims[1]")]
+    # Named after the one block the analyst wrote, and the id of it asked about.
+    assert [(v.subject, v.path) for v in asked] == [("T1003", "static.claims[0].T1003")]
 
 
 def test_a_split_claim_is_counted_once_against_the_claims_begun() -> None:

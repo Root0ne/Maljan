@@ -511,16 +511,27 @@ def validate_isr(
     claims = list(getattr(isr, "claims", None) or [])
     agent = str(getattr(isr, "agent_id", "") or "")
     scope = expected_technique_scope(sample)
+    # The block each claim was read from: a block whose TECHNIQUE line listed
+    # several ids is one claim per id, and the analyst wrote one block.
+    blocks = claim_block_indexes(claims)
+    block_sizes = {block: blocks.count(block) for block in set(blocks)}
 
     for index, claim in enumerate(claims):
-        path = f"{agent}.claims[{index}]" if agent else f"claims[{index}]"
+        block = blocks[index]
+        block_path = f"{agent}.claims[{block}]" if agent else f"claims[{block}]"
+        listed = block_sizes[block] > 1
+        claim_tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
+        # One id of a list is named after its block, so two of its ids asked
+        # the same question are two findings.
+        path = f"{block_path}.{claim_tid}" if listed and claim_tid else block_path
+        first_of_block = index == 0 or blocks[index - 1] != block
 
         confidence: Any = getattr(claim, "confidence", None)
         try:
             numeric: float | None = float(confidence)
         except (TypeError, ValueError):
             numeric = None
-        if numeric is None or not (0.0 <= numeric <= 1.0):
+        if first_of_block and (numeric is None or not (0.0 <= numeric <= 1.0)):
             violations.append(
                 Violation(
                     code="isr.confidence_range",
@@ -528,12 +539,12 @@ def validate_isr(
                         f"CONFIDENCE is {safe_finding_value(confidence)!r}; it must be a number "
                         "between 0.0 and 1.0."
                     ),
-                    path=path,
+                    path=block_path,
                 )
             )
 
         evidence = str(getattr(claim, "evidence_ref", "") or "").strip()
-        if not evidence:
+        if first_of_block and not evidence:
             violations.append(
                 Violation(
                     code="isr.empty_evidence",
@@ -541,7 +552,7 @@ def validate_isr(
                         "the claim cites no evidence; give the concrete artifact it "
                         "rests on, or drop the claim."
                     ),
-                    path=path,
+                    path=block_path,
                 )
             )
 
@@ -571,7 +582,7 @@ def validate_isr(
         if not tid:
             continue
         if attck is None:
-            absence = absence_claim_violation(claim, tid, None, path=path)
+            absence = absence_claim_violation(claim, tid, None, path=path, listed=listed)
             if absence is not None:
                 violations.append(absence)
             continue
@@ -600,7 +611,7 @@ def validate_isr(
         # that is the one question its id is asked: where the id sits in the
         # catalogue is beside the point of a claim that says it is not there.
         # The index's ranking is still written on the claim, as on every claim.
-        absence = absence_claim_violation(claim, tid, attck, path=path)
+        absence = absence_claim_violation(claim, tid, attck, path=path, listed=listed)
         if absence is not None:
             violations.append(absence)
         else:
@@ -615,7 +626,9 @@ def validate_isr(
                 # asked about the platform; one whose sentence never names its
                 # technique is asked this one. The weak-alignment challenge,
                 # when it is on, may still be asked of the same claim.
-                undescribed = claim_does_not_describe_violation(claim, tid, attck, path=path)
+                undescribed = claim_does_not_describe_violation(
+                    claim, tid, attck, path=path, listed=listed
+                )
                 if undescribed is not None:
                     violations.append(undescribed)
         weak = _weak_alignment(
@@ -902,7 +915,7 @@ def states_absence(text: str, pattern: re.Pattern[str] | None) -> bool:
 
 
 def absence_claim_violation(
-    claim: Any, technique_id: str, attck: Any = None, *, path: str = ""
+    claim: Any, technique_id: str, attck: Any = None, *, path: str = "", listed: bool = False
 ) -> Violation | None:
     """The question for a claim that states a behaviour is absent and carries a technique id.
 
@@ -919,13 +932,20 @@ def absence_claim_violation(
     if not states_absence(text, behaviour_pattern(technique_id, attck)):
         return None
     tid = safe_finding_value(technique_id)
+    # On a claim whose TECHNIQUE line lists other ids, NONE would take them
+    # with it: the one id asked about is what comes off the line.
+    absent = (
+        f"remove {tid} from this claim's TECHNIQUE line"
+        if listed
+        else "write TECHNIQUE: NONE on this claim"
+    )
     return Violation(
         code=ABSENCE_CLAIM_CODE,
         message=(
             f"CLAIM {safe_finding_value(text)!r} reads as saying the behaviour is absent, "
             f"and carries TECHNIQUE {tid}. A technique on a claim is read as something the "
             f"sample does, so {tid} is published as a finding of this run. If the behaviour "
-            "is absent, write TECHNIQUE: NONE on this claim; if the sample does do it, keep "
+            f"is absent, {absent}; if the sample does do it, keep "
             "the technique and say what the sample does."
         ),
         path=path,
@@ -1027,7 +1047,7 @@ def _name_terms(technique_id: str, attck: Any) -> tuple[str, set[str]]:
 
 
 def claim_does_not_describe_violation(
-    claim: Any, technique_id: str, attck: Any, *, path: str = ""
+    claim: Any, technique_id: str, attck: Any, *, path: str = "", listed: bool = False
 ) -> Violation | None:
     """The question for a claim whose sentence shares no term with the technique it names.
 
@@ -1054,6 +1074,12 @@ def claim_does_not_describe_violation(
     if any(_stem(word) in stems for word in re.findall(r"[A-Za-z0-9]+", text) if len(word) >= 3):
         return None
     tid = safe_finding_value(technique_id)
+    otherwise = (
+        f"give that behaviour's technique in its place or remove {tid} from this claim's "
+        "TECHNIQUE line"
+        if listed
+        else "give that behaviour's technique or write TECHNIQUE: NONE"
+    )
     return Violation(
         code=CLAIM_DOES_NOT_DESCRIBE_CODE,
         message=(
@@ -1062,8 +1088,7 @@ def claim_does_not_describe_violation(
             f"technique: not its name, its tactic or the words that describe it. A technique "
             f"on a claim is published as something the sample does. Keep {tid} only if the "
             f"sample does it, and then say in the claim what it does that is {tid}; if the "
-            "claim describes another behaviour, give that behaviour's technique or write "
-            "TECHNIQUE: NONE."
+            f"claim describes another behaviour, {otherwise}."
         ),
         path=path,
         subject=str(technique_id).strip().upper(),
@@ -1625,17 +1650,64 @@ def mark_invalid_technique_ids(isr: Any, violations: Iterable[Violation]) -> Non
     sent leaves the claim unnoted (see ``BaseAnalyst._validate_isr``).
     """
     claims = list(getattr(isr, "claims", None) or [])
+    blocks = claim_block_indexes(claims)
     for violation in violations:
         if violation.code not in (VALIDITY_CODE, ABSENCE_CLAIM_CODE):
             continue
-        index = _claim_index(violation.path)
-        if index is None or index >= len(claims):
+        block = _claim_index(violation.path)
+        if block is None:
             continue
-        claim = claims[index]
-        if violation.code == VALIDITY_CODE and hasattr(claim, "technique_id_valid"):
-            claim.technique_id_valid = False
-        if violation.code == ABSENCE_CLAIM_CODE and hasattr(claim, "kept_after_absence_question"):
-            claim.kept_after_absence_question = True
+        # The path names the block the analyst wrote; the finding is about the
+        # claim of that block that carries its subject.
+        subject = str(violation.subject or "").strip().upper()
+        for claim, at in zip(claims, blocks, strict=True):
+            if at != block:
+                continue
+            tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
+            if subject and tid != subject:
+                continue
+            if violation.code == VALIDITY_CODE and hasattr(claim, "technique_id_valid"):
+                claim.technique_id_valid = False
+            if violation.code == ABSENCE_CLAIM_CODE and hasattr(
+                claim, "kept_after_absence_question"
+            ):
+                claim.kept_after_absence_question = True
+
+
+def claim_block_indexes(claims: Sequence[Any]) -> list[int]:
+    """Per claim, the index of the claim block the analyst wrote it in.
+
+    A block whose TECHNIQUE line listed several ids is read as one claim per
+    id, each with the block's sentence, evidence and confidence, one after
+    another (``base_agent.read_claim_blocks``). Such a run of claims, each
+    with a different id, is one block; every other claim is its own.
+    """
+    out: list[int] = []
+    block = -1
+    previous: tuple[Any, ...] | None = None
+    ids: set[str] = set()
+    for claim in claims:
+        written = (
+            str(getattr(claim, "claim", "") or ""),
+            str(getattr(claim, "evidence_ref", "") or ""),
+            getattr(claim, "confidence", None),
+            getattr(claim, "technique_line", None),
+        )
+        tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
+        if tid and ids and written == previous and tid not in ids:
+            ids.add(tid)
+        else:
+            block += 1
+            previous = written
+            ids = {tid} if tid else set()
+        out.append(block)
+    return out
+
+
+def count_claim_blocks(claims: Sequence[Any]) -> int:
+    """How many claim blocks the analyst wrote, however many ids each one listed."""
+    indexes = claim_block_indexes(claims)
+    return indexes[-1] + 1 if indexes else 0
 
 
 def _claim_index(path: str) -> int | None:
