@@ -1898,8 +1898,10 @@ class MarkdownRenderer:
                     lines.append(
                         _item(
                             f"{row.get('agent')}, round {row.get('round')}: "
-                            f"{row.get('values')} values from {row.get('claims')} earlier "
-                            "claims are no longer stated"
+                            f"{row.get('values')} value{'' if row.get('values') == 1 else 's'} "
+                            f"from {row.get('claims')} earlier "
+                            f"claim{'' if row.get('claims') == 1 else 's'} "
+                            f"{'is' if row.get('values') == 1 else 'are'} no longer stated"
                         )
                     )
             for sentence in negotiation.get("not_blocking") or []:
