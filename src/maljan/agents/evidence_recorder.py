@@ -40,6 +40,8 @@ from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, build_entry
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
+    from maljan.agents.ledger_answers import LedgerAnswers
+
 
 # The servers whose ``resolve_api_hashes`` is this platform's own: the triage
 # pack (recorded as ``pipeline``) and the analysis server.
@@ -742,6 +744,17 @@ def served_repeat_notice(
     )
 
 
+def ledger_repeat_notice(
+    tool: str, entry_id: str, narrowing: Sequence[str] = (), *, last_warning: bool = False
+) -> str:
+    """What a call is told when the ledger already answered the same ask in this loop."""
+    return (
+        f"{tool} was not run: this conversation was already given the answer recorded in "
+        f"[{entry_id}] for this ask. Do not ask for it again; "
+        f"{_do_something_else(tool, narrowing)}{_ENDING_SENTENCE if last_warning else ''}"
+    )
+
+
 # The question a call is answered with when an argument's value is the name of
 # its own parameter. A static analyst sent ``strings`` the pattern
 # ``"\"pattern\""`` twice — the parameter's name, quoted — which searched for
@@ -789,14 +802,17 @@ def record_tools(
     repairs: ArgumentRepairs | None = None,
     context_budget: Any | None = None,
     on_question: Callable[[str], None] | None = None,
+    ledger: LedgerAnswers | None = None,
 ) -> list[BaseTool]:
     """Every tool, each writing its call to ``recorder`` and stamping the id.
 
     ``on_question`` is told the code of every question a call is answered with
     instead of being run, so the run summary counts what the model was asked.
+    ``ledger`` answers a listing or a decompile the ledger already holds
+    (``agents.ledger_answers``), after the repeat guard has had its say.
     """
     return [
-        _record_tool(tool, recorder, repeats, repairs, context_budget, on_question)
+        _record_tool(tool, recorder, repeats, repairs, context_budget, on_question, ledger)
         for tool in tools
     ]
 
@@ -808,6 +824,7 @@ def _record_tool(
     repairs: ArgumentRepairs | None = None,
     context_budget: Any | None = None,
     on_question: Callable[[str], None] | None = None,
+    ledger: LedgerAnswers | None = None,
 ) -> Any:
     """One tool, rebuilt so its result is recorded and stamped.
 
@@ -927,6 +944,36 @@ def _record_tool(
             narrowing,
             last_warning=repeats.warning_of_the_end(),
             failed=recorder.entry_failed(first) or repeats.seeded_failure(first),
+        )
+
+    def _from_the_ledger(kwargs: dict[str, Any]) -> str | None:
+        """The ledger's answer for a listing or a decompile it already holds, if it does.
+
+        Not run and not written to the ledger, like a refused repeat. A first
+        answer is the recorded text and the sentence saying why; asking for
+        the same again after it is a repeat, counted, and told in one line.
+        """
+        if ledger is None:
+            return None
+        found = ledger.answer(name, server, kwargs)
+        if found is None:
+            return None
+        if not found.repeat:
+            logger.info(
+                "%s: %s answered from %s, not run (%s asked again).",
+                recorder.agent,
+                name,
+                found.entry_id,
+                found.kind,
+            )
+            return found.text
+        if repeats is not None:
+            repeats.note_repeat()
+        return ledger_repeat_notice(
+            name,
+            found.entry_id,
+            narrowing,
+            last_warning=repeats.warning_of_the_end() if repeats is not None else False,
         )
 
     def _note(kwargs: dict[str, Any], entry_id: str) -> None:
@@ -1078,6 +1125,9 @@ def _record_tool(
             answered = _already_answered(kwargs)
             if answered is not None:
                 return answered
+            answered = _from_the_ledger(kwargs)
+            if answered is not None:
+                return answered
             recorder.call_started(tool=name, args=kwargs, server=server)
             # Two clocks: the wall clock says when the call happened and
             # correlates with a log line, the monotonic one measures how long
@@ -1103,6 +1153,9 @@ def _record_tool(
             if question is not None:
                 return question
             answered = _already_answered(kwargs)
+            if answered is not None:
+                return answered
+            answered = _from_the_ledger(kwargs)
             if answered is not None:
                 return answered
             recorder.call_started(tool=name, args=kwargs, server=server)
