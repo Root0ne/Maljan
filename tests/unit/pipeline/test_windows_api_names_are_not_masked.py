@@ -53,6 +53,13 @@ def _dotted_forms(key: str) -> list[str]:
     return [*forms, f"kernel32.dll!{key}", f"{key}!{CATALOGUE_NAME}"]
 
 
+def _published(row: str) -> str:
+    """A finding row as an event carries it: through the publisher's scrub."""
+    from app.worker.analysis_worker import scrubbed
+
+    return str(scrubbed({"message": row})["message"])
+
+
 def _fragment_of(key: str, text: str, length: int = 8) -> bool:
     """Whether any run of ``length`` characters of ``key`` is in ``text``."""
     return any(key[at : at + length] in text for at in range(len(key) - length + 1))
@@ -127,7 +134,7 @@ class TestTheCatalogue:
         for text, said in cases.items():
             assert ev.scrub(text) == said, text
             # A finding row is report text: the event that carries it is scrubbed.
-            assert ev.safe_finding_value(text) == text, text
+            assert _published(ev.safe_finding_value(text)) == said, text
 
     def test_a_digest_after_a_directory_is_still_written_as_it_is(self) -> None:
         digest = hashlib.sha256(b"synthetic").hexdigest()
@@ -136,7 +143,12 @@ class TestTheCatalogue:
     def test_no_fragment_of_a_key_survives_beside_dotted_text(self) -> None:
         for shape in _every_key_shape():
             for joined in _dotted_forms(shape):
-                for scrubbed in (ev.scrub(joined), ev.scrub_keeping_layout(joined)):
+                for scrubbed in (
+                    ev.scrub(joined),
+                    ev.scrub_keeping_layout(joined),
+                    # A finding row is report text; the event carrying it is scrubbed.
+                    _published(ev.safe_finding_value(joined)),
+                ):
                     assert not _fragment_of(shape, scrubbed), (joined, scrubbed)
 
     def test_no_fragment_of_a_random_base64_key_survives(self) -> None:
@@ -160,7 +172,12 @@ class TestTheCatalogue:
                 f"kernel32.dll!{shape}",
                 f"{shape}!{CATALOGUE_NAME}",
             ):
-                for scrubbed in (ev.scrub(joined), ev.scrub_keeping_layout(joined)):
+                for scrubbed in (
+                    ev.scrub(joined),
+                    ev.scrub_keeping_layout(joined),
+                    # A finding row is report text; the event carrying it is scrubbed.
+                    _published(ev.safe_finding_value(joined)),
+                ):
                     assert shape not in scrubbed, joined
 
     def test_a_name_the_catalogue_does_not_hold_is_still_read_by_shape(self) -> None:

@@ -1,17 +1,18 @@
-"""The event and transcript scrub never reaches report text, and reads words as words.
+"""The event and transcript scrub never reaches report text; in events a family name is a name.
 
 A local run's report printed "T1134 Access Token ***" in its validation
 findings, and its events masked a family name: the finding rows that the
-report prints went through the event scrub, the scheme rule took the word
-after "Token" for a secret, and the length rule took a family name with a
-capitalised piece inside it for a key.
+report prints went through the event scrub, and the length rule took a family
+name with a capitalised compound piece for a key.
 
-Masking now applies only to events and the transcript, which the publisher
-scrubs where the wire begins. A finding row keeps the words of the evidence
-and of the catalogue it quotes; only the operator's own configured values are
-kept out of it by value. In events, a capitalised word after "Token" and words
-joined by separators, a capitalised compound among them, are words. Every
-credential shape is still masked in events, after "Token" too.
+Masking applies only to events and the transcript, which the publisher scrubs
+where the wire begins. A finding row keeps the words of the evidence and of
+the catalogue it quotes; only the operator's own configured values are kept
+out of it by value. In events the label rule is unchanged: whatever follows
+"Token", "Bearer" or "Basic" is masked, so "Access Token Manipulation" reads
+"Access Token ***" there, as before. A family name of slash-joined words with
+a capitalised compound among them is kept, except right after a credential
+label. Every credential shape is still masked in events, after every label.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from collections.abc import Iterator
 import pytest
 
 from maljan.pipeline import events as ev
-from maljan.pipeline.events import safe_finding_value, scrub
+from maljan.pipeline.events import safe_finding_value, scrub, scrub_keeping_layout
 from maljan.pipeline.validation import ValidationTally, Violation
 from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
 from maljan.reporting.renderers.markdown import MarkdownRenderer
@@ -41,37 +42,55 @@ def _no_configured_values() -> Iterator[None]:
     ev.forget_secret_values()
 
 
-class TestTheEventScrubReadsWordsAsWords:
-    def test_a_capitalised_word_after_token_is_kept(self) -> None:
-        assert scrub(f"carries TECHNIQUE {TECHNIQUE}, and") == f"carries TECHNIQUE {TECHNIQUE}, and"
+LABELS = ("Access Token ", "Bearer ", "Authorization: ", "api_key=", "password=", "token ")
 
+
+class TestTheEventScrubReadsAFamilyNameAsAName:
     def test_a_family_name_with_a_compound_piece_is_kept(self) -> None:
         assert len(FAMILY) >= 24
         assert scrub(f"associated with the {FAMILY} family") == (
             f"associated with the {FAMILY} family"
         )
+        assert scrub_keeping_layout(f"Claim 1: the {FAMILY} family") == (
+            f"Claim 1: the {FAMILY} family"
+        )
 
-    def test_every_key_shape_is_still_masked_after_token(self) -> None:
-        for key in _every_key_shape():
-            assert key not in scrub(f"Access Token {key} here"), key
+    def test_a_family_shaped_value_after_a_credential_label_is_masked(self) -> None:
+        for label in LABELS:
+            assert FAMILY not in scrub(f"{label}{FAMILY}"), label
 
-    def test_a_lowercase_password_after_token_is_still_masked(self) -> None:
-        for length in (4, 8, 12, 30):
-            secret = password(length)
-            assert secret not in scrub(f"token {secret}"), secret
-
-    def test_bearer_and_basic_still_mask_any_word(self) -> None:
+    def test_the_label_rule_is_unchanged(self) -> None:
+        assert scrub(f"carries TECHNIQUE {TECHNIQUE}, and") == (
+            "carries TECHNIQUE T1134 Access Token ***, and"
+        )
         assert scrub("Bearer Manipulation") == "Bearer ***"
         assert scrub("Basic Abcdefgh") == "Basic ***"
+
+    def test_every_key_shape_is_masked_after_every_label(self) -> None:
+        for key in _every_key_shape():
+            for label in LABELS:
+                for text in (f"{label}{key}", f"the header {label}{key} was sent"):
+                    assert key not in scrub(text), (label, key)
+                    assert key not in scrub_keeping_layout(text), (label, key)
+
+    def test_a_lowercase_password_after_a_label_is_still_masked(self) -> None:
+        for length in (4, 8, 12, 30):
+            secret = password(length)
+            for label in ("token ", "Bearer ", "Basic "):
+                assert secret not in scrub(f"{label}{secret}"), (label, secret)
 
     def test_every_key_shape_is_still_masked_alone_and_in_a_sentence(self) -> None:
         for key in _every_key_shape():
             assert key not in scrub(key), key
             assert key not in scrub(f"the analyst quoted {key} as the key"), key
 
-    def test_a_mixed_case_run_with_digits_joined_by_slashes_is_still_a_key(self) -> None:
-        key = "Ab3dEf9h/Kl2nOp4r/St6vWx8z"
-        assert key not in scrub(f"value {key}")
+    def test_runs_that_are_not_a_family_name_are_still_keys(self) -> None:
+        for key in (
+            "Ab3dEf9h/Kl2nOp4r/St6vWx8z",
+            "AbCdEfGhIjKl/MnOpQrStUvWx",
+            "Rivulet/NorthWindAlphaBeta/Calder",
+        ):
+            assert key not in scrub(f"value {key}"), key
 
 
 class TestAFindingRowIsNotMasked:

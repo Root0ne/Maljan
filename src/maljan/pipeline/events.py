@@ -565,14 +565,21 @@ _MIME_TYPE = re.compile(
 # capital in front — and each shorter than the length floor, so that a piece
 # which would be a key on its own keeps the whole run a key. A key's body of
 # random letters mixes its case or runs past the floor; a vendor prefix is
-# asked before this and wins. A capitalised compound of two or three words, as
-# a family or a product name is written (``NorthWind``, ``IcedId``), is a word
-# too: a first word of three letters or more, then one or two more, each a
-# capital and small letters. A key's random case does not keep that pattern,
-# and one alternating letter by letter (``AbCdEf…``) has more words than three.
-_WORD_PIECE = re.compile(
-    r"\A(?:[a-z]{1,23}|[A-Z]{1,23}|[A-Z][a-z]{1,22}"
-    r"|(?=[A-Za-z]{1,23}\Z)[A-Z][a-z]{2,}(?:[A-Z][a-z]+){1,2})\Z"
+# asked before this and wins.
+_WORD_PIECE = re.compile(r"\A(?:[a-z]{1,23}|[A-Z]{1,23}|[A-Z][a-z]{1,22})\Z")
+# A capitalised compound of two or three words, as a family or a product name
+# is written (``NorthWind``): a first word of three letters or more, then one
+# or two more, each a capital and small letters. A key's random case does not
+# keep that pattern, and one alternating letter by letter (``AbCdEf…``) has
+# more words than three. Read only by :func:`_is_a_family_name`, and never
+# for a run that follows a credential label.
+_COMPOUND_PIECE = re.compile(r"\A(?=[A-Za-z]{1,23}\Z)[A-Z][a-z]{2,}(?:[A-Z][a-z]+){1,2}\Z")
+# A credential label right before a run: an argument word a credential is
+# named by (``_SECRET_ARGUMENT_WORDS``, "Access Token" among them by its last
+# word), an authorization scheme, then an optional ``:`` or ``=`` and quote.
+_LABEL_BEFORE_RE = re.compile(
+    r"(?i)(?:api[_-]?key|auth\w*|bearer|basic|cookie|credentials?|passphrase|passwd|password"
+    r"|private[_-]?key|pwd|secrets?|session\w*|tokens?)[\s\"']*[:=]?[\s\"']*\Z"
 )
 # The identifier this system issues for a job, a report, a sample and a
 # message. Exempt for the reason a digest is: it is on the job, on the report
@@ -999,6 +1006,22 @@ def _shorten_path(found: re.Match[str]) -> str:
     return segments[-1]
 
 
+def _is_a_family_name(run: str) -> bool:
+    """Whether ``run`` is a family name of words joined by ``/``, one a capitalised compound.
+
+    ``Rivulet/NorthWind/Calder``: two or more pieces, each a word
+    (``_WORD_PIECE``) or a capitalised compound (``_COMPOUND_PIECE``), at
+    least one a compound and none with a digit. The caller asks it only where
+    no credential label stands before the run.
+    """
+    pieces = run.split("/")
+    return (
+        len(pieces) >= 2
+        and all(_WORD_PIECE.match(piece) or _COMPOUND_PIECE.match(piece) for piece in pieces)
+        and any(_COMPOUND_PIECE.match(piece) for piece in pieces)
+    )
+
+
 def _hide_credentials(found: re.Match[str]) -> str:
     """One value run, with every key in it masked together with the base64 around it.
 
@@ -1024,6 +1047,10 @@ def _hide_credentials(found: re.Match[str]) -> str:
     """
     value = found.group(0)
     if _names_only(value):
+        return value
+    if _is_a_family_name(value) and not _LABEL_BEFORE_RE.search(
+        found.string[max(0, found.start() - 40) : found.start()]
+    ):
         return value
     if _looks_like_a_credential(value, whole=True):
         return _REDACTED
@@ -1231,30 +1258,10 @@ def _scrub_line(line: str) -> str:
     return line
 
 
-# A capitalised word, with the sentence's punctuation after it: what follows
-# "Token" in a name such as "Access Token Manipulation", and no credential
-# shape (``tests/credential_shapes.py`` builds none that is a capital and
-# small letters alone).
-_CAPITALISED_WORD = re.compile(r"[A-Z][a-z]+[.:!?]?")
-
-
-def _scheme_and_secret(found: re.Match[str]) -> str:
-    """An authorization scheme with its secret masked; "Token" before a capitalised word kept.
-
-    "Bearer" and "Basic" mask whatever follows them. "Token" is also a word
-    of names a report quotes — a technique's, a product's — and a capitalised
-    word after it is that name going on, not a secret.
-    """
-    scheme, secret = found.group(1), found.group(0)[len(found.group(1)) :].strip()
-    if scheme.lower() == "token" and _CAPITALISED_WORD.fullmatch(secret):
-        return found.group(0)
-    return f"{scheme} {_REDACTED}"
-
-
 def _scrub_once(line: str) -> str:
     """The configured secrets by value, then the four passes, once."""
     line = _mask_configured_values(line)
-    line = _SCHEME_AND_SECRET.sub(_scheme_and_secret, line)
+    line = _SCHEME_AND_SECRET.sub(lambda m: f"{m.group(1)} {_REDACTED}", line)
     line = _URL_RUN.sub(_shorten_url, line)
     line = _VALUE_RUN.sub(_hide_credentials, line)
     return _PATH_RUN.sub(_shorten_path, line)
