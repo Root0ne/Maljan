@@ -462,6 +462,13 @@ def _message_of(violation: Violation | None) -> str:
     return violation.message
 
 
+def _every_message(found: list[Any]) -> str:
+    """The messages of questions every one of which must be asked; one not asked fails here."""
+    missing = [index for index, violation in enumerate(found) if violation is None]
+    assert not missing, f"the questions at {missing} were not asked of their synthetic claims"
+    return " ".join(violation.message for violation in found)
+
+
 PROMPTS: dict[str, str] = {
     "example team document prompts": _TEAM_DOCUMENT_PROMPTS,
     "narrative contract": EXPECTED_OBJECT,
@@ -510,9 +517,8 @@ PROMPTS: dict[str, str] = {
         ]
         if v is not None
     ),
-    "the absence and describe questions on one id of a technique list": " ".join(
-        v.message
-        for v in [
+    "the absence and describe questions on one id of a technique list": _every_message(
+        [
             absence_claim_violation(
                 ClaimEvidence(
                     claim="The file holds no persistence mechanism.",
@@ -535,7 +541,6 @@ PROMPTS: dict[str, str] = {
                 listed=True,
             ),
         ]
-        if v is not None
     ),
     "capability questions for evading analysis and packing": " ".join(
         v.message
