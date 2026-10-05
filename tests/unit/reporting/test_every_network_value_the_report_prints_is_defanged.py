@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from maljan.reporting.models import (
     FileHashes,
     MalwareReport,
@@ -208,3 +210,84 @@ def test_a_draft_rule_s_compile_error_prints_defanged() -> None:
 
     assert "hxxps://relay[.]example[.]net/live/" in line
     assert _live_in(line) == []
+
+
+# What free prose prints as written: words that look dotted and name no host.
+NOT_NETWORK = (
+    "It is an ASP.NET page handler.",
+    "It targets .NET and calls System.IO.File.",
+    "The crate ships src/main.rs and lib.rs.",
+    "FileVersion 10.0.0.1 and ProductVersion 2.1.0.0 are in its resources.",
+    "The build is v1.2.3.4 of the loader.",
+    "It reports version 10.0.0.1 in its banner.",
+    "It drops update_data.dat and setup.exe beside kernel32.dll.",
+)
+# What free prose prints defanged: hosts under a real top-level domain,
+# addresses that are no version, URLs and mailboxes.
+NETWORK = (
+    ("It beacons to relay.example.net daily.", "relay[.]example[.]net"),
+    ("It resolves dl.delivery.mp.microsoft.com first.", "dl[.]delivery[.]mp[.]microsoft[.]com"),
+    ("A fallback host is x.icu.", "x[.]icu"),
+    ("Another is a.ru.", "a[.]ru"),
+    ("It connects to 203.0.113.9 on port 443.", "203[.]0[.]113[.]9"),
+    ("It posts to https://relay.example.net/a.", "hxxps://relay[.]example[.]net/a"),
+    ("Mail goes to op@mail.example.org.", "op[@]mail[.]example[.]org"),
+    ("It names EVIL.COM in capitals.", "EVIL[.]COM"),
+)
+
+
+@pytest.mark.parametrize("sentence", NOT_NETWORK)
+def test_prose_that_names_no_network_value_prints_as_written(sentence: str) -> None:
+    from maljan.reporting.renderers.markdown import _defanged_text
+
+    assert _defanged_text(sentence) == sentence
+
+
+@pytest.mark.parametrize(("sentence", "defanged"), NETWORK)
+def test_prose_that_names_a_network_value_prints_it_defanged(sentence: str, defanged: str) -> None:
+    from maljan.reporting.renderers.markdown import _defanged_text
+
+    assert defanged in _defanged_text(sentence)
+
+
+def test_the_run_s_own_indicator_is_defanged_even_where_it_reads_as_a_file_name() -> None:
+    from maljan.reporting.models import (
+        NetworkDomain,
+        NetworkIOCs,
+        TechnicalAnalysis,
+        TechnicalSubsection,
+    )
+
+    report = _report(
+        network=NetworkIOCs(domains=[NetworkDomain(fqdn="lib.rs", source="sandbox")]),
+        technical_analysis=TechnicalAnalysis(
+            command_and_control=TechnicalSubsection(
+                title="Command and control", body="It beacons to lib.rs every hour."
+            )
+        ),
+    )
+    markdown = MarkdownRenderer().render(report)
+
+    assert "It beacons to lib[.]rs every hour." in markdown
+
+
+def test_a_reference_link_stays_a_link_unless_it_holds_the_run_s_indicator() -> None:
+    from maljan.reporting.renderers.markdown import _Context
+
+    report = _report(network=None)
+    from maljan.reporting.models import NetworkIOCs, NetworkIP
+
+    report.network = NetworkIOCs(ips=[NetworkIP(address="203.0.113.9", source="sandbox")])
+    ctx = _Context(report)
+    file_link = "https://www.virustotal.com/gui/file/" + "a" * 64
+    ip_link = "https://www.virustotal.com/gui/ip-address/203.0.113.9"
+
+    assert ctx.plain(f"report url {file_link}") == f"report url {file_link}"
+    kept = ctx.plain(f"report url {ip_link}")
+    assert "https://" not in kept and "203.0.113.9" not in kept
+
+
+def test_a_digit_before_a_top_level_domain_is_no_host() -> None:
+    from maljan.reporting.renderers.markdown import _defanged_text
+
+    assert _defanged_text('noise "?3e)}3.cz in a string') == 'noise "?3e)}3.cz in a string'

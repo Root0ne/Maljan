@@ -3908,7 +3908,41 @@ def network_values_in(text: str) -> list[tuple[str, str]]:
         value = str(row.get("value") or "").strip().lower().rstrip(".")
         if value and ("domain", value) not in found:
             found.append(("domain", value))
+    # The hosts the sweep's shape rules pass over and its own TLD list still
+    # names: more than four labels ("dl.delivery.mp.microsoft.com"), or a
+    # two-label name of one letter ("x.icu", "a.ru").
+    for match in _LONG_OR_SHORT_HOST_RE.finditer(plain):
+        value = match.group(0).lower().rstrip(".")
+        if ("domain", value) in found or not _host_under_a_known_tld(match.group(0)):
+            continue
+        labels = value.split(".")
+        # A one-letter name is a letter ("x.icu"); a digit there ("3.cz") is
+        # the tail of a version or of noise.
+        short = len(labels) == 2 and (len(labels[0]) < 2 or len(value) < 5)
+        if len(labels) > 4 or (short and labels[0].isalpha()):
+            found.append(("domain", value))
     return found
+
+
+# A dotted name of any number of labels, a one-letter one included.
+_LONG_OR_SHORT_HOST_RE = re.compile(
+    r"(?<![\w.@/-])(?:[A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,24}(?![\w-]|\.[A-Za-z0-9])"
+)
+
+
+def _host_under_a_known_tld(text: str) -> bool:
+    """Whether a dotted name ends in a TLD of the sweep's own list and reads as no file or type."""
+    from maljan.tools.strings import _KNOWN_TLDS, _NAMESPACE_TOKENS, _NON_DOMAIN_SUFFIXES
+
+    lower = text.lower()
+    labels = lower.split(".")
+    if len(labels) < 2 or labels[-1] not in _KNOWN_TLDS or not all(labels):
+        return False
+    if any(lower.endswith(suffix) for suffix in _NON_DOMAIN_SUFFIXES):
+        return False
+    if any(label in _NAMESPACE_TOKENS for label in labels[:-1]) and text[:1].isupper():
+        return False
+    return not any(ch.isupper() for ch in text.split(".")[0][1:])
 
 
 # What a recommendation's check says of a value no row of the IOC table holds.

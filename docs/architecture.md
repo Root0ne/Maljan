@@ -3127,9 +3127,13 @@ is assembled from what the run gathered rather than recomputed beside it:
   every indicator column, the platform's findings (section 13, the verdict,
   the export decisions), a tool failure's error, a draft rule's source line and
   compile error, and model prose and cells beyond the run's own values defang
-  every URL, mailbox, address and host they hold, a host in capitals and an
-  `.onion` name included; a draft rule's body is printed as it compiles, and
-  the references and the configured model endpoint stay links. The JSON report,
+  every URL, mailbox, address and host under a real top-level domain (the
+  string sweep's list; any number of labels, in capitals, `.onion`). A version
+  number ("FileVersion 10.0.0.1"), a .NET name ("ASP.NET") and a two-label
+  name under a TLD that is also a source extension ("lib.rs") print as written
+  unless the run recorded them; a draft rule's body is printed as it compiles;
+  a link to VirusTotal, MalwareBazaar or ATT&CK stays a link unless the run's
+  indicator is in it, and the configured model endpoint stays as written. The JSON report,
   the STIX bundle, MISP and `/reports/{id}/iocs` carry every value live, and
   the indicator section says so under its tables. A §7 string is printed as
   the file's bytes are, and says it is not an observed endpoint.

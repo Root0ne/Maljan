@@ -2575,25 +2575,82 @@ _INLINE_META_NO_PIPE = re.compile(r"([\\`\[\]<>*])")
 
 
 def _defanged_text(text: str) -> str:
-    """``text`` with every URL, mailbox, address and host in it defanged, as the report does."""
+    """``text`` with every network indicator in it defanged, as the report does.
+
+    A URL, a mailbox, a host under a real top-level domain (the string sweep's
+    own list) and an address are defanged. What names no network value prints
+    as written: a version number ("FileVersion 10.0.0.1", "v1.2.3.4"), a .NET
+    name ("ASP.NET"), and a two-label name whose top-level label is also a
+    source file's extension ("lib.rs"). A link to a reference service
+    (``_REFERENCE_HOSTS``) stays a link unless the run's own indicator was
+    already defanged inside it. A value the run itself recorded is defanged
+    before this, by the context's own pass, wherever it stands.
+    """
     from maljan.pipeline.validation import network_values_in
     from maljan.reporting.defang import defang_text
 
-    indicators = [(found.group(0), "url") for found in _URL_IN_TEXT.finditer(text)]
-    indicators += [(found.group(0), "email") for found in _EMAIL_IN_TEXT.finditer(text)]
-    indicators += [(value, kind) for kind, value in network_values_in(text)]
+    kept: dict[str, str] = {}
+
+    def _keep(found: re.Match[str]) -> str:
+        url = found.group(0)
+        host = (urlparse(url).hostname or "").lower() if "://" in url else ""
+        tainted = text[found.end() : found.end() + 3] in ("[.]", "[:]", "[@]")
+        if host not in _REFERENCE_HOSTS or tainted:
+            return url
+        token = f"\x00{len(kept)}\x00"
+        kept[token] = url
+        return token
+
+    written = _URL_IN_TEXT.sub(_keep, text)
+    indicators = [(found.group(0), "url") for found in _URL_IN_TEXT.finditer(written)]
+    indicators += [(found.group(0), "email") for found in _EMAIL_IN_TEXT.finditer(written)]
+    indicators += [
+        (value, kind)
+        for kind, value in network_values_in(written)
+        if not _names_no_network_value(written, kind, value)
+    ]
     # A host written in capitals ("EVIL.COM") is read as the host it spells;
     # the string sweep's reader takes an inner capital for a type name.
-    for found in _SHOUTED_HOST.finditer(text):
-        indicators += [(value, kind) for kind, value in network_values_in(found.group(0).lower())]
+    for found in _SHOUTED_HOST.finditer(written):
+        if _DOTNET_NAME.fullmatch(found.group(0)):
+            continue
+        indicators += [
+            (value, kind)
+            for kind, value in network_values_in(found.group(0).lower())
+            if not _names_no_network_value(written, kind, value)
+        ]
     # An onion service's name, whatever its length.
-    indicators += [(found.group(0), "domain") for found in _ONION_HOST.finditer(text)]
-    return defang_text(text, indicators)
+    indicators += [(found.group(0), "domain") for found in _ONION_HOST.finditer(written)]
+    written = defang_text(written, indicators)
+    for token, url in kept.items():
+        written = written.replace(token, url)
+    return written
 
 
+# The reference services a report links to: the sample's own lookups and the
+# ATT&CK catalogue. A link to one carries no indicator of the sample's, unless
+# one is in its path.
+_REFERENCE_HOSTS = frozenset({"www.virustotal.com", "bazaar.abuse.ch", "attack.mitre.org"})
 # A dotted name written wholly in capitals, and a name under ``.onion``.
 _SHOUTED_HOST = re.compile(r"(?<![\w.-])[A-Z0-9-]+(?:\.[A-Z0-9-]+)+(?![\w-])")
 _ONION_HOST = re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+onion(?![\w-])")
+# A .NET technology's name, which ends in a real top-level domain.
+_DOTNET_NAME = re.compile(r"(?i)(?:" + _PIPE.join(("ASP", "ADO", "VB")) + r")\.NET")
+# The top-level domains that are also source files' extensions: a two-label
+# name under one ("lib.rs", "notes.md") is read as a file in free prose.
+_FILE_EXTENSION_TLDS = frozenset({"rs", "md", "pl", "sh", "ps", "ml"})
+# What a dotted quad of a version number follows: "FileVersion", "version",
+# "ProductVersion:" or a "v" written against it.
+_VERSION_BEFORE = re.compile(r"(?i)(?:version\s*[:=]?\s*" + _PIPE + r"\bv)$")
+
+
+def _names_no_network_value(text: str, kind: str, value: str) -> bool:
+    """Whether a value the host reader found is a version number or a file name in ``text``."""
+    if kind == "ip":
+        places = [m.start() for m in re.finditer(re.escape(value), text)]
+        return bool(places) and all(_VERSION_BEFORE.search(text[:at]) for at in places)
+    labels = value.lower().split(".")
+    return len(labels) == 2 and labels[-1] in _FILE_EXTENSION_TLDS
 
 
 def _inline_safe(text: Any, *, pipes: bool = True) -> str:
