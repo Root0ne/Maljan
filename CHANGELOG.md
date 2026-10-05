@@ -2394,6 +2394,11 @@ change landed on `main`.
   flat cost; the ended answer's question says it was ended, its in-call pace is
   recorded, and the spend ceiling is charged a stated estimate of its usage.
   The reader keeps no text: a claim is a 16-byte hash, and no line is buffered.
+  A block still open is read as kept as it arrives and cut back only if it
+  resolves as removed; a tag's closing is read only after its own `>`.
+- **A streamed answer is joined as it arrives, holding no chunk** (llama.cpp,
+  DeepSeek, Ollama): 400,000 chunks join in about 11 s and 12 MB, where adding
+  the chunks took about 141 s and 990 MB; the joined answer is unchanged.
 - **A fenced JSON block nested past the parser's depth is kept as text** by the
   tool-call strip, as invalid JSON is, rather than raising and losing the answer.
 - **A connection that drops while an answer streams is an `APIConnectionError`**

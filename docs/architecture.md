@@ -1498,7 +1498,9 @@ at each line's end and ends the call once the margin is crossed
 to there, which the check then asks about as above. The reader
 (`agents.repeat_watch`) gives the check's verdict for every prefix and keeps no
 text: a claim is kept as a 16-byte hash and a line is read by automata built
-from the heading patterns, so its memory grows only with the distinct claims.
+from the heading patterns, so its memory grows only with the distinct claims. A
+tool-call tag or a JSON fence still open is read as kept, as the check keeps it,
+and cut back to the reading before it only if it resolves as removed.
 
 Two more questions are asked of an analyst's answer in the same validation
 turn, each once, and what the analyst answers stands.

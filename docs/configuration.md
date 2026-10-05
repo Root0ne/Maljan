@@ -1149,7 +1149,8 @@ and its numbers.
 
 Pieces are seen only where the answer is streamed. A llama.cpp server's answer
 is read as a stream for this reason, with its usage on the closing chunk and
-`langchain-openai`'s own 120 s gap limit off. The chunks are joined into the
+`langchain-openai`'s own 120 s gap limit off. The chunks are joined, as they
+arrive and holding none of them, into the
 answer the server would have sent whole: the same text, finish reason,
 `timings` and usage (the last the stream sent, wherever it came, since
 ik_llama.cpp repeats a running total on every chunk), and tool calls read as
