@@ -1597,6 +1597,40 @@ once more, as any retry after a failure is. A replayed conversation keeps the
 seeds. A run's second chunk re-ran ten
 decompiles the first had done.
 
+An analyst that has read a function sees its function map in the run-state
+block on every turn (`agents.function_map`). The platform keeps it from facts
+only, and the model does not write to it. It lists:
+
+- every function the agent's own calls decompiled, or listed (a disassembly of
+  a whole function, or one at a known function's address), with the entries
+  that hold the listing;
+- what the analysis server tied to the function: names its hashes resolve to,
+  texts it refers to and the call sites they are passed to, strings FLOSS
+  decoded in it. A place after a function start is not counted inside it;
+- the first sentence of the first of the agent's parsed claims that names it.
+
+A coverage line counts the functions visited against the functions reaching
+artefacts, and one line names those not yet visited. The sources are the
+agent's entries of the job, copied before the byte budget trims them, and the
+pack's artefacts, briefed by the node and handed on to an ask.
+
+A repeat the ledger already answers is answered from it (`agents.ledger_answers`),
+after the repeat guard has had its say. It is not run and nothing is written:
+
+- A list or search tool asked again for the same scope is answered from the
+  entry. So is a wider scope, when the earlier answer held fewer items than it
+  asked for. An answer with no stated limit is not taken as whole.
+- A function decompiled again on the same server with no new argument is
+  answered with its recorded listing. This covers another spelling of the
+  address, and one function of an earlier batch.
+
+The answer names the entry and says why. The first decompile answered this way
+in a loop says once how to move on: run a decoding tool the loop has, or name
+the decoder in a claim; state the constraint the code imposes; or give the
+answer. Asking for the same again is a counted repeat. The loop's budget record
+counts these answers under `ledger_answers`. The report's "Functions examined"
+section carries the map's coverage in one line.
+
 An analyst whose loop ended with nothing at all — no claim and no prose — is
 given a second loop over the same material only when what is left of its
 stage time, its loop budget less what the node has spent, holds one turn and a
