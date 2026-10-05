@@ -74,6 +74,18 @@ SCAFFOLD = [
     "<tool_call",
     "a <function_call x>y</function_call> b",
     "<tool_response>",
+    # A tag whose own opening holds its closing tag before its ``>``, a tag
+    # left open that a later ``>`` resolves, and a stray closing tag.
+    '<tool_call\n{"name": "x"}\n</tool_call>',
+    "a <tool_call name=x",
+    "so a > b here",
+    "</tool_call>",
+    "<TOOL_cAll",
+    # Lines that close a fence opened earlier, as a tool call or as evidence.
+    "}\n```",
+    '"}}\n```',
+    "} ``",
+    "`",
 ]
 FENCES = [
     '```json\n{"name": "strings", "arguments": {"path": "x"}}\n```',
@@ -373,3 +385,46 @@ def test_a_fence_nested_past_the_parser_s_depth_agrees_and_is_kept() -> None:
     fence = '```json\n{"name": "x", "arguments": ' + "[" * depth + "]" * depth + "}\n```\n"
     text = "CLAIM: it reads a key\n" + fence + "CLAIM: it reads a key\n" * 3
     _agree_in_pieces_of(text, 4096, None)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '<tool_call\n{"name": "x"}\n</tool_call>\nCLAIM: a\n' * 3,
+        '<tool_call\n{"name": "x"}\n</tool_call>\nCLAIM: a\n</tool_call>\n' + "CLAIM: b\n" * 3,
+    ],
+    ids=["never-closed", "closed-later"],
+)
+def test_a_tag_holding_its_closing_tag_before_its_bracket_agrees(text: str) -> None:
+    """The closing is read only after the opening tag's ``>``, as the check reads it."""
+    _agree_in_pieces_of(text, 1, None)
+
+
+def _seconds_after(opening: str, chars: int) -> float:
+    """CPU for an answer that opens ``opening`` and never resolves it, read in 4-char pieces."""
+    claim = "CLAIM: the file carries configuration string number {n}.\nEVIDENCE: [ev_0001]\n"
+    parts, size, n = [opening], len(opening), 0
+    while size < chars:
+        block = claim.format(n=n)
+        parts.append(block)
+        size += len(block)
+        n += 1
+    text = "".join(parts)
+    reader = ClaimRepeatReader(None)
+    started = time.process_time()
+    for at in range(0, len(text), 4):
+        piece = text[at : at + 4]
+        reader.feed(piece)
+        if "\n" in piece:
+            assert not reader.count().crossed
+    return time.process_time() - started
+
+
+@pytest.mark.parametrize("opening", ["```json\n{", "<tool_call"], ids=["fence", "tag"])
+def test_an_opening_that_never_resolves_costs_the_same_per_line(opening: str) -> None:
+    short = _seconds_after(opening, 100_000)
+    long = _seconds_after(opening, 400_000)
+
+    # Four times the answer, about four times the time: the held block is
+    # read once, as it arrives, not again at every line.
+    assert long < short * 4 * 2.5

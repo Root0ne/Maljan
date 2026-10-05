@@ -740,140 +740,6 @@ class _Line:
         return out
 
 
-# ---------------------------------------------------------------------------
-# The reader
-# ---------------------------------------------------------------------------
-
-
-def _scaffolding() -> tuple[Any, Any, Any, tuple[str, ...]]:
-    """The strip's own patterns, from ``base_agent``, which imports this module."""
-    if not _SCAFFOLDING:
-        from maljan.agents.base_agent import (
-            _FENCED_JSON_RE,
-            _SCAFFOLD_BLOCK_RE,
-            _SCAFFOLD_TAGS,
-            _is_tool_invocation,
-        )
-
-        _SCAFFOLDING.append(
-            (_SCAFFOLD_BLOCK_RE, _FENCED_JSON_RE, _is_tool_invocation, _SCAFFOLD_TAGS)
-        )
-    return _SCAFFOLDING[0]
-
-
-_SCAFFOLDING: list[tuple[Any, Any, Any, tuple[str, ...]]] = []
-_OPENINGS: dict[str, Any] = {}
-
-
-def _openings() -> dict[str, Any]:
-    if not _OPENINGS:
-        _block, _fenced, _is_inv, tags = _scaffolding()
-        names = "|".join(tags)
-        _OPENINGS.update(
-            {
-                "tag": re.compile(r"<(?:" + names + r")\b[^>]*\Z", re.IGNORECASE),
-                "tag_part": re.compile(r"<([A-Za-z_]*)\Z"),
-                "tags": tuple(tags),
-                "fence": re.compile(r"```(?:json|tool_code)?\s*\{"),
-                "fence_part": re.compile(
-                    r"(?:```(?:json|tool_code|j|js|jso|t|to|too|tool|tool_|tool_c|tool_co"
-                    r"|tool_cod)?\s*|``|`)\Z"
-                ),
-            }
-        )
-    return _OPENINGS
-
-
-def _strip_core(text: str) -> str:
-    """``strip_tool_call_scaffolding`` without its last step, the trim of the text's ends."""
-    block_re, fenced_re, is_invocation, _tags = _scaffolding()
-    cleaned = block_re.sub("", text)
-    return str(fenced_re.sub(lambda m: "" if is_invocation(m.group(1)) else m.group(0), cleaned))
-
-
-def _closed_block(match: Any) -> bool:
-    tag = re.escape(match.group("tag"))
-    return re.search(r"</" + tag + r"\s*>\Z", match.group(0), re.IGNORECASE) is not None
-
-
-def _tag_opening(text: str, start: int) -> int | None:
-    found = _openings()
-    whole = found["tag"].search(text, start)
-    if whole is not None:
-        return int(whole.start())
-    part = found["tag_part"].search(text, max(start, len(text) - 16))
-    if part is not None:
-        begun = part.group(1).lower()
-        if any(tag.startswith(begun) and tag != begun for tag in found["tags"]):
-            return int(part.start())
-    return None
-
-
-def _fence_opening(text: str, start: int) -> int | None:
-    found = _openings()
-    places = [
-        m.start()
-        for m in (found["fence"].search(text, start), found["fence_part"].search(text, start))
-        if m is not None
-    ]
-    return min(places) if places else None
-
-
-def _settle(tail: str) -> tuple[int, str, bool, tuple[str, int] | None]:
-    """``(cut, stripped, removed, opened)`` of the unresolved ``tail``.
-
-    ``tail[:cut]`` stripped is the check's strip of that part whatever text
-    follows. ``opened`` is ``(tag, at)`` when the cut stops at a tool-call block
-    that has opened (its ``>`` arrived) and not closed, and nothing before it
-    is unresolved: its text from ``at`` on is never part of the answer.
-    """
-    block_re, fenced_re, is_invocation, _tags = _scaffolding()
-    kept: list[str] = []
-    spans: list[tuple[int, int, int]] = []
-    length = 0
-    last = 0
-    pending: int | None = None
-    opened: tuple[str, int] | None = None
-    for match in block_re.finditer(tail):
-        if not _closed_block(match):
-            pending = match.start()
-            opened = (match.group("tag"), match.start() + match.group(0).index(">") + 1)
-            break
-        piece = tail[last : match.start()]
-        spans.append((length, last, len(piece)))
-        kept.append(piece)
-        length += len(piece)
-        last = match.end()
-    if pending is None:
-        pending = _tag_opening(tail, last)
-    end = pending if pending is not None else len(tail)
-    piece = tail[last:end]
-    spans.append((length, last, len(piece)))
-    kept.append(piece)
-    scaffold_free = "".join(kept)
-
-    out: list[str] = []
-    fence_end = 0
-    for match in fenced_re.finditer(scaffold_free):
-        out.append(scaffold_free[fence_end : match.start()])
-        out.append("" if is_invocation(match.group(1)) else match.group(0))
-        fence_end = match.end()
-    fence_pending = _fence_opening(scaffold_free, fence_end)
-    stop = fence_pending if fence_pending is not None else len(scaffold_free)
-    out.append(scaffold_free[fence_end:stop])
-    if stop == len(scaffold_free):
-        cut = end
-    else:
-        cut = end
-        opened = None
-        for begins, at, size in spans:
-            if begins <= stop < begins + size:
-                cut = at + (stop - begins)
-                break
-    stripped = "".join(out)
-    return cut, stripped, stripped != tail[:cut], opened
-
-
 def _distinct(keys: Any) -> list[_Key]:
     """Each hash once, where two readings share one."""
     out: list[_Key] = []
@@ -898,6 +764,15 @@ class _Pipeline:
         self.line = _Line(first=True)
         # The last complete line that holds anything, not yet applied.
         self.held: _Line | None = None
+
+    def clone(self) -> _Pipeline:
+        """A copy of the whole reading, to return to."""
+        twin = _Pipeline.__new__(_Pipeline)
+        twin.machines = [machine.fork() for machine in self.machines]
+        twin.trimmed_first = self.trimmed_first
+        twin.line = self.line.copy()
+        twin.held = None if self.held is None else self.held.copy()
+        return twin
 
     def peek(self) -> _Pipeline:
         twin = _Pipeline.__new__(_Pipeline)
@@ -1023,81 +898,319 @@ class _Pipeline:
         return machine.count(margin)
 
 
+# ---------------------------------------------------------------------------
+# The reader
+# ---------------------------------------------------------------------------
+
+
+def _scaffolding() -> tuple[Any, Any, Any, tuple[str, ...]]:
+    """The strip's own patterns, from ``base_agent``, which imports this module."""
+    if not _SCAFFOLDING:
+        from maljan.agents.base_agent import (
+            _FENCED_JSON_RE,
+            _SCAFFOLD_BLOCK_RE,
+            _SCAFFOLD_TAGS,
+            _is_tool_invocation,
+        )
+
+        _SCAFFOLDING.append(
+            (_SCAFFOLD_BLOCK_RE, _FENCED_JSON_RE, _is_tool_invocation, _SCAFFOLD_TAGS)
+        )
+    return _SCAFFOLDING[0]
+
+
+_SCAFFOLDING: list[tuple[Any, Any, Any, tuple[str, ...]]] = []
+
+# ``base_agent._FENCED_JSON_RE`` read in parts: its opening up to the brace,
+# what an opening still being written may be, and the closing that ends it.
+_FENCE_OPENED = re.compile(r"```(?:json|tool_code)?\s*\{")
+_FENCE_OPENING = re.compile(
+    r"```(?:json|tool_code|j|js|jso|t|to|too|tool|tool_|tool_c|tool_co|tool_cod)?\s*"
+)
+_FENCE_CLOSE = re.compile(r"\}\s*```")
+_FENCE_CLOSE_BEGUN = re.compile(r"\}\s*`{0,2}\Z")
+
+
+def _tag_letter(letter: str) -> Callable[[str], bool]:
+    """Whether a character is ``letter`` as ``re.IGNORECASE`` reads a tag name."""
+    return _char_test(re.escape(letter), re.IGNORECASE)
+
+
+class _Fence:
+    """``_FENCED_JSON_RE`` on the scaffold-free text, as it arrives.
+
+    ``held`` is a fence's first one or two backticks, not yet passed on. From
+    the third, the text goes on as kept — as the check keeps it while the
+    fence has not closed — and ``mark`` is the reading as it stood before the
+    fence: the fence is cut back to it only if it closes as a tool call.
+    ``obj_text`` is the fence's object from its brace, which the tool-call test
+    reads whole.
+    """
+
+    __slots__ = ("carry", "carried", "held", "key", "mark", "mode", "obj_text")
+
+    def __init__(self) -> None:
+        self.mode = "text"
+        self.held = ""
+        self.key = ""
+        self.mark: _Pipeline | None = None
+        self.obj_text: list[str] = []
+        # The end of the object that may begin its closing, whitespace
+        # compressed, and how many characters of the object it stands for.
+        self.carry = ""
+        self.carried = 0
+
+    def copy(self) -> _Fence:
+        twin = _Fence()
+        twin.mode, twin.held, twin.key, twin.carry = self.mode, self.held, self.key, self.carry
+        twin.carried = self.carried
+        twin.mark = None if self.mark is None else self.mark.clone()
+        twin.obj_text = list(self.obj_text)
+        return twin
+
+
+class _Tag:
+    """``_SCAFFOLD_BLOCK_RE`` on the raw text, as it arrives.
+
+    ``held`` is a ``<`` and the start of a tag name, not yet passed on. Once
+    the name and the boundary after it are read, the text goes on as kept — as
+    the check keeps a tag that has no ``>`` yet — and ``mark`` is the whole
+    reading (the claims and the fence) as it stood at the ``<``: when the
+    ``>`` comes, everything from the ``<`` is cut back to it. Inside a block
+    that opened, nothing goes on until its closing tag; ``carry`` holds the
+    characters that may begin it.
+    """
+
+    __slots__ = ("carry", "held", "mark", "mode", "name", "names")
+
+    def __init__(self) -> None:
+        self.mode = "text"
+        self.held = ""
+        self.names: tuple[str, ...] = ()
+        self.name = ""
+        self.mark: tuple[_Pipeline, _Fence] | None = None
+        self.carry = ""
+
+
 class ClaimRepeatReader:
     """``claims_repeated(strip_tool_call_scaffolding(text), margin)`` for each prefix, read as it grows.
 
     :meth:`feed` takes the next piece of the answer; :meth:`count` is what the
-    check on a finished answer would count had the answer ended there.
+    check on a finished answer would count had the answer ended there. A
+    block that has begun and not resolved is read as kept, as the check reads
+    it, and is cut back only if it resolves as removed: no text is read twice
+    but what such a cut removes.
     """
 
     def __init__(self, margin: int | None = None) -> None:
         self.margin = margin
-        self._tail = ""
         self._removed = False
         self._pipeline = _Pipeline()
-        # Inside a tool-call block that opened and has not closed: its tag and
-        # the characters that may begin its closing tag.
-        self._inside: tuple[str, str] | None = None
+        self._fence = _Fence()
+        self._tag = _Tag()
+
+    # -- the claims ---------------------------------------------------------
+
+    def _kept(self, text: str) -> None:
+        if text:
+            self._pipeline.feed(text)
+
+    # -- fenced JSON, on the scaffold-free text -----------------------------
+
+    def _fenced(self, text: str) -> None:
+        fence = self._fence
+        at = 0
+        while at < len(text):
+            if fence.mode == "text":
+                tick = text.find("`", at)
+                if tick < 0:
+                    self._kept(text[at:])
+                    return
+                self._kept(text[at:tick])
+                fence.mode, fence.held, at = "held", "`", tick + 1
+                continue
+            if fence.mode == "held":
+                ch = text[at]
+                if ch != "`":
+                    self._kept(fence.held)
+                    fence.mode, fence.held = "text", ""
+                    continue
+                at += 1
+                if fence.held == "`":
+                    fence.held = "``"
+                    continue
+                fence.mark = self._pipeline.clone()
+                fence.mode, fence.held, fence.key = "opening", "", "```"
+                self._kept("```")
+                continue
+            if fence.mode == "opening":
+                ch = text[at]
+                spaced = ch.isspace()
+                key = (
+                    fence.key
+                    if spaced and fence.key.endswith(" ")
+                    else (fence.key + (" " if spaced else ch))
+                )
+                if _FENCE_OPENED.fullmatch(key):
+                    fence.mode, fence.obj_text = "body", ["{"]
+                    fence.carry, fence.carried = "", 0
+                    self._kept(ch)
+                    at += 1
+                    continue
+                if _FENCE_OPENING.fullmatch(key):
+                    fence.key = key
+                    if spaced:
+                        run = len(text) - len(text[at:].lstrip())
+                        self._kept(text[at:run])
+                        at = run
+                    else:
+                        self._kept(ch)
+                        at += 1
+                    continue
+                if ch == "`" and fence.key == "```":
+                    # A fourth backtick: the fence begins one backtick later.
+                    if fence.mark is not None:
+                        fence.mark.feed("`")
+                    self._kept(ch)
+                    at += 1
+                    continue
+                fence.mode, fence.mark, fence.key = "text", None, ""
+                continue
+            # The fence's object: read up to the closing that ends it.
+            rest = text[at:]
+            joined = fence.carry + rest
+            close = _FENCE_CLOSE.search(joined)
+            if close is None:
+                self._kept(rest)
+                fence.obj_text.append(rest)
+                begun = _FENCE_CLOSE_BEGUN.search(joined)
+                if begun is None:
+                    fence.carry, fence.carried = "", 0
+                    return
+                if begun.start() < len(fence.carry):
+                    fence.carried += len(rest)
+                else:
+                    fence.carried = len(joined) - begun.start()
+                carry = begun.group()
+                ticks = len(carry) - len(carry.rstrip("`"))
+                fence.carry = "}" + (" " if len(carry) - ticks > 1 else "") + "`" * ticks
+                return
+            end = at + close.end() - len(fence.carry)
+            earlier = "".join(fence.obj_text)
+            if close.start() < len(fence.carry):
+                brace = len(earlier) - fence.carried
+            else:
+                brace = len(earlier) + close.start() - len(fence.carry)
+            payload = (earlier + rest)[: brace + 1]
+            _block, _fenced_re, is_invocation, _tags = _scaffolding()
+            if is_invocation(payload) and fence.mark is not None:
+                self._pipeline = fence.mark
+                self._removed = True
+            else:
+                self._kept(text[at:end])
+            fence.mode, fence.mark, fence.obj_text = "text", None, []
+            fence.carry, fence.carried = "", 0
+            at = end
+
+    # -- tool-call tags, on the raw text --------------------------------------
 
     def feed(self, piece: str) -> None:
         if not piece:
             return
-        if self._inside is not None:
-            piece = self._inside_block(piece)
-            if not piece:
+        tag = self._tag
+        text = piece
+        at = 0
+        while at < len(text):
+            if tag.mode == "text":
+                lt = text.find("<", at)
+                if lt < 0:
+                    self._fenced(text[at:])
+                    return
+                self._fenced(text[at:lt])
+                tag.mode, tag.held, at = "name", "<", lt + 1
+                tag.names = _scaffolding()[3]
+                continue
+            if tag.mode == "name":
+                ch = text[at]
+                index = len(tag.held) - 1
+                complete = [name for name in tag.names if len(name) == index]
+                if complete:
+                    if _WORD(ch):
+                        tag.names = ()
+                    else:
+                        # The tag's name and its boundary: from here the text
+                        # is kept until a ``>`` cuts it back to the ``<``.
+                        tag.name = tag.held[1:]
+                        tag.mark = (self._pipeline.clone(), self._fence.copy())
+                        tag.mode = "attributes"
+                        self._fenced(tag.held)
+                        tag.held = ""
+                        continue
+                else:
+                    tag.names = tuple(
+                        name
+                        for name in tag.names
+                        if index < len(name) and _tag_letter(name[index])(ch)
+                    )
+                if not tag.names:
+                    held = tag.held
+                    tag.mode, tag.held = "text", ""
+                    self._fenced(held[0])
+                    text = held[1:] + text[at:]
+                    at = 0
+                    continue
+                tag.held += ch
+                at += 1
+                continue
+            if tag.mode == "attributes":
+                gt = text.find(">", at)
+                if gt < 0:
+                    self._fenced(text[at:])
+                    return
+                if tag.mark is not None:
+                    self._pipeline, self._fence = tag.mark
+                tag.mode, tag.mark, tag.carry = "inside", None, ""
+                self._removed = True
+                at = gt + 1
+                continue
+            # Inside a block that opened: nothing goes on until its closing tag.
+            joined = tag.carry + text[at:]
+            close = re.search(r"</" + re.escape(tag.name) + r"\s*>", joined, re.IGNORECASE)
+            if close is None:
+                tag.carry = _closing_begun(joined, tag.name)
                 return
-        if not self._tail and "<" not in piece and "`" not in piece:
-            # Nothing unresolved, and nothing here can open a block: final as it is.
-            self._pipeline.feed(piece)
-            return
-        self._tail += piece
-        cut, stripped, removed, opened = _settle(self._tail)
-        if removed:
-            self._removed = True
-        if stripped:
-            self._pipeline.feed(stripped)
-        if opened is not None:
-            # Everything from the block's opening on is removed: only the
-            # characters that may begin its closing tag are kept.
-            tag, at = opened
-            rest = self._tail[at:]
-            self._tail = ""
-            self._removed = True
-            self._inside = (tag, "")
-            if rest:
-                self.feed(rest)
-            return
-        self._tail = self._tail[cut:]
-
-    def _inside_block(self, piece: str) -> str:
-        """``piece`` read inside an opened tool-call block: what follows its closing tag, if any."""
-        assert self._inside is not None
-        tag, carry = self._inside
-        text = carry + piece
-        close = re.search(r"</" + re.escape(tag) + r"\s*>", text, re.IGNORECASE)
-        if close is not None:
-            self._inside = None
-            return text[close.end() :]
-        start = text.rfind("<")
-        keep = ""
-        if start >= 0:
-            candidate = text[start:]
-            wanted = "</" + tag.lower()
-            lowered = candidate.lower()
-            if lowered.startswith(wanted):
-                after = candidate[len(wanted) :]
-                if not after or after.isspace():
-                    keep = candidate[: len(wanted)] + (" " if after else "")
-            elif wanted.startswith(lowered):
-                keep = candidate
-        self._inside = (tag, keep)
-        return ""
+            tag.mode, tag.carry = "text", ""
+            text = joined[close.end() :]
+            at = 0
 
     def count(self) -> RepeatCount:
         peek = self._pipeline.peek()
-        removed = self._removed or self._inside is not None
-        if self._tail:
-            rest = _strip_core(self._tail)
-            removed = removed or rest != self._tail
-            peek.feed(rest)
+        pending = self._fence.held + (self._tag.held if self._tag.mode == "name" else "")
+        if pending:
+            peek.feed(pending)
+        removed = self._removed or self._tag.mode == "inside"
         return peek.count(removed, self.margin)
+
+
+def _closing_begun(text: str, name: str) -> str:
+    """The end of ``text`` that may begin ``</name\\s*>``, whitespace compressed, or nothing."""
+    start = text.rfind("<")
+    if start < 0:
+        return ""
+    candidate = text[start:]
+    wanted = "</" + name
+    reach = min(len(candidate), len(wanted))
+    for index in range(reach):
+        want = wanted[index]
+        ch = candidate[index]
+        if index < 2:
+            if ch != want:
+                return ""
+        elif not _tag_letter(want)(ch):
+            return ""
+    if len(candidate) <= len(wanted):
+        return candidate
+    after = candidate[len(wanted) :]
+    if after.isspace():
+        return candidate[: len(wanted)] + " "
+    return ""
