@@ -150,3 +150,30 @@ def test_the_analyst_hands_its_unread_answers_to_the_run_record_once() -> None:
     (row,) = analyst.drain_unparsed_answers()
     assert (row["agent"], row["round"], row["answer"].strip()) == ("static", "1", PROSE.strip())
     assert analyst.drain_unparsed_answers() == []
+
+
+def test_an_answer_and_its_retry_both_unread_are_both_kept() -> None:
+    from unittest.mock import MagicMock
+
+    from maljan.agents.base_agent import BaseAnalyst
+
+    retry_text = "Still prose after the question, and no claim block in it at all."
+
+    class _Analyst(BaseAnalyst):
+        def analyze(self, data: str) -> str:  # pragma: no cover - unused
+            return ""
+
+        def revise(self, *args: Any, **kwargs: Any) -> str:  # pragma: no cover - unused
+            return ""
+
+        def analyze_isr(self, data: str) -> AgentISR:
+            return _prose_isr()
+
+        def _invoke_llm_with_timeout(self, messages: list, timeout: int, **_: Any) -> str:
+            return retry_text
+
+    analyst = _Analyst(llm=MagicMock(), name="static")
+    analyst.safe_analyze_isr("raw data")
+
+    kept = [row["answer"].strip() for row in analyst.drain_unparsed_answers()]
+    assert kept == [PROSE.strip(), retry_text]

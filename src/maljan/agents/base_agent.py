@@ -6726,6 +6726,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             if only_cut:
                 return _whole_answer_questions(candidate)
             unread = [] if nudged else parse_violations(candidate)
+            # Every answer checked that no claim could be read from, the first
+            # and its retry alike, goes to the run record whole.
+            self._keep_unparsed_answers(unread, candidate.revision_round)
             undescribed = decompiled_not_described_violation(
                 undescribed_decompiles(candidate, decompiled, image_bases)
             )
@@ -7079,19 +7082,12 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         try:
             tally = ValidationTally()
-
-            def _shown(shown: Sequence[Violation]) -> None:
-                tally.count(shown)
-                # An answer no claim could be read from goes to the run
-                # record whole; its event says only that it did.
-                self._keep_unparsed_answers(shown, isr.revision_round)
-
             revised, violations, retries = retry_with_feedback_sync(
                 _run,
                 messages,
                 [_validator],
                 parse=_parse,
-                on_feedback=_shown,
+                on_feedback=tally.count,
                 sink=self._event_sink(),
                 agent=str(self.name),
                 stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
@@ -7108,9 +7104,6 @@ class BaseAnalyst(BudgetMeter, ABC):
             return isr
 
         self.validation_retries += retries
-        # A retry still unread is kept too, where it is not the answer kept
-        # above already.
-        self._keep_unparsed_answers(violations, isr.revision_round)
         for code, count in tally.by_code.items():
             self.validation_fed_back[code] = self.validation_fed_back.get(code, 0) + count
 

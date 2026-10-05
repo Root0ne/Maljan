@@ -156,9 +156,9 @@ class Violation:
     # Never shown to the producer and never stored on the channel.
     labels: tuple[str, ...] = ()
     # The answer the finding is about, as the producer wrote it, where the
-    # finding is that none of it could be read (``isr.unparsed_answer``). Kept
-    # on the event that asks, so the run record holds what failed to parse.
-    # Never shown to the producer and never stored on the channel.
+    # finding is that none of it could be read (``isr.unparsed_answer``). The
+    # run record keeps it (``unparsed_answer_rows``); the event that asks says
+    # only where. Never shown to the producer and never stored on the channel.
     answer: str = ""
 
     def __post_init__(self) -> None:
