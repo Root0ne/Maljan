@@ -480,8 +480,14 @@ class _Reading:
 
     def _copy(self) -> _Reading:
         twin = _Reading.__new__(_Reading)
-        for name in _Reading.__slots__:
-            setattr(twin, name, getattr(self, name))
+        twin._head, twin.heading = self._head, self.heading
+        twin.heading_at_delimiter = self.heading_at_delimiter
+        twin._separator = self._separator
+        twin._field, twin._field_wait = self._field, self._field_wait
+        twin._field_open = self._field_open
+        twin._label, twin._label_rest = self._label, self._label_rest
+        twin._section, twin._section_wait = self._section, self._section_wait
+        twin._section_rest = self._section_rest
         return twin
 
     @property
