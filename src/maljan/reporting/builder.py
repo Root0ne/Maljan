@@ -603,6 +603,22 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         return _build_consolidated_iocs(report)
 
 
+def ioc_table(report: MalwareReport) -> list[ConsolidatedIOC]:
+    """The IOC table the report prints and ``/reports/{id}/iocs`` serves, from one source.
+
+    Rebuilt from the stored report by the current rule
+    (:func:`build_consolidated_iocs`), so a report stored before a row kind or
+    an answer's wording existed reads the same in §9, in a cell's publish state
+    and in the feed. The stored rows that carry a kind are read only when the
+    rebuild fails.
+    """
+    try:
+        return build_consolidated_iocs(report)
+    except Exception:  # noqa: BLE001 — the stored rows are the fallback
+        logger.exception("builder: the IOC table could not be rebuilt; the stored rows are read.")
+        return [row for row in report.consolidated_iocs if row.kind]
+
+
 def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     from maljan.extractors.network_extractor import url_host
     from maljan.reporting.ledger_projection import listed_non_network_values

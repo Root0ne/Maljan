@@ -3049,17 +3049,15 @@ def _family_voice(report: MalwareReport) -> str:
 def _indicator_rows(report: MalwareReport) -> list[ConsolidatedIOC]:
     """The IOC table's rows, answered by the publish rule on this render.
 
-    Built on request from the stored report, the way ``/reports/{id}/iocs``
-    is, so an enrichment that ran after the report was stored is reflected and
-    a report stored before the table carried a kind prints in the new shape.
+    Built on request from the stored report by the one reader
+    ``/reports/{id}/iocs`` and the cells' publish state use
+    (``builder.ioc_table``), so an enrichment that ran after the report was
+    stored is reflected and a report stored before the table carried a kind
+    prints in the new shape.
     """
-    from maljan.reporting.builder import build_consolidated_iocs
+    from maljan.reporting.builder import ioc_table
 
-    try:
-        return build_consolidated_iocs(report)
-    except Exception:  # noqa: BLE001 — the stored rows are the fallback
-        logger.exception("markdown_renderer: the IOC table could not be rebuilt.")
-        return [row for row in report.consolidated_iocs if row.kind]
+    return ioc_table(report)
 
 
 def _reputations(report: MalwareReport) -> dict[str, str]:

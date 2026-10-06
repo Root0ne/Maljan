@@ -2384,6 +2384,7 @@ change landed on `main`.
 
 ### Fixed
 
+- **`/iocs` and the report's §9 read the IOC table from one source** (`builder.ioc_table`, rebuilt from the stored report), so an old report's analyst rows and their notes read the same in both.
 - **A function map summary attaches only to the function its claim names**: a name that is an ordinary word needs a code spelling or a function cue beside it, two virtual addresses a base apart stay two functions with a base known, and the function's own digits written without `0x` name it with no base known.
 - **A configured password under four characters, echoed after `Bearer`, `Basic` or `token`, is masked in a finding row** as the whole word after the scheme; elsewhere such a value keeps the row's words.
 - **The triage pack prints an APK's package name as the manifest wrote it**, even one that starts with `no: `; only `apk_info`'s own refusal reasons are left out (`binary.is_apk_unread`).

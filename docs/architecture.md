@@ -3313,7 +3313,9 @@ is assembled from what the run gathered rather than recomputed beside it:
   `strings`, the reason saying it is read from the sections the stored report
   keeps; otherwise it says only that no tool answer it keeps holds it.
   `/iocs?include=all` carries the analysts' listed non-network rows exactly
-  as the report's IOC table shows them. The judge
+  as the report's IOC table shows them, both read by one reader
+  (`builder.ioc_table`: rebuilt from the stored report, the stored rows only
+  when the rebuild fails), so an old report reads the same in both. The judge
   naming such a value keeps the standing it had before, so it is published.
   One run's sixteen capture addresses were told no tool saw them before the
   capture was read. The drafts read the table's
