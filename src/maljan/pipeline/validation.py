@@ -7724,6 +7724,35 @@ def unparsed_answer_rows(
     ]
 
 
+def folded_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+    """Each identical finding row once, in first-seen order, with its count.
+
+    Two rows are identical when every field but the count is: the same agent,
+    code and message, the same flags. A row left more than once carries
+    ``count`` (as a string, like every field of a row); a row left once
+    carries none, so a record with no repeat is the record it always was. A
+    row that already carries a count adds it, so folding twice changes nothing.
+    """
+    order: list[tuple[tuple[str, str], ...]] = []
+    counts: dict[tuple[tuple[str, str], ...], int] = {}
+    kept: dict[tuple[tuple[str, str], ...], dict[str, str]] = {}
+    for row in rows:
+        fields = {str(k): str(v) for k, v in dict(row).items() if k != "count"}
+        key = tuple(sorted(fields.items()))
+        try:
+            times = max(1, int(str(dict(row).get("count") or 1)))
+        except ValueError:
+            times = 1
+        if key not in counts:
+            order.append(key)
+            counts[key] = 0
+            kept[key] = fields
+        counts[key] += times
+    return [
+        {**kept[key], **({"count": str(counts[key])} if counts[key] > 1 else {})} for key in order
+    ]
+
+
 def validation_metrics(
     retries: int,
     unresolved: Sequence[tuple[str, Violation]],
@@ -7766,7 +7795,9 @@ def validation_metrics(
     out: dict[str, Any] = {
         "retries": int(retries),
         "by_code": dict(sorted(by_code.items())),
-        "unresolved": rows,
+        # Each identical row once, with how many times it was left: ``by_code``
+        # still counts every one.
+        "unresolved": folded_rows(rows),
         "not_run": sorted({str(code) for code in (not_run or []) if str(code).strip()}),
     }
     # The answers no claim could be read from, whole, so why can be read

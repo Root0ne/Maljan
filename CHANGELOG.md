@@ -2392,6 +2392,7 @@ change landed on `main`.
 
 ### Fixed
 
+- **An identical unresolved finding is listed once with its count** in `run_summary.validation.unresolved` (`count`) and in section 13 ("left N times"), a stored report's rows folded when it is rendered; `by_code` still counts every one.
 - **A sub-technique is not described by its parent's words alone**: a claim that writes none of the sub-technique's own distinctive words and writes a sibling sub-technique's whole name is asked once whether its technique is right, naming the sibling (Change Default File Association on an accessibility features sentence passed on "persistence").
 - **A TECHNIQUE line that writes an id with the vendored catalogue's own name for it in brackets is read as that id** (`T1027 (Obfuscated Files or Information)`); any other bracketed words keep the line whole and asked about, as before.
 - **The command-line flags table and a draft rule's comments print network values defanged**, through the report's own defanger; the strings a draft rule matches on stay as they compile.

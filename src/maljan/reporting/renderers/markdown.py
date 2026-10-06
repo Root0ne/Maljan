@@ -1767,7 +1767,13 @@ class MarkdownRenderer:
                 lines.extend([_one_line(" ".join(said_parts)), ""])
 
         validation = summary.get("validation") or {}
-        unresolved = [row for row in (validation.get("unresolved") or []) if isinstance(row, dict)]
+        # Each identical finding once, with how many times it was left: a
+        # record stored before the run summary folded them is folded here.
+        from maljan.pipeline.validation import folded_rows
+
+        unresolved = folded_rows(
+            [row for row in (validation.get("unresolved") or []) if isinstance(row, dict)]
+        )
         exports = [row for row in unresolved if str(row.get("code", "")).startswith("stix.")]
         others = [row for row in unresolved if row not in exports]
         # A question the producer answered as it allows is not left unresolved:
@@ -1787,15 +1793,15 @@ class MarkdownRenderer:
                 advisory = " (advisory)" if row.get("advisory") else ""
                 lines.append(
                     _item(
-                        f"`{row.get('code', '')}` ({row.get('agent', '')}){advisory}: "
-                        f"{_finding_text(row)}"
+                        f"`{row.get('code', '')}` ({row.get('agent', '')}){advisory}"
+                        f"{_times(row)}: {_finding_text(row)}"
                     )
                 )
             for row in answered:
                 lines.append(
                     _item(
-                        f"`{row.get('code', '')}` ({row.get('agent', '')}) (answered): "
-                        f"{_finding_text(row)}"
+                        f"`{row.get('code', '')}` ({row.get('agent', '')}) (answered)"
+                        f"{_times(row)}: {_finding_text(row)}"
                     )
                 )
             if others or answered:
@@ -2997,6 +3003,15 @@ def _names_a_network_value(text: Any) -> bool:
         )
     except Exception:  # noqa: BLE001 — unread, the cell is taken to name one
         return True
+
+
+def _times(row: dict[str, Any]) -> str:
+    """`` (left N times)`` for a folded finding row left more than once, else ``""``."""
+    try:
+        count = int(str(row.get("count") or 1))
+    except ValueError:
+        return ""
+    return f" (left {count} times)" if count > 1 else ""
 
 
 def _code_span(text: str) -> str:

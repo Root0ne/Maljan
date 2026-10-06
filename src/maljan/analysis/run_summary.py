@@ -1103,8 +1103,9 @@ class RunSummary:
                 lines.append("**Still wrong after the retry:**")
                 lines.append("")
                 for row in v.unresolved:
+                    times = f" (left {row['count']} times)" if row.get("count") else ""
                     lines.append(
-                        f"- `{row.get('agent', '?')}` / `{row.get('code', '?')}`: "
+                        f"- `{row.get('agent', '?')}` / `{row.get('code', '?')}`{times}: "
                         f"{row.get('message', '')}"
                     )
                 lines.append("")
