@@ -3906,7 +3906,7 @@ def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, s
     evidence does, so a host named ``com.evil-c2.update.cdn.ru`` that the
     run resolved is never skipped.
     """
-    from maljan.tools.strings import iocs_from_text, written_as_an_object_name
+    from maljan.tools.strings import iocs_from_text
 
     plain = _refanged(text)
     found: list[tuple[str, str]] = []
@@ -3956,66 +3956,38 @@ def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, s
         labels = value.split(".")
         if not packages and package_shaped(value):
             continue
-        if not packages and written_as_an_object_name(plain, match.start()):
-            continue
         # A one-letter name is a letter ("x.icu"); a digit there ("3.cz") is
         # the tail of a version or of noise.
         short = len(labels) == 2 and (len(labels[0]) < 2 or len(value) < 5)
         # Two letters ("ab.ru") are a word as often as a name: read only for a
-        # caller that asks the run's network evidence (``needs_network_evidence``).
+        # caller that asks the run's network evidence (``evidence_gated_values``).
         lettered = packages and two_letter_name(value)
         if len(labels) > 4 or (short and labels[0].isalpha()) or lettered:
             held.add(("domain", value))
             found.append(("domain", value))
-    if packages:
-        # A name written as a kernel object's (``Global\mtx.app``), which the
-        # sweep does not read: the caller asks the run's evidence for it.
-        for match in _NAME_AFTER_AN_OBJECT_NAMESPACE.finditer(plain):
-            if not written_as_an_object_name(plain, match.start()):
-                continue
-            for row in iocs_from_text(match.group(0), ["domain"]).get("iocs") or []:
-                value = str(row.get("value") or "").strip().lower().rstrip(".")
-                if value and ("domain", value) not in held:
-                    held.add(("domain", value))
-                    found.append(("domain", value))
     return found
 
 
-# A dotted name standing right after a backslash, for the object-name reading.
-_NAME_AFTER_AN_OBJECT_NAMESPACE = re.compile(r"(?<=\\)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
+def evidence_gated_values(text: str) -> frozenset[str]:
+    """The names ``text`` names that are hosts only where the run's network evidence holds them.
 
-
-def written_only_as_an_object_name(text: str, value: str) -> bool:
-    """Whether every place ``text`` writes ``value`` is a kernel object's name.
-
-    A mutex named under the ``Global`` namespace is one. Such a name is no
-    host unless the run's network evidence holds it: a caller that can ask
-    the evidence drops it only when no evidence does.
+    A package-shaped name (:func:`package_shaped`), and a name only the
+    evidence-asking reading reads (``network_values_in(..., packages=True)``):
+    a two-label name whose first label is two letters (``ab.ru``) that the
+    default reading does not read. A name the default reading reads is never
+    gated, so a check reads every value it read before.
     """
-    plain = _refanged(text)
-    places = [
-        found.start()
-        for found in re.finditer(
-            r"(?<![\w.-])" + re.escape(str(value or "")) + r"(?![\w-])", plain, re.IGNORECASE
-        )
-    ]
-    from maljan.tools.strings import written_as_an_object_name
-
-    return bool(places) and all(written_as_an_object_name(plain, start) for start in places)
+    return _values_and_gated(text)[1]
 
 
-def needs_network_evidence(text: str, value: str) -> bool:
-    """Whether ``value``, as ``text`` writes it, is a host only where the network evidence holds it.
-
-    A package-shaped name (:func:`package_shaped`), a two-label name whose
-    first label is two letters (:func:`two_letter_name`) and a name written
-    only as a kernel object's (:func:`written_only_as_an_object_name`).
-    """
-    return (
-        package_shaped(value)
-        or two_letter_name(value)
-        or written_only_as_an_object_name(text, value)
+def _values_and_gated(text: str) -> tuple[list[tuple[str, str]], frozenset[str]]:
+    """``network_values_in(text, packages=True)`` and the names of it that are gated."""
+    plain = {value for _kind, value in network_values_in(text)}
+    values = network_values_in(text, packages=True)
+    gated = frozenset(
+        value for _kind, value in values if value not in plain or package_shaped(value)
     )
+    return values, gated
 
 
 def two_letter_name(value: str) -> bool:
@@ -4116,13 +4088,14 @@ def recommendation_indicator_violations(
     for index, row in enumerate(_rows_of(payload, "defensive_recommendations")):
         text = " ".join(str(row.get(key) or "") for key in ("action", "rationale", "detection"))
         refused: list[str] = []
-        for kind, value in network_values_in(text, packages=True):
+        named, gated = _values_and_gated(text)
+        for kind, value in named:
             answer = str(answers(kind, value) or "")
             if publishes(answer):
                 continue
-            # A package name or a kernel object's name no row of the run's
-            # evidence holds is no host.
-            if not answer and needs_network_evidence(text, value):
+            # A package name, or a two-letter name only the evidence reading
+            # reads, that no row of the run's evidence holds is no host.
+            if not answer and value in gated:
                 continue
             if not answer and kind == "domain" and is_well_known_benign_host(value):
                 # A reference or vendor host the run never recorded: a place to
@@ -4195,13 +4168,10 @@ def _unstated_values(
             return f"no: {NO_TABLE_ANSWER}"
 
     plain = _refanged(sentence).lower()
-    # A package name or a kernel object's name no row of the run's evidence
-    # holds is no host.
-    values = [
-        (kind, value)
-        for kind, value in network_values_in(sentence, packages=True)
-        if not needs_network_evidence(sentence, value) or _answer(kind, value)
-    ]
+    # A package name, or a two-letter name only the evidence reading reads,
+    # that no row of the run's evidence holds is no host.
+    named, gated = _values_and_gated(sentence)
+    values = [(kind, value) for kind, value in named if value not in gated or _answer(kind, value)]
     places = sorted((plain.find(value.lower()), kind, value) for kind, value in values if value)
     out: list[tuple[str, str, str]] = []
     for position, (start, kind, value) in enumerate(places):

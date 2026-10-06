@@ -14,7 +14,7 @@ the run recorded it.
 from __future__ import annotations
 
 from maljan.pipeline.validation import (
-    needs_network_evidence,
+    evidence_gated_values,
     network_values_in,
     unpublished_value_violations,
 )
@@ -57,7 +57,7 @@ class TestALabelOfTwoLetters:
         sentence = "It beacons to ab.ru every minute."
 
         assert network_values_in(sentence, packages=True) == [("domain", "ab.ru")]
-        assert needs_network_evidence(sentence, "ab.ru")
+        assert "ab.ru" in evidence_gated_values(sentence)
         payload = {"body": sentence, "evidence_refs": []}
         assert unpublished_value_violations(payload, lambda kind, value: "") == []
 

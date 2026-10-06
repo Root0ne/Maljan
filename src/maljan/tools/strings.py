@@ -261,38 +261,15 @@ def _domains_in(text: str) -> list[str]:
     so `sectigo.com` under `crl.sectigo.com` stays.
     """
     found: list[tuple[int, int, str]] = []
-    data = text.encode("ascii", errors="ignore")
-    for match in _DOMAIN_RE.finditer(data):
+    for match in _DOMAIN_RE.finditer(text.encode("ascii", errors="ignore")):
         candidate = match.group().decode("ascii", errors="ignore")
-        if _looks_like_domain(candidate) and not written_as_an_object_name(data, match.start()):
+        if _looks_like_domain(candidate):
             found.append((match.start(), match.end(), candidate))
     # Spans that do not overlap, as ``finditer`` yields them, nest nowhere:
     # checked in one pass, so a run of many names is not compared pairwise.
     if all(found[index][1] <= found[index + 1][0] for index in range(len(found) - 1)):
         return [value for _start, _end, value in found]
     return [value for start, end, value in found if not _inside_a_longer_host(start, end, found)]
-
-
-# A Windows kernel object's namespace written before its name: ``Global\``,
-# ``Local\``, ``Session\<n>\`` or ``BaseNamedObjects\``. A dotted name
-# after one is that object's name (a mutex, an event, a section): no resolver
-# reads a kernel namespace, so it is no host. The same name the run's network
-# evidence holds is that evidence's host, read from the evidence.
-_OBJECT_NAMESPACE = r"(?<![A-Za-z0-9_])(?:global|local|basenamedobjects|session\\\d+)\\"
-OBJECT_NAMESPACE = re.compile(r"(?i)" + _OBJECT_NAMESPACE)
-_OBJECT_NAMESPACE_BEFORE = re.compile(r"(?i)" + _OBJECT_NAMESPACE + r"\Z")
-_OBJECT_NAMESPACE_BEFORE_BYTES = re.compile(rb"(?i)" + _OBJECT_NAMESPACE.encode() + rb"\Z")
-# How far before a name its namespace is looked for: ``BaseNamedObjects\``
-# and ``Session\<n>\`` are shorter.
-_OBJECT_NAMESPACE_REACH = 32
-
-
-def written_as_an_object_name(text: str | bytes, start: int) -> bool:
-    """Whether the name starting at ``start`` of ``text`` follows a kernel object's namespace."""
-    window = text[max(0, start - _OBJECT_NAMESPACE_REACH) : start]
-    if isinstance(window, bytes):
-        return _OBJECT_NAMESPACE_BEFORE_BYTES.search(window) is not None
-    return _OBJECT_NAMESPACE_BEFORE.search(window) is not None
 
 
 def _inside_a_longer_host(start: int, end: int, found: list[tuple[int, int, str]]) -> bool:
