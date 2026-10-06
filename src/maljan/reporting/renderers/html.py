@@ -163,6 +163,20 @@ figcaption b { color: var(--ink); }
 """
 
 
+# The link targets the HTML report makes anchors of: the web's and mail's own
+# schemes, and a place in the page or beside it.
+_LINKED_SCHEMES = ("http:", "https:", "mailto:")
+
+
+def _report_link(url: str) -> bool:
+    """Whether a Markdown link's target becomes an anchor in the HTML report."""
+    target = str(url or "").strip().lower()
+    if target.startswith(_LINKED_SCHEMES):
+        return True
+    scheme = re.match(r"[a-z][a-z0-9+.-]*:", target)
+    return scheme is None
+
+
 class HtmlRenderer:
     """Render a complete ``MalwareReport`` as one self-contained HTML document."""
 
@@ -219,8 +233,21 @@ class HtmlRenderer:
             ),
             markdown,
         )
-        # html=False is the XSS guard: report content is LLM- and malware-derived.
+        return self._markdown_to_html(markdown)
+
+    @staticmethod
+    def _markdown_to_html(markdown: str) -> str:
+        """The report's Markdown as HTML, linking only what the report itself links.
+
+        ``html=False`` is the XSS guard: report content is LLM- and
+        malware-derived. The CommonMark preset links no bare text (no
+        linkify), so a value the defanger left as written is never an anchor;
+        and a link is made only for an http, https or mailto target, or one
+        inside the page, so a defanged URL ("hxxps://…", written in angle
+        brackets or as a link's target) is never one either.
+        """
         md = MarkdownIt("commonmark", {"html": False}).enable("table").enable("strikethrough")
+        md.validateLink = _report_link  # type: ignore[method-assign]
         return str(md.render(markdown))
 
     # ------------------------------------------------------------------

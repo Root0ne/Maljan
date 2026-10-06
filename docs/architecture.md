@@ -3127,8 +3127,12 @@ is assembled from what the run gathered rather than recomputed beside it:
   every indicator column, the platform's findings (section 13, the verdict,
   the export decisions), a tool failure's error, a draft rule's source line and
   compile error, and model prose and cells beyond the run's own values defang
-  every URL, mailbox, address and host under a real top-level domain (the
-  string sweep's list; any number of labels, in capitals, `.onion`). A version
+  every URL of any scheme, `www.` host, mailbox, IPv4 or IPv6 address and host
+  under a real top-level domain (the string sweep's list; any number of
+  labels, in capitals, `.onion`): everything a viewer could link. The HTML
+  report links no bare text (CommonMark, no linkify) and makes an anchor only
+  of an http, https or mailto target or a place in the page, so a defanged
+  URL is never an anchor. A version
   number ("FileVersion 10.0.0.1"), a .NET name ("ASP.NET") and a two-label
   name under a TLD that is also a source extension ("lib.rs") print as written
   unless the run recorded them; a draft rule's body is printed as it compiles;

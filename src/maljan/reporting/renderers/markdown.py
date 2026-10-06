@@ -2564,9 +2564,13 @@ _VALUE_FINDING_CODES = frozenset({"report.value_not_in_cited_entry", "report.unp
 # is a table row assembled by hand (``test_a_table_row_is_never_assembled_by_hand``).
 _PIPE = chr(124)
 # A URL and a mailbox in free text, for defanging what no indicator list holds.
-_URL_IN_TEXT = re.compile(
-    r"(?i)\b(?:https?" + _PIPE + r"ftp" + _PIPE + r"hxxps?)://[^\s<>()\[\]`'\"" + _PIPE + r"]+"
-)
+# Any scheme a viewer may make a link of ("https", "ftp", "sftp", "ws", a
+# defanged "hxxps"), not only the web's.
+_URL_IN_TEXT = re.compile(r"(?i)\b[a-z][a-z0-9+.-]{1,31}://[^\s<>()\[\]`'\"" + _PIPE + r"]+")
+# A host a forge links as written whatever its top-level label: "www." first.
+_WWW_HOST = re.compile(r"(?i)(?<![\w.@/-])www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+(?![\w-])")
+# An IPv6 address written in text: hex groups and colons, read by ``ipaddress``.
+_IPV6_CANDIDATE = re.compile(r"(?<![\w:.])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![\w:])")
 _EMAIL_IN_TEXT = re.compile(r"(?<![\w.+-])[\w.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 # The characters that make Markdown of a sample's text: a code span, a link or
 # image, an HTML tag, a table cell, emphasis, and the backslash itself.
@@ -2621,6 +2625,14 @@ def _defanged_text(text: str) -> str:
         ]
     # An onion service's name, whatever its length.
     indicators += [(found.group(0), "domain") for found in _ONION_HOST.finditer(written)]
+    # A "www." host, which a forge links whatever its top-level label.
+    indicators += [(found.group(0), "domain") for found in _WWW_HOST.finditer(written)]
+    # An IPv6 address.
+    indicators += [
+        (found.group(0), "ip")
+        for found in _IPV6_CANDIDATE.finditer(written)
+        if _is_ipv6(found.group(0))
+    ]
     written = defang_text(written, indicators)
     for token, url in kept.items():
         written = written.replace(token, url)
@@ -2642,6 +2654,16 @@ _FILE_EXTENSION_TLDS = frozenset({"rs", "md", "pl", "sh", "ps", "ml"})
 # What a dotted quad of a version number follows: "FileVersion", "version",
 # "ProductVersion:" or a "v" written against it.
 _VERSION_BEFORE = re.compile(r"(?i)(?:version\s*[:=]?\s*" + _PIPE + r"\bv)$")
+
+
+def _is_ipv6(text: str) -> bool:
+    """Whether ``text`` is an IPv6 address."""
+    import ipaddress
+
+    try:
+        return ipaddress.ip_address(text).version == 6
+    except ValueError:
+        return False
 
 
 def _names_no_network_value(text: str, kind: str, value: str) -> bool:
