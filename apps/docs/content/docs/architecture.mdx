@@ -1404,7 +1404,12 @@ once for the claim format (`isr.unparsed_answer`) — unless the final-answer
 nudge already asked — and an answer that is still prose leaves the analyst
 with no claims, its prose as its report, status `no_claims` with the reason,
 and the run's degradation reasons naming it ("analyst answers kept as prose,
-…"). A CLAIM block that states no confidence, or one that is not a number, is
+…"). Such an answer is kept whole in `run_summary.validation.unparsed_answers`,
+and every validation retry answer the analyst's first answer is kept over (no
+claim block, fewer claim blocks, a retry that repeats again) is kept whole in
+`run_summary.validation.discarded_retry_answers` with why the first answer was
+kept (`validation.discarded_retry_row`); both are masked as model text in the
+record is, bounded only by the answer, and an answer is kept once. A CLAIM block that states no confidence, or one that is not a number, is
 not a claim either: it is counted and asked about
 (`isr.claim_without_confidence`), where the parsers used to write 0.5.
 Every path that reads claims reads them through one reader,

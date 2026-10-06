@@ -76,6 +76,7 @@ from maljan.pipeline.validation import (
     count_claim_blocks,
     decompiled_functions,
     decompiled_not_described_violation,
+    discarded_retry_row,
     image_bases_in,
     library_only_claims,
     library_only_claims_violation,
@@ -6991,6 +6992,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             shown_repeat = None
             first[:] = [_PriorAnswer(isr)]
 
+        # Each retry answer's own text, by the ISR it parsed to: a retry the
+        # first answer is kept over is kept in the run record whole.
+        raw_answers: dict[int, str] = {}
+
         def _run(turns: list[Any]) -> Any:
             if first:
                 return first.pop()
@@ -7032,6 +7037,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             self._last_answer_cut = None
             ended_by[id(parsed)] = bool(getattr(self, "_last_answer_ended", False))
             self._last_answer_ended = False
+            raw_answers[id(parsed)] = text
             return parsed
 
         def _keep(first_answer: AgentISR, retried: AgentISR) -> AgentISR:
@@ -7058,6 +7064,20 @@ class BaseAnalyst(BudgetMeter, ABC):
                     "kept": "retry" if kept is retried else "first",
                 },
             )
+            if kept is first_answer and retried is not first_answer:
+                # The retry the first answer is kept over is the analyst's
+                # work too: its text goes to the run record whole, with why.
+                BaseAnalyst._keep_discarded_retry(  # type: ignore[arg-type]
+                    self,
+                    raw_answers.get(id(retried), ""),
+                    int(isr.revision_round or 0),
+                    f"the retry answered {len(retried.claims)} claim(s) in "
+                    f"{count_claim_blocks(retried.claims)} claim block(s) and "
+                    f"{len(retried.findings or [])} finding(s), the first answer "
+                    f"{len(first_answer.claims)} claim(s) in "
+                    f"{count_claim_blocks(first_answer.claims)} claim block(s) and "
+                    f"{len(first_answer.findings or [])} finding(s); the first answer is kept",
+                )
             if kept is retried and first_answer.findings and not retried.findings:
                 # Findings follow the answer that is kept, and this one wrote
                 # none: the first answer's go with it, and the record says so.
@@ -7275,6 +7295,23 @@ class BaseAnalyst(BudgetMeter, ABC):
         for row in unparsed_answer_rows(str(self.name), int(revision_round or 0), violations):
             if row not in kept:
                 kept.append(row)
+
+    def _keep_discarded_retry(self, answer: str, revision_round: int, why: str) -> None:
+        """Keep a retry answer the first answer was kept over, for the run record, once."""
+        if not str(answer or "").strip():
+            return
+        kept = getattr(self, "validation_unparsed_answers", None)
+        if not isinstance(kept, list):
+            kept = []
+            self.validation_unparsed_answers = kept
+        row = discarded_retry_row(str(self.name), int(revision_round or 0), answer, why)
+        # An answer already kept as one no claim could be read from is kept once.
+        if all(
+            (other.get("agent"), other.get("round"), other.get("answer"))
+            != (row["agent"], row["round"], row["answer"])
+            for other in kept
+        ):
+            kept.append(row)
 
     def drain_unparsed_answers(self) -> list[dict[str, str]]:
         """The answers no claim could be read from, handed over once."""

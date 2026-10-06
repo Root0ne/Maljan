@@ -148,6 +148,11 @@ class ISRAgentStats:
     status: str = ""
 
 
+# The keys of ``run_summary.validation`` that keep analyst answers whole
+# (``pipeline.validation.validation_metrics``).
+VALIDATION_ANSWER_KEYS: tuple[str, ...] = ("unparsed_answers", "discarded_retry_answers")
+
+
 @dataclass
 class ValidationMetrics:
     """What the validation loop found, and what it could not get fixed.
@@ -163,6 +168,11 @@ class ValidationMetrics:
     # The checks that could not run at all, by code. A check that ran and
     # found nothing and a check that never ran are different facts.
     not_run: list[str] = field(default_factory=list)
+    # The analyst answers the record keeps whole, by what they are: answers no
+    # claim could be read from (``unparsed_answers``) and retry answers a first
+    # answer was kept over (``discarded_retry_answers``). A key with no rows is
+    # left out of the summary.
+    answers: dict[str, list[dict[str, str]]] = field(default_factory=dict)
 
 
 @dataclass
@@ -1339,6 +1349,11 @@ class RunSummary:
                 "by_code": dict(sorted(self.validation.by_code.items())),
                 "unresolved": [dict(row) for row in self.validation.unresolved],
                 "not_run": list(self.validation.not_run),
+                **{
+                    key: [dict(row) for row in rows]
+                    for key, rows in self.validation.answers.items()
+                    if rows
+                },
             }
 
         if self.tokens:
@@ -1972,6 +1987,11 @@ class RunSummaryBuilder:
             by_code=dict(metrics.get("by_code") or {}),
             unresolved=[dict(row) for row in metrics.get("unresolved") or []],
             not_run=[str(code) for code in metrics.get("not_run") or []],
+            answers={
+                key: [dict(row) for row in metrics.get(key) or [] if isinstance(row, dict)]
+                for key in VALIDATION_ANSWER_KEYS
+                if metrics.get(key)
+            },
         )
         return self
 

@@ -7891,6 +7891,28 @@ def folded_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
     ]
 
 
+# What a run-record row of the validation answers is, when it is not an answer
+# no claim could be read from: a retry answer the analyst's first answer was
+# kept over.
+DISCARDED_RETRY_RECORD = "discarded_retry"
+
+
+def discarded_retry_row(agent: str, revision_round: int, answer: str, why: str) -> dict[str, str]:
+    """A retry answer the first answer was kept over, as the run record keeps it.
+
+    The answer whole and masked as model text in the record is
+    (``events.safe_answer_text``), bounded only by itself, with why the first
+    answer was kept. Read into ``run_summary.validation.discarded_retry_answers``.
+    """
+    return {
+        "record": DISCARDED_RETRY_RECORD,
+        "agent": str(agent),
+        "round": str(int(revision_round or 0)),
+        "why": str(why),
+        "answer": safe_answer_text(answer),
+    }
+
+
 def validation_metrics(
     retries: int,
     unresolved: Sequence[tuple[str, Violation]],
@@ -7939,10 +7961,20 @@ def validation_metrics(
         "not_run": sorted({str(code) for code in (not_run or []) if str(code).strip()}),
     }
     # The answers no claim could be read from, whole, so why can be read
-    # later (``unparsed_answer_rows``). Left out when there were none.
-    kept = [dict(row) for row in (unparsed_answers or []) if isinstance(row, Mapping)]
-    if kept:
-        out["unparsed_answers"] = kept
+    # later (``unparsed_answer_rows``), and the retry answers a first answer
+    # was kept over (``discarded_retry_row``), whole. Each left out when there
+    # were none.
+    rows_kept = [dict(row) for row in (unparsed_answers or []) if isinstance(row, Mapping)]
+    unparsed = [row for row in rows_kept if not row.get("record")]
+    discarded = [
+        {k: v for k, v in row.items() if k != "record"}
+        for row in rows_kept
+        if row.get("record") == DISCARDED_RETRY_RECORD
+    ]
+    if unparsed:
+        out["unparsed_answers"] = unparsed
+    if discarded:
+        out["discarded_retry_answers"] = discarded
     return out
 
 
