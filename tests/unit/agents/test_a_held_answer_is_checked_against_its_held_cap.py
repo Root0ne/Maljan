@@ -13,8 +13,12 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from langchain_core.messages import AIMessage
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import RunnableLambda
+from langchain_core.tools import StructuredTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
 
 from maljan.agents.base_agent import BaseAnalyst, cap_in_force, turn_held_cap
 from maljan.llm.context_window import OutputCap, record_built_cap
@@ -108,3 +112,90 @@ class TestALoopTurn:
         binding = RunnableLambda(lambda x: x).bind()
         assert turn_held_cap(binding, MagicMock()) is None
         assert turn_held_cap(None, MagicMock()) is None
+
+
+class TestTheKeptTurnIsCheckedAgainstItsOwnHold:
+    def test_the_hook_records_each_turn_s_hold_by_its_place(self) -> None:
+        analyst = _Analyst(MagicMock())
+        binding = RunnableLambda(lambda x: x).bind()
+        holds: dict[int, int | None] = {}
+        with patch.object(BaseAnalyst, "_spend_admits", side_effect=[HELD, None, HELD - 10]):
+            refresh = analyst._run_state_refresher(
+                None, None, 0.0, held_binding=binding, turn_holds=holds
+            )
+            opening = [HumanMessage(content="t")]
+            refresh({"messages": opening})
+            refresh({"messages": [*opening, _message(5)]})
+            refresh({"messages": [*opening, _message(5), _message(5)]})
+
+        assert holds == {1: HELD, 2: None, 3: HELD - 10}
+
+    def test_a_rolled_back_question_pass_leaves_the_first_answer_its_own_hold(self) -> None:
+        analyst = _QuestionedAnalyst(llm=_HeldModel(caps=[]), name="triage")
+        record_built_cap(analyst.llm, OutputCap(BUILT, "a quarter of 131072 (probed)"))
+        analyst.logger = MagicMock()
+        analyst.tools = [_lookup()]
+        # The first answer is sent held at HELD and writes HELD - 1 tokens; the
+        # question's pass is held lower, at HELD - 1, and its call fails.
+        with (
+            patch.object(BaseAnalyst, "_spend_admits", side_effect=[HELD, HELD - 1]),
+            patch("maljan.agents.base_agent.loop_limits", return_value=(None, None)),
+        ):
+            answer = analyst.execute_tool_loop([("system", "s"), ("human", "look")])
+
+        assert answer.strip() == TEXT
+        assert analyst.llm.caps == [HELD, HELD - 1]
+        assert analyst._last_answer_cut is None
+
+    def test_a_first_answer_at_its_own_hold_is_cut_whatever_the_question_pass_held(self) -> None:
+        analyst = _QuestionedAnalyst(llm=_HeldModel(caps=[]), name="triage")
+        record_built_cap(analyst.llm, OutputCap(BUILT, "a quarter of 131072 (probed)"))
+        analyst.logger = MagicMock()
+        analyst.tools = [_lookup()]
+        with (
+            patch.object(BaseAnalyst, "_spend_admits", side_effect=[HELD - 1, HELD]),
+            patch("maljan.agents.base_agent.loop_limits", return_value=(None, None)),
+        ):
+            analyst.execute_tool_loop([("system", "s"), ("human", "look")])
+
+        assert analyst.llm.caps == [HELD - 1, HELD]
+        assert analyst._last_answer_cut == (HELD - 1, TEXT)
+
+
+class _HeldModel(BaseChatModel):
+    """Answers the task in ``HELD - 1`` tokens; the question after it fails at its deadline."""
+
+    caps: list = []
+
+    def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kw: Any) -> Any:
+        from maljan.llm.generation_rate import ModelCallDeadline
+
+        self.caps.append(kw.get("max_tokens"))
+        if any(
+            isinstance(m, HumanMessage) and "without calling any tool" in str(m.content)
+            for m in messages
+        ):
+            raise ModelCallDeadline("the model request did not finish within its 5 s deadline")
+        return ChatResult(generations=[ChatGeneration(message=_message(HELD - 1))])
+
+    @property
+    def _llm_type(self) -> str:
+        return "scripted"
+
+    def bind_tools(self, tools: Any, **_: Any) -> Any:
+        return self.bind(tools=[convert_to_openai_tool(t) for t in tools])
+
+
+class _QuestionedAnalyst(BaseAnalyst):
+    def analyze(self, data: str) -> str:  # pragma: no cover - unused
+        return ""
+
+    def revise(self, *args: Any, **kwargs: Any) -> str:  # pragma: no cover - unused
+        return ""
+
+
+def _lookup() -> Any:
+    def _run(what: str = "") -> str:
+        return f"answer for {what}"
+
+    return StructuredTool.from_function(func=_run, name="lookup", description="Look it up.")

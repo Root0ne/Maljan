@@ -3832,11 +3832,21 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 revised_isrs[name] = isr
                 made += 1
                 identical = identical and answer_unchanged(in_force_text, revised_text)
-                for dropped in dropped_values(
+                dropped_here = dropped_values(
                     kept_isrs.get(name), isr, revised_text, revision_round=iteration
-                ):
+                )
+                if dropped_here:
+                    logger.info(
+                        "The %s analyst's round-%d revision states nowhere %d value(s) "
+                        "from %d claim(s) of its answer in force; each is in the run summary.",
+                        name,
+                        int(iteration),
+                        sum(len(d.missing) for d in dropped_here),
+                        len(dropped_here),
+                    )
+                for dropped in dropped_here:
                     sentence = dropped_values_sentence(name, iteration, dropped)
-                    logger.info("%s", sentence)
+                    logger.debug("%s", sentence)
                     dropped_rows.append(
                         {
                             "agent": name,

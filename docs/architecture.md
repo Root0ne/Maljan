@@ -349,10 +349,10 @@ no analyst was asked to revise.
 The debate ends when nothing is left to settle (`pipeline/debate_facts.py`,
 `pipeline/claim_drops.py`, `pipeline/routing.py`):
 
-- The mediator ends each line of its block with `[blocking: <reason>]` or `[not blocking: <reason>]`; consensus is its confidence at the threshold with no line marked blocking, an unmarked line blocks, and the platform overrides a mark in neither direction. The reason may hold one level of brackets (`[not blocking: see [ev_0021]]`); a mark with no reason, conflicting marks and a mark that cannot be read block and go to `negotiation.unread_marks`.
+- The mediator ends each line of its block with `[blocking: <reason>]` or `[not blocking: <reason>]`; consensus is its confidence at the threshold with no line marked blocking, an unmarked line blocks, and the platform overrides a mark in neither direction. The reason may hold one level of brackets (`[not blocking: see [ev_0021]]`); a `[not blocking]` mark with no reason, conflicting marks and a mark that cannot be read block and go to `negotiation.unread_marks`, and a `[blocking]` mark with no reason blocks as it asks.
 - For a listed line whose cited entries (cited by the line or by a claim it names) hold, in a field named for a count or a total, a number the line itself states, every such value is stated; a size or a time is not a count. No call is made for them: they ride on the revision directive of the analysts the line names and on the next mediation's prompt, and a debate that ends at this mediation spends nothing on them.
 - A revision round whose every revision is the answer in force again, whitespace aside, ends the debate as `converged`; the router reads only the record of the round right before the mediation it routes.
-- A revision is made against the analyst's answer in force and its peers'; each value of the answer in force it states nowhere is recorded in `run_summary.negotiation.dropped_claims` (a decimal only as a stated value, never a claim, round or list number, nor the round's own number), the report's run appendix prints one count line per analyst and round (`dropped_value_counts`), and nothing is asked.
+- A revision is made against the analyst's answer in force and its peers'; each value of the answer in force it states nowhere is recorded in `run_summary.negotiation.dropped_claims` (a decimal only as a stated value, never a claim, round, step, stage, phase or list number, nor the round's own number; nor a cross-reference to the answer's own numbering such as "#3" or "item 3"; a number after any other word, such as "line 75", is compared as a value), the report's run appendix prints one count line per analyst and round (`dropped_value_counts`), the worker log one count line per analyst and round at INFO with each claim's sentence at DEBUG, and nothing is asked.
 - The debate stage's duration adds the revision rounds' time to the mediations', and `termination_reason` comes from the router's own rules, `hard_limit` only when the debate would have gone on.
 
 A single local model server has one slot, and fanning out three analysts onto
@@ -1478,7 +1478,8 @@ says why.
 
 An analyst answer that ended at its output cap (`llm.expert_max_tokens`, or the
 cap derived from the window when it is 0; for a call the spend ceiling held to
-less, the held cap it was sent with; by the
+less, the held cap it was sent with, recorded per loop turn as it is sent, so a
+later turn the loop did not keep never stands in for it; by the
 server's finish reason or by a generated count equal to the cap, since
 ik_llama.cpp reports `stop` for an answer it cut) is asked once for a whole
 shorter one, the way the judge's and a report section's are:
@@ -2544,7 +2545,8 @@ plain text — goes to the `FunctionSummarizer` when
 `preprocessing.use_function_summarizer` is on and to the character cut
 otherwise, exactly as before. A summary that ended at its output limit, by the
 analysts' rule, begins with a note saying its end is missing, and the cut is
-recorded with the run's shortened inputs.
+recorded with the run's shortened inputs, in one sentence per output limit that
+counts the summaries cut at it.
 
 The shortening runs **before** the summariser, and for a JSON object it is the
 better of the two: the summariser answers in English prose, and prose is what

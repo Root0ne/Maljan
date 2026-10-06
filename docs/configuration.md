@@ -1164,7 +1164,10 @@ answer the server would have sent whole: the same text, finish reason,
 `timings` and usage (the last the stream sent, wherever it came, since
 ik_llama.cpp repeats a running total on every chunk), and tool calls read as
 strictly as a whole answer's, so a call cut mid-argument stays an invalid
-call. A server error sent inside the stream is raised as the status error it
+call. A chunk whose content is not a string is joined by langchain's own rule,
+with the text before it and after it kept in its place. The join works on its
+own copy of each chunk, so the chunks the run's callbacks were handed (a
+LangSmith trace keeps them) stay as the server sent them. A server error sent inside the stream is raised as the status error it
 is on a whole answer, and a connection that drops while the answer streams as
 the `APIConnectionError` it is on a whole answer. Ollama's client streams every
 answer. DeepSeek (`compat: deepseek`) is read as a stream too, its reasoning
@@ -1344,7 +1347,8 @@ the summary was written.
 *A refusal is not exhaustion.* A call that does not fit only because other
 calls in flight hold their worst case — a parallel analyst's turn held to what
 was left — waits for them to settle, since they usually settle far below what
-they reserved, for as long as its own deadline allows. A call the ceiling
+they reserved, for as long as its own deadline allows; a job cancelled while a
+call waits ends that call as cancelled, not as a refusal. A call the ceiling
 refuses is not sent, its refusal is logged with its numbers and counted
 (`run_summary.spend.refused_calls`), and its caller takes its salvage path: a
 tool loop whose next turn is refused ends its tool phase and its agent writes
@@ -1352,8 +1356,9 @@ its answer from what it gathered, and the budget record says which call was
 refused. The job goes on while a call of any kind made since the latest stage
 began — each at the smallest prompt it was sent with, with its own cap — would
 still be admitted: a mediation turn refused at its whole cap does not stop the
-revisions after it. A refusal made while other calls are in flight never
-exhausts the spend; the question is asked again once none is. The spend is
+revisions after it. A kind the stage will make and has not made yet is asked
+about on the model of the call this job made last. A refusal made while other
+calls are in flight never exhausts the spend; the question is asked again once none is. The spend is
 *exhausted* when the ceiling is reached, or when, with no call in flight, a
 refusal leaves nothing else that fits. From then on every
 gate reads it, `run_summary.spend` says `exhausted` with when and why, no
