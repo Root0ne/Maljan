@@ -1138,21 +1138,23 @@ def claim_does_not_describe_violation(
         for word in re.findall(r"[A-Za-z0-9]+", text)
         if len(word) >= 3
     ):
-        sibling = sibling_named_instead(text, technique_id)
-        if sibling is None:
+        named = sibling_named_instead(text, technique_id)
+        if named is None:
             return None
-        sibling_id, sibling_name, parent_id, parent_name = sibling
+        sibling_id, sibling_name, parent_id, parent_name = named
+        sibling = safe_finding_value(sibling_id)
+        parent = safe_finding_value(parent_id)
         return Violation(
             code=CLAIM_DOES_NOT_DESCRIBE_CODE,
             message=(
                 f"CLAIM {safe_finding_value(text)!r} carries TECHNIQUE {tid} "
-                f"{safe_finding_value(name)}, and its sentence names {sibling_id} "
-                f"{safe_finding_value(sibling_name)}, another sub-technique of {parent_id} "
+                f"{safe_finding_value(name)}, and its sentence names {sibling} "
+                f"{safe_finding_value(sibling_name)}, another sub-technique of {parent} "
                 f"{safe_finding_value(parent_name)}, and none of {tid}'s own words: what it "
-                f"shares with {tid} is only what every technique under {parent_id} shares. A "
+                f"shares with {tid} is only what every technique under {parent} shares. A "
                 f"technique on a claim is published as something the sample does. Keep {tid} "
                 f"only if the sample does it, and then say in the claim what it does that is "
-                f"{tid}; if the claim describes {sibling_id}, {otherwise}."
+                f"{tid}; if the claim describes {sibling}, {otherwise}."
             ),
             path=path,
             subject=str(technique_id).strip().upper(),
