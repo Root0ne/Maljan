@@ -13,8 +13,9 @@ how many packets were read and how many the capture holds.
 
 ``capture_facts(path)`` is the structured view (counts, protocols, every
 external conversation, SNI names, beacons); ``summarize_pcap(path)`` is the
-same facts as a text block. Both are best-effort and side-effect free: any
-parse error (missing scapy, unreadable file) returns ``None``.
+same facts as a text block. Both are best-effort and side-effect free: a file
+that cannot be read as a capture returns ``None``. The capture is read by
+``analysis.capture_reader``.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from maljan.analysis.capture_reader import Packet, count_records, packets
 from maljan.core.logger import logger
 
 # Beaconing: a destination contacted at least this many times with a stable
@@ -81,39 +83,27 @@ def asked_limit(packet_limit: Any) -> int | None:
     return wanted if wanted > 0 else None
 
 
-def _count_records(path: str) -> int:
-    """How many packet records the capture holds, without dissecting one."""
-    from scapy.utils import RawPcapReader  # type: ignore[attr-defined]
-
-    count = 0
-    with RawPcapReader(path) as reader:
-        for _record in reader:
-            count += 1
-    return count
-
-
-def each_packet(path: str, visit: Callable[[Any], None], packet_limit: Any = None) -> CaptureRead:
+def each_packet(
+    path: str, visit: Callable[[Packet], None], packet_limit: Any = None
+) -> CaptureRead:
     """Call ``visit`` on each packet of the capture at ``path``, in file order.
 
-    A stream: scapy's ``PcapReader`` holds one packet at a time, which is what
-    lets a reader take the whole capture instead of a head of it. With a limit
-    the walk stops there and the rest are counted without being dissected, so
-    the answer still says how many the capture holds. Raises what scapy raises
-    for a file it cannot read.
+    A stream: one packet in memory at a time, which is what lets a reader take
+    the whole capture instead of a head of it. With a limit the walk stops
+    there and the rest are counted without being decoded, so the answer still
+    says how many the capture holds. Raises ``CaptureFormatError`` for a file
+    that is not a capture.
     """
-    from scapy.all import PcapReader  # type: ignore[attr-defined]
-
     limit = asked_limit(packet_limit)
     read = CaptureRead(limit=limit)
     stopped = False
-    with PcapReader(path) as reader:
-        for pkt in reader:
-            if limit is not None and read.packets_read >= limit:
-                stopped = True
-                break
-            read.packets_read += 1
-            visit(pkt)
-    read.packets_in_capture = _count_records(path) if stopped else read.packets_read
+    for pkt in packets(path):
+        if limit is not None and read.packets_read >= limit:
+            stopped = True
+            break
+        read.packets_read += 1
+        visit(pkt)
+    read.packets_in_capture = count_records(path) if stopped else read.packets_read
     return read
 
 
@@ -147,19 +137,17 @@ def _cv(xs: list[float]) -> float:
     return float((var**0.5) / m)
 
 
-def _extract_sni(pkt: Any) -> str | None:
+def _extract_sni(pkt: Packet) -> str | None:
     """Best-effort TLS SNI from a ClientHello, parsed from the raw TCP payload.
 
-    Avoids scapy's optional TLS layer (not loaded by default); walks the TLS
-    record -> handshake -> extensions to the server_name. Returns None on any
-    shape mismatch — SNI is a bonus signal, never a hard dependency.
+    Walks the TLS record -> handshake -> extensions to the server_name.
+    Returns None on any shape mismatch — SNI is a bonus signal, never a hard
+    dependency.
     """
     try:
-        from scapy.all import TCP, Raw  # type: ignore[attr-defined]
-
-        if not pkt.haslayer(TCP) or not pkt.haslayer(Raw):
+        if pkt.tcp is None or not pkt.tcp.data:
             return None
-        data: bytes = bytes(pkt[Raw].load)
+        data: bytes = pkt.tcp.data
         # TLS record: content_type(22=handshake) ver(2) len(2); handshake:
         # type(1=client_hello) len(3) ver(2) random(32) ...
         if len(data) < 45 or data[0] != 0x16 or data[5] != 0x01:
@@ -199,16 +187,6 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
     heaviest first), ``sni`` (``{name: ClientHello count}``) and ``beacons``
     (``{dst, dport, proto, callbacks, interval_s}``).
     """
-    try:
-        # ``scapy.all`` (not ``scapy.utils``) populates conf.l2types so the
-        # capture's link-layer type (DLT 1 = Ethernet, from KVM/CAPE) decodes to
-        # Ether/IP instead of Raw — otherwise every packet is opaque and no IP
-        # endpoints are seen.
-        from scapy.all import IP, TCP, UDP  # type: ignore[attr-defined]
-    except Exception as exc:  # scapy missing / import failure
-        logger.info("pcap_summary: scapy unavailable (%s); skipping.", exc)
-        return None
-
     times: list[float] = []
     proto_counts: dict[str, int] = defaultdict(int)
     # (dst, dport, proto) -> {pkts, bytes, times}
@@ -216,27 +194,27 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
     snis: dict[str, int] = defaultdict(int)
     total_bytes = 0
 
-    def _visit(pkt: Any) -> None:
+    def _visit(pkt: Packet) -> None:
         nonlocal total_bytes
         try:
-            plen = len(pkt)
+            plen = pkt.length
             total_bytes += plen
-            t = float(getattr(pkt, "time", 0.0))
+            t = pkt.time
             if t:
                 times.append(t)
-            if not pkt.haslayer(IP):
+            if pkt.ip_dst is None:
                 return
-            dst = pkt[IP].dst
-            if pkt.haslayer(TCP):
+            dst = pkt.ip_dst
+            if pkt.tcp is not None:
                 proto = "tcp"
-                dport = int(pkt[TCP].dport)
+                dport = pkt.tcp.dport
                 if dport == 443:
                     sni = _extract_sni(pkt)
                     if sni:
                         snis[sni] += 1
-            elif pkt.haslayer(UDP):
+            elif pkt.udp is not None:
                 proto = "udp"
-                dport = int(pkt[UDP].dport)
+                dport = pkt.udp.dport
             else:
                 proto = "other"
                 dport = 0

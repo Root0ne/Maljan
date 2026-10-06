@@ -1,0 +1,5210 @@
+{
+ "edge_layers.pcap": {
+  "capture_facts": {
+   "packets_read": 60,
+   "packets_in_capture": 60,
+   "packet_limit": null,
+   "bytes": 4863,
+   "duration_s": 44.2,
+   "protocols": {
+    "other": 8,
+    "tcp": 15,
+    "udp": 26
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 18,
+     "bytes": 1266
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 9,
+     "bytes": 823
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 8,
+     "bytes": 663
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4789,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 208
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 117
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 116
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4790,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 107
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 8293,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 98,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 99,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 67,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 5355,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 50,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 71
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 6000,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 70
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 7,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 50
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 60,
+   "packet_limit": 3,
+   "bytes": 291,
+   "duration_s": 1.5,
+   "protocols": {
+    "other": 1,
+    "tcp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 8293,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n60 of 60 packets in the capture read: 4863 bytes over 44.2s. Protocols: other=8, tcp=15, udp=26\n\nExternal conversations (all 15, by volume):\n- 8.8.8.8:53/udp — 18 pkts, 1266 bytes\n- 8.8.8.8:80/tcp — 9 pkts, 823 bytes\n- 8.8.8.8:0/other — 8 pkts, 663 bytes\n- 8.8.8.8:4789/udp — 2 pkts, 208 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 117 bytes\n- 8.8.8.8:53/tcp — 2 pkts, 116 bytes\n- 8.8.8.8:4790/udp — 1 pkts, 107 bytes\n- 8.8.8.8:8293/tcp — 1 pkts, 97 bytes\n- 8.8.8.8:98/tcp — 1 pkts, 90 bytes\n- 8.8.8.8:99/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:67/udp — 1 pkts, 82 bytes\n- 8.8.8.8:5355/udp — 1 pkts, 73 bytes\n- 8.8.8.8:50/udp — 1 pkts, 71 bytes\n- 8.8.8.8:6000/udp — 1 pkts, 70 bytes\n- 8.8.8.8:7/udp — 1 pkts, 50 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n60 of 60 packets in the capture read: 4863 bytes over 44.2s. Protocols: other=8, tcp=15, udp=26\n\nExternal conversations (all 15, by volume):\n- 8.8.8.8:53/udp — 18 pkts, 1266 bytes\n- 8.8.8.8:80/tcp — 9 pkts, 823 bytes\n- 8.8.8.8:0/other — 8 pkts, 663 bytes\n- 8.8.8.8:4789/udp — 2 pkts, 208 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 117 bytes\n- 8.8.8.8:53/tcp — 2 pkts, 116 bytes\n- 8.8.8.8:4790/udp — 1 pkts, 107 bytes\n- 8.8.8.8:8293/tcp — 1 pkts, 97 bytes\n- 8.8.8.8:98/tcp — 1 pkts, 90 bytes\n- 8.8.8.8:99/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:67/udp — 1 pkts, 82 bytes\n- 8.8.8.8:5355/udp — 1 pkts, 73 bytes\n- 8.8.8.8:50/udp — 1 pkts, 71 bytes\n- 8.8.8.8:6000/udp — 1 pkts, 70 bytes\n- 8.8.8.8:7/udp — 1 pkts, 50 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 60,
+   "packets_in_capture": 60,
+   "packet_limit": null,
+   "bytes": 4863,
+   "duration_s": 44.2,
+   "protocols": {
+    "other": 8,
+    "tcp": 15,
+    "udp": 26
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 18,
+     "bytes": 1266
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 9,
+     "bytes": 823
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 8,
+     "bytes": 663
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4789,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 208
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 117
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 116
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4790,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 107
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 8293,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 98,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 99,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 67,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 5355,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 50,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 71
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 6000,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 70
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 7,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 50
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n60 of 60 packets in the capture read: 4863 bytes over 44.2s. Protocols: other=8, tcp=15, udp=26\n\nExternal conversations (all 15, by volume):\n- 8.8.8.8:53/udp — 18 pkts, 1266 bytes\n- 8.8.8.8:80/tcp — 9 pkts, 823 bytes\n- 8.8.8.8:0/other — 8 pkts, 663 bytes\n- 8.8.8.8:4789/udp — 2 pkts, 208 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 117 bytes\n- 8.8.8.8:53/tcp — 2 pkts, 116 bytes\n- 8.8.8.8:4790/udp — 1 pkts, 107 bytes\n- 8.8.8.8:8293/tcp — 1 pkts, 97 bytes\n- 8.8.8.8:98/tcp — 1 pkts, 90 bytes\n- 8.8.8.8:99/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:67/udp — 1 pkts, 82 bytes\n- 8.8.8.8:5355/udp — 1 pkts, 73 bytes\n- 8.8.8.8:50/udp — 1 pkts, 71 bytes\n- 8.8.8.8:6000/udp — 1 pkts, 70 bytes\n- 8.8.8.8:7/udp — 1 pkts, 50 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary_page": "Packets 3 to 9 of the 60 in the capture; the next page starts at offset 10.\nPacket 3: 10.0.0.1 -> 8.8.8.8 (TCP 40000->80)\nPacket 4: 10.0.0.1 -> 8.8.8.8 (TCP 40000->80)\nPacket 5: 10.0.0.1 -> 8.8.8.8 (UDP 40001->53)\nPacket 6: 10.0.0.1 -> 8.8.8.8 (UDP 40001->53)\nPacket 7: 10.0.0.1 -> 8.8.8.8 (UDP 40001->53)\nPacket 8: 10.0.0.1 -> 8.8.8.8 (UDP 40001->53)\nPacket 9: 10.0.0.1 -> 8.8.8.8 (UDP 40001->53)",
+  "extract_dns": "60 of 60 packets in the capture read.\nu.example.\nsix.example.\next.example.\nf0.example.\nerr6.example.\npppoe.example.\ngpe.example.\nbridged.example.\nnb.example.\ndhcp6.example.\nll.example.\n.\na.bcd.\nerr.example.\nfrag41.example.",
+  "extract_dns_limit_5": "5 of 60 packets in the capture read (the caller asked for 5). No DNS queries in them.",
+  "extract_http": "60 of 60 packets in the capture read.\nGET /e HTTP/1.1 | Host: edge.example.com\nGET /e HTTP/1.1 | Host: edge.example.com\nGET /e HTTP/1.1 | Host: edge.example.com\nGET /e HTTP/1.1 | Host: edge.example.com\nGET /e HTTP/1.1 | Host: edge.example.com\nGET / HTTP/1.1 | Host: x\nPOST /v HTTP/1.1 | Host: vlan.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n60 of 60 packets in the capture read: 4863 bytes over 44.2s. Protocols: other=8, tcp=15, udp=26\n\nExternal conversations (all 15, by volume):\n- 8.8.8.8:53/udp — 18 pkts, 1266 bytes\n- 8.8.8.8:80/tcp — 9 pkts, 823 bytes\n- 8.8.8.8:0/other — 8 pkts, 663 bytes\n- 8.8.8.8:4789/udp — 2 pkts, 208 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 117 bytes\n- 8.8.8.8:53/tcp — 2 pkts, 116 bytes\n- 8.8.8.8:4790/udp — 1 pkts, 107 bytes\n- 8.8.8.8:8293/tcp — 1 pkts, 97 bytes\n- 8.8.8.8:98/tcp — 1 pkts, 90 bytes\n- 8.8.8.8:99/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:67/udp — 1 pkts, 82 bytes\n- 8.8.8.8:5355/udp — 1 pkts, 73 bytes\n- 8.8.8.8:50/udp — 1 pkts, 71 bytes\n- 8.8.8.8:6000/udp — 1 pkts, 70 bytes\n- 8.8.8.8:7/udp — 1 pkts, 50 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 60,
+   "packets_in_capture": 60,
+   "packet_limit": null,
+   "bytes": 4863,
+   "duration_s": 44.2,
+   "protocols": {
+    "other": 8,
+    "tcp": 15,
+    "udp": 26
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 18,
+     "bytes": 1266
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 9,
+     "bytes": 823
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 8,
+     "bytes": 663
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4789,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 208
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 117
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 116
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4790,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 107
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 8293,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 98,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 99,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 67,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 5355,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 50,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 71
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 6000,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 70
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 7,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 50
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
+ "empty_file.pcap": {
+  "capture_facts": null,
+  "capture_facts_limit_3": null,
+  "summarize_pcap": null,
+  "tool_pcap_summary": {
+   "summary": "",
+   "empty": true,
+   "packets_read": 0,
+   "packets_in_capture": 0,
+   "packet_limit": null
+  },
+  "read_pcap_summary": {
+   "error_code": "tool_failed",
+   "tool": "read_pcap_summary"
+  },
+  "read_pcap_summary_page": {
+   "error_code": "tool_failed",
+   "tool": "read_pcap_summary"
+  },
+  "extract_dns": {
+   "error_code": "tool_failed",
+   "tool": "extract_dns"
+  },
+  "extract_dns_limit_5": {
+   "error_code": "tool_failed",
+   "tool": "extract_dns"
+  },
+  "extract_http": {
+   "error_code": "tool_failed",
+   "tool": "extract_http"
+  },
+  "network_pcap_summary": {
+   "summary": "",
+   "empty": true,
+   "packets_read": 0,
+   "packets_in_capture": 0,
+   "packet_limit": null
+  }
+ },
+ "ethernet_mixed.pcap": {
+  "capture_facts": {
+   "packets_read": 67,
+   "packets_in_capture": 67,
+   "packet_limit": null,
+   "bytes": 4888,
+   "duration_s": 344.8,
+   "protocols": {
+    "other": 4,
+    "tcp": 31,
+    "udp": 27
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 8,
+     "bytes": 553
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 348
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "151.101.1.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 264
+    },
+    {
+     "dst": "151.101.1.2",
+     "dport": 443,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 258
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 3,
+     "bytes": 237
+    },
+    {
+     "dst": "104.16.0.2",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 150
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 2,
+     "bytes": 134
+    },
+    {
+     "dst": "104.16.0.3",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 120
+    },
+    {
+     "dst": "93.184.216.35",
+     "dport": 8080,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "80.1.1.1",
+     "dport": 3389,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "93.184.216.37",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.39",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.40",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "9.9.9.9",
+     "dport": 123,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "70.1.1.1",
+     "dport": 22,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "1.1.1.1",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 89
+    },
+    {
+     "dst": "104.16.0.4",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 87
+    },
+    {
+     "dst": "93.184.216.36",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 81
+    },
+    {
+     "dst": "50.1.1.1",
+     "dport": 8443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 78
+    },
+    {
+     "dst": "93.184.216.38",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "60.1.1.1",
+     "dport": 9999,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 54
+    },
+    {
+     "dst": "8.8.4.4",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 46
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "callbacks": 6,
+     "interval_s": 30.0
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "callbacks": 5,
+     "interval_s": 60.0
+    }
+   ]
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 67,
+   "packet_limit": 3,
+   "bytes": 232,
+   "duration_s": 0.5,
+   "protocols": {
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 78
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "empty": false,
+   "packets_read": 67,
+   "packets_in_capture": 67,
+   "packet_limit": null,
+   "bytes": 4888,
+   "duration_s": 344.8,
+   "protocols": {
+    "other": 4,
+    "tcp": 31,
+    "udp": 27
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 8,
+     "bytes": 553
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 348
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "151.101.1.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 264
+    },
+    {
+     "dst": "151.101.1.2",
+     "dport": 443,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 258
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 3,
+     "bytes": 237
+    },
+    {
+     "dst": "104.16.0.2",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 150
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 2,
+     "bytes": 134
+    },
+    {
+     "dst": "104.16.0.3",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 120
+    },
+    {
+     "dst": "93.184.216.35",
+     "dport": 8080,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "80.1.1.1",
+     "dport": 3389,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "93.184.216.37",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.39",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.40",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "9.9.9.9",
+     "dport": 123,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "70.1.1.1",
+     "dport": 22,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "1.1.1.1",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 89
+    },
+    {
+     "dst": "104.16.0.4",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 87
+    },
+    {
+     "dst": "93.184.216.36",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 81
+    },
+    {
+     "dst": "50.1.1.1",
+     "dport": 8443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 78
+    },
+    {
+     "dst": "93.184.216.38",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "60.1.1.1",
+     "dport": 9999,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 54
+    },
+    {
+     "dst": "8.8.4.4",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 46
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "callbacks": 6,
+     "interval_s": 30.0
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "callbacks": 5,
+     "interval_s": 60.0
+    }
+   ]
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "read_pcap_summary_page": "Packets 3 to 9 of the 67 in the capture; the next page starts at offset 10.\nPacket 3: 10.0.2.15 -> 10.0.2.3 (UDP 50001->53)\nPacket 4: 10.0.2.15 -> 224.0.0.251 (UDP 5353->5353)\nPacket 5: 10.0.2.15 -> 224.0.0.252 (UDP 50002->5355)\nPacket 6: 10.0.2.15 -> 1.1.1.1 (TCP 50003->53)\nPacket 7: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 8: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 9: 10.0.2.15 -> 93.184.216.35 (TCP 50005->8080)",
+  "extract_dns": "67 of 67 packets in the capture read.\nupdate.example.com.\nintranet.local.\nprinter.local.\nwpad.\ntcp.example.org.\nv6.example.com.\n.\ntrunc.example.com.\nfirst.example.com.\ncafé.example.com.",
+  "extract_dns_limit_5": "5 of 67 packets in the capture read (the caller asked for 5).\nupdate.example.com.\nintranet.local.\nprinter.local.",
+  "extract_http": "67 of 67 packets in the capture read.\nGET /index.html HTTP/1.1 | Host: www.example.com\nPOST /gate.php HTTP/1.0 | \nGET /v6 HTTP/1.1 | Host: v6.example.com\nGET /x HTTP/1.1 | Host: tiny\nGET /local HTTP/1.1 | host: 10.0.2.2:8000\nHEAD / HTTP/1.1 | Host: opts.example.com\nPUT /a HTTP/1.1 | \nDELETE /b HTTP/1.1 | HOST: upper.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "empty": false,
+   "packets_read": 67,
+   "packets_in_capture": 67,
+   "packet_limit": null,
+   "bytes": 4888,
+   "duration_s": 344.8,
+   "protocols": {
+    "other": 4,
+    "tcp": 31,
+    "udp": 27
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 8,
+     "bytes": 553
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 348
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "151.101.1.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 264
+    },
+    {
+     "dst": "151.101.1.2",
+     "dport": 443,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 258
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 3,
+     "bytes": 237
+    },
+    {
+     "dst": "104.16.0.2",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 150
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 2,
+     "bytes": 134
+    },
+    {
+     "dst": "104.16.0.3",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 120
+    },
+    {
+     "dst": "93.184.216.35",
+     "dport": 8080,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "80.1.1.1",
+     "dport": 3389,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "93.184.216.37",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.39",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.40",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "9.9.9.9",
+     "dport": 123,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "70.1.1.1",
+     "dport": 22,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "1.1.1.1",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 89
+    },
+    {
+     "dst": "104.16.0.4",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 87
+    },
+    {
+     "dst": "93.184.216.36",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 81
+    },
+    {
+     "dst": "50.1.1.1",
+     "dport": 8443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 78
+    },
+    {
+     "dst": "93.184.216.38",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "60.1.1.1",
+     "dport": 9999,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 54
+    },
+    {
+     "dst": "8.8.4.4",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 46
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "callbacks": 6,
+     "interval_s": 30.0
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "callbacks": 5,
+     "interval_s": 60.0
+    }
+   ]
+  }
+ },
+ "ethernet_mixed.pcap.gz": {
+  "capture_facts": {
+   "packets_read": 67,
+   "packets_in_capture": 67,
+   "packet_limit": null,
+   "bytes": 4888,
+   "duration_s": 344.8,
+   "protocols": {
+    "other": 4,
+    "tcp": 31,
+    "udp": 27
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 8,
+     "bytes": 553
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 348
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "151.101.1.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 264
+    },
+    {
+     "dst": "151.101.1.2",
+     "dport": 443,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 258
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 3,
+     "bytes": 237
+    },
+    {
+     "dst": "104.16.0.2",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 150
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 2,
+     "bytes": 134
+    },
+    {
+     "dst": "104.16.0.3",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 120
+    },
+    {
+     "dst": "93.184.216.35",
+     "dport": 8080,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "80.1.1.1",
+     "dport": 3389,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "93.184.216.37",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.39",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.40",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "9.9.9.9",
+     "dport": 123,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "70.1.1.1",
+     "dport": 22,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "1.1.1.1",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 89
+    },
+    {
+     "dst": "104.16.0.4",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 87
+    },
+    {
+     "dst": "93.184.216.36",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 81
+    },
+    {
+     "dst": "50.1.1.1",
+     "dport": 8443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 78
+    },
+    {
+     "dst": "93.184.216.38",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "60.1.1.1",
+     "dport": 9999,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 54
+    },
+    {
+     "dst": "8.8.4.4",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 46
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "callbacks": 6,
+     "interval_s": 30.0
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "callbacks": 5,
+     "interval_s": 60.0
+    }
+   ]
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 67,
+   "packet_limit": 3,
+   "bytes": 232,
+   "duration_s": 0.5,
+   "protocols": {
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 78
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "empty": false,
+   "packets_read": 67,
+   "packets_in_capture": 67,
+   "packet_limit": null,
+   "bytes": 4888,
+   "duration_s": 344.8,
+   "protocols": {
+    "other": 4,
+    "tcp": 31,
+    "udp": 27
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 8,
+     "bytes": 553
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 348
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "151.101.1.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 264
+    },
+    {
+     "dst": "151.101.1.2",
+     "dport": 443,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 258
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 3,
+     "bytes": 237
+    },
+    {
+     "dst": "104.16.0.2",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 150
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 2,
+     "bytes": 134
+    },
+    {
+     "dst": "104.16.0.3",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 120
+    },
+    {
+     "dst": "93.184.216.35",
+     "dport": 8080,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "80.1.1.1",
+     "dport": 3389,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "93.184.216.37",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.39",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.40",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "9.9.9.9",
+     "dport": 123,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "70.1.1.1",
+     "dport": 22,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "1.1.1.1",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 89
+    },
+    {
+     "dst": "104.16.0.4",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 87
+    },
+    {
+     "dst": "93.184.216.36",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 81
+    },
+    {
+     "dst": "50.1.1.1",
+     "dport": 8443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 78
+    },
+    {
+     "dst": "93.184.216.38",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "60.1.1.1",
+     "dport": 9999,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 54
+    },
+    {
+     "dst": "8.8.4.4",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 46
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "callbacks": 6,
+     "interval_s": 30.0
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "callbacks": 5,
+     "interval_s": 60.0
+    }
+   ]
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "read_pcap_summary_page": "Packets 3 to 9 of the 67 in the capture; the next page starts at offset 10.\nPacket 3: 10.0.2.15 -> 10.0.2.3 (UDP 50001->53)\nPacket 4: 10.0.2.15 -> 224.0.0.251 (UDP 5353->5353)\nPacket 5: 10.0.2.15 -> 224.0.0.252 (UDP 50002->5355)\nPacket 6: 10.0.2.15 -> 1.1.1.1 (TCP 50003->53)\nPacket 7: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 8: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 9: 10.0.2.15 -> 93.184.216.35 (TCP 50005->8080)",
+  "extract_dns": "67 of 67 packets in the capture read.\nupdate.example.com.\nintranet.local.\nprinter.local.\nwpad.\ntcp.example.org.\nv6.example.com.\n.\ntrunc.example.com.\nfirst.example.com.\ncafé.example.com.",
+  "extract_dns_limit_5": "5 of 67 packets in the capture read (the caller asked for 5).\nupdate.example.com.\nintranet.local.\nprinter.local.",
+  "extract_http": "67 of 67 packets in the capture read.\nGET /index.html HTTP/1.1 | Host: www.example.com\nPOST /gate.php HTTP/1.0 | \nGET /v6 HTTP/1.1 | Host: v6.example.com\nGET /x HTTP/1.1 | Host: tiny\nGET /local HTTP/1.1 | host: 10.0.2.2:8000\nHEAD / HTTP/1.1 | Host: opts.example.com\nPUT /a HTTP/1.1 | \nDELETE /b HTTP/1.1 | HOST: upper.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "empty": false,
+   "packets_read": 67,
+   "packets_in_capture": 67,
+   "packet_limit": null,
+   "bytes": 4888,
+   "duration_s": 344.8,
+   "protocols": {
+    "other": 4,
+    "tcp": 31,
+    "udp": 27
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 8,
+     "bytes": 553
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 348
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "151.101.1.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 264
+    },
+    {
+     "dst": "151.101.1.2",
+     "dport": 443,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 258
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 3,
+     "bytes": 237
+    },
+    {
+     "dst": "104.16.0.2",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 150
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 2,
+     "bytes": 134
+    },
+    {
+     "dst": "104.16.0.3",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 120
+    },
+    {
+     "dst": "93.184.216.35",
+     "dport": 8080,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "80.1.1.1",
+     "dport": 3389,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "93.184.216.37",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.39",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.40",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "9.9.9.9",
+     "dport": 123,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "70.1.1.1",
+     "dport": 22,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "1.1.1.1",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 89
+    },
+    {
+     "dst": "104.16.0.4",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 87
+    },
+    {
+     "dst": "93.184.216.36",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 81
+    },
+    {
+     "dst": "50.1.1.1",
+     "dport": 8443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 78
+    },
+    {
+     "dst": "93.184.216.38",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "60.1.1.1",
+     "dport": 9999,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 54
+    },
+    {
+     "dst": "8.8.4.4",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 46
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "callbacks": 6,
+     "interval_s": 30.0
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "callbacks": 5,
+     "interval_s": 60.0
+    }
+   ]
+  }
+ },
+ "ethernet_mixed_be_nano.pcap": {
+  "capture_facts": {
+   "packets_read": 67,
+   "packets_in_capture": 67,
+   "packet_limit": null,
+   "bytes": 4888,
+   "duration_s": 344.8,
+   "protocols": {
+    "other": 4,
+    "tcp": 31,
+    "udp": 27
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 8,
+     "bytes": 553
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 348
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "151.101.1.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 264
+    },
+    {
+     "dst": "151.101.1.2",
+     "dport": 443,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 258
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 3,
+     "bytes": 237
+    },
+    {
+     "dst": "104.16.0.2",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 150
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 2,
+     "bytes": 134
+    },
+    {
+     "dst": "104.16.0.3",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 120
+    },
+    {
+     "dst": "93.184.216.35",
+     "dport": 8080,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "80.1.1.1",
+     "dport": 3389,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "93.184.216.37",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.39",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.40",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "9.9.9.9",
+     "dport": 123,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "70.1.1.1",
+     "dport": 22,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "1.1.1.1",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 89
+    },
+    {
+     "dst": "104.16.0.4",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 87
+    },
+    {
+     "dst": "93.184.216.36",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 81
+    },
+    {
+     "dst": "50.1.1.1",
+     "dport": 8443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 78
+    },
+    {
+     "dst": "93.184.216.38",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "60.1.1.1",
+     "dport": 9999,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 54
+    },
+    {
+     "dst": "8.8.4.4",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 46
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "callbacks": 6,
+     "interval_s": 30.0
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "callbacks": 5,
+     "interval_s": 60.0
+    }
+   ]
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 67,
+   "packet_limit": 3,
+   "bytes": 232,
+   "duration_s": 0.5,
+   "protocols": {
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 78
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "empty": false,
+   "packets_read": 67,
+   "packets_in_capture": 67,
+   "packet_limit": null,
+   "bytes": 4888,
+   "duration_s": 344.8,
+   "protocols": {
+    "other": 4,
+    "tcp": 31,
+    "udp": 27
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 8,
+     "bytes": 553
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 348
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "151.101.1.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 264
+    },
+    {
+     "dst": "151.101.1.2",
+     "dport": 443,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 258
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 3,
+     "bytes": 237
+    },
+    {
+     "dst": "104.16.0.2",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 150
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 2,
+     "bytes": 134
+    },
+    {
+     "dst": "104.16.0.3",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 120
+    },
+    {
+     "dst": "93.184.216.35",
+     "dport": 8080,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "80.1.1.1",
+     "dport": 3389,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "93.184.216.37",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.39",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.40",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "9.9.9.9",
+     "dport": 123,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "70.1.1.1",
+     "dport": 22,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "1.1.1.1",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 89
+    },
+    {
+     "dst": "104.16.0.4",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 87
+    },
+    {
+     "dst": "93.184.216.36",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 81
+    },
+    {
+     "dst": "50.1.1.1",
+     "dport": 8443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 78
+    },
+    {
+     "dst": "93.184.216.38",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "60.1.1.1",
+     "dport": 9999,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 54
+    },
+    {
+     "dst": "8.8.4.4",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 46
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "callbacks": 6,
+     "interval_s": 30.0
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "callbacks": 5,
+     "interval_s": 60.0
+    }
+   ]
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "read_pcap_summary_page": "Packets 3 to 9 of the 67 in the capture; the next page starts at offset 10.\nPacket 3: 10.0.2.15 -> 10.0.2.3 (UDP 50001->53)\nPacket 4: 10.0.2.15 -> 224.0.0.251 (UDP 5353->5353)\nPacket 5: 10.0.2.15 -> 224.0.0.252 (UDP 50002->5355)\nPacket 6: 10.0.2.15 -> 1.1.1.1 (TCP 50003->53)\nPacket 7: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 8: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 9: 10.0.2.15 -> 93.184.216.35 (TCP 50005->8080)",
+  "extract_dns": "67 of 67 packets in the capture read.\nupdate.example.com.\nintranet.local.\nprinter.local.\nwpad.\ntcp.example.org.\nv6.example.com.\n.\ntrunc.example.com.\nfirst.example.com.\ncafé.example.com.",
+  "extract_dns_limit_5": "5 of 67 packets in the capture read (the caller asked for 5).\nupdate.example.com.\nintranet.local.\nprinter.local.",
+  "extract_http": "67 of 67 packets in the capture read.\nGET /index.html HTTP/1.1 | Host: www.example.com\nPOST /gate.php HTTP/1.0 | \nGET /v6 HTTP/1.1 | Host: v6.example.com\nGET /x HTTP/1.1 | Host: tiny\nGET /local HTTP/1.1 | host: 10.0.2.2:8000\nHEAD / HTTP/1.1 | Host: opts.example.com\nPUT /a HTTP/1.1 | \nDELETE /b HTTP/1.1 | HOST: upper.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4888 bytes over 344.8s. Protocols: other=4, tcp=31, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 185.199.108.1:4444/tcp — 5 pkts, 270 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 5 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "empty": false,
+   "packets_read": 67,
+   "packets_in_capture": 67,
+   "packet_limit": null,
+   "bytes": 4888,
+   "duration_s": 344.8,
+   "protocols": {
+    "other": 4,
+    "tcp": 31,
+    "udp": 27
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 8,
+     "bytes": 553
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 348
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "151.101.1.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 264
+    },
+    {
+     "dst": "151.101.1.2",
+     "dport": 443,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 258
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 3,
+     "bytes": 237
+    },
+    {
+     "dst": "104.16.0.2",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 150
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 2,
+     "bytes": 134
+    },
+    {
+     "dst": "104.16.0.3",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 120
+    },
+    {
+     "dst": "93.184.216.35",
+     "dport": 8080,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "80.1.1.1",
+     "dport": 3389,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "93.184.216.37",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.39",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.40",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "9.9.9.9",
+     "dport": 123,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "70.1.1.1",
+     "dport": 22,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "1.1.1.1",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 89
+    },
+    {
+     "dst": "104.16.0.4",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 87
+    },
+    {
+     "dst": "93.184.216.36",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 81
+    },
+    {
+     "dst": "50.1.1.1",
+     "dport": 8443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 78
+    },
+    {
+     "dst": "93.184.216.38",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "60.1.1.1",
+     "dport": 9999,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 54
+    },
+    {
+     "dst": "8.8.4.4",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 46
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "callbacks": 6,
+     "interval_s": 30.0
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "callbacks": 5,
+     "interval_s": 60.0
+    }
+   ]
+  }
+ },
+ "header_only.pcap": {
+  "capture_facts": {
+   "packets_read": 0,
+   "packets_in_capture": 0,
+   "packet_limit": null,
+   "bytes": 0,
+   "duration_s": 0.0,
+   "protocols": {},
+   "conversations": [],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 0,
+   "packets_in_capture": 0,
+   "packet_limit": 3,
+   "bytes": 0,
+   "duration_s": 0.0,
+   "protocols": {},
+   "conversations": [],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": null,
+  "tool_pcap_summary": {
+   "summary": "",
+   "empty": true,
+   "packets_read": 0,
+   "packets_in_capture": 0,
+   "packet_limit": null
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n0 of 0 packets in the capture read: 0 bytes over 0.0s. Protocols: no IP packets\nNo external (public) endpoints contacted — traffic stayed internal to the sandbox.",
+  "read_pcap_summary_page": "Packets 3 to 3 of the 0 in the capture. No IP packets in them.",
+  "extract_dns": "0 of 0 packets in the capture read. No DNS queries in them.",
+  "extract_dns_limit_5": "0 of 0 packets in the capture read. No DNS queries in them.",
+  "extract_http": "0 of 0 packets in the capture read. No HTTP requests in them.",
+  "network_pcap_summary": {
+   "summary": "",
+   "empty": true,
+   "packets_read": 0,
+   "packets_in_capture": 0,
+   "packet_limit": null
+  }
+ },
+ "ipv4_dlt228.pcap": {
+  "capture_facts": {
+   "packets_read": 2,
+   "packets_in_capture": 2,
+   "packet_limit": null,
+   "bytes": 148,
+   "duration_s": 1.5,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 2,
+   "packets_in_capture": 2,
+   "packet_limit": 3,
+   "bytes": 148,
+   "duration_s": 1.5,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n2 of 2 packets in the capture read: 148 bytes over 1.5s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:53/udp — 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n2 of 2 packets in the capture read: 148 bytes over 1.5s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:53/udp — 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 2,
+   "packets_in_capture": 2,
+   "packet_limit": null,
+   "bytes": 148,
+   "duration_s": 1.5,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n2 of 2 packets in the capture read: 148 bytes over 1.5s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:53/udp — 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary_page": "Packets 3 to 3 of the 2 in the capture. No IP packets in them.",
+  "extract_dns": "2 of 2 packets in the capture read.\nlink.example.com.",
+  "extract_dns_limit_5": "2 of 2 packets in the capture read.\nlink.example.com.",
+  "extract_http": "2 of 2 packets in the capture read.\nGET /link HTTP/1.1 | Host: link.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n2 of 2 packets in the capture read: 148 bytes over 1.5s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:53/udp — 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 2,
+   "packets_in_capture": 2,
+   "packet_limit": null,
+   "bytes": 148,
+   "duration_s": 1.5,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
+ "linux_sll.pcap": {
+  "capture_facts": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 271,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 102
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 78
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": 3,
+   "bytes": 271,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 102
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 78
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 271 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 102 bytes\n- 8.8.8.8:53/udp — 1 pkts, 78 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 271 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 102 bytes\n- 8.8.8.8:53/udp — 1 pkts, 78 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 271,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 102
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 78
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 271 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 102 bytes\n- 8.8.8.8:53/udp — 1 pkts, 78 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary_page": "Packets 3 to 3 of the 3 in the capture. No IP packets in them.",
+  "extract_dns": "3 of 3 packets in the capture read.\nlink.example.com.\nsix.local.",
+  "extract_dns_limit_5": "3 of 3 packets in the capture read.\nlink.example.com.\nsix.local.",
+  "extract_http": "3 of 3 packets in the capture read.\nGET /link HTTP/1.1 | Host: link.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 271 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 102 bytes\n- 8.8.8.8:53/udp — 1 pkts, 78 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 271,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 102
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 78
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
+ "linux_sll2.pcap": {
+  "capture_facts": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 283,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 106
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": 3,
+   "bytes": 283,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 106
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 283 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 106 bytes\n- 8.8.8.8:53/udp — 1 pkts, 82 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 283 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 106 bytes\n- 8.8.8.8:53/udp — 1 pkts, 82 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 283,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 106
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 283 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 106 bytes\n- 8.8.8.8:53/udp — 1 pkts, 82 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary_page": "Packets 3 to 3 of the 3 in the capture. No IP packets in them.",
+  "extract_dns": "3 of 3 packets in the capture read.\nlink.example.com.\nsix.local.",
+  "extract_dns_limit_5": "3 of 3 packets in the capture read.\nlink.example.com.\nsix.local.",
+  "extract_http": "3 of 3 packets in the capture read.\nGET /link HTTP/1.1 | Host: link.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 283 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 106 bytes\n- 8.8.8.8:53/udp — 1 pkts, 82 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 283,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 106
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
+ "loopback_families.pcap": {
+  "capture_facts": {
+   "packets_read": 12,
+   "packets_in_capture": 12,
+   "packet_limit": null,
+   "bytes": 888,
+   "duration_s": 11.0,
+   "protocols": {
+    "other": 4,
+    "udp": 4
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 4,
+     "bytes": 240
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "callbacks": 4,
+     "interval_s": 1.0
+    }
+   ]
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 12,
+   "packet_limit": 3,
+   "bytes": 180,
+   "duration_s": 2.0,
+   "protocols": {
+    "udp": 3
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 3,
+     "bytes": 180
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n12 of 12 packets in the capture read: 888 bytes over 11.0s. Protocols: other=4, udp=4\n\nExternal conversations (all 1, by volume):\n- 8.8.8.8:53/udp — 4 pkts, 240 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 8.8.8.8:53/udp — 4 callbacks, ~1.0s interval (regular; likely C2 beacon)",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n12 of 12 packets in the capture read: 888 bytes over 11.0s. Protocols: other=4, udp=4\n\nExternal conversations (all 1, by volume):\n- 8.8.8.8:53/udp — 4 pkts, 240 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 8.8.8.8:53/udp — 4 callbacks, ~1.0s interval (regular; likely C2 beacon)",
+   "empty": false,
+   "packets_read": 12,
+   "packets_in_capture": 12,
+   "packet_limit": null,
+   "bytes": 888,
+   "duration_s": 11.0,
+   "protocols": {
+    "other": 4,
+    "udp": 4
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 4,
+     "bytes": 240
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "callbacks": 4,
+     "interval_s": 1.0
+    }
+   ]
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n12 of 12 packets in the capture read: 888 bytes over 11.0s. Protocols: other=4, udp=4\n\nExternal conversations (all 1, by volume):\n- 8.8.8.8:53/udp — 4 pkts, 240 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 8.8.8.8:53/udp — 4 callbacks, ~1.0s interval (regular; likely C2 beacon)",
+  "read_pcap_summary_page": "Packets 3 to 9 of the 12 in the capture; the next page starts at offset 10.\nPacket 3: 10.0.0.1 -> 8.8.8.8 (UDP 40010->53)\nPacket 5: 0.0.0.0 -> 0.0.0.0 (Unknown)\nPacket 7: 0.0.0.0 -> 0.0.0.0 (Unknown)\nPacket 9: 0.0.0.0 -> 0.0.0.0 (Unknown)",
+  "extract_dns": "12 of 12 packets in the capture read.\nlo.example.\nlo6.example.",
+  "extract_dns_limit_5": "5 of 12 packets in the capture read (the caller asked for 5).\nlo.example.\nlo6.example.",
+  "extract_http": "12 of 12 packets in the capture read. No HTTP requests in them.",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n12 of 12 packets in the capture read: 888 bytes over 11.0s. Protocols: other=4, udp=4\n\nExternal conversations (all 1, by volume):\n- 8.8.8.8:53/udp — 4 pkts, 240 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 8.8.8.8:53/udp — 4 callbacks, ~1.0s interval (regular; likely C2 beacon)",
+   "empty": false,
+   "packets_read": 12,
+   "packets_in_capture": 12,
+   "packet_limit": null,
+   "bytes": 888,
+   "duration_s": 11.0,
+   "protocols": {
+    "other": 4,
+    "udp": 4
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 4,
+     "bytes": 240
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "callbacks": 4,
+     "interval_s": 1.0
+    }
+   ]
+  }
+ },
+ "not_a_capture.pcap": {
+  "capture_facts": null,
+  "capture_facts_limit_3": null,
+  "summarize_pcap": null,
+  "tool_pcap_summary": {
+   "summary": "",
+   "empty": true,
+   "packets_read": 0,
+   "packets_in_capture": 0,
+   "packet_limit": null
+  },
+  "read_pcap_summary": {
+   "error_code": "tool_failed",
+   "tool": "read_pcap_summary"
+  },
+  "read_pcap_summary_page": {
+   "error_code": "tool_failed",
+   "tool": "read_pcap_summary"
+  },
+  "extract_dns": {
+   "error_code": "tool_failed",
+   "tool": "extract_dns"
+  },
+  "extract_dns_limit_5": {
+   "error_code": "tool_failed",
+   "tool": "extract_dns"
+  },
+  "extract_http": {
+   "error_code": "tool_failed",
+   "tool": "extract_http"
+  },
+  "network_pcap_summary": {
+   "summary": "",
+   "empty": true,
+   "packets_read": 0,
+   "packets_in_capture": 0,
+   "packet_limit": null
+  }
+ },
+ "null_loopback.pcap": {
+  "capture_facts": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 235,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 66
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": 3,
+   "bytes": 235,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 66
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 235 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 90 bytes\n- 8.8.8.8:53/udp — 1 pkts, 66 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 235 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 90 bytes\n- 8.8.8.8:53/udp — 1 pkts, 66 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 235,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 66
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 235 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 90 bytes\n- 8.8.8.8:53/udp — 1 pkts, 66 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary_page": "Packets 3 to 3 of the 3 in the capture. No IP packets in them.",
+  "extract_dns": "3 of 3 packets in the capture read.\nlink.example.com.",
+  "extract_dns_limit_5": "3 of 3 packets in the capture read.\nlink.example.com.",
+  "extract_http": "3 of 3 packets in the capture read.\nGET /link HTTP/1.1 | Host: link.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 235 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 90 bytes\n- 8.8.8.8:53/udp — 1 pkts, 66 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 235,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 66
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
+ "odd_records.pcap": {
+  "capture_facts": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 208,
+   "duration_s": 2.0,
+   "protocols": {
+    "tcp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 26469,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": 3,
+   "bytes": 208,
+   "duration_s": 2.0,
+   "protocols": {
+    "tcp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 26469,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 208 bytes over 2.0s. Protocols: tcp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:26469/tcp — 1 pkts, 97 bytes\n- 8.8.8.8:80/tcp — 1 pkts, 97 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 208 bytes over 2.0s. Protocols: tcp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:26469/tcp — 1 pkts, 97 bytes\n- 8.8.8.8:80/tcp — 1 pkts, 97 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 208,
+   "duration_s": 2.0,
+   "protocols": {
+    "tcp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 26469,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 208 bytes over 2.0s. Protocols: tcp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:26469/tcp — 1 pkts, 97 bytes\n- 8.8.8.8:80/tcp — 1 pkts, 97 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary_page": "Packets 3 to 3 of the 3 in the capture. No IP packets in them.",
+  "extract_dns": "3 of 3 packets in the capture read. No DNS queries in them.",
+  "extract_dns_limit_5": "3 of 3 packets in the capture read. No DNS queries in them.",
+  "extract_http": "3 of 3 packets in the capture read.\nGET /e HTTP/1.1 | Host: edge.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 208 bytes over 2.0s. Protocols: tcp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:26469/tcp — 1 pkts, 97 bytes\n- 8.8.8.8:80/tcp — 1 pkts, 97 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 208,
+   "duration_s": 2.0,
+   "protocols": {
+    "tcp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 26469,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
+ "openbsd_loopback.pcap": {
+  "capture_facts": {
+   "packets_read": 12,
+   "packets_in_capture": 12,
+   "packet_limit": null,
+   "bytes": 888,
+   "duration_s": 11.0,
+   "protocols": {
+    "udp": 3
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 3,
+     "bytes": 180
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 12,
+   "packet_limit": 3,
+   "bytes": 180,
+   "duration_s": 2.0,
+   "protocols": {
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 120
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n12 of 12 packets in the capture read: 888 bytes over 11.0s. Protocols: udp=3\n\nExternal conversations (all 1, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 180 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n12 of 12 packets in the capture read: 888 bytes over 11.0s. Protocols: udp=3\n\nExternal conversations (all 1, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 180 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 12,
+   "packets_in_capture": 12,
+   "packet_limit": null,
+   "bytes": 888,
+   "duration_s": 11.0,
+   "protocols": {
+    "udp": 3
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 3,
+     "bytes": 180
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n12 of 12 packets in the capture read: 888 bytes over 11.0s. Protocols: udp=3\n\nExternal conversations (all 1, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 180 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary_page": "Packets 3 to 9 of the 12 in the capture; the next page starts at offset 10.\nPacket 3: 10.0.0.1 -> 8.8.8.8 (UDP 40010->53)",
+  "extract_dns": "12 of 12 packets in the capture read.\nlo.example.\nlo6.example.",
+  "extract_dns_limit_5": "5 of 12 packets in the capture read (the caller asked for 5).\nlo.example.",
+  "extract_http": "12 of 12 packets in the capture read. No HTTP requests in them.",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n12 of 12 packets in the capture read: 888 bytes over 11.0s. Protocols: udp=3\n\nExternal conversations (all 1, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 180 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 12,
+   "packets_in_capture": 12,
+   "packet_limit": null,
+   "bytes": 888,
+   "duration_s": 11.0,
+   "protocols": {
+    "udp": 3
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 3,
+     "bytes": 180
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
+ "pcapng_without_interface.pcapng": {
+  "capture_facts": {
+   "packets_read": 0,
+   "packets_in_capture": 0,
+   "packet_limit": null,
+   "bytes": 0,
+   "duration_s": 0.0,
+   "protocols": {},
+   "conversations": [],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 0,
+   "packets_in_capture": 0,
+   "packet_limit": 3,
+   "bytes": 0,
+   "duration_s": 0.0,
+   "protocols": {},
+   "conversations": [],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": null,
+  "tool_pcap_summary": {
+   "summary": "",
+   "empty": true,
+   "packets_read": 0,
+   "packets_in_capture": 0,
+   "packet_limit": null
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n0 of 0 packets in the capture read: 0 bytes over 0.0s. Protocols: no IP packets\nNo external (public) endpoints contacted — traffic stayed internal to the sandbox.",
+  "read_pcap_summary_page": "Packets 3 to 3 of the 0 in the capture. No IP packets in them.",
+  "extract_dns": "0 of 0 packets in the capture read. No DNS queries in them.",
+  "extract_dns_limit_5": "0 of 0 packets in the capture read. No DNS queries in them.",
+  "extract_http": "0 of 0 packets in the capture read. No HTTP requests in them.",
+  "network_pcap_summary": {
+   "summary": "",
+   "empty": true,
+   "packets_read": 0,
+   "packets_in_capture": 0,
+   "packet_limit": null
+  }
+ },
+ "raw_ip_dlt101.pcap": {
+  "capture_facts": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 223,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": 3,
+   "bytes": 223,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 223 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:53/udp — 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 223 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:53/udp — 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 223,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 223 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:53/udp — 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary_page": "Packets 3 to 3 of the 3 in the capture. No IP packets in them.",
+  "extract_dns": "3 of 3 packets in the capture read.\nlink.example.com.\nsix.local.",
+  "extract_dns_limit_5": "3 of 3 packets in the capture read.\nlink.example.com.\nsix.local.",
+  "extract_http": "3 of 3 packets in the capture read.\nGET /link HTTP/1.1 | Host: link.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 223 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:53/udp — 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 223,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
+ "raw_ip_dlt12.pcap": {
+  "capture_facts": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 223,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": 3,
+   "bytes": 223,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 223 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:53/udp — 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 223 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:53/udp — 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 223,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 223 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:53/udp — 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary_page": "Packets 3 to 3 of the 3 in the capture. No IP packets in them.",
+  "extract_dns": "3 of 3 packets in the capture read.\nlink.example.com.\nsix.local.",
+  "extract_dns_limit_5": "3 of 3 packets in the capture read.\nlink.example.com.\nsix.local.",
+  "extract_http": "3 of 3 packets in the capture read.\nGET /link HTTP/1.1 | Host: link.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 223 bytes over 3.0s. Protocols: tcp=1, udp=1\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:53/udp — 1 pkts, 62 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 223,
+   "duration_s": 3.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 1
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
+ "truncated_block.pcapng": {
+  "capture_facts": null,
+  "capture_facts_limit_3": null,
+  "summarize_pcap": null,
+  "tool_pcap_summary": {
+   "summary": "",
+   "empty": true,
+   "packets_read": 0,
+   "packets_in_capture": 0,
+   "packet_limit": null
+  },
+  "read_pcap_summary": {
+   "error_code": "tool_failed",
+   "tool": "read_pcap_summary"
+  },
+  "read_pcap_summary_page": {
+   "error_code": "tool_failed",
+   "tool": "read_pcap_summary"
+  },
+  "extract_dns": {
+   "error_code": "tool_failed",
+   "tool": "extract_dns"
+  },
+  "extract_dns_limit_5": {
+   "error_code": "tool_failed",
+   "tool": "extract_dns"
+  },
+  "extract_http": {
+   "error_code": "tool_failed",
+   "tool": "extract_http"
+  },
+  "network_pcap_summary": {
+   "summary": "",
+   "empty": true,
+   "packets_read": 0,
+   "packets_in_capture": 0,
+   "packet_limit": null
+  }
+ },
+ "truncated_in_header.pcap": {
+  "capture_facts": {
+   "packets_read": 66,
+   "packets_in_capture": 66,
+   "packet_limit": null,
+   "bytes": 4834,
+   "duration_s": 284.8,
+   "protocols": {
+    "other": 4,
+    "tcp": 30,
+    "udp": 27
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 8,
+     "bytes": 553
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 348
+    },
+    {
+     "dst": "151.101.1.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 264
+    },
+    {
+     "dst": "151.101.1.2",
+     "dport": 443,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 258
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 3,
+     "bytes": 237
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 4,
+     "bytes": 216
+    },
+    {
+     "dst": "104.16.0.2",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 150
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 2,
+     "bytes": 134
+    },
+    {
+     "dst": "104.16.0.3",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 120
+    },
+    {
+     "dst": "93.184.216.35",
+     "dport": 8080,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "80.1.1.1",
+     "dport": 3389,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "93.184.216.37",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.39",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.40",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "9.9.9.9",
+     "dport": 123,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "70.1.1.1",
+     "dport": 22,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "1.1.1.1",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 89
+    },
+    {
+     "dst": "104.16.0.4",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 87
+    },
+    {
+     "dst": "93.184.216.36",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 81
+    },
+    {
+     "dst": "50.1.1.1",
+     "dport": 8443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 78
+    },
+    {
+     "dst": "93.184.216.38",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "60.1.1.1",
+     "dport": 9999,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 54
+    },
+    {
+     "dst": "8.8.4.4",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 46
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "callbacks": 6,
+     "interval_s": 30.0
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "callbacks": 4,
+     "interval_s": 60.0
+    }
+   ]
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 66,
+   "packet_limit": 3,
+   "bytes": 232,
+   "duration_s": 0.5,
+   "protocols": {
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 78
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n66 of 66 packets in the capture read: 4834 bytes over 284.8s. Protocols: other=4, tcp=30, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp — 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n66 of 66 packets in the capture read: 4834 bytes over 284.8s. Protocols: other=4, tcp=30, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp — 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "empty": false,
+   "packets_read": 66,
+   "packets_in_capture": 66,
+   "packet_limit": null,
+   "bytes": 4834,
+   "duration_s": 284.8,
+   "protocols": {
+    "other": 4,
+    "tcp": 30,
+    "udp": 27
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 8,
+     "bytes": 553
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 348
+    },
+    {
+     "dst": "151.101.1.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 264
+    },
+    {
+     "dst": "151.101.1.2",
+     "dport": 443,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 258
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 3,
+     "bytes": 237
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 4,
+     "bytes": 216
+    },
+    {
+     "dst": "104.16.0.2",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 150
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 2,
+     "bytes": 134
+    },
+    {
+     "dst": "104.16.0.3",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 120
+    },
+    {
+     "dst": "93.184.216.35",
+     "dport": 8080,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "80.1.1.1",
+     "dport": 3389,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "93.184.216.37",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.39",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.40",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "9.9.9.9",
+     "dport": 123,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "70.1.1.1",
+     "dport": 22,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "1.1.1.1",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 89
+    },
+    {
+     "dst": "104.16.0.4",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 87
+    },
+    {
+     "dst": "93.184.216.36",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 81
+    },
+    {
+     "dst": "50.1.1.1",
+     "dport": 8443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 78
+    },
+    {
+     "dst": "93.184.216.38",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "60.1.1.1",
+     "dport": 9999,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 54
+    },
+    {
+     "dst": "8.8.4.4",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 46
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "callbacks": 6,
+     "interval_s": 30.0
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "callbacks": 4,
+     "interval_s": 60.0
+    }
+   ]
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n66 of 66 packets in the capture read: 4834 bytes over 284.8s. Protocols: other=4, tcp=30, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp — 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "read_pcap_summary_page": "Packets 3 to 9 of the 66 in the capture; the next page starts at offset 10.\nPacket 3: 10.0.2.15 -> 10.0.2.3 (UDP 50001->53)\nPacket 4: 10.0.2.15 -> 224.0.0.251 (UDP 5353->5353)\nPacket 5: 10.0.2.15 -> 224.0.0.252 (UDP 50002->5355)\nPacket 6: 10.0.2.15 -> 1.1.1.1 (TCP 50003->53)\nPacket 7: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 8: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 9: 10.0.2.15 -> 93.184.216.35 (TCP 50005->8080)",
+  "extract_dns": "66 of 66 packets in the capture read.\nupdate.example.com.\nintranet.local.\nprinter.local.\nwpad.\ntcp.example.org.\nv6.example.com.\n.\ntrunc.example.com.\nfirst.example.com.\ncafé.example.com.",
+  "extract_dns_limit_5": "5 of 66 packets in the capture read (the caller asked for 5).\nupdate.example.com.\nintranet.local.\nprinter.local.",
+  "extract_http": "66 of 66 packets in the capture read.\nGET /index.html HTTP/1.1 | Host: www.example.com\nPOST /gate.php HTTP/1.0 | \nGET /v6 HTTP/1.1 | Host: v6.example.com\nGET /x HTTP/1.1 | Host: tiny\nGET /local HTTP/1.1 | host: 10.0.2.2:8000\nHEAD / HTTP/1.1 | Host: opts.example.com\nPUT /a HTTP/1.1 | \nDELETE /b HTTP/1.1 | HOST: upper.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n66 of 66 packets in the capture read: 4834 bytes over 284.8s. Protocols: other=4, tcp=30, udp=27\n\nExternal conversations (all 25, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp — 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "empty": false,
+   "packets_read": 66,
+   "packets_in_capture": 66,
+   "packet_limit": null,
+   "bytes": 4834,
+   "duration_s": 284.8,
+   "protocols": {
+    "other": 4,
+    "tcp": 30,
+    "udp": 27
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 8,
+     "bytes": 553
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 348
+    },
+    {
+     "dst": "151.101.1.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 264
+    },
+    {
+     "dst": "151.101.1.2",
+     "dport": 443,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 258
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 3,
+     "bytes": 237
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 4,
+     "bytes": 216
+    },
+    {
+     "dst": "104.16.0.2",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 150
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 2,
+     "bytes": 134
+    },
+    {
+     "dst": "104.16.0.3",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 120
+    },
+    {
+     "dst": "93.184.216.35",
+     "dport": 8080,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "80.1.1.1",
+     "dport": 3389,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "93.184.216.37",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.39",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.40",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "9.9.9.9",
+     "dport": 123,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "70.1.1.1",
+     "dport": 22,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "1.1.1.1",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 89
+    },
+    {
+     "dst": "104.16.0.4",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 87
+    },
+    {
+     "dst": "93.184.216.36",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 81
+    },
+    {
+     "dst": "50.1.1.1",
+     "dport": 8443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 78
+    },
+    {
+     "dst": "93.184.216.38",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "60.1.1.1",
+     "dport": 9999,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 54
+    },
+    {
+     "dst": "8.8.4.4",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 46
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "callbacks": 6,
+     "interval_s": 30.0
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "callbacks": 4,
+     "interval_s": 60.0
+    }
+   ]
+  }
+ },
+ "truncated_in_record.pcap": {
+  "capture_facts": {
+   "packets_read": 67,
+   "packets_in_capture": 67,
+   "packet_limit": null,
+   "bytes": 4871,
+   "duration_s": 344.8,
+   "protocols": {
+    "other": 5,
+    "tcp": 30,
+    "udp": 27
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 8,
+     "bytes": 553
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 348
+    },
+    {
+     "dst": "151.101.1.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 264
+    },
+    {
+     "dst": "151.101.1.2",
+     "dport": 443,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 258
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 3,
+     "bytes": 237
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 4,
+     "bytes": 216
+    },
+    {
+     "dst": "104.16.0.2",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 150
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 2,
+     "bytes": 134
+    },
+    {
+     "dst": "104.16.0.3",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 120
+    },
+    {
+     "dst": "93.184.216.35",
+     "dport": 8080,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "80.1.1.1",
+     "dport": 3389,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "93.184.216.37",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.39",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.40",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "9.9.9.9",
+     "dport": 123,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "70.1.1.1",
+     "dport": 22,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "1.1.1.1",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 89
+    },
+    {
+     "dst": "104.16.0.4",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 87
+    },
+    {
+     "dst": "93.184.216.36",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 81
+    },
+    {
+     "dst": "50.1.1.1",
+     "dport": 8443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 78
+    },
+    {
+     "dst": "93.184.216.38",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "60.1.1.1",
+     "dport": 9999,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 54
+    },
+    {
+     "dst": "8.8.4.4",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 46
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 37
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "callbacks": 6,
+     "interval_s": 30.0
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "callbacks": 4,
+     "interval_s": 60.0
+    }
+   ]
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 67,
+   "packet_limit": 3,
+   "bytes": 232,
+   "duration_s": 0.5,
+   "protocols": {
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 78
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4871 bytes over 344.8s. Protocols: other=5, tcp=30, udp=27\n\nExternal conversations (all 26, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp — 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n- 185.199.108.1:0/other — 1 pkts, 37 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4871 bytes over 344.8s. Protocols: other=5, tcp=30, udp=27\n\nExternal conversations (all 26, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp — 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n- 185.199.108.1:0/other — 1 pkts, 37 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "empty": false,
+   "packets_read": 67,
+   "packets_in_capture": 67,
+   "packet_limit": null,
+   "bytes": 4871,
+   "duration_s": 344.8,
+   "protocols": {
+    "other": 5,
+    "tcp": 30,
+    "udp": 27
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 8,
+     "bytes": 553
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 348
+    },
+    {
+     "dst": "151.101.1.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 264
+    },
+    {
+     "dst": "151.101.1.2",
+     "dport": 443,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 258
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 3,
+     "bytes": 237
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 4,
+     "bytes": 216
+    },
+    {
+     "dst": "104.16.0.2",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 150
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 2,
+     "bytes": 134
+    },
+    {
+     "dst": "104.16.0.3",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 120
+    },
+    {
+     "dst": "93.184.216.35",
+     "dport": 8080,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "80.1.1.1",
+     "dport": 3389,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "93.184.216.37",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.39",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.40",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "9.9.9.9",
+     "dport": 123,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "70.1.1.1",
+     "dport": 22,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "1.1.1.1",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 89
+    },
+    {
+     "dst": "104.16.0.4",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 87
+    },
+    {
+     "dst": "93.184.216.36",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 81
+    },
+    {
+     "dst": "50.1.1.1",
+     "dport": 8443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 78
+    },
+    {
+     "dst": "93.184.216.38",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "60.1.1.1",
+     "dport": 9999,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 54
+    },
+    {
+     "dst": "8.8.4.4",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 46
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 37
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "callbacks": 6,
+     "interval_s": 30.0
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "callbacks": 4,
+     "interval_s": 60.0
+    }
+   ]
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4871 bytes over 344.8s. Protocols: other=5, tcp=30, udp=27\n\nExternal conversations (all 26, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp — 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n- 185.199.108.1:0/other — 1 pkts, 37 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+  "read_pcap_summary_page": "Packets 3 to 9 of the 67 in the capture; the next page starts at offset 10.\nPacket 3: 10.0.2.15 -> 10.0.2.3 (UDP 50001->53)\nPacket 4: 10.0.2.15 -> 224.0.0.251 (UDP 5353->5353)\nPacket 5: 10.0.2.15 -> 224.0.0.252 (UDP 50002->5355)\nPacket 6: 10.0.2.15 -> 1.1.1.1 (TCP 50003->53)\nPacket 7: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 8: 10.0.2.15 -> 93.184.216.34 (TCP 50004->80)\nPacket 9: 10.0.2.15 -> 93.184.216.35 (TCP 50005->8080)",
+  "extract_dns": "67 of 67 packets in the capture read.\nupdate.example.com.\nintranet.local.\nprinter.local.\nwpad.\ntcp.example.org.\nv6.example.com.\n.\ntrunc.example.com.\nfirst.example.com.\ncafé.example.com.",
+  "extract_dns_limit_5": "5 of 67 packets in the capture read (the caller asked for 5).\nupdate.example.com.\nintranet.local.\nprinter.local.",
+  "extract_http": "67 of 67 packets in the capture read.\nGET /index.html HTTP/1.1 | Host: www.example.com\nPOST /gate.php HTTP/1.0 | \nGET /v6 HTTP/1.1 | Host: v6.example.com\nGET /x HTTP/1.1 | Host: tiny\nGET /local HTTP/1.1 | host: 10.0.2.2:8000\nHEAD / HTTP/1.1 | Host: opts.example.com\nPUT /a HTTP/1.1 | \nDELETE /b HTTP/1.1 | HOST: upper.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n67 of 67 packets in the capture read: 4871 bytes over 344.8s. Protocols: other=5, tcp=30, udp=27\n\nExternal conversations (all 26, by volume):\n- 8.8.8.8:53/udp — 8 pkts, 553 bytes\n- 104.16.0.1:443/tcp — 2 pkts, 348 bytes\n- 151.101.1.1:443/tcp — 5 pkts, 270 bytes\n- 45.33.32.156:8080/udp — 6 pkts, 264 bytes\n- 151.101.1.2:443/udp — 6 pkts, 258 bytes\n- 93.184.216.34:80/tcp — 3 pkts, 237 bytes\n- 185.199.108.1:4444/tcp — 4 pkts, 216 bytes\n- 104.16.0.2:443/tcp — 1 pkts, 150 bytes\n- 8.8.8.8:0/other — 2 pkts, 134 bytes\n- 104.16.0.3:443/tcp — 1 pkts, 120 bytes\n- 93.184.216.35:8080/tcp — 1 pkts, 104 bytes\n- 80.1.1.1:3389/tcp — 1 pkts, 104 bytes\n- 93.184.216.37:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.39:80/tcp — 1 pkts, 101 bytes\n- 93.184.216.40:80/tcp — 1 pkts, 97 bytes\n- 9.9.9.9:123/udp — 1 pkts, 94 bytes\n- 70.1.1.1:22/tcp — 1 pkts, 94 bytes\n- 1.1.1.1:53/tcp — 1 pkts, 89 bytes\n- 104.16.0.4:443/tcp — 1 pkts, 87 bytes\n- 93.184.216.36:80/tcp — 1 pkts, 81 bytes\n- 50.1.1.1:8443/tcp — 1 pkts, 78 bytes\n- 93.184.216.38:80/tcp — 1 pkts, 73 bytes\n- 60.1.1.1:9999/udp — 1 pkts, 62 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 54 bytes\n- 8.8.4.4:0/other — 1 pkts, 46 bytes\n- 185.199.108.1:0/other — 1 pkts, 37 bytes\n\nBeaconing detected (periodic callbacks — strong C2 signal):\n- 45.33.32.156:8080/udp — 6 callbacks, ~30.0s interval (regular; likely C2 beacon)\n- 185.199.108.1:4444/tcp — 4 callbacks, ~60.0s interval (regular; likely C2 beacon)",
+   "empty": false,
+   "packets_read": 67,
+   "packets_in_capture": 67,
+   "packet_limit": null,
+   "bytes": 4871,
+   "duration_s": 344.8,
+   "protocols": {
+    "other": 5,
+    "tcp": 30,
+    "udp": 27
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 8,
+     "bytes": 553
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 348
+    },
+    {
+     "dst": "151.101.1.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 5,
+     "bytes": 270
+    },
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 264
+    },
+    {
+     "dst": "151.101.1.2",
+     "dport": 443,
+     "proto": "udp",
+     "packets": 6,
+     "bytes": 258
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 3,
+     "bytes": 237
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 4,
+     "bytes": 216
+    },
+    {
+     "dst": "104.16.0.2",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 150
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 2,
+     "bytes": 134
+    },
+    {
+     "dst": "104.16.0.3",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 120
+    },
+    {
+     "dst": "93.184.216.35",
+     "dport": 8080,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "80.1.1.1",
+     "dport": 3389,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 104
+    },
+    {
+     "dst": "93.184.216.37",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.39",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 101
+    },
+    {
+     "dst": "93.184.216.40",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "9.9.9.9",
+     "dport": 123,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "70.1.1.1",
+     "dport": 22,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 94
+    },
+    {
+     "dst": "1.1.1.1",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 89
+    },
+    {
+     "dst": "104.16.0.4",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 87
+    },
+    {
+     "dst": "93.184.216.36",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 81
+    },
+    {
+     "dst": "50.1.1.1",
+     "dport": 8443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 78
+    },
+    {
+     "dst": "93.184.216.38",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "60.1.1.1",
+     "dport": 9999,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 62
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 54
+    },
+    {
+     "dst": "8.8.4.4",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 46
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 37
+    }
+   ],
+   "sni": {},
+   "beacons": [
+    {
+     "dst": "45.33.32.156",
+     "dport": 8080,
+     "proto": "udp",
+     "callbacks": 6,
+     "interval_s": 30.0
+    },
+    {
+     "dst": "185.199.108.1",
+     "dport": 4444,
+     "proto": "tcp",
+     "callbacks": 4,
+     "interval_s": 60.0
+    }
+   ]
+  }
+ },
+ "two_interfaces.pcapng": {
+  "capture_facts": {
+   "packets_read": 7,
+   "packets_in_capture": 7,
+   "packet_limit": null,
+   "bytes": 661,
+   "duration_s": 40.0,
+   "protocols": {
+    "tcp": 3,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 186
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 173
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 138
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 7,
+   "packet_limit": 3,
+   "bytes": 238,
+   "duration_s": 2.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 138
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 100
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n7 of 7 packets in the capture read: 661 bytes over 40.0s. Protocols: tcp=3, udp=2\n\nExternal conversations (all 3, by volume):\n- 93.184.216.34:80/tcp — 2 pkts, 186 bytes\n- 104.16.0.1:443/tcp — 1 pkts, 173 bytes\n- 8.8.8.8:53/udp — 2 pkts, 138 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n7 of 7 packets in the capture read: 661 bytes over 40.0s. Protocols: tcp=3, udp=2\n\nExternal conversations (all 3, by volume):\n- 93.184.216.34:80/tcp — 2 pkts, 186 bytes\n- 104.16.0.1:443/tcp — 1 pkts, 173 bytes\n- 8.8.8.8:53/udp — 2 pkts, 138 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 7,
+   "packets_in_capture": 7,
+   "packet_limit": null,
+   "bytes": 661,
+   "duration_s": 40.0,
+   "protocols": {
+    "tcp": 3,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 186
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 173
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 138
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n7 of 7 packets in the capture read: 661 bytes over 40.0s. Protocols: tcp=3, udp=2\n\nExternal conversations (all 3, by volume):\n- 93.184.216.34:80/tcp — 2 pkts, 186 bytes\n- 104.16.0.1:443/tcp — 1 pkts, 173 bytes\n- 8.8.8.8:53/udp — 2 pkts, 138 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary_page": "Packets 3 to 6 of the 7 in the capture.\nPacket 3: 10.0.2.15 -> 93.184.216.34 (TCP 52001->80)\nPacket 6: 10.0.2.15 -> 104.16.0.1 (TCP 52003->443)",
+  "extract_dns": "7 of 7 packets in the capture read.\nlink.example.com.\nsix.local.",
+  "extract_dns_limit_5": "5 of 7 packets in the capture read (the caller asked for 5).\nlink.example.com.\nsix.local.",
+  "extract_http": "7 of 7 packets in the capture read.\nGET /link HTTP/1.1 | Host: link.example.com\nGET /link HTTP/1.1 | Host: link.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n7 of 7 packets in the capture read: 661 bytes over 40.0s. Protocols: tcp=3, udp=2\n\nExternal conversations (all 3, by volume):\n- 93.184.216.34:80/tcp — 2 pkts, 186 bytes\n- 104.16.0.1:443/tcp — 1 pkts, 173 bytes\n- 8.8.8.8:53/udp — 2 pkts, 138 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 7,
+   "packets_in_capture": 7,
+   "packet_limit": null,
+   "bytes": 661,
+   "duration_s": 40.0,
+   "protocols": {
+    "tcp": 3,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 186
+    },
+    {
+     "dst": "104.16.0.1",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 173
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 138
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
+ "unknown_linktype.pcap": {
+  "capture_facts": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 265,
+   "duration_s": 3.0,
+   "protocols": {},
+   "conversations": [],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": 3,
+   "bytes": 265,
+   "duration_s": 3.0,
+   "protocols": {},
+   "conversations": [],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 265 bytes over 3.0s. Protocols: no IP packets\nNo external (public) endpoints contacted — traffic stayed internal to the sandbox.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 265 bytes over 3.0s. Protocols: no IP packets\nNo external (public) endpoints contacted — traffic stayed internal to the sandbox.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 265,
+   "duration_s": 3.0,
+   "protocols": {},
+   "conversations": [],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 265 bytes over 3.0s. Protocols: no IP packets\nNo external (public) endpoints contacted — traffic stayed internal to the sandbox.",
+  "read_pcap_summary_page": "Packets 3 to 3 of the 3 in the capture. No IP packets in them.",
+  "extract_dns": "3 of 3 packets in the capture read. No DNS queries in them.",
+  "extract_dns_limit_5": "3 of 3 packets in the capture read. No DNS queries in them.",
+  "extract_http": "3 of 3 packets in the capture read. No HTTP requests in them.",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 265 bytes over 3.0s. Protocols: no IP packets\nNo external (public) endpoints contacted — traffic stayed internal to the sandbox.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 265,
+   "duration_s": 3.0,
+   "protocols": {},
+   "conversations": [],
+   "sni": {},
+   "beacons": []
+  }
+ }
+}

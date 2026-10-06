@@ -5,12 +5,12 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from maljan.analysis.capture_reader import Packet
 from maljan.analysis.pcap_summary import each_packet
 from maljan.tools import staging
-from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest, module
+from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest
 from maljan.tools.errors import (
     CAPTURES_REMEDIATION,
-    MISSING_DEPENDENCY,
     NO_CAPTURE_REMEDIATION,
     NO_SUCH_FILE,
     PATH_OUTSIDE_ROOTS,
@@ -20,43 +20,21 @@ from maljan.tools.errors import (
 )
 from maljan.tools.roots import PathOutsideRoots, resolve_under_roots
 
-# scapy is the one library every tool here reads a capture with. Imported
-# guarded so a host without it still starts the server and answers the
-# manifest, and every tool then answers the same error instead of the server
-# never coming up.
-try:
-    from scapy.all import (  # type: ignore[attr-defined]
-        DNSQR,
-        IP,
-        TCP,
-        UDP,
-    )
-
-    _SCAPY_MISSING: str | None = None
-except ModuleNotFoundError as exc:  # pragma: no cover - depends on the host
-    DNSQR = IP = TCP = UDP = None  # type: ignore[assignment]
-    _SCAPY_MISSING = f"scapy is not installed ({exc})"
-except ImportError as exc:  # pragma: no cover - depends on the host
-    # A broken install rather than an absent one. Its message names absolute
-    # paths on this host, and this reason travels to a probe response, the
-    # console and the judge's prompt, so only the type crosses.
-    DNSQR = IP = TCP = UDP = None  # type: ignore[assignment]
-    _SCAPY_MISSING = f"scapy is not installed ({type(exc).__name__})"
-
 mcp = FastMCP("NetworkMCP")
 
 # Every tool here reads the whole capture, one packet at a time
-# (``analysis.pcap_summary.each_packet``), and stops early only where the
+# (``analysis.pcap_summary.each_packet``, over ``analysis.capture_reader``,
+# which needs no optional library), and stops early only where the
 # caller passed ``packet_limit``. Each answer says how many packets it read and
 # how many the capture holds: a capture that held 14,887 packets was once read
 # to its 5,000th, and "No DNS queries found" about the rest of it would have
 # been the platform stating something nobody looked at.
 
 TOOL_NEEDS: list[ToolNeeds] = [
-    ToolNeeds("read_pcap_summary", (module("scapy"),)),
-    ToolNeeds("extract_dns", (module("scapy"),)),
-    ToolNeeds("extract_http", (module("scapy"),)),
-    ToolNeeds("pcap_summary", (module("scapy"),)),
+    ToolNeeds("read_pcap_summary"),
+    ToolNeeds("extract_dns"),
+    ToolNeeds("extract_http"),
+    ToolNeeds("pcap_summary"),
 ]
 CAPABILITIES = manifest("network", TOOL_NEEDS)
 
@@ -153,8 +131,6 @@ def read_pcap_summary(pcap_path: str, packet_limit: int | None = None, offset: i
     contacts. With one, it lists ``packet_limit`` packets from ``offset``, one
     line each, and names the offset of the next page.
     """
-    if _SCAPY_MISSING:
-        return _text_error(MISSING_DEPENDENCY, _SCAPY_MISSING, "read_pcap_summary")
     capture = _opened("read_pcap_summary", pcap_path)
     if isinstance(capture, str):
         return capture
@@ -173,15 +149,15 @@ def read_pcap_summary(pcap_path: str, packet_limit: int | None = None, offset: i
         output: list[str] = []
         index = 0
 
-        def _visit(pkt: Any) -> None:
+        def _visit(pkt: Packet) -> None:
             nonlocal index
-            if index >= start and IP in pkt:
+            if index >= start and pkt.ip_dst is not None:
                 proto = "Unknown"
-                if TCP in pkt:
-                    proto = f"TCP {pkt[TCP].sport}->{pkt[TCP].dport}"
-                elif UDP in pkt:
-                    proto = f"UDP {pkt[UDP].sport}->{pkt[UDP].dport}"
-                output.append(f"Packet {index}: {pkt[IP].src} -> {pkt[IP].dst} ({proto})")
+                if pkt.tcp is not None:
+                    proto = f"TCP {pkt.tcp.sport}->{pkt.tcp.dport}"
+                elif pkt.udp is not None:
+                    proto = f"UDP {pkt.udp.sport}->{pkt.udp.dport}"
+                output.append(f"Packet {index}: {pkt.ip_src} -> {pkt.ip_dst} ({proto})")
             index += 1
 
         read = each_packet(str(capture), _visit, start + page)
@@ -201,17 +177,15 @@ def read_pcap_summary(pcap_path: str, packet_limit: int | None = None, offset: i
 @mcp.tool()
 def extract_dns(pcap_path: str, packet_limit: int | None = None) -> str:
     """Extract every DNS query name in a PCAP file; ``packet_limit`` reads fewer packets."""
-    if _SCAPY_MISSING:
-        return _text_error(MISSING_DEPENDENCY, _SCAPY_MISSING, "extract_dns")
     capture = _opened("extract_dns", pcap_path)
     if isinstance(capture, str):
         return capture
     try:
         queries: dict[str, None] = {}
 
-        def _visit(pkt: Any) -> None:
-            if DNSQR in pkt:
-                queries.setdefault(pkt[DNSQR].qname.decode("utf-8", errors="ignore"), None)
+        def _visit(pkt: Packet) -> None:
+            if pkt.dns_qname is not None:
+                queries.setdefault(pkt.dns_qname.decode("utf-8", errors="ignore"), None)
 
         read = each_packet(str(capture), _visit, packet_limit)
         head = f"{read.statement()}."
@@ -223,17 +197,15 @@ def extract_dns(pcap_path: str, packet_limit: int | None = None) -> str:
 @mcp.tool()
 def extract_http(pcap_path: str, packet_limit: int | None = None) -> str:
     """Extract every HTTP request line and Host header; ``packet_limit`` reads fewer packets."""
-    if _SCAPY_MISSING:
-        return _text_error(MISSING_DEPENDENCY, _SCAPY_MISSING, "extract_http")
     capture = _opened("extract_http", pcap_path)
     if isinstance(capture, str):
         return capture
     try:
         requests: list[str] = []
 
-        def _visit(pkt: Any) -> None:
-            if TCP in pkt and pkt[TCP].payload:
-                payload = bytes(pkt[TCP].payload).decode("utf-8", errors="ignore")
+        def _visit(pkt: Packet) -> None:
+            if pkt.tcp is not None and pkt.tcp.rest:
+                payload = pkt.tcp.rest.decode("utf-8", errors="ignore")
                 if payload.startswith(("GET ", "POST ", "PUT ", "DELETE ", "HEAD ")):
                     # The request line, and the Host header when there is one.
                     lines = payload.split("\r\n")

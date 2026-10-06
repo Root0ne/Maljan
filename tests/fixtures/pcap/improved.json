@@ -1,0 +1,258 @@
+{
+ "odd_records.pcap": {
+  "capture_facts": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 194,
+   "duration_s": 2.0,
+   "protocols": {
+    "other": 1,
+    "tcp": 1
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": 3,
+   "bytes": 194,
+   "duration_s": 2.0,
+   "protocols": {
+    "other": 1,
+    "tcp": 1
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 194 bytes over 2.0s. Protocols: other=1, tcp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:0/other — 1 pkts, 97 bytes\n- 8.8.8.8:80/tcp — 1 pkts, 97 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 194 bytes over 2.0s. Protocols: other=1, tcp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:0/other — 1 pkts, 97 bytes\n- 8.8.8.8:80/tcp — 1 pkts, 97 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 194,
+   "duration_s": 2.0,
+   "protocols": {
+    "other": 1,
+    "tcp": 1
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 194 bytes over 2.0s. Protocols: other=1, tcp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:0/other — 1 pkts, 97 bytes\n- 8.8.8.8:80/tcp — 1 pkts, 97 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary_page": "Packets 3 to 3 of the 3 in the capture. No IP packets in them.",
+  "extract_dns": "3 of 3 packets in the capture read. No DNS queries in them.",
+  "extract_dns_limit_5": "3 of 3 packets in the capture read. No DNS queries in them.",
+  "extract_http": "3 of 3 packets in the capture read.\nGET /e HTTP/1.1 | Host: edge.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 194 bytes over 2.0s. Protocols: other=1, tcp=1\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:0/other — 1 pkts, 97 bytes\n- 8.8.8.8:80/tcp — 1 pkts, 97 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 194,
+   "duration_s": 2.0,
+   "protocols": {
+    "other": 1,
+    "tcp": 1
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
+ "truncated_block.pcapng": {
+  "capture_facts": {
+   "packets_read": 6,
+   "packets_in_capture": 6,
+   "packet_limit": null,
+   "bytes": 488,
+   "duration_s": 5.1,
+   "protocols": {
+    "tcp": 2,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 186
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 138
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 6,
+   "packet_limit": 3,
+   "bytes": 238,
+   "duration_s": 2.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 138
+    },
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 100
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n6 of 6 packets in the capture read: 488 bytes over 5.1s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 2 pkts, 186 bytes\n- 8.8.8.8:53/udp — 2 pkts, 138 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n6 of 6 packets in the capture read: 488 bytes over 5.1s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 2 pkts, 186 bytes\n- 8.8.8.8:53/udp — 2 pkts, 138 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 6,
+   "packets_in_capture": 6,
+   "packet_limit": null,
+   "bytes": 488,
+   "duration_s": 5.1,
+   "protocols": {
+    "tcp": 2,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 186
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 138
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n6 of 6 packets in the capture read: 488 bytes over 5.1s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 2 pkts, 186 bytes\n- 8.8.8.8:53/udp — 2 pkts, 138 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary_page": "Packets 3 to 5 of the 6 in the capture.\nPacket 3: 10.0.2.15 -> 93.184.216.34 (TCP 52001->80)",
+  "extract_dns": "6 of 6 packets in the capture read.\nlink.example.com.\nsix.local.",
+  "extract_dns_limit_5": "5 of 6 packets in the capture read (the caller asked for 5).\nlink.example.com.\nsix.local.",
+  "extract_http": "6 of 6 packets in the capture read.\nGET /link HTTP/1.1 | Host: link.example.com\nGET /link HTTP/1.1 | Host: link.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n6 of 6 packets in the capture read: 488 bytes over 5.1s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 93.184.216.34:80/tcp — 2 pkts, 186 bytes\n- 8.8.8.8:53/udp — 2 pkts, 138 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 6,
+   "packets_in_capture": 6,
+   "packet_limit": null,
+   "bytes": 488,
+   "duration_s": 5.1,
+   "protocols": {
+    "tcp": 2,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "93.184.216.34",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 186
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 138
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ }
+}
