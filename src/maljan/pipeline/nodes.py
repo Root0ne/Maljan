@@ -1181,17 +1181,25 @@ def evidence_summary(ledger: Sequence[Any]) -> dict[str, Any]:
     # A call the repeat guard answered from an earlier entry is an entry and is
     # counted apart: it neither worked nor failed, it was not run.
     ran = [e for e in ledger if not getattr(e, "repeated_of", None)]
+    # An answer the tool-output guardrail cut keeps what the model read and is
+    # counted as cut, not as trimmed to the budget, unless the budget then
+    # blanked it too.
+    cut = [e for e in ledger if int(getattr(e, "chars_dropped", 0) or 0) > 0]
+    cut_ids = {id(e) for e in cut}
     summary: dict[str, Any] = {
         "entries": len(ledger),
         "ok": sum(1 for e in ran if e.ok),
         "failed": sum(1 for e in ran if not e.ok),
-        "trimmed": sum(1 for e in ledger if e.truncated),
+        "trimmed": sum(1 for e in ledger if e.truncated and (id(e) not in cut_ids or not e.output)),
         "by_tool": dict(sorted(by_tool.items())),
         "failures": tool_failures(ledger),
     }
     repeats = len(ledger) - len(ran)
     if repeats:
         summary["repeats"] = repeats
+    if cut:
+        summary["cut"] = len(cut)
+        summary["chars_dropped"] = sum(int(e.chars_dropped) for e in cut)
     return summary
 
 

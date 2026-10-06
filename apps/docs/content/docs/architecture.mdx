@@ -2632,6 +2632,18 @@ failure with a cause that did not happen. `truncated` is persisted alongside
 `repeated_of` (the earlier identical call a repeat was answered from), `symbol`
 and `started_at`, and the evidence endpoint returns all four.
 
+An answer the tool-output guardrail cut, shortened or summarised to fit is
+`truncated` too, and carries `chars_dropped`, the characters it lost: the
+guardrail tells the call it is answering (`context_window.note_answer_cut`),
+and the entry keeps exactly what the model read. A compact form, which loses no
+value, is not a cut. `run_summary.evidence` counts such entries apart from the
+budget's trims (`cut`, `chars_dropped`), and §13's evidence bounds say
+"N cut by the tool-output guardrail (X characters dropped)"; a summary written
+before the count reads the guardrail's own count from `run_summary.truncation`.
+A cut entry still holds its answer for a later chunk, which is answered from it
+as from any kept result. Two decompilations once cut by thousands of characters
+were stored as `truncated: false`, and the report said nothing was cut.
+
 The rows are written in one batch when the run ends, so `created_at` used to be
 the flush for every one of them — thirty entries of one run had one distinct
 value between them, and a ledger sorted by it said nothing about when anything

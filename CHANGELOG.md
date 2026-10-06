@@ -2392,6 +2392,7 @@ change landed on `main`.
 
 ### Fixed
 
+- **A tool answer the guardrail cut, shortened or summarised is recorded as `truncated` with `chars_dropped`** (a new `evidence_entries` column), and §13's evidence bounds count it ("2 cut by the tool-output guardrail (5,817 characters dropped)"), where such an entry was stored as whole.
 - **Every call the repeat guard answers without running is a ledger entry and a pair of tool-call events**, filed as a repeat of the entry that holds its answer (`repeated_of`) and counted apart in `run_summary.evidence.repeats`, the report header, §13's evidence bounds and Appendix A ("repeat of ev_…"); a later chunk's calls an earlier chunk had made, and a refused third identical call, left no trace before.
 - **A bare two-label host with a two-character first label is read when the label holds a digit and a letter** (`c2.ru`, `x1.top`), by the string sweep and the report's host reader; one of two letters (`ab.ru`) is read only where the run's network evidence holds it, so prose such as `to.do` stays as written.
 - **An IPv6 address, bare or bracketed, and a `.onion` name of any labels are network values to every reader**: the publish checks, the run summary's sentences and a cell's state note read them by form: an IPv6 address whole, an embedded IPv4 tail included, in brackets or with at least three groups and a digit, so a scope name such as `dead::beef` is no address.

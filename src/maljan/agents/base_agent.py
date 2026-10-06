@@ -2986,11 +2986,12 @@ def earlier_chunks_block(entries: Sequence[Any]) -> str:
         except (TypeError, ValueError):
             shown = repr(args)
         ok = bool(getattr(entry, "ok", True))
-        # A result the run did not keep whole cannot answer the call again,
-        # which is then made once more, as a failed one may be.
-        kept = bool(str(getattr(entry, "output", "") or "")) and not bool(
-            getattr(entry, "truncated", False)
-        )
+        # A result the run did not keep cannot answer the call again, which is
+        # then made once more, as a failed one may be. One the guardrail cut is
+        # kept as the model read it.
+        from maljan.schemas.evidence import holds_its_answer
+
+        kept = holds_its_answer(entry)
         failed = (
             " (failed)" if not ok else "" if kept else " (result not kept; may be made once more)"
         )

@@ -40,6 +40,7 @@ from maljan.schemas.evidence import (
     EvidenceCounter,
     LedgerEntry,
     build_entry,
+    holds_its_answer,
     not_shown_record,
 )
 
@@ -290,13 +291,16 @@ class EvidenceRecorder:
         args_repaired: bool = False,
         args_raw: str | None = None,
         not_shown: int | None = None,
+        cut: int | None = None,
     ) -> LedgerEntry:
         """Append one entry and return it, so the caller can quote its id.
 
         ``not_shown`` is the length of an answer the conversation had no room
         for: the entry is recorded as cut (``schemas.evidence.not_shown_record``)
         and ``output``, what the model was handed instead, is what the run's
-        corpus remembers.
+        corpus remembers. ``cut`` is the characters the tool-output guardrail
+        dropped from an answer it cut to fit: the entry keeps what the model
+        read and is marked ``truncated`` with ``chars_dropped``.
         """
         entry_id, seq = self.counter.next_id()
         entry = build_entry(
@@ -318,6 +322,7 @@ class EvidenceRecorder:
             args_raw=args_raw,
             model=self.model or None,
             not_shown=not_shown is not None,
+            chars_dropped=int(cut or 0) if not_shown is None else 0,
         )
         self.entries.append(entry)
         # The function names a hash resolution read are names, and the event
@@ -615,9 +620,11 @@ def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
     """A loop's repeat guard, seeded with the calls earlier chunks made (``RepeatGuard.seed``).
 
     An answered call is seeded with the result its entry recorded, which is
-    what a later identical call is answered with. A call whose entry holds no
-    whole result — the byte budget blanked it, or a ceiling cut it — has
-    nothing recorded to answer with and is served once more.
+    what a later identical call is answered with. A call whose entry does not
+    hold the answer the model read — the byte budget blanked it, a ceiling cut
+    it, or the conversation had no room for it — has nothing recorded to
+    answer with and is served once more. An answer the tool-output guardrail
+    cut is held as the model read it, which a second call would hand back.
     """
     guard = RepeatGuard()
     for entry in entries or ():
@@ -632,11 +639,10 @@ def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
         if not bool(getattr(entry, "ok", True)):
             guard.seed(tool, args, entry_id, failed=True)
             continue
-        output = str(getattr(entry, "output", "") or "")
-        if not output or bool(getattr(entry, "truncated", False)):
+        if not holds_its_answer(entry):
             guard.seed(tool, args, entry_id, rerun=True)
             continue
-        guard.seed(tool, args, entry_id, recorded=output)
+        guard.seed(tool, args, entry_id, recorded=str(getattr(entry, "output", "") or ""))
     return guard
 
 
@@ -1064,6 +1070,7 @@ def _record_tool(
         value: Any,
         repeated: str | None,
         not_shown: int | None = None,
+        cut: int | None = None,
     ) -> str:
         text = result_text(value)
         raw = _was_repaired(kwargs)
@@ -1077,6 +1084,7 @@ def _record_tool(
             args_repaired=raw is not None,
             args_raw=raw,
             not_shown=not_shown,
+            cut=cut,
         )
         _note(kwargs, entry.id)
         # Read off the answer itself, before any notice is appended to it: a
@@ -1174,7 +1182,15 @@ def _record_tool(
                 # analyst's answer (``BaseAnalyst._claims_watched``).
                 with answering_for(recorder.agent) as call_answer, watching(None):
                     value = func(**kwargs)
-                return _stamp(kwargs, started, wall_clock, value, repeated, call_answer.not_shown)
+                return _stamp(
+                    kwargs,
+                    started,
+                    wall_clock,
+                    value,
+                    repeated,
+                    call_answer.not_shown,
+                    call_answer.cut,
+                )
             except SampleNotOpened as exc:
                 return _stopped(kwargs, started, wall_clock, exc, repeated)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
@@ -1203,7 +1219,15 @@ def _record_tool(
                 # the guardrail to, because that copies the context.
                 with answering_for(recorder.agent) as call_answer, watching(None):
                     value = await coroutine(**kwargs)
-                return _stamp(kwargs, started, wall_clock, value, repeated, call_answer.not_shown)
+                return _stamp(
+                    kwargs,
+                    started,
+                    wall_clock,
+                    value,
+                    repeated,
+                    call_answer.not_shown,
+                    call_answer.cut,
+                )
             except SampleNotOpened as exc:
                 return _stopped(kwargs, started, wall_clock, exc, repeated)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence

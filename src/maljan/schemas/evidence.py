@@ -133,6 +133,21 @@ def answer_not_shown(entry: Any) -> bool:
     return _NOT_SHOWN_RE.fullmatch(str(getattr(entry, "output", "") or "").strip()) is not None
 
 
+def holds_its_answer(entry: Any) -> bool:
+    """Whether ``entry`` keeps the answer its call gave the model, so it can answer the call again.
+
+    An entry the byte budget blanked keeps nothing, and one whose answer the
+    conversation had no room for holds a statement of the cut. One the
+    tool-output guardrail cut keeps exactly what the model read, which is what
+    making the call again would hand it: it holds its answer.
+    """
+    if not str(getattr(entry, "output", "") or ""):
+        return False
+    if not getattr(entry, "truncated", False):
+        return True
+    return int(getattr(entry, "chars_dropped", 0) or 0) > 0 and not answer_not_shown(entry)
+
+
 def parse_structured(output: str) -> dict[str, Any] | list[Any] | None:
     """The tool's output as JSON when it is JSON, else ``None``.
 
@@ -181,7 +196,15 @@ class LedgerEntry(BaseModel):
         default=None, description="Parsed result when the tool returned JSON."
     )
     truncated: bool = Field(
-        default=False, description="Output dropped because the agent's byte budget was spent."
+        default=False,
+        description=(
+            "Output not the whole answer: dropped because the agent's byte budget was "
+            "spent, or cut by the tool-output guardrail (chars_dropped)."
+        ),
+    )
+    chars_dropped: int = Field(
+        default=0,
+        description="Characters the tool-output guardrail cut from the answer; 0 for none.",
     )
     repeated_of: str | None = Field(
         default=None,
@@ -259,6 +282,7 @@ def build_entry(
     args_raw: str | None = None,
     model: str | None = None,
     not_shown: bool = False,
+    chars_dropped: int = 0,
 ) -> LedgerEntry:
     """One entry, with the output trimmed and parsed the same way every time.
 
@@ -296,6 +320,10 @@ def build_entry(
     ``not_shown`` says the conversation had no room for any of the answer:
     ``output`` is then the statement of the cut (:func:`not_shown_record`),
     the entry is marked ``truncated`` and nothing is parsed out of it.
+
+    ``chars_dropped`` is what the tool-output guardrail cut from the answer
+    before the model read it: ``output`` is what the model was handed, and
+    the entry is marked ``truncated`` because it is not the whole answer.
     """
     safe_args = dict(args) if isinstance(args, dict) else {}
     full = str(output or "")
@@ -320,7 +348,8 @@ def build_entry(
         error=error,
         remediation=remediation if error else None,
         output=text,
-        truncated=bool(not_shown) or len(text) < len(full),
+        truncated=bool(not_shown) or len(text) < len(full) or int(chars_dropped) > 0,
+        chars_dropped=max(0, int(chars_dropped)),
         structured=None if repeated_of or not_shown else parse_structured(full),
         repeated_of=repeated_of,
         args_repaired=bool(args_repaired),

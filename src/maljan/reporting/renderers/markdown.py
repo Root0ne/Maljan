@@ -1736,7 +1736,9 @@ class MarkdownRenderer:
                 f"**Evidence bounds:** {evidence.get('entries', 0)} ledger entries, "
                 f"{evidence.get('ok', 0)} ok, {evidence.get('failed', 0)} failed, "
                 + (f"{repeats} answered from an earlier entry without running, " if repeats else "")
-                + f"{evidence.get('trimmed', 0)} trimmed to the budget."
+                + f"{evidence.get('trimmed', 0)} trimmed to the budget"
+                + _guardrail_cut_clause(evidence, summary.get("truncation"))
+                + "."
             )
             lines.append("")
         failures = [row for row in (evidence.get("failures") or []) if isinstance(row, dict)]
@@ -2377,6 +2379,34 @@ class _Context:
         if trimmed:
             parts.append(f"{trimmed} of {entries} ledger entries were trimmed")
         return f" The evidence is partial: {' and '.join(parts)}." if parts else ""
+
+
+def _guardrail_cut_clause(evidence: dict[str, Any], truncation: Any) -> str:
+    """``", N cut by the tool-output guardrail (X characters dropped)"``, or ``""`` for none.
+
+    Read off the ledger's own count (``run_summary.evidence.cut``). A summary
+    written before the ledger counted cuts has the guardrail's count of the
+    answers it cut, shortened or summarised, which is the same calls counted
+    where they were cut.
+    """
+    if "cut" in evidence:
+        cut = int(evidence.get("cut") or 0)
+        dropped = int(evidence.get("chars_dropped") or 0)
+    elif isinstance(truncation, dict):
+        cut = sum(
+            int(truncation.get(key) or 0)
+            for key in (
+                "tool_output_hard_truncated",
+                "tool_output_shortened",
+                "tool_output_summarised",
+            )
+        )
+        dropped = int(truncation.get("tool_output_chars_dropped") or 0)
+    else:
+        return ""
+    if cut <= 0:
+        return ""
+    return f", {cut} cut by the tool-output guardrail ({dropped:,} characters dropped)"
 
 
 # How the methodology appendix names each sandbox state.
