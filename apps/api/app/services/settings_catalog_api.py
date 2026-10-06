@@ -21,6 +21,7 @@ from maljan.core.config import REQUIRED_ENV_ALLOW
 from maljan.core.settings_annotations import GROUP_ORDER
 from maljan.core.settings_catalog import CatalogEntry, FieldType, _bounds, core_catalog
 from maljan.core.settings_overrides import redact_url
+from maljan.providers.sandbox.limits import SAMPLE_UPLOAD_MAX_BYTES
 from pydantic import SecretStr
 
 from app.config import APISettings
@@ -64,7 +65,7 @@ API_DEFAULTS: dict[str, Any] = {
     "rate_limit_whitelist": ["/health"],
     "login_max_attempts": 10,
     "login_lockout_seconds": 300,
-    "upload_max_bytes": 100 * 1024 * 1024,  # 100 MB
+    "upload_max_bytes": SAMPLE_UPLOAD_MAX_BYTES,  # 100 MiB
     "upload_allowed_mime_types": [
         # The list mirrors every analyzer package shipped by CAPEv2 under
         # ``external/CAPEv2/analyzer/{windows,linux}/modules/packages/`` so

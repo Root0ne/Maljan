@@ -53,18 +53,20 @@ def test_a_gzip_capture_stops_at_the_platform_cap_and_says_so(
     records = [_udp_to(b"\x08\x08\x08\x08", 9, b"y" * 100) for _ in range(50)]
     target = tmp_path / "big.pcap.gz"
     target.write_bytes(gzip.compress(_pcap(records)))
-    monkeypatch.setattr(limits, "MAX_RESPONSE_BYTES", 24 + 5 * (16 + 128) + 10)
+    cap = 24 + 5 * (16 + 128) + 10
+    monkeypatch.setattr(limits, "MAX_RESPONSE_BYTES", cap - 1)
+    monkeypatch.setattr(limits, "SAMPLE_UPLOAD_MAX_BYTES", cap)
 
     seen: list[object] = []
     read = each_packet(str(target), seen.append)
 
     assert read.packets_read == 5
-    assert read.byte_cap == limits.MAX_RESPONSE_BYTES
+    assert read.byte_cap == cap
     assert not read.whole
     assert "5 packets read" in read.statement()
     assert "reading stopped at the" in read.statement()
     facts = capture_facts(str(target))
-    assert facts is not None and facts["byte_cap"] == limits.MAX_RESPONSE_BYTES
+    assert facts is not None and facts["byte_cap"] == cap
 
 
 def test_a_gzip_capture_under_the_cap_reads_whole(tmp_path: Path) -> None:
@@ -92,3 +94,41 @@ def test_a_long_pcapng_option_list_is_walked_once() -> None:
     found = capture_reader._pcapng_options(options, "<")
 
     assert found[9] == b"\x09"
+
+
+def test_a_plain_capture_larger_than_every_cap_reads_whole(tmp_path: Path) -> None:
+    """80 MB uncompressed: the channel that delivered it capped its size, not the reader."""
+    record = _udp_to(b"\x08\x08\x08\x08", 9, b"z" * 60_000)
+    count = 80_000_000 // (16 + len(record)) + 1
+    target = tmp_path / "large.pcap"
+    with target.open("wb") as out:
+        out.write(_pcap([]))
+        frame = struct.pack("<IIII", 1_700_000_000, 0, len(record), len(record)) + record
+        for _ in range(count):
+            out.write(frame)
+    assert target.stat().st_size > max(limits.MAX_RESPONSE_BYTES, 80_000_000)
+
+    read = each_packet(str(target), lambda _p: None)
+
+    assert read.packets_read == read.packets_in_capture == count
+    assert read.whole and read.byte_cap is None
+    assert read.statement() == f"{count} of {count} packets in the capture read"
+
+
+def test_a_gzip_capture_past_the_upload_cap_stops_there_and_says_so(tmp_path: Path) -> None:
+    record = _udp_to(b"\x08\x08\x08\x08", 9, bytes(60_000))
+    frame = struct.pack("<IIII", 1_700_000_000, 0, len(record), len(record)) + record
+    count = limits.SAMPLE_UPLOAD_MAX_BYTES // len(frame) + 50
+    target = tmp_path / "large.pcap.gz"
+    with target.open("wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=1) as out:
+        out.write(_pcap([]))
+        for _ in range(count):
+            out.write(frame)
+
+    read = each_packet(str(target), lambda _p: None)
+
+    cap = max(limits.MAX_RESPONSE_BYTES, limits.SAMPLE_UPLOAD_MAX_BYTES)
+    assert read.byte_cap == cap
+    assert read.packets_read == (cap - 24) // len(frame)
+    assert not read.whole
+    assert f"reading stopped at the {cap} decompressed bytes" in read.statement()

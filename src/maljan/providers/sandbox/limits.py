@@ -23,6 +23,12 @@ from maljan.providers.errors import ProviderError
 # Read at call time, never bound at import: the tests lower it, and a future
 # setting can point at it without every caller having to be found again.
 MAX_RESPONSE_BYTES = 64 * 1024 * 1024
+
+# The default size a sample upload may reach (the API's ``upload_max_bytes``
+# setting, ``apps/api/app/services/settings_catalog_api.py``, which reads it
+# from here). Declared in ``src/`` so the capture reader, which runs where the
+# API's settings are not importable, holds an uploaded gzip capture to it.
+SAMPLE_UPLOAD_MAX_BYTES = 100 * 1024 * 1024
 CHUNK_BYTES = 64 * 1024
 
 

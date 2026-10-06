@@ -1084,9 +1084,12 @@ change landed on `main`.
 
   Outside the corpus: a record is read up to the snapshot length the capture
   declares, and records longer than 65,535 bytes within it count in full (scapy
-  cut them at 65,535); a gzip capture is decompressed as a stream and no
-  further than the 64 MiB the sandbox providers allow a downloaded capture
-  (`providers/sandbox/limits.py`), and the answer says when it stopped there; a
+  cut them at 65,535); a plain capture is read whole; a gzip capture is
+  decompressed as a stream and no further than the larger of the caps on the
+  two channels that deliver one, the sample upload's default
+  (`SAMPLE_UPLOAD_MAX_BYTES`, 100 MiB, now declared in
+  `providers/sandbox/limits.py` and read by the API's `upload_max_bytes`) and
+  the sandbox download's (64 MiB), and the answer says when it stopped there; a
   simple packet block carries no timestamp, where scapy stamped the time of
   reading; interface numbers start again in every pcapng section.
 - **The documentation site is built with Fumadocs.** The pages are MDX under

@@ -11,10 +11,11 @@ resolution; a pcapng file with any number of sections and interfaces, each
 interface with its own link type, snapshot length and timestamp resolution;
 either one compressed with gzip, decompressed as a stream. A record's bytes are
 read up to the snapshot length the capture declares (0 declares none) and the
-rest of the record is skipped. A gzip capture is decompressed up to the byte
-cap the platform puts on a capture it downloads
-(``providers.sandbox.limits.MAX_RESPONSE_BYTES``), and ``ReadNotes`` says when
-it stopped there.
+rest of the record is skipped. A plain file is read whole: the channel that
+delivered it already capped its size. A gzip capture is decompressed no
+further than the larger of the two delivery caps (``_capture_byte_cap``: the
+sample upload's and the sandbox download's), and ``ReadNotes`` says when it
+stopped there.
 
 A record cut short at the end of the file is read as far as it goes. A cut
 inside a record header or a pcapng block, or a pcapng block whose trailing
@@ -227,15 +228,19 @@ class _Unreadable(Exception):
 
 
 def _capture_byte_cap() -> int:
-    """The platform's cap on a capture's bytes, read at call time.
+    """The cap on a gzip capture's decompressed bytes, read at call time.
 
-    The cap the sandbox providers stream a downloaded capture to disk under
-    (``providers/sandbox/limits.py``, ``MAX_RESPONSE_BYTES``); a gzip capture
-    is held to it after decompression too.
+    A capture reaches the reader by one of two channels, each with its own cap
+    on the bytes it delivers: a sandbox download (``MAX_RESPONSE_BYTES``) or a
+    sample upload (``SAMPLE_UPLOAD_MAX_BYTES``), both in
+    ``providers/sandbox/limits.py``. The reader cannot tell which delivered a
+    file, so it holds the decompressed bytes to the larger, and a capture is
+    never cut below what either channel delivers. A plain file is never cut:
+    its channel already capped its size.
     """
     from maljan.providers.sandbox import limits
 
-    return int(limits.MAX_RESPONSE_BYTES)
+    return max(int(limits.MAX_RESPONSE_BYTES), int(limits.SAMPLE_UPLOAD_MAX_BYTES))
 
 
 class _Source:
