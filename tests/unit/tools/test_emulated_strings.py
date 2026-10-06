@@ -597,7 +597,7 @@ class TestOnePinEverywhere:
         "relative, pins",
         [
             ("services/analysis-mcp/README.md", ("version", "zip", "binary")),
-            ("docs/configuration.md", ("version", "zip")),
+            ("apps/docs/content/docs/configuration.mdx", ("version", "zip")),
         ],
     )
     def test_the_docs_state_the_same_pin(self, relative: str, pins: tuple[str, ...]) -> None:

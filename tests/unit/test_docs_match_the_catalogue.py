@@ -1,6 +1,6 @@
 """The two tables a reader meets first, checked against the code they describe.
 
-Both had drifted. ``docs/configuration.md`` enumerated sixteen setting groups
+Both had drifted. ``apps/docs/content/docs/configuration.mdx`` enumerated sixteen setting groups
 when the catalogue held seventeen, so the one place that lists them all omitted
 the group two documented settings live in. ``README.md`` listed every seeded
 team without its ``triage_pack`` stage, and named the stage after it ``triage``
@@ -22,7 +22,7 @@ from maljan.core.config import _builtin_profiles
 from maljan.core.settings_annotations import GROUP_ORDER
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIGURATION = ROOT / "docs" / "configuration.md"
+CONFIGURATION = ROOT / "apps" / "docs" / "content" / "docs" / "configuration.mdx"
 README = ROOT / "README.md"
 
 # Only as far as the catalogue can grow before someone has to write the word

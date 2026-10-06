@@ -128,12 +128,6 @@ dev = [
     # 3.2.0 until a release ships them again.
     "stix2-validator==3.2.0",
 ]
-# The GitHub Pages site under docs/, built with MkDocs Material. Kept apart
-# from dev so the docs workflow installs it alone, with none of the runtime
-# or test dependencies.
-docs = [
-    "mkdocs-material==9.7.7",
-]
 
 [tool.ruff]
 line-length = 100

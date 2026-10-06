@@ -65,7 +65,7 @@ MAX_SUGGESTIONS = 3
 # says anything. The index scores a *correct* id near zero often enough that a
 # bare threshold questioned almost every claim: 81 of the 92 feedback rows in
 # one audited run, 33 of 33 in another. The default is the measured one — see
-# ``tests/fixtures/attck_alignment_recorded.json`` and docs/architecture.md.
+# ``tests/fixtures/attck_alignment_recorded.json`` and apps/docs/content/docs/architecture.mdx.
 ALIGNMENT_MARGIN = 0.20
 
 

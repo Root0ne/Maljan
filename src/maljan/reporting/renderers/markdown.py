@@ -1430,7 +1430,7 @@ class MarkdownRenderer:
         lines.append(
             "Network values are defanged for reading. The STIX 2.1 bundle "
             f"(`/reports/{rid}/stix`) and the machine-readable list "
-            f"(`/reports/{rid}/iocs`, see `docs/api.md`) carry them live."
+            f"(`/reports/{rid}/iocs`, see `apps/docs/content/docs/api.mdx`) carry them live."
         )
         return "\n".join(lines)
 

@@ -35,4 +35,4 @@ except where Maljan's integration with them creates the exposure, and issues
 that require an already-compromised host.
 
 How authentication, roles, secret storage and exports work is described in
-[docs/security.md](docs/security.md).
+[Security](https://root0ne.github.io/Maljan/security/).
