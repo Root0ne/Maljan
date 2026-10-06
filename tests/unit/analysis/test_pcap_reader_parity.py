@@ -13,9 +13,10 @@ are empty or not a capture at all.
 
 An error answer is compared by its code, not its text: the text named the old
 library's exception class. Where the new reader answers better than the old
-one, the fixture is listed in ``IMPROVED`` with what changed: its answers are
-pinned in ``improved.json``, and the test also proves they differ from the old
-ones, so an improvement cannot pass for parity or the reverse.
+one, the fixture is listed in ``IMPROVED`` with why and the surfaces that
+changed: those answers are pinned in ``improved.json`` and proven to differ
+from the old ones, and every other surface of the fixture must still answer
+exactly as before, so an improvement cannot pass for parity or the reverse.
 """
 
 from __future__ import annotations
@@ -42,18 +43,79 @@ CAPTURES = sorted(
     if p.is_file() and p.name not in (EXPECTED.name, IMPROVED_ANSWERS.name)
 )
 
-IMPROVED = {
+_FACTS = ("capture_facts", "summarize_pcap", "tool_pcap_summary", "read_pcap_summary")
+_FACTS_ALL = (*_FACTS, "network_pcap_summary")
+_FACTS_LIMITED = ("capture_facts_limit_3", *_FACTS_ALL)
+_EVERY_SURFACE = (
+    *_FACTS_LIMITED,
+    "read_pcap_summary_page",
+    "extract_dns",
+    "extract_dns_limit_5",
+    "extract_http",
+)
+_SNI = (
+    "the TLS server name is read: the old code decoded it with a codec that always "
+    "raised, so ``sni`` was always empty"
+)
+
+# Each improved capture: why, and the surfaces whose answer changed. Every
+# other surface of it must still answer exactly as before.
+IMPROVED: dict[str, tuple[str, tuple[str, ...]]] = {
+    "ethernet_mixed.pcap": (_SNI, _FACTS_ALL),
+    "ethernet_mixed.pcap.gz": (_SNI, _FACTS_ALL),
+    "ethernet_mixed_be_nano.pcap": (_SNI, _FACTS_ALL),
+    "truncated_in_header.pcap": (_SNI, _FACTS_ALL),
+    "truncated_in_record.pcap": (_SNI, _FACTS_ALL),
+    "two_interfaces.pcapng": (_SNI, _FACTS_ALL),
     "truncated_block.pcapng": (
         "a pcapng file cut inside a block: the old reader raised and every surface "
         "answered that the capture could not be read; the new one ends the capture "
         "at the cut and reads the six packets before it, as a pcap file cut short "
-        "always was"
+        "always was",
+        _EVERY_SURFACE,
     ),
     "odd_records.pcap": (
         "an IPv4 header length of 0 and an empty record: the old reader read a TCP "
         "header out of the IP header's own bytes and counted 14 bytes for the empty "
         "record; the new one reads no transport header past an invalid header "
-        "length and counts the empty record as 0 bytes"
+        "length and counts the empty record as 0 bytes",
+        _FACTS_LIMITED,
+    ),
+    "hostile_vlan_stack.pcap": (
+        "a frame under 500 stacked 802.1Q tags: the old reader dropped its IP "
+        "header; the new walk is a loop and reads the DNS query beneath the tags",
+        _FACTS_LIMITED,
+    ),
+    "hostile_ipip_nesting.pcap": (
+        "a datagram under 1,000 nested IPv4-in-IPv4 headers: the old reader stopped "
+        "at the outer header; the new walk reaches the UDP datagram at the bottom",
+        _FACTS_LIMITED,
+    ),
+    "unreadable_blocks.pcapng": (
+        "three correctly framed pcapng blocks that cannot be read: the old reader "
+        "ended the capture at the first and said the 2 packets before it were the "
+        "whole capture; the new one skips each by its length, reads the 2 packets "
+        "after them and says 3 blocks were unreadable and why",
+        _EVERY_SURFACE,
+    ),
+    "pcapng_without_interface.pcapng": (
+        "a packet block naming an interface no description declared: skipped and "
+        "stated instead of ending the capture in silence",
+        (
+            "capture_facts",
+            "capture_facts_limit_3",
+            "read_pcap_summary",
+            "read_pcap_summary_page",
+            "extract_dns",
+            "extract_dns_limit_5",
+            "extract_http",
+        ),
+    ),
+    "spb_snaplen0.pcapng": (
+        "simple packet blocks on an interface whose snapshot length is 0, which "
+        "pcapng defines as no limit: the old reader read 0 bytes of each; the new "
+        "one reads the packets",
+        tuple(x for x in _EVERY_SURFACE if x != "read_pcap_summary_page"),
     ),
 }
 
@@ -146,9 +208,58 @@ def test_every_surface_answers_as_before(name: str, answers: dict[str, dict[str,
 
 
 @pytest.mark.parametrize("name", sorted(IMPROVED))
-def test_an_improved_capture_answers_its_pinned_better_values(
+def test_an_improved_capture_changes_only_the_surfaces_it_names(
     name: str, answers: dict[str, dict[str, Any]]
 ) -> None:
+    before = _load(EXPECTED)[name]
+    pinned = _load(IMPROVED_ANSWERS)[name]
     got = answers[name]
-    assert got == _load(IMPROVED_ANSWERS)[name]
-    assert got != _load(EXPECTED)[name]
+    changed = IMPROVED[name][1]
+    assert list(got) == list(before)
+    for surface in got:
+        if surface in changed:
+            assert got[surface] == pinned[surface], f"{name}: {surface}"
+            assert got[surface] != before[surface], f"{name}: {surface}"
+        else:
+            assert got[surface] == before[surface], f"{name}: {surface}"
+
+
+def test_the_server_name_comes_out_and_nothing_else_moves(
+    answers: dict[str, dict[str, Any]],
+) -> None:
+    before = _load(EXPECTED)
+    for name, sni in (
+        ("ethernet_mixed.pcap", {"cdn.example.net": 2}),
+        ("two_interfaces.pcapng", {"ng.example.net": 1}),
+    ):
+        facts = answers[name]["capture_facts"]
+        assert facts["sni"] == sni
+        assert before[name]["capture_facts"]["sni"] == {}
+        assert {**facts, "sni": {}} == before[name]["capture_facts"]
+        assert "TLS SNI (encrypted destinations):" in answers[name]["summarize_pcap"]
+
+
+@pytest.mark.parametrize("name", ["hostile_vlan_stack.pcap", "hostile_ipip_nesting.pcap"])
+def test_a_deeply_nested_frame_costs_no_other_packet(
+    name: str, answers: dict[str, dict[str, Any]]
+) -> None:
+    facts = answers[name]["capture_facts"]
+    assert facts["packets_read"] == facts["packets_in_capture"] == 5
+    conversations = {
+        (c["dst"], c["dport"], c["proto"]): c["packets"] for c in facts["conversations"]
+    }
+    # The two good packets on each side of the hostile frame, and the hostile
+    # frame's own DNS query read beneath its nesting.
+    assert conversations == {("8.8.8.8", 53, "udp"): 3, ("8.8.8.8", 4444, "tcp"): 2}
+    assert "evil.example." in answers[name]["extract_dns"]
+
+
+def test_skipped_blocks_are_never_called_the_whole_capture(
+    answers: dict[str, dict[str, Any]],
+) -> None:
+    facts = answers["unreadable_blocks.pcapng"]["capture_facts"]
+    assert facts["blocks_unreadable"] == 3
+    summary = answers["unreadable_blocks.pcapng"]["summarize_pcap"]
+    assert "part of the capture" in summary
+    assert "4 packets read, 3 blocks unreadable: " in summary
+    assert " of 4 packets in the capture read" not in summary

@@ -8,13 +8,25 @@ where ``tests/unit/analysis/test_pcap_reader_parity.py`` pins them.
 
 Framing. A pcap file in either byte order and at micro- or nanosecond
 resolution; a pcapng file with any number of sections and interfaces, each
-interface with its own link type and timestamp resolution; either one
-compressed with gzip. A record cut short at the end of the file is read as far
-as it goes. A cut inside a record header or a pcapng block ends the capture
-there, and every packet before it is still read. A file that is not a capture
-raises ``CaptureFormatError``.
+interface with its own link type, snapshot length and timestamp resolution;
+either one compressed with gzip, decompressed as a stream. A record's bytes are
+read up to the snapshot length the capture declares (0 declares none) and the
+rest of the record is skipped. A gzip capture is decompressed up to the byte
+cap the platform puts on a capture it downloads
+(``providers.sandbox.limits.MAX_RESPONSE_BYTES``), and ``ReadNotes`` says when
+it stopped there.
 
-Decoding walks the headers from the link layer in:
+A record cut short at the end of the file is read as far as it goes. A cut
+inside a record header or a pcapng block, or a pcapng block whose trailing
+length disagrees with its leading one, ends the capture there, and every
+packet before it is still read. A pcapng block that is correctly framed but
+cannot be read (a packet naming an interface no description declared, a fixed
+part shorter than its type requires) is skipped by its length and counted in
+``ReadNotes``. A file that is not a capture raises ``CaptureFormatError``.
+
+Decoding walks the headers from the link layer in, as a loop: each header
+names the next one and where it lies, so a frame of any nesting depth costs
+time linear in its length.
 
 - link types: BSD loopback (``DLT_NULL``, ``DLT_LOOP``), Ethernet, raw IP
   (``DLT_RAW`` in both numberings, ``LINKTYPE_IPV4``, ``LINKTYPE_IPV6``), Linux
@@ -28,18 +40,23 @@ Decoding walks the headers from the link layer in:
   question only, never as a packet of its own.
 
 A non-first IP fragment is not read past its IP header, and a header cut short
-ends the walk at the last header that was whole.
+ends the walk at the last header that was whole. A record the walk fails on is
+kept with the headers read before the failure, marked ``undecoded``, and the
+next record is read.
 """
 
 from __future__ import annotations
 
 import gzip
 import ipaddress
+import os
 import struct
 import zlib
-from collections.abc import Iterator
+from array import array
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from decimal import Decimal
+from types import TracebackType
 from typing import BinaryIO
 
 _PCAP_MAGICS = {
@@ -49,12 +66,14 @@ _PCAP_MAGICS = {
     b"\x4d\x3c\xb2\xa1": ("<", 9),
 }
 _PCAPNG_MAGIC = b"\x0a\x0d\x0d\x0a"
+_SECTION_HEADER = 0x0A0D0D0A
 _GZIP_MAGIC = b"\x1f\x8b"
 _NOT_A_CAPTURE = "Not a supported capture file"
+_GZIP_ERRORS = (EOFError, gzip.BadGzipFile, zlib.error)
 
-# A record's bytes are read in pieces no larger than this, so a length field
-# claiming more than the file holds costs what the file holds, not the claim.
-_READ_PIECE = 1 << 20
+# Bytes skipped are read and dropped in pieces of this size, so skipping costs
+# no memory however long the skipped part claims to be.
+_SKIP_PIECE = 1 << 20
 
 # Link types (tcpdump.org/linktypes.html).
 _DLT_NULL = 0
@@ -117,17 +136,26 @@ class CaptureFormatError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class Segment:
-    """A TCP header's ports and what follows it.
+    """A TCP header's ports, and where its payload lies in the record.
 
     ``data`` is the segment's payload inside the IP datagram. ``rest`` is every
     byte of the record after the TCP header, trailing link-layer padding
-    included.
+    included. Both are sliced from the record when asked for.
     """
 
     sport: int
     dport: int
-    data: bytes
-    rest: bytes
+    frame: bytes
+    data_start: int
+    data_end: int
+
+    @property
+    def data(self) -> bytes:
+        return self.frame[self.data_start : self.data_end]
+
+    @property
+    def rest(self) -> bytes:
+        return self.frame[self.data_start :]
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,10 +169,11 @@ class Packet:
     """One record, as far as its headers could be read.
 
     ``time`` is the record's timestamp in seconds (``0.0`` when it carries
-    none) and ``length`` its captured bytes. ``ip_src``/``ip_dst`` are the
-    first IPv4 header's, ``tcp`` and ``udp`` the first of each, ``dns_qname``
-    the first DNS question's name (``b"example.com."``). Each is ``None`` when
-    the record holds none.
+    none) and ``length`` its captured bytes as read. ``ip_src``/``ip_dst`` are
+    the first IPv4 header's, ``tcp`` and ``udp`` the first of each, and
+    ``dns_qname`` the first DNS question's name (``b"example.com."``). Each is
+    ``None`` when the record holds none. ``undecoded`` is set when the walk
+    failed part of the way in; the fields hold what it read before that.
     """
 
     time: float = 0.0
@@ -154,6 +183,7 @@ class Packet:
     tcp: Segment | None = None
     udp: Datagram | None = None
     dns_qname: bytes | None = None
+    undecoded: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +193,28 @@ class Record:
     linktype: int
 
 
+@dataclass
+class ReadNotes:
+    """What a read had to skip, or where it had to stop, and why.
+
+    ``blocks_unreadable`` counts correctly framed pcapng blocks that could not
+    be read, with the distinct reasons in ``unreadable_reasons``.
+    ``byte_cap`` is the cap in bytes when a gzip capture's decompressed bytes
+    reached it and the read stopped there. ``packets_undecoded`` counts the
+    records the header walk failed on.
+    """
+
+    blocks_unreadable: int = 0
+    unreadable_reasons: list[str] = field(default_factory=list)
+    byte_cap: int | None = None
+    packets_undecoded: int = 0
+
+    def unreadable(self, reason: str) -> None:
+        self.blocks_unreadable += 1
+        if reason not in self.unreadable_reasons:
+            self.unreadable_reasons.append(reason)
+
+
 # ---------------------------------------------------------------- framing
 
 
@@ -170,41 +222,119 @@ class _CaptureEnds(Exception):
     """The file ends here, whole or cut."""
 
 
-def _read_up_to(stream: BinaryIO, size: int) -> bytes:
-    """``size`` bytes, or fewer when the file ends first."""
-    pieces: list[bytes] = []
-    remaining = size
-    while remaining > 0:
-        piece = stream.read(min(remaining, _READ_PIECE))
-        if not piece:
-            break
-        pieces.append(piece)
-        remaining -= len(piece)
-    return b"".join(pieces)
+class _Unreadable(Exception):
+    """A correctly framed block that cannot be read; the reason is the message."""
 
 
-def _read_exact(stream: BinaryIO, size: int) -> bytes:
-    data = _read_up_to(stream, size)
-    if len(data) != size:
-        raise _CaptureEnds
-    return data
+def _capture_byte_cap() -> int:
+    """The platform's cap on a capture's bytes, read at call time.
+
+    The cap the sandbox providers stream a downloaded capture to disk under
+    (``providers/sandbox/limits.py``, ``MAX_RESPONSE_BYTES``); a gzip capture
+    is held to it after decompression too.
+    """
+    from maljan.providers.sandbox import limits
+
+    return int(limits.MAX_RESPONSE_BYTES)
 
 
-def _pcap_records(stream: BinaryIO, magic: bytes) -> Iterator[Record]:
-    endian, digits = _PCAP_MAGICS[magic]
-    header = stream.read(20)
+class _Source:
+    """The capture's bytes, read no further than they can exist.
+
+    For a plain file a read is clamped to what the file still holds; for a gzip
+    stream, to what is left under the byte cap, and ``capped`` is set when the
+    decompressed stream holds more than that.
+    """
+
+    def __init__(self, raw: BinaryIO) -> None:
+        self.raw = raw
+        self.stream: BinaryIO = raw
+        self.size = os.fstat(raw.fileno()).st_size
+        self.cap: int | None = None
+        self.taken = 0
+        self.capped = False
+
+    def decompress(self) -> None:
+        self.raw.seek(0)
+        self.stream = gzip.GzipFile(fileobj=self.raw)  # type: ignore[assignment]
+        self.cap = _capture_byte_cap()
+        self.taken = 0
+
+    def _room(self) -> int:
+        limit = self.size if self.cap is None else self.cap
+        return max(0, limit - self.taken)
+
+    def read(self, size: int) -> bytes:
+        """Up to ``size`` bytes; fewer when the file, or the cap, ends first."""
+        wanted = min(size, self._room())
+        data = self.stream.read(wanted)
+        if len(data) < wanted:  # a gzip stream may answer in pieces
+            buffer = bytearray(data)
+            while len(buffer) < wanted:
+                piece = self.stream.read(wanted - len(buffer))
+                if not piece:
+                    break
+                buffer += piece
+            data = bytes(buffer)
+        self.taken += len(data)
+        if self.cap is not None and len(data) < size and self._room() == 0:
+            if self.stream.read(1):
+                self.capped = True
+        return data
+
+    def skip(self, size: int) -> int:
+        """Skip up to ``size`` bytes; how many were skipped."""
+        if self.cap is None:
+            skipped = min(size, self._room())
+            self.raw.seek(skipped, os.SEEK_CUR)
+            self.taken += skipped
+            return skipped
+        skipped = 0
+        while skipped < size:
+            piece = self.read(min(_SKIP_PIECE, size - skipped))
+            if not piece:
+                break
+            skipped += len(piece)
+        return skipped
+
+    def exact(self, size: int) -> bytes:
+        data = self.read(size)
+        if len(data) != size:
+            raise _CaptureEnds
+        return data
+
+    def skip_exact(self, size: int) -> None:
+        if self.skip(size) != size:
+            raise _CaptureEnds
+
+
+def _within(caplen: int, snaplen: int) -> int:
+    """How many of a record's ``caplen`` bytes are read: up to the snapshot length."""
+    return min(caplen, snaplen) if snaplen else caplen
+
+
+def _pcap_records(source: _Source, endian: str, digits: int) -> Iterator[Record]:
+    header = source.read(20)
     if len(header) < 20:
         raise CaptureFormatError(_NOT_A_CAPTURE)
-    linktype = struct.unpack(endian + "IIIII", header)[4]
+    snaplen, linktype = struct.unpack(endian + "IIIII", header)[3:]
     scale = Decimal(10) ** -digits
 
     def walk() -> Iterator[Record]:
         while True:
-            head = stream.read(16)
+            head = source.read(16)
             if len(head) < 16:
                 return
             seconds, fraction, caplen, _wirelen = struct.unpack(endian + "IIII", head)
-            yield Record(float(seconds + scale * fraction), _read_up_to(stream, caplen), linktype)
+            kept = _within(caplen, snaplen)
+            data = source.read(kept)
+            if len(data) == kept and kept < caplen:
+                source.skip(caplen - kept)
+            if source.capped and len(data) < kept:
+                return  # the cap fell inside the bytes this record keeps
+            yield Record(float(seconds + scale * fraction), data, linktype)
+            if source.capped:
+                return
 
     return walk()
 
@@ -212,30 +342,62 @@ def _pcap_records(stream: BinaryIO, magic: bytes) -> Iterator[Record]:
 def _pcapng_options(body: bytes, endian: str) -> dict[int, bytes]:
     """A pcapng options list; an option given twice keeps its last value."""
     options: dict[int, bytes] = {}
-    while len(body) >= 4:
-        code, length = struct.unpack(endian + "HH", body[:4])
+    view = memoryview(body)
+    position = 0
+    while len(body) - position >= 4:
+        code, length = struct.unpack_from(endian + "HH", view, position)
         if code == 0:
             break
-        if 4 + length <= len(body):
-            options[code] = body[4 : 4 + length]
-        body = body[4 + length + (-length % 4) :]
+        if position + 4 + length <= len(body):
+            options[code] = bytes(view[position + 4 : position + 4 + length])
+        position += 4 + length + (-length % 4)
     return options
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class _Interface:
     linktype: int
     snaplen: int
     resolution: int  # timestamp units per second
 
 
+_DEFAULT_RESOLUTION = 6  # if_tsresol's default: 10**6 units per second
+
+
+@dataclass
+class _Interfaces:
+    """One section's interface descriptions, as three typed arrays.
+
+    A row costs 7 bytes, so a section that declares millions of interfaces
+    costs memory linear in them and small.
+    """
+
+    linktypes: array = field(default_factory=lambda: array("H"))
+    snaplens: array = field(default_factory=lambda: array("I"))
+    resolutions: array = field(default_factory=lambda: array("B"))
+
+    def __len__(self) -> int:
+        return len(self.linktypes)
+
+    def add(self, linktype: int, snaplen: int, resolution: int) -> None:
+        self.linktypes.append(linktype)
+        self.snaplens.append(snaplen)
+        self.resolutions.append(resolution)
+
+    def __getitem__(self, number: int) -> _Interface:
+        code = self.resolutions[number]
+        units = (2 if code & 0x80 else 10) ** (code & 0x7F)
+        return _Interface(self.linktypes[number], self.snaplens[number], units)
+
+
 @dataclass
 class _PcapNg:
     """A pcapng stream: its sections, interfaces and packet blocks."""
 
-    stream: BinaryIO
+    source: _Source
+    notes: ReadNotes
     endian: str = "<"
-    interfaces: list[_Interface] = field(default_factory=list)
+    interfaces: _Interfaces = field(default_factory=_Interfaces)
 
     def open(self) -> _PcapNg:
         try:
@@ -244,43 +406,40 @@ class _PcapNg:
             raise CaptureFormatError(_NOT_A_CAPTURE) from exc
         return self
 
+    def _u32(self, data: bytes) -> int:
+        return int(struct.unpack(self.endian + "I", data)[0])
+
     def _section(self) -> None:
         """A Section Header Block, read from just after its block type."""
-        raw_length = _read_exact(self.stream, 4)
-        order = _read_exact(self.stream, 4)
+        raw_length = self.source.exact(4)
+        order = self.source.exact(4)
         if order == b"\x1a\x2b\x3c\x4d":
             self.endian = ">"
         elif order == b"\x4d\x3c\x2b\x1a":
             self.endian = "<"
         else:
             raise _CaptureEnds
-        length = struct.unpack(self.endian + "I", raw_length)[0]
+        length = self._u32(raw_length)
         if length < 28:
             raise _CaptureEnds
-        if struct.unpack(self.endian + "H", _read_exact(self.stream, 2))[0] != 1:
+        if struct.unpack(self.endian + "H", self.source.exact(2))[0] != 1:
             raise _CaptureEnds  # a major version this reader does not know
-        _read_exact(self.stream, 10)  # minor version, section length
-        _read_exact(self.stream, length - 28)  # options
+        self.source.skip_exact(10)  # minor version, section length
+        self.source.skip_exact(length - 28)  # options
         self._tail(length)
-        self.interfaces = []  # interface numbers start again in every section
+        self.interfaces = _Interfaces()  # interface numbers start again in every section
 
     def _tail(self, length: int) -> None:
         if length % 4:
-            self.stream.read(-length % 4)
-        if struct.unpack(self.endian + "I", _read_exact(self.stream, 4))[0] != length:
+            self.source.skip(-length % 4)
+        if self._u32(self.source.exact(4)) != length:
             raise _CaptureEnds
 
-    def _interface(self, body: bytes) -> None:
-        linktype, snaplen = struct.unpack(self.endian + "HxxI", body[:8])
-        resolution = 1_000_000
-        exponent = _pcapng_options(body[8:], self.endian).get(9)  # if_tsresol
-        if exponent is not None and len(exponent) == 1:
-            resolution = (2 if exponent[0] & 0x80 else 10) ** (exponent[0] & 0x7F)
-        self.interfaces.append(_Interface(linktype, snaplen, resolution))
-
-    def _on(self, number: int) -> _Interface:
+    def _on(self, number: int, block: str) -> _Interface:
         if number >= len(self.interfaces):
-            raise _CaptureEnds
+            raise _Unreadable(
+                f"{block} names interface {number}, which no interface description declared"
+            )
         return self.interfaces[number]
 
     @staticmethod
@@ -290,72 +449,162 @@ class _PcapNg:
     def records(self) -> Iterator[Record]:
         while True:
             try:
-                block_type = struct.unpack(self.endian + "I", _read_exact(self.stream, 4))[0]
-                if block_type == 0x0A0D0D0A:
+                block_type = self._u32(self.source.exact(4))
+                if block_type == _SECTION_HEADER:
                     self._section()
                     continue
-                length = struct.unpack(self.endian + "I", _read_exact(self.stream, 4))[0]
+                length = self._u32(self.source.exact(4))
                 if length < 12:
                     return
-                body = _read_exact(self.stream, length - 12)
+                record, unreadable = self._block(block_type, length - 12)
                 self._tail(length)
-                record = self._block(block_type, body)
-            except (_CaptureEnds, struct.error):
+            except _CaptureEnds:
                 return
-            if record is not None:
+            if self.source.capped:
+                return
+            if unreadable is not None:
+                self.notes.unreadable(unreadable)
+            elif record is not None:
                 yield record
 
-    def _block(self, block_type: int, body: bytes) -> Record | None:
-        endian = self.endian
-        if block_type == 1:  # Interface Description Block
-            self._interface(body)
-        elif block_type == 6:  # Enhanced Packet Block
-            number, high, low, caplen, _wirelen = struct.unpack(endian + "5I", body[:20])
-            interface = self._on(number)
-            data = body[20 : 20 + caplen]
-            return Record(self._stamp(interface, high, low), data, interface.linktype)
-        elif block_type == 3:  # Simple Packet Block, which carries no timestamp
-            interface = self._on(0)
-            wirelen = struct.unpack(endian + "I", body[:4])[0]
-            data = body[4 : 4 + min(wirelen, interface.snaplen)]
-            return Record(0.0, data, interface.linktype)
-        elif block_type == 2:  # Packet Block, obsolete
-            number, _drops, high, low, caplen, _wirelen = struct.unpack(endian + "HH4I", body[:20])
-            interface = self._on(number)
-            data = body[20 : 20 + caplen]
-            return Record(self._stamp(interface, high, low), data, interface.linktype)
-        return None
+    def _fixed(self, body_length: int, size: int, name: str) -> bytes:
+        """A block's fixed part; ``_Unreadable`` when the block is shorter."""
+        if body_length < size:
+            raise _Unreadable(f"{name} is shorter than its fixed part")
+        return self.source.exact(size)
+
+    def _block(self, block_type: int, body_length: int) -> tuple[Record | None, str | None]:
+        """One block's body, consumed whole: its record, or why it is unreadable."""
+        consumed = 0
+        try:
+            if block_type == 1:  # Interface Description Block
+                body = self.source.exact(body_length)
+                consumed = body_length
+                if body_length < 8:
+                    raise _Unreadable("an interface description is shorter than its fixed part")
+                self._interface(body)
+                return None, None
+            if block_type == 6:  # Enhanced Packet Block
+                fixed = self._fixed(body_length, 20, "an enhanced packet block")
+                consumed = 20
+                number, high, low, caplen, _wirelen = struct.unpack(self.endian + "5I", fixed)
+                interface = self._on(number, "an enhanced packet block")
+                kept = min(_within(caplen, interface.snaplen), body_length - 20)
+                data = self.source.exact(kept)
+                consumed += kept
+                return Record(self._stamp(interface, high, low), data, interface.linktype), None
+            if block_type == 3:  # Simple Packet Block, which carries no timestamp
+                fixed = self._fixed(body_length, 4, "a simple packet block")
+                consumed = 4
+                interface = self._on(0, "a simple packet block")
+                wirelen = self._u32(fixed)
+                kept = min(_within(wirelen, interface.snaplen), body_length - 4)
+                data = self.source.exact(kept)
+                consumed += kept
+                return Record(0.0, data, interface.linktype), None
+            if block_type == 2:  # Packet Block, obsolete
+                fixed = self._fixed(body_length, 20, "a packet block")
+                consumed = 20
+                number, _drops, high, low, caplen, _wirelen = struct.unpack(
+                    self.endian + "HH4I", fixed
+                )
+                interface = self._on(number, "a packet block")
+                kept = min(_within(caplen, interface.snaplen), body_length - 20)
+                data = self.source.exact(kept)
+                consumed += kept
+                return Record(self._stamp(interface, high, low), data, interface.linktype), None
+            return None, None
+        except _Unreadable as exc:
+            return None, str(exc)
+        finally:
+            self.source.skip_exact(body_length - consumed)
+
+    def _interface(self, body: bytes) -> None:
+        linktype, snaplen = struct.unpack(self.endian + "HxxI", body[:8])
+        resolution = _DEFAULT_RESOLUTION
+        exponent = _pcapng_options(body[8:], self.endian).get(9)  # if_tsresol
+        if exponent is not None and len(exponent) == 1:
+            resolution = exponent[0]
+        self.interfaces.add(linktype, snaplen, resolution)
+
+
+class Capture:
+    """One capture file, open for reading; use as a context manager.
+
+    Opening raises ``CaptureFormatError`` for a file that is not a capture,
+    and what ``open`` raises for a file that cannot be opened. ``notes`` fills
+    in as the records are read.
+    """
+
+    def __init__(self, path: str) -> None:
+        self.notes = ReadNotes()
+        raw = open(path, "rb")  # noqa: SIM115 - closed by close()
+        self._source = _Source(raw)
+        try:
+            self._walk = self._open()
+        except Exception:
+            raw.close()
+            raise
+
+    def _open(self) -> Iterator[Record]:
+        source = self._source
+        try:
+            head = source.read(2)
+            if head == _GZIP_MAGIC:
+                source.decompress()
+                head = source.read(2)
+            magic = head + source.read(2)
+            if not magic:
+                raise CaptureFormatError("No data could be read!")
+            if magic in _PCAP_MAGICS:
+                return _pcap_records(source, *_PCAP_MAGICS[magic])
+            if magic == _PCAPNG_MAGIC:
+                return _PcapNg(source, self.notes).open().records()
+        except _GZIP_ERRORS as exc:
+            raise CaptureFormatError(_NOT_A_CAPTURE) from exc
+        raise CaptureFormatError(_NOT_A_CAPTURE)
+
+    def records(self) -> Iterator[Record]:
+        """Every record, in file order."""
+        try:
+            yield from self._walk
+        except _GZIP_ERRORS:
+            return  # a gzip stream cut short or corrupt ends the capture there
+        finally:
+            if self._source.capped:
+                self.notes.byte_cap = self._source.cap
+
+    def decode(self, record: Record) -> Packet:
+        """One record's headers; a record the walk fails on is counted and kept."""
+        packet = decode(record)
+        if packet.undecoded:
+            self.notes.packets_undecoded += 1
+        return packet
+
+    def packets(self) -> Iterator[Packet]:
+        for record in self.records():
+            yield self.decode(record)
+
+    def close(self) -> None:
+        self._source.stream.close()
+        self._source.raw.close()
+
+    def __enter__(self) -> Capture:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
 
 
 def records(path: str) -> Iterator[Record]:
-    """Every record of the capture at ``path``, in file order.
-
-    Raises ``CaptureFormatError`` for a file that is not a capture, and what
-    ``open`` raises for a file that cannot be opened.
-    """
-    with open(path, "rb") as raw:
-        stream: BinaryIO = raw
-        try:
-            head = stream.read(2)
-            if head == _GZIP_MAGIC:
-                raw.seek(0)
-                stream = gzip.GzipFile(fileobj=raw)  # type: ignore[assignment]
-                head = stream.read(2)
-            magic = head + stream.read(2)
-        except (EOFError, gzip.BadGzipFile, zlib.error) as exc:
-            raise CaptureFormatError(_NOT_A_CAPTURE) from exc
-        if not magic:
-            raise CaptureFormatError("No data could be read!")
-        if magic in _PCAP_MAGICS:
-            walk = _pcap_records(stream, magic)
-        elif magic == _PCAPNG_MAGIC:
-            walk = _PcapNg(stream).open().records()
-        else:
-            raise CaptureFormatError(_NOT_A_CAPTURE)
-        try:
-            yield from walk
-        except (EOFError, gzip.BadGzipFile, zlib.error):
-            return  # a gzip stream cut short or corrupt ends the capture there
+    """Every record of the capture at ``path``, in file order."""
+    with Capture(path) as capture:
+        yield from capture.records()
 
 
 def count_records(path: str) -> int:
@@ -433,100 +682,119 @@ def _udp_payload_kind(sport: int, dport: int) -> str:
     return _OTHER
 
 
+# One step of the walk: the header to read next, where it starts, where the
+# bytes it may read end, and whether it lies inside an ICMP error's quote.
+_Step = tuple[Callable[[int, int, bool], "_Step | None"], int, int, bool]
+
+
 @dataclass
 class _Walk:
-    """One record's header walk. Every reader takes ``start``, the offset of
-    its header in the frame, and ``end``, where the bytes it may read end."""
+    """One record's header walk. Each reader takes ``start``, the offset of
+    its header in the frame, and ``end``, where the bytes it may read end; it
+    fills ``packet`` with what it finds and returns the next step, or
+    ``None`` where the walk ends."""
 
     frame: bytes
     packet: Packet
 
-    def link(self, linktype: int) -> None:
+    def run(self, linktype: int) -> None:
+        step = self.link(linktype)
+        while step is not None:
+            read, start, end, quoted = step
+            step = read(start, end, quoted)
+
+    def link(self, linktype: int) -> _Step | None:
         frame, end = self.frame, len(self.frame)
         if linktype in _DLT_ETHERNET:
-            self.ethernet(0, end)
-        elif linktype in _DLT_RAW:
+            return (self.ethernet, 0, end, False)
+        if linktype in _DLT_RAW:
             if frame and frame[0] >> 4 == 6:
-                self.ipv6(0, end)
-            else:
-                self.ipv4(0, end)
-        elif linktype == _DLT_IPV4:
-            self.ipv4(0, end)
-        elif linktype in _DLT_IPV6:
-            self.ipv6(0, end)
-        elif linktype == _DLT_NULL and end >= 4:
+                return (self.ipv6, 0, end, False)
+            return (self.ipv4, 0, end, False)
+        if linktype == _DLT_IPV4:
+            return (self.ipv4, 0, end, False)
+        if linktype in _DLT_IPV6:
+            return (self.ipv6, 0, end, False)
+        if linktype == _DLT_NULL and end >= 4:
             # The family is written in the capturing host's byte order and
             # its first byte read: a big-endian family reads as 0.
-            self.address_family(frame[0], 4, end)
-        elif linktype == _DLT_LOOP and end >= 4:
-            self.address_family(struct.unpack("!I", frame[:4])[0], 4, end)
-        elif linktype == _DLT_LINUX_SLL and end >= 16:
-            self.cooked(struct.unpack("!H", frame[14:16])[0], 16, end)
-        elif linktype == _DLT_LINUX_SLL2 and end >= 20:
-            self.cooked(struct.unpack("!H", frame[0:2])[0], 20, end)
+            return self.address_family(frame[0], 4, end)
+        if linktype == _DLT_LOOP and end >= 4:
+            return self.address_family(struct.unpack("!I", frame[:4])[0], 4, end)
+        if linktype == _DLT_LINUX_SLL and end >= 16:
+            return self.cooked(struct.unpack("!H", frame[14:16])[0], 16, end)
+        if linktype == _DLT_LINUX_SLL2 and end >= 20:
+            return self.cooked(struct.unpack("!H", frame[0:2])[0], 20, end)
+        return None
 
-    def address_family(self, family: int, start: int, end: int) -> None:
+    def address_family(self, family: int, start: int, end: int) -> _Step | None:
         if family in (0, 2):
-            self.ipv4(start, end)
-        elif family == 10:
-            self.ipv6(start, end)
+            return (self.ipv4, start, end, False)
+        if family == 10:
+            return (self.ipv6, start, end, False)
+        return None
 
-    def cooked(self, protocol: int, start: int, end: int) -> None:
+    def cooked(self, protocol: int, start: int, end: int) -> _Step | None:
         if protocol == _ETH_IPV4:
-            self.ipv4(start, end)
-        elif protocol == _ETH_IPV6:
-            self.ipv6(start, end)
-        elif protocol == _ETH_8021Q:
-            self.vlan(start, end)
-        elif protocol == _ETH_PPPOE_SESSION:
-            self.pppoe(start, end)
-        elif protocol == 1:  # an Ethernet frame after the cooked header
-            self.ethernet(start, end)
+            return (self.ipv4, start, end, False)
+        if protocol == _ETH_IPV6:
+            return (self.ipv6, start, end, False)
+        if protocol == _ETH_8021Q:
+            return (self.vlan, start, end, False)
+        if protocol == _ETH_PPPOE_SESSION:
+            return (self.pppoe, start, end, False)
+        if protocol == 1:  # an Ethernet frame after the cooked header
+            return (self.ethernet, start, end, False)
+        return None
 
-    def ethernet(self, start: int, end: int) -> None:
-        if end - start < 14:
-            return
-        self.ethertype(struct.unpack("!H", self.frame[start + 12 : start + 14])[0], start + 14, end)
-
-    def ethertype(self, kind: int, start: int, end: int) -> None:
+    def ethertype(self, kind: int, start: int, end: int) -> _Step | None:
         if kind <= _ETH_LENGTH_MAX:  # 802.3: LLC follows, not an IP header
-            return
+            return None
         if kind == _ETH_IPV4:
-            self.ipv4(start, end)
-        elif kind == _ETH_IPV6:
-            self.ipv6(start, end)
-        elif kind in (_ETH_8021Q, _ETH_8021AD):
-            self.vlan(start, end)
-        elif kind == _ETH_PPPOE_SESSION:
-            self.pppoe(start, end)
+            return (self.ipv4, start, end, False)
+        if kind == _ETH_IPV6:
+            return (self.ipv6, start, end, False)
+        if kind in (_ETH_8021Q, _ETH_8021AD):
+            return (self.vlan, start, end, False)
+        if kind == _ETH_PPPOE_SESSION:
+            return (self.pppoe, start, end, False)
+        return None
 
-    def vlan(self, start: int, end: int) -> None:
+    def ethernet(self, start: int, end: int, _quoted: bool = False) -> _Step | None:
+        if end - start < 14:
+            return None
+        kind = struct.unpack("!H", self.frame[start + 12 : start + 14])[0]
+        return self.ethertype(kind, start + 14, end)
+
+    def vlan(self, start: int, end: int, _quoted: bool = False) -> _Step | None:
         if end - start < 4:
-            return
-        self.ethertype(struct.unpack("!H", self.frame[start + 2 : start + 4])[0], start + 4, end)
+            return None
+        kind = struct.unpack("!H", self.frame[start + 2 : start + 4])[0]
+        return self.ethertype(kind, start + 4, end)
 
-    def pppoe(self, start: int, end: int) -> None:
+    def pppoe(self, start: int, end: int, _quoted: bool = False) -> _Step | None:
         frame = self.frame
         if end - start < 7 or frame[start + 1] != 0:  # code 0: session data
-            return
+            return None
         first = frame[start + 6]
         if first == 0xFF:  # HDLC-framed PPP is not read
-            return
+            return None
         if first & 1:  # a compressed, one-byte protocol field
             protocol, body = first, start + 7
         elif end - start >= 8:
             protocol, body = struct.unpack("!H", frame[start + 6 : start + 8])[0], start + 8
         else:
-            return
+            return None
         if protocol == 0x21:
-            self.ipv4(body, end)
-        elif protocol == 0x57:
-            self.ipv6(body, end)
+            return (self.ipv4, body, end, False)
+        if protocol == 0x57:
+            return (self.ipv6, body, end, False)
+        return None
 
-    def ipv4(self, start: int, end: int, quoted: bool = False) -> None:
+    def ipv4(self, start: int, end: int, quoted: bool = False) -> _Step | None:
         frame = self.frame
         if end - start < 20:
-            return
+            return None
         header_length = (frame[start] & 0x0F) * 4
         total_length = struct.unpack("!H", frame[start + 2 : start + 4])[0]
         fragment_offset = struct.unpack("!H", frame[start + 6 : start + 8])[0] & 0x1FFF
@@ -535,108 +803,111 @@ class _Walk:
             self.packet.ip_src = str(ipaddress.IPv4Address(frame[start + 12 : start + 16]))
             self.packet.ip_dst = str(ipaddress.IPv4Address(frame[start + 16 : start + 20]))
         if header_length < 20:  # below the minimum: nothing past it is read
-            return
+            return None
         body = min(start + header_length, end)
         if total_length >= header_length:  # a smaller total (TSO writes 0) is ignored
             end = min(end, start + total_length)
         if quoted:
             if fragment_offset == 0:
-                self.transport(protocol, body, end, quoted=True)
-        elif protocol == 41:
-            self.ipv6(body, end)
-        elif fragment_offset == 0:
-            if protocol == 4:
-                self.ipv4(body, end)
-            elif protocol == 47:
-                self.gre(body, end)
-            elif protocol == 1:
-                if end - body >= 8 and frame[body] in _ICMP_ERRORS:
-                    self.ipv4(body + 8, end, quoted=True)
-            else:
-                self.transport(protocol, body, end)
+                return self.transport(protocol, body, end, quoted=True)
+            return None
+        if protocol == 41:
+            return (self.ipv6, body, end, False)
+        if fragment_offset != 0:
+            return None
+        if protocol == 4:
+            return (self.ipv4, body, end, False)
+        if protocol == 47:
+            return (self.gre, body, end, False)
+        if protocol == 1:
+            if end - body >= 8 and frame[body] in _ICMP_ERRORS:
+                return (self.ipv4, body + 8, end, True)
+            return None
+        return self.transport(protocol, body, end)
 
-    def ipv6(self, start: int, end: int, quoted: bool = False) -> None:
+    def ipv6(self, start: int, end: int, quoted: bool = False) -> _Step | None:
         frame = self.frame
         if end - start < 40:
-            return
+            return None
         payload_length = struct.unpack("!H", frame[start + 4 : start + 6])[0]
         following = frame[start + 6]
         position = start + 40
         end = min(end, position + payload_length)
         if quoted:
-            self.transport(following, position, end, quoted=True)
-            return
+            return self.transport(following, position, end, quoted=True)
         while following in _IPV6_OPTION_HEADERS or following == _IPV6_FRAGMENT_HEADER:
             if end - position < 8:
-                return
+                return None
             if following == _IPV6_FRAGMENT_HEADER:
                 if struct.unpack("!H", frame[position + 2 : position + 4])[0] >> 3:
-                    return  # a non-first fragment
+                    return None  # a non-first fragment
                 following, position = frame[position], position + 8
             else:
                 following, position = frame[position], position + (frame[position + 1] + 1) * 8
         if position > end:
-            return
+            return None
         if following == 41:
-            self.ipv6(position, end)
-        elif following == 4:
-            self.ipv4(position, end)
-        elif following == 47:
-            self.gre(position, end)
-        elif following == 58:
+            return (self.ipv6, position, end, False)
+        if following == 4:
+            return (self.ipv4, position, end, False)
+        if following == 47:
+            return (self.gre, position, end, False)
+        if following == 58:
             if end - position >= 8 and frame[position] in _ICMP6_ERRORS:
-                self.ipv6(position + 8, end, quoted=True)
-        else:
-            self.transport(following, position, end)
+                return (self.ipv6, position + 8, end, True)
+            return None
+        return self.transport(following, position, end)
 
-    def gre(self, start: int, end: int) -> None:
+    def gre(self, start: int, end: int, _quoted: bool = False) -> _Step | None:
         frame = self.frame
         if end - start < 4:
-            return
+            return None
         flags = frame[start]
         protocol = struct.unpack("!H", frame[start + 2 : start + 4])[0]
         if protocol == 0x880B:  # PPTP's enhanced GRE is not read
-            return
+            return None
         header_length = 4
         header_length += 4 if flags & 0xC0 else 0  # checksum or routing present
         header_length += 4 if flags & 0x20 else 0  # key present
         header_length += 4 if flags & 0x10 else 0  # sequence number present
         if end - start < header_length:
-            return
+            return None
         body = start + header_length
         if protocol == _ETH_8021Q:
-            self.vlan(body, end)
-        elif protocol == _ETH_BRIDGED:
-            self.ethernet(body, end)
-        elif flags & 0x40:  # routing entries follow, and are not read
-            return
-        elif protocol == _ETH_IPV4:
-            self.ipv4(body, end)
-        elif protocol == _ETH_IPV6:
-            self.ipv6(body, end)
+            return (self.vlan, body, end, False)
+        if protocol == _ETH_BRIDGED:
+            return (self.ethernet, body, end, False)
+        if flags & 0x40:  # routing entries follow, and are not read
+            return None
+        if protocol == _ETH_IPV4:
+            return (self.ipv4, body, end, False)
+        if protocol == _ETH_IPV6:
+            return (self.ipv6, body, end, False)
+        return None
 
-    def transport(self, protocol: int, start: int, end: int, quoted: bool = False) -> None:
+    def transport(self, protocol: int, start: int, end: int, quoted: bool = False) -> _Step | None:
         if protocol == 6:
-            self.tcp(start, end, quoted)
-        elif protocol == 17:
-            self.udp(start, end, quoted)
+            return (self.tcp, start, end, quoted)
+        if protocol == 17:
+            return (self.udp, start, end, quoted)
+        return None
 
-    def tcp(self, start: int, end: int, quoted: bool) -> None:
+    def tcp(self, start: int, end: int, quoted: bool) -> _Step | None:
         frame = self.frame
         if end - start < 20:
-            return
+            return None
         sport, dport = struct.unpack("!HH", frame[start : start + 4])
         data_start = min(start + max(20, (frame[start + 12] >> 4) * 4), end)
-        data = frame[data_start:end]
         if not quoted and self.packet.tcp is None:
-            self.packet.tcp = Segment(sport, dport, data, frame[data_start:])
+            self.packet.tcp = Segment(sport, dport, frame, data_start, end)
         if sport == 53 or dport == 53:
-            self.question(_dns_over_tcp(data))
+            self.question(_dns_over_tcp(frame[data_start:end]))
+        return None
 
-    def udp(self, start: int, end: int, quoted: bool) -> None:
+    def udp(self, start: int, end: int, quoted: bool) -> _Step | None:
         frame = self.frame
         if end - start < 8:
-            return
+            return None
         sport, dport, length = struct.unpack("!HHH", frame[start : start + 6])
         body = start + 8
         # The UDP length bounds the payload; one below the header's own eight
@@ -650,27 +921,29 @@ class _Walk:
         kind = _udp_payload_kind(sport, dport)
         if kind == _DNS:
             self.question(_dns_question(frame[body:body_end]))
-        elif quoted:
-            return
-        elif kind == _VXLAN:
-            self.vxlan(body, body_end)
-        elif kind == _GRE:
-            self.gre(body, body_end)
+            return None
+        if quoted:
+            return None
+        if kind == _VXLAN:
+            return (self.vxlan, body, body_end, False)
+        if kind == _GRE:
+            return (self.gre, body, body_end, False)
+        return None
 
-    def vxlan(self, start: int, end: int) -> None:
+    def vxlan(self, start: int, end: int, _quoted: bool = False) -> _Step | None:
         if end - start < 8:
-            return
+            return None
         inner = start + 8
         if self.frame[start] & 0x04:  # a next-protocol field (VXLAN-GPE)
             following = self.frame[start + 3]
             if following == 1:
-                self.ipv4(inner, end)
-            elif following == 2:
-                self.ipv6(inner, end)
-            elif following in (0, 3):
-                self.ethernet(inner, end)
-        else:
-            self.ethernet(inner, end)
+                return (self.ipv4, inner, end, False)
+            if following == 2:
+                return (self.ipv6, inner, end, False)
+            if following in (0, 3):
+                return (self.ethernet, inner, end, False)
+            return None
+        return (self.ethernet, inner, end, False)
 
     def question(self, name: bytes | None) -> None:
         if name is not None and self.packet.dns_qname is None:
@@ -678,13 +951,20 @@ class _Walk:
 
 
 def decode(record: Record) -> Packet:
-    """One record's headers, as far as they go."""
+    """One record's headers, as far as they go; never raises.
+
+    A record the walk fails on comes back with what was read before the
+    failure and ``undecoded`` set.
+    """
     packet = Packet(time=record.time, length=len(record.data))
-    _Walk(record.data, packet).link(record.linktype)
+    try:
+        _Walk(record.data, packet).run(record.linktype)
+    except Exception:  # noqa: BLE001 - one record never costs the capture
+        packet.undecoded = True
     return packet
 
 
 def packets(path: str) -> Iterator[Packet]:
     """Every packet of the capture at ``path``, decoded, in file order."""
-    for record in records(path):
-        yield decode(record)
+    with Capture(path) as capture:
+        yield from capture.packets()

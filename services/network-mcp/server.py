@@ -168,6 +168,9 @@ def read_pcap_summary(pcap_path: str, packet_limit: int | None = None, offset: i
         )
         if end < read.packets_in_capture:
             head += f"; the next page starts at offset {end}"
+        if read.blocks_unreadable or read.byte_cap is not None or read.packets_undecoded:
+            # The count above is of what could be read; the statement says what could not.
+            head += f" ({read.statement()})"
         head += "."
         return "\n".join([head, *output]) if output else f"{head} No IP packets in them."
     except Exception as e:  # noqa: BLE001 - a tool server answers, it does not raise

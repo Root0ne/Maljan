@@ -1059,12 +1059,31 @@ change landed on `main`.
 
 - **Captures are read by Maljan's own pcap/pcapng reader
   (`maljan.analysis.capture_reader`) instead of scapy**, a GPL-2.0 runtime
-  dependency the dependency review refuses. Every answer the network tools and
-  the capture summary give on the fixture corpus is unchanged
-  (`tests/unit/analysis/test_pcap_reader_parity.py`), with two corrections: a
-  pcapng file cut inside a block yields the packets before the cut instead of
-  no capture, and an IPv4 header claiming a length below 20 bytes no longer
-  has a TCP header read out of its own bytes.
+  dependency the dependency review refuses. On the 27-capture fixture corpus
+  (`tests/unit/analysis/test_pcap_reader_parity.py`), 14 captures answer
+  exactly as before on all ten surfaces measured; the other 13 change only on
+  the surfaces the test names, each for a stated reason:
+  - the TLS server name is now read (the old decode always raised, so `sni`
+    was always empty);
+  - a pcapng block that is correctly framed but unreadable is skipped by its
+    length and the answer says how many and why ("4 packets read, 3 blocks
+    unreadable: …"), where the capture used to end there and still be called
+    whole;
+  - a pcapng file cut inside a block yields the packets before the cut;
+  - a frame of any nesting depth (stacked VLAN tags, nested tunnels) is walked
+    by a loop, and a record the walk fails on no longer costs the capture;
+  - an IPv4 header length below 20 no longer has a TCP header read out of its
+    own bytes, and an empty record counts 0 bytes, not 14;
+  - simple packet blocks on an interface with snapshot length 0 (no limit)
+    yield their packets.
+
+  Outside the corpus: a record is read up to the snapshot length the capture
+  declares, and records longer than 65,535 bytes within it count in full (scapy
+  cut them at 65,535); a gzip capture is decompressed as a stream and no
+  further than the 64 MiB the sandbox providers allow a downloaded capture
+  (`providers/sandbox/limits.py`), and the answer says when it stopped there; a
+  simple packet block carries no timestamp, where scapy stamped the time of
+  reading; interface numbers start again in every pcapng section.
 - **The documentation site is built with Fumadocs.** The pages are MDX under
   `apps/docs/content/docs/` and the images under `apps/docs/public/assets/`;
   `mkdocs.yml`, the theme overrides and the `docs` dependency group are gone,

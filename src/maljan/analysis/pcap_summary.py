@@ -23,10 +23,10 @@ from __future__ import annotations
 import ipaddress
 from collections import defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from maljan.analysis.capture_reader import Packet, count_records, packets
+from maljan.analysis.capture_reader import Capture, Packet, ReadNotes
 from maljan.core.logger import logger
 
 # Beaconing: a destination contacted at least this many times with a stable
@@ -42,30 +42,91 @@ class CaptureRead:
     """How much of one capture a reader read: the fact every answer states.
 
     ``limit`` is the caller's own, and ``None`` when it gave none — a read with
-    no limit reads the whole capture.
+    no limit reads the whole capture. The rest is what the reader had to skip
+    or where it stopped (``capture_reader.ReadNotes``): pcapng blocks it could
+    not read and why, the byte cap a gzip capture reached, and records whose
+    headers could not be walked to the end. Each appears in the fields only
+    when it happened.
     """
 
     packets_read: int = 0
     packets_in_capture: int = 0
     limit: int | None = None
+    blocks_unreadable: int = 0
+    unreadable_reasons: list[str] = field(default_factory=list)
+    byte_cap: int | None = None
+    packets_undecoded: int = 0
+
+    def note(self, notes: ReadNotes) -> None:
+        self.blocks_unreadable = notes.blocks_unreadable
+        self.unreadable_reasons = list(notes.unreadable_reasons)
+        self.byte_cap = notes.byte_cap
+        self.packets_undecoded = notes.packets_undecoded
 
     @property
     def whole(self) -> bool:
-        return self.packets_read >= self.packets_in_capture
+        return (
+            self.packets_read >= self.packets_in_capture
+            and not self.blocks_unreadable
+            and self.byte_cap is None
+        )
 
     def statement(self) -> str:
-        """``"14887 of 14887 packets in the capture read"``, and why fewer when fewer."""
-        said = f"{self.packets_read} of {self.packets_in_capture} packets in the capture read"
-        if not self.whole and self.limit is not None:
+        """``"14887 of 14887 packets in the capture read"``, and why fewer when fewer.
+
+        When blocks were skipped or a byte cap stopped the read, the capture's
+        own count is not known, and the statement says what was read and why
+        instead: ``"6 packets read, 1 blocks unreadable: <reason>"``.
+        """
+        partial = self.blocks_unreadable or self.byte_cap is not None
+        if partial:
+            said = f"{self.packets_read} packets read"
+        else:
+            said = f"{self.packets_read} of {self.packets_in_capture} packets in the capture read"
+        if self.packets_read < self.packets_in_capture and self.limit is not None:
             said += f" (the caller asked for {self.limit})"
+        if self.blocks_unreadable:
+            said += f", {self.blocks_unreadable} blocks unreadable: " + "; ".join(
+                self.unreadable_reasons
+            )
+        if self.byte_cap is not None:
+            said += (
+                f", reading stopped at the {self.byte_cap} decompressed bytes the platform "
+                "allows a capture"
+            )
+        if self.packets_undecoded:
+            said += (
+                f", {self.packets_undecoded} of them read only to the headers before "
+                "one that could not be decoded"
+            )
         return said
 
     def as_fields(self) -> dict[str, Any]:
-        return {
+        fields: dict[str, Any] = {
             "packets_read": self.packets_read,
             "packets_in_capture": self.packets_in_capture,
             "packet_limit": self.limit,
         }
+        if self.blocks_unreadable:
+            fields["blocks_unreadable"] = self.blocks_unreadable
+            fields["unreadable_reasons"] = list(self.unreadable_reasons)
+        if self.byte_cap is not None:
+            fields["byte_cap"] = self.byte_cap
+        if self.packets_undecoded:
+            fields["packets_undecoded"] = self.packets_undecoded
+        return fields
+
+    @classmethod
+    def from_fields(cls, facts: dict[str, Any]) -> CaptureRead:
+        return cls(
+            packets_read=int(facts.get("packets_read") or 0),
+            packets_in_capture=int(facts.get("packets_in_capture") or 0),
+            limit=facts.get("packet_limit"),
+            blocks_unreadable=int(facts.get("blocks_unreadable") or 0),
+            unreadable_reasons=list(facts.get("unreadable_reasons") or []),
+            byte_cap=facts.get("byte_cap"),
+            packets_undecoded=int(facts.get("packets_undecoded") or 0),
+        )
 
 
 def asked_limit(packet_limit: Any) -> int | None:
@@ -96,14 +157,17 @@ def each_packet(
     """
     limit = asked_limit(packet_limit)
     read = CaptureRead(limit=limit)
-    stopped = False
-    for pkt in packets(path):
-        if limit is not None and read.packets_read >= limit:
-            stopped = True
-            break
-        read.packets_read += 1
-        visit(pkt)
-    read.packets_in_capture = count_records(path) if stopped else read.packets_read
+    with Capture(path) as capture:
+        stream = capture.records()
+        rest = 0
+        for record in stream:
+            if limit is not None and read.packets_read >= limit:
+                rest = 1 + sum(1 for _record in stream)
+                break
+            read.packets_read += 1
+            visit(capture.decode(record))
+        read.packets_in_capture = read.packets_read + rest
+        read.note(capture.notes)
     return read
 
 
@@ -170,7 +234,9 @@ def _extract_sni(pkt: Packet) -> str | None:
                 # server_name_list(2) + entry: type(1) + name_len(2) + name
                 name_len = int.from_bytes(data[idx + 3 : idx + 5], "big")
                 name = data[idx + 5 : idx + 5 + name_len]
-                return name.decode("idna", "replace") if name else None
+                # A host name is ASCII (RFC 6066, an A-label for an IDN); a
+                # byte outside it is written as an escape, not dropped.
+                return name.decode("ascii", "backslashreplace") if name else None
             idx += elen
     except Exception:
         return None
@@ -282,11 +348,7 @@ def conversation_line(row: dict[str, Any]) -> str:
 
 def summary_text(facts: dict[str, Any]) -> str:
     """The facts as the markdown block the network analyst and the report read."""
-    read = CaptureRead(
-        packets_read=int(facts.get("packets_read") or 0),
-        packets_in_capture=int(facts.get("packets_in_capture") or 0),
-        limit=facts.get("packet_limit"),
-    )
+    read = CaptureRead.from_fields(facts)
     heading = "#### Packet Capture Analysis (deterministic, whole capture):"
     if not read.whole:
         heading = "#### Packet Capture Analysis (deterministic, part of the capture):"
