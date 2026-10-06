@@ -1,0 +1,274 @@
+# Latrodectus score: all-tools team, hosted DeepSeek, run 5
+
+The reference sample run under the importable all-tools team with a real
+sandbox, on a hosted model, for the second time. Team `all_tools` (three static
+analysts, a Ghidra reverser, then the dynamic and network stages; see [An
+all-tools team](../../configuration.md#an-all-tools-team)), model
+`deepseek-flash` (DeepSeek, hosted) through the OpenAI-compatible provider with
+`compat = deepseek`, thinking on and `reasoning_effort = max`, a 1,048,576-token
+window, output caps of 393,216 tokens for every analyst, the judge and the
+report model, **no spend ceiling**, and analysts run in parallel (`parallel_analysts
+auto`). **Sandbox: Hatching Triage, a 600 s run.** The job completed in 9,578 s,
+with a persisted report, no degraded-run banner and no failed analyst. The cost
+was 3.07 USD, computed from the recorded token counts at the published prices;
+the runner recorded no balance, so there is no charge to check it against.
+
+The run's artefacts do not record the commit. It ran on `dev` after the fixes
+that followed [run 4](latrodectus-all-tools-run4.md): the claim reader that
+counts unread blocks, a validation turn on every revision answer, the function
+map, the host-identifier and configuration-value checks, the publish rule for
+unattributed addresses, and streaming for every hosted call.
+
+The method and the scoring surface are the same as for [run
+4](latrodectus-all-tools-run4.md) and the [local
+run](latrodectus-all-tools-local6.md) and are described in [the all-tools
+series](../index.md#the-all-tools-series).
+
+## Totals
+
+| Group | Items | Found | Partly (body) | Partly (appendix) | Missed | Wrong |
+|---|---|---|---|---|---|---|
+| K1 identity | 5 | 4 | 1 | 0 | 0 | 0 |
+| K2 execution flow | 6 | 4 | 1 | 0 | 1 | 0 |
+| K3 anti-analysis | 7 | 6 | 1 | 0 | 0 | 0 |
+| K4 identifiers | 3 | 2 | 0 | 1 | 0 | 0 |
+| K5 persistence | 3 | 1 | 2 | 0 | 0 | 0 |
+| K6 C2 | 7 | 6 | 0 | 0 | 1 | 0 |
+| K9 IOCs | 8 | 5 | 3 | 0 | 0 | 0 |
+| **Main (K1–K6, K9)** | **39** | **28** | **8** | **1** | **2** | **0** |
+| K7 commands | 11 | 9 | 1 | 0 | 0 | 1 |
+| K8 discovery | 1 | 1 | 0 | 0 | 0 | 0 |
+| K10 ATT&CK | 6 | 5 | 1 | 0 | 0 | 0 |
+| **Depth (K7, K8, K10)** | **18** | **15** | **2** | **0** | **0** | **1** |
+| **All core** | **57** | **43** | **10** | **1** | **2** | **1** |
+
+**43 found / 11 partly (10 in the body, 1 in the appendix only) / 2 missed / 1
+wrong**, and **27 facts beyond the human reports** (below).
+
+Against [run 4](latrodectus-all-tools-run4.md) (45 / 9 / 2 / 1): 6 items better,
+9 worse, 42 the same.
+
+- **A deeper command table, a weaker install story.** The gains are the items
+  run 4's claim reader lost: the task name `Updater` with its COM chain and
+  logon trigger, command 0xc as an operator-driven download and start, command
+  0x11 as a process exit, and the counter-0 registration block with `&mac=`,
+  `&computername=` and `&domain=`. The fix to the claim reader held: it now
+  states what it could not read ("began 11, 10 were read, 1 could not be read")
+  and every revision answer gets a validation turn.
+- **The losses are one misreading, repeated.** `Custom_update` and `Update_%x`
+  are framed as a staged payload path under a resolved shell folder, and
+  `\update_data.dat` as a downloaded staging file. No section says the sample
+  copies itself to `%APPDATA%\Custom_update\` or reads replacement C2 addresses
+  from `update_data.dat`. That one reading costs seven items.
+- **Command 0xf is still wrong**, now as "teardown-and-exit" rather than
+  "uninstall". The analysts' own claims ("teardown … re-launch") describe an
+  update; the report body dropped the re-launch.
+- **Report correctness is the best so far.** All 37 configuration rows and all
+  43 host-identifier rows hold their value in a cited entry, every one of 19
+  sandbox addresses is marked `no:` with a reason, and no redaction mask appears
+  in the report.
+- **More than twice run 4's cost, and slower.** 3.07 against 1.39 USD, and 9,578
+  against 7,603 s. Part of that came from the platform defects listed below, not
+  from the analysis.
+
+## What the claims held and the report did not
+
+| Item | Where the claim was | Report | Result |
+|---|---|---|---|
+| K6.6 beacon types | The reverser's round-1 answer gave the body formats and the type values | No `type` value is stated in the body | missed (was partly). A later revision replaced the answer and the claim was in no final answer |
+| K3.4 MAC check | Reverser final claims: a walk over the adapter list that fails on an entry whose length field is above 6 | "inspects the network adapter table", without the length test | partly |
+| K7.15 update (0xf) | Static, triage and reverser claims: teardown, re-launch, exit; the dispatcher calls the fetch-exe handler before and after the delete | "teardown-and-exit action" | stays wrong; the re-launch was dropped |
+| K4.1 bot ID | The routine that formats the id was decompiled and asked about once; no final claim describes it | The format string in Appendix A only | partly (appendix) |
+| K2.6 / K5.3 | The routine that reads `update_data.dat` was decompiled; no claim says what it reads | Read as a download target | the analysts never had it right |
+
+`decode_string_blobs` again tied every key string to the function that uses it.
+This time the reverser described most of them (the mutex, the self-delete
+stream, the task name, the group string, the RC4 key, the reply keywords and
+`files/bp.dat`), and they reach the body. The two key-relevant functions read
+and never described are the bot-id routine and the `update_data.dat` reader.
+
+## Item by item
+
+| # | Score | Report (quoted or condensed) |
+|---|---|---|
+| K1.1a family | found | "Family: Latrodectus (moderate confidence, 0.60, stated by the judge)". Another section says "low-to-moderate", and one says "We make no family attribution" |
+| K1.1b loader | found | "Category: loader"; "a fully tasked loader one operator command away from delivering a second stage" |
+| K1.2 IcedID link | partly (body) | VirusTotal labels "Latrodectus alongside Ulise, IcedID …". Command 0x12, `bp.dat` and `init -zzzz` are not tied to IcedID |
+| K1.4 x64 DLL; arch check | found | "pe, x86-64, DLL"; "requires a 64-bit host via IsWow64Process" |
+| K1.5 four exports, one address | found | "All 4 exports share one address, 0x3ce4." |
+| K2.1 APIs by hash | found | "164 stored 32-bit values resolve at run time, via a PEB walk at 0x8690 and CRC-32 export-name parsing at 0x869c" |
+| K2.2 abort on failed check | found | "reads the PEB BeingDebugged byte and aborts on detection … aborts below 75 visible processes … parking in a Sleep(1000) loop on failure" |
+| K2.3 mutex | found | "CreateMutexW-shaped routine as (NULL, FALSE, "runnung") and exits … when GetLastError() reports ERROR_ALREADY_EXISTS (0xB7)" |
+| K2.4 install, then persist | partly (body) | Task action built from "a shell folder plus the `Custom_update` directory name and an `Update_%x` file name"; "whether that target is a dropped module or this DLL is not settled". No self-copy |
+| K2.5 register, then loop | found | "the 0x7fa8 block (&mac=, &computername=%s, &domain=%s) is appended only on the cycle where the beacon counter is zero"; the loop with its tasking parse |
+| K2.6 `update_data.dat` read first | missed | `\update_data.dat` only as a fetch and staging name |
+| K3.1 PEB BeingDebugged | found | "0x309c loads the PEB word at offset +2 (BeingDebugged, via the 0x8690 accessor)"; T1622 published |
+| K3.2 process count 75/50 | found | "counts processes with 0x8820 against the constants 0x4b (75) and … 0x32 (50)" |
+| K3.3 architecture / WOW64 | found | "requires a 64-bit host (IsWow64Process)" |
+| K3.4 MAC check | partly (body) | "inspects the network adapter table" as a pre-flight check; the length test is in the claims only |
+| K3.5 PEB walk + CRC32 names | found | Export parsing at 0x869c, CRC32 at 0x6aa4 (0xEDB88320), PEB access at 0x8690 |
+| K3.6 string encryption | found | "4-byte seed 0x33629d40, a 2-byte length word XOR-ed with the seed's low 16 bits, a rolling key starting at 0x41" |
+| K3.7 self-deletion | found | "renames its own image into the ":wtfbbq" alternate data stream and sets delete-on-close". Another section calls the same string a single-instance marker |
+| K4.1 bot ID | partly (appendix) | `guid=%s` in the template; `%04X%04X%04X%04X%08X%04X` and `GetVolumeInformationW` in Appendix A only |
+| K4.2 group → FNV-1a | found | "0xC99C hashes the decoded string 'Littlehw' … XOR step before the multiply by 0x01000193 from an offset basis of 0x811C9DC5, which is FNV-1a" into `group=` |
+| K4.4 two encrypted C2s | found | "two literal HTTPS base URLs … decoded … stored by the routine at 0x6988 into a two-entry gateway array at global 0x10568" |
+| K5.1 `Custom_update\Update_%x.dll` | partly (body) | "Persistence install path · `<shell folder>\Custom_update\Update_%x.exe\|.dll`"; `Update_%x` called a generated payload file name. No `%APPDATA%` |
+| K5.2 task `Updater`, COM, logon | found | "Task Scheduler logon task named Updater with trigger type 9 (TASK_TRIGGER_LOGON) carrying the string LogonTrigger"; the CoCreateInstance chain |
+| K5.3 `update_data.dat` holds C2s | partly (body) | Named, with the wrong purpose: "Downloaded update-data file name", "Payload staging file" |
+| K6.1 HTTPS POST `/live/` | found | "form-encoded HTTP POST/GET"; two `hxxps://…/live/` bases |
+| K6.2 User-Agent | found | "Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; Tob 1.1)" |
+| K6.3 RC4 then base64 | found | "RC4-encrypted under the decoded literal key 12345 and base64-encoded, replies are base64-decoded and RC4-decrypted" |
+| K6.4 beacon interval | found | "(rand % 150 + 450) s … 450–599 s, or (rand % 600 + 1500) … 1500–2099 s, when the slow-beacon flag 0x1058c is set" |
+| K6.5 beacon format | found | The template exact, plus `&mac=`, `&computername=%s` and `&domain=%s` on counter 0 |
+| K6.6 beacon types 1–5 | missed | No `type` value in the body; the claim was lost between revisions |
+| K6.7 URLS/CLEARURL/COMMAND/ERROR | found | "splits them on the CRLF pair and then on the \| character … CLEARURL → 0xce20, URLS → 0xccbc, COMMAND → 0x3cf4, ERROR recognised and dropped" |
+| K9 own hashes | found | published |
+| K9 `/live/` | found | both URLs published with provenance |
+| K9 UA | found | body and the proxy hunt |
+| K9 mutex `runnung` | found | published, with a YARA string |
+| K9 `Custom_update\` | partly (body) | "Subdirectory under a resolved shell folder used for the staged payload/task path" |
+| K9 `Update_<hex>.dll` | partly (body) | `Update_%x` "Generated payload file name under Custom_update" |
+| K9 `update_data.dat` | partly (body) | `\update_data.dat` "Downloaded update-data file name", no directory |
+| K9 task `Updater` | found | "Scheduled task name · Updater"; a hunting note on `…\TaskCache\Tree\Updater` with event ids 4698 and 106 |
+| K7 2 desktop links | found | "COMMAND id 2 … '&desklinks=['" |
+| K7 3 process list | found | "COMMAND id 3 … '&proclist=[' … 'proc' and 'subproc'" |
+| K7 4 sysinfo | found | "a re-run of the reconnaissance thread" with the full cmd.exe set and its tags |
+| K7 12 download + run EXE | found | "0xc · fetch and run executable … an operator-driven download-and-start of an executable" |
+| K7 13 DLL via rundll32 | found | 0xd "fetch and run DLL"; the launcher formats `rundll32.exe %s,%s` |
+| K7 14 shellcode | found | "0xe … allocated as read-write-execute memory and run on a new thread" |
+| K7 15 update | **wrong** | "0xf · teardown … we assess a teardown-and-exit action". B, E and P: 15 is update |
+| K7 17 uninstall | found | "0x11 · exit · calls the ExitProcess pointer stored at 0x10b68 with 0 — an operator-ordered process exit" |
+| K7 18 `bp.dat` | partly (body) | "0x12 · update … 'files/bp.dat' … 'init -zzzz="%s\%s"'": download and run right, purpose labelled update, no IcedID |
+| K7 19 longer interval | found | "0x13 · slow beacon pacing" (1500–2099 s) |
+| K7 20 reset counter | found | "0x14 · beacon counter reset" |
+| K8 discovery | found | All twelve cmd and wmic lines with their output tags and call sites |
+| K10 T1027 | found | published |
+| K10 T1218.011 | found | published, corroborated |
+| K10 T1055 | partly (body) | Published "corroborated", but every analyst states a capability with no call site; command 0xe goes to T1620 |
+| K10 T1053.005 | found | published, corroborated |
+| K10 T1070.004 | found | published ("opens its own image with DELETE access, renames it into the `:wtfbbq` ADS") |
+| K10 T1059.003 | found | published, corroborated |
+
+**Build and later items** (consistency checks, not scored): the RC4 key `12345`
+is found, with its call site. `Littlehw` is stated and is on B's list, but its
+numeric group id is not computed. The beacon `ver` and `up` fields are not
+stated. Both C2 domains are on B's list of 47. The shell-folder set read
+through the Shell Folders key is stated but not tied to the install path.
+Command 0x15 is read as a module run from a file mapping, which fixes run 4's
+"download to disk".
+
+## Beyond the human reports
+
+Each fact below is stated in the report body and is held by no item of the
+human reports' key (K1–K11), and none of B, E or P states it for this hash. The
+run's own evidence proves each one; the evidence id and the tool follow each
+line.
+
+1. Compile TimeDateStamp **2024-03-25 15:54:25 UTC** — `ev_0004` `pe_info`.
+2. Export-directory name **`UpdaterTag.dll`** — `ev_0004` `pe_info`; `ev_0045` r2 `list_functions`.
+3. Five sections, highest entropy `.data` 6.48, no packer signature — `ev_0004` `pe_info`.
+4. The static import table is exactly five imports (`PeekNamedPipe`, `GetLastError`, `CreateMutexW`, `MessageBeep`, `MessageBoxA`) — `ev_0004` `pe_info`.
+5. No Authenticode signature — `ev_0003` `signing_info`.
+6. This build's string-cipher parameters: seed **0x33629d40**, first key **0x41**, mostly UTF-16LE; the decoder at 0xae78 reads the seed, the length and the data and steps the key through a helper at 0x9040 — `ev_0021` `decode_string_blobs`; `ev_0333` Ghidra `decompile_function`.
+7. Resolver layout: hash tables at **0x9484 (90), 0x904C (24), 0xA59C (37 ntdll), 0xAC50 (3 ole32)**, with module-name hashes at 0x84E4, 0xA47C and 0xABD4 — `ev_0020` `resolve_api_hashes`.
+8. The export resolver at 0x869c reads `e_lfanew`, the export directory, the name count and the name array; the PEB getter at 0x8690 reads `gs:[0x60]` — `ev_0008` capa; `ev_0110` and `ev_0114` Ghidra `batch_decompile`; `ev_0122` Ghidra `read_memory`.
+9. Crypto and hash routines: CRC32 at 0x6aa4 (polynomial 0xEDB88320), FNV-1a at 0xc99c (basis 0x811C9DC5, prime 0x01000193), RC4 PRGA at 0xcaac and KSA at 0xcbe0 — `ev_0008` capa; `ev_0334`, `ev_0344`, `ev_0341`, `ev_0343` Ghidra `decompile_function`.
+10. **This hash's C2 pair**, both on `/live/`, decoded by 0xae78 inside 0x6988 and referenced at 0x69b3 and 0x6a1f (`hxxps://titnovacrion[.]top/live/`, `hxxps://skinnyjeanso[.]com/live/`) — `ev_0019` FLOSS; `ev_0021` `decode_string_blobs`.
+11. The decoder's output slot becomes argument 1 of the call to 0xbc1c at 0x69e2 and 0x6a4e — `ev_0021` `decode_string_blobs`.
+12. The C2 bases go into a two-entry gateway array at **0x10568**; an operator list at 0x109a8 is preferred when non-empty, and the base is chosen by the beacon counter modulo the count — `ev_0107` and `ev_0135` Ghidra decompiles.
+13. **This hash's group string is `Littlehw`** (blob 0xfb10, used in 0x463c), FNV-1a-hashed into `group=` — `ev_0021` `decode_string_blobs`; `ev_0344` Ghidra `decompile_function`.
+14. WinINet request flags **0x04080000 | 0x00803000** (secure; certificate name and date errors ignored) — `ev_0077` r2 `decompile_function`.
+15. `Content-Type: application/x-www-form-urlencoded` (blob 0xfb68) and the `POST` / `GET` verbs in the request builder — `ev_0021` `decode_string_blobs`; `ev_0019` FLOSS.
+16. Base64 alphabet at 0x10160, encoder 0x6634, decoder 0x6370 — `ev_0021`; `ev_0135` and `ev_0099` Ghidra decompiles.
+17. Reply handlers: split on CRLF and then `|`, CLEARURL → 0xce20, URLS → 0xccbc, COMMAND → 0x3cf4, ERROR compared with no handler — `ev_0127` Ghidra `decompile_function`.
+18. The command-dispatch table (2 → 0x1a08, 3 → 0x1c38, 4 → 0x2118, 0xc → 0x6e04, 0xd → 0x6c2c, 0xe → 0x7170, 0x12 → 0x4110, 0x15 → 0x72c8 → 0xb670, 0x13 and 0x14 → flags 0x1058c and 0x10590, 0x11 → the ExitProcess slot 0x10b68) — `ev_0134` Ghidra `decompile_function`.
+19. A pre-beacon delay of 0x708 × 100 ms, about 180 s — `ev_0135` Ghidra `decompile_function`.
+20. The recon runner at 0x1030: inheritable security attributes, three inheritable handles, a STARTUPINFO with flags 0x101, and CreateProcessW through a resolved slot; each command is decoded in 0x2200 — `ev_0057` r2 `decompile_function`; `ev_0021`.
+21. Task construction beyond name, COM and logon: trigger type 9 named `LogonTrigger`, settings `PT0S`, the action template at 0x35ee, the builder chain 0x33ac → 0x3728 → 0xb344 → 0xc5e8 with the trigger in 0xc2c4 and the settings in 0xc7b4, the class-identifier constant at 0xe040 — `ev_0019` FLOSS; `ev_0021`; `ev_0108` Ghidra `batch_decompile`; `ev_0070` r2 `decompile_function`.
+22. The rundll32 launcher at 0xb4cc with the templates `C:\WINDOWS\SYSTEM32\rundll32.exe %s,%s` and `… %s`, reached from 0x6c2c and 0x4110 — `ev_0021`; `ev_0048` r2 `decompile_function`; `ev_0116` and `ev_0129` Ghidra.
+23. Staging name templates `%s%d.dll`, `%s%d.exe`, `%s\%d.dll`, `%d.dat`, and the argument template `init -zzzz="%s\%s"` — `ev_0021` `decode_string_blobs`.
+24. Registry access is read-only: the Shell Folders key is read in 0x7b98, and 0x88f8 decodes `\Registry\Machine\` and calls RtlFormatCurrentUserKeyPath — `ev_0021`; `ev_0081` r2 `decompile_function`; `ev_0117` Ghidra.
+25. VirusTotal: 52 of 75 engines — `ev_0018` `get_file_report`.
+26. Domain reputation: 16 of 91 and 20 of 91 engines for the two C2 domains — `ev_0031` and `ev_0032` `get_domain_report`.
+27. The sandbox record: two `rundll32.exe <sample>.dll,#1` processes, ordinal 1 — `ev_0012` `sandbox_processes`.
+
+**27 facts beyond the human reports.** (Run 4: 19. Local 6: 12.)
+
+**Not counted: wrong, or not proven by the evidence.**
+
+- Command 0xf as "teardown-and-exit" and 0x12 as "update" (wrong labels).
+- `update_data.dat` and `Custom_update\Update_%x` as fetch staging paths (wrong purpose).
+- `:wtfbbq` as a single-instance marker, in one section.
+- `curl/7.88.1` on the C2 request: the string is referenced only in the desktop-link handler.
+- Command 0x15 as a file mapping whose entry point is then called: the reverser's assessment, not checked against the evidence.
+- T1055 "corroborated", and T1008 and T1041 as techniques (the facts behind them are counted in 12 and 18).
+- The sentence that the run's own ATT&CK tagging is empty.
+
+## Reverse direction: claims no human report supports
+
+| Claim | Ruling |
+|---|---|
+| "0xf teardown-and-exit action" | wrong (B, E, P: 15 is update). The claims' re-launch was dropped |
+| 0x12 "update … re-launches the module through the init argument" | wrong purpose (B, E, P: 18 is download and run IcedID via `bp.dat`); the mechanics are right |
+| `update_data.dat` as a "downloaded update-data file name"; `Custom_update\Update_%x` as a "staged payload" path | wrong purpose (B: C2 replacement store; self-copy target) |
+| ":wtfbbq … a single-instance marker, although the call site was not recovered" | wrong, and contradicted by the install steps and the ATT&CK row of the same report |
+| "a second curl/7.88.1 User-Agent" installed by the request builder | unsupported |
+| "the run's own ATT&CK tagging is empty" | contradicts the 28 published techniques |
+| T1033 "group output populates the `group` field" | contradicted by another section of the same report |
+| T1055 published "corroborated" | over-published: every layer states a capability with no call site |
+| T1547.001 dropped by the judge; Run, RunOnce and Startup rejected with reasons; the CDN address not attributed to the sample; 19 sandbox addresses marked `no:`; the packer false positive dismissed | correct |
+
+## What this run changed
+
+The run exposed platform defects. Each was fixed in the code that followed:
+
+- **The debate ends when nothing is left to settle.** One contradiction in the
+  mediator's list, however immaterial, kept the debate open: a count of decoded
+  blobs, then a claim its author had already withdrawn. The debate ran five
+  rounds, four of them with revisions. Consensus is now blocked only by a
+  contradiction that touches a published fact, a technique, an indicator or the
+  verdict, and claims an author no longer carries are not passed to the
+  mediator.
+- **Revisions record what they drop.** A revision replaced the answer in force
+  wholesale, and the reverser's claims fell from 52 to 17 across the rounds
+  with nothing recording it; the beacon-type mapping (K6.6) was lost this way.
+  A revision's dropped claims are now recorded.
+- **The whole technique line is read.** The reader accepted one technique per
+  claim, and a line such as "T1027, T1140" was re-asked. It was the cause of 29
+  re-asks. The line is now read as a whole.
+- **The validator reads inflections.** It flagged a true claim ("deobfuscates
+  its own obfuscated strings") for sharing no term with the technique it
+  supports. It now matches word forms.
+- **The family is on the STIX malware object.** The object was passed through
+  as the judge wrote it ("UpdaterTag.dll loader", not a family) although the
+  report's family is Latrodectus. It is now built from the verdict's family.
+- **Network values are defanged everywhere in the report.** The strings-of-note
+  table and one quoted claim printed the C2 URLs and domains live.
+- **Raw unparsed answers are kept.** Five revision answers read no claims on
+  the first attempt, and the raw text was kept in no artefact, so format drift
+  could not be told from reader strictness. The raw answer is now stored.
+
+The model-side findings stay open: the `Custom_update` and `update_data.dat`
+misreading, the 0xf and 0x12 labels, and T1055 over-claimed as corroborated.
+
+## The run
+
+| | |
+|---|---|
+| Duration | 9,578 s |
+| Cost | 3.07 USD, computed from the recorded token counts (no charge was recorded) |
+| Debate | 5 rounds (agreement 0.78 → 0.82 → 0.80 → 0.81 → 0.82); 4 revision rounds ran; the hard limit of 5 was reached |
+| Published techniques | 28 |
+| Published network indicators | 2 domains, 2 URLs, no addresses (19 sandbox addresses marked `no:`) |
+| Model calls | 219, all streamed; 20.33 M input tokens (15.22 M cached), 3.76 M output (3.23 M reasoning) |
+| Tool calls | 350 (10 failed): pipeline 22, triage 26, static 4, static_r2 43, qu1cksc0pe 30, reverser 175, dynamic 23, network 27 |
+
+Part of the cost and of the wall time came from the defects above: the debate
+rounds kept open by the contradiction rule and the re-asks on technique lines
+account for most of the difference from run 4, and no scored item depends on
+the rounds they added. The debate took 3,550 s of the 9,578 s, against 1,778 s
+in run 4. With no spend ceiling, nothing stopped it.
+
+The sandbox record shows the DLL loaded as `rundll32.exe <sample>.dll,#1` and
+nothing beyond it; the report states what was observed there and marks the
+rest as assessed. This is a single run.

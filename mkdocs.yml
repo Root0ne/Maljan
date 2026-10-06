@@ -46,6 +46,7 @@ nav:
   - Benchmark:
       - benchmark/index.md
       - "Score: all-tools, local Qwen3.6-35B": benchmark/scores/latrodectus-all-tools-local6.md
+      - "Score: all-tools, hosted DeepSeek, run 5": benchmark/scores/latrodectus-all-tools-run5.md
       - "Score: all-tools, hosted DeepSeek": benchmark/scores/latrodectus-all-tools-run4.md
       - "Score: iteration 6, default model": benchmark/scores/latrodectus-iteration6-default.md
       - "Score: iteration 5, default model": benchmark/scores/latrodectus-iteration5-default.md
