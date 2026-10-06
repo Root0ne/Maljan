@@ -1,7 +1,7 @@
 # Contributing
 
 Thank you for helping with Maljan. This page is the short version; the
-development guide in [docs/development.md](docs/development.md) has the
+development guide in [Development](https://root0ne.github.io/Maljan/development/) has the
 details.
 
 ## Before you start

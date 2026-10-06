@@ -1,0 +1,209 @@
+---
+title: "Maljan"
+sidebarTitle: "Introduction"
+description: "Multi-agent malware analysis with an evidence ledger behind every claim."
+---
+
+import { Brain, FileSearch, ListOrdered, MonitorCog, Network, Rocket, Scale, Settings, Share, Wrench } from 'lucide-react';
+
+<Hero tagline="Multi-agent malware analysis in which every claim in the report resolves back to the tool call it came from.">
+
+Maljan connects LLM agent teams to malware-analysis tools: signature scanners,
+rule engines, binary and capture readers, a sandbox, an ATT&CK catalogue. The
+output is a report against MITRE ATT&CK and a STIX 2.1 bundle.
+
+</Hero>
+
+<Cards>
+
+<Card icon={<Rocket />} title="Quick start" href="/getting-started/">
+
+From a clean checkout to a first finished analysis on the compose stack:
+the two configuration files, the first account, the first run.
+
+</Card>
+
+<Card icon={<MonitorCog />} title="Console" href="/console/">
+
+The web console: submitting samples, following a run as a conversation,
+reading the evidence ledger and the report.
+
+</Card>
+
+<Card icon={<Brain />} title="LLM providers" href="/providers/">
+
+OpenAI-compatible endpoints (DeepSeek included), Anthropic, Gemini,
+Ollama and a local llama.cpp server, per agent if you like.
+
+</Card>
+
+<Card icon={<Wrench />} title="Tools" href="/tools/">
+
+Ghidra, radare2, capa and YARA, CAPE and Triage sandboxes, VirusTotal,
+the built-in analysis sidecars and any MCP server of your own.
+
+</Card>
+
+</Cards>
+
+## Key capabilities
+
+- <Network className="mj-inline-icon" aria-hidden /> **Teams are configuration, not code.** A team is
+  an ordered list of stages — triage, the passes the sample is worth, a debate,
+  a verdict and a report — each with a condition, so a team applies to a sample
+  rather than being written for one. See [Teams and profiles](/usage/teams/).
+- <ListOrdered className="mj-inline-icon" aria-hidden /> **An evidence ledger with citable ids.** Every
+  tool call is written to the ledger as `ev_NNNN`, and every section of the
+  report names the ids it was built from. See [the evidence
+  ledger](/architecture/#the-evidence-ledger).
+- <Scale className="mj-inline-icon" aria-hidden /> **The agent decides, the code says what is wrong.**
+  Nothing rewrites a claim, a technique id, a confidence or an attribution
+  behind the producer's back: a problem goes back to the producer as feedback,
+  with one turn to fix it. See [validation loops](/architecture/#validation-loops).
+- <FileSearch className="mj-inline-icon" aria-hidden /> **Format-agnostic routing.** The sample's own
+  bytes decide its route (PE, ELF, Mach-O, APK, DEX, documents, scripts,
+  archives); a format nothing recognises gets the neutral path and a report
+  that says so. See [format routing](/architecture/#format-routing).
+- <Share className="mj-inline-icon" aria-hidden /> **Reports that other systems can act on.** Markdown,
+  HTML, PDF, the full JSON document, STIX 2.1, an IOC feed with a publish
+  decision on every row, and detection drafts. See [Reports and
+  exports](/usage/reports-and-exports/).
+- <Settings className="mj-inline-icon" aria-hidden /> **Configured from the console.** A small bootstrap
+  environment, and every other setting in a store edited from the web console,
+  with setup guides and connection tests. See
+  [Configuration](/configuration/).
+
+## Multi-agent architecture in brief
+
+A run is one team executing over one sample. The deterministic triage pack
+establishes the facts first — what the file is, its hashes and signature, what
+the rule engines and the reputation services say — and writes each to the
+evidence ledger. The analysts of each stage then call the tools they were
+given, the debate puts their positions against each other, the judge states the
+verdict, and the report is assembled from the ledger and the claims that cite
+it.
+
+![Maljan runtime components](/assets/architecture.svg)
+
+The components, the job lifecycle and every stage are described in
+[Architecture](/architecture/).
+
+## A quick example
+
+Upload a sample and start an analysis with the `default` team.
+
+<Tabs items={["Console", "REST API", "CLI, without Docker"]}>
+
+<Tab value="Console">
+
+<Steps>
+
+<Step>
+
+Open the console at `http://localhost:3000` and sign in.
+
+</Step>
+
+<Step>
+
+Upload the sample and start an analysis.
+
+</Step>
+
+<Step>
+
+Watch the **CONVERSATION** tab: every agent's messages, its tool calls
+and the verdict, with each stage filling in on the analysis header.
+
+</Step>
+
+<Step>
+
+Read the report from the evidence up: every section carries the ledger
+ids it was built from, and each opens that call on the **EVIDENCE** tab.
+
+</Step>
+
+</Steps>
+
+</Tab>
+
+<Tab value="REST API">
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"..."}' | python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+
+curl -X POST http://localhost:8000/api/v1/samples/upload \
+  -H "Authorization: Bearer $TOKEN" -F 'file=@sample.exe'
+
+curl -X POST http://localhost:8000/api/v1/jobs \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"sample_id":"<id from the upload>"}'
+```
+
+</Tab>
+
+<Tab value="CLI, without Docker">
+
+```bash
+uv run maljan analyze sample_1 --mock --name test.exe
+```
+
+The standalone CLI runs the pipeline without the API, the worker or any of
+the backing services, and reads the process environment rather than the
+settings store.
+
+</Tab>
+
+</Tabs>
+
+<Callout type="warn" title="Analyse malware only in isolated, authorised environments">
+
+Maljan handles live malware. Run it, and any sandbox it submits to, only on
+hosts and networks you are authorised to use for that purpose, isolated
+from production systems and data. A sandbox detonates the sample; the mock
+sandbox, the default, executes nothing. Uploading a sample to an external
+service such as VirusTotal publishes it; that tool ships unticked. See
+[Security](/security/#handling-samples).
+
+</Callout>
+
+## All documents
+
+Each document is written against the code in this repository: the bootstrap
+contract in `apps/api/app/bootstrap.py`, the settings catalog in
+`src/maljan/core/`, the routers under `apps/api/app/api/v1/` and the compose
+stack in `docker/`.
+
+| Document | What it covers |
+| :-- | :-- |
+| [Quick start](/getting-started/) | Prerequisites, the two configuration files, starting the stack, first login and first analysis. |
+| [Console](/console/) | The navigation tree, the analysis tabs, the Conversation view and how the console follows a run. |
+| [Running an analysis](/usage/running-an-analysis/) | Samples, jobs, the per-job overrides, the sandbox choice and following a run. |
+| [Teams and profiles](/usage/teams/) | The teams that ship, stages and conditions, the measurement baseline, writing a team of your own. |
+| [Reports and exports](/usage/reports-and-exports/) | The report, its renderings, STIX, the IOC feed, detection drafts and comparing two runs. |
+| [LLM providers](/providers/) | The four provider backends, per-agent models and fallbacks, and a page per provider. |
+| [Tools](/tools/) | Static providers, sandboxes, VirusTotal, the built-in sidecars and generic MCP servers. |
+| [REST API](/api/) | Router groups, the evidence endpoint, the run-summary fields, the stage events on the WebSocket, authentication and pagination. |
+| [MCP servers](/integrations/mcp-servers/) | Transports, remote sample delivery, and the conventions that make a tool server a good citizen of a run. |
+| [CI](/integrations/ci/) | Driving Maljan from a pipeline with an API key. |
+| [Configuration](/configuration/) | The bootstrap environment contract, Settings → Configuration, the setup guides, connection probes, JSON export and import, secret storage. |
+| [Architecture](/architecture/) | Components, the request and job lifecycle, teams as stages, agents and their tools, the evidence ledger, validation loops and report assembly. |
+| [Security](/security/) | Authentication, roles, API keys, secret encryption, what an export leaves out, CORS and cookie flags, vulnerability reporting. |
+| [Deployment](/deployment/) | Compose services and healthchecks, required secrets, health endpoints, Kubernetes and systemd notes, upgrades and migrations. |
+| [Operations](/operations/) | Logs, what a run's metrics mean, staged samples, the audit trail, rate limits, backups and a troubleshooting table. |
+| [Development](/development/) | Repository layout, `make` targets, the test suites, CI jobs and the branch workflow. |
+| [Benchmark](/benchmark/) | The benchmark: samples, models, the scoring key, results across iterations and against a human report, the findings beyond it, the false-positive control and limitations. |
+| [Paper](/paper/) | Where the published evaluation, its harness and its fixtures live. |
+
+Images used by these documents and by the top-level
+[README.md](https://github.com/Root0ne/Maljan/blob/dev/README.md) live in
+[apps/docs/public/assets/](https://github.com/Root0ne/Maljan/tree/dev/apps/docs/public/assets).
+
+## Historical design record
+
+The specs, plans and superpowers notes that once lived under `docs/specs/`,
+`docs/plans/` and `docs/superpowers/` are no longer carried in the working
+tree; read them with `git log -- docs/plans docs/specs docs/superpowers`.

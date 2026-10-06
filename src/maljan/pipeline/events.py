@@ -961,7 +961,7 @@ def _is_words(run: str) -> bool:
     code from a hyphenated phrase, so a secret of that shape passes this rule.
     A vendor prefix is asked before it (``_PREFIXED_KEY_FORMATS``), and the
     secrets the platform holds are masked by value before any shape is read
-    (``remember_secret_values``); ``docs/configuration.md`` states the rest.
+    (``remember_secret_values``); ``apps/docs/content/docs/configuration.mdx`` states the rest.
     """
     pieces = re.split(r"[_\-/]", run)
     return len(pieces) >= 2 and all(_WORD_PIECE.match(piece) for piece in pieces)

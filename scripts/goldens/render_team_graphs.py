@@ -10,7 +10,7 @@ Deliberately no graphing library. A team is rows of boxes with a few
 labelled arrows, placed by ``maljan.core.team_layout`` (the layout the
 console's team preview draws too), and hand-written SVG keeps the output
 diffable, dependency free and readable in both light and dark pages — the
-colours are the two the existing ``docs/assets/architecture.svg`` uses.
+colours are the two the existing ``apps/docs/public/assets/architecture.svg`` uses.
 
 Run: ``uv run python scripts/goldens/render_team_graphs.py``
 """
@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
-ASSETS = ROOT / "docs" / "assets"
+ASSETS = ROOT / "apps" / "docs" / "public" / "assets"
 
 # The teams drawn on the architecture page, in the order they are introduced.
 TEAMS: tuple[str, ...] = ("default", "mobile", "deep_static", "team_lead")

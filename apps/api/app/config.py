@@ -142,7 +142,7 @@ class APISettings(BaseSettings):
     # nobody remembers to clear is a key that stays accepted for the life of
     # the deployment, which is the whole risk rotating was meant to remove.
     # ``/system/status`` and the startup log say that a grace secret is
-    # configured and when it lapses; the runbook is in docs/deployment.md.
+    # configured and when it lapses; the runbook is in apps/docs/content/docs/deployment.mdx.
     jwt_key_id: str = "v1"
     jwt_previous_secret_key: SecretStr = SecretStr("")
     jwt_previous_key_id: str = "v0"
