@@ -20,15 +20,26 @@
 }
 
 /*
- * Palette. Every colour on the site is defined here, once per scheme, and
- * taken from the logo: deep blue and sky blue for links, marks and the active
- * place in the navigation, amber and yellow for warnings and highlights, and
- * neutral greys for text and surfaces. Light mode leads with the deep blue;
- * dark mode leads with sky on a deep navy-black surface, where deep blue would
- * not read. Everything below refers to these variables and to nothing else.
+ * Palette. Every colour on the site is defined here, once per scheme, from
+ * two sources only: the logo's four colours (deep blue, sky, amber, yellow)
+ * and neutral greys. The neutrals are slate greys: white, slate 50, 200, 300,
+ * 500, 600 and 900 in light mode; in dark mode slate 200, 400, 700, 800 and
+ * 900, a mid grey between slate 400 and 500 for faint text, and navy-black
+ * surfaces darker than slate 900. Slate carries a slight blue cast, which
+ * sits with the logo. Every other shade is mixed from those with
+ * color-mix(): tints are a logo colour over transparent, and the darker amber
+ * light mode needs for readable icons and code is the logo's amber mixed into
+ * the text colour. Light mode leads with the deep blue; dark mode leads with
+ * sky on the navy-black surface, where deep blue would not read. Text meets
+ * 4.5:1 against the surfaces it sits on, icons 3:1. Everything below refers
+ * to these variables and to nothing else.
  */
 
 [data-md-color-scheme="default"] {
+  --mj-logo-blue: #1d4ed8;
+  --mj-logo-sky: #38bdf8;
+  --mj-logo-amber: #f59e0b;
+  --mj-logo-yellow: #fde047;
   --mj-bg: #ffffff;
   --mj-surface: #ffffff;
   --mj-surface-sunken: #f8fafc;
@@ -38,30 +49,35 @@
   --mj-border-strong: #cbd5e1;
   --mj-fg: #0f172a;
   --mj-fg-muted: #475569;
-  --mj-fg-faint: #94a3b8;
-  --mj-accent: #1d4ed8;
-  --mj-accent-fg: #ffffff;
-  --mj-accent-tint: rgba(29, 78, 216, 0.06);
-  --mj-accent-ring: rgba(29, 78, 216, 0.28);
-  --mj-highlight: #f59e0b;
-  --mj-warning: #f59e0b;
-  --mj-warning-tint: rgba(245, 158, 11, 0.08);
-  --mj-warning-ring: rgba(245, 158, 11, 0.45);
-  --mj-danger: #f59e0b;
-  --mj-danger-tint: rgba(245, 158, 11, 0.14);
-  --mj-danger-ring: rgba(245, 158, 11, 0.7);
-  --mj-mark-bg: rgba(253, 224, 71, 0.45);
-  --mj-grid-line: rgba(15, 23, 42, 0.06);
-  --mj-hl-keyword: #1d4ed8;
-  --mj-hl-string: #b45309;
-  --mj-hl-number: #b45309;
-  --mj-hl-name: #0f172a;
-  --mj-hl-comment: #94a3b8;
-  --mj-hl-operator: #475569;
+  --mj-fg-faint: #64748b;
+  --mj-amber-deep: color-mix(in srgb, var(--mj-logo-amber) 55%, var(--mj-fg));
+  --mj-accent: var(--mj-logo-blue);
+  --mj-accent-fg: var(--mj-bg);
+  --mj-accent-tint: color-mix(in srgb, var(--mj-logo-blue) 6%, transparent);
+  --mj-accent-ring: color-mix(in srgb, var(--mj-logo-blue) 28%, transparent);
+  --mj-highlight: var(--mj-amber-deep);
+  --mj-warning: var(--mj-amber-deep);
+  --mj-warning-tint: color-mix(in srgb, var(--mj-logo-amber) 8%, transparent);
+  --mj-warning-ring: color-mix(in srgb, var(--mj-logo-amber) 45%, transparent);
+  --mj-danger: var(--mj-amber-deep);
+  --mj-danger-tint: color-mix(in srgb, var(--mj-logo-amber) 14%, transparent);
+  --mj-danger-ring: color-mix(in srgb, var(--mj-logo-amber) 70%, transparent);
+  --mj-mark-bg: color-mix(in srgb, var(--mj-logo-yellow) 45%, transparent);
+  --mj-grid-line: color-mix(in srgb, var(--mj-fg) 6%, transparent);
+  --mj-hl-keyword: var(--mj-logo-blue);
+  --mj-hl-string: var(--mj-amber-deep);
+  --mj-hl-number: var(--mj-amber-deep);
+  --mj-hl-name: var(--mj-fg);
+  --mj-hl-comment: var(--mj-fg-faint);
+  --mj-hl-operator: var(--mj-fg-muted);
 }
 
 [data-md-color-scheme="slate"] {
   --md-hue: 222;
+  --mj-logo-blue: #1d4ed8;
+  --mj-logo-sky: #38bdf8;
+  --mj-logo-amber: #f59e0b;
+  --mj-logo-yellow: #fde047;
   --mj-bg: #0b1120;
   --mj-surface: #0f172a;
   --mj-surface-sunken: #0d1526;
@@ -71,26 +87,43 @@
   --mj-border-strong: #334155;
   --mj-fg: #e2e8f0;
   --mj-fg-muted: #94a3b8;
-  --mj-fg-faint: #64748b;
-  --mj-accent: #38bdf8;
-  --mj-accent-fg: #0b1120;
-  --mj-accent-tint: rgba(56, 189, 248, 0.08);
-  --mj-accent-ring: rgba(56, 189, 248, 0.32);
-  --mj-highlight: #fde047;
-  --mj-warning: #fde047;
-  --mj-warning-tint: rgba(253, 224, 71, 0.06);
-  --mj-warning-ring: rgba(253, 224, 71, 0.35);
-  --mj-danger: #f59e0b;
-  --mj-danger-tint: rgba(245, 158, 11, 0.1);
-  --mj-danger-ring: rgba(245, 158, 11, 0.5);
-  --mj-mark-bg: rgba(253, 224, 71, 0.22);
-  --mj-grid-line: rgba(148, 163, 184, 0.075);
-  --mj-hl-keyword: #38bdf8;
-  --mj-hl-string: #f59e0b;
-  --mj-hl-number: #fde047;
-  --mj-hl-name: #e2e8f0;
-  --mj-hl-comment: #64748b;
-  --mj-hl-operator: #94a3b8;
+  --mj-fg-faint: #7c8ca2;
+  --mj-accent: var(--mj-logo-sky);
+  --mj-accent-fg: var(--mj-bg);
+  --mj-accent-tint: color-mix(in srgb, var(--mj-logo-sky) 8%, transparent);
+  --mj-accent-ring: color-mix(in srgb, var(--mj-logo-sky) 32%, transparent);
+  --mj-highlight: var(--mj-logo-yellow);
+  --mj-warning: var(--mj-logo-yellow);
+  --mj-warning-tint: color-mix(in srgb, var(--mj-logo-yellow) 6%, transparent);
+  --mj-warning-ring: color-mix(in srgb, var(--mj-logo-yellow) 35%, transparent);
+  --mj-danger: var(--mj-logo-amber);
+  --mj-danger-tint: color-mix(in srgb, var(--mj-logo-amber) 10%, transparent);
+  --mj-danger-ring: color-mix(in srgb, var(--mj-logo-amber) 50%, transparent);
+  --mj-mark-bg: color-mix(in srgb, var(--mj-logo-yellow) 22%, transparent);
+  --mj-grid-line: color-mix(in srgb, var(--mj-fg-muted) 7.5%, transparent);
+  --mj-hl-keyword: var(--mj-logo-sky);
+  --mj-hl-string: var(--mj-logo-amber);
+  --mj-hl-number: var(--mj-logo-yellow);
+  --mj-hl-name: var(--mj-fg);
+  --mj-hl-comment: var(--mj-fg-faint);
+  --mj-hl-operator: var(--mj-fg-muted);
+}
+
+/*
+ * Keyboard focus: one visible ring, in the accent colour, for every control
+ * the layout adds or restyles, so focus never depends on the browser's
+ * default outline.
+ */
+
+.md-nav__link:focus-visible,
+.md-footer__link:focus-visible,
+.md-typeset .md-button:focus-visible,
+.md-typeset .md-code__button:focus-visible,
+.mj-tabs .md-tabs__link:focus-visible,
+.mj-theme .md-option:focus-visible + .mj-theme__option,
+.mj-theme .mj-theme__option:focus-visible {
+  outline: 2px solid var(--mj-accent);
+  outline-offset: 2px;
 }
 
 /* The theme's own variables, mapped onto the palette for both schemes. */
@@ -280,10 +313,19 @@ body[data-md-color-media="(prefers-color-scheme: dark)"] .mj-theme__option[data-
   box-shadow: 0 0 0 1px var(--mj-border);
 }
 
-.mj-theme .md-option:focus-visible + .mj-theme__option,
-.mj-theme .mj-theme__option:focus-visible {
-  outline: 2px solid var(--mj-accent);
-  outline-offset: 1px;
+
+/* Text for assistive technology only. */
+
+.mj-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* The drawer's top block (narrow screens): the switch and a search box. */

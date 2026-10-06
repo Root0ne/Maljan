@@ -3,7 +3,9 @@
   column: the site's logo and name, the appearance switch, then the search
   box. On a narrow screen it is a compact bar: the menu button, the logo, the
   page name and the search button; the appearance switch moves into the
-  navigation drawer. The repository link is the first row of the navigation.
+  navigation drawer. The repository link (config.repo_url) is the first row
+  of the navigation rather than a widget here. A language or version
+  selector (extra.alternate) keeps its place after the appearance switch.
 -#}
 {% import "partials/theme-switch.html" as theme_switch with context %}
 <header class="md-header md-header--shadow" data-md-component="header">
@@ -52,6 +54,9 @@
       </script>
       {{ theme_switch.render(true) }}
       {% include "partials/javascripts/palette.html" %}
+    {% endif %}
+    {% if config.extra.alternate %}
+      {% include "partials/alternate.html" %}
     {% endif %}
     {% if "material/search" in config.plugins %}
       {% set search = config.plugins["material/search"] | attr("config") %}
