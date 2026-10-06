@@ -3538,7 +3538,13 @@ is assembled from what the run gathered rather than recomputed beside it:
   every statement of an observed step is one the sandbox watched; or names an
   address or a host no flow of the sample's process tree reached, by
   `evidence_bundles.sample_flow_fact`, a name judged by the addresses its DNS
-  answers gave (`NetworkDomain.resolved_ips`)),
+  answers gave (`NetworkDomain.resolved_ips`); or states persistence where
+  the sandbox watched the registry and the files and recorded none, the fact
+  the Persistence section prints as "no persistence observed",
+  `evidence_bundles.sandbox_saw_no_persistence`),
+  `report.persistence_not_observed` (the Persistence section's prose states
+  persistence under that same fact with no word that it was not observed in
+  this run; asked once with the fact and the sentence's start),
   `narrative.unpublished_indicator` (the narrative round's: a recommendation's
   action, rationale or detection names an address or a host the IOC table does
   not publish, a well-known reference host no row holds aside; asked with the

@@ -144,6 +144,7 @@ from maljan.pipeline.validation import (
     library_only_claims_violation,
     malware_object_violations,
     misstated_entry_contents,
+    persistence_not_observed_violations,
     recommendation_indicator_violations,
     recommendation_technique_violations,
     repeated_item_violations,
@@ -677,6 +678,20 @@ PROMPTS: dict[str, str] = {
             {"defensive_recommendations": [{"action": "Alert on it.", "technique_id": "T1001"}]},
             ["T1002"],
         )
+    ),
+    "composer questions about persistence the sandbox did not record": _every_message(
+        [
+            *persistence_not_observed_violations(
+                {"body": "The program persists through a task it registers [ev_0001]."},
+                True,
+                section="persistence_detail",
+            ),
+            *persistence_not_observed_violations(
+                {"steps": [{"order": 1, "action": "It persists at logon.", "voice": "observed"}]},
+                True,
+                section="execution_flow",
+            ),
+        ]
     ),
     "composer question about table rows no cited entry holds": " ".join(
         v.message

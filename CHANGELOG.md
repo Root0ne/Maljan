@@ -2392,6 +2392,7 @@ change landed on `main`.
 
 ### Fixed
 
+- **Report text stating persistence the sandbox did not record is put to the report model once**: the Persistence section's prose (`report.persistence_not_observed`) and an execution-flow step marked observed (`report.flow_voice`), where the section prints "no persistence observed".
 - **A recommendation or hunting note that names a technique the run does not publish is asked about once** (`narrative.unpublished_technique`), as one naming an unpublished indicator is; an id kept after it is recorded.
 - **The ransom-note section is asked for only when something in the run speaks of a note**: a claim naming one, a strings answer holding the words of one, or a ransomware category. The strings tools and the capability profile, present on every PE run, asked for a note every run and printed none.
 - **A chunk is named by its place in the list the analyst is handed**, in its prompt header and in the cut-at-cap and repeated-claims questions; chunks from two data sources both read "1 of 1", and the question named the wrong chunk.

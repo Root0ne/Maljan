@@ -462,6 +462,24 @@ def _assessed_persistence(report: MalwareReport) -> list[str]:
     ]
 
 
+def sandbox_watched_persistence(report: MalwareReport) -> bool:
+    """Whether a sandbox report is held whose registry and file views were not unavailable."""
+    dyn = report.dynamic
+    blind = {str(name).strip().lower() for name in (dyn.unavailable if dyn else [])}
+    return dyn is not None and not blind.intersection(
+        {"registry", "files", "file", "file_operations", "filesystem"}
+    )
+
+
+def sandbox_saw_no_persistence(report: MalwareReport) -> bool:
+    """The fact the Persistence section prints as "no persistence observed".
+
+    The sandbox watched the registry and the files, and no persistence row
+    was recorded.
+    """
+    return not report.persistence and sandbox_watched_persistence(report)
+
+
 def sandbox_entry_ids(report: MalwareReport) -> list[str]:
     """The ledger ids of the sandbox answers that recorded something, in issue order.
 

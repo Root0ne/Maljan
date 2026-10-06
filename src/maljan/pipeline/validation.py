@@ -3009,6 +3009,10 @@ def citation_violations(
 # or rewrites what the model wrote.
 UNGROUNDED_FINDING_CODE = "narrative.ungrounded_finding"
 FLOW_VOICE_CODE = "report.flow_voice"
+# A section's prose states persistence where the sandbox, watching the
+# registry and the files, recorded none: the report prints "no persistence
+# observed" under that same section. Asked once; the prose kept is recorded.
+PERSISTENCE_NOT_OBSERVED_CODE = "report.persistence_not_observed"
 UNCITED_CONFIGURATION_CODE = "report.configuration_uncited"
 # A report section answer the output cap ended. Its JSON is cut before it
 # closes, so the schema check could only say "not JSON at all" — and a model
@@ -3900,6 +3904,7 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         REPEATED_ITEMS_CODE,
         UNPUBLISHED_RECOMMENDATION_CODE,
         UNPUBLISHED_RECOMMENDATION_TECHNIQUE_CODE,
+        PERSISTENCE_NOT_OBSERVED_CODE,
     }
 )
 
@@ -4520,6 +4525,90 @@ def flow_voice_violations(
             )
         )
     return out
+
+
+# The behaviour the persistence question is about, and the words that say a
+# text already states it was not seen in this run.
+_PERSISTENCE_RE = re.compile(r"\bpersist\w*", re.IGNORECASE)
+_NOT_OBSERVED_RE = re.compile(
+    r"\b(?:not|never)\s+(?:been\s+|yet\s+)?(?:observed|seen|created|established|exercised"
+    r"|executed|triggered)\b|\bunobserved\b|\bunexercised\b|\bno\s+persistence\b",
+    re.IGNORECASE,
+)
+NO_PERSISTENCE_OBSERVED_FACT = (
+    "the sandbox watched this sample's registry and files and recorded no persistence; the "
+    'report prints "no persistence observed" under its Persistence section'
+)
+
+
+def _states_persistence(text: str) -> bool:
+    """Whether ``text`` names persistence as something the sample does, not as absent."""
+    return bool(_PERSISTENCE_RE.search(text)) and not states_absence(text, _PERSISTENCE_RE)
+
+
+def persistence_not_observed_violations(
+    payload: Any, saw_none: bool, *, section: str
+) -> list[Violation]:
+    """Report text that states persistence where the sandbox recorded none.
+
+    ``saw_none`` is the fact the report's Persistence section prints as "no
+    persistence observed" (``evidence_bundles.sandbox_saw_no_persistence``):
+    the sandbox watched the registry and the files and no persistence row was
+    recorded. Two places contradict it. The Persistence section's own prose
+    (``section="persistence_detail"``) stating persistence with no word that
+    it was not observed in this run is asked once; an execution-flow step
+    (``section="execution_flow"``) marked observed that states persistence is
+    asked once per step, as a flow-voice question. What the model answers
+    stands; nothing is removed.
+    """
+    if not saw_none:
+        return []
+    fact = NO_PERSISTENCE_OBSERVED_FACT
+    if section == "execution_flow":
+        out: list[Violation] = []
+        for index, row in enumerate(_rows_of(payload, "steps")):
+            if str(row.get("voice") or "").strip().lower() != "observed":
+                continue
+            action = str(row.get("action") or "")
+            if not _states_persistence(action):
+                continue
+            out.append(
+                Violation(
+                    code=FLOW_VOICE_CODE,
+                    message=(
+                        f"step {safe_finding_value(_step_order(row, index))} is marked observed "
+                        f"and states persistence, and {fact}. A step marked observed says the "
+                        "sandbox watched it happen. Mark the step assessed, or cite the sandbox "
+                        "entry that records the persistence."
+                    ),
+                    path=f"steps.{index}.voice",
+                )
+            )
+        return out
+    texts = _prose_of_a_section(payload)
+    whole = " ".join(texts)
+    if not whole or not _states_persistence(whole) or _NOT_OBSERVED_RE.search(whole):
+        return []
+    first = next(
+        (
+            sentence.strip()
+            for text in texts
+            for sentence in _SENTENCE_END_RE.split(text)
+            if _states_persistence(sentence)
+        ),
+        whole,
+    )
+    return [
+        Violation(
+            code=PERSISTENCE_NOT_OBSERVED_CODE,
+            message=(
+                f"the section states persistence ({safe_finding_value(_sentence_start(first))}), "
+                f"and {fact}. Say in the section that persistence was not observed in this run "
+                "and what the reading rests on, or write what in this run's evidence shows it."
+            ),
+            path="body",
+        )
+    ]
 
 
 def configuration_citation_violations(payload: Any, known_ids: Iterable[str]) -> list[Violation]:

@@ -2155,11 +2155,9 @@ class _Context:
         # "No persistence observed" is a sandbox's to say only when it watched
         # the places persistence is written: a run whose sandbox recorded one
         # URL and nothing about the host looked at none of them.
-        dyn = report.dynamic
-        blind = {name.strip().lower() for name in (dyn.unavailable if dyn else [])}
-        self.sandbox_watched_persistence = dyn is not None and not blind.intersection(
-            {"registry", "files", "file", "file_operations", "filesystem"}
-        )
+        from maljan.reporting.evidence_bundles import sandbox_watched_persistence
+
+        self.sandbox_watched_persistence = sandbox_watched_persistence(report)
         self.analysts = _AnalystStates(report)
         team = _team(report)
         self.no_analyst_claims = bool(team) and set(team) <= self.analysts.idle
