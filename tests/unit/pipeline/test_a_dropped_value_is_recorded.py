@@ -140,6 +140,27 @@ class TestADecimalCountsOnlyAsAStatedValue:
         assert "75" in values
         assert not {"3", "2", "14", "15", "4"} & values
 
+    def test_a_number_after_a_word_that_is_not_the_debate_s_numbering_is_a_value(self) -> None:
+        values = claim_values(
+            "The gate aborts below line 75, reads item 3 and no. 5 of the table, and #12."
+        )
+
+        assert {"75", "3", "5", "12"} <= values
+
+    def test_a_value_after_a_reference_word_is_recorded_when_the_revision_drops_it(self) -> None:
+        in_force = _isr("The check passes at line 75 of the config (Claim 2).")
+        text = "CLAIM 1 — The check passes at a threshold in the config."
+
+        dropped = dropped_values(in_force, _isr(text), text, revision_round=1)
+
+        assert [d.missing for d in dropped] == [("75",)]
+
+    def test_a_number_after_a_reference_word_the_revision_states_is_carried(self) -> None:
+        in_force = _isr("The check passes at line 75 of the config.")
+        text = "CLAIM 1 — The threshold is 75."
+
+        assert dropped_values(in_force, _isr(text), text, revision_round=1) == []
+
     def test_a_list_number_opening_the_claim_is_not_a_value(self) -> None:
         assert "1" not in claim_values("1. The loop sleeps 180 s.")
         assert "180" in claim_values("1. The loop sleeps 180 s.")

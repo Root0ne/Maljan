@@ -2386,6 +2386,9 @@ change landed on `main`.
 
 ### Fixed
 
+- **A value written after a word such as "line", "item", "section", "no." or "#" is compared like any value among a revision's dropped values**; only a claim, round, step, stage or phase number is the debate's own numbering and left out.
+### Fixed
+
 - **A LangSmith trace shows each streamed chunk as the server sent it**: the llama.cpp, DeepSeek and Ollama joins take the text, reasoning and call arguments out of their own copy of the chunk, where they emptied the chunk the trace keeps.
 ### Fixed
 
