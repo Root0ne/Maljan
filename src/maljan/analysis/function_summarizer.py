@@ -281,13 +281,12 @@ class FunctionSummarizer:
         logger.warning(
             "FunctionSummarizer: the summary ended at its %d-token output limit.", cut_at
         )
-        record = getattr(self._truncation_ledger, "record_input_shortened", None)
+        # Counted by the job's ledger, which locks: summaries are cut on
+        # several threads at once, and this summariser may be rebuilt mid-job.
+        record = getattr(self._truncation_ledger, "record_summary_cut", None)
         if callable(record):
             try:
-                record(
-                    "A function summary ended at its "
-                    f"{cut_at:,}-token output limit; the analyst was told its end is missing."
-                )
+                record(cut_at)
             except Exception as exc:  # noqa: BLE001 — a record never costs a summary
                 logger.debug("FunctionSummarizer: the cut was not recorded (%s).", exc)
         return f"{SUMMARY_CUT_NOTE.format(cap=cut_at)}\n{text}"

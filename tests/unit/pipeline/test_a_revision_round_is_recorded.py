@@ -147,6 +147,29 @@ class TestDroppedValues:
         ]
         assert "states nowhere 0x40" in rows[0]["sentence"]
 
+    def test_the_log_counts_the_dropped_values_and_keeps_each_sentence_at_debug(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        with caplog.at_level(logging.DEBUG, logger="maljan"):
+            _run(
+                {
+                    "static": ("Other.", _isr("static", "Other.")),
+                    "dynamic": ("Writes a file.", IN_FORCE["dynamic"]),
+                }
+            )
+
+        info = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+        debug = [r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG]
+        counted = [m for m in info if "states nowhere" in m]
+        assert counted == [
+            "The static analyst's round-2 revision states nowhere 1 value(s) from 1 claim(s) "
+            "of its answer in force; each is in the run summary."
+        ]
+        assert not any("Opens a key" in m for m in info)
+        assert any("states nowhere 0x40" in m and "Opens a key" in m for m in debug)
+
     def test_a_value_the_revision_s_text_still_states_is_not_recorded(self) -> None:
         update, _ = _run(
             {

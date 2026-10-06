@@ -2384,6 +2384,15 @@ change landed on `main`.
 
 ### Fixed
 
+- **A call waiting on the spend ceiling for calls in flight ends as cancelled when its job is cancelled** (`JobCancelled`, with where it stopped), so its loop records a cancellation rather than the spend cap.
+- **A kind of call a stage will make and has not made yet is asked about on the model of the call the job made last**, where it was the model of the kind first made last.
+- **Function summaries cut at one output limit are counted in the run's shortened inputs** ("3 function summaries ended at their 4,000-token output limit"), where every cut after the first merged into one identical line.
+- **A loop's kept last answer is checked for a cut against the cap that turn was sent with**, recorded as each turn is sent, not against a later turn's hold left on the binding (a question pass rolled back, a turn the clock ended).
+- **The worker log states a revision's dropped values as one count line per analyst and round at INFO**, each claim's sentence at DEBUG; the run summary keeps every sentence.
+- **A mediator's `[blocking]` mark with no reason blocks as it asks and is no longer recorded among `negotiation.unread_marks`**; a `[not blocking]` mark still needs its reason.
+- **A value written after a word such as "line", "section" or "no." is compared like any value among a revision's dropped values**; a claim, round, step, stage or phase number and a cross-reference to the answer's own numbering ("#3", "item 3") are left out.
+- **A LangSmith trace shows each streamed chunk as the server sent it**: the llama.cpp, DeepSeek and Ollama joins take the text, reasoning and call arguments out of their own copy of the chunk, where they emptied the chunk the trace keeps.
+- **A streamed answer's text is kept beside a chunk whose content is not a string**: llama.cpp, DeepSeek and Ollama joins add such content by langchain's own rule, with the text before and after it in place, where the text pieces were dropped.
 - **A TECHNIQUE line listing ids separated by commas, "and" or slashes is read as one claim per id**, each checked as a technique, and an id taken off the list when asked is the answer kept; a closing `· ---` is read past, the claim format says several ids are separated by commas, and only a line with words beside an id is asked about.
 - **The verb a catalogue name opens with, ending in a silent "e", is matched by its -s, -d and -ing forms**, so "deobfuscates" and "decoded" describe Deobfuscate/Decode Files or Information and no word of its own ("stated", "computer") matches; and on the absence question a dash ends a negation's reach only before a new clause or after "instead of" or "rather than", an aside between dashes keeps the negation with its verb, and "never-" before a listed past participle negates nothing.
 - **The STIX bundle holds a malware object for the family the run states** (`is_family: true`), the judge's sample object kept as written and related to it as `variant-of`.

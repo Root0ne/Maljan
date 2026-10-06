@@ -45,7 +45,8 @@ class AgentArgument(BaseModel):
         default_factory=list,
         description=(
             "For the mediator: the lines of its block written with a mark the platform did "
-            "not honour (one it could not read, one with no reason, or two that conflict). "
+            "not honour (one it could not read, a not-blocking one with no reason, or two that "
+            "conflict). "
             "They block."
         ),
     )

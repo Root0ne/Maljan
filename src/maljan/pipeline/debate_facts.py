@@ -183,7 +183,8 @@ class Mark:
     """One listed line as the mediator marked it.
 
     ``unread`` says the line was written with a mark the platform did not
-    honour: one it could not read, one with no reason, or two that conflict.
+    honour: one it could not read, a ``not blocking`` one with no reason, or
+    two that conflict.
     Such a line blocks, and the run records it.
     """
 
@@ -205,9 +206,11 @@ def read_marks(lines: Iterable[str]) -> list[Mark]:
       brackets.
     - A line with marks of both kinds blocks.
     - ``[not blocking]`` with no reason is no mark: the line blocks.
+      ``[blocking]`` with no reason blocks as it asks.
     - A line that opens a mark the parser cannot read blocks.
 
-    The last three are recorded as unread.
+    Conflicting marks, a ``[not blocking]`` with no reason and a mark that
+    cannot be read are recorded as unread.
     """
     marks: list[Mark] = []
     for line in lines:
@@ -217,6 +220,10 @@ def read_marks(lines: Iterable[str]) -> list[Mark]:
         reason = (match.group("reason") or "").strip() if match is not None else ""
         if len(kinds) > 1:
             marks.append(Mark(line=text, blocking=True, marked=True, unread=True))
+        elif match is not None and not reason and _kind(match) == "blocking":
+            # The line blocks as the mark asks; only a mark that would set a
+            # line aside needs its reason.
+            marks.append(Mark(line=text, blocking=True, marked=True))
         elif match is None or not reason:
             marks.append(
                 Mark(

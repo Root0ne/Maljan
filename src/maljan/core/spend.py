@@ -624,6 +624,9 @@ class SpendMeter:
         # prompt (tokens) it was sent with, its cap, whether it can be held
         # and its deadline: what "would another call still fit" is asked of.
         self._kinds: dict[str, dict[str, Any]] = {}
+        # A count of the kinds noted so far, so the kind made last is known:
+        # each row carries the count at its latest call (``used``).
+        self._uses = 0
         # How many calls the ceiling refused.
         self._refused = 0
         # A refusal made while other calls held reservations: whether anything
@@ -1306,7 +1309,8 @@ class SpendMeter:
         A call that does not fit only because other calls in flight hold their
         worst case waits for them to settle: at most until ``deadline_s``, or
         ``wait_s`` when the caller's own clock (a tool loop's) ends sooner, and
-        never past the job's cancellation (:meth:`close`), which wakes it. The
+        never past the job's cancellation (:meth:`close`), which wakes it and
+        raises ``JobCancelled``, so the caller ends as cancelled. The
         wait blocks the calling thread. The calls that can run beside another —
         analyst nodes, revisions, tool loops — each run on a thread of their
         own; the verdict and report calls, which admit from a coroutine, run
@@ -1392,8 +1396,14 @@ class SpendMeter:
             break
         if decision.refused:
             if gave_up:
-                # Not the spend's refusal: the job is ending.
-                raise SpendCeilingStop(f"a {kind} call of {name} was not made: {gave_up}")
+                # Not the spend's refusal: the job is ending, and its loops
+                # record a cancellation, not the spend cap.
+                from maljan.core.cancellation import JobCancelled
+
+                where = f"while a {kind} call of {name} waited for calls in flight"
+                if job is not None and job.is_cancelled:
+                    job.check(where)
+                raise JobCancelled(f"the job was cancelled; stopped {where}")
             said = f"a {kind} call of {name} was not made: {decision.refused}"
             with self._lock:
                 self._refused += 1
@@ -1453,6 +1463,7 @@ class SpendMeter:
         deadline_s: float | None,
     ) -> None:
         """Remember a kind of call this job makes, at the smallest prompt it was sent with."""
+        self._uses += 1
         row = self._kinds.get(kind)
         if row is None or row.get("seeded"):
             self._kinds[kind] = {
@@ -1462,6 +1473,7 @@ class SpendMeter:
                 "holdable": holdable,
                 "deadline": deadline_s,
                 "generation": self._generation,
+                "used": self._uses,
             }
             return
         if prompt_tokens < row["prompt"]:
@@ -1469,6 +1481,7 @@ class SpendMeter:
         row["model"], row["cap"], row["deadline"] = model, cap, deadline_s
         row["holdable"] = bool(row["holdable"] or holdable)
         row["generation"] = self._generation
+        row["used"] = self._uses
 
     def _another_fits_locked(self, now: datetime) -> bool:
         """Whether a call of any kind this job makes would still be admitted.
@@ -1479,17 +1492,18 @@ class SpendMeter:
         loop's closing answer are left out: they are made after exhaustion too.
         """
         made = [row for row in self._kinds.values() if not row.get("seeded")]
+        latest = max(made, key=lambda row: int(row.get("used", 0))) if made else None
         for kind, row in self._kinds.items():
             if kind in AFTER_EXHAUSTION_KINDS or row.get("generation") != self._generation:
                 continue
             if row.get("seeded"):
                 # Planned for this stage and not made yet: asked about on the
-                # model of the latest kind this job made, at its largest
+                # model of the kind this job made last, at its largest
                 # single-shot prompt and answer; with nothing to ask it on, it
                 # is taken to fit rather than latch the job on a guess.
-                if not made:
+                if latest is None:
                     return True
-                model = str(made[-1]["model"])
+                model = str(latest["model"])
                 name = _clean(model) or "the model"
                 prompt = int(
                     self._largest_prompt.get("single", 0)
@@ -1504,7 +1518,7 @@ class SpendMeter:
                     "prompt": prompt,
                     "cap": max(1, answer),
                     "holdable": True,
-                    "deadline": made[-1]["deadline"],
+                    "deadline": latest["deadline"],
                 }
             price = self._admission_price(str(row["model"]), now, row["deadline"])
             decision = self._decide_locked(

@@ -53,12 +53,16 @@ def _refanged(text: str) -> str:
     return re.sub(r"\bhxxp", "http", out, flags=re.IGNORECASE)
 
 
-# A number that names a place rather than states a value: a claim, round,
-# step or section reference ("Claim 14/15", "round 2", "#3"), and the list
-# number a claim opens with ("1." or "(1)").
+# A number that names a place in the debate rather than states a value: a
+# claim, round, step, stage or phase reference ("Claim 14/15", "round 2"), a
+# cross-reference to an entry of the answer's own numbering ("#3", "item 3",
+# "see #2"), all of which a revision renumbers, and the list number a claim
+# opens with ("1." or "(1)"). A number after any other word ("line 75",
+# "section 4", "no. 5") is compared as a value, because it may be one:
+# recorded only when the revision states that number nowhere.
 _REFERENCE_NUMBER = re.compile(
-    r"(?i)(?:\b(?:claims?|rounds?|steps?|stages?|phases?|parts?|sections?|items?|lines?|"
-    r"number|no\.?|nr\.?)|#)\s*#?\d+(?:\s*(?:/|,|&|\+|and|to|-|–)\s*#?\d+)*"
+    r"(?i)(?:\b(?:claims?|rounds?|steps?|stages?|phases?|items?)\s*#?|#)\d+"
+    r"(?:\s*(?:/|,|&|\+|and|to|-|–)\s*#?\d+)*"
 )
 _LIST_NUMBER = re.compile(r"(?m)^\s*\(?\d+[.)](?=\s)")
 
