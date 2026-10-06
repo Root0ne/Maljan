@@ -4900,7 +4900,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The last turn is the answer the validation turn checks for a cut, so
         # it is checked against the cap it was sent with, recorded when it was
         # sent: a turn the loop sent later and did not keep (the question's
-        # pass rolled back, a turn the clock ended) held its own cap.
+        # pass rolled back, a turn the clock ended) held its own cap. The key
+        # is the turn's place among the model turns of the graph's state, as
+        # the hook counted them; it holds only while ``msgs`` keeps every model
+        # turn of that state in order, so anything that drops or merges model
+        # turns out of the state must key the holds again, or the kept turn
+        # reads no hold (the built cap).
         turns = [m for m in msgs if is_model_turn(m)]
         last_held = turn_holds.get(len(turns))
         for index, _m in enumerate(turns):
