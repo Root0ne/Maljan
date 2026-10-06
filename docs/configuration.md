@@ -1495,7 +1495,9 @@ parse still gets the zip-level facts: each fact androguard could not read is
 answered as `no: <reason>` (the manifest could not be parsed, with the
 exception's type only), and the answer's `degraded` note names them. A dex
 file androguard's reader refuses is listed under `dex_strings_unread`, beside
-the strings of the files it read.
+the strings of the files it read. The triage pack leaves out only those
+reasons; a package name the manifest wrote is printed as written, even one
+that starts with `no: `.
 
 `floss`, the emulating string decoder, runs FLOSS (Apache-2.0) as FLARE's
 pinned standalone Linux build, v3.1.1 (zip sha256

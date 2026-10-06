@@ -2604,6 +2604,10 @@ _BARE_AT_HOST = re.compile(r"(?<![\w.+-])@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
 _WWW_HOST = re.compile(r"(?i)(?<![^\W_])www\.[\w-]+(?:\.[\w-]+)*")
 # An IPv6 address written in text: hex groups and colons, read by ``ipaddress``.
 _IPV6_CANDIDATE = re.compile(r"(?<![\w:.\]])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![\w:])")
+# The same with an IPv4 tail read whole ("::ffff:192.0.2.1").
+_IPV6_WITH_A_TAIL = re.compile(
+    r"(?<![\w:.\]])(?:[0-9A-Fa-f]{0,4}:){2,7}\d{1,3}(?:\.\d{1,3}){3}(?![\w:])(?!\.\d)"
+)
 # A mailbox: GFM's name characters (``_`` among them) and a dotted domain.
 _EMAIL_IN_TEXT = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 # The characters that make Markdown of a sample's text: a code span, a link or
@@ -2812,8 +2816,16 @@ def _mark_hosts(text: str, marks: dict[int, str]) -> None:
     for pattern in (_WWW_HOST, _ONION_HOST):
         for found in pattern.finditer(text):
             _bracket_dots(text, found.start(), found.end(), marks)
+    # Any run an IPv6 address could be is defanged, a short one too ("fe80::1"):
+    # only its first colon is bracketed, and the publish checks' stricter
+    # reader (``validation.ipv6_addresses_in``) decides which is a value.
     for found in _IPV6_CANDIDATE.finditer(text):
         if _is_ipv6(found.group(0)):
+            _bracket(text, text.index(":", found.start()), marks)
+    # An address with an IPv4 tail written in full ("2001:db8:0:0:0:0:1.2.3.4"),
+    # which the run above stops short of, read whole by the checks' candidate.
+    for found in _IPV6_WITH_A_TAIL.finditer(text):
+        if "." in found.group(0) and _is_ipv6(found.group(0)):
             _bracket(text, text.index(":", found.start()), marks)
     # Read with "@" and backslashes as spaces as well, so a host written after
     # either ("…/\@evil.com") is found; the mailbox itself is read above.
@@ -3049,17 +3061,16 @@ def _family_voice(report: MalwareReport) -> str:
 def _indicator_rows(report: MalwareReport) -> list[ConsolidatedIOC]:
     """The IOC table's rows, answered by the publish rule on this render.
 
-    Built on request from the stored report, the way ``/reports/{id}/iocs``
-    is, so an enrichment that ran after the report was stored is reflected and
-    a report stored before the table carried a kind prints in the new shape.
+    Built on request from the stored report by the reader
+    ``/reports/{id}/iocs`` uses for its analyst rows (``builder.ioc_table``),
+    so an enrichment that ran after the report was stored is reflected and a
+    report stored before the table carried a kind prints in the new shape. A
+    cell's publish state reads the stored table first
+    (``narrative_agent.published_answers``).
     """
-    from maljan.reporting.builder import build_consolidated_iocs
+    from maljan.reporting.builder import ioc_table
 
-    try:
-        return build_consolidated_iocs(report)
-    except Exception:  # noqa: BLE001 — the stored rows are the fallback
-        logger.exception("markdown_renderer: the IOC table could not be rebuilt.")
-        return [row for row in report.consolidated_iocs if row.kind]
+    return ioc_table(report)
 
 
 def _reputations(report: MalwareReport) -> dict[str, str]:

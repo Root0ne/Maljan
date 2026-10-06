@@ -172,6 +172,27 @@ class TestNoOperatorCredentialReachesARow:
 
         assert secret not in row
 
+    def test_a_password_under_four_characters_after_an_authorization_scheme(self) -> None:
+        for length in (1, 2, 3):
+            ev.forget_secret_values()
+            secret = password(length, variant=5)
+            url = f"https://operator:{secret}@sandbox.example/api"
+            self._configured(url)
+
+            for scheme in ("Bearer", "basic", "TOKEN"):
+                row = safe_finding_value(f"the answer echoed Authorization: {scheme} {secret}.")
+
+                assert f"{scheme} {secret}" not in row, (length, scheme)
+                assert row.endswith("."), (length, scheme)
+
+    def test_a_password_under_four_characters_elsewhere_keeps_the_words(self) -> None:
+        secret = password(3, variant=5)
+        self._configured(f"https://operator:{secret}@sandbox.example/api")
+
+        sentence = f"the word {secret} and the {secret}x run stay; Bearer {secret}x is no echo"
+
+        assert safe_finding_value(sentence) == sentence
+
     def test_a_token_in_the_username_slot(self) -> None:
         token = prefixed_key("ghp_", 36)
         url = f"https://{token}@mcp.example/sse"

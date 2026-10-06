@@ -1657,10 +1657,13 @@ argument position, call and callee, so one text passed to two calls is two
 facts. An offset and its virtual address are one function only through an
 image base the run read: exactly one of the two is below the base, and they are
 apart by it. Two virtual addresses a base apart stay two functions. With no
-base, both are kept as written. A claim gives a function its summary by the
-decompiled-not-described check's reading when a base is known. With none, it
-needs the same address written out, or a name the decompiler gave the function.
-No address is guessed. A visited function with neither an artefact nor a
+base, both are kept as written. A claim gives a function its summary by an
+address that is the same function by that rule (with no base, the same address),
+by the function's own hex spelling written as digits alone, or by a name the
+decompiler gave it; a name that is an ordinary word (`entry`, `start`, or the
+last label of `sym.entry`) counts only written as code or beside a word such as
+"function" or "export". No
+address is guessed. A visited function with neither an artefact nor a
 summary appears on one "also visited" line, by address. Names other than a
 decompiler's generic `FUN_`, `sub_` or `fcn.` name are kept beside it, such as
 an export name.
@@ -3141,7 +3144,12 @@ is assembled from what the run gathered rather than recomputed beside it:
   every URL of any scheme, `www.` host, mailbox, IPv4 or IPv6 address and host
   under a real top-level domain (the string sweep's list, the root zone's;
   any number of labels, in capitals, `.onion`): everything a viewer could
-  link. What a viewer can link is decided by form alone, never by a TLD or an
+  link. The host reader the publish checks, the run summary's sentences and
+  a cell's state note use (`validation.network_values_in`) reads a `.onion`
+  name of any labels by the same form reader, and an IPv6 address whole (an
+  IPv4 tail included) when it is bracketed or has at least three groups and a
+  digit, so a scope name such as `dead::beef` is no value; the defanger still
+  brackets any shorter form. What a viewer can link is decided by form alone, never by a TLD or an
   exemption: a scheme before `//`, a scheme a link or autolink syntax opens
   (`<…>`, `[x](…)`, `[r]: …`), a `mailto:`, `xmpp:`, `javascript:`,
   `vbscript:` or `data:` before a target, a `www.` prefix, and a mailbox. Each
@@ -3168,7 +3176,11 @@ is assembled from what the run gathered rather than recomputed beside it:
   run recorded them; under a scheme, a `//`, `www.` or `@` such a name is
   always defanged; a name of more than four labels opening with a
   reverse-DNS root (`com.`, `org.`, `android.`, `java.`, …) is read as a
-  package, not a host, unless the run's network evidence holds it; a draft rule's
+  package, not a host, unless the run's network evidence holds it; a two-label
+  name whose first label is two characters is read when that label holds a
+  digit and a letter (`c2.ru`), and one of two letters (`ab.ru`, `to.do`) only
+  by a check that asks the run's network evidence, or defanged where the run
+  recorded it, while every name read before is still read; a draft rule's
   body is printed as it compiles; a VirusTotal (`/gui/file|url/<hex>`,
   `/gui/domain|ip-address/<value>`), MalwareBazaar (`/sample/<sha256>/`) or
   ATT&CK (`/techniques/…`, `/tactics/…`, `/software/…`, `/matrices/…`) lookup
@@ -3313,7 +3325,9 @@ is assembled from what the run gathered rather than recomputed beside it:
   `strings`, the reason saying it is read from the sections the stored report
   keeps; otherwise it says only that no tool answer it keeps holds it.
   `/iocs?include=all` carries the analysts' listed non-network rows exactly
-  as the report's IOC table shows them. The judge
+  as the report's IOC table shows them, both read by one reader
+  (`builder.ioc_table`: rebuilt from the stored report, the stored rows only
+  when the rebuild fails), so an old report reads the same in both. The judge
   naming such a value keeps the standing it had before, so it is published.
   One run's sixteen capture addresses were told no tool saw them before the
   capture was read. The drafts read the table's
@@ -4033,7 +4047,8 @@ bundle cannot hold — goes through `pipeline.events.safe_finding_value`. A
 validation row, a degradation reason and an export decline are report text.
 With the operator's configured values registered (the worker registers them
 per job), a row keeps the evidence's words and loses every operator
-credential: each configured value by value (a short one as a whole word), a
+credential: each configured value by value (a short one as a whole word, one
+under four characters only as the word after `Bearer`, `Basic` or `token`), a
 URL's userinfo and each credential-named query value. Registration reads a
 configured URL's password of any length, a token in its username slot and its
 `api_key`, `apikey`, `access_token`, `token` and `key` values. With nothing

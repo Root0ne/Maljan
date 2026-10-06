@@ -199,9 +199,9 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
     iocs: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
 
-    def _add(kind: str, decoded: str, notes: str | None = None) -> None:
+    def _add(kind: str, decoded: str, notes: str | None = None, *, floor: int = 0) -> None:
         decoded = decoded.strip("\x00").strip()
-        if len(decoded) < _MIN_STRING_LENGTH:
+        if len(decoded) < (floor or _MIN_STRING_LENGTH):
             return
         key = (kind, decoded.lower())
         if key in seen:
@@ -230,7 +230,10 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
         for match in _MUTEX_RE.findall(text.encode("ascii", errors="ignore")):
             _add("mutex", match.decode("ascii", errors="ignore"))
         for candidate in _domains_in(text):
-            _add("domain", candidate)
+            # `c2.ru` is five characters: a name of a two-character first label
+            # with a digit in it is held to the host reader's own floor.
+            short = two_character_label_with_a_digit(candidate.split(".", 1)[0])
+            _add("domain", candidate, floor=5 if short else 0)
         for label, pattern in _SECRET_PATTERNS:
             for hit in pattern.findall(text):
                 _add("secret", hit, notes=label)
@@ -665,6 +668,17 @@ _CODE_IDENTIFIER_LABELS = frozenset(
 )
 
 
+def two_character_label_with_a_digit(label: str) -> bool:
+    """Whether a label is two characters, one a digit and one a letter (``c2``, ``x1``, ``7z``)."""
+    return (
+        len(label) == 2
+        and any(char.isdigit() for char in label)
+        and any(char.isalpha() for char in label)
+        and label.isascii()
+        and label.isalnum()
+    )
+
+
 def _looks_like_domain(text: str) -> bool:
     """Filter out obvious non-domain matches (filenames, version strings)."""
     if text.startswith(".") or text.endswith("."):
@@ -716,8 +730,15 @@ def _looks_like_domain(text: str) -> bool:
     # A one-character second-level label is a version fragment, not a
     # registrable name. Two characters are allowed only for the second level of
     # a multi-part public suffix such as `example.co.uk`.
+    # A two-label name whose first label holds a digit and a letter (`c2.ru`,
+    # `x1.top`) is a host's shape no word has; two letters (`to.do`, `in.it`)
+    # are prose and code, read only where the run's network evidence holds them.
     sld = labels[-2]
-    if len(sld) < 2 or (len(sld) == 2 and sld not in _MULTIPART_TLD_SECOND_LEVELS):
+    if len(sld) < 2 or (
+        len(sld) == 2
+        and sld not in _MULTIPART_TLD_SECOND_LEVELS
+        and not (len(labels) == 2 and two_character_label_with_a_digit(sld))
+    ):
         return False
 
     # `self.id`, `data.io`, `result.co` — a code identifier followed by a short

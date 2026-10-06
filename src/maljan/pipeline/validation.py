@@ -20,6 +20,7 @@ and the drop of an indicator that named a value no tool ever saw.
 
 from __future__ import annotations
 
+import bisect
 import ipaddress
 import json
 import re
@@ -3906,13 +3907,29 @@ def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, s
     evidence does, so a host named ``com.evil-c2.update.cdn.ru`` that the
     run resolved is never skipped.
     """
+    return _read_network_values(text, packages=packages)[0]
+
+
+def _read_network_values(text: str, *, packages: bool) -> tuple[list[tuple[str, str]], set[str]]:
+    """:func:`network_values_in`, and the names it read only because ``packages`` was asked."""
     from maljan.tools.strings import iocs_from_text
 
     plain = _refanged(text)
     found: list[tuple[str, str]] = []
+    # The names read only for a caller that asks the run's network evidence.
+    only_asked: set[str] = set()
     # What ``found`` holds, for a membership test that does not read the list.
     held: set[tuple[str, str]] = set()
+    # An IPv6 address with an IPv4 tail is one value; its tail is no second one.
+    v6 = ipv6_addresses_in(plain)
+    # Both readings run left to right, so one pointer walks the v6 spans.
+    spans = [(match.start(), match.end()) for match in v6]
+    at = 0
     for match in _DOTTED_ADDRESS_RE.finditer(plain):
+        while at < len(spans) and spans[at][1] < match.end():
+            at += 1
+        if at < len(spans) and spans[at][0] <= match.start():
+            continue
         try:
             ipaddress.ip_address(match.group(0))
         except ValueError:
@@ -3920,11 +3937,33 @@ def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, s
         if ("ip", match.group(0)) not in held:
             held.add(("ip", match.group(0)))
             found.append(("ip", match.group(0)))
+    # An IPv6 address and a ``.onion`` name are read by their form, as the
+    # report's defanger reads them: neither is under a TLD of the root zone.
+    for match in v6:
+        value = match.group(0).lower()
+        if ("ip", value) not in held:
+            held.add(("ip", value))
+            found.append(("ip", value))
+    # Each onion name reversed, sorted once: a sweep row is the tail of one
+    # when a reversed name starts with the row reversed and a dot, found by
+    # one bisection. Memory is the names' own length, however many labels.
+    reversed_onions: list[str] = []
+    for match in ONION_NAME.finditer(plain):
+        value = match.group(0).lower()
+        reversed_onions.append(value[::-1])
+        if ("domain", value) not in held:
+            held.add(("domain", value))
+            found.append(("domain", value))
+    reversed_onions.sort()
     # A sentence's full stop is not part of the host it ends on.
     for row in (
         iocs_from_text(_TRAILING_PUNCTUATION_RE.sub(" ", plain), ["domain"]).get("iocs") or []
     ):
         value = str(row.get("value") or "").strip().lower().rstrip(".")
+        # The sweep's onion reader takes the last two labels of a longer
+        # ``.onion`` name; the name read whole above is the value.
+        if reversed_onions and _tail_of_one(value, reversed_onions):
+            continue
         if value and ("domain", value) not in held:
             held.add(("domain", value))
             found.append(("domain", value))
@@ -3941,10 +3980,89 @@ def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, s
         # A one-letter name is a letter ("x.icu"); a digit there ("3.cz") is
         # the tail of a version or of noise.
         short = len(labels) == 2 and (len(labels[0]) < 2 or len(value) < 5)
-        if len(labels) > 4 or (short and labels[0].isalpha()):
+        # Two letters ("ab.ru") are a word as often as a name: read only for a
+        # caller that asks the run's network evidence (``evidence_gated_values``).
+        read = len(labels) > 4 or (short and labels[0].isalpha())
+        lettered = packages and not read and two_letter_name(value)
+        if read or lettered:
             held.add(("domain", value))
             found.append(("domain", value))
-    return found
+        if lettered:
+            only_asked.add(value)
+    return found, only_asked
+
+
+def evidence_gated_values(text: str) -> frozenset[str]:
+    """The names ``text`` names that are hosts only where the run's network evidence holds them.
+
+    A package-shaped name (:func:`package_shaped`), and a name only the
+    evidence-asking reading reads (``network_values_in(..., packages=True)``):
+    a two-label name whose first label is two letters (``ab.ru``) that the
+    default reading does not read. A name the default reading reads is never
+    gated, so a check reads every value it read before.
+    """
+    return _values_and_gated(text)[1]
+
+
+def _values_and_gated(text: str) -> tuple[list[tuple[str, str]], frozenset[str]]:
+    """``network_values_in(text, packages=True)`` and the names of it that are gated."""
+    values, only_asked = _read_network_values(text, packages=True)
+    gated = frozenset(
+        value for _kind, value in values if value in only_asked or package_shaped(value)
+    )
+    return values, gated
+
+
+def two_letter_name(value: str) -> bool:
+    """Whether a dotted name is two labels, the first of two letters (``ab.ru``, ``to.do``)."""
+    labels = str(value or "").lower().split(".")
+    return len(labels) == 2 and len(labels[0]) == 2 and labels[0].isascii() and labels[0].isalpha()
+
+
+# An IPv6 address written in text, bare or in brackets ("[2001:db8::1]:443"):
+# hex groups and colons, and an embedded IPv4 tail read whole
+# ("::ffff:192.0.2.1"), so no piece of an address is a value of its own.
+_IPV6_CANDIDATE = re.compile(
+    r"(?<![\w:.\]])(?:[0-9A-Fa-f]{0,4}:){2,7}"
+    r"(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9A-Fa-f]{0,4})(?![\w:]|\.\d)"
+)
+# A name under ``.onion``, which the root zone does not delegate: read by its
+# form, any number of labels, in any case, ending at the TLD: an ``onion``
+# label with another label after it ("tor.onion.example.com") is no TLD.
+ONION_NAME = re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+onion(?![\w-]|\.[A-Za-z0-9])")
+
+
+def ipv6_addresses_in(text: str) -> list[re.Match[str]]:
+    """Where ``text`` writes a whole IPv6 address, each one ``ipaddress`` parses.
+
+    In brackets (``[2001:db8::1]:443``, a URL's host) any address is one. Bare,
+    an address has at least three groups (an IPv4 tail counts as two) and a
+    digit, and touches no identifier character: ``ab::cd``, ``dead::beef``,
+    ``std::vector`` and ``a::b::c`` are scope names, not addresses.
+    """
+    written = str(text or "")
+    out: list[re.Match[str]] = []
+    for match in _IPV6_CANDIDATE.finditer(written):
+        value = match.group(0)
+        try:
+            if ipaddress.ip_address(value).version != 6:
+                continue
+        except ValueError:
+            continue
+        bracketed = written[match.start() - 1 : match.start()] == "[" and (
+            written[match.end() : match.end() + 1] == "]"
+        )
+        groups = sum(2 if "." in part else 1 for part in value.split(":") if part)
+        if bracketed or (groups >= 3 and any(char.isdigit() for char in value)):
+            out.append(match)
+    return out
+
+
+def _tail_of_one(value: str, reversed_names: list[str]) -> bool:
+    """Whether ``value`` is a dotted tail of a name in ``reversed_names`` (sorted, reversed)."""
+    key = value[::-1] + "."
+    at = bisect.bisect_left(reversed_names, key)
+    return at < len(reversed_names) and reversed_names[at].startswith(key)
 
 
 # A run of a sentence's closing punctuation before a space or the end, matched
@@ -4014,12 +4132,14 @@ def recommendation_indicator_violations(
     for index, row in enumerate(_rows_of(payload, "defensive_recommendations")):
         text = " ".join(str(row.get(key) or "") for key in ("action", "rationale", "detection"))
         refused: list[str] = []
-        for kind, value in network_values_in(text, packages=True):
+        named, gated = _values_and_gated(text)
+        for kind, value in named:
             answer = str(answers(kind, value) or "")
             if publishes(answer):
                 continue
-            # A package name no row of the run's evidence holds is code.
-            if not answer and package_shaped(value):
+            # A package name, or a two-letter name only the evidence reading
+            # reads, that no row of the run's evidence holds is no host.
+            if not answer and value in gated:
                 continue
             if not answer and kind == "domain" and is_well_known_benign_host(value):
                 # A reference or vendor host the run never recorded: a place to
@@ -4092,12 +4212,10 @@ def _unstated_values(
             return f"no: {NO_TABLE_ANSWER}"
 
     plain = _refanged(sentence).lower()
-    # A package name no row of the run's evidence holds is code, not a host.
-    values = [
-        (kind, value)
-        for kind, value in network_values_in(sentence, packages=True)
-        if not package_shaped(value) or _answer(kind, value)
-    ]
+    # A package name, or a two-letter name only the evidence reading reads,
+    # that no row of the run's evidence holds is no host.
+    named, gated = _values_and_gated(sentence)
+    values = [(kind, value) for kind, value in named if value not in gated or _answer(kind, value)]
     places = sorted((plain.find(value.lower()), kind, value) for kind, value in values if value)
     out: list[tuple[str, str, str]] = []
     for position, (start, kind, value) in enumerate(places):

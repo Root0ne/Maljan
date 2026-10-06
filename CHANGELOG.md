@@ -2384,6 +2384,12 @@ change landed on `main`.
 
 ### Fixed
 
+- **A bare two-label host with a two-character first label is read when the label holds a digit and a letter** (`c2.ru`, `x1.top`), by the string sweep and the report's host reader; one of two letters (`ab.ru`) is read only where the run's network evidence holds it, so prose such as `to.do` stays as written.
+- **An IPv6 address, bare or bracketed, and a `.onion` name of any labels are network values to every reader**: the publish checks, the run summary's sentences and a cell's state note read them by form: an IPv6 address whole, an embedded IPv4 tail included, in brackets or with at least three groups and a digit, so a scope name such as `dead::beef` is no address.
+- **`/iocs` and the report's §9 read the IOC table from one source** (`builder.ioc_table`, rebuilt from the stored report), so an old report's analyst rows and their notes read the same in both.
+- **A function map summary attaches only to the function its claim names**: a name that is an ordinary word, alone or as the last label of a dotted decompiler name (`sym.entry`), needs a code spelling or a function cue beside it, two virtual addresses a base apart stay two functions with a base known, and the function's own digits written without `0x` name it with no base known.
+- **A configured password under four characters, echoed after `Bearer`, `Basic` or `token`, is masked in a finding row** as the whole word after the scheme; elsewhere such a value keeps the row's words.
+- **The triage pack prints an APK's package name as the manifest wrote it**, even one that starts with `no: `; only `apk_info`'s own refusal reasons are left out (`binary.is_apk_unread`).
 - **A call waiting on the spend ceiling for calls in flight ends as cancelled when its job is cancelled** (`JobCancelled`, with where it stopped), so its loop records a cancellation rather than the spend cap.
 - **A kind of call a stage will make and has not made yet is asked about on the model of the call the job made last**, where it was the model of the kind first made last.
 - **Function summaries cut at one output limit are counted in the run's shortened inputs** ("3 function summaries ended at their 4,000-token output limit"), where every cut after the first merged into one identical line.

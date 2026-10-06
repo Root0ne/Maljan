@@ -29,12 +29,11 @@ from typing import Any
 
 from maljan.pipeline.validation import (
     _ADDRESS_ARGUMENTS,
+    _DIGIT_RUN,
     _GENERIC_FUNCTION_NAME,
     _NAME_ARGUMENTS,
-    DecompiledFunction,
     _address_value,
     _addresses_written,
-    _named_by,
     decompiled_functions,
     image_bases_in,
 )
@@ -458,17 +457,69 @@ def build_function_map(
 def _claim_names(text: str, entry: MapEntry, bases: Sequence[int]) -> bool:
     """Whether a claim's text names this visited function.
 
-    With an image base known, by the decompiled-not-described check's own
-    reading (``_named_by``). With none, only by the same address written out,
-    or by a name the decompiler gave the function: no address is guessed.
+    By an address written out that is the same function by the map's own rule
+    (``_same``: equal, or an offset and its virtual address apart by a base the
+    run read; with no base, only equal), by the function's own hex spelling
+    written as digits alone, or by a name the decompiler gave it. A name that
+    is an ordinary word (``entry``, ``start``) names it only written as code
+    or beside a word that says it is a function. No address is guessed.
     """
-    if bases:
-        function = DecompiledFunction(address=entry.address, names=entry.names, entries=())
-        return _named_by(text, function, bases)
-    if entry.address is not None and entry.address in _addresses_written(text):
-        return True
-    named = DecompiledFunction(address=None, names=entry.names, entries=())
-    return bool(entry.names) and _named_by(text, named, ())
+    if entry.address is not None:
+        if any(_same(entry.address, address, bases) for address in _addresses_written(text)):
+            return True
+        spelled = f"{entry.address:x}"
+        if spelled.isdigit() and any(
+            run.group(1).lstrip("0") == spelled.lstrip("0") for run in _DIGIT_RUN.finditer(text)
+        ):
+            return True
+    for name in entry.names:
+        if _GENERIC_FUNCTION_NAME.fullmatch(name):
+            continue
+        # A dotted name (``sym.entry``, ``fcn.main``) written whole names it;
+        # its last label is read by the same rule as a plain name.
+        if "." in name and _written_bare(text, name):
+            return True
+        last = name.rsplit(".", 1)[-1]
+        if len(last) < 3 or _GENERIC_FUNCTION_NAME.fullmatch(last):
+            continue
+        if _WORD_NAME.fullmatch(last):
+            if _named_as_a_function(text, last):
+                return True
+            continue
+        if _written_bare(text, last):
+            return True
+    return False
+
+
+def _written_bare(text: str, spelling: str) -> bool:
+    """Whether ``text`` writes ``spelling`` as a whole word, as the decompiled check reads a name."""
+    return re.search(r"(?<![\w.])" + re.escape(spelling) + r"(?![\w])", text) is not None
+
+
+# A function name spelled like a word of prose: letters only, at most the first
+# a capital ("entry", "Start").
+_WORD_NAME = re.compile(r"[A-Za-z][a-z]+")
+# The words that say a name beside them is a function's.
+_FUNCTION_CUE = (
+    r"(?:functions?|routines?|subroutines?|procedures?|methods?|exports?|exported|"
+    r"handlers?|callbacks?|symbols?)"
+)
+
+
+def _named_as_a_function(text: str, name: str) -> bool:
+    """Whether ``text`` writes the word ``name`` as code or beside a word that says it is a function.
+
+    As code: in backticks or quotes, or with a call's parenthesis after it.
+    Beside a cue: the cue straight before it or straight after it
+    (``the export entry``, ``the entry function``).
+    """
+    word = re.escape(name)
+    quoted = r"[`'\"]" + word + r"[`'\"]"
+    called = r"(?<![\w.])" + word + r"\s*\("
+    bare = r"[`'\"]?" + word + r"[`'\"]?"
+    before = r"(?i:\b" + _FUNCTION_CUE + r")\s+" + bare + r"(?![\w])"
+    after = r"(?<![\w.])" + bare + r"\s+(?i:" + _FUNCTION_CUE + r"\b)"
+    return any(re.search(pattern, text) for pattern in (quoted, called, before, after))
 
 
 def _kinds(artefacts: Sequence[Artefact]) -> list[tuple[str, int, list[str]]]:
