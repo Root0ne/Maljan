@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/logo.svg" alt="Maljan" width="112">
+  <img src="apps/docs/public/assets/logo.svg" alt="Maljan" width="112">
 </p>
 
 <h1 align="center">Maljan</h1>
@@ -49,7 +49,7 @@ rather than a rejection.
 
 Teams are configuration, not code. A team of your own is an ordered list of
 stages and a prompt per agent, written in the console; see
-[docs/configuration.md](docs/configuration.md).
+[Configuration](https://root0ne.github.io/Maljan/configuration/).
 
 Samples are submitted, tracked and read in a web console; the whole
 configuration of a deployment lives in that console as well, not in environment
@@ -97,15 +97,15 @@ were published from the analyst's hedged claims.
 This is one reference sample, one run per cell with no variance measured, on
 an 8 GB-GPU laptop. The method, the per-group scores, the false-positive
 control and the item-by-item score files are in
-[docs/benchmark/index.md](docs/benchmark/index.md).
+[Benchmark](https://root0ne.github.io/Maljan/benchmark/).
 
 ## The console
 
 | | |
 |---|---|
-| <img src="docs/assets/dashboard.png" alt="Dashboard"> | <img src="docs/assets/analysis-summary.png" alt="Analysis summary"> |
+| <img src="apps/docs/public/assets/dashboard.png" alt="Dashboard"> | <img src="apps/docs/public/assets/analysis-summary.png" alt="Analysis summary"> |
 | **Dashboard.** Totals, failure rate, recent analyses and verdict distribution. | **Analysis.** One run, its stages, its evidence ledger and the report built from it, with Markdown, PDF, HTML, STIX 2.1 and MISP export. |
-| <img src="docs/assets/settings-configuration.png" alt="Settings configuration"> | <img src="docs/assets/settings-guide.png" alt="Setup guide"> |
+| <img src="apps/docs/public/assets/settings-configuration.png" alt="Settings configuration"> | <img src="apps/docs/public/assets/settings-guide.png" alt="Setup guide"> |
 | **Configuration.** Every application setting, grouped, searchable, with its origin and when a change takes effect. | **Setup guides.** Short walkthroughs that configure one subsystem at a time and test the connection before saving. |
 
 ## Quick start
@@ -121,12 +121,12 @@ cp docker/.env.example docker/.env  # then fill in every secret it declares
 make dev-up                         # docker compose up -d, development overlay
 ```
 
-The development overlay is for a workstation; [docs/deployment.md](docs/deployment.md)
+The development overlay is for a workstation; [Deployment](https://root0ne.github.io/Maljan/deployment/)
 covers a production deployment.
 
 Every secret in [`docker/.env.example`](docker/.env.example) is declared with
 `:?` in the compose file, so the stack refuses to start while one is missing;
-[docs/getting-started.md](docs/getting-started.md) has the commands that
+[Quick start](https://root0ne.github.io/Maljan/getting-started/) has the commands that
 generate them. Open <http://localhost:3000>, register the first account from
 the login page, promote it to `admin` once in the database, then walk
 **Settings → Setup** to point the deployment at a language model, a sandbox and
@@ -138,21 +138,21 @@ production deployment has no interactive schema.
 
 ## Documentation
 
-Everything below lives in [docs/](docs/README.md) and is written against the
-code in this repository. The same set is published as a browsable site at
-<https://root0ne.github.io/Maljan/>.
+Everything below is published as a browsable site at
+<https://root0ne.github.io/Maljan/> and is written against the code in this
+repository; the pages are under [apps/docs/content/docs/](apps/docs/content/docs/).
 
 | Document | What it covers |
 | :-- | :-- |
-| [getting-started.md](docs/getting-started.md) | Prerequisites, the two configuration files, starting the stack, first login and first analysis. |
-| [configuration.md](docs/configuration.md) | The bootstrap environment contract, Settings → Configuration, the setup guides, connection probes, JSON export and import, secret storage. |
-| [architecture.md](docs/architecture.md) | Components, the request and job lifecycle, teams as stages, agents and their tools, the evidence ledger, validation loops and report assembly. |
-| [deployment.md](docs/deployment.md) | Compose services and healthchecks, required secrets, health endpoints, Kubernetes and systemd notes, upgrades and migrations. |
-| [operations.md](docs/operations.md) | Logs, what a run's metrics mean, staged samples, the audit trail, rate limits, backups and a troubleshooting table. |
-| [security.md](docs/security.md) | Authentication, roles, API keys, secret encryption, what an export leaves out, CORS and cookie flags, vulnerability reporting. |
-| [development.md](docs/development.md) | Repository layout, `make` targets, the test suites, CI jobs and the branch workflow. |
-| [api.md](docs/api.md) | Router groups, the evidence endpoint, the run-summary fields, the stage events on the WebSocket, authentication and pagination. |
-| [benchmark/index.md](docs/benchmark/index.md) | The benchmark: samples, models, the scoring key, results across iterations and against a human report, the false-positive control and limitations. |
+| [Quick start](https://root0ne.github.io/Maljan/getting-started/) | Prerequisites, the two configuration files, starting the stack, first login and first analysis. |
+| [Configuration](https://root0ne.github.io/Maljan/configuration/) | The bootstrap environment contract, Settings → Configuration, the setup guides, connection probes, JSON export and import, secret storage. |
+| [Architecture](https://root0ne.github.io/Maljan/architecture/) | Components, the request and job lifecycle, teams as stages, agents and their tools, the evidence ledger, validation loops and report assembly. |
+| [Deployment](https://root0ne.github.io/Maljan/deployment/) | Compose services and healthchecks, required secrets, health endpoints, Kubernetes and systemd notes, upgrades and migrations. |
+| [Operations](https://root0ne.github.io/Maljan/operations/) | Logs, what a run's metrics mean, staged samples, the audit trail, rate limits, backups and a troubleshooting table. |
+| [Security](https://root0ne.github.io/Maljan/security/) | Authentication, roles, API keys, secret encryption, what an export leaves out, CORS and cookie flags, vulnerability reporting. |
+| [Development](https://root0ne.github.io/Maljan/development/) | Repository layout, `make` targets, the test suites, CI jobs and the branch workflow. |
+| [REST API](https://root0ne.github.io/Maljan/api/) | Router groups, the evidence endpoint, the run-summary fields, the stage events on the WebSocket, authentication and pagination. |
+| [Benchmark](https://root0ne.github.io/Maljan/benchmark/) | The benchmark: samples, models, the scoring key, results across iterations and against a human report, the false-positive control and limitations. |
 
 Release notes are in [CHANGELOG.md](CHANGELOG.md).
 

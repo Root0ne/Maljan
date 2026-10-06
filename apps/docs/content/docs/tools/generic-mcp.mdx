@@ -1,0 +1,93 @@
+---
+title: "Generic MCP servers"
+description: "Giving the agents any MCP server's tools."
+---
+
+Any MCP server can give Maljan's agents its tools: Maljan reads the server's
+manifest and calls what the operator ticks. There is no allow-list in the code
+and no cut to the descriptions a server advertises; the per-server tick list is
+the only thing that narrows it.
+
+## Add a server
+
+<Steps>
+
+<Step>
+
+Open **Settings → Setup guides → Add a tool server**, or add an entry under
+`core.mcp.servers` in **Settings → Configuration → Analysis tools**.
+
+</Step>
+
+<Step>
+
+Choose the transport and say how to reach the server:
+
+ | Transport | Fields |
+ | :-- | :-- |
+ | `stdio` | `command`, `args`, `env`, `cwd`, and `env_allow` for the names copied from the worker's own environment |
+ | `http`, `streamable-http`, `sse` | `url` and `auth_token` |
+
+</Step>
+
+<Step>
+
+Test it. The probe (`POST /api/v1/settings/test/mcp`) lists the tools the
+server advertises and, if it answers `capabilities`, which of them are
+unavailable on its host.
+
+</Step>
+
+<Step>
+
+Tick the tools to expose. A freshly added server exposes nothing until you
+do (`tools: []`); `null` exposes every tool it advertises.
+
+</Step>
+
+<Step>
+
+Say which agents receive it: by role in the entry's `agents`, or by a tool
+reference in an agent definition.
+
+</Step>
+
+</Steps>
+
+<Callout type="info" title={<>{"Credentials never go in "}<code>{"env"}</code></>}>
+
+`env` is a visible setting. A token a stdio server needs reaches it through
+`env_allow`, which copies the named variable from the worker's own
+environment into the child. An `auth_token` for an HTTP server is stored in
+its own encrypted row and never echoed.
+
+</Callout>
+
+## As the static provider
+
+The `generic_mcp` static provider hands the static analyst the tools of one
+`core.mcp.servers` entry, named by `core.static.generic.server`. It is how a
+reverse-engineering MCP tool Maljan has never heard of becomes the static
+analyst's toolkit. Unlike Ghidra it degrades: a server that is down costs the
+run its tools and is named in the run summary. An empty
+`core.static.generic.server` attaches nothing, and the probe says so.
+
+```
+core.static.provider        = generic_mcp
+core.static.generic.server  = <the key of the core.mcp.servers entry>
+```
+
+## As a generic agent's server
+
+A generic agent definition — a prompt and a tool list, no class — can name any
+server in its tools. The importable all-tools team does this with
+`all_tools_qu1cksc0pe`, a generic agent on a `qu1cksc0pe` server the operator
+adds. See [An all-tools team](/configuration/#an-all-tools-team).
+
+## A server on another host
+
+A server reached over HTTP does not share the worker's filesystem. Either mount
+a shared volume, or have the server advertise `put_sample` and Maljan uploads
+the sample to it before the agent's first call. See [MCP
+servers](/integrations/mcp-servers/) for the convention, and for the two
+optional conventions that make a server a better citizen of a run.
