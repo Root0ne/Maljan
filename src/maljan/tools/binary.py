@@ -701,7 +701,7 @@ def apk_info(
     if dex_strings:
         out["dex_strings"] = _androguard_fact(lambda: _apk_dex_strings(out, apk, limit), DEX_UNREAD)
 
-    unsaid = [key for key in wanted if _is_unread(out.get(key))]
+    unsaid = [key for key in wanted if is_apk_unread(out.get(key))]
     # A list's own strings are the sample's, so a list is never read for
     # ``no:``; the dex files the reader refused are listed under their own key.
     if out.get("dex_strings_unread"):
@@ -767,14 +767,14 @@ def _apk_facts_wanted(
     return keys
 
 
-def _is_unread(value: Any) -> bool:
+def is_apk_unread(value: Any) -> bool:
     """Whether an ``apk_info`` fact, or any part of one, is one of this tool's ``no: <reason>``.
 
     Matched against the tool's own reasons, not any ``no: `` prefix: a value
     read from the manifest is the sample's text and may begin that way.
     """
     if isinstance(value, dict):
-        return any(_is_unread(part) for part in value.values())
+        return any(is_apk_unread(part) for part in value.values())
     return isinstance(value, str) and value.startswith(_APK_UNREAD_REASONS)
 
 

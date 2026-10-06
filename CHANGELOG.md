@@ -2384,6 +2384,7 @@ change landed on `main`.
 
 ### Fixed
 
+- **The triage pack prints an APK's package name as the manifest wrote it**, even one that starts with `no: `; only `apk_info`'s own refusal reasons are left out (`binary.is_apk_unread`).
 - **A TECHNIQUE line listing ids separated by commas, "and" or slashes is read as one claim per id**, each checked as a technique, and an id taken off the list when asked is the answer kept; a closing `· ---` is read past, the claim format says several ids are separated by commas, and only a line with words beside an id is asked about.
 - **The verb a catalogue name opens with, ending in a silent "e", is matched by its -s, -d and -ing forms**, so "deobfuscates" and "decoded" describe Deobfuscate/Decode Files or Information and no word of its own ("stated", "computer") matches; and on the absence question a dash ends a negation's reach only before a new clause or after "instead of" or "rather than", an aside between dashes keeps the negation with its verb, and "never-" before a listed past participle negates nothing.
 - **The STIX bundle holds a malware object for the family the run states** (`is_family: true`), the judge's sample object kept as written and related to it as `variant-of`.
