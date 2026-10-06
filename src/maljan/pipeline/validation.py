@@ -20,6 +20,7 @@ and the drop of an indicator that named a value no tool ever saw.
 
 from __future__ import annotations
 
+import bisect
 import ipaddress
 import json
 import re
@@ -3943,18 +3944,17 @@ def _read_network_values(text: str, *, packages: bool) -> tuple[list[tuple[str, 
         if ("ip", value) not in held:
             held.add(("ip", value))
             found.append(("ip", value))
-    # Every dotted suffix of each onion name, built once, so the sweep's
-    # reading of a longer onion name's tail is skipped by one lookup.
-    onion_tails: set[str] = set()
+    # Each onion name reversed, sorted once: a sweep row is the tail of one
+    # when a reversed name starts with the row reversed and a dot, found by
+    # one bisection. Memory is the names' own length, however many labels.
+    reversed_onions: list[str] = []
     for match in ONION_NAME.finditer(plain):
         value = match.group(0).lower()
-        at = value.find(".")
-        while at != -1:
-            onion_tails.add(value[at + 1 :])
-            at = value.find(".", at + 1)
+        reversed_onions.append(value[::-1])
         if ("domain", value) not in held:
             held.add(("domain", value))
             found.append(("domain", value))
+    reversed_onions.sort()
     # A sentence's full stop is not part of the host it ends on.
     for row in (
         iocs_from_text(_TRAILING_PUNCTUATION_RE.sub(" ", plain), ["domain"]).get("iocs") or []
@@ -3962,7 +3962,7 @@ def _read_network_values(text: str, *, packages: bool) -> tuple[list[tuple[str, 
         value = str(row.get("value") or "").strip().lower().rstrip(".")
         # The sweep's onion reader takes the last two labels of a longer
         # ``.onion`` name; the name read whole above is the value.
-        if value in onion_tails:
+        if reversed_onions and _tail_of_one(value, reversed_onions):
             continue
         if value and ("domain", value) not in held:
             held.add(("domain", value))
@@ -4056,6 +4056,13 @@ def ipv6_addresses_in(text: str) -> list[re.Match[str]]:
         if bracketed or (groups >= 3 and any(char.isdigit() for char in value)):
             out.append(match)
     return out
+
+
+def _tail_of_one(value: str, reversed_names: list[str]) -> bool:
+    """Whether ``value`` is a dotted tail of a name in ``reversed_names`` (sorted, reversed)."""
+    key = value[::-1] + "."
+    at = bisect.bisect_left(reversed_names, key)
+    return at < len(reversed_names) and reversed_names[at].startswith(key)
 
 
 # A run of a sentence's closing punctuation before a space or the end, matched

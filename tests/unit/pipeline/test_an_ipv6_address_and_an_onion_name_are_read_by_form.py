@@ -174,3 +174,25 @@ class TestAnOnionNameEndsAtItsTld:
         network_values_in(text)
         _defanged_text(text)
         assert time.perf_counter() - started < 20
+
+    def test_one_long_onion_name_of_many_labels_is_read_in_linear_time_and_memory(self) -> None:
+        import time
+        import tracemalloc
+
+        from maljan.pipeline.validation import _unstated_values
+
+        text = "a." * (200_000 // 2) + "onion"
+        tracemalloc.start()
+        try:
+            started = time.perf_counter()
+            network_values_in(text)
+            _unstated_values(text, lambda kind, value: "")
+            took = time.perf_counter() - started
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        assert peak < 50_000_000, peak
+        assert took < 20, took
+        started = time.perf_counter()
+        _defanged_text(text)
+        assert time.perf_counter() - started < 20
