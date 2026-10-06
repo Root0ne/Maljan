@@ -350,8 +350,9 @@ def test_a_package_name_is_no_host() -> None:
     ]
 
 
-# ".sh" and ".ps" are not in the vendored TLD list, so no reader reads them as hosts.
-@pytest.mark.parametrize("host", ["evil.pl", "panel.ml"])
+# A two-label name under ".pl", ".sh" or ".ps" is a file in free prose; under
+# a country code no file carries, it is a host, and so is a longer name.
+@pytest.mark.parametrize("host", ["panel.ml", "cdn.evil.pl", "x.update.sh"])
 def test_a_common_country_code_host_is_defanged_in_prose(host: str) -> None:
     from maljan.reporting.renderers.markdown import _defanged_text
 

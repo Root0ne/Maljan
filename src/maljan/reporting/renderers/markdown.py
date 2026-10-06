@@ -67,6 +67,7 @@ from maljan.reporting.models import (
     stated_family,
 )
 from maljan.schemas.isr_models import UNVERIFIED_TECHNIQUE_MARKER
+from maljan.tools.strings import FILE_EXTENSION_TLDS
 
 # ---------------------------------------------------------------------------
 # Voices
@@ -2563,111 +2564,202 @@ _VALUE_FINDING_CODES = frozenset({"report.value_not_in_cited_entry", "report.unp
 # The table separator, named rather than written: a literal one in this module
 # is a table row assembled by hand (``test_a_table_row_is_never_assembled_by_hand``).
 _PIPE = chr(124)
-# A URL and a mailbox in free text, for defanging what no indicator list holds.
-# Any scheme a viewer may make a link of ("https", "ftp", "sftp", "ws", a
-# defanged "hxxps"), not only the web's.
-_URL_IN_TEXT = re.compile(r"(?i)\b[a-z][a-z0-9+.-]{1,31}://[^\s<>()\[\]`'\"" + _PIPE + r"]+")
+# A URL in free text, for telling whether a cell names one. Any scheme a
+# viewer may make a link of ("https", "ftp", "sftp", "ws", a defanged "hxxps"),
+# wherever it starts: no word boundary before it, since GFM starts a link after
+# a digit or "_" as readily as after a space.
+_URL_IN_TEXT = re.compile(r"(?i)[a-z][a-z0-9+.-]{0,31}://[^\s<>()\[\]`'\"" + _PIPE + r"]+")
 # A host after an "@" no mailbox name stands before.
 _BARE_AT_HOST = re.compile(r"(?<![\w.+-])@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
-# A host a forge links as written whatever its top-level label: "www." first.
-_WWW_HOST = re.compile(r"(?i)(?<![\w.@/-])www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+(?![\w-])")
+# A "www." host, which a forge links whatever its top-level label, after any
+# character that is no letter or digit ("_", "*", "~", "(", "/" and the rest).
+_WWW_HOST = re.compile(r"(?i)(?<![^\W_])www\.[\w-]+(?:\.[\w-]+)*")
 # An IPv6 address written in text: hex groups and colons, read by ``ipaddress``.
-_IPV6_CANDIDATE = re.compile(r"(?<![\w:.])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![\w:])")
-_EMAIL_IN_TEXT = re.compile(r"(?<![\w.+-])[\w.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
+_IPV6_CANDIDATE = re.compile(r"(?<![\w:.\]])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![\w:])")
+# A mailbox: GFM's name characters (``_`` among them) and a dotted domain.
+_EMAIL_IN_TEXT = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 # The characters that make Markdown of a sample's text: a code span, a link or
 # image, an HTML tag, a table cell, emphasis, and the backslash itself.
 _INLINE_META = re.compile(r"([\\`\[\]<>*" + _PIPE + r"])")
 _INLINE_META_NO_PIPE = re.compile(r"([\\`\[\]<>*])")
+# A link a reference service may own: https, at no scheme character's end.
+_REFERENCE_CANDIDATE = re.compile(r"(?i)(?<![a-z0-9+.-])https://[^\s<>()\[\]`'\"" + _PIPE + r"]+")
+# What ends the authority of a URL, or of a "//" target: a separator, a space,
+# or a character Markdown or a sentence puts around a link.
+_AUTHORITY_END = frozenset("/?#\\<>()[]{}\"'`" + _PIPE)
+# The bracketed characters a defanged value is written with.
+_DEFANGED_MARKS = ("[.]", "[:]", "[@]")
 
 
 def _defanged_text(text: str) -> str:
     """``text`` with every network indicator in it defanged, as the report does.
 
     A URL, a mailbox, a host under a real top-level domain (the string sweep's
-    own list) and an address are defanged. What names no network value prints
-    as written: a version number ("FileVersion 10.0.0.1", "v1.2.3.4"), a .NET
-    name ("ASP.NET"), and a two-label name whose top-level label is also a
-    source file's extension ("lib.rs"). A reference service's own lookup
-    (``_REFERENCE_LOOKUPS``) stays a link unless the run's own indicator was
-    already defanged inside it. A value the run itself recorded is defanged
-    before this, by the context's own pass, wherever it stands.
+    own list, the root zone's) and an address are defanged. What names no
+    network value prints as written: a version number ("FileVersion 10.0.0.1",
+    "v1.2.3.4"), a .NET name ("ASP.NET"), and a two-label name whose top-level
+    label is also a file's extension ("lib.rs", "install.sh"). A reference
+    service's own lookup (``_REFERENCE_LOOKUPS``) stays a link, exactly as it
+    was checked; the text is split around those links and only the pieces
+    between them are read. A value the run itself recorded is defanged before
+    this, by the context's own pass, wherever it stands.
     """
-    kept: dict[str, str] = {}
-    # A placeholder for a kept link: a private-use character the text does
-    # not hold, around the link's index, so nothing the text says is replaced.
-    marker = next(chr(cp) for cp in range(0xE000, 0xF900) if chr(cp) not in text)
-
-    def _keep(found: re.Match[str]) -> str:
-        url = found.group(0)
-        tainted = text[found.end() : found.end() + 3] in ("[.]", "[:]", "[@]")
-        if tainted or not _reference_lookup(url):
-            return url
-        token = f"{marker}{len(kept)}{marker}"
-        kept[token] = url
-        return token
-
-    written = _URL_IN_TEXT.sub(_keep, text)
-    # A value inside a URL that was defanged whole ("…/gui/url/http://evil…")
-    # is read again: the URL's own defanging ends where its first bracket is.
-    # Passes repeat until nothing changes, a bounded number of times: each one
-    # only adds brackets, and none re-reads what an earlier one kept.
-    defanged = written
-    for _ in range(_DEFANG_PASSES):
-        again = _defang_pass(defanged)
-        if again == defanged:
-            break
-        defanged = again
-    for token, url in kept.items():
-        defanged = defanged.replace(token, url)
-    return defanged
+    out: list[str] = []
+    at = 0
+    for start, end in _reference_spans(text):
+        out += [_defanged_piece(text[at:start]), text[start:end]]
+        at = end
+    out.append(_defanged_piece(text[at:]))
+    return "".join(out)
 
 
-# How many times a text is read for values inside values a pass defanged.
-# Nesting deeper than this is not a URL anyone writes.
-_DEFANG_PASSES = 4
+def _reference_spans(text: str) -> list[tuple[int, int]]:
+    """Where ``text`` holds a reference service's own lookup, kept as checked.
+
+    A sentence's punctuation after the link is trimmed before the check, and
+    only what was checked is kept: the trimmed characters are read with the
+    rest of the text. A link the run's own indicator was defanged inside is no
+    lookup.
+    """
+    spans: list[tuple[int, int]] = []
+    for found in _REFERENCE_CANDIDATE.finditer(text):
+        if text[found.end() : found.end() + 3] in _DEFANGED_MARKS:
+            continue
+        checked = found.group(0).rstrip(",.;:!?")
+        if _reference_lookup(checked):
+            spans.append((found.start(), found.start() + len(checked)))
+    return spans
 
 
-def _defang_pass(written: str) -> str:
-    """One reading of ``written`` and every network value it finds, defanged."""
+def _defanged_piece(text: str) -> str:
+    """``text``, holding no kept link, with every network value in it defanged, in one reading.
+
+    Each place a viewer starts a link is read where it stands, whatever is
+    around it and however deeply it is nested, and the characters that make it
+    live are rewritten in place: a scheme's letters (``hxxp``), the dots of a
+    host (``[.]``), a mailbox's ``@`` and an IPv6 address's first colon. Nothing
+    is read twice and no pass is repeated, so a text of any length and any
+    nesting is read in time linear in its length.
+    """
+    if not text:
+        return text
+    marks: dict[int, str] = {}
+    _mark_links(text, marks)
+    _mark_mailboxes(text, marks)
+    _mark_hosts(text, marks)
+    if not marks:
+        return text
+    out: list[str] = []
+    at = 0
+    for index in sorted(marks):
+        out += [text[at:index], marks[index]]
+        at = index + 1
+    out.append(text[at:])
+    return "".join(out)
+
+
+def _bracket(text: str, index: int, marks: dict[int, str]) -> None:
+    """Write the ``.``, ``:`` or ``@`` at ``index`` bracketed, unless it already is."""
+    if 0 < index < len(text) - 1 and text[index - 1] == "[" and text[index + 1] == "]":
+        return
+    marks[index] = f"[{text[index]}]"
+
+
+def _bracket_dots(text: str, start: int, end: int, marks: dict[int, str]) -> None:
+    for index in range(start, end):
+        if text[index] == ".":
+            _bracket(text, index, marks)
+
+
+def _mark_links(text: str, marks: dict[int, str]) -> None:
+    """Every ``//`` target and every scheme: the authority's dots, and http, https or ftp renamed.
+
+    GFM reads a scheme from the letters right before ``://``, after any
+    character at all, so the letters are read back to the first non-letter.
+    The authority runs to the first separator; a defanged mark inside it is
+    read past. Each ``//`` starts its own authority, so a URL nested in
+    another's path is read where it stands, at any depth.
+    """
+    from maljan.reporting.defang import _SCHEMES
+
+    at = text.find("//")
+    while at != -1:
+        if at > 0 and text[at - 1] == ":":
+            letters = at - 1
+            while letters > 0 and text[letters - 1].isascii() and text[letters - 1].isalpha():
+                letters -= 1
+            scheme = text[letters : at - 1]
+            renamed = _SCHEMES.get(scheme.lower(), "")
+            for offset, (was, now) in enumerate(zip(scheme.lower(), renamed, strict=False)):
+                if was != now:
+                    marks[letters + offset] = now.upper() if scheme[offset].isupper() else now
+        # A browser reads past more slashes and backslashes to the host.
+        index = at + 2
+        while index < len(text) and text[index] in "/\\":
+            index += 1
+        while index < len(text):
+            if text[index : index + 3] in _DEFANGED_MARKS:
+                index += 3
+                continue
+            char = text[index]
+            if char in _AUTHORITY_END or char.isspace():
+                break
+            if char == ".":
+                _bracket(text, index, marks)
+            index += 1
+        at = text.find("//", max(index, at + 2))
+
+
+def _mark_mailboxes(text: str, marks: dict[int, str]) -> None:
+    """Every mailbox, and every host after a bare ``@``: the ``@`` and the domain's dots."""
     from maljan.pipeline.validation import network_values_in
-    from maljan.reporting.defang import defang_text
 
-    indicators = [(found.group(0), "url") for found in _URL_IN_TEXT.finditer(written)]
-    indicators += [(found.group(0), "email") for found in _EMAIL_IN_TEXT.finditer(written)]
-    # A host written after a bare "@" ("…/\\@evil.com"), with no mailbox name.
-    indicators += [
-        (found.group(0), "email")
-        for found in _BARE_AT_HOST.finditer(written)
-        if network_values_in(found.group(1))
-    ]
+    for found in _EMAIL_IN_TEXT.finditer(text):
+        at = text.index("@", found.start())
+        _bracket(text, at, marks)
+        _bracket_dots(text, at + 1, found.end(), marks)
+    for found in _BARE_AT_HOST.finditer(text):
+        if network_values_in(found.group(1)):
+            _bracket(text, found.start(), marks)
+            _bracket_dots(text, found.start(1), found.end(1), marks)
+
+
+def _mark_hosts(text: str, marks: dict[int, str]) -> None:
+    """Every ``www.`` host, ``.onion`` name, host under a real TLD and address: dots, or a colon."""
+    from maljan.pipeline.validation import network_values_in
+
+    for pattern in (_WWW_HOST, _ONION_HOST):
+        for found in pattern.finditer(text):
+            _bracket_dots(text, found.start(), found.end(), marks)
+    for found in _IPV6_CANDIDATE.finditer(text):
+        if _is_ipv6(found.group(0)):
+            _bracket(text, text.index(":", found.start()), marks)
     # Read with "@" and backslashes as spaces as well, so a host written after
     # either ("…/\@evil.com") is found; the mailbox itself is read above.
-    indicators += [
-        (value, kind)
-        for kind, value in network_values_in(re.sub(r"[@\\]", " ", written))
-        if not _names_no_network_value(written, kind, value)
-    ]
+    values = {
+        value: kind
+        for kind, value in network_values_in(re.sub(r"[@\\]", " ", text))
+        if not _file_name_host(kind, value)
+    }
     # A host written in capitals ("EVIL.COM") is read as the host it spells;
     # the string sweep's reader takes an inner capital for a type name.
-    for found in _SHOUTED_HOST.finditer(written):
-        if _DOTNET_NAME.fullmatch(found.group(0)):
+    for found in _SHOUTED_HOST.finditer(text):
+        if not _DOTNET_NAME.fullmatch(found.group(0)):
+            for kind, value in network_values_in(found.group(0).lower()):
+                if not _file_name_host(kind, value):
+                    values.setdefault(value, kind)
+    if not values:
+        return
+    alternatives = _PIPE.join(re.escape(value) for value in sorted(values, key=len, reverse=True))
+    pattern = re.compile(
+        rf"(?<![A-Za-z0-9-])(?:{alternatives})(?![A-Za-z0-9-]{_PIPE}\.[A-Za-z0-9])", re.IGNORECASE
+    )
+    for found in pattern.finditer(text):
+        if values[found.group(0).lower()] == "ip" and _VERSION_BEFORE.search(
+            text[max(0, found.start() - _VERSION_WORD_REACH) : found.start()]
+        ):
             continue
-        indicators += [
-            (value, kind)
-            for kind, value in network_values_in(found.group(0).lower())
-            if not _names_no_network_value(written, kind, value)
-        ]
-    # An onion service's name, whatever its length.
-    indicators += [(found.group(0), "domain") for found in _ONION_HOST.finditer(written)]
-    # A "www." host, which a forge links whatever its top-level label.
-    indicators += [(found.group(0), "domain") for found in _WWW_HOST.finditer(written)]
-    # An IPv6 address.
-    indicators += [
-        (found.group(0), "ip")
-        for found in _IPV6_CANDIDATE.finditer(written)
-        if _is_ipv6(found.group(0))
-    ]
-    return defang_text(written, indicators)
+        _bracket_dots(text, found.start(), found.end(), marks)
 
 
 # The reference services a report links to, each with the shape of its own
@@ -2709,10 +2801,8 @@ def _reference_lookup(url: str) -> bool:
     """
     from urllib.parse import unquote
 
-    # A sentence's punctuation after the link is not part of it.
-    trimmed = url.rstrip(",.;:!?")
     try:
-        parts = urlparse(trimmed)
+        parts = urlparse(url)
     except ValueError:
         return False
     shape = _REFERENCE_LOOKUPS.get((parts.hostname or "").lower())
@@ -2744,33 +2834,30 @@ _SHOUTED_HOST = re.compile(r"(?<![\w.-])[A-Z0-9-]+(?:\.[A-Z0-9-]+)+(?![\w-])")
 _ONION_HOST = re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+onion(?![\w-])")
 # A .NET technology's name, which ends in a real top-level domain.
 _DOTNET_NAME = re.compile(r"(?i)(?:" + _PIPE.join(("ASP", "ADO", "VB")) + r")\.NET")
-# The top-level domains that are also common source files' extensions: a
-# two-label name under one ("lib.rs", "README.md") is read as a file in free
-# prose. Only these two: ".sh", ".pl", ".ml" and ".ps" are country codes a
-# sample's hosts use often enough to be read as hosts.
-_FILE_EXTENSION_TLDS = frozenset({"rs", "md"})
+# The top-level domains that are also common files' extensions: a two-label
+# name under one ("lib.rs", "README.md", "install.sh", "archive.zip") is read
+# as a file in free prose. Under a scheme, a "//", "www." or "@" it is a host
+# and defanged, and so is any value the run itself recorded.
+_FILE_EXTENSION_TLDS = FILE_EXTENSION_TLDS | frozenset({"py", "so", "pl", "md", "rs"})
 # What a dotted quad of a version number follows: "FileVersion", "version",
-# "ProductVersion:" or a "v" written against it.
+# "ProductVersion:" or a "v" written against it, and how far before the quad
+# that is looked for.
 _VERSION_BEFORE = re.compile(r"(?i)(?:version\s*[:=]?\s*" + _PIPE + r"\bv)$")
+_VERSION_WORD_REACH = 64
 
 
 def _is_ipv6(text: str) -> bool:
     """Whether ``text`` is an IPv6 address."""
-    import ipaddress
-
     try:
         return ipaddress.ip_address(text).version == 6
     except ValueError:
         return False
 
 
-def _names_no_network_value(text: str, kind: str, value: str) -> bool:
-    """Whether a value the host reader found is a version number or a file name in ``text``."""
-    if kind == "ip":
-        places = [m.start() for m in re.finditer(re.escape(value), text)]
-        return bool(places) and all(_VERSION_BEFORE.search(text[:at]) for at in places)
+def _file_name_host(kind: str, value: str) -> bool:
+    """Whether a host the reader found is a two-label name under a file-extension TLD."""
     labels = value.lower().split(".")
-    return len(labels) == 2 and labels[-1] in _FILE_EXTENSION_TLDS
+    return kind == "domain" and len(labels) == 2 and labels[-1] in _FILE_EXTENSION_TLDS
 
 
 def _inline_safe(text: Any, *, pipes: bool = True) -> str:

@@ -3128,8 +3128,14 @@ is assembled from what the run gathered rather than recomputed beside it:
   the export decisions), a tool failure's error, a draft rule's source line and
   compile error, and model prose and cells beyond the run's own values defang
   every URL of any scheme, `www.` host, mailbox, IPv4 or IPv6 address and host
-  under a real top-level domain (the string sweep's list; any number of
-  labels, in capitals, `.onion`): everything a viewer could link. The HTML
+  under a real top-level domain (the string sweep's list, the root zone's;
+  any number of labels, in capitals, `.onion`): everything a viewer could
+  link. Every `://`, `//`, `www.` and `@` is read where it stands, after any
+  character (`_`, `*`, `~`, `(`, `/`, a digit) and at any nesting depth, in
+  one reading of the text: the scheme's letters, the host's dots, the `@` and
+  an IPv6 address's first colon are rewritten in place, and a kept reference
+  lookup is split off before the reading, so the time is linear in the text
+  and no character of it is ever used as a placeholder. The HTML
   report links no bare text (CommonMark, no linkify); it makes an anchor only
   of an http, https or mailto target, a place in the page (`#…`) or a relative
   path with no leading `/` and no backslash, so neither a defanged URL nor a
@@ -3139,15 +3145,19 @@ is assembled from what the run gathered rather than recomputed beside it:
   inline stylesheet and the figures' style attributes need `'unsafe-inline'`;
   the figures are inline SVG and need nothing more). A version
   number ("FileVersion 10.0.0.1"), a .NET name ("ASP.NET") and a two-label
-  name under `.rs` or `.md` ("lib.rs", "README.md") print as written unless
-  the run recorded them; a name of more than four labels opening with a
+  name in free prose under a TLD that is also a file extension (`.zip`,
+  `.mov`, `.py`, `.so`, `.sh`, `.ps`, `.ai`, `.pl`, `.md`, `.rs`, `.pm`,
+  `.cat`, `.one`, `.cab`: "lib.rs", "install.sh") print as written unless the
+  run recorded them; under a scheme, a `//`, `www.` or `@` such a name is
+  always defanged; a name of more than four labels opening with a
   reverse-DNS root (`com.`, `org.`, `android.`, `java.`, …) is read as a
   package, not a host, unless the run's network evidence holds it; a draft rule's
   body is printed as it compiles; a VirusTotal (`/gui/file|url/<hex>`,
   `/gui/domain|ip-address/<value>`), MalwareBazaar (`/sample/<sha256>/`) or
   ATT&CK (`/techniques/…`, `/tactics/…`, `/software/…`, `/matrices/…`) lookup
   with no query, matched whole on its decoded path (no dot segment, backslash,
-  `@` or second `//`), stays a link unless the run's indicator is in it, anything
+  `@` or second `//`) after a sentence's trailing punctuation is trimmed, and
+  kept exactly as matched, stays a link unless the run's indicator is in it, anything
   else on those hosts is defanged, and the configured model endpoint stays as
   written. The JSON report,
   the STIX bundle, MISP and `/reports/{id}/iocs` carry every value live, and
