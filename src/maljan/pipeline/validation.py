@@ -3906,13 +3906,29 @@ def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, s
     evidence does, so a host named ``com.evil-c2.update.cdn.ru`` that the
     run resolved is never skipped.
     """
+    return _read_network_values(text, packages=packages)[0]
+
+
+def _read_network_values(text: str, *, packages: bool) -> tuple[list[tuple[str, str]], set[str]]:
+    """:func:`network_values_in`, and the names it read only because ``packages`` was asked."""
     from maljan.tools.strings import iocs_from_text
 
     plain = _refanged(text)
     found: list[tuple[str, str]] = []
+    # The names read only for a caller that asks the run's network evidence.
+    only_asked: set[str] = set()
     # What ``found`` holds, for a membership test that does not read the list.
     held: set[tuple[str, str]] = set()
+    # An IPv6 address with an IPv4 tail is one value; its tail is no second one.
+    v6 = ipv6_addresses_in(plain)
+    # Both readings run left to right, so one pointer walks the v6 spans.
+    spans = [(match.start(), match.end()) for match in v6]
+    at = 0
     for match in _DOTTED_ADDRESS_RE.finditer(plain):
+        while at < len(spans) and spans[at][1] < match.end():
+            at += 1
+        if at < len(spans) and spans[at][0] <= match.start():
+            continue
         try:
             ipaddress.ip_address(match.group(0))
         except ValueError:
@@ -3922,7 +3938,7 @@ def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, s
             found.append(("ip", match.group(0)))
     # An IPv6 address and a ``.onion`` name are read by their form, as the
     # report's defanger reads them: neither is under a TLD of the root zone.
-    for match in ipv6_addresses_in(plain):
+    for match in v6:
         value = match.group(0).lower()
         if ("ip", value) not in held:
             held.add(("ip", value))
@@ -3961,11 +3977,14 @@ def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, s
         short = len(labels) == 2 and (len(labels[0]) < 2 or len(value) < 5)
         # Two letters ("ab.ru") are a word as often as a name: read only for a
         # caller that asks the run's network evidence (``evidence_gated_values``).
-        lettered = packages and two_letter_name(value)
-        if len(labels) > 4 or (short and labels[0].isalpha()) or lettered:
+        read = len(labels) > 4 or (short and labels[0].isalpha())
+        lettered = packages and not read and two_letter_name(value)
+        if read or lettered:
             held.add(("domain", value))
             found.append(("domain", value))
-    return found
+        if lettered:
+            only_asked.add(value)
+    return found, only_asked
 
 
 def evidence_gated_values(text: str) -> frozenset[str]:
@@ -3982,10 +4001,9 @@ def evidence_gated_values(text: str) -> frozenset[str]:
 
 def _values_and_gated(text: str) -> tuple[list[tuple[str, str]], frozenset[str]]:
     """``network_values_in(text, packages=True)`` and the names of it that are gated."""
-    plain = {value for _kind, value in network_values_in(text)}
-    values = network_values_in(text, packages=True)
+    values, only_asked = _read_network_values(text, packages=True)
     gated = frozenset(
-        value for _kind, value in values if value not in plain or package_shaped(value)
+        value for _kind, value in values if value in only_asked or package_shaped(value)
     )
     return values, gated
 
@@ -3997,27 +4015,40 @@ def two_letter_name(value: str) -> bool:
 
 
 # An IPv6 address written in text, bare or in brackets ("[2001:db8::1]:443"):
-# hex groups and colons, at least one hex digit among them.
-_IPV6_CANDIDATE = re.compile(r"(?<![\w:.\]])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![\w:])")
+# hex groups and colons, and an embedded IPv4 tail read whole
+# ("::ffff:192.0.2.1"), so no piece of an address is a value of its own.
+_IPV6_CANDIDATE = re.compile(
+    r"(?<![\w:.\]])(?:[0-9A-Fa-f]{0,4}:){2,7}"
+    r"(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9A-Fa-f]{0,4})(?![\w:]|\.\d)"
+)
 # A name under ``.onion``, which the root zone does not delegate: read by its
 # form, any number of labels, in any case.
 ONION_NAME = re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+onion(?![\w-])")
 
 
 def ipv6_addresses_in(text: str) -> list[re.Match[str]]:
-    """Where ``text`` writes an IPv6 address, bare or bracketed: each one ``ipaddress`` parses.
+    """Where ``text`` writes a whole IPv6 address, each one ``ipaddress`` parses.
 
-    A run of colons with no hex digit (``::`` between words) is no address.
+    In brackets (``[2001:db8::1]:443``, a URL's host) any address is one. Bare,
+    an address has at least three groups (an IPv4 tail counts as two) and a
+    digit, and touches no identifier character: ``ab::cd``, ``dead::beef``,
+    ``std::vector`` and ``a::b::c`` are scope names, not addresses.
     """
+    written = str(text or "")
     out: list[re.Match[str]] = []
-    for match in _IPV6_CANDIDATE.finditer(str(text or "")):
-        if not any(char not in ":" for char in match.group(0)):
-            continue
+    for match in _IPV6_CANDIDATE.finditer(written):
+        value = match.group(0)
         try:
-            if ipaddress.ip_address(match.group(0)).version == 6:
-                out.append(match)
+            if ipaddress.ip_address(value).version != 6:
+                continue
         except ValueError:
             continue
+        bracketed = written[match.start() - 1 : match.start()] == "[" and (
+            written[match.end() : match.end() + 1] == "]"
+        )
+        groups = sum(2 if "." in part else 1 for part in value.split(":") if part)
+        if bracketed or (groups >= 3 and any(char.isdigit() for char in value)):
+            out.append(match)
     return out
 
 

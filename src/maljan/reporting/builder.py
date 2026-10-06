@@ -604,13 +604,14 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
 
 
 def ioc_table(report: MalwareReport) -> list[ConsolidatedIOC]:
-    """The IOC table the report prints and ``/reports/{id}/iocs`` serves, from one source.
+    """The IOC table the report's §9 prints and ``/reports/{id}/iocs`` serves, from one source.
 
     Rebuilt from the stored report by the current rule
     (:func:`build_consolidated_iocs`), so a report stored before a row kind or
-    an answer's wording existed reads the same in §9, in a cell's publish state
-    and in the feed. The stored rows that carry a kind are read only when the
-    rebuild fails.
+    an answer's wording existed reads the same in §9 and in the feed's analyst
+    rows. The stored rows that carry a kind are read only when the rebuild
+    fails. A cell's publish state and the composer's checks read the stored
+    table first (``narrative_agent.published_answers``).
     """
     try:
         return build_consolidated_iocs(report)

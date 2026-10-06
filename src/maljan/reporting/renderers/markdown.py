@@ -2602,6 +2602,8 @@ _BARE_AT_HOST = re.compile(r"(?<![\w.+-])@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
 # A "www." host, which a forge links whatever its top-level label, after any
 # character that is no letter or digit ("_", "*", "~", "(", "/" and the rest).
 _WWW_HOST = re.compile(r"(?i)(?<![^\W_])www\.[\w-]+(?:\.[\w-]+)*")
+# An IPv6 address written in text: hex groups and colons, read by ``ipaddress``.
+_IPV6_CANDIDATE = re.compile(r"(?<![\w:.\]])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![\w:])")
 # A mailbox: GFM's name characters (``_`` among them) and a dotted domain.
 _EMAIL_IN_TEXT = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 # The characters that make Markdown of a sample's text: a code span, a link or
@@ -2805,13 +2807,17 @@ def _mark_mailboxes(text: str, marks: dict[int, str]) -> None:
 
 def _mark_hosts(text: str, marks: dict[int, str]) -> None:
     """Every ``www.`` host, ``.onion`` name, host under a real TLD and address: dots, or a colon."""
-    from maljan.pipeline.validation import ONION_NAME, ipv6_addresses_in, network_values_in
+    from maljan.pipeline.validation import ONION_NAME, network_values_in
 
     for pattern in (_WWW_HOST, ONION_NAME):
         for found in pattern.finditer(text):
             _bracket_dots(text, found.start(), found.end(), marks)
-    for found in ipv6_addresses_in(text):
-        _bracket(text, text.index(":", found.start()), marks)
+    # Any run an IPv6 address could be is defanged, a short one too ("fe80::1"):
+    # only its first colon is bracketed, and the publish checks' stricter
+    # reader (``validation.ipv6_addresses_in``) decides which is a value.
+    for found in _IPV6_CANDIDATE.finditer(text):
+        if _is_ipv6(found.group(0)):
+            _bracket(text, text.index(":", found.start()), marks)
     # Read with "@" and backslashes as spaces as well, so a host written after
     # either ("…/\@evil.com") is found; the mailbox itself is read above.
     values = {
@@ -2942,6 +2948,14 @@ _VERSION_BEFORE = re.compile(r"(?i)(?:version\s*[:=]?\s*" + _PIPE + r"\bv)$")
 _VERSION_WORD_REACH = 64
 
 
+def _is_ipv6(text: str) -> bool:
+    """Whether ``text`` is an IPv6 address."""
+    try:
+        return ipaddress.ip_address(text).version == 6
+    except ValueError:
+        return False
+
+
 def _file_name_host(kind: str, value: str) -> bool:
     """Whether a host the reader found is a two-label name under a file-extension TLD."""
     labels = value.lower().split(".")
@@ -3037,11 +3051,12 @@ def _family_voice(report: MalwareReport) -> str:
 def _indicator_rows(report: MalwareReport) -> list[ConsolidatedIOC]:
     """The IOC table's rows, answered by the publish rule on this render.
 
-    Built on request from the stored report by the one reader
-    ``/reports/{id}/iocs`` and the cells' publish state use
-    (``builder.ioc_table``), so an enrichment that ran after the report was
-    stored is reflected and a report stored before the table carried a kind
-    prints in the new shape.
+    Built on request from the stored report by the reader
+    ``/reports/{id}/iocs`` uses for its analyst rows (``builder.ioc_table``),
+    so an enrichment that ran after the report was stored is reflected and a
+    report stored before the table carried a kind prints in the new shape. A
+    cell's publish state reads the stored table first
+    (``narrative_agent.published_answers``).
     """
     from maljan.reporting.builder import ioc_table
 

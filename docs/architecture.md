@@ -1659,8 +1659,9 @@ apart by it. Two virtual addresses a base apart stay two functions. With no
 base, both are kept as written. A claim gives a function its summary by an
 address that is the same function by that rule (with no base, the same address),
 by the function's own hex spelling written as digits alone, or by a name the
-decompiler gave it; a name that is an ordinary word (`entry`, `start`) counts
-only written as code or beside a word such as "function" or "export". No
+decompiler gave it; a name that is an ordinary word (`entry`, `start`, or the
+last label of `sym.entry`) counts only written as code or beside a word such as
+"function" or "export". No
 address is guessed. A visited function with neither an artefact nor a
 summary appears on one "also visited" line, by address. Names other than a
 decompiler's generic `FUN_`, `sub_` or `fcn.` name are kept beside it, such as
@@ -3142,9 +3143,11 @@ is assembled from what the run gathered rather than recomputed beside it:
   under a real top-level domain (the string sweep's list, the root zone's;
   any number of labels, in capitals, `.onion`): everything a viewer could
   link. The host reader the publish checks, the run summary's sentences and
-  a cell's state note use (`validation.network_values_in`) reads an IPv6
-  address, bare or bracketed, and a `.onion` name of any labels by the same
-  form readers. What a viewer can link is decided by form alone, never by a TLD or an
+  a cell's state note use (`validation.network_values_in`) reads a `.onion`
+  name of any labels by the same form reader, and an IPv6 address whole (an
+  IPv4 tail included) when it is bracketed or has at least three groups and a
+  digit, so a scope name such as `dead::beef` is no value; the defanger still
+  brackets any shorter form. What a viewer can link is decided by form alone, never by a TLD or an
   exemption: a scheme before `//`, a scheme a link or autolink syntax opens
   (`<…>`, `[x](…)`, `[r]: …`), a `mailto:`, `xmpp:`, `javascript:`,
   `vbscript:` or `data:` before a target, a `www.` prefix, and a mailbox. Each
