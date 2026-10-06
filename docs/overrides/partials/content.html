@@ -1,0 +1,17 @@
+{#-
+  The theme's content partial with one addition: the name of the section a
+  page belongs to, printed as a small eyebrow above the page title. The home
+  page (the site root) and pages outside any section print none.
+-#}
+{% include "partials/tags.html" %}
+{% include "partials/actions.html" %}
+{% if page.parent and page.parent.title and page.url %}
+  <p class="mj-eyebrow">{{ page.parent.title }}</p>
+{% endif %}
+{% if "\u003ch1" not in page.content %}
+  <h1>{{ page.title | d(config.site_name, true)}}</h1>
+{% endif %}
+{{ page.content }}
+{% include "partials/source-file.html" %}
+{% include "partials/feedback.html" %}
+{% include "partials/comments.html" %}

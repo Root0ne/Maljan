@@ -6,6 +6,10 @@ repo_url: https://github.com/Root0ne/Maljan
 edit_uri: edit/dev/docs/
 
 docs_dir: docs
+# Theme overrides live beside the pages so a change to them runs the docs
+# workflow; they are templates, not pages.
+exclude_docs: |
+  /overrides/
 
 nav:
   - Get started:
@@ -59,6 +63,7 @@ nav:
 
 theme:
   name: material
+  custom_dir: docs/overrides
   language: en
   logo: assets/logo.svg
   favicon: assets/logo.svg
@@ -67,8 +72,8 @@ theme:
     admonition:
       warning: material/shield-alert-outline
   font:
-    text: Inter
-    code: JetBrains Mono
+    text: Geist
+    code: Geist Mono
   palette:
     # Dark first. Flat colours only: the custom swatches are defined in
     # assets/extra.css, and nothing on the site eases between colours.
@@ -88,8 +93,6 @@ theme:
     - navigation.instant
     - navigation.instant.progress
     - navigation.tracking
-    - navigation.tabs
-    - navigation.tabs.sticky
     - navigation.sections
     - navigation.indexes
     - navigation.top
@@ -112,6 +115,7 @@ plugins:
 markdown_extensions:
   - toc:
       permalink: true
+      title: On this page
   - tables
   - fenced_code
   - admonition
