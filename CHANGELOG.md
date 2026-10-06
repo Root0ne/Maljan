@@ -1057,6 +1057,14 @@ change landed on `main`.
 
 ### Changed
 
+- **Captures are read by Maljan's own pcap/pcapng reader
+  (`maljan.analysis.capture_reader`) instead of scapy**, a GPL-2.0 runtime
+  dependency the dependency review refuses. Every answer the network tools and
+  the capture summary give on the fixture corpus is unchanged
+  (`tests/unit/analysis/test_pcap_reader_parity.py`), with two corrections: a
+  pcapng file cut inside a block yields the packets before the cut instead of
+  no capture, and an IPv4 header claiming a length below 20 bytes no longer
+  has a TCP header read out of its own bytes.
 - **The documentation site is built with Fumadocs.** The pages are MDX under
   `apps/docs/content/docs/` and the images under `apps/docs/public/assets/`;
   `mkdocs.yml`, the theme overrides and the `docs` dependency group are gone,
