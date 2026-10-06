@@ -32,10 +32,8 @@ from maljan.pipeline.validation import (
     _DIGIT_RUN,
     _GENERIC_FUNCTION_NAME,
     _NAME_ARGUMENTS,
-    DecompiledFunction,
     _address_value,
     _addresses_written,
-    _named_by,
     decompiled_functions,
     image_bases_in,
 )
@@ -477,16 +475,25 @@ def _claim_names(text: str, entry: MapEntry, bases: Sequence[int]) -> bool:
     for name in entry.names:
         if _GENERIC_FUNCTION_NAME.fullmatch(name):
             continue
-        if len(name) < 3:
+        # A dotted name (``sym.entry``, ``fcn.main``) written whole names it;
+        # its last label is read by the same rule as a plain name.
+        if "." in name and _written_bare(text, name):
+            return True
+        last = name.rsplit(".", 1)[-1]
+        if len(last) < 3 or _GENERIC_FUNCTION_NAME.fullmatch(last):
             continue
-        if _WORD_NAME.fullmatch(name):
-            if _named_as_a_function(text, name):
+        if _WORD_NAME.fullmatch(last):
+            if _named_as_a_function(text, last):
                 return True
             continue
-        named = DecompiledFunction(address=None, names=(name,), entries=())
-        if _named_by(text, named, ()):
+        if _written_bare(text, last):
             return True
     return False
+
+
+def _written_bare(text: str, spelling: str) -> bool:
+    """Whether ``text`` writes ``spelling`` as a whole word, as the decompiled check reads a name."""
+    return re.search(r"(?<![\w.])" + re.escape(spelling) + r"(?![\w])", text) is not None
 
 
 # A function name spelled like a word of prose: letters only, at most the first

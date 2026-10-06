@@ -479,6 +479,27 @@ class TestANameThatIsAWord:
             == "The entry export writes the Run key."
         )
 
+    def test_a_dotted_decompiler_name_s_last_word_takes_the_same_rule(self) -> None:
+        for name, said, cued in (
+            ("sym.entry", "Persistence via a Run key entry.", "The sym.entry routine runs first."),
+            ("fcn.main", "The main payload is decrypted.", "The main function decrypts it."),
+            ("sub.start", "At start the loader sleeps.", "`start` sleeps first."),
+        ):
+            own = [_decompiled("ev_0001", "0x1360bc03c7c", f"void {name}(void)\n{{\n}}\n")]
+            for claim, summary in ((said, ""), (cued, cued)):
+                found = build_function_map(own, None, [_claim(claim)], (BASE,))
+                entry = found.visited[0]
+                assert name in entry.names, (name, entry.names)
+                assert entry.summary == summary, (name, claim)
+
+    def test_a_dotted_name_with_a_distinctive_last_label_names_it_alone(self) -> None:
+        own = [_decompiled("ev_0001", "0x1360bc03c7c", "void sym.DecryptConfig(void)\n{\n}\n")]
+        claim = _claim("DecryptConfig decrypts the configuration.")
+
+        found = build_function_map(own, None, [claim], (BASE,))
+
+        assert found.visited[0].summary == "DecryptConfig decrypts the configuration."
+
     def test_a_name_that_is_no_word_still_names_it_alone(self) -> None:
         own = [_decompiled("ev_0001", "0x1360bc03c7c", "void DecryptConfig(void)\n{\n}\n")]
         claim = _claim("DecryptConfig decrypts the configuration.")
