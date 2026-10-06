@@ -1,11 +1,11 @@
 /*
- * Flat colours everywhere: no gradient background, and no state change that
- * eases from one colour to another. The theme ships a handful of each — a
- * fade toward the page background on the tabbed-content scroll arrows and on
- * the extended-tooltip preview, and timed colour and background transitions
- * on links, tabs and buttons — and this file turns them off rather than
- * leaving them for the day a feature that uses them gets turned on. A hover
- * state is a state: it arrives when the pointer does.
+ * No state change eases from one colour to another. The theme ships timed
+ * colour and background transitions on links, tabs and buttons, and a fade
+ * toward the page background on the tabbed-content scroll arrows and on the
+ * extended-tooltip preview; this file turns them off rather than leaving them
+ * for the day a feature that uses them gets turned on. A hover state is a
+ * state: it arrives when the pointer does. The one fade on the site is the
+ * page grid's, which thins out from the top of the page.
  */
 
 * {
@@ -20,75 +20,200 @@
 }
 
 /*
- * Palette. The two schemes take their colours from the logo: a deep blue for
- * links and marks, a sky blue for the dark scheme where deep blue would not
- * read, and the logo's amber for the small brand marks. The header shares the
- * page background and is separated from it by a hairline, not by colour.
+ * Palette. Every colour on the site is defined here, once per scheme, from
+ * two sources only: the logo's four colours (deep blue, sky, amber, yellow)
+ * and neutral greys. The neutrals are slate greys: white, slate 50, 200, 300,
+ * 500, 600 and 900 in light mode; in dark mode slate 200, 400, 700, 800 and
+ * 900, a mid grey between slate 400 and 500 for faint text, and navy-black
+ * surfaces darker than slate 900. Slate carries a slight blue cast, which
+ * sits with the logo. Every other shade is mixed from those with
+ * color-mix(): tints are a logo colour over transparent, and the darker amber
+ * light mode needs for readable icons and code is the logo's amber mixed into
+ * the text colour. Light mode leads with the deep blue; dark mode leads with
+ * sky on the navy-black surface, where deep blue would not read. Text meets
+ * 4.5:1 against the surfaces it sits on, icons 3:1. Everything below refers
+ * to these variables and to nothing else.
  */
 
-:root {
-  --mj-blue-700: #1d4ed8;
-  --mj-blue-600: #2563eb;
-  --mj-sky-300: #7dd3fc;
-  --mj-sky-400: #38bdf8;
-  --mj-amber-500: #f59e0b;
-  --mj-radius: 0.6rem;
-}
-
 [data-md-color-scheme="default"] {
-  --md-primary-fg-color: #ffffff;
-  --md-primary-fg-color--light: #ffffff;
-  --md-primary-fg-color--dark: #f1f5f9;
-  --md-primary-bg-color: #0f172a;
-  --md-primary-bg-color--light: #475569;
-  --md-accent-fg-color: var(--mj-blue-600);
-  --md-accent-fg-color--transparent: rgba(37, 99, 235, 0.08);
-  --md-default-bg-color: #ffffff;
-  --md-default-fg-color: #0f172a;
-  --md-default-fg-color--light: #475569;
-  --md-default-fg-color--lighter: #94a3b8;
-  --md-default-fg-color--lightest: #e2e8f0;
-  --md-code-bg-color: #f6f8fa;
-  --md-typeset-a-color: var(--mj-blue-700);
+  --mj-logo-blue: #1d4ed8;
+  --mj-logo-sky: #38bdf8;
+  --mj-logo-amber: #f59e0b;
+  --mj-logo-yellow: #fde047;
+  --mj-bg: #ffffff;
+  --mj-surface: #ffffff;
+  --mj-surface-sunken: #f8fafc;
+  --mj-sidebar-bg: #f8fafc;
+  --mj-code-bg: #f8fafc;
   --mj-border: #e2e8f0;
-  --mj-card-bg: #ffffff;
-  --mj-card-hover-border: var(--mj-blue-600);
-  --mj-hero-bg: #f8fafc;
-  --mj-mark: var(--mj-amber-500);
-  --mj-button-bg: var(--mj-blue-700);
-  --mj-button-fg: #ffffff;
-  --mj-search-bg: #f1f5f9;
+  --mj-border-strong: #cbd5e1;
+  --mj-fg: #0f172a;
+  --mj-fg-muted: #475569;
+  --mj-fg-faint: #64748b;
+  --mj-amber-deep: color-mix(in srgb, var(--mj-logo-amber) 55%, var(--mj-fg));
+  --mj-accent: var(--mj-logo-blue);
+  --mj-accent-fg: var(--mj-bg);
+  --mj-accent-tint: color-mix(in srgb, var(--mj-logo-blue) 6%, transparent);
+  --mj-accent-ring: color-mix(in srgb, var(--mj-logo-blue) 28%, transparent);
+  --mj-highlight: var(--mj-amber-deep);
+  --mj-warning: var(--mj-amber-deep);
+  --mj-warning-tint: color-mix(in srgb, var(--mj-logo-amber) 8%, transparent);
+  --mj-warning-ring: color-mix(in srgb, var(--mj-logo-amber) 45%, transparent);
+  --mj-danger: var(--mj-amber-deep);
+  --mj-danger-tint: color-mix(in srgb, var(--mj-logo-amber) 14%, transparent);
+  --mj-danger-ring: color-mix(in srgb, var(--mj-logo-amber) 70%, transparent);
+  --mj-mark-bg: color-mix(in srgb, var(--mj-logo-yellow) 45%, transparent);
+  --mj-grid-line: color-mix(in srgb, var(--mj-fg) 6%, transparent);
+  --mj-hl-keyword: var(--mj-logo-blue);
+  --mj-hl-string: var(--mj-amber-deep);
+  --mj-hl-number: var(--mj-amber-deep);
+  --mj-hl-name: var(--mj-fg);
+  --mj-hl-comment: var(--mj-fg-faint);
+  --mj-hl-operator: var(--mj-fg-muted);
 }
 
 [data-md-color-scheme="slate"] {
   --md-hue: 222;
-  --md-primary-fg-color: #0b1120;
-  --md-primary-fg-color--light: #0b1120;
-  --md-primary-fg-color--dark: #0b1120;
-  --md-primary-bg-color: #e2e8f0;
-  --md-primary-bg-color--light: #94a3b8;
-  --md-accent-fg-color: var(--mj-sky-300);
-  --md-accent-fg-color--transparent: rgba(125, 211, 252, 0.1);
-  --md-default-bg-color: #0b1120;
-  --md-default-fg-color: #e2e8f0;
-  --md-default-fg-color--light: #a5b4c8;
-  --md-default-fg-color--lighter: #64748b;
-  --md-default-fg-color--lightest: #1e293b;
-  --md-code-bg-color: #111a2e;
-  --md-typeset-a-color: var(--mj-sky-400);
+  --mj-logo-blue: #1d4ed8;
+  --mj-logo-sky: #38bdf8;
+  --mj-logo-amber: #f59e0b;
+  --mj-logo-yellow: #fde047;
+  --mj-bg: #0b1120;
+  --mj-surface: #0f172a;
+  --mj-surface-sunken: #0d1526;
+  --mj-sidebar-bg: #0e1628;
+  --mj-code-bg: #0d1526;
   --mj-border: #1e293b;
-  --mj-card-bg: #0f172a;
-  --mj-card-hover-border: var(--mj-sky-400);
-  --mj-hero-bg: #0f172a;
-  --mj-mark: var(--mj-amber-500);
-  --mj-button-bg: var(--mj-sky-400);
-  --mj-button-fg: #0b1120;
-  --mj-search-bg: #111a2e;
+  --mj-border-strong: #334155;
+  --mj-fg: #e2e8f0;
+  --mj-fg-muted: #94a3b8;
+  --mj-fg-faint: #7c8ca2;
+  --mj-accent: var(--mj-logo-sky);
+  --mj-accent-fg: var(--mj-bg);
+  --mj-accent-tint: color-mix(in srgb, var(--mj-logo-sky) 8%, transparent);
+  --mj-accent-ring: color-mix(in srgb, var(--mj-logo-sky) 32%, transparent);
+  --mj-highlight: var(--mj-logo-yellow);
+  --mj-warning: var(--mj-logo-yellow);
+  --mj-warning-tint: color-mix(in srgb, var(--mj-logo-yellow) 6%, transparent);
+  --mj-warning-ring: color-mix(in srgb, var(--mj-logo-yellow) 35%, transparent);
+  --mj-danger: var(--mj-logo-amber);
+  --mj-danger-tint: color-mix(in srgb, var(--mj-logo-amber) 10%, transparent);
+  --mj-danger-ring: color-mix(in srgb, var(--mj-logo-amber) 50%, transparent);
+  --mj-mark-bg: color-mix(in srgb, var(--mj-logo-yellow) 22%, transparent);
+  --mj-grid-line: color-mix(in srgb, var(--mj-fg-muted) 7.5%, transparent);
+  --mj-hl-keyword: var(--mj-logo-sky);
+  --mj-hl-string: var(--mj-logo-amber);
+  --mj-hl-number: var(--mj-logo-yellow);
+  --mj-hl-name: var(--mj-fg);
+  --mj-hl-comment: var(--mj-fg-faint);
+  --mj-hl-operator: var(--mj-fg-muted);
 }
 
-/* Header and tabs: the page background with a hairline under each. */
+/*
+ * Keyboard focus: one visible ring, in the accent colour, for every control
+ * the layout adds or restyles, so focus never depends on the browser's
+ * default outline.
+ */
+
+.md-nav__link:focus-visible,
+.md-footer__link:focus-visible,
+.md-typeset .md-button:focus-visible,
+.md-typeset .md-code__button:focus-visible,
+.mj-tabs .md-tabs__link:focus-visible,
+.mj-theme .md-option:focus-visible + .mj-theme__option,
+.mj-theme .mj-theme__option:focus-visible {
+  outline: 2px solid var(--mj-accent);
+  outline-offset: 2px;
+}
+
+/* The theme's own variables, mapped onto the palette for both schemes. */
+
+[data-md-color-scheme] {
+  --mj-radius: 0.6rem;
+  --mj-radius-lg: 0.9rem;
+  --mj-grid-size: 2.4rem;
+  --mj-grid-fade: 36rem;
+  --mj-sidebar-w: 15rem;
+  --mj-top-h: 6.6rem;
+  --mj-strip-h: 2.6rem;
+  --md-primary-fg-color: var(--mj-bg);
+  --md-primary-fg-color--light: var(--mj-bg);
+  --md-primary-fg-color--dark: var(--mj-bg);
+  --md-primary-bg-color: var(--mj-fg);
+  --md-primary-bg-color--light: var(--mj-fg-muted);
+  --md-accent-fg-color: var(--mj-accent);
+  --md-accent-fg-color--transparent: var(--mj-accent-tint);
+  --md-accent-bg-color: var(--mj-accent-fg);
+  --md-default-bg-color: var(--mj-bg);
+  --md-default-fg-color: var(--mj-fg);
+  --md-default-fg-color--light: var(--mj-fg-muted);
+  --md-default-fg-color--lighter: var(--mj-fg-faint);
+  --md-default-fg-color--lightest: var(--mj-border);
+  --md-code-bg-color: var(--mj-code-bg);
+  --md-code-fg-color: var(--mj-fg);
+  --md-code-hl-color: var(--mj-accent);
+  --md-code-hl-color--light: var(--mj-accent-tint);
+  --md-code-hl-keyword-color: var(--mj-hl-keyword);
+  --md-code-hl-constant-color: var(--mj-hl-keyword);
+  --md-code-hl-special-color: var(--mj-hl-number);
+  --md-code-hl-number-color: var(--mj-hl-number);
+  --md-code-hl-string-color: var(--mj-hl-string);
+  --md-code-hl-function-color: var(--mj-hl-keyword);
+  --md-code-hl-name-color: var(--mj-hl-name);
+  --md-code-hl-variable-color: var(--mj-hl-name);
+  --md-code-hl-generic-color: var(--mj-fg-muted);
+  --md-code-hl-comment-color: var(--mj-hl-comment);
+  --md-code-hl-operator-color: var(--mj-hl-operator);
+  --md-code-hl-punctuation-color: var(--mj-hl-operator);
+  --md-typeset-a-color: var(--mj-accent);
+  --md-typeset-mark-color: var(--mj-mark-bg);
+  --md-typeset-table-color: var(--mj-border);
+  --md-typeset-table-color--light: var(--mj-accent-tint);
+  --md-footer-bg-color: var(--mj-bg);
+  --md-footer-bg-color--dark: var(--mj-bg);
+  --md-footer-fg-color: var(--mj-fg);
+  --md-footer-fg-color--light: var(--mj-fg-muted);
+  --md-footer-fg-color--lighter: var(--mj-fg-faint);
+  --md-shadow-z1: none;
+  --md-shadow-z2: none;
+  --md-shadow-z3: none;
+}
+
+/*
+ * The page background: a faint grid of hairlines, fixed to the viewport, that
+ * fades out from the top of the page. The fade is a mask, so it reads only
+ * the mask's opacity, never its colour.
+ */
+
+body {
+  background-color: var(--mj-bg);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--mj-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--mj-grid-line) 1px, transparent 1px);
+  background-size: var(--mj-grid-size) var(--mj-grid-size);
+  -webkit-mask-image: linear-gradient(to bottom, black, transparent var(--mj-grid-fade));
+  mask-image: linear-gradient(to bottom, black, transparent var(--mj-grid-fade));
+}
+
+.md-container,
+.md-main {
+  background: transparent;
+}
+
+/* Header: a compact bar on narrow screens, the top of the left column on
+   wide ones. */
 
 .md-header {
+  background-color: var(--mj-bg);
+  color: var(--mj-fg);
   border-bottom: 1px solid var(--mj-border);
   box-shadow: none;
 }
@@ -98,18 +223,26 @@
   box-shadow: none;
 }
 
-.md-tabs {
-  border-bottom: 1px solid var(--mj-border);
+.md-header__title {
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
-.md-tabs__link {
-  font-weight: 500;
-  opacity: 0.75;
+.mj-site-name {
+  display: none;
 }
 
-.md-tabs__item--active .md-tabs__link,
-.md-tabs__link:hover {
-  opacity: 1;
+/* The compact bar keeps the logo beside the menu button. */
+@media screen and (max-width: 76.234375em) {
+  .md-header__button.md-logo {
+    display: inline-block;
+    margin: 0.2rem 0;
+    padding: 0.4rem 0.2rem;
+  }
+}
+
+.md-header .mj-theme {
+  display: none;
 }
 
 .md-search__form {
@@ -120,100 +253,702 @@
 @media screen and (min-width: 60em) {
   .md-search__form,
   .md-search__form:hover {
-    background-color: var(--mj-search-bg);
+    background-color: var(--mj-surface-sunken);
   }
 
   .md-search__input,
   .md-search__input::placeholder,
   .md-search__input + .md-search__icon {
-    color: var(--md-default-fg-color--light);
+    color: var(--mj-fg-muted);
+  }
+
+  .md-search__form:hover {
+    border-color: var(--mj-border-strong);
+  }
+}
+
+/* The appearance switch: a small pill of three choices, the current one
+   raised. */
+
+.mj-theme {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.12rem;
+  border: 1px solid var(--mj-border);
+  border-radius: 999px;
+  background-color: var(--mj-surface-sunken);
+}
+
+.mj-theme .mj-theme__option,
+.mj-theme .mj-theme__option[hidden] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: 999px;
+  color: var(--mj-fg-faint);
+  cursor: pointer;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.mj-theme .mj-theme__option svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  fill: currentColor;
+}
+
+.mj-theme .mj-theme__option:hover {
+  color: var(--mj-fg);
+}
+
+body[data-md-color-media="(prefers-color-scheme)"] .mj-theme__option[data-mj-media="(prefers-color-scheme)"],
+body[data-md-color-media="(prefers-color-scheme: light)"] .mj-theme__option[data-mj-media="(prefers-color-scheme: light)"],
+body[data-md-color-media="(prefers-color-scheme: dark)"] .mj-theme__option[data-mj-media="(prefers-color-scheme: dark)"] {
+  color: var(--mj-accent);
+  background-color: var(--mj-surface);
+  box-shadow: 0 0 0 1px var(--mj-border);
+}
+
+
+/* Text for assistive technology only. */
+
+.mj-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The drawer's top block (narrow screens): the switch and a search box. */
+
+.mj-drawer-top {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.8rem 0.8rem 0.4rem;
+}
+
+.mj-search-box {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--mj-border);
+  border-radius: var(--mj-radius);
+  background-color: var(--mj-surface-sunken);
+  color: var(--mj-fg-muted);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.mj-search-box svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  fill: currentColor;
+}
+
+/* Search opened from the drawer takes the screen; the drawer comes back
+   when search closes. */
+@media screen and (max-width: 76.234375em) {
+  [data-md-toggle="search"]:checked ~ .md-overlay,
+  [data-md-toggle="search"]:checked ~ .md-container .md-sidebar--primary {
+    display: none;
+  }
+}
+
+/* The repository row at the head of the navigation. */
+
+.mj-nav-anchor > .md-nav__link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mj-nav-anchor__icon svg {
+  width: 0.85rem;
+  height: 0.85rem;
+  fill: currentColor;
+}
+
+/* The section strip over the text column (wide screens only). */
+
+.mj-tabs {
+  display: none;
+}
+
+/*
+ * Wide layout: a left column on a slightly distinct surface behind a
+ * hairline, holding the site name, the appearance switch, the search box and
+ * the navigation; the section strip over the text column; the text column at
+ * a reading width; the table of contents to its right.
+ */
+
+@media screen and (min-width: 76.25em) {
+  .md-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: var(--mj-sidebar-w);
+    height: var(--mj-top-h);
+    background-color: var(--mj-sidebar-bg);
+    border-bottom: 0;
+    border-right: 1px solid var(--mj-border);
+    z-index: 5;
+  }
+
+  .md-header__inner.md-grid {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+      "logo name theme"
+      "search search search";
+    align-items: center;
+    gap: 0.9rem 0.4rem;
+    max-width: none;
+    height: auto;
+    margin: 0;
+    padding: 1.2rem 0.8rem 0.8rem 1rem;
+    box-sizing: border-box;
+  }
+
+  .md-header__inner > label[for="__drawer"],
+  .md-header__inner > label[for="__search"],
+  .md-header__title {
+    display: none;
+  }
+
+  .md-header__button.md-logo {
+    grid-area: logo;
+    margin: 0;
+    padding: 0;
+  }
+
+  .md-header__button.md-logo img,
+  .md-header__button.md-logo svg {
+    height: 1.3rem;
+  }
+
+  .mj-site-name {
+    grid-area: name;
+    display: block;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--mj-fg);
+  }
+
+  .md-header .mj-theme {
+    grid-area: theme;
+    display: inline-flex;
+  }
+
+  .md-header .md-search {
+    grid-area: search;
+    padding: 0;
+  }
+
+  .md-header .md-search__inner {
+    float: none;
+    width: 100%;
+    padding: 0;
+  }
+
+  .md-header .md-search__form {
+    height: 1.9rem;
+  }
+
+  .md-header .md-search__input,
+  .md-header .md-search__suggest {
+    font-size: 0.7rem;
+  }
+
+  /* The key that opens search, shown as a hint at the end of the box. */
+  .md-header .md-search__form::after {
+    content: "/";
+    position: absolute;
+    top: 50%;
+    right: 0.6rem;
+    transform: translateY(-50%);
+    padding: 0 0.35rem;
+    border: 1px solid var(--mj-border);
+    border-radius: 0.3rem;
+    font-family: var(--md-code-font-family);
+    font-size: 0.6rem;
+    line-height: 1.5;
+    color: var(--mj-fg-faint);
+    pointer-events: none;
+  }
+
+  [data-md-toggle="search"]:checked ~ .md-header .md-search__form::after {
+    display: none;
+  }
+
+  /* Open, the search box widens over the page and the rest dims. */
+  [data-md-toggle="search"]:checked ~ .md-header .md-search__inner {
+    width: 34rem;
+  }
+
+  [data-md-toggle="search"]:checked ~ .md-header .md-search__overlay {
+    position: fixed;
+    inset: 0;
+    width: auto;
+    height: auto;
+    border-radius: 0;
+    transform: none;
+  }
+
+  .md-container {
+    margin-left: var(--mj-sidebar-w);
+  }
+
+  .mj-tabs {
+    display: block;
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    height: var(--mj-strip-h);
+    padding: 0 2rem;
+    background-color: var(--mj-bg);
+    border-bottom: 1px solid var(--mj-border);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .mj-tabs .md-tabs__list {
+    display: flex;
+    gap: 1.4rem;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    white-space: nowrap;
+  }
+
+  .mj-tabs .md-tabs__item {
+    display: flex;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  .mj-tabs .md-tabs__link {
+    display: flex;
+    align-items: center;
+    margin: 0;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--mj-fg-muted);
+    opacity: 1;
+    border-bottom: 2px solid transparent;
+  }
+
+  .mj-tabs .md-tabs__link:hover {
+    color: var(--mj-fg);
+  }
+
+  .mj-tabs .md-tabs__item--active .md-tabs__link {
+    color: var(--mj-fg);
+    font-weight: 600;
+    border-bottom-color: var(--mj-accent);
+  }
+
+  .md-main__inner.md-grid {
+    max-width: 72rem;
+    margin: 0 auto;
+  }
+
+  .md-sidebar--primary {
+    position: fixed;
+    top: var(--mj-top-h);
+    bottom: 0;
+    left: 0;
+    width: var(--mj-sidebar-w);
+    height: auto;
+    padding: 0;
+    background-color: var(--mj-sidebar-bg);
+    border-right: 1px solid var(--mj-border);
+    z-index: 3;
+  }
+
+  .md-sidebar--primary .md-sidebar__scrollwrap {
+    height: calc(100vh - var(--mj-top-h)) !important;
+    margin: 0;
+    overflow-y: auto;
+  }
+
+  .md-sidebar--primary .md-sidebar__inner {
+    padding-right: 0;
+  }
+
+  .md-sidebar--primary .md-nav--primary {
+    width: auto;
+    padding: 0.8rem 0.8rem 2rem 0.4rem;
+  }
+
+  .md-nav--primary .md-nav__item--section > .md-nav > .md-nav__list {
+    padding-left: 0;
+  }
+
+  .md-nav--primary > .md-nav__title,
+  .mj-drawer-top {
+    display: none;
+  }
+
+  .md-sidebar--secondary {
+    top: var(--mj-strip-h);
+    padding-top: 1.6rem;
+  }
+
+  .md-content {
+    max-width: 42rem;
+    margin: 0 auto;
+  }
+}
+
+/* Left navigation: bold group labels over plain lists. */
+
+.md-nav {
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.md-nav__link {
+  color: var(--mj-fg-muted);
+}
+
+.md-nav__link:hover,
+.md-nav__link:focus {
+  color: var(--mj-fg);
+}
+
+.md-nav__title,
+.md-nav__item--section > .md-nav__link,
+.md-nav__item--section > .md-nav__container > .md-nav__link {
+  font-weight: 600;
+  color: var(--mj-fg);
+}
+
+@media screen and (min-width: 76.25em) {
+  .md-nav--primary > .md-nav__list > .md-nav__item {
+    margin-bottom: 1.1rem;
+  }
+
+  .md-nav--primary .md-nav__item--section > .md-nav__link {
+    font-size: 0.72rem;
+    margin-bottom: 0.4rem;
+    color: var(--mj-fg);
+  }
+
+  /* The items of a group hang from one hairline; the current page lays an
+     accent bar over that line and takes the accent colour. */
+  .md-nav--primary .md-nav__item--section > .md-nav {
+    margin-left: 0.6rem;
+    border-left: 1px solid var(--mj-border);
+  }
+
+  .md-nav--primary .md-nav__item--section > .md-nav > .md-nav__list > .md-nav__item {
+    padding: 0;
+  }
+
+  .md-nav--primary .md-nav__item--section > .md-nav .md-nav__link {
+    margin: 0 0 0 -1px;
+    padding: 0.3rem 0.6rem 0.3rem 0.7rem;
+    border-left: 2px solid transparent;
+  }
+
+  .md-nav--primary .md-nav__item--section > .md-nav .md-nav__link:hover {
+    border-left-color: var(--mj-border-strong);
+  }
+
+  .md-nav--primary .md-nav__item--section > .md-nav .md-nav__link--active {
+    color: var(--mj-accent);
+    font-weight: 600;
+    border-left-color: var(--mj-accent);
+    background-color: var(--mj-accent-tint);
+    border-radius: 0 0.4rem 0.4rem 0;
+  }
+}
+
+.md-nav__link--active,
+.md-nav__item .md-nav__link--active code {
+  color: var(--mj-accent);
+}
+
+/* Right column: "On this page", the current section in the accent colour. */
+
+@media screen and (min-width: 76.25em) {
+  .md-sidebar--secondary .md-nav--secondary .md-nav__title {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--mj-fg);
+    background: transparent;
+    box-shadow: none;
+    padding-left: 0.6rem;
+  }
+
+  .md-sidebar--secondary .md-nav.md-nav--secondary > .md-nav__list {
+    border-left: 1px solid var(--mj-border);
+    margin-left: 0.6rem;
+    padding-left: 0;
+  }
+
+  .md-sidebar--secondary .md-nav--secondary .md-nav__link {
+    margin: 0 0 0 -1px;
+    padding: 0.3rem 0 0.3rem 0.8rem;
+    border-left: 2px solid transparent;
+  }
+
+  .md-sidebar--secondary .md-nav--secondary .md-nav__link--active {
+    color: var(--mj-accent);
+    font-weight: 500;
+    border-left-color: var(--mj-accent);
   }
 }
 
 /* Typography and spacing. */
 
 .md-typeset {
-  font-size: 0.78rem;
-  line-height: 1.7;
+  font-size: 0.8rem;
+  line-height: 1.75;
 }
 
-.md-typeset h1 {
+.md-typeset .mj-eyebrow {
+  margin: 0 0 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+  color: var(--mj-accent);
+}
+
+.md-content .md-typeset h1 {
+  font-size: 1.9rem;
   font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--md-default-fg-color);
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  margin: 0 0 0.8rem;
+  color: var(--mj-fg);
+}
+
+/* The first paragraph under a page title reads as its lead; search results,
+   which also pair a title with a paragraph, keep their own sizes. */
+.md-content .md-typeset h1 + p {
+  font-size: 0.88rem;
+  line-height: 1.7;
+  color: var(--mj-fg-muted);
+  margin-bottom: 1.6rem;
 }
 
 .md-typeset h2 {
+  font-size: 1.2rem;
   font-weight: 650;
-  letter-spacing: -0.01em;
-  margin-top: 2.2em;
+  letter-spacing: -0.02em;
+  margin-top: 2.4em;
+  color: var(--mj-fg);
 }
 
 .md-typeset h3 {
+  font-size: 0.95rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--mj-fg);
 }
+
+.md-typeset a {
+  text-underline-offset: 0.2em;
+}
+
+.md-typeset a:hover {
+  text-decoration: underline;
+}
+
+.md-typeset .headerlink {
+  color: var(--mj-fg-faint);
+}
+
+.md-typeset :is(.headerlink):hover,
+.md-typeset :target > .headerlink {
+  color: var(--mj-accent);
+}
+
+.md-typeset mark {
+  border-radius: 0.2rem;
+}
+
+/* Code: rounded, bordered blocks with the copy button in the corner. */
 
 .md-typeset code {
   border-radius: 0.3rem;
-  font-size: 0.86em;
+  font-size: 0.85em;
+  border: 1px solid var(--mj-border);
+  padding: 0.05em 0.35em;
+}
+
+.md-typeset pre {
+  border: 1px solid var(--mj-border);
+  border-radius: var(--mj-radius);
+  background-color: var(--mj-code-bg);
+  overflow: hidden;
 }
 
 .md-typeset pre > code {
+  border: 0;
   border-radius: var(--mj-radius);
+  padding: 0.9rem 1rem;
+  line-height: 1.7;
 }
 
+.md-typeset .highlight span.filename {
+  border: 1px solid var(--mj-border);
+  border-bottom: 0;
+  border-radius: var(--mj-radius) var(--mj-radius) 0 0;
+  background-color: var(--mj-surface-sunken);
+  font-weight: 500;
+}
+
+.md-typeset .highlight span.filename + pre {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.md-typeset .md-code__button {
+  color: var(--mj-fg-faint);
+  border-radius: 0.4rem;
+}
+
+.md-typeset .md-code__button:hover,
+.md-typeset .md-code__button:focus,
+.md-typeset .md-code__button--active {
+  color: var(--mj-accent);
+}
+
+/* Tables: a bordered, rounded frame with hairline rows. */
+
 .md-typeset table:not([class]) {
+  max-width: 100%;
   border: 1px solid var(--mj-border);
   border-radius: var(--mj-radius);
-  font-size: 0.72rem;
+  font-size: 0.74rem;
+  background-color: var(--mj-surface);
 }
 
 .md-typeset table:not([class]) th {
   font-weight: 600;
+  min-width: 3rem;
+  background-color: var(--mj-surface-sunken);
+  color: var(--mj-fg);
 }
 
 /* Tighter cells, so a table of short columns fits the content width rather
    than scrolling under its own border. */
-.md-typeset table:not([class]) {
-  max-width: 100%;
-}
-
 .md-typeset table:not([class]) th,
 .md-typeset table:not([class]) td {
   padding: 0.6em 0.8em;
 }
 
-.md-typeset table:not([class]) th {
-  min-width: 3rem;
+.md-typeset table:not([class]) td {
+  border-top-color: var(--mj-border);
 }
 
-.md-nav__title,
-.md-nav__item--section > .md-nav__link {
-  font-weight: 600;
-}
+/*
+ * Callouts: a rounded, bordered box tinted by its kind. Notes and tips take
+ * the accent colour; warnings and dangers take the logo's yellow and amber.
+ */
 
 .md-typeset .admonition,
 .md-typeset details {
+  --mj-callout: var(--mj-accent);
+  --mj-callout-tint: var(--mj-accent-tint);
+  --mj-callout-ring: var(--mj-accent-ring);
+  border: 1px solid var(--mj-callout-ring);
   border-radius: var(--mj-radius);
-  border-width: 1px;
+  background-color: var(--mj-callout-tint);
   box-shadow: none;
-  font-size: 0.74rem;
+  font-size: 0.76rem;
+  padding: 0 1rem;
+  color: var(--mj-fg);
+}
+
+.md-typeset .admonition:focus-within,
+.md-typeset details:focus-within {
+  box-shadow: 0 0 0 0.1rem var(--mj-callout-ring);
+}
+
+.md-typeset :is(.warning, .caution, .attention) {
+  --mj-callout: var(--mj-warning);
+  --mj-callout-tint: var(--mj-warning-tint);
+  --mj-callout-ring: var(--mj-warning-ring);
+}
+
+.md-typeset :is(.danger, .error, .failure, .fail, .missing, .bug) {
+  --mj-callout: var(--mj-danger);
+  --mj-callout-tint: var(--mj-danger-tint);
+  --mj-callout-ring: var(--mj-danger-ring);
+}
+
+.md-typeset .admonition.admonition,
+.md-typeset details.admonition,
+.md-typeset details {
+  border-color: var(--mj-callout-ring);
+}
+
+.md-typeset .admonition > .admonition-title,
+.md-typeset details > summary {
+  background-color: transparent;
+  border: 0;
+  margin: 0 -1rem;
+  padding: 0.7rem 1rem 0 2.6rem;
+  font-weight: 600;
+  color: var(--mj-fg);
+}
+
+.md-typeset .admonition > .admonition-title::before,
+.md-typeset details > summary::before {
+  background-color: var(--mj-callout);
+  left: 1rem;
+  top: 0.8rem;
+}
+
+.md-typeset details > summary::after {
+  color: var(--mj-callout);
+  top: 0.8rem;
+}
+
+.md-typeset .admonition > :last-child,
+.md-typeset details > :last-child {
+  margin-bottom: 0.9rem;
+}
+
+.md-typeset .admonition > .admonition-title + *,
+.md-typeset details > summary + * {
+  margin-top: 0.4rem;
 }
 
 /* Cards. */
 
 .md-typeset .grid.cards > ul > li,
 .md-typeset .grid > .card {
-  background: var(--mj-card-bg);
+  background: var(--mj-surface);
   border: 1px solid var(--mj-border);
-  border-radius: var(--mj-radius);
+  border-radius: var(--mj-radius-lg);
   box-shadow: none;
-  padding: 1rem 1.1rem;
+  padding: 1.1rem 1.2rem;
 }
 
 .md-typeset .grid.cards > ul > li:hover,
 .md-typeset .grid > .card:hover {
-  border-color: var(--mj-card-hover-border);
+  border-color: var(--mj-accent);
   box-shadow: none;
 }
 
@@ -223,19 +958,82 @@
 }
 
 .md-typeset .grid.cards .lg {
-  color: var(--mj-mark);
+  color: var(--mj-highlight);
 }
 
 .md-typeset .grid.cards p:last-child a {
   font-weight: 600;
 }
 
+/* Previous and next: two bordered cards above a hairline footer. */
+
+.md-footer {
+  border-top: 1px solid var(--mj-border);
+}
+
+.md-footer__inner {
+  gap: 0.8rem;
+  padding: 1rem 0.8rem;
+}
+
+.md-footer__link {
+  border: 1px solid var(--mj-border);
+  border-radius: var(--mj-radius);
+  background-color: var(--mj-surface);
+  padding: 0.6rem 0.4rem 0.8rem;
+  opacity: 1;
+}
+
+.md-footer__link:hover,
+.md-footer__link:focus {
+  border-color: var(--mj-accent);
+  opacity: 1;
+}
+
+.md-footer__link:hover .md-footer__title,
+.md-footer__link:focus .md-footer__title {
+  color: var(--mj-accent);
+}
+
+.md-footer-meta {
+  background-color: var(--mj-bg);
+  border-top: 1px solid var(--mj-border);
+}
+
+.md-footer-meta,
+.md-copyright,
+.md-copyright__highlight {
+  color: var(--mj-fg-faint);
+}
+
+/* Buttons. */
+
+.md-typeset .md-button {
+  border-radius: var(--mj-radius);
+  border: 1px solid var(--mj-border-strong);
+  color: var(--mj-fg);
+  font-weight: 600;
+}
+
+.md-typeset .md-button--primary {
+  color: var(--mj-accent-fg);
+  background-color: var(--mj-accent);
+  border-color: var(--mj-accent);
+}
+
+.md-typeset .md-button:hover,
+.md-typeset .md-button:focus {
+  color: var(--mj-accent-fg);
+  background-color: var(--mj-accent);
+  border-color: var(--mj-accent);
+}
+
 /* The landing page's opening block. */
 
 .md-typeset .mj-hero {
-  background: var(--mj-hero-bg);
+  background: var(--mj-surface);
   border: 1px solid var(--mj-border);
-  border-radius: calc(var(--mj-radius) * 1.5);
+  border-radius: var(--mj-radius-lg);
   padding: 2rem 1.6rem 1.6rem;
   margin: 0 0 1.6rem;
 }
@@ -247,38 +1045,33 @@
 }
 
 .md-typeset .mj-hero h1 {
-  font-size: 2.1rem;
+  font-size: 2.2rem;
   margin: 0 0 0.4rem;
 }
 
 .md-typeset .mj-hero .mj-tagline {
   font-size: 1.05rem;
-  color: var(--md-default-fg-color--light);
+  color: var(--mj-fg-muted);
   margin: 0 0 1.2rem;
   max-width: 38rem;
 }
 
 .md-typeset .mj-hero .md-button {
-  border-radius: var(--mj-radius);
   margin: 0 0.4rem 0.4rem 0;
   font-size: 0.72rem;
   padding: 0.5em 1.2em;
-  color: var(--md-default-fg-color);
-  border-color: var(--mj-border);
   background: transparent;
 }
 
 .md-typeset .mj-hero .md-button--primary {
-  color: var(--mj-button-fg);
-  background: var(--mj-button-bg);
-  border-color: var(--mj-button-bg);
+  background: var(--mj-accent);
 }
 
 .md-typeset .mj-hero .md-button:hover,
 .md-typeset .mj-hero .md-button:focus {
-  color: var(--mj-button-fg);
-  background: var(--mj-button-bg);
-  border-color: var(--mj-button-bg);
+  color: var(--mj-accent-fg);
+  background: var(--mj-accent);
+  border-color: var(--mj-accent);
 }
 
 /* Numbered steps: an ordered list inside a block marked "steps". */
@@ -293,7 +1086,6 @@
 .md-typeset .mj-steps > ol > li {
   counter-increment: mj-step;
   position: relative;
-  margin-left: 0;
   padding: 0 0 1rem 2.6rem;
   border-left: 1px solid var(--mj-border);
   margin-left: 0.9rem;
@@ -314,9 +1106,9 @@
   line-height: 1.8rem;
   text-align: center;
   border-radius: 50%;
-  background: var(--md-default-bg-color);
+  background: var(--mj-bg);
   border: 1px solid var(--mj-border);
-  color: var(--md-typeset-a-color);
+  color: var(--mj-accent);
   font-weight: 700;
   font-size: 0.75rem;
 }
@@ -331,6 +1123,10 @@
   }
 
   .md-typeset .mj-hero h1 {
+    font-size: 1.6rem;
+  }
+
+  .md-content .md-typeset h1 {
     font-size: 1.6rem;
   }
 }

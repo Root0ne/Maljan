@@ -1,7 +1,5 @@
 ---
 title: Introduction
-hide:
-  - navigation
 ---
 
 <div class="mj-hero" markdown>
