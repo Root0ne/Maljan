@@ -3943,10 +3943,15 @@ def _read_network_values(text: str, *, packages: bool) -> tuple[list[tuple[str, 
         if ("ip", value) not in held:
             held.add(("ip", value))
             found.append(("ip", value))
-    onions: list[str] = []
+    # Every dotted suffix of each onion name, built once, so the sweep's
+    # reading of a longer onion name's tail is skipped by one lookup.
+    onion_tails: set[str] = set()
     for match in ONION_NAME.finditer(plain):
         value = match.group(0).lower()
-        onions.append(value)
+        at = value.find(".")
+        while at != -1:
+            onion_tails.add(value[at + 1 :])
+            at = value.find(".", at + 1)
         if ("domain", value) not in held:
             held.add(("domain", value))
             found.append(("domain", value))
@@ -3957,7 +3962,7 @@ def _read_network_values(text: str, *, packages: bool) -> tuple[list[tuple[str, 
         value = str(row.get("value") or "").strip().lower().rstrip(".")
         # The sweep's onion reader takes the last two labels of a longer
         # ``.onion`` name; the name read whole above is the value.
-        if any(onion.endswith(f".{value}") for onion in onions):
+        if value in onion_tails:
             continue
         if value and ("domain", value) not in held:
             held.add(("domain", value))
@@ -4022,8 +4027,9 @@ _IPV6_CANDIDATE = re.compile(
     r"(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9A-Fa-f]{0,4})(?![\w:]|\.\d)"
 )
 # A name under ``.onion``, which the root zone does not delegate: read by its
-# form, any number of labels, in any case.
-ONION_NAME = re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+onion(?![\w-])")
+# form, any number of labels, in any case, ending at the TLD: an ``onion``
+# label with another label after it ("tor.onion.example.com") is no TLD.
+ONION_NAME = re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+onion(?![\w-]|\.[A-Za-z0-9])")
 
 
 def ipv6_addresses_in(text: str) -> list[re.Match[str]]:

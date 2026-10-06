@@ -132,3 +132,45 @@ class TestNoFormADefangerReadsIsLeftLive:
     def test_each_is_defanged_whole(self) -> None:
         for written, defanged_as in self.CASES:
             assert _defanged_text(written) == defanged_as, written
+
+
+class TestAnOnionNameEndsAtItsTld:
+    HOSTS = ("tor.onion.example.com", "my-c2.onion.ws", "files.onion.pet")
+
+    def test_a_host_with_an_onion_label_inside_is_read_whole(self) -> None:
+        for host in self.HOSTS:
+            assert network_values_in(f"Block {host} at the proxy.") == [("domain", host)], host
+
+    def test_a_published_host_raises_nothing(self) -> None:
+        from maljan.pipeline.validation import (
+            _unstated_values,
+            recommendation_indicator_violations,
+        )
+
+        for host in self.HOSTS:
+            text = f"Block {host} at the proxy."
+
+            def published(kind: str, value: str, host: str = host) -> str:
+                return "yes: a second source in this run records it" if value == host else ""
+
+            payload = {"defensive_recommendations": [{"action": text}]}
+            assert recommendation_indicator_violations(payload, published) == [], host
+            assert _unstated_values(text, published) == [], host
+
+    def test_a_sentence_dot_a_port_and_a_path_still_end_the_name(self) -> None:
+        for written in (f"{ONION}.", f"{ONION}:80/x", f"http://{ONION}/x", f"{ONION}/path"):
+            assert ("domain", ONION) in network_values_in(f"It reaches {written}"), written
+            assert ONION not in _defanged_text(f"It reaches {written}"), written
+
+    def test_many_onion_names_are_read_in_linear_time(self) -> None:
+        import time
+
+        def name(index: int) -> str:
+            alphabet = "abcdefghijklmnopqrstuvwxyz234567"
+            return "".join(alphabet[(index >> (5 * k)) % 32] for k in range(16))
+
+        text = " ".join(f"{name(i * 7919 + 1)}.onion" for i in range(400_000 // 23))
+        started = time.perf_counter()
+        network_values_in(text)
+        _defanged_text(text)
+        assert time.perf_counter() - started < 20

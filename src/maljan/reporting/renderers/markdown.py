@@ -2811,9 +2811,9 @@ def _mark_mailboxes(text: str, marks: dict[int, str]) -> None:
 
 def _mark_hosts(text: str, marks: dict[int, str]) -> None:
     """Every ``www.`` host, ``.onion`` name, host under a real TLD and address: dots, or a colon."""
-    from maljan.pipeline.validation import ONION_NAME, network_values_in
+    from maljan.pipeline.validation import network_values_in
 
-    for pattern in (_WWW_HOST, ONION_NAME):
+    for pattern in (_WWW_HOST, _ONION_HOST):
         for found in pattern.finditer(text):
             _bracket_dots(text, found.start(), found.end(), marks)
     # Any run an IPv6 address could be is defanged, a short one too ("fe80::1"):
@@ -2934,10 +2934,11 @@ def _reference_lookup(url: str) -> bool:
     return shape.fullmatch(path) is not None
 
 
-# A dotted name written wholly in capitals.
+# A dotted name written wholly in capitals, and a name under ``.onion``.
 # A dotted token: labels of letters, digits and hyphens joined by dots.
 _DOTTED_TOKEN = re.compile(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 _SHOUTED_HOST = re.compile(r"(?<![\w.-])[A-Z0-9-]+(?:\.[A-Z0-9-]+)+(?![\w-])")
+_ONION_HOST = re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+onion(?![\w-])")
 # A .NET technology's name, which ends in a real top-level domain.
 _DOTNET_NAME = re.compile(r"(?i)(?:" + _PIPE.join(("ASP", "ADO", "VB")) + r")\.NET")
 # The top-level domains that are also common files' extensions: a two-label
