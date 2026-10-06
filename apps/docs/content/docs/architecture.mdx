@@ -3144,8 +3144,10 @@ is assembled from what the run gathered rather than recomputed beside it:
   the evidence dump through `ProseDefanger`, which touches exactly the values
   the run's network block and IOC table hold, as whole tokens. Strings of note,
   every indicator column, the platform's findings (section 13, the verdict,
-  the export decisions), a tool failure's error, a draft rule's source line and
-  compile error, and model prose and cells beyond the run's own values defang
+  the export decisions), a tool failure's error, a draft rule's source line,
+  compile error and comments (each `<value>: published because <reason>` line
+  of a YARA or Suricata draft; the strings and contents the rule matches on
+  stay as they compile), the command-line flags table, and model prose and cells beyond the run's own values defang
   every URL of any scheme, `www.` host, mailbox, IPv4 or IPv6 address and host
   under a real top-level domain (the string sweep's list, the root zone's;
   any number of labels, in capitals, `.onion`): everything a viewer could

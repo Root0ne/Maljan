@@ -803,9 +803,11 @@ class MarkdownRenderer:
                 body.append(_row("Flag", "Meaning", "Evidence"))
                 body.append(_divider(3))
                 for flag in ta.cli_flags:
+                    # A flag is the sample's own text, and a URL or host in it
+                    # is defanged like every other value the body prints.
                     body.append(
                         _row(
-                            f"`{flag.flag}`",
+                            _code_span(ctx.plain(flag.flag)),
                             ctx.cell(flag.description or "-"),
                             flag.evidence_ref or "no evidence cited",
                         )
