@@ -2386,6 +2386,9 @@ change landed on `main`.
 
 ### Fixed
 
+- **The worker log states a revision's dropped values as one count line per analyst and round at INFO**, each claim's sentence at DEBUG; the run summary keeps every sentence.
+### Fixed
+
 - **A mediator's `[blocking]` mark with no reason blocks as it asks and is no longer recorded among `negotiation.unread_marks`**; a `[not blocking]` mark still needs its reason.
 ### Fixed
 
