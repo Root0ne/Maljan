@@ -3,7 +3,9 @@
 - Unreadable pcapng blocks are told by kind of reason, each once with its
   count and its first occurrence, so the statement does not grow with them.
 - An IP datagram is read only as far as its own header says, so a packet's
-  payload is never larger than what its IP header declares.
+  payload is never larger than what its IP header declares. A total below the
+  header length is what segmentation offload writes: the payload is the rest
+  of the frame, up to the 65,535 octets an IPv4 header can state.
 - A DNS name longer than DNS allows is stated as malformed with its length.
 - A value that cannot be written is counted and stated and costs no other.
 - A gzip stream that is corrupt, or followed by bytes that are not gzip, is
@@ -115,15 +117,42 @@ def test_a_datagram_is_read_only_as_far_as_its_header_says(tmp_path: Path, netwo
     request = b"GET /declared HTTP/1.1\r\nHost: real.example\r\n\r\n"
     trailing = b"GET /trailer HTTP/1.1\r\nHost: smuggled.example\r\n\r\n"
     declared = _ip(6, _tcp(80, request))
-    no_payload = _ip(6, _tcp(80, trailing), total=0)
     target = network.captures / "bounded.pcap"
-    target.write_bytes(_pcap([declared + trailing, no_payload]))
+    target.write_bytes(_pcap([declared + trailing]))
 
     answer = network.extract_http(str(target))
 
     assert answer.splitlines()[1:] == ["GET /declared HTTP/1.1 | Host: real.example"]
+
+
+def test_an_offloaded_segment_is_the_rest_of_its_frame(network: Any) -> None:
+    request = b"GET /offloaded HTTP/1.1\r\nHost: tso.example\r\n\r\n"
+    frames = [
+        _ip(6, _tcp(80, request), total=0),
+        _ip(17, _udp(53, _dns([b"tso", b"example"])), total=0),
+        _ip(17, _udp(5353, _dns([b"below", b"example"])), total=19),
+    ]
+    target = network.captures / "offloaded.pcap"
+    target.write_bytes(_pcap(frames))
+
+    assert network.extract_http(str(target)).splitlines()[1:] == [
+        "GET /offloaded HTTP/1.1 | Host: tso.example"
+    ]
+    assert network.extract_dns(str(target)).splitlines()[1:] == [
+        "tso.example.",
+        "below.example.",
+    ]
     facts = capture_facts(str(target))
-    assert facts is not None and facts["protocols"] == {"other": 1, "tcp": 1}
+    assert facts is not None and facts["protocols"] == {"tcp": 1, "udp": 2}
+    ports = {(c["dport"], c["proto"]) for c in facts["conversations"]}
+    assert ports == {(80, "tcp"), (53, "udp"), (5353, "udp")}
+
+
+def test_an_offloaded_segment_ends_where_an_ipv4_header_could_end_it() -> None:
+    segment = _tcp(80, b"GET /big HTTP/1.1\r\n" + b"X" * 70_000)
+    packet = capture_reader.decode(capture_reader.Record(0.0, _ip(6, segment, total=0), 101))
+    assert packet.tcp is not None
+    assert len(packet.tcp.data) == 65_535 - 20 - 20
 
 
 def test_a_jumbogram_is_read_to_the_length_its_option_states() -> None:

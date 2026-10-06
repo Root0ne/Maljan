@@ -123,6 +123,7 @@ _UDP_PORTS: tuple[tuple[str, int, str], ...] = (
 )
 _DHCP_PORT_PAIRS = {(68, 67), (67, 68), (67, 67)}
 
+_IPV4_MAX_TOTAL_LENGTH = 0xFFFF  # the most an IPv4 total length field can state
 _ICMP_ERRORS = (3, 4, 5, 11, 12)
 _ICMP6_ERRORS = (1, 2, 3, 4)
 _IPV6_OPTION_HEADERS = (0, 43, 60)  # hop-by-hop, routing, destination options
@@ -870,10 +871,14 @@ class _Walk:
         if header_length < 20:  # below the minimum: nothing past it is read
             return None
         body = min(start + header_length, end)
-        # The datagram ends where its own header says. A total below the header
-        # length (TSO writes 0) declares no payload, and nothing past the header
-        # is read as one; bytes past the total are trailer or padding.
-        end = min(end, start + max(total_length, header_length))
+        # The datagram ends where its own header says; bytes past the total are
+        # trailer or padding. A total below the header length is what segmentation
+        # offload writes (Windows LSOv2, Linux BIG TCP write 0): the payload is
+        # the rest of the frame, up to the 65,535 octets an IPv4 header can state.
+        if total_length >= header_length:
+            end = min(end, start + total_length)
+        else:
+            end = min(end, start + _IPV4_MAX_TOTAL_LENGTH)
         if quoted:
             if fragment_offset == 0:
                 return self.transport(protocol, body, end, quoted=True)

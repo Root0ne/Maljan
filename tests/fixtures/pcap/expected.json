@@ -4127,6 +4127,134 @@
    "beacons": []
   }
  },
+ "segmentation_offload.pcap": {
+  "capture_facts": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 3259,
+   "duration_s": 2.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 3105
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 154
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": 3,
+   "bytes": 3259,
+   "duration_s": 2.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 3105
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 154
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 3259 bytes over 2.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:80/tcp — 1 pkts, 3105 bytes\n- 8.8.8.8:53/udp — 2 pkts, 154 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 3259 bytes over 2.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:80/tcp — 1 pkts, 3105 bytes\n- 8.8.8.8:53/udp — 2 pkts, 154 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 3259,
+   "duration_s": 2.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 3105
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 154
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 3259 bytes over 2.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:80/tcp — 1 pkts, 3105 bytes\n- 8.8.8.8:53/udp — 2 pkts, 154 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary_page": "Packets 3 to 3 of the 3 in the capture. No IP packets in them.",
+  "extract_dns": "3 of 3 packets in the capture read.\ntso.evil.example.\nshort.evil.example.",
+  "extract_dns_limit_5": "3 of 3 packets in the capture read.\ntso.evil.example.\nshort.evil.example.",
+  "extract_http": "3 of 3 packets in the capture read.\nGET /tso-beacon HTTP/1.1 | Host: c2.evil.example",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n3 of 3 packets in the capture read: 3259 bytes over 2.0s. Protocols: tcp=1, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:80/tcp — 1 pkts, 3105 bytes\n- 8.8.8.8:53/udp — 2 pkts, 154 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 3,
+   "packets_in_capture": 3,
+   "packet_limit": null,
+   "bytes": 3259,
+   "duration_s": 2.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 3105
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 154
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
  "spb_snaplen0.pcapng": {
   "capture_facts": {
    "packets_read": 2,

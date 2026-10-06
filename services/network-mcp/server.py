@@ -252,7 +252,9 @@ def extract_http(pcap_path: str, packet_limit: int | None = None) -> str:
     if isinstance(capture, str):
         return capture
     try:
-        requests: list[str] = []
+        # Each distinct request once, in order of first appearance, with how
+        # many times it was sent; a repeat is counted, not written again.
+        requests: dict[tuple[bytes, bytes], list[Any]] = {}
 
         unwritten: list[BaseException] = []
 
@@ -265,15 +267,26 @@ def extract_http(pcap_path: str, packet_limit: int | None = None) -> str:
             # The request line, and the Host header when there is one.
             lines = data.split(b"\r\n")
             host = next((x for x in lines[1:] if x.lower().startswith(b"host: ")), b"")
+            seen = requests.get((lines[0], host))
+            if seen is not None:
+                seen[1] += 1
+                return
             line, written_host = _written(lines[0], unwritten), _written(host, unwritten)
             if line is not None and written_host is not None:
-                requests.append(f"{line} | {written_host}")
+                requests[(lines[0], host)] = [f"{line} | {written_host}", 1]
 
         read = each_packet(str(capture), _isolated(_visit, unwritten), packet_limit)
         for failure in unwritten:
             read.unwritable(failure)
         head = f"{read.statement()}."
-        return "\n".join([head, *requests]) if requests else f"{head} No HTTP requests in them."
+        if not requests:
+            return f"{head} No HTTP requests in them."
+        # A request line begins with its method, so a count before it cannot be
+        # mistaken for the sender's text.
+        written = [
+            text if count == 1 else f"{count} times: {text}" for text, count in requests.values()
+        ]
+        return "\n".join([head, *written])
     except Exception as e:  # noqa: BLE001 - a tool server answers, it does not raise
         return _text_error(code_for_exception(e), f"{type(e).__name__}: {e}", "extract_http")
 

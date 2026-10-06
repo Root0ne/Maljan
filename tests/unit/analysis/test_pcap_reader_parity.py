@@ -17,6 +17,9 @@ one, the fixture is listed in ``IMPROVED`` with why and the surfaces that
 changed: those answers are pinned in ``improved.json`` and proven to differ
 from the old ones, and every other surface of the fixture must still answer
 exactly as before, so an improvement cannot pass for parity or the reverse.
+
+The HTTP tool writes a request sent more than once on one line with its count,
+where the old one wrote every repeat: the old answer is compared in that form.
 """
 
 from __future__ import annotations
@@ -92,12 +95,11 @@ IMPROVED: dict[str, tuple[str, tuple[str, ...]]] = {
         "and reaches the UDP datagram at the bottom",
         _FACTS_LIMITED,
     ),
-    "edge_layers.pcap": (
-        "two IPv4 headers whose total length (0, 10) is below their own header "
-        "length: the old reader read the bytes after them as a TCP segment carrying "
-        "an HTTP request; the new one reads an IP datagram only up to the length its "
-        "header declares, so neither carries a payload",
-        (*_FACTS_ALL, "extract_http"),
+    "hostile_ipip_nesting.pcap": (
+        "a datagram under 1,000 nested IPv4-in-IPv4 headers, each with a total "
+        "length of 0 as segmentation offload writes: the old reader stopped at the "
+        "outer header; the new walk is a loop and reaches the DNS query at the bottom",
+        _FACTS_LIMITED,
     ),
     "unreadable_blocks.pcapng": (
         "three correctly framed pcapng blocks that cannot be read: the old reader "
@@ -147,6 +149,25 @@ def _answer(value: Any) -> Any:
     if isinstance(parsed, dict) and isinstance(parsed.get("error"), str):
         return {"error": True, "tool": parsed.get("tool")}
     return value
+
+
+def collapsed(answer: Any) -> Any:
+    """An old HTTP answer with each repeated request on one line and its count,
+    in order of first appearance, as the HTTP tool now writes it."""
+    if not isinstance(answer, str) or "\n" not in answer:
+        return answer
+    head, *lines = answer.split("\n")
+    counts: dict[str, int] = {}
+    for line in lines:
+        counts[line] = counts.get(line, 0) + 1
+    written = [line if n == 1 else f"{n} times: {line}" for line, n in counts.items()]
+    return "\n".join([head, *written])
+
+
+def _before(name: str) -> dict[str, Any]:
+    """The old answers for one capture, its HTTP answer in the collapsed form."""
+    old = _load(EXPECTED)[name]
+    return {**old, "extract_http": collapsed(old["extract_http"])}
 
 
 def observed(capture: Path, network: Any) -> dict[str, Any]:
@@ -208,7 +229,7 @@ def test_the_expected_values_name_every_capture_of_the_corpus() -> None:
 
 @pytest.mark.parametrize("name", [c for c in CAPTURES if c not in IMPROVED])
 def test_every_surface_answers_as_before(name: str, answers: dict[str, dict[str, Any]]) -> None:
-    expected = _load(EXPECTED)[name]
+    expected = _before(name)
     got = answers[name]
     assert list(got) == list(expected)
     for surface, value in expected.items():
@@ -219,7 +240,7 @@ def test_every_surface_answers_as_before(name: str, answers: dict[str, dict[str,
 def test_an_improved_capture_changes_only_the_surfaces_it_names(
     name: str, answers: dict[str, dict[str, Any]]
 ) -> None:
-    before = _load(EXPECTED)[name]
+    before = _before(name)
     pinned = _load(IMPROVED_ANSWERS)[name]
     got = answers[name]
     changed = IMPROVED[name][1]
@@ -247,7 +268,9 @@ def test_the_server_name_comes_out_and_nothing_else_moves(
         assert "TLS SNI (encrypted destinations):" in answers[name]["summarize_pcap"]
 
 
-@pytest.mark.parametrize("name", ["hostile_vlan_stack.pcap", "deep_ipip_tunnels.pcap"])
+@pytest.mark.parametrize(
+    "name", ["hostile_vlan_stack.pcap", "deep_ipip_tunnels.pcap", "hostile_ipip_nesting.pcap"]
+)
 def test_a_deeply_nested_frame_costs_no_other_packet(
     name: str, answers: dict[str, dict[str, Any]]
 ) -> None:
@@ -277,17 +300,29 @@ def test_skipped_blocks_are_never_called_the_whole_capture(
     ) in summary
 
 
-def test_nested_headers_that_declare_no_payload_are_read_no_further(
+def test_an_offloaded_segment_carries_its_request_query_and_ports(
     answers: dict[str, dict[str, Any]],
 ) -> None:
-    """Every level of this nesting says its total length is 0: the outer header
-    is the datagram, as the old reader read it, and the packets around it stay."""
-    facts = answers["hostile_ipip_nesting.pcap"]["capture_facts"]
+    """Segmentation offload writes an IPv4 total length of 0 (or one below the
+    header): the segment is the rest of the frame, as the old reader read it."""
+    facts = answers["segmentation_offload.pcap"]["capture_facts"]
     conversations = {
         (c["dst"], c["dport"], c["proto"]): c["packets"] for c in facts["conversations"]
     }
-    assert conversations == {
-        ("8.8.8.8", 0, "other"): 1,
-        ("8.8.8.8", 53, "udp"): 2,
-        ("8.8.8.8", 4444, "tcp"): 2,
-    }
+    assert conversations == {("8.8.8.8", 80, "tcp"): 1, ("8.8.8.8", 53, "udp"): 2}
+    http = answers["segmentation_offload.pcap"]["extract_http"].splitlines()[1:]
+    assert http == ["GET /tso-beacon HTTP/1.1 | Host: c2.evil.example"]
+    dns = answers["segmentation_offload.pcap"]["extract_dns"].splitlines()[1:]
+    assert dns == ["tso.evil.example.", "short.evil.example."]
+
+
+def test_a_repeated_request_is_written_once_with_its_count(
+    answers: dict[str, dict[str, Any]],
+) -> None:
+    http = answers["edge_layers.pcap"]["extract_http"].splitlines()[1:]
+    assert http == [
+        "5 times: GET /e HTTP/1.1 | Host: edge.example.com",
+        "GET / HTTP/1.1 | Host: x",
+        "POST /v HTTP/1.1 | Host: vlan.example.com",
+    ]
+    assert len(_load(EXPECTED)["edge_layers.pcap"]["extract_http"].splitlines()) == 8
