@@ -1643,6 +1643,22 @@ once more, as any retry after a failure is. A replayed conversation keeps the
 seeds. A run's second chunk re-ran ten
 decompiles the first had done.
 
+Every call the repeat guard answers without running is filed in the ledger as
+a repeat of the entry that holds its answer (`EvidenceRecorder.record_repeat`):
+an earlier chunk's call answered from its entry, and a refused third identical
+call. The entry carries `repeated_of`, the note the model was handed in place
+of a result and a duration of 0 ms, and its `tool_call_started` and
+`tool_call_finished` events go out like any call's, the finish naming
+`repeated_of`. The model is never shown the repeat's own id: the answer it
+reads carries the earlier entry's, which is the one to cite. A repeat is
+counted apart in `run_summary.evidence.repeats` and in neither `ok` nor
+`failed`; the report header and §13's evidence bounds say how many calls were
+answered from an earlier entry, and Appendix A marks each such row "repeat of
+ev_…". No report section, decompiled-function list, function map, later
+chunk's block or seeded guard reads a repeat: each reads the entry it names. A
+reverser's second chunk once made nine calls, all answered this way, and left
+no entry and no event.
+
 An analyst that has read a function sees its function map in the run-state
 block on every turn (`agents.function_map`). The platform keeps it from facts
 only, and the model does not write to it. It lists:

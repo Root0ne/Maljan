@@ -294,6 +294,8 @@ class MarkdownRenderer:
             failed = int(evidence.get("failed") or 0)
             said = f"\nEvidence: {entries} tool call(s)"
             said += f", {failed} failed" if failed else ""
+            repeats = int(evidence.get("repeats") or 0)
+            said += f", {repeats} answered from an earlier entry" if repeats else ""
             lines.append(said + " (see §13).")
         profile = (report.run_summary or {}).get("profile") or {}
         # A reduced profile changes what evidence backs the verdict, so a
@@ -1729,10 +1731,12 @@ class MarkdownRenderer:
 
         evidence = summary.get("evidence") or {}
         if evidence:
+            repeats = int(evidence.get("repeats") or 0)
             lines.append(
                 f"**Evidence bounds:** {evidence.get('entries', 0)} ledger entries, "
                 f"{evidence.get('ok', 0)} ok, {evidence.get('failed', 0)} failed, "
-                f"{evidence.get('trimmed', 0)} trimmed to the budget."
+                + (f"{repeats} answered from an earlier entry without running, " if repeats else "")
+                + f"{evidence.get('trimmed', 0)} trimmed to the budget."
             )
             lines.append("")
         failures = [row for row in (evidence.get("failures") or []) if isinstance(row, dict)]
@@ -1838,7 +1842,10 @@ class MarkdownRenderer:
                         row.agent or "-",
                         row.server or "-",
                         row.tool or "-",
-                        "yes" if row.ok else "no",
+                        # A repeat was not run: it names the entry that answered it.
+                        f"repeat of {row.repeated_of}"
+                        if row.repeated_of
+                        else ("yes" if row.ok else "no"),
                         f"{row.duration_ms} ms",
                         "yes" if row.truncated else "no",
                     )

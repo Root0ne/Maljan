@@ -1178,14 +1178,21 @@ def evidence_summary(ledger: Sequence[Any]) -> dict[str, Any]:
     by_tool: dict[str, int] = {}
     for entry in ledger:
         by_tool[entry.tool] = by_tool.get(entry.tool, 0) + 1
-    return {
+    # A call the repeat guard answered from an earlier entry is an entry and is
+    # counted apart: it neither worked nor failed, it was not run.
+    ran = [e for e in ledger if not getattr(e, "repeated_of", None)]
+    summary: dict[str, Any] = {
         "entries": len(ledger),
-        "ok": sum(1 for e in ledger if e.ok),
-        "failed": sum(1 for e in ledger if not e.ok),
+        "ok": sum(1 for e in ran if e.ok),
+        "failed": sum(1 for e in ran if not e.ok),
         "trimmed": sum(1 for e in ledger if e.truncated),
         "by_tool": dict(sorted(by_tool.items())),
         "failures": tool_failures(ledger),
     }
+    repeats = len(ledger) - len(ran)
+    if repeats:
+        summary["repeats"] = repeats
+    return summary
 
 
 def with_verdict_fallback(validation: Any, failure: str) -> dict[str, Any]:

@@ -2968,13 +2968,17 @@ EARLIER_CHUNKS_HEAD = (
 def earlier_chunks_block(entries: Sequence[Any]) -> str:
     """The earlier chunks' tool calls as ``tool(args) → ev_id`` lines under their head, or ``""``.
 
-    Every call, in the order made; a call that failed says so.
+    Every call that ran, in the order made; a call that failed says so. A
+    repeat the guard answered is left out: the entry it names is listed.
     """
     lines: list[str] = []
     for entry in entries or ():
         tool = str(getattr(entry, "tool", "") or "")
         entry_id = str(getattr(entry, "id", "") or "")
         if not tool or not entry_id:
+            continue
+        # A repeat is answered by the entry it names, which is listed itself.
+        if getattr(entry, "repeated_of", None):
             continue
         args = getattr(entry, "args", None) or {}
         try:

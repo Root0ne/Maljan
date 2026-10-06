@@ -141,8 +141,11 @@ class MalwareReportBuilder:
             recovered_network_values,
         )
 
+        # What the calls answered. A repeat the guard answered from an earlier
+        # entry holds a note, not an answer, and is in the index alone.
+        ledger = [e for e in self.evidence_ledger if not getattr(e, "repeated_of", None)]
         identity = identity_from_ledger(
-            self.evidence_ledger,
+            ledger,
             sample_path=self.sample_path,
             file_name=self.file_name,
             file_hash=self.file_hash,
@@ -153,20 +156,20 @@ class MalwareReportBuilder:
         # filled from the tools that were actually called, and each stays
         # empty otherwise. The network block also reads which values the
         # analysts listed, which it states and never publishes on alone.
-        static = static_from_ledger(self.evidence_ledger)
-        dynamic = dynamic_from_ledger(self.evidence_ledger)
+        static = static_from_ledger(ledger)
+        dynamic = dynamic_from_ledger(ledger)
         # What only a recovering tool read. Each domain, address and URL in it
         # is a candidate row of its own, whether or not a model named it: a
         # C2 URL FLOSS and the static decoder both recovered once had no row
         # anywhere, not even a refused one, while the record gave it standing.
-        emulated = emulation_from_ledger(self.evidence_ledger)
+        emulated = emulation_from_ledger(ledger)
         # Where the run's tools saw each value an analyst listed: a listed
         # value stands on the answer that holds it, and "no tool saw it" is
         # said only when this search of the whole ledger found none.
         # The judge's indicator values too: a value it names and no row
         # publishes is said to be the judge's alone only after this search.
         sightings, queries = tool_sightings(
-            self.evidence_ledger,
+            ledger,
             [
                 *analyst_listed_values(self.isr_reports),
                 *(
@@ -176,13 +179,13 @@ class MalwareReportBuilder:
             ],
         )
         network = network_from_ledger(
-            self.evidence_ledger,
+            ledger,
             self.isr_reports,
             sandbox_report=self.sandbox_report,
             recovered=recovered_network_values(emulated),
             sightings=sightings,
         )
-        persistence = persistence_from_ledger(self.evidence_ledger)
+        persistence = persistence_from_ledger(ledger)
         cells, mappings = build_capability_matrix(
             stix_output=self.stix_output,
             isr_reports=self.isr_reports,
@@ -228,7 +231,7 @@ class MalwareReportBuilder:
                 JudgeIndicator(kind=value.kind, value=value.value, algorithm=value.algorithm)
                 for value in exported_indicator_values(self.stix_output)
             ],
-            rule_match_strings=yara_rule_strings(self.evidence_ledger),
+            rule_match_strings=yara_rule_strings(ledger),
             emulated_strings=emulated,
             tool_sightings=sightings,
             tool_queries=queries,
@@ -239,7 +242,7 @@ class MalwareReportBuilder:
         # the verdict, the severity or the STIX bundle above it.
         merges = MergeTally()
         report.sections = build_sections(
-            self.evidence_ledger,
+            ledger,
             self.isr_reports,
             identity.file_type,
             str(identity.platform),
@@ -270,6 +273,7 @@ class MalwareReportBuilder:
                 ok=entry.ok,
                 duration_ms=entry.duration_ms,
                 truncated=entry.truncated,
+                repeated_of=entry.repeated_of or None,
             )
             for entry in self.evidence_ledger
         ]

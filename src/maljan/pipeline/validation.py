@@ -3338,7 +3338,8 @@ def decompiled_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
 
     An entry counts when its tool's name says it decompiles and the call
     answered with something the model read: an answer the conversation had no
-    room for (``schemas.evidence.answer_not_shown``) is no listing read. A
+    room for (``schemas.evidence.answer_not_shown``) is no listing read, and
+    neither is a repeat the guard answered from an earlier entry. A
     batch answer keyed by address is one function per key, its ``Error`` keys
     left out; a batch whose answer is not keyed takes the
     addresses it was given. Otherwise the address is the one the call was
@@ -3352,6 +3353,10 @@ def decompiled_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
     for entry in entries:
         tool = str(getattr(entry, "tool", "") or "").lower()
         if "decompil" not in tool or not getattr(entry, "ok", True) or answer_not_shown(entry):
+            continue
+        # A repeat holds the guard's note, not a listing: the function it
+        # asked for is the earlier entry's.
+        if getattr(entry, "repeated_of", None):
             continue
         entry_id = str(getattr(entry, "id", "") or "")
         for address, names in _entry_functions(entry):
