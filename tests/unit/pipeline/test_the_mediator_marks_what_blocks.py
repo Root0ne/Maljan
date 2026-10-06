@@ -190,6 +190,17 @@ class TestTheMediatorsMarks:
 
             assert mark.blocking is True and mark.marked is False and mark.unread is True
 
+    def test_blocking_with_no_reason_blocks_as_marked_and_is_not_unread(self) -> None:
+        for line in ("A vs B [blocking]", "A vs B **[Blocking: ]**."):
+            mark = read_marks([line])[0]
+
+            assert mark.blocking is True and mark.marked is True and mark.unread is False
+
+    def test_blocking_with_no_reason_before_more_text_is_still_unread(self) -> None:
+        mark = read_marks(["A vs B [blocking] and more words"])[0]
+
+        assert mark.blocking is True and mark.unread is True
+
     def test_a_line_that_only_mentions_blocking_is_not_unread(self) -> None:
         mark = read_marks(["A says the gate is blocking; B says it is not"])[0]
 

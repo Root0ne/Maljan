@@ -2386,6 +2386,9 @@ change landed on `main`.
 
 ### Fixed
 
+- **A mediator's `[blocking]` mark with no reason blocks as it asks and is no longer recorded among `negotiation.unread_marks`**; a `[not blocking]` mark still needs its reason.
+### Fixed
+
 - **A value written after a word such as "line", "item", "section", "no." or "#" is compared like any value among a revision's dropped values**; only a claim, round, step, stage or phase number is the debate's own numbering and left out.
 ### Fixed
 
