@@ -1,4 +1,5 @@
-import { sectionOf, source } from '@/lib/source';
+import { sectionOf, sections, source } from '@/lib/source';
+import { SectionStrip } from '@/components/section-strip';
 import {
   DocsBody,
   DocsDescription,
@@ -24,6 +25,7 @@ export default async function Page(props: PageProps<'/[[...slug]]'>) {
 
   return (
     <DocsPage toc={page.data.toc} full={page.data.full} breadcrumb={{ enabled: false }}>
+      <SectionStrip sections={sections()} />
       {!home && (
         <header className="mj-page-head">
           {section && <p className="mj-eyebrow">{section}</p>}
