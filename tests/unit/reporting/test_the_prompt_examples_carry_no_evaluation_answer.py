@@ -101,6 +101,10 @@ from maljan.extractors.capability_matrix import (
 from maljan.llm.context_window import no_room_sentence
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.pipeline import triage_pack
+from maljan.pipeline.debate_facts import (
+    ledger_count_facts,
+    with_ledger_facts,
+)
 from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
@@ -1173,6 +1177,15 @@ PROMPTS: dict[str, str] = {
                 DecompiledFunction(address=None, names=("F",), entries=("ev_0002",)),
             ]
         )
+    ),
+    "ledger counts told to a revision round and to the next mediation": with_ledger_facts(
+        "mediator feedback",
+        ledger_count_facts(
+            ["A Claim 1 counts 3 [ev_0001]; B Claim 1 counts 2."],
+            {},
+            [{"id": "ev_0001", "tool": "t", "structured": {"total": 3}}],
+            ["a", "b"],
+        ),
     ),
     "claims that say only that a library is used": _message_of(
         library_only_claims_violation(

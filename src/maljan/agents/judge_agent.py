@@ -78,6 +78,7 @@ from maljan.llm.context_window import (
 from maljan.llm.generation_rate import GenerationRates, ModelCallDeadline, model_name_of
 from maljan.memory.attck_loader import technique_label
 from maljan.memory.long_term_memory import a_past_case_technique
+from maljan.pipeline.debate_facts import read_marks, with_ledger_facts
 from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
@@ -462,8 +463,10 @@ CONTRADICTIONS_BLOCK_RULE = (
     "own: the analyst, its claim, and what contradicts it (another analyst's claim, or the "
     "id of the ledger entry). When none stands, write the single line "
     "'CONTRADICTIONS: NONE'. Only this final block is counted: a contradiction you drafted "
-    "above it and then resolved is left out of it, and any line in it sends the analysts "
-    "to revise, whatever agreement_confidence you write."
+    "above it and then resolved is left out of it. End each line with "
+    "[blocking: <one-line reason>] when the analysts must revise over it, or "
+    "[not blocking: <one-line reason>] when it need not hold up agreement; a line you do "
+    "not mark sends the analysts to revise, whatever agreement_confidence you write."
 )
 
 # The one question asked when the mediator's answer carried no such block. The
@@ -472,8 +475,9 @@ CONTRADICTIONS_BLOCK_QUESTION = (
     "Your answer has no final 'CONTRADICTIONS:' block. Write it now: a line reading "
     "exactly 'CONTRADICTIONS:' followed by one line per contradiction still standing (the "
     "analyst, its claim, and what contradicts it: another analyst's claim or the id of the "
-    "ledger entry), or the single line 'CONTRADICTIONS: NONE'; then the line "
-    "'agreement_confidence: <number>'. This turn carries no tools."
+    "ledger entry), each ending in [blocking: <one-line reason>] or "
+    "[not blocking: <one-line reason>], or the single line 'CONTRADICTIONS: NONE'; then the "
+    "line 'agreement_confidence: <number>'. This turn carries no tools."
 )
 
 # What the structured extraction is told: the contradictions are the final
@@ -482,7 +486,8 @@ MEDIATION_EXTRACTION_SYSTEM = (
     "Extract the final structured verdict from the mediator's reasoning log.\n"
     "You MUST produce a structured response with:\n"
     "- contradictions: the lines of the log's final 'CONTRADICTIONS:' block, one item "
-    "per line, and an empty list when that block reads 'CONTRADICTIONS: NONE'. A "
+    "per line written whole with its [blocking: …] or [not blocking: …] mark, and an empty "
+    "list when that block reads 'CONTRADICTIONS: NONE'. A "
     "contradiction the log drafted above that block and then resolved is not one.\n"
     "- resolution_summary: what was resolved and what remains\n"
     "- confidence: the log's last agreement_confidence, a float 0.0-1.0"
@@ -1443,6 +1448,14 @@ def _seconds_or_none(value: Any) -> float | None:
     return None if value is None else float(value)
 
 
+def _last_ledger_facts(history: Sequence[Any]) -> list[str]:
+    """The ledger counts the platform stated for the last mediation's lines, or none."""
+    for argument in reversed(list(history or [])):
+        if getattr(argument, "agent_name", "") == "Mediator":
+            return [str(f) for f in getattr(argument, "ledger_facts", None) or []]
+    return []
+
+
 class JudgeAgent(BudgetMeter):
     """Chief controller responsible for mediation, consensus detection, and final verdict.
 
@@ -2320,6 +2333,10 @@ class JudgeAgent(BudgetMeter):
         # decision — earlier prompt wording let "CLEAN / NO THREAT DETECTED"
         # prose leak into the judge prompt and bias the verdict toward
         # benign even when YARA had a hit.
+        # The counts the ledger states for the lines the last mediation listed,
+        # carried on this call rather than asked in one of their own.
+        last_counts = with_ledger_facts("", _last_ledger_facts(history))
+        carried_facts = f"{last_counts}\n\n" if last_counts else ""
         prompt_messages = [
             (
                 "system",
@@ -2349,6 +2366,7 @@ class JudgeAgent(BudgetMeter):
                 f"{_standing_blocks(run_state, facts_block)}"
                 f"{_identity_prefix(sample)}"
                 f"Expert Reports:\n{reports_text}\n\nPrevious Discussion:\n{history}\n\n"
+                f"{carried_facts}"
                 f"{MEDIATOR_HUMAN_CLOSING}",
             ),
         ]
@@ -2509,31 +2527,53 @@ class JudgeAgent(BudgetMeter):
             )
             verdict = verdict.model_copy(update={"contradictions": stated})
 
+        # The mediator's own mark on each line decides whether it stands: a
+        # line it marked [not blocking: <reason>] does not, and an unmarked
+        # line does, as every line did before marks existed. The platform
+        # overrides a mark in neither direction.
+        listed = list(verdict.contradictions)
+        marks = read_marks(listed)
+        blocking = [m.line for m in marks if m.blocking]
+        not_blocking = [m.line for m in marks if not m.blocking]
+        unread_marks = [m.line for m in marks if m.unread]
+        if unread_marks:
+            self.logger.info(
+                "Mediator: %d listed line(s) carry a mark that was not read; they block.",
+                len(unread_marks),
+            )
+
         # A contradiction still standing is not consensus, whatever number the
         # mediator wrote; the number is kept and shown beside the list.
         reached = verdict.confidence >= self._consensus_threshold(consensus_threshold)
-        is_consensus = reached and not verdict.contradictions
-        if reached and verdict.contradictions:
+        is_consensus = reached and not blocking
+        if reached and blocking:
             self.logger.info(
                 "No consensus: the mediator lists %d contradiction(s) still standing "
                 "(confidence=%.2f).",
-                len(verdict.contradictions),
+                len(blocking),
                 verdict.confidence,
             )
         else:
             log_msg = "Consensus reached" if is_consensus else "No consensus yet"
             self.logger.info("%s (confidence=%.2f)", log_msg, verdict.confidence)
+        if not_blocking:
+            self.logger.info(
+                "Mediator: %d listed line(s) marked not blocking by the mediator.",
+                len(not_blocking),
+            )
 
         finding = (
             f"{verdict.resolution_summary}\n\n"
-            f"Contradictions: {'; '.join(verdict.contradictions) or 'None'}\n"
+            f"Contradictions: {'; '.join(listed) or 'None'}\n"
             f"Confidence: {verdict.confidence:.2f}"
         )
         argument = AgentArgument(
             agent_name="Mediator",
             finding=finding,
             confidence_score=verdict.confidence,
-            contradictions=list(verdict.contradictions),
+            contradictions=blocking,
+            not_blocking=not_blocking,
+            unread_marks=unread_marks,
             note=(
                 CONTRADICTIONS_BLOCK_MISSING_NOTE
                 if block_missing
