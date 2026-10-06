@@ -1355,7 +1355,8 @@ its answer from what it gathered, and the budget record says which call was
 refused. The job goes on while a call of any kind made since the latest stage
 began — each at the smallest prompt it was sent with, with its own cap — would
 still be admitted: a mediation turn refused at its whole cap does not stop the
-revisions after it. A refusal made while other calls are in flight never
+revisions after it. A kind the stage will make and has not made yet is asked
+about on the model of the call this job made last. A refusal made while other calls are in flight never
 exhausts the spend; the question is asked again once none is. The spend is
 *exhausted* when the ceiling is reached, or when, with no call in flight, a
 refusal leaves nothing else that fits. From then on every

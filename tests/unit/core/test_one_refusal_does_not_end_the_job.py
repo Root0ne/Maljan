@@ -332,6 +332,24 @@ class TestAStageSKnownKinds:
         self._refuse_an_unholdable_question(meter)
         assert meter.exhausted() is True
 
+    def test_a_seeded_kind_is_asked_about_on_the_model_used_last(self) -> None:
+        meter = SpendMeter(2.00, clock=lambda: OFF_PEAK)
+        for kind, model in (("loop turn", FLASH), ("summary", "model-b"), ("loop turn", "model-c")):
+            meter.admit(kind=kind, model=model, prompt_chars=4_000, cap_tokens=100)
+        meter.begin_stage(("revision",))
+        asked: list[str] = []
+        price = meter._admission_price
+
+        def _spy(model: str, *args: object) -> object:
+            asked.append(model)
+            return price(model, *args)
+
+        meter._admission_price = _spy  # type: ignore[method-assign]
+        with meter._lock:
+            assert meter._another_fits_locked(OFF_PEAK) is True
+
+        assert asked == ["model-c"]
+
     def test_when_not_even_a_revision_fits_it_latches(self) -> None:
         meter = self._at_the_debate()
         meter.settle(

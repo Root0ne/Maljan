@@ -2386,6 +2386,9 @@ change landed on `main`.
 
 ### Fixed
 
+- **A kind of call a stage will make and has not made yet is asked about on the model of the call the job made last**, where it was the model of the kind first made last.
+### Fixed
+
 - **Function summaries cut at one output limit are counted in the run's shortened inputs** ("3 function summaries ended at their 4,000-token output limit"), where every cut after the first merged into one identical line.
 ### Fixed
 
