@@ -123,6 +123,18 @@ _PRINTABLE_RE = re.compile(rb"[\x20-\x7e]{%d,}" % _MIN_STRING_LENGTH)
 # the pattern and dropping the NULs recovers a whole class of C2 hosts and file
 # paths that were previously invisible.
 _WIDE_RE = re.compile(rb"(?:[\x20-\x7e]\x00){%d,}" % _MIN_STRING_LENGTH)
+# A whole run one character under the floor, ASCII and UTF-16LE: `c2.ru`
+# stored on its own as a NUL-terminated config value is five characters, and
+# the two patterns above never hand it to the scan. Such a run is read only
+# when the whole of it is a host by the host reader's own rules
+# (``_short_host``); every other five-character run stays below the floor.
+_SHORT_RUN_LENGTH = _MIN_STRING_LENGTH - 1
+_SHORT_PRINTABLE_RE = re.compile(
+    rb"(?<![\x20-\x7e])[\x20-\x7e]{%d}(?![\x20-\x7e])" % _SHORT_RUN_LENGTH
+)
+_SHORT_WIDE_RE = re.compile(
+    rb"(?<![\x20-\x7e]\x00)(?:[\x20-\x7e]\x00){%d}(?![\x20-\x7e]\x00)" % _SHORT_RUN_LENGTH
+)
 
 # Credentials and wallets. These are the highest-value strings in a stealer and
 # were not extracted at all.
@@ -233,7 +245,7 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
             # `c2.ru` is five characters: a name of a two-character first label
             # with a digit in it is held to the host reader's own floor.
             short = two_character_label_with_a_digit(candidate.split(".", 1)[0])
-            _add("domain", candidate, floor=5 if short else 0)
+            _add("domain", candidate, floor=_SHORT_RUN_LENGTH if short else 0)
         for label, pattern in _SECRET_PATTERNS:
             for hit in pattern.findall(text):
                 _add("secret", hit, notes=label)
@@ -243,7 +255,36 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
         for hit in _ONION_RE.findall(text):
             _add("domain", hit, notes="tor_hidden_service")
 
+    # After the sweep, so every row it gives keeps its place.
+    for host in _short_hosts(blob):
+        _add("domain", host, floor=_SHORT_RUN_LENGTH)
+
     return iocs
+
+
+def _short_hosts(blob: bytes) -> Iterator[str]:
+    """The five-character runs that are each a host as a whole, ASCII then UTF-16LE."""
+    for match in _SHORT_PRINTABLE_RE.finditer(blob):
+        host = _short_host(match.group().decode("ascii", errors="ignore"))
+        if host:
+            yield host
+    for match in _SHORT_WIDE_RE.finditer(blob):
+        host = _short_host(match.group()[::2].decode("ascii", errors="ignore"))
+        if host:
+            yield host
+
+
+def _short_host(run: str) -> str:
+    """The run when the whole of it is a host with a two-character first label, else ``""``.
+
+    The shape `c2.ru` has: a two-character first label with a digit and a
+    letter, under a TLD the root zone delegates, by the same reader the sweep
+    uses (``_domains_in``). A two-letter label (`or.at`, `in.de`) is not
+    read here; it is prose and code as often as it is a name.
+    """
+    if not two_character_label_with_a_digit(run.split(".", 1)[0]):
+        return ""
+    return run if _domains_in(run) == [run] else ""
 
 
 def _domains_in(text: str) -> list[str]:
