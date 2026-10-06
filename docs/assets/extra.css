@@ -1,11 +1,11 @@
 /*
- * Flat colours everywhere: no gradient fill, and no state change that eases
- * from one colour to another. The theme ships a handful of each — a fade
+ * No state change eases from one colour to another. The theme ships timed
+ * colour and background transitions on links, tabs and buttons, and a fade
  * toward the page background on the tabbed-content scroll arrows and on the
- * extended-tooltip preview, and timed colour and background transitions on
- * links, tabs and buttons — and this file turns them off rather than leaving
- * them for the day a feature that uses them gets turned on. A hover state is
- * a state: it arrives when the pointer does.
+ * extended-tooltip preview; this file turns them off rather than leaving them
+ * for the day a feature that uses them gets turned on. A hover state is a
+ * state: it arrives when the pointer does. The one fade on the site is the
+ * page grid's, which thins out from the top of the page.
  */
 
 * {
@@ -32,6 +32,7 @@
   --mj-bg: #ffffff;
   --mj-surface: #ffffff;
   --mj-surface-sunken: #f8fafc;
+  --mj-sidebar-bg: #f8fafc;
   --mj-code-bg: #f8fafc;
   --mj-border: #e2e8f0;
   --mj-border-strong: #cbd5e1;
@@ -50,7 +51,7 @@
   --mj-danger-tint: rgba(245, 158, 11, 0.14);
   --mj-danger-ring: rgba(245, 158, 11, 0.7);
   --mj-mark-bg: rgba(253, 224, 71, 0.45);
-  --mj-grid-line: rgba(15, 23, 42, 0.045);
+  --mj-grid-line: rgba(15, 23, 42, 0.06);
   --mj-hl-keyword: #1d4ed8;
   --mj-hl-string: #b45309;
   --mj-hl-number: #b45309;
@@ -64,6 +65,7 @@
   --mj-bg: #0b1120;
   --mj-surface: #0f172a;
   --mj-surface-sunken: #0d1526;
+  --mj-sidebar-bg: #0e1628;
   --mj-code-bg: #0d1526;
   --mj-border: #1e293b;
   --mj-border-strong: #334155;
@@ -82,7 +84,7 @@
   --mj-danger-tint: rgba(245, 158, 11, 0.1);
   --mj-danger-ring: rgba(245, 158, 11, 0.5);
   --mj-mark-bg: rgba(253, 224, 71, 0.22);
-  --mj-grid-line: rgba(148, 163, 184, 0.055);
+  --mj-grid-line: rgba(148, 163, 184, 0.075);
   --mj-hl-keyword: #38bdf8;
   --mj-hl-string: #f59e0b;
   --mj-hl-number: #fde047;
@@ -97,6 +99,10 @@
   --mj-radius: 0.6rem;
   --mj-radius-lg: 0.9rem;
   --mj-grid-size: 2.4rem;
+  --mj-grid-fade: 36rem;
+  --mj-sidebar-w: 15rem;
+  --mj-top-h: 6.6rem;
+  --mj-strip-h: 2.6rem;
   --md-primary-fg-color: var(--mj-bg);
   --md-primary-fg-color--light: var(--mj-bg);
   --md-primary-fg-color--dark: var(--mj-bg);
@@ -141,17 +147,27 @@
 }
 
 /*
- * The page background: a faint grid of hairlines over the flat surface,
- * fixed to the viewport so it stays put while the text scrolls over it.
+ * The page background: a faint grid of hairlines, fixed to the viewport, that
+ * fades out from the top of the page. The fade is a mask, so it reads only
+ * the mask's opacity, never its colour.
  */
 
 body {
   background-color: var(--mj-bg);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background-image:
     linear-gradient(var(--mj-grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--mj-grid-line) 1px, transparent 1px);
   background-size: var(--mj-grid-size) var(--mj-grid-size);
-  background-attachment: fixed;
+  -webkit-mask-image: linear-gradient(to bottom, black, transparent var(--mj-grid-fade));
+  mask-image: linear-gradient(to bottom, black, transparent var(--mj-grid-fade));
 }
 
 .md-container,
@@ -159,7 +175,8 @@ body {
   background: transparent;
 }
 
-/* Top bar: logo, title, search and repository on the page background. */
+/* Header: a compact bar on narrow screens, the top of the left column on
+   wide ones. */
 
 .md-header {
   background-color: var(--mj-bg);
@@ -176,6 +193,23 @@ body {
 .md-header__title {
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+.mj-site-name {
+  display: none;
+}
+
+/* The compact bar keeps the logo beside the menu button. */
+@media screen and (max-width: 76.234375em) {
+  .md-header__button.md-logo {
+    display: inline-block;
+    margin: 0.2rem 0;
+    padding: 0.4rem 0.2rem;
+  }
+}
+
+.md-header .mj-theme {
+  display: none;
 }
 
 .md-search__form {
@@ -200,34 +234,315 @@ body {
   }
 }
 
-.md-source__repository {
-  font-weight: 500;
+/* The appearance switch: a small pill of three choices, the current one
+   raised. */
+
+.mj-theme {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.12rem;
+  border: 1px solid var(--mj-border);
+  border-radius: 999px;
+  background-color: var(--mj-surface-sunken);
+}
+
+.mj-theme .mj-theme__option,
+.mj-theme .mj-theme__option[hidden] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: 999px;
+  color: var(--mj-fg-faint);
+  cursor: pointer;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.mj-theme .mj-theme__option svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  fill: currentColor;
+}
+
+.mj-theme .mj-theme__option:hover {
+  color: var(--mj-fg);
+}
+
+body[data-md-color-media="(prefers-color-scheme)"] .mj-theme__option[data-mj-media="(prefers-color-scheme)"],
+body[data-md-color-media="(prefers-color-scheme: light)"] .mj-theme__option[data-mj-media="(prefers-color-scheme: light)"],
+body[data-md-color-media="(prefers-color-scheme: dark)"] .mj-theme__option[data-mj-media="(prefers-color-scheme: dark)"] {
+  color: var(--mj-accent);
+  background-color: var(--mj-surface);
+  box-shadow: 0 0 0 1px var(--mj-border);
+}
+
+.mj-theme .md-option:focus-visible + .mj-theme__option,
+.mj-theme .mj-theme__option:focus-visible {
+  outline: 2px solid var(--mj-accent);
+  outline-offset: 1px;
+}
+
+/* The drawer's top block (narrow screens): the switch and a search box. */
+
+.mj-drawer-top {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.8rem 0.8rem 0.4rem;
+}
+
+.mj-search-box {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--mj-border);
+  border-radius: var(--mj-radius);
+  background-color: var(--mj-surface-sunken);
+  color: var(--mj-fg-muted);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.mj-search-box svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  fill: currentColor;
+}
+
+/* Search opened from the drawer takes the screen; the drawer comes back
+   when search closes. */
+@media screen and (max-width: 76.234375em) {
+  [data-md-toggle="search"]:checked ~ .md-overlay,
+  [data-md-toggle="search"]:checked ~ .md-container .md-sidebar--primary {
+    display: none;
+  }
+}
+
+/* The repository row at the head of the navigation. */
+
+.mj-nav-anchor > .md-nav__link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mj-nav-anchor__icon svg {
+  width: 0.85rem;
+  height: 0.85rem;
+  fill: currentColor;
+}
+
+/* The section strip over the text column (wide screens only). */
+
+.mj-tabs {
+  display: none;
 }
 
 /*
- * Wide layout: the navigation sits against the left edge behind a hairline,
- * the text column keeps a reading width in the middle, and the table of
- * contents sits to its right.
+ * Wide layout: a left column on a slightly distinct surface behind a
+ * hairline, holding the site name, the appearance switch, the search box and
+ * the navigation; the section strip over the text column; the text column at
+ * a reading width; the table of contents to its right.
  */
 
 @media screen and (min-width: 76.25em) {
-  .md-header__inner.md-grid,
-  .md-main__inner.md-grid {
-    max-width: 90rem;
+  .md-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: var(--mj-sidebar-w);
+    height: var(--mj-top-h);
+    background-color: var(--mj-sidebar-bg);
+    border-bottom: 0;
+    border-right: 1px solid var(--mj-border);
+    z-index: 5;
   }
 
-  .md-main__inner {
-    margin-top: 0;
+  .md-header__inner.md-grid {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+      "logo name theme"
+      "search search search";
+    align-items: center;
+    gap: 0.9rem 0.4rem;
+    max-width: none;
+    height: auto;
+    margin: 0;
+    padding: 1.2rem 0.8rem 0.8rem 1rem;
+    box-sizing: border-box;
   }
 
-  .md-sidebar--primary {
-    width: 14.5rem;
+  .md-header__inner > label[for="__drawer"],
+  .md-header__inner > label[for="__search"],
+  .md-header__title {
+    display: none;
+  }
+
+  .md-header__button.md-logo {
+    grid-area: logo;
+    margin: 0;
     padding: 0;
   }
 
-  .md-sidebar--primary .md-sidebar__scrollwrap {
+  .md-header__button.md-logo img,
+  .md-header__button.md-logo svg {
+    height: 1.3rem;
+  }
+
+  .mj-site-name {
+    grid-area: name;
+    display: block;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--mj-fg);
+  }
+
+  .md-header .mj-theme {
+    grid-area: theme;
+    display: inline-flex;
+  }
+
+  .md-header .md-search {
+    grid-area: search;
+    padding: 0;
+  }
+
+  .md-header .md-search__inner {
+    float: none;
+    width: 100%;
+    padding: 0;
+  }
+
+  .md-header .md-search__form {
+    height: 1.9rem;
+  }
+
+  .md-header .md-search__input,
+  .md-header .md-search__suggest {
+    font-size: 0.7rem;
+  }
+
+  /* The key that opens search, shown as a hint at the end of the box. */
+  .md-header .md-search__form::after {
+    content: "/";
+    position: absolute;
+    top: 50%;
+    right: 0.6rem;
+    transform: translateY(-50%);
+    padding: 0 0.35rem;
+    border: 1px solid var(--mj-border);
+    border-radius: 0.3rem;
+    font-family: var(--md-code-font-family);
+    font-size: 0.6rem;
+    line-height: 1.5;
+    color: var(--mj-fg-faint);
+    pointer-events: none;
+  }
+
+  [data-md-toggle="search"]:checked ~ .md-header .md-search__form::after {
+    display: none;
+  }
+
+  /* Open, the search box widens over the page and the rest dims. */
+  [data-md-toggle="search"]:checked ~ .md-header .md-search__inner {
+    width: 34rem;
+  }
+
+  [data-md-toggle="search"]:checked ~ .md-header .md-search__overlay {
+    position: fixed;
+    inset: 0;
+    width: auto;
+    height: auto;
+    border-radius: 0;
+    transform: none;
+  }
+
+  .md-container {
+    margin-left: var(--mj-sidebar-w);
+  }
+
+  .mj-tabs {
+    display: block;
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    height: var(--mj-strip-h);
+    padding: 0 2rem;
+    background-color: var(--mj-bg);
+    border-bottom: 1px solid var(--mj-border);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .mj-tabs .md-tabs__list {
+    display: flex;
+    gap: 1.4rem;
+    height: 100%;
     margin: 0;
+    padding: 0;
+    white-space: nowrap;
+  }
+
+  .mj-tabs .md-tabs__item {
+    display: flex;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  .mj-tabs .md-tabs__link {
+    display: flex;
+    align-items: center;
+    margin: 0;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--mj-fg-muted);
+    opacity: 1;
+    border-bottom: 2px solid transparent;
+  }
+
+  .mj-tabs .md-tabs__link:hover {
+    color: var(--mj-fg);
+  }
+
+  .mj-tabs .md-tabs__item--active .md-tabs__link {
+    color: var(--mj-fg);
+    font-weight: 600;
+    border-bottom-color: var(--mj-accent);
+  }
+
+  .md-main__inner.md-grid {
+    max-width: 72rem;
+    margin: 0 auto;
+  }
+
+  .md-sidebar--primary {
+    position: fixed;
+    top: var(--mj-top-h);
+    bottom: 0;
+    left: 0;
+    width: var(--mj-sidebar-w);
+    height: auto;
+    padding: 0;
+    background-color: var(--mj-sidebar-bg);
     border-right: 1px solid var(--mj-border);
+    z-index: 3;
+  }
+
+  .md-sidebar--primary .md-sidebar__scrollwrap {
+    height: calc(100vh - var(--mj-top-h)) !important;
+    margin: 0;
+    overflow-y: auto;
   }
 
   .md-sidebar--primary .md-sidebar__inner {
@@ -236,19 +551,21 @@ body {
 
   .md-sidebar--primary .md-nav--primary {
     width: auto;
-    padding: 1.6rem 0.8rem 2rem 0.2rem;
+    padding: 0.8rem 0.8rem 2rem 0.4rem;
   }
 
   .md-nav--primary .md-nav__item--section > .md-nav > .md-nav__list {
     padding-left: 0;
   }
 
-  .md-nav--primary > .md-nav__title {
+  .md-nav--primary > .md-nav__title,
+  .mj-drawer-top {
     display: none;
   }
 
   .md-sidebar--secondary {
-    padding-top: 2.6rem;
+    top: var(--mj-strip-h);
+    padding-top: 1.6rem;
   }
 
   .md-content {

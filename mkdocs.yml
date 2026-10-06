@@ -75,20 +75,33 @@ theme:
     text: Geist
     code: Geist Mono
   palette:
-    # Dark first. Flat colours only: the custom swatches are defined in
-    # assets/extra.css, and nothing on the site eases between colours.
-    - scheme: slate
+    # Three choices in one switch: follow the system, light, dark. Dark is the
+    # default: a first visit stores the last entry here (see the header
+    # override), so it must stay the dark one. The system entry's scheme is
+    # what paints before the page script runs. The custom swatches are
+    # defined in assets/extra.css, and nothing on the site eases between
+    # colours.
+    - media: "(prefers-color-scheme)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/monitor
+        name: Follow the system appearance
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
       primary: custom
       accent: custom
       toggle:
         icon: material/weather-sunny
-        name: Switch to light mode
-    - scheme: default
+        name: Light appearance
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
       primary: custom
       accent: custom
       toggle:
         icon: material/weather-night
-        name: Switch to dark mode
+        name: Dark appearance
   features:
     - navigation.instant
     - navigation.instant.progress
