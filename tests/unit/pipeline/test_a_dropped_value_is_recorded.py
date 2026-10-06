@@ -141,11 +141,21 @@ class TestADecimalCountsOnlyAsAStatedValue:
         assert not {"3", "2", "14", "15", "4"} & values
 
     def test_a_number_after_a_word_that_is_not_the_debate_s_numbering_is_a_value(self) -> None:
-        values = claim_values(
-            "The gate aborts below line 75, reads item 3 and no. 5 of the table, and #12."
-        )
+        values = claim_values("The gate aborts below line 75 and reads no. 5 of section 4.")
 
-        assert {"75", "3", "5", "12"} <= values
+        assert {"75", "5", "4"} <= values
+
+    def test_a_cross_reference_to_the_answer_s_own_numbering_is_not_a_value(self) -> None:
+        values = claim_values("As in item 3 and items 4/5 (see #12, #13), the key is 0x40.")
+
+        assert not {"3", "4", "5", "12", "13"} & values
+        assert "0x40" in values
+
+    def test_a_renumbered_cross_reference_is_not_recorded_as_dropped(self) -> None:
+        in_force = _isr("The key at 0x40 opens the gate (see #3 and item 3).")
+        text = "CLAIM 1 — The key at 0x40 opens the gate (see #2 and item 2)."
+
+        assert dropped_values(in_force, _isr(text), text, revision_round=1) == []
 
     def test_a_value_after_a_reference_word_is_recorded_when_the_revision_drops_it(self) -> None:
         in_force = _isr("The check passes at line 75 of the config (Claim 2).")
