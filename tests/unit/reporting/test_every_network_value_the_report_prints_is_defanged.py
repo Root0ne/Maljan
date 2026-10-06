@@ -291,3 +291,84 @@ def test_a_digit_before_a_top_level_domain_is_no_host() -> None:
     from maljan.reporting.renderers.markdown import _defanged_text
 
     assert _defanged_text('noise "?3e)}3.cz in a string') == 'noise "?3e)}3.cz in a string'
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.virustotal.com/gui/url/http://evil.com/e",
+        "https://attack.mitre.org/techniques/T1055/?r=http://evil.com",
+        "https://bazaar.abuse.ch/../\\@evil.com",
+        "https://www.virustotal.com/gui/search/evil.com",
+    ],
+)
+def test_a_reference_host_url_off_its_lookup_shape_is_defanged(url: str) -> None:
+    from maljan.reporting.renderers.markdown import _defanged_text
+
+    written = _defanged_text(f"see {url} here")
+
+    assert "evil.com" not in written
+    assert "https://" not in written
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.virustotal.com/gui/file/" + "a" * 64,
+        "https://www.virustotal.com/gui/url/" + "b" * 64,
+        "https://www.virustotal.com/gui/ip-address/198.51.100.20",
+        "https://www.virustotal.com/gui/domain/relay.example.net",
+        "https://bazaar.abuse.ch/sample/" + "c" * 64 + "/",
+        "https://attack.mitre.org/techniques/T1055/012/",
+        "https://attack.mitre.org/tactics/TA0011/",
+        "https://attack.mitre.org/software/S0154/",
+        "https://attack.mitre.org/matrices/enterprise/",
+    ],
+)
+def test_a_reference_lookup_stays_a_link(url: str) -> None:
+    from maljan.reporting.renderers.markdown import _defanged_text
+
+    assert _defanged_text(f"see {url} here") == f"see {url} here"
+
+
+def test_a_package_name_is_no_host() -> None:
+    from maljan.pipeline.validation import network_values_in
+
+    for name in (
+        "com.facebook.react.bridge.app",
+        "com.example.myapp.services.io",
+        "net.sf.json.util.info",
+        "com.android.okhttp.internal.net",
+        "com.google.firebase.messaging.cloud",
+        "org.apache.commons.io.monster",
+        "android.app.admin.device.policy",
+        "kotlin.collections.builders.list.app",
+    ):
+        assert network_values_in(f"It loads {name} at start.") == [], name
+    assert network_values_in("It resolves dl.delivery.mp.microsoft.com.") == [
+        ("domain", "dl.delivery.mp.microsoft.com")
+    ]
+
+
+# ".sh" and ".ps" are not in the vendored TLD list, so no reader reads them as hosts.
+@pytest.mark.parametrize("host", ["evil.pl", "panel.ml"])
+def test_a_common_country_code_host_is_defanged_in_prose(host: str) -> None:
+    from maljan.reporting.renderers.markdown import _defanged_text
+
+    assert host not in _defanged_text(f"see {host} now")
+
+
+def test_a_kept_link_is_put_back_whatever_the_text_holds() -> None:
+    from maljan.reporting.renderers.markdown import _defanged_text
+
+    url = "https://www.virustotal.com/gui/file/" + "a" * 64
+    text = f"odd \x000\x00 and  0  beside {url}"
+
+    assert _defanged_text(text) == text
+
+
+def test_a_reference_lookup_before_a_comma_stays_a_link() -> None:
+    from maljan.reporting.renderers.markdown import _defanged_text
+
+    text = "report_url=https://www.virustotal.com/gui/ip-address/198.51.100.20, coverage=91"
+    assert _defanged_text(text) == text

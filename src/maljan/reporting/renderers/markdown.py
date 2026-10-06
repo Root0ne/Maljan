@@ -2567,6 +2567,8 @@ _PIPE = chr(124)
 # Any scheme a viewer may make a link of ("https", "ftp", "sftp", "ws", a
 # defanged "hxxps"), not only the web's.
 _URL_IN_TEXT = re.compile(r"(?i)\b[a-z][a-z0-9+.-]{1,31}://[^\s<>()\[\]`'\"" + _PIPE + r"]+")
+# A host after an "@" no mailbox name stands before.
+_BARE_AT_HOST = re.compile(r"(?<![\w.+-])@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
 # A host a forge links as written whatever its top-level label: "www." first.
 _WWW_HOST = re.compile(r"(?i)(?<![\w.@/-])www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+(?![\w-])")
 # An IPv6 address written in text: hex groups and colons, read by ``ipaddress``.
@@ -2585,8 +2587,8 @@ def _defanged_text(text: str) -> str:
     own list) and an address are defanged. What names no network value prints
     as written: a version number ("FileVersion 10.0.0.1", "v1.2.3.4"), a .NET
     name ("ASP.NET"), and a two-label name whose top-level label is also a
-    source file's extension ("lib.rs"). A link to a reference service
-    (``_REFERENCE_HOSTS``) stays a link unless the run's own indicator was
+    source file's extension ("lib.rs"). A reference service's own lookup
+    (``_REFERENCE_LOOKUPS``) stays a link unless the run's own indicator was
     already defanged inside it. A value the run itself recorded is defanged
     before this, by the context's own pass, wherever it stands.
     """
@@ -2594,23 +2596,33 @@ def _defanged_text(text: str) -> str:
     from maljan.reporting.defang import defang_text
 
     kept: dict[str, str] = {}
+    # A placeholder for a kept link: a private-use character the text does
+    # not hold, around the link's index, so nothing the text says is replaced.
+    marker = next(chr(cp) for cp in range(0xE000, 0xF900) if chr(cp) not in text)
 
     def _keep(found: re.Match[str]) -> str:
         url = found.group(0)
-        host = (urlparse(url).hostname or "").lower() if "://" in url else ""
         tainted = text[found.end() : found.end() + 3] in ("[.]", "[:]", "[@]")
-        if host not in _REFERENCE_HOSTS or tainted:
+        if tainted or not _reference_lookup(url):
             return url
-        token = f"\x00{len(kept)}\x00"
+        token = f"{marker}{len(kept)}{marker}"
         kept[token] = url
         return token
 
     written = _URL_IN_TEXT.sub(_keep, text)
     indicators = [(found.group(0), "url") for found in _URL_IN_TEXT.finditer(written)]
     indicators += [(found.group(0), "email") for found in _EMAIL_IN_TEXT.finditer(written)]
+    # A host written after a bare "@" ("…/\\@evil.com"), with no mailbox name.
+    indicators += [
+        (found.group(0), "email")
+        for found in _BARE_AT_HOST.finditer(written)
+        if network_values_in(found.group(1))
+    ]
+    # Read with "@" and backslashes as spaces as well, so a host written after
+    # either ("…/\@evil.com") is found; the mailbox itself is read above.
     indicators += [
         (value, kind)
-        for kind, value in network_values_in(written)
+        for kind, value in network_values_in(re.sub(r"[@\\]", " ", written))
         if not _names_no_network_value(written, kind, value)
     ]
     # A host written in capitals ("EVIL.COM") is read as the host it spells;
@@ -2633,24 +2645,75 @@ def _defanged_text(text: str) -> str:
         for found in _IPV6_CANDIDATE.finditer(written)
         if _is_ipv6(found.group(0))
     ]
-    written = defang_text(written, indicators)
+    defanged = defang_text(written, indicators)
+    # A value inside a URL that was defanged whole ("…/gui/url/http://evil…")
+    # is read again: the URL's own defanging ends where its first bracket is.
+    if defanged != written:
+        defanged = _defanged_text(defanged) if not kept else defanged
     for token, url in kept.items():
-        written = written.replace(token, url)
-    return written
+        defanged = defanged.replace(token, url)
+    return defanged
 
 
-# The reference services a report links to: the sample's own lookups and the
-# ATT&CK catalogue. A link to one carries no indicator of the sample's, unless
-# one is in its path.
-_REFERENCE_HOSTS = frozenset({"www.virustotal.com", "bazaar.abuse.ch", "attack.mitre.org"})
+# The reference services a report links to, each with the shape of its own
+# lookups: a link of that shape, with no query, fragment, userinfo, backslash
+# or dot segment, stays a link; anything else on those hosts is defanged.
+_REFERENCE_LOOKUPS: dict[str, re.Pattern[str]] = {
+    "www.virustotal.com": re.compile(
+        r"/gui/(?:(?:file"
+        + _PIPE
+        + r"url)/[0-9a-f]+"
+        + _PIPE
+        + r"(?:domain"
+        + _PIPE
+        + r"ip-address)/[A-Za-z0-9.:-]+)/?"
+    ),
+    "bazaar.abuse.ch": re.compile(r"/sample/[0-9a-f]{64}/?"),
+    "attack.mitre.org": re.compile(
+        r"/(?:"
+        + _PIPE.join(
+            (
+                r"techniques/T\d{4}(?:/\d{3})?",
+                r"tactics/TA\d{4}",
+                r"software/S\d{4}",
+                r"matrices/[a-z]+(?:/[a-z]+)?",
+            )
+        )
+        + r")/?"
+    ),
+}
+
+
+def _reference_lookup(url: str) -> bool:
+    """Whether ``url`` is one of a reference service's own lookups, and so stays a link."""
+    if "\\" in url or "@" in url or "/." in url:
+        return False
+    # A sentence's punctuation after the link is not part of it.
+    try:
+        parts = urlparse(url.rstrip(",.;:!?"))
+    except ValueError:
+        return False
+    shape = _REFERENCE_LOOKUPS.get((parts.hostname or "").lower())
+    return (
+        shape is not None
+        and parts.scheme.lower() == "https"
+        and not parts.query
+        and not parts.fragment
+        and parts.port is None
+        and shape.fullmatch(parts.path) is not None
+    )
+
+
 # A dotted name written wholly in capitals, and a name under ``.onion``.
 _SHOUTED_HOST = re.compile(r"(?<![\w.-])[A-Z0-9-]+(?:\.[A-Z0-9-]+)+(?![\w-])")
 _ONION_HOST = re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+onion(?![\w-])")
 # A .NET technology's name, which ends in a real top-level domain.
 _DOTNET_NAME = re.compile(r"(?i)(?:" + _PIPE.join(("ASP", "ADO", "VB")) + r")\.NET")
-# The top-level domains that are also source files' extensions: a two-label
-# name under one ("lib.rs", "notes.md") is read as a file in free prose.
-_FILE_EXTENSION_TLDS = frozenset({"rs", "md", "pl", "sh", "ps", "ml"})
+# The top-level domains that are also common source files' extensions: a
+# two-label name under one ("lib.rs", "README.md") is read as a file in free
+# prose. Only these two: ".sh", ".pl", ".ml" and ".ps" are country codes a
+# sample's hosts use often enough to be read as hosts.
+_FILE_EXTENSION_TLDS = frozenset({"rs", "md"})
 # What a dotted quad of a version number follows: "FileVersion", "version",
 # "ProductVersion:" or a "v" written against it.
 _VERSION_BEFORE = re.compile(r"(?i)(?:version\s*[:=]?\s*" + _PIPE + r"\bv)$")

@@ -3130,14 +3130,24 @@ is assembled from what the run gathered rather than recomputed beside it:
   every URL of any scheme, `www.` host, mailbox, IPv4 or IPv6 address and host
   under a real top-level domain (the string sweep's list; any number of
   labels, in capitals, `.onion`): everything a viewer could link. The HTML
-  report links no bare text (CommonMark, no linkify) and makes an anchor only
-  of an http, https or mailto target or a place in the page, so a defanged
-  URL is never an anchor. A version
+  report links no bare text (CommonMark, no linkify); it makes an anchor only
+  of an http, https or mailto target, a place in the page (`#…`) or a relative
+  path with no leading `/` and no backslash, so neither a defanged URL nor a
+  protocol-relative `//host` is one; it renders a Markdown image as its alt
+  text and fetches none; and its `<meta http-equiv="Content-Security-Policy">`
+  is `default-src 'none'; style-src 'unsafe-inline'; img-src data:` (the
+  inline stylesheet and the figures' style attributes need `'unsafe-inline'`;
+  the figures are inline SVG and need nothing more). A version
   number ("FileVersion 10.0.0.1"), a .NET name ("ASP.NET") and a two-label
-  name under a TLD that is also a source extension ("lib.rs") print as written
-  unless the run recorded them; a draft rule's body is printed as it compiles;
-  a link to VirusTotal, MalwareBazaar or ATT&CK stays a link unless the run's
-  indicator is in it, and the configured model endpoint stays as written. The JSON report,
+  name under `.rs` or `.md` ("lib.rs", "README.md") print as written unless
+  the run recorded them; a package name opening with a reverse-DNS root
+  (`com.`, `org.`, `android.`, `java.`, …) is not read as a host; a draft rule's
+  body is printed as it compiles; a VirusTotal (`/gui/file|url/<hex>`,
+  `/gui/domain|ip-address/<value>`), MalwareBazaar (`/sample/<sha256>/`) or
+  ATT&CK (`/techniques/…`, `/tactics/…`, `/software/…`, `/matrices/…`) lookup
+  with no query stays a link unless the run's indicator is in it, anything
+  else on those hosts is defanged, and the configured model endpoint stays as
+  written. The JSON report,
   the STIX bundle, MISP and `/reports/{id}/iocs` carry every value live, and
   the indicator section says so under its tables. A §7 string is printed as
   the file's bytes are, and says it is not an observed endpoint.

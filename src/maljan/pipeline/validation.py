@@ -3926,6 +3926,10 @@ def network_values_in(text: str) -> list[tuple[str, str]]:
         if ("domain", value) in found or not _host_under_a_known_tld(match.group(0)):
             continue
         labels = value.split(".")
+        # A package name ("com.facebook.react.bridge.app") opens with a
+        # reverse-DNS root; it names code, not a host.
+        if labels[0] in _REVERSE_DNS_ROOTS:
+            continue
         # A one-letter name is a letter ("x.icu"); a digit there ("3.cz") is
         # the tail of a version or of noise.
         short = len(labels) == 2 and (len(labels[0]) < 2 or len(value) < 5)
@@ -3934,6 +3938,10 @@ def network_values_in(text: str) -> list[tuple[str, str]]:
     return found
 
 
+# The first labels of a Java, Kotlin or Android package name.
+_REVERSE_DNS_ROOTS = frozenset(
+    {"com", "org", "net", "io", "android", "androidx", "java", "javax", "kotlin"}
+)
 # A dotted name of any number of labels, a one-letter one included.
 _LONG_OR_SHORT_HOST_RE = re.compile(
     r"(?<![\w.@/-])(?:[A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,24}(?![\w-]|\.[A-Za-z0-9])"
