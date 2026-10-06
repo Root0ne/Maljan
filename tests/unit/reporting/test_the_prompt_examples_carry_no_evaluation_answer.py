@@ -521,6 +521,18 @@ PROMPTS: dict[str, str] = {
         ]
         if v is not None
     ),
+    "analyst question for a claim that names a sibling sub-technique": _message_of(
+        claim_does_not_describe_violation(
+            ClaimEvidence(
+                claim="The program persists by registering its own accessibility features handler.",
+                evidence_ref="[ev_0001]",
+                confidence=0.9,
+                technique_id="T1546.001",
+            ),
+            "T1546.001",
+            knowledge,
+        )
+    ),
     "the absence and describe questions on one id of a technique list": _every_message(
         [
             absence_claim_violation(

@@ -1125,15 +1125,6 @@ def claim_does_not_describe_violation(
     name, stems, forms = _name_terms(technique_id, attck)
     if not name:
         return None
-    pattern = behaviour_pattern(technique_id, attck)
-    if pattern is not None and pattern.search(text):
-        return None
-    if any(
-        _stem(word) in stems or word.lower() in forms
-        for word in re.findall(r"[A-Za-z0-9]+", text)
-        if len(word) >= 3
-    ):
-        return None
     tid = safe_finding_value(technique_id)
     otherwise = (
         f"give that behaviour's technique in its place or remove {tid} from this claim's "
@@ -1141,6 +1132,31 @@ def claim_does_not_describe_violation(
         if listed
         else "give that behaviour's technique or write TECHNIQUE: NONE"
     )
+    pattern = behaviour_pattern(technique_id, attck)
+    if (pattern is not None and pattern.search(text)) or any(
+        _stem(word) in stems or word.lower() in forms
+        for word in re.findall(r"[A-Za-z0-9]+", text)
+        if len(word) >= 3
+    ):
+        sibling = sibling_named_instead(text, technique_id)
+        if sibling is None:
+            return None
+        sibling_id, sibling_name, parent_id, parent_name = sibling
+        return Violation(
+            code=CLAIM_DOES_NOT_DESCRIBE_CODE,
+            message=(
+                f"CLAIM {safe_finding_value(text)!r} carries TECHNIQUE {tid} "
+                f"{safe_finding_value(name)}, and its sentence names {sibling_id} "
+                f"{safe_finding_value(sibling_name)}, another sub-technique of {parent_id} "
+                f"{safe_finding_value(parent_name)}, and none of {tid}'s own words: what it "
+                f"shares with {tid} is only what every technique under {parent_id} shares. A "
+                f"technique on a claim is published as something the sample does. Keep {tid} "
+                f"only if the sample does it, and then say in the claim what it does that is "
+                f"{tid}; if the claim describes {sibling_id}, {otherwise}."
+            ),
+            path=path,
+            subject=str(technique_id).strip().upper(),
+        )
     return Violation(
         code=CLAIM_DOES_NOT_DESCRIBE_CODE,
         message=(
@@ -1154,6 +1170,54 @@ def claim_does_not_describe_violation(
         path=path,
         subject=str(technique_id).strip().upper(),
     )
+
+
+def _name_stems(name: str) -> set[str]:
+    """The stems of a catalogue name's words, its filler words left out."""
+    return {
+        _stem(word)
+        for word in re.findall(r"[A-Za-z0-9]+", str(name or ""))
+        if len(word) >= 3 and word.lower() not in _NAME_FILLER_WORDS
+    }
+
+
+def sibling_named_instead(text: str, technique_id: str) -> tuple[str, str, str, str] | None:
+    """Another sub-technique of the same parent that ``text`` names, when it names none of its own.
+
+    A sub-technique's sentence may share terms with it only through what every
+    technique under its parent shares: the parent's name, the parent's
+    capability terms, its tactic ("persistence" under Boot or Logon Autostart
+    Execution). When the sentence writes none of the sub-technique's own
+    distinctive words (its vendored name's words that are not its parent's)
+    and writes the whole vendored name of a sibling of more than one word,
+    the sentence describes that sibling. ``(sibling id, sibling name, parent
+    id, parent name)``, or ``None`` when the id is no sub-technique, the
+    sentence writes one of its own words, or names no sibling.
+    """
+    from maljan.memory.attck_loader import sub_technique_entries, technique_entry
+
+    tid = str(technique_id or "").strip().upper()
+    if "." not in tid:
+        return None
+    own = technique_entry(tid)
+    parent = technique_entry(tid.split(".")[0])
+    if own is None or parent is None or not own.name:
+        return None
+    distinctive = _name_stems(own.name) - _name_stems(parent.name)
+    forms = _inflected_forms(own.name)
+    if any(
+        _stem(word) in distinctive or word.lower() in forms
+        for word in re.findall(r"[A-Za-z0-9]+", text)
+        if len(word) >= 3
+    ):
+        return None
+    for entry in sub_technique_entries(parent.technique_id):
+        if entry.technique_id == tid or len(entry.name.split()) < 2:
+            continue
+        phrase = _phrase(entry.name.replace("/", " "))
+        if phrase and re.search(phrase, text, re.IGNORECASE):
+            return entry.technique_id, entry.name, parent.technique_id, parent.name
+    return None
 
 
 def undescribed_technique_finding(technique_id: str, attck: Any, claims: int) -> str:

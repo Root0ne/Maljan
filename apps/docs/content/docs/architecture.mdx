@@ -1166,6 +1166,16 @@ decides.
    technique id) it asks 18, three of them true claims whose sentences used
    none of the technique's words (Ingress Tool Transfer on "downloads and
    writes a file", Native API on "the raw syscall() entry point").
+   A sub-technique whose sentence shares terms with it only through what
+   every sub-technique of its parent shares (the parent's name and capability
+   terms, its tactic) is asked the same question, naming the sibling, when
+   the sentence writes none of its own distinctive words (its vendored name's
+   words that are not its parent's) and writes the whole vendored name of a
+   sibling of more than one word: Change Default File Association on a
+   sentence about accessibility features and "persistence"
+   (`validation.sibling_named_instead`). On the stored
+   claims of run 5, run 4, local 6 and local 8 (457 claim and id pairs) it
+   asks that one pair and no other.
 2. **Domain and platform consistency** (`attck.platform_mismatch`, exact). The
    catalogue's domain and platforms for the id against the routed sample —
    a Windows PE is `enterprise`/Windows, an APK `mobile`/Android, an ELF

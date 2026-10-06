@@ -2392,6 +2392,7 @@ change landed on `main`.
 
 ### Fixed
 
+- **A sub-technique is not described by its parent's words alone**: a claim that writes none of the sub-technique's own distinctive words and writes a sibling sub-technique's whole name is asked once whether its technique is right, naming the sibling (Change Default File Association on an accessibility features sentence passed on "persistence").
 - **A TECHNIQUE line that writes an id with the vendored catalogue's own name for it in brackets is read as that id** (`T1027 (Obfuscated Files or Information)`); any other bracketed words keep the line whole and asked about, as before.
 - **The command-line flags table and a draft rule's comments print network values defanged**, through the report's own defanger; the strings a draft rule matches on stay as they compile.
 - **A bare two-label host with a two-character first label is read when the label holds a digit and a letter** (`c2.ru`, `x1.top`), by the string sweep and the report's host reader; one of two letters (`ab.ru`) is read only where the run's network evidence holds it, so prose such as `to.do` stays as written.
