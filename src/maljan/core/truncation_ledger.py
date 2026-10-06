@@ -359,10 +359,20 @@ class TruncationLedger:
 
     # -- loop / generation ceilings ----------------------------------------
 
-    def record_input_shortened(self, sentence: str) -> None:
-        """One analyst input shortened to its prompt's room, in the sentence the run records."""
+    def record_input_shortened(self, sentence: str, replaces: str | None = None) -> None:
+        """One analyst input shortened to its prompt's room, in the sentence the run records.
+
+        ``replaces`` is an earlier sentence this one supersedes, such as a
+        count that grew: it takes that sentence's place.
+        """
         with self._lock:
-            if sentence not in self.input_shortened:
+            if replaces is not None and replaces in self.input_shortened:
+                index = self.input_shortened.index(replaces)
+                if sentence in self.input_shortened:
+                    del self.input_shortened[index]
+                else:
+                    self.input_shortened[index] = sentence
+            elif sentence not in self.input_shortened:
                 self.input_shortened.append(sentence)
 
     def record_react_loop(self, *, hit_step_cap: bool) -> None:

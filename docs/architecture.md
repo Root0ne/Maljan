@@ -2542,7 +2542,8 @@ plain text — goes to the `FunctionSummarizer` when
 `preprocessing.use_function_summarizer` is on and to the character cut
 otherwise, exactly as before. A summary that ended at its output limit, by the
 analysts' rule, begins with a note saying its end is missing, and the cut is
-recorded with the run's shortened inputs.
+recorded with the run's shortened inputs, in one sentence per output limit that
+counts the summaries cut at it.
 
 The shortening runs **before** the summariser, and for a JSON object it is the
 better of the two: the summariser answers in English prose, and prose is what

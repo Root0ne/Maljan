@@ -2386,6 +2386,9 @@ change landed on `main`.
 
 ### Fixed
 
+- **Function summaries cut at one output limit are counted in the run's shortened inputs** ("3 function summaries ended at their 4,000-token output limit"), where every cut after the first merged into one identical line.
+### Fixed
+
 - **A loop's kept last answer is checked for a cut against the cap that turn was sent with**, recorded as each turn is sent, not against a later turn's hold left on the binding (a question pass rolled back, a turn the clock ended).
 ### Fixed
 

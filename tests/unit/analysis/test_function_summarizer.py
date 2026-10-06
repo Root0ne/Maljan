@@ -205,6 +205,58 @@ class TestACutSummaryIsMarkedCut:
         (sentence,) = [c.args[0] for c in ledger.record_input_shortened.call_args_list]
         assert "100-token output limit" in sentence
 
+    def test_summaries_cut_at_one_limit_are_counted_in_one_sentence(self) -> None:
+        from maljan.core.truncation_ledger import TruncationLedger
+
+        ledger = TruncationLedger()
+        ledger.record_input_shortened("Another input was shortened.")
+        llm = _Capped(
+            [_answer("cut one", 100), _answer("whole", 10), _answer("cut two", 100)],
+            max_tokens=100,
+        )
+        summarizer = FunctionSummarizer(llm=llm, truncation_ledger=ledger)  # type: ignore[arg-type]
+
+        summarizer.summarize_chunk("a")
+        assert ledger.input_shortened[1:] == [
+            "A function summary ended at its 100-token output limit; the analyst was told "
+            "its end is missing."
+        ]
+        summarizer.summarize_chunk("b")
+        summarizer.summarize_chunk("c")
+
+        assert ledger.input_shortened == [
+            "Another input was shortened.",
+            "2 function summaries ended at their 100-token output limit; the analyst was "
+            "told each one's end is missing.",
+        ]
+
+    def test_summaries_cut_at_different_limits_are_counted_apart(self) -> None:
+        from contextlib import contextmanager
+
+        from maljan.core.truncation_ledger import TruncationLedger
+
+        holds = iter([40, None, None])
+
+        @contextmanager
+        def _held(*_args: Any, **_kwargs: Any) -> Any:
+            yield next(holds)
+
+        ledger = TruncationLedger()
+        llm = _Capped(
+            [_answer("cut", 40), _answer("cut", 100), _answer("cut", 100)], max_tokens=100
+        )
+        summarizer = FunctionSummarizer(llm=llm, truncation_ledger=ledger)  # type: ignore[arg-type]
+        with patch("maljan.core.spend.admitted", _held):
+            for chunk in ("a", "b", "c"):
+                summarizer.summarize_chunk(chunk)
+
+        assert ledger.input_shortened == [
+            "A function summary ended at its 40-token output limit; the analyst was told "
+            "its end is missing.",
+            "2 function summaries ended at their 100-token output limit; the analyst was "
+            "told each one's end is missing.",
+        ]
+
     def test_a_server_that_says_length_is_believed(self) -> None:
         llm = _Capped([_answer("It injects", 12, finish="length")])
         result = FunctionSummarizer(llm=llm).summarize_chunk("code")  # type: ignore[arg-type]
