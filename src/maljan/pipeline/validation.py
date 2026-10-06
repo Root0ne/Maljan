@@ -3910,26 +3910,30 @@ def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, s
 
     plain = _refanged(text)
     found: list[tuple[str, str]] = []
+    # What ``found`` holds, for a membership test that does not read the list.
+    held: set[tuple[str, str]] = set()
     for match in _DOTTED_ADDRESS_RE.finditer(plain):
         try:
             ipaddress.ip_address(match.group(0))
         except ValueError:
             continue
-        if ("ip", match.group(0)) not in found:
+        if ("ip", match.group(0)) not in held:
+            held.add(("ip", match.group(0)))
             found.append(("ip", match.group(0)))
     # A sentence's full stop is not part of the host it ends on.
     for row in (
-        iocs_from_text(re.sub(r"[.,;:!?)]+(?=\s|$)", " ", plain), ["domain"]).get("iocs") or []
+        iocs_from_text(_TRAILING_PUNCTUATION_RE.sub(" ", plain), ["domain"]).get("iocs") or []
     ):
         value = str(row.get("value") or "").strip().lower().rstrip(".")
-        if value and ("domain", value) not in found:
+        if value and ("domain", value) not in held:
+            held.add(("domain", value))
             found.append(("domain", value))
     # The hosts the sweep's shape rules pass over and its own TLD list still
     # names: more than four labels ("dl.delivery.mp.microsoft.com"), or a
     # two-label name of one letter ("x.icu", "a.ru").
     for match in _LONG_OR_SHORT_HOST_RE.finditer(plain):
         value = match.group(0).lower().rstrip(".")
-        if ("domain", value) in found or not _host_under_a_known_tld(match.group(0)):
+        if ("domain", value) in held or not _host_under_a_known_tld(match.group(0)):
             continue
         labels = value.split(".")
         if not packages and package_shaped(value):
@@ -3938,8 +3942,15 @@ def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, s
         # the tail of a version or of noise.
         short = len(labels) == 2 and (len(labels[0]) < 2 or len(value) < 5)
         if len(labels) > 4 or (short and labels[0].isalpha()):
+            held.add(("domain", value))
             found.append(("domain", value))
     return found
+
+
+# A run of a sentence's closing punctuation before a space or the end, matched
+# from the run's first character only: tried from inside a long run, each try
+# would scan the rest of it again.
+_TRAILING_PUNCTUATION_RE = re.compile(r"(?<![.,;:!?)])[.,;:!?)]++(?=\s|$)")
 
 
 def package_shaped(value: str) -> bool:

@@ -3146,7 +3146,7 @@ is assembled from what the run gathered rather than recomputed beside it:
   the figures are inline SVG and need nothing more). A version
   number ("FileVersion 10.0.0.1"), a .NET name ("ASP.NET") and a two-label
   name in free prose under a TLD that is also a file extension (`.zip`,
-  `.mov`, `.py`, `.so`, `.sh`, `.ps`, `.ai`, `.pl`, `.md`, `.rs`, `.pm`,
+  `.mov`, `.py`, `.so`, `.sh`, `.ps`, `.ai`, `.md`, `.rs`, `.pm`,
   `.cat`, `.one`, `.cab`: "lib.rs", "install.sh") print as written unless the
   run recorded them; under a scheme, a `//`, `www.` or `@` such a name is
   always defanged; a name of more than four labels opening with a

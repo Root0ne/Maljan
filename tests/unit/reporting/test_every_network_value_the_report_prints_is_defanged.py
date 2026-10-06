@@ -350,9 +350,9 @@ def test_a_package_name_is_no_host() -> None:
     ]
 
 
-# A two-label name under ".pl", ".sh" or ".ps" is a file in free prose; under
-# a country code no file carries, it is a host, and so is a longer name.
-@pytest.mark.parametrize("host", ["panel.ml", "cdn.evil.pl", "x.update.sh"])
+# A two-label name under ".sh" or ".ps" is a file in free prose; under a
+# country code samples use (".pl", ".ml") it is a host, and so is a longer name.
+@pytest.mark.parametrize("host", ["evil.pl", "panel.ml", "cdn.evil.pl", "x.update.sh"])
 def test_a_common_country_code_host_is_defanged_in_prose(host: str) -> None:
     from maljan.reporting.renderers.markdown import _defanged_text
 

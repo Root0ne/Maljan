@@ -181,7 +181,7 @@ FILE_NAMES = (
     "The crate ships lib.rs.",
     "It drops install.sh and run.ps beside archive.zip.",
     "It records clip.mov and logo.ai.",
-    "It runs app.py, tool.pl and Module.pm.",
+    "It runs app.py and Module.pm.",
     "It reads notes.md and libc.so.",
     "It installs oem1.cat and opens invoice.one.",
     "It is an ASP.NET page handler on .NET.",

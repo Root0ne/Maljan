@@ -80,6 +80,41 @@ _EMAIL_RE = re.compile(rb"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 _DOMAIN_RE = re.compile(
     rb"(?<![A-Za-z0-9._@-])(?:[A-Za-z0-9-]{1,63}\.){1,3}[A-Za-z]{2,24}(?![A-Za-z0-9._])"
 )
+# ``_EMAIL_RE``'s two halves, for reading a mailbox from its "@": a mailbox
+# name's characters, and the domain read forward from just after the "@".
+_EMAIL_NAME_BYTES = frozenset(
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._%+-"
+)
+_EMAIL_DOMAIN_RE = re.compile(rb"[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+
+
+def emails_in(data: bytes) -> list[bytes]:
+    """``_EMAIL_RE.findall(data)``, the same matches in the same order, in linear time.
+
+    The regex tries a start at every character of a long run of name
+    characters with no "@" after it, and each try reads the rest of the run
+    again. This reads from each "@" instead: the name back over the run (never
+    before the previous match's end), the domain forward. The runs before two
+    "@"s and the domains after them never overlap, so each byte is read a
+    bounded number of times.
+    """
+    found: list[bytes] = []
+    floor = 0
+    at = data.find(b"@")
+    while at != -1:
+        start = at
+        while start > floor and data[start - 1] in _EMAIL_NAME_BYTES:
+            start -= 1
+        domain = _EMAIL_DOMAIN_RE.match(data, at + 1) if start < at else None
+        if domain is not None:
+            found.append(data[start : domain.end()])
+            floor = domain.end()
+            at = data.find(b"@", floor)
+        else:
+            at = data.find(b"@", at + 1)
+    return found
+
+
 _MUTEX_RE = re.compile(rb"\\BaseNamedObjects\\[A-Za-z0-9_\-]+")
 _PRINTABLE_RE = re.compile(rb"[\x20-\x7e]{%d,}" % _MIN_STRING_LENGTH)
 # UTF-16LE runs. Windows binaries are full of wide strings — every ...W API call
@@ -190,7 +225,7 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
             candidate = match.decode("ascii", errors="ignore")
             if _looks_like_path(candidate):
                 _add("path", candidate)
-        for match in _EMAIL_RE.findall(text.encode("ascii", errors="ignore")):
+        for match in emails_in(text.encode("ascii", errors="ignore")):
             _add("email", match.decode("ascii", errors="ignore"))
         for match in _MUTEX_RE.findall(text.encode("ascii", errors="ignore")):
             _add("mutex", match.decode("ascii", errors="ignore"))
@@ -227,6 +262,10 @@ def _domains_in(text: str) -> list[str]:
         candidate = match.group().decode("ascii", errors="ignore")
         if _looks_like_domain(candidate):
             found.append((match.start(), match.end(), candidate))
+    # Spans that do not overlap, as ``finditer`` yields them, nest nowhere:
+    # checked in one pass, so a run of many names is not compared pairwise.
+    if all(found[index][1] <= found[index + 1][0] for index in range(len(found) - 1)):
+        return [value for _start, _end, value in found]
     return [value for start, end, value in found if not _inside_a_longer_host(start, end, found)]
 
 

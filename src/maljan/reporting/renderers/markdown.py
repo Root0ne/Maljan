@@ -2749,16 +2749,28 @@ def _mark_hosts(text: str, marks: dict[int, str]) -> None:
                     values.setdefault(value, kind)
     if not values:
         return
-    alternatives = _PIPE.join(re.escape(value) for value in sorted(values, key=len, reverse=True))
-    pattern = re.compile(
-        rf"(?<![A-Za-z0-9-])(?:{alternatives})(?![A-Za-z0-9-]{_PIPE}\.[A-Za-z0-9])", re.IGNORECASE
-    )
-    for found in pattern.finditer(text):
-        if values[found.group(0).lower()] == "ip" and _VERSION_BEFORE.search(
-            text[max(0, found.start() - _VERSION_WORD_REACH) : found.start()]
+    # Where each value stands: a dotted token, or the part of one after a dot,
+    # that ends where the token ends. One reading of the text's tokens, each
+    # looked up by its suffixes, longest first.
+    lengths = {len(value) for value in values}
+    places: dict[str, list[tuple[int, int]]] = {}
+    for token in _DOTTED_TOKEN.finditer(text):
+        written = token.group(0).lower()
+        starts = [0] + [index + 1 for index, char in enumerate(written) if char == "."]
+        for start in starts:
+            if len(written) - start in lengths and written[start:] in values:
+                places.setdefault(written[start:], []).append((token.start() + start, token.end()))
+                break
+    for value, found_at in places.items():
+        # An address is a version number only where every place it stands
+        # follows a version word; one place that does not makes it an address.
+        if values[value] == "ip" and all(
+            _VERSION_BEFORE.search(text[max(0, start - _VERSION_WORD_REACH) : start])
+            for start, _end in found_at
         ):
             continue
-        _bracket_dots(text, found.start(), found.end(), marks)
+        for start, end in found_at:
+            _bracket_dots(text, start, end, marks)
 
 
 # The reference services a report links to, each with the shape of its own
@@ -2829,18 +2841,21 @@ def _reference_lookup(url: str) -> bool:
 
 
 # A dotted name written wholly in capitals, and a name under ``.onion``.
+# A dotted token: labels of letters, digits and hyphens joined by dots.
+_DOTTED_TOKEN = re.compile(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 _SHOUTED_HOST = re.compile(r"(?<![\w.-])[A-Z0-9-]+(?:\.[A-Z0-9-]+)+(?![\w-])")
 _ONION_HOST = re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+onion(?![\w-])")
 # A .NET technology's name, which ends in a real top-level domain.
 _DOTNET_NAME = re.compile(r"(?i)(?:" + _PIPE.join(("ASP", "ADO", "VB")) + r")\.NET")
 # The top-level domains that are also common files' extensions: a two-label
 # name under one ("lib.rs", "README.md", "install.sh", "archive.zip") is read
-# as a file in free prose. Under a scheme, a "//", "www." or "@" it is a host
-# and defanged, and so is any value the run itself recorded.
-# A display rule of this report alone: no extraction, tool or publish check
-# reads it.
+# as a file in free prose. ".pl" and ".ml" are country codes a sample's hosts
+# use often enough that a name under them stays a host. Under a scheme, a
+# "//", "www." or "@" such a name is a host and defanged, and so is any value
+# the run itself recorded. A display rule of this report alone: no
+# extraction, tool or publish check reads it.
 _FILE_EXTENSION_TLDS = frozenset(
-    {"zip", "mov", "py", "so", "sh", "ps", "ai", "pl", "md", "rs", "pm", "cat", "one", "cab"}
+    {"zip", "mov", "py", "so", "sh", "ps", "ai", "md", "rs", "pm", "cat", "one", "cab"}
 )
 # What a dotted quad of a version number follows: "FileVersion", "version",
 # "ProductVersion:" or a "v" written against it, and how far before the quad

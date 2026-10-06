@@ -70,3 +70,28 @@ def test_the_sweep_extracts_everything_it_extracted_with_the_shorter_list() -> N
 
     assert sorted(set(golden["expected"]) - found) == []
     assert len(found) > len(golden["expected"])
+
+
+def test_the_mailbox_reader_finds_what_the_mailbox_regex_finds() -> None:
+    import random
+
+    from maljan.tools.strings import _EMAIL_RE, emails_in
+
+    rng = random.Random(7)
+    alphabet = b"ab.@-+_%c1 x"
+    for _ in range(3000):
+        data = bytes(rng.choice(alphabet) for _ in range(rng.randint(0, 40)))
+        assert emails_in(data) == _EMAIL_RE.findall(data), data
+    for data in (b"a@b.comc@d.com", b"a@b.cc+x@d.com", b"op@mail.example.org", b"@x.com a@@b.co"):
+        assert emails_in(data) == _EMAIL_RE.findall(data), data
+
+
+def test_the_mailbox_reader_is_linear_on_a_long_run_with_no_at() -> None:
+    import time
+
+    from maljan.tools.strings import emails_in
+
+    started = time.perf_counter()
+    emails_in(b"a." * 200_000 + b"x")
+    emails_in(b"a@" * 200_000)
+    assert time.perf_counter() - started < 2
