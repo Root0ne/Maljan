@@ -11,7 +11,7 @@ hold. It covers two series:
   executed**: all runs used the mock sandbox, so every finding is static.
 - **The all-tools series.** The importable all-tools team — three static
   analysts, a Ghidra reverser, then the dynamic and network stages — ran on
-  the reference sample with a real sandbox (Hatching Triage), once on a hosted
+  the reference sample with a real sandbox (Hatching Triage), twice on a hosted
   model and several times on the local one. See [The all-tools
   series](#the-all-tools-series).
 
@@ -21,7 +21,8 @@ The reference sample, 57 core items:
 
 | Run | Model | Found | Partly | Missed | Wrong | Beyond human |
 | :-- | :-- | --: | --: | --: | --: | --: |
-| [All-tools, hosted](scores/latrodectus-all-tools-run4.md) | `deepseek-flash` | **45** | 9 | 2 | 1 | **19** |
+| [All-tools, hosted, run 5](scores/latrodectus-all-tools-run5.md) | `deepseek-flash` | 43 | 11 | 2 | 1 | **27** |
+| [All-tools, hosted, run 4](scores/latrodectus-all-tools-run4.md) | `deepseek-flash` | **45** | 9 | 2 | 1 | **19** |
 | [All-tools, local](scores/latrodectus-all-tools-local6.md) | Qwen3.6-35B | 15 | 21 | 21 | 0 | **12** |
 | [Default, it. 6](scores/latrodectus-iteration6-default.md) | Qwen3.6-35B | 12 | 28 | 17 | 0 | — |
 | [Default, it. 5](scores/latrodectus-iteration5-default.md) | Qwen3.6-35B | 14 | 25 | 18 | 0 | — |
@@ -60,10 +61,15 @@ In short, for the default-team iterations:
 
 In short, for the all-tools series:
 
-- On the hosted model the report found 45 of 57 core items, partly found 9,
+- In run 4 on the hosted model the report found 45 of 57 core items, partly found 9,
   missed 2 and got 1 wrong (command 0xf labelled "uninstall"), and stated 19
   facts beyond the human reports, from the decoder and handler addresses to
   the TLS flags the request routine sets.
+- A second hosted run, with no spend ceiling and parallel analysts, found 43,
+  partly found 11, missed 2 and got 1 wrong (command 0xf again), and stated 27
+  facts beyond the human reports. It cost 3.07 USD against 1.39 for run 4 counted the same way (1.36 charged), and
+  part of that came from platform defects the run exposed, which were fixed
+  afterwards.
 - On the local model the best run found 15, with none wrong, and stated 12
   facts beyond the human reports. Its reverser decompiled every function the
   key items' decoded strings are used in and described none of them in a
@@ -629,9 +635,9 @@ not stop an analyst's technique from being published. The rest of the report:
 - **The small model's numbers come from iteration 1 only**, and they reflect
   this host: a GPU that holds the whole model would change its time-cap
   outcome.
-- **The all-tools series is one hosted run and one scored local run per
-  page**, on one sample. The sandbox ran it, but the sample's own gates kept it
-  inert on the guest, so no C2 contact, drop or task registration was observed.
+- **The all-tools series is one run per page** (two hosted, one scored local), on one
+  sample. In run 4 and the local run the sample's own gates kept it inert on
+  the guest, so no C2 contact, drop or task registration was observed.
 - **A beyond-human count is a count of stated, proven facts**, not a measure of
   their value: an export name and a decompiled handler address each count one.
 
@@ -639,6 +645,7 @@ not stop an analyst's technique from being published. The rest of the report:
 
 | File | Run |
 | :-- | :-- |
+| [latrodectus-all-tools-run5.md](scores/latrodectus-all-tools-run5.md) | All-tools team, hosted `deepseek-flash` (DeepSeek), Triage sandbox, no spend ceiling, parallel analysts |
 | [latrodectus-all-tools-run4.md](scores/latrodectus-all-tools-run4.md) | All-tools team, hosted `deepseek-flash` (DeepSeek), Triage sandbox (`dev` @ `ceb4244a`) |
 | [latrodectus-all-tools-local6.md](scores/latrodectus-all-tools-local6.md) | All-tools team, local Qwen3.6-35B-A3B, Triage sandbox (`dev` @ `4d80c62e`) |
 | [latrodectus-iteration6-default.md](scores/latrodectus-iteration6-default.md) | Default model, iteration 6 (`dev` @ `ed57265b`) |
