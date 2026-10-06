@@ -43,7 +43,7 @@ every tool, so it never says to leave the argument out. When a job has exactly
 one capture, the platform hides `pcap_path` from the schema the network tools
 are bound with and fills it in (`maljan.agents.tool_pinning`), the way it fills
 the sample's own path; see "Which directories a sidecar may read" in
-`docs/configuration.md`.
+`apps/docs/content/docs/configuration.mdx`.
 
 ## Capabilities and errors
 
@@ -51,4 +51,4 @@ the sample's own path; see "Which directories a sidecar may read" in
 optional_dependency, available, reason, timeout_s}]}`, computed when the server
 starts by probing what each tool needs on this host. A tool that cannot answer
 returns `{"error": {"code", "message", "remediation"}, "tool"}` rather than
-raising; see *Writing a tool server* in `docs/configuration.md`.
+raising; see *Writing a tool server* in `apps/docs/content/docs/configuration.mdx`.

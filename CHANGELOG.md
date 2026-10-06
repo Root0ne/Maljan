@@ -1057,6 +1057,14 @@ change landed on `main`.
 
 ### Changed
 
+- **The documentation site is built with Fumadocs.** The pages are MDX under
+  `apps/docs/content/docs/` and the images under `apps/docs/public/assets/`;
+  `mkdocs.yml`, the theme overrides and the `docs` dependency group are gone,
+  and `docs/` keeps only `examples/`. The site is still published at
+  <https://root0ne.github.io/Maljan/> from `main`, every page at the address
+  it had, every heading at the anchor it had. `.github/workflows/docs.yml`
+  type-checks, lints and builds `apps/docs` with npm, and the build fails if
+  an address the site served before no longer leads to a page.
 - **Analysts run in parallel on a hosted API and one after another on a
   single-slot local server, decided per job.** `llm.parallel_analysts` is now
   `auto` (the default), `true` or `false`. `auto` resolves each analyst

@@ -21,7 +21,7 @@ samples with, which is a disclosure an operator makes deliberately.
 
 The stdio constants below have no production caller and are not meant to: the
 built-in seeds the HTTP transport, and the stdio form is a second server entry
-an operator types. They are the executable half of what ``docs/deployment.md``
+an operator types. They are the executable half of what ``apps/docs/content/docs/deployment.mdx``
 tells that operator to run, pinned by a test so the documentation and the
 resolution rule cannot drift apart.
 """

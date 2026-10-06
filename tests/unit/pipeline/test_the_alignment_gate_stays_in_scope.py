@@ -38,7 +38,7 @@ FIXTURE = json.loads(
 
 # What the narrowed gate sends over the audit's own rankings. Zero over the ids
 # the audit read as right for their sample; the rest is the measurement
-# docs/architecture.md carries. ``RANKED`` is the derived corpus: the same
+# apps/docs/content/docs/architecture.mdx carries. ``RANKED`` is the derived corpus: the same
 # rankings with the claimed id in them, where the rule says nothing at all.
 CHALLENGED_SCOPED = 0
 CHALLENGED_OTHER = 5

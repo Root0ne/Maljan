@@ -14,4 +14,4 @@ are bound to the `judge`.
 optional_dependency, available, reason, timeout_s}]}`, computed when the server
 starts by probing what each tool needs on this host. A tool that cannot answer
 returns `{"error": {"code", "message", "remediation"}, "tool"}` rather than
-raising; see *Writing a tool server* in `docs/configuration.md`.
+raising; see *Writing a tool server* in `apps/docs/content/docs/configuration.mdx`.
