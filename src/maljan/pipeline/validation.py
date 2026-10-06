@@ -3920,11 +3920,29 @@ def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, s
         if ("ip", match.group(0)) not in held:
             held.add(("ip", match.group(0)))
             found.append(("ip", match.group(0)))
+    # An IPv6 address and a ``.onion`` name are read by their form, as the
+    # report's defanger reads them: neither is under a TLD of the root zone.
+    for match in ipv6_addresses_in(plain):
+        value = match.group(0).lower()
+        if ("ip", value) not in held:
+            held.add(("ip", value))
+            found.append(("ip", value))
+    onions: list[str] = []
+    for match in ONION_NAME.finditer(plain):
+        value = match.group(0).lower()
+        onions.append(value)
+        if ("domain", value) not in held:
+            held.add(("domain", value))
+            found.append(("domain", value))
     # A sentence's full stop is not part of the host it ends on.
     for row in (
         iocs_from_text(_TRAILING_PUNCTUATION_RE.sub(" ", plain), ["domain"]).get("iocs") or []
     ):
         value = str(row.get("value") or "").strip().lower().rstrip(".")
+        # The sweep's onion reader takes the last two labels of a longer
+        # ``.onion`` name; the name read whole above is the value.
+        if any(onion.endswith(f".{value}") for onion in onions):
+            continue
         if value and ("domain", value) not in held:
             held.add(("domain", value))
             found.append(("domain", value))
@@ -3945,6 +3963,31 @@ def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, s
             held.add(("domain", value))
             found.append(("domain", value))
     return found
+
+
+# An IPv6 address written in text, bare or in brackets ("[2001:db8::1]:443"):
+# hex groups and colons, at least one hex digit among them.
+_IPV6_CANDIDATE = re.compile(r"(?<![\w:.\]])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![\w:])")
+# A name under ``.onion``, which the root zone does not delegate: read by its
+# form, any number of labels, in any case.
+ONION_NAME = re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+onion(?![\w-])")
+
+
+def ipv6_addresses_in(text: str) -> list[re.Match[str]]:
+    """Where ``text`` writes an IPv6 address, bare or bracketed: each one ``ipaddress`` parses.
+
+    A run of colons with no hex digit (``::`` between words) is no address.
+    """
+    out: list[re.Match[str]] = []
+    for match in _IPV6_CANDIDATE.finditer(str(text or "")):
+        if not any(char not in ":" for char in match.group(0)):
+            continue
+        try:
+            if ipaddress.ip_address(match.group(0)).version == 6:
+                out.append(match)
+        except ValueError:
+            continue
+    return out
 
 
 # A run of a sentence's closing punctuation before a space or the end, matched

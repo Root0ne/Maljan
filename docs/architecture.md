@@ -3141,7 +3141,10 @@ is assembled from what the run gathered rather than recomputed beside it:
   every URL of any scheme, `www.` host, mailbox, IPv4 or IPv6 address and host
   under a real top-level domain (the string sweep's list, the root zone's;
   any number of labels, in capitals, `.onion`): everything a viewer could
-  link. What a viewer can link is decided by form alone, never by a TLD or an
+  link. The host reader the publish checks, the run summary's sentences and
+  a cell's state note use (`validation.network_values_in`) reads an IPv6
+  address, bare or bracketed, and a `.onion` name of any labels by the same
+  form readers. What a viewer can link is decided by form alone, never by a TLD or an
   exemption: a scheme before `//`, a scheme a link or autolink syntax opens
   (`<…>`, `[x](…)`, `[r]: …`), a `mailto:`, `xmpp:`, `javascript:`,
   `vbscript:` or `data:` before a target, a `www.` prefix, and a mailbox. Each

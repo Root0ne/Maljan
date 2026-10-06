@@ -2602,8 +2602,6 @@ _BARE_AT_HOST = re.compile(r"(?<![\w.+-])@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
 # A "www." host, which a forge links whatever its top-level label, after any
 # character that is no letter or digit ("_", "*", "~", "(", "/" and the rest).
 _WWW_HOST = re.compile(r"(?i)(?<![^\W_])www\.[\w-]+(?:\.[\w-]+)*")
-# An IPv6 address written in text: hex groups and colons, read by ``ipaddress``.
-_IPV6_CANDIDATE = re.compile(r"(?<![\w:.\]])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![\w:])")
 # A mailbox: GFM's name characters (``_`` among them) and a dotted domain.
 _EMAIL_IN_TEXT = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 # The characters that make Markdown of a sample's text: a code span, a link or
@@ -2807,14 +2805,13 @@ def _mark_mailboxes(text: str, marks: dict[int, str]) -> None:
 
 def _mark_hosts(text: str, marks: dict[int, str]) -> None:
     """Every ``www.`` host, ``.onion`` name, host under a real TLD and address: dots, or a colon."""
-    from maljan.pipeline.validation import network_values_in
+    from maljan.pipeline.validation import ONION_NAME, ipv6_addresses_in, network_values_in
 
-    for pattern in (_WWW_HOST, _ONION_HOST):
+    for pattern in (_WWW_HOST, ONION_NAME):
         for found in pattern.finditer(text):
             _bracket_dots(text, found.start(), found.end(), marks)
-    for found in _IPV6_CANDIDATE.finditer(text):
-        if _is_ipv6(found.group(0)):
-            _bracket(text, text.index(":", found.start()), marks)
+    for found in ipv6_addresses_in(text):
+        _bracket(text, text.index(":", found.start()), marks)
     # Read with "@" and backslashes as spaces as well, so a host written after
     # either ("…/\@evil.com") is found; the mailbox itself is read above.
     values = {
@@ -2922,11 +2919,10 @@ def _reference_lookup(url: str) -> bool:
     return shape.fullmatch(path) is not None
 
 
-# A dotted name written wholly in capitals, and a name under ``.onion``.
+# A dotted name written wholly in capitals.
 # A dotted token: labels of letters, digits and hyphens joined by dots.
 _DOTTED_TOKEN = re.compile(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 _SHOUTED_HOST = re.compile(r"(?<![\w.-])[A-Z0-9-]+(?:\.[A-Z0-9-]+)+(?![\w-])")
-_ONION_HOST = re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+onion(?![\w-])")
 # A .NET technology's name, which ends in a real top-level domain.
 _DOTNET_NAME = re.compile(r"(?i)(?:" + _PIPE.join(("ASP", "ADO", "VB")) + r")\.NET")
 # The top-level domains that are also common files' extensions: a two-label
@@ -2944,14 +2940,6 @@ _FILE_EXTENSION_TLDS = frozenset(
 # that is looked for.
 _VERSION_BEFORE = re.compile(r"(?i)(?:version\s*[:=]?\s*" + _PIPE + r"\bv)$")
 _VERSION_WORD_REACH = 64
-
-
-def _is_ipv6(text: str) -> bool:
-    """Whether ``text`` is an IPv6 address."""
-    try:
-        return ipaddress.ip_address(text).version == 6
-    except ValueError:
-        return False
 
 
 def _file_name_host(kind: str, value: str) -> bool:
