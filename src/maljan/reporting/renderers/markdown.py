@@ -1807,6 +1807,13 @@ class MarkdownRenderer:
                 )
             if others or answered:
                 lines.append("")
+            # What a kept validation retry left out of an analyst's first
+            # answer, and what became of each item when the analyst was asked.
+            drops = [row for row in validation.get("retry_drops") or [] if isinstance(row, dict)]
+            if drops:
+                lines.extend(["**Items a kept validation retry left out:**", ""])
+                lines.extend(_item(ctx.plain(str(row.get("sentence") or ""))) for row in drops)
+                lines.append("")
         if exports:
             lines.extend(["**Export decisions:**", ""])
             for row in exports:

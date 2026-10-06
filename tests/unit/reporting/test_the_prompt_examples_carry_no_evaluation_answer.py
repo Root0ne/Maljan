@@ -127,6 +127,7 @@ from maljan.pipeline.validation import (
     ClaimsRepeated,
     DecompiledFunction,
     EntryTexts,
+    RetryDrops,
     Violation,
     _term_ids_said,
     absence_claim_violation,
@@ -148,6 +149,7 @@ from maljan.pipeline.validation import (
     recommendation_indicator_violations,
     recommendation_technique_violations,
     repeated_item_violations,
+    retry_drop_question,
     section_cut_violation,
     stated_value_violations,
     technique_line_violation,
@@ -223,6 +225,7 @@ from maljan.schemas.isr_models import (
     JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
     AgentISR,
     ClaimEvidence,
+    Finding,
     judge_and_findings_note,
     judge_dropped_reason,
     judge_kept_note,
@@ -692,6 +695,22 @@ PROMPTS: dict[str, str] = {
                 section="execution_flow",
             ),
         ]
+    ),
+    "analyst question about what a kept retry left out": retry_drop_question(
+        RetryDrops(
+            claims=(
+                (
+                    ClaimEvidence(
+                        claim="The file opens a window.",
+                        evidence_ref="[ev_0001]",
+                        confidence=0.9,
+                        technique_id="T1001",
+                    ),
+                    ("T1001", "0x40"),
+                ),
+            ),
+            findings=(Finding(title="The file opens a window", detail="It names it."),),
+        )
     ),
     "composer question about table rows no cited entry holds": " ".join(
         v.message

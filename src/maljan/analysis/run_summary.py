@@ -150,7 +150,11 @@ class ISRAgentStats:
 
 # The keys of ``run_summary.validation`` that keep analyst answers whole
 # (``pipeline.validation.validation_metrics``).
-VALIDATION_ANSWER_KEYS: tuple[str, ...] = ("unparsed_answers", "discarded_retry_answers")
+VALIDATION_ANSWER_KEYS: tuple[str, ...] = (
+    "unparsed_answers",
+    "discarded_retry_answers",
+    "retry_drops",
+)
 
 
 @dataclass
@@ -1108,6 +1112,11 @@ class RunSummary:
             if v.by_code:
                 lines += ["| Code | Count |", "|---|---|"]
                 lines += [f"| {code} | {count} |" for code, count in sorted(v.by_code.items())]
+                lines.append("")
+            drops = v.answers.get("retry_drops") or []
+            if drops:
+                lines += ["**Items a kept validation retry left out:**", ""]
+                lines += [f"- {row.get('sentence', '')}" for row in drops]
                 lines.append("")
             if v.unresolved:
                 lines.append("**Still wrong after the retry:**")

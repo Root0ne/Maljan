@@ -1146,7 +1146,18 @@ decides.
    claims. The outcome every finding is published with in the
    conversation is the kept answer's: an analyst whose retry lost claims keeps
    its first answer, and the loop checks that answer again before it says what
-   became of each finding (`retry_with_feedback_sync(keep=)`).
+   became of each finding (`retry_with_feedback_sync(keep=)`). A retry that
+   is kept although it no longer states claims or findings of the first answer
+   — the claims by the values of theirs it states nowhere
+   (`claim_drops.dropped_values`), the technique ids the retry was asked about
+   aside; the findings by title — is followed by one question naming each item
+   (`isr.retry_dropped`, `validation.retry_drop_question`): the analyst answers
+   `KEEP <label>: <reason>` or `WITHDRAW <label>: <reason>` per item. A kept
+   item goes back into the answer as the first answer wrote it, a withdrawn one
+   stays out, and an item with no answer stays as the first answer wrote it.
+   Each item, its state and the reason are recorded per analyst in
+   `run_summary.validation.retry_drops`, listed in the run summary and in the
+   report's section 13 (`validation.retry_drop_row`).
    **A claim that does not describe its technique**
    (`attck.claim_does_not_describe`). A claim whose sentence shares no term
    with the technique it carries — no capability term listing the id, no word

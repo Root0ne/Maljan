@@ -1,0 +1,217 @@
+"""What a kept validation retry left out of the first answer is put to the analyst once.
+
+A local run kept a static analyst's retry that read 32 claims against the
+first answer's 41, and a dynamic analyst's retry that carried none of the
+first answer's 6 findings; neither loss was recorded anywhere. The platform
+now states which claims (by the values the retry states nowhere, the
+technique ids it was asked about aside) and which findings (by title) the
+kept retry left out, per analyst, and asks the analyst once to keep or
+withdraw each with a reason. Its answer stands: a kept item goes back into
+the answer as the first answer wrote it, a withdrawn one stays out. With no
+answer, the first answer's items stay, their state said. Every item is
+recorded in ``run_summary.validation.retry_drops``.
+
+The two cases are replayed here with synthetic answers of the same shape.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+from langchain_core.messages import AIMessage
+
+from maljan.agents.base_agent import BaseAnalyst
+from maljan.pipeline.validation import (
+    RETRY_DROP_KEPT,
+    RETRY_DROP_NOT_ANSWERED,
+    RETRY_DROP_WITHDRAWN,
+    RETRY_DROPPED_CODE,
+    read_retry_drop_answers,
+    retry_drop_question,
+    retry_drops,
+    validation_metrics,
+)
+from maljan.schemas.isr_models import AgentISR, Finding
+
+
+def _block(n: int, technique: str) -> str:
+    return (
+        f"CLAIM: The file carries configuration string number {n}.\n"
+        "EVIDENCE: [ev_0001] strings\n"
+        "CONFIDENCE: 0.8\n"
+        f"TECHNIQUE: {technique}\n"
+        "---\n"
+    )
+
+
+# 32 claim blocks; the first is asked about, nine list two ids: 41 claims.
+FIRST = _block(1, "T1055 or T1106") + "".join(
+    _block(n, "T1027, T1140" if n <= 10 else "T1027") for n in range(2, 33)
+)
+# The retry answers the question and writes each block with one id: 32 claims.
+RETRY = _block(1, "T1055") + "".join(_block(n, "T1027") for n in range(2, 33))
+
+
+class _Analyst(BaseAnalyst):
+    def __init__(self, name: str, replies: list[Any]) -> None:
+        super().__init__(llm=MagicMock(), name=name)
+        self.pack_ledger_ids = ["ev_0001"]
+        self._replies = list(replies)
+        self.questions: list[str] = []
+
+    def analyze(self, data: str) -> str:  # pragma: no cover - unused
+        return ""
+
+    def revise(self, *args: Any, **kwargs: Any) -> str:  # pragma: no cover - unused
+        return ""
+
+    def _invoke_llm_with_timeout(self, messages: list, timeout: float, **_: Any) -> str:
+        self.questions.append(str(messages[-1].content))
+        reply = self._replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        self._record_usage(AIMessage(content=reply))
+        return reply
+
+
+def _check(analyst: _Analyst, first: str) -> AgentISR:
+    isr = analyst._text_to_isr(first, 0)
+    with (
+        patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+        patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
+    ):
+        return analyst._validate_isr(isr, "evidence")
+
+
+def _drop_rows(analyst: _Analyst) -> list[dict[str, str]]:
+    return [row for row in analyst.drain_unparsed_answers() if row.get("record") == "retry_drop"]
+
+
+class TestTheStaticReplay:
+    """41 claims, a kept retry of 32: nine claims no longer stated."""
+
+    REPLY = "\n".join(
+        [*(f"KEEP C{n}: the routine decodes it" for n in range(1, 6))]
+        + [*(f"WITHDRAW C{n}: the id was a guess" for n in range(6, 10))]
+    )
+
+    def test_the_first_answer_has_41_claims_and_the_retry_32(self) -> None:
+        analyst = _Analyst("all_tools_static_r2", [])
+
+        assert len(analyst._text_to_isr(FIRST, 0).claims) == 41
+        assert len(analyst._text_to_isr(RETRY, 0).claims) == 32
+
+    def test_the_nine_left_out_are_named_once_and_the_answer_stands(self) -> None:
+        analyst = _Analyst("all_tools_static_r2", [RETRY, self.REPLY])
+
+        result = _check(analyst, FIRST)
+
+        retry_question, drops_question = analyst.questions
+        assert "C9. CLAIM: The file carries configuration string number 10." in drops_question
+        assert "C10." not in drops_question
+        assert "it stated T1140, which your retry states nowhere" in drops_question
+        assert len(result.claims) == 32 + 5
+        rows = _drop_rows(analyst)
+        assert [row["state"] for row in rows] == [RETRY_DROP_KEPT] * 5 + [RETRY_DROP_WITHDRAWN] * 4
+        assert rows[0]["reason"] == "the routine decodes it"
+        assert rows[0]["missing"] == "T1140"
+        assert "left out the claim" in rows[0]["sentence"]
+        assert analyst.validation_fed_back[RETRY_DROPPED_CODE] == 1
+
+    def test_the_rows_reach_the_run_summary(self) -> None:
+        analyst = _Analyst("all_tools_static_r2", [RETRY, self.REPLY])
+        _check(analyst, FIRST)
+
+        metrics = validation_metrics(1, [], unparsed_answers=analyst.drain_unparsed_answers())
+
+        assert len(metrics["retry_drops"]) == 9
+        assert all("record" not in row for row in metrics["retry_drops"])
+
+
+class TestTheDynamicReplay:
+    """23 claims kept, the first answer's 6 findings carried by no retry finding."""
+
+    FIRST = _block(1, "T1055 or T1106") + "".join(_block(n, "T1027") for n in range(2, 24))
+    RETRY = _block(1, "T1055") + "".join(_block(n, "T1027") for n in range(2, 24))
+
+    def _findings(self) -> list[Finding]:
+        return [
+            Finding(title=f"The sample writes cache file {n}", evidence_ids=["ev_0001"])
+            for n in range(1, 7)
+        ]
+
+    def test_an_unanswered_question_keeps_the_six_findings_with_their_state(self) -> None:
+        analyst = _Analyst("dynamic", [self.RETRY, TimeoutError("no answer")])
+        analyst._findings_buffer = self._findings()
+
+        result = _check(analyst, self.FIRST)
+
+        assert len(result.claims) == 23
+        assert [f.title for f in result.findings] == [f.title for f in self._findings()]
+        rows = _drop_rows(analyst)
+        assert [row["kind"] for row in rows] == ["finding"] * 6
+        assert {row["state"] for row in rows} == {RETRY_DROP_NOT_ANSWERED}
+
+    def test_withdrawn_findings_stay_out(self) -> None:
+        reply = "\n".join(f"- **WITHDRAW F{n}** - a guest file" for n in range(1, 7))
+        analyst = _Analyst("dynamic", [self.RETRY, reply])
+        analyst._findings_buffer = self._findings()
+
+        result = _check(analyst, self.FIRST)
+
+        assert result.findings == []
+        assert {row["reason"] for row in _drop_rows(analyst)} == {"a guest file"}
+
+
+class TestTheParts:
+    def test_an_id_the_retry_was_asked_about_is_no_loss(self) -> None:
+        analyst = _Analyst("static", [])
+        first, retried = analyst._text_to_isr(FIRST, 0), analyst._text_to_isr(RETRY, 0)
+
+        assert len(retry_drops(first, retried, RETRY).claims) == 9
+        assert not retry_drops(first, retried, RETRY, asked_about=["T1140"])
+
+    def test_a_retry_that_states_everything_leaves_nothing_to_ask(self) -> None:
+        analyst = _Analyst("static", [_block(1, "T1055") + FIRST.split("---\n", 1)[1]])
+
+        _check(analyst, FIRST)
+
+        assert len(analyst.questions) == 1
+        assert _drop_rows(analyst) == []
+
+    def test_only_named_labels_are_read_and_each_once(self) -> None:
+        text = "KEEP C1: yes\nKEEP C1: again\nWITHDRAW C7: no\nkeep f1\nsome prose"
+
+        assert read_retry_drop_answers(text, ["C1", "F1"]) == {
+            "C1": ("KEEP", "yes"),
+            "F1": ("KEEP", ""),
+        }
+
+    def test_the_question_says_what_to_write(self) -> None:
+        analyst = _Analyst("static", [])
+        drops = retry_drops(analyst._text_to_isr(FIRST, 0), analyst._text_to_isr(RETRY, 0))
+
+        question = retry_drop_question(drops)
+        assert question.startswith("Your retry stands as your answer")
+        assert "KEEP <label>: <reason>" in question
+        assert "WITHDRAW <label>: <reason>" in question
+
+
+def test_section_13_lists_each_item_with_its_state() -> None:
+    from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+    from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+    analyst = _Analyst("all_tools_static_r2", [RETRY, TestTheStaticReplay.REPLY])
+    _check(analyst, FIRST)
+    metrics = validation_metrics(1, [], unparsed_answers=analyst.drain_unparsed_answers())
+    report = MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+        verdict="Malware",
+        run_summary={"validation": metrics},
+    )
+
+    markdown = MarkdownRenderer().render(report)
+
+    assert "**Items a kept validation retry left out:**" in markdown
+    assert markdown.count(f": {RETRY_DROP_WITHDRAWN} (the id was a guess).") == 4
