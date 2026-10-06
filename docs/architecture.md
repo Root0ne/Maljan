@@ -1656,10 +1656,12 @@ argument position, call and callee, so one text passed to two calls is two
 facts. An offset and its virtual address are one function only through an
 image base the run read: exactly one of the two is below the base, and they are
 apart by it. Two virtual addresses a base apart stay two functions. With no
-base, both are kept as written. A claim gives a function its summary by the
-decompiled-not-described check's reading when a base is known. With none, it
-needs the same address written out, or a name the decompiler gave the function.
-No address is guessed. A visited function with neither an artefact nor a
+base, both are kept as written. A claim gives a function its summary by an
+address that is the same function by that rule (with no base, the same address),
+by the function's own hex spelling written as digits alone, or by a name the
+decompiler gave it; a name that is an ordinary word (`entry`, `start`) counts
+only written as code or beside a word such as "function" or "export". No
+address is guessed. A visited function with neither an artefact nor a
 summary appears on one "also visited" line, by address. Names other than a
 decompiler's generic `FUN_`, `sub_` or `fcn.` name are kept beside it, such as
 an export name.

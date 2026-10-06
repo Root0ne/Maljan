@@ -2384,6 +2384,7 @@ change landed on `main`.
 
 ### Fixed
 
+- **A function map summary attaches only to the function its claim names**: a name that is an ordinary word needs a code spelling or a function cue beside it, two virtual addresses a base apart stay two functions with a base known, and the function's own digits written without `0x` name it with no base known.
 - **A configured password under four characters, echoed after `Bearer`, `Basic` or `token`, is masked in a finding row** as the whole word after the scheme; elsewhere such a value keeps the row's words.
 - **The triage pack prints an APK's package name as the manifest wrote it**, even one that starts with `no: `; only `apk_info`'s own refusal reasons are left out (`binary.is_apk_unread`).
 - **A TECHNIQUE line listing ids separated by commas, "and" or slashes is read as one claim per id**, each checked as a technique, and an id taken off the list when asked is the answer kept; a closing `· ---` is read past, the claim format says several ids are separated by commas, and only a line with words beside an id is asked about.
