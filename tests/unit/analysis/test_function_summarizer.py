@@ -202,8 +202,7 @@ class TestACutSummaryIsMarkedCut:
 
         assert result.startswith(SUMMARY_CUT_NOTE.format(cap=100))
         assert result.endswith("It injects into expl")
-        (sentence,) = [c.args[0] for c in ledger.record_input_shortened.call_args_list]
-        assert "100-token output limit" in sentence
+        assert [c.args for c in ledger.record_summary_cut.call_args_list] == [(100,)]
 
     def test_summaries_cut_at_one_limit_are_counted_in_one_sentence(self) -> None:
         from maljan.core.truncation_ledger import TruncationLedger
@@ -257,6 +256,58 @@ class TestACutSummaryIsMarkedCut:
             "told each one's end is missing.",
         ]
 
+    def test_summaries_cut_at_once_on_several_threads_are_all_counted(self) -> None:
+        import asyncio
+        import threading
+        import time
+
+        from maljan.core.truncation_ledger import TruncationLedger
+
+        class _SlowLedger(TruncationLedger):
+            """A ledger whose recording takes a moment, as any shared work may."""
+
+            def record_input_shortened(self, sentence: str, replaces: str | None = None) -> None:
+                time.sleep(0.05)
+                super().record_input_shortened(sentence, replaces)
+
+        threads = 6
+        together = threading.Barrier(threads)
+
+        class _Together:
+            max_tokens = 100
+
+            def invoke(self, messages: Any, **kwargs: Any) -> Any:
+                together.wait(5)
+                return _answer("cut", 100)
+
+        ledger = _SlowLedger()
+        summarizer = FunctionSummarizer(llm=_Together(), truncation_ledger=ledger)  # type: ignore[arg-type]
+
+        async def _all() -> None:
+            await asyncio.gather(
+                *(asyncio.to_thread(summarizer.summarize_chunk, f"c{n}") for n in range(threads))
+            )
+
+        asyncio.run(_all())
+
+        assert ledger.input_shortened == [
+            "6 function summaries ended at their 100-token output limit; the analyst was "
+            "told each one's end is missing."
+        ]
+
+    def test_a_summariser_rebuilt_during_the_job_counts_on(self) -> None:
+        from maljan.core.truncation_ledger import TruncationLedger
+
+        ledger = TruncationLedger()
+        for _ in range(2):
+            llm = _Capped([_answer("cut", 100)], max_tokens=100)
+            FunctionSummarizer(llm=llm, truncation_ledger=ledger).summarize_chunk("a")  # type: ignore[arg-type]
+
+        assert ledger.input_shortened == [
+            "2 function summaries ended at their 100-token output limit; the analyst was "
+            "told each one's end is missing."
+        ]
+
     def test_a_server_that_says_length_is_believed(self) -> None:
         llm = _Capped([_answer("It injects", 12, finish="length")])
         result = FunctionSummarizer(llm=llm).summarize_chunk("code")  # type: ignore[arg-type]
@@ -268,7 +319,7 @@ class TestACutSummaryIsMarkedCut:
         summarizer = FunctionSummarizer(llm=llm, truncation_ledger=ledger)  # type: ignore[arg-type]
 
         assert summarizer.summarize_chunk("code") == "It injects into explorer."
-        ledger.record_input_shortened.assert_not_called()
+        ledger.record_summary_cut.assert_not_called()
 
     def test_a_held_call_is_checked_against_its_held_cap(self) -> None:
         from contextlib import contextmanager

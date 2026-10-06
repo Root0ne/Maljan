@@ -124,9 +124,6 @@ class FunctionSummarizer:
         # ``summarizer`` and the model the summariser calls.
         self._token_ledger = token_ledger
         self._model_label = model_label
-        # How many summaries ended at each output limit, and the sentence
-        # each count was recorded in: one sentence per limit, counting them.
-        self._cuts: dict[int, tuple[int, str]] = {}
 
     def _record(self, response: Any) -> None:
         from maljan.core.token_ledger import record_response_usage
@@ -284,23 +281,12 @@ class FunctionSummarizer:
         logger.warning(
             "FunctionSummarizer: the summary ended at its %d-token output limit.", cut_at
         )
-        record = getattr(self._truncation_ledger, "record_input_shortened", None)
+        # Counted by the job's ledger, which locks: summaries are cut on
+        # several threads at once, and this summariser may be rebuilt mid-job.
+        record = getattr(self._truncation_ledger, "record_summary_cut", None)
         if callable(record):
-            count, earlier = self._cuts.get(cut_at, (0, ""))
-            count += 1
-            sentence = (
-                "A function summary ended at its "
-                f"{cut_at:,}-token output limit; the analyst was told its end is missing."
-                if count == 1
-                else f"{count} function summaries ended at their {cut_at:,}-token output "
-                "limit; the analyst was told each one's end is missing."
-            )
             try:
-                if earlier:
-                    record(sentence, replaces=earlier)
-                else:
-                    record(sentence)
-                self._cuts[cut_at] = (count, sentence)
+                record(cut_at)
             except Exception as exc:  # noqa: BLE001 — a record never costs a summary
                 logger.debug("FunctionSummarizer: the cut was not recorded (%s).", exc)
         return f"{SUMMARY_CUT_NOTE.format(cap=cut_at)}\n{text}"
