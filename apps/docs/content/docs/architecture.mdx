@@ -1632,7 +1632,11 @@ A chunked analysis answers each chunk's cut inside that chunk, before the
 merge: the cut is taken as the chunk ends (in a `finally`, so a chunk that
 raises leaves none for the next), and that chunk's own answer is asked once for
 a whole shorter one over that chunk's own input, the question naming it ("Your
-answer to chunk 1 of 2 stopped at the output limit …"). What comes back stands
+answer to chunk 1 of 2 stopped at the output limit …"; a repeated-claims
+question names its chunk the same way). A chunk is named by its place in the
+list the analyst is handed, in its prompt header as in the question: chunks
+from several data sources each count within their own source, and two of them
+both read "1 of 1". What comes back stands
 for that chunk alone in the merge; the merged answer is never replaced by one
 retry. A chunk still cut after its question is kept as it was cut and recorded
 as unread for that chunk. Before, a cut in chunk 1 was overwritten by a short

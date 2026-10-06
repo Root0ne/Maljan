@@ -1579,6 +1579,26 @@ def _without_catalogue_names(text: str) -> str:
     return _ID_WITH_BRACKETED_WORDS_RE.sub(_plain, text)
 
 
+def _numbered_in_order(chunks: list[Any]) -> list[Any]:
+    """``chunks`` with each one's index and total its place in this list.
+
+    A chunk that already says so is kept as it is; one that cannot be copied
+    with new numbers (not a dataclass) is kept as it is too.
+    """
+    import dataclasses
+
+    total = len(chunks)
+    out: list[Any] = []
+    for position, chunk in enumerate(chunks):
+        if (getattr(chunk, "index", None), getattr(chunk, "total", None)) == (position, total):
+            out.append(chunk)
+        elif dataclasses.is_dataclass(chunk) and not isinstance(chunk, type):
+            out.append(dataclasses.replace(chunk, index=position, total=total))
+        else:
+            out.append(chunk)
+    return out
+
+
 def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     """``(technique ids, unread line)`` for one claim's TECHNIQUE line as written.
 
@@ -6333,6 +6353,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             return self.safe_analyze_isr(chunks[0].content)
 
         self.logger.info("Chunked analysis: %d chunks for agent='%s'.", len(chunks), self.name)
+        # Each chunk is named by its place in the list this analyst is handed:
+        # chunks from several data sources each count within their own source
+        # ("1 of 1" twice), and a question naming the chunk it was asked in
+        # named the wrong one.
+        chunks = _numbered_in_order(chunks)
 
         chunk_isrs: list[AgentISR] = []
         errors: list[str] = []
