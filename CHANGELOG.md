@@ -2392,6 +2392,7 @@ change landed on `main`.
 
 ### Fixed
 
+- **A TECHNIQUE line that writes an id with the vendored catalogue's own name for it in brackets is read as that id** (`T1027 (Obfuscated Files or Information)`); any other bracketed words keep the line whole and asked about, as before.
 - **The command-line flags table and a draft rule's comments print network values defanged**, through the report's own defanger; the strings a draft rule matches on stay as they compile.
 - **A bare two-label host with a two-character first label is read when the label holds a digit and a letter** (`c2.ru`, `x1.top`), by the string sweep and the report's host reader; one of two letters (`ab.ru`) is read only where the run's network evidence holds it, so prose such as `to.do` stays as written.
 - **An IPv6 address, bare or bracketed, and a `.onion` name of any labels are network values to every reader**: the publish checks, the run summary's sentences and a cell's state note read them by form: an IPv6 address whole, an embedded IPv4 tail included, in brackets or with at least three groups and a digit, so a scope name such as `dead::beef` is no address.

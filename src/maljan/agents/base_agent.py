@@ -1536,6 +1536,49 @@ def _bare_technique(text: str) -> str:
     return text.strip().strip("*`_ ").rstrip(".").strip().strip("*`_ ")
 
 
+# An id followed by words in brackets: "T1027 (Obfuscated Files or Information)".
+_ID_WITH_BRACKETED_WORDS_RE = re.compile(
+    r"(?<![\w.])(?P<id>T\d{4}(?:\.\d{3})?)\s*\((?P<words>[^()]*)\)", re.IGNORECASE
+)
+
+
+def _catalogue_names_for(technique_id: str) -> set[str]:
+    """The vendored catalogue's own names for an id, folded for comparing; empty when unknown.
+
+    A sub-technique is named by its own name or by its parent's name and its
+    own joined by a colon or a dash, as the catalogue's pages write it.
+    """
+    from maljan.memory.attck_loader import _folded_name, technique_entry
+
+    entry = technique_entry(technique_id)
+    if entry is None or not entry.name:
+        return set()
+    names = {_folded_name(entry.name)}
+    if "." in technique_id:
+        parent = technique_entry(technique_id.split(".")[0])
+        if parent is not None and parent.name:
+            names.add(_folded_name(f"{parent.name} {entry.name}"))
+    return {name for name in names if name}
+
+
+def _without_catalogue_names(text: str) -> str:
+    """``text`` with each bracketed catalogue name after its own id taken off.
+
+    Only words that are the vendored catalogue's own name for the id they
+    follow are taken off; any other bracketed words stay where they are, and
+    the line is read as it always was.
+    """
+    from maljan.memory.attck_loader import _folded_name
+
+    def _plain(match: re.Match[str]) -> str:
+        words = _folded_name(match.group("words"))
+        if words and words in _catalogue_names_for(match.group("id").upper()):
+            return match.group("id")
+        return match.group(0)
+
+    return _ID_WITH_BRACKETED_WORDS_RE.sub(_plain, text)
+
+
 def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     """``(technique ids, unread line)`` for one claim's TECHNIQUE line as written.
 
@@ -1547,10 +1590,12 @@ def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     joined by another word ("T1027 or T1140") — claims no technique the
     reader could name without deciding what the words mean, so no id is read
     and the line is returned as written, for the validation turn to ask about
-    (``isr.technique_line_unread``).
+    (``isr.technique_line_unread``). An id followed by the vendored
+    catalogue's own name for it in brackets ("T1027 (Obfuscated Files or
+    Information)") is that id: the bracket names the id and decides nothing.
     """
     text = str(line or "").strip()
-    bare = _bare_technique(_TRAILING_BLOCK_SEPARATOR_RE.sub("", text))
+    bare = _bare_technique(_without_catalogue_names(_TRAILING_BLOCK_SEPARATOR_RE.sub("", text)))
     if bare.upper() in _NO_TECHNIQUE:
         return (), None
     parts = [_bare_technique(part) for part in _TECHNIQUE_LIST_SEPARATOR_RE.split(bare)]

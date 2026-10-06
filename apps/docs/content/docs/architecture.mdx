@@ -1467,7 +1467,10 @@ note on part of an answer leaves the claims it read standing when one is. A TECH
 id, a list of ids separated by commas, "and" or slashes (read as one claim per id, each
 with the claim's sentence, evidence and confidence, and each checked as a
 technique), or `NONE` or a dash for none; a closing block separator (`· ---`)
-is no part of it. Any other line (a qualifier, a negation, ids joined by
+is no part of it. An id followed by the vendored catalogue's own name for it
+in brackets (`T1027 (Obfuscated Files or Information)`; for a sub-technique its
+own name, or its parent's and its own joined by a colon) is that id. Any other
+line (bracketed words that are not that name, a qualifier, a negation, ids joined by
 another word) claims no id, is kept on the claim as `technique_line`, and the
 validation turn asks once for the ids alone, an id the claim does not assert
 left off the line (`isr.technique_line_unread`). The claims begun are counted
