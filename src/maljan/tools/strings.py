@@ -507,156 +507,42 @@ _TWO_PART_PUBLIC_SUFFIXES = frozenset(
 # hostname — the concrete example being `System.Collections.Generic`, which was
 # emitted as a `domain` IOC on every .NET sample.
 #
-# Deliberately not the full IANA list: the goal is to reject compile artefacts,
-# and a curated set of TLDs that actually appear in malware C2 does that with a
-# far smaller false-negative surface than trying to be exhaustive would create
-# false positives.
-_KNOWN_TLDS = frozenset(
-    {
-        # generic
-        "com",
-        "net",
-        "org",
-        "info",
-        "biz",
-        "io",
-        "co",
-        "app",
-        "dev",
-        "xyz",
-        "site",
-        "online",
-        "store",
-        "shop",
-        "club",
-        "space",
-        "website",
-        "tech",
-        "live",
-        "life",
-        "world",
-        "today",
-        "top",
-        "icu",
-        "cyou",
-        "monster",
-        "click",
-        "link",
-        "fun",
-        "pw",
-        "cc",
-        "tv",
-        "me",
-        "ws",
-        "su",
-        "sbs",
-        "digital",
-        "cloud",
-        "email",
-        "network",
-        "systems",
-        "services",
-        "host",
-        "press",
-        "wiki",
-        "art",
-        "blog",
-        "page",
-        "rest",
-        "zone",
-        "run",
-        "bar",
-        # ccTLDs that show up in real C2
-        "ru",
-        "cn",
-        "br",
-        "in",
-        "ir",
-        "ua",
-        "pl",
-        "de",
-        "fr",
-        "uk",
-        "nl",
-        "it",
-        "es",
-        "tr",
-        "jp",
-        "kr",
-        "vn",
-        "id",
-        "th",
-        "my",
-        "ph",
-        "hk",
-        "tw",
-        "sg",
-        "za",
-        "ng",
-        "ke",
-        "eg",
-        "sa",
-        "ae",
-        "il",
-        "gr",
-        "pt",
-        "ro",
-        "cz",
-        "sk",
-        "hu",
-        "bg",
-        "rs",
-        "hr",
-        "si",
-        "lt",
-        "lv",
-        "ee",
-        "fi",
-        "se",
-        "no",
-        "dk",
-        "be",
-        "at",
-        "ch",
-        "ie",
-        "us",
-        "ca",
-        "mx",
-        "ar",
-        "cl",
-        "pe",
-        "ve",
-        "au",
-        "nz",
-        "kz",
-        "by",
-        "md",
-        "ge",
-        "am",
-        "az",
-        "uz",
-        "pk",
-        "bd",
-        "lk",
-        "np",
-        "tk",
-        "ml",
-        "ga",
-        "cf",
-        "gq",
-        "to",
-        "st",
-        "cx",
-        "nu",
-        "im",
-        "gg",
-        "je",
-        # ".onion" is deliberately absent. Hidden services have a fixed address
-        # shape that a dedicated pattern validates, and routing them through the
-        # generic domain path would accept any `word.onion` while losing the
-        # note that says what it is.
-    }
-)
+# The list is the root zone's own: IANA's ``tlds-alpha-by-domain.txt``,
+# vendored under ``data/`` with its version line and refreshed by
+# ``scripts/knowledge/refresh_iana_tlds.py``. A host under any delegated TLD
+# (``.sh``, ``.ly``, ``.ai``, ``.zip``) is read as one; the shape rules below,
+# not a shortened list, keep compile artefacts out. ".onion" is not in the
+# root zone: hidden services have a fixed address shape that a dedicated
+# pattern validates.
+TLD_LIST_PATH = Path(__file__).resolve().parents[3] / "data" / "tlds-alpha-by-domain.txt"
+
+
+def read_tld_list(text: str) -> tuple[str, frozenset[str]]:
+    """The version line and the lower-case TLDs of an IANA ``tlds-alpha-by-domain.txt``.
+
+    The first line must be the registry's ``# Version …`` line, and every
+    other line one TLD: letters, digits and hyphens. Anything else is refused
+    with ``ValueError``, so a truncated or foreign file is never read as the list.
+    """
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    if not lines or not lines[0].startswith("# Version "):
+        raise ValueError("the TLD list has no version line")
+    tlds = frozenset(line.lower() for line in lines[1:])
+    if not tlds or not all(re.fullmatch(r"[a-z0-9-]+", tld) for tld in tlds):
+        raise ValueError("the TLD list holds a line that is no TLD")
+    return lines[0], tlds
+
+
+_KNOWN_TLDS = read_tld_list(TLD_LIST_PATH.read_text(encoding="ascii"))[1]
+
+# The TLDs that are also extensions of files a binary carries in bulk: a
+# two-label name under one ("install.sh", "archive.zip", "authroot.cab") is a
+# file to the sweep, and a longer one ("cdn.evil.sh") a host. ".py", ".so" and
+# ".md" are already file suffixes above; ".pl" and ".rs" are country codes the
+# sweep has always read as hosts, and still does.
+FILE_EXTENSION_TLDS = frozenset({"zip", "mov", "sh", "ps", "ai", "pm", "cat", "one", "cab"})
+# The generic TLDs a hostname is written in capitals with (`Evil.COM`).
+_CAPITALISED_HOST_TLDS = frozenset({"com", "net", "org", "info", "biz"})
 
 
 def _looks_like_path(text: str) -> bool:
@@ -769,6 +655,8 @@ def _looks_like_domain(text: str) -> bool:
     # does not.
     if labels[-1] not in _KNOWN_TLDS:
         return False
+    if len(labels) == 2 and labels[-1] in FILE_EXTENSION_TLDS:
+        return False
 
     # Nothing registrable in it. `co.uk` and `ne.jp` are the registry's own
     # level, not names, and a sample carrying a public-suffix table was
@@ -785,6 +673,12 @@ def _looks_like_domain(text: str) -> bool:
     # for rather than for an upper-case letter in any suffix at all.
     tld = text.rsplit(".", 1)[1]
     if len(tld) == 2 and any(ch.isupper() for ch in tld) and not text.isupper():
+        return False
+    # The same table's longer suffixes (`Latrodectus.CPA`) wear a generic TLD
+    # in capitals. A hostname is capitalised with the classic generic TLDs
+    # only, so any other one spelled in capitals on a name that is not is a
+    # detection name's suffix.
+    if tld.isupper() and tld.lower() not in _CAPITALISED_HOST_TLDS and not text.isupper():
         return False
 
     # Namespace shape. Most .NET identifiers die on the TLD check already

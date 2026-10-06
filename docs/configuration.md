@@ -584,6 +584,15 @@ travels to the knowledge tool server — the process where the build happens —
 `MALJAN_INDEX_RETRY_SECONDS`, which is on that server's `env_allow` and cannot
 be taken off it.
 
+### The top-level-domain list
+
+`data/tlds-alpha-by-domain.txt` is IANA's root-zone list as published, with its
+`# Version` line, and the string sweep reads hosts against it
+(`tools.strings.read_tld_list`, loaded at import). Refresh it with
+`uv run python scripts/knowledge/refresh_iana_tlds.py`, which downloads the
+registry's file, checks it with the same reader and writes it unchanged; no
+hand edits.
+
 ### The API catalogue
 
 `data/api_behaviour_map_v1.json` and `data/api_attck_map_v1.json` are written
