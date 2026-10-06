@@ -15,7 +15,7 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -25,7 +25,7 @@ from maljan.providers.base import MirrorSpec
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_static_provider
 from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
-from maljan.tools.errors import BAD_ARGUMENT, TOOL_FAILED, tool_error
+from maljan.tools.errors import BAD_ARGUMENT, TOOL_FAILED, error_parts, tool_error
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -40,6 +40,24 @@ if TYPE_CHECKING:
 # sample's own strings can hold any sentence, and a string the sample carries is
 # not the tool failing.
 _R2_OPEN_FILE_FIRST = "call open_file with the path you are given, then call this tool again"
+# The same advice when the path radare2 can open for this sample is known: it
+# names it, so a model whose open failed is not left to guess it.
+_R2_OPEN_FILE_FIRST_AT = "call open_file with {readable}, then call this tool again"
+# What a failed open is told: the path it tried and the one radare2 can open.
+_R2_OPEN_FAILED_AT = (
+    "open_file could not open {tried}; the path radare2 can open for this sample is "
+    "{readable}: call open_file with it"
+)
+_R2_OPEN_FAILED_ON_ITS_OWN = (
+    "open_file could not open {tried}, the path radare2 was given for this sample; report "
+    "it with the server log"
+)
+_R2_OPEN_TOOL = "open_file"
+# The open-first refusal r2mcp raises as a protocol error rather than writing as
+# a reply; it reaches the tool layer as the MCP client's failure marker.
+_R2_OPEN_FIRST_ERROR = re.compile(
+    r"(?:\w+: )?Use the open_file method before calling any other method\b.*"
+)
 _R2_ERROR_REPLIES: tuple[tuple[re.Pattern[str], str, str | None], ...] = (
     (re.compile(r"Invalid regex used in filter parameter\b.*"), BAD_ARGUMENT, None),
     (re.compile(r"Invalid parameter '[^']*':.*"), BAD_ARGUMENT, None),
@@ -87,14 +105,25 @@ def _r2_logged_error(text: str) -> str | None:
     return "\n".join(lines)
 
 
-def r2_error_reply(tool: str, reply: Any) -> dict[str, Any] | None:
+def r2_error_reply(
+    tool: str, reply: Any, *, tried: str | None = None, readable: str | None = None
+) -> dict[str, Any] | None:
     """The structured failure for one r2mcp reply that is an error, else ``None``.
 
     ``None`` for anything that is not one of r2mcp's own error sentences as the
-    whole reply, or a log envelope holding nothing but radare2's log lines with
-    an ``[ERROR]`` or ``[FATAL]`` among them, so every answer keeps exactly what it said. The
-    message is r2mcp's sentence, or radare2's log lines, unchanged.
+    whole reply, a log envelope holding nothing but radare2's log lines with
+    an ``[ERROR]`` or ``[FATAL]`` among them, or the MCP client's marker for
+    r2mcp's open-first protocol error, so every answer keeps exactly what it
+    said. The message is r2mcp's sentence, or radare2's log lines, unchanged.
+
+    ``tried`` is the path an ``open_file`` call was given and ``readable`` the
+    path radare2 can open for this sample (the provider's mirror): a failed
+    open names both in its remediation, and an open-first refusal names the
+    readable one.
     """
+    marker = _open_first_marker(reply)
+    if marker is not None:
+        return tool_error(TOOL_FAILED, marker, tool=tool, remediation=_open_first(readable))
     if not isinstance(reply, str):
         return None
     text = reply.strip()
@@ -105,17 +134,46 @@ def r2_error_reply(tool: str, reply: Any) -> dict[str, Any] | None:
         return None
     for pattern, code, remediation in _R2_ERROR_REPLIES:
         if pattern.fullmatch(text):
+            if remediation == _R2_OPEN_FILE_FIRST:
+                remediation = _open_first(readable)
+            elif tool == _R2_OPEN_TOOL and text.startswith("Failed to open file") and tried:
+                remediation = _open_failed(tried, readable)
             return tool_error(code, text, tool=tool, remediation=remediation)
     return None
 
 
-def _reading_error_replies(tool: Any) -> Any:
+def _open_first(readable: str | None) -> str:
+    """The open-first advice, naming the path radare2 can open when it is known."""
+    return _R2_OPEN_FILE_FIRST_AT.format(readable=readable) if readable else _R2_OPEN_FILE_FIRST
+
+
+def _open_failed(tried: str, readable: str | None) -> str:
+    """What a failed open is told: the path it tried, and the one radare2 can open."""
+    if readable and readable != tried:
+        return _R2_OPEN_FAILED_AT.format(tried=tried, readable=readable)
+    return _R2_OPEN_FAILED_ON_ITS_OWN.format(tried=tried)
+
+
+def _open_first_marker(reply: Any) -> str | None:
+    """The message of the MCP client's failure marker for r2mcp's open-first error, or ``None``."""
+    if not (isinstance(reply, dict) or (isinstance(reply, str) and reply.lstrip().startswith("{"))):
+        return None
+    parts = error_parts(reply)
+    if parts is None:
+        return None
+    _code, message, _remediation = parts
+    return message if _R2_OPEN_FIRST_ERROR.fullmatch(message.strip()) else None
+
+
+def _reading_error_replies(tool: Any, readable: Callable[[], str | None] | None = None) -> Any:
     """``tool``, rebuilt so an r2mcp error reply comes back as the structured failure.
 
     The ledger's rule for a returned error (``schemas.evidence.build_entry``)
     reads the structured shape, so an error reply is then a failed entry with
-    r2mcp's own message. A tool that cannot be rebuilt faithfully is returned
-    as it is.
+    r2mcp's own message. ``readable`` answers, at call time, the path radare2
+    can open for this sample, which a failed open's remediation names beside
+    the path it tried. A tool that cannot be rebuilt faithfully is returned as
+    it is.
     """
     from langchain_core.tools import StructuredTool
 
@@ -127,7 +185,13 @@ def _reading_error_replies(tool: Any) -> Any:
 
     async def _call(**kwargs: Any) -> Any:
         reply = await coroutine(**kwargs)
-        failure = r2_error_reply(name, reply)
+        tried = kwargs.get("file_path") if name == _R2_OPEN_TOOL else None
+        failure = r2_error_reply(
+            name,
+            reply,
+            tried=str(tried) if tried else None,
+            readable=readable() if readable is not None else None,
+        )
         return json.dumps(failure) if failure is not None else reply
 
     try:
@@ -338,7 +402,56 @@ class R2StaticProvider(GenericMCPStaticProvider):
         self.tools = self.get_tools()
 
     def get_tools(self) -> list[BaseTool]:
-        return [_reading_error_replies(tool) for tool in super().get_tools()]
+        return [_reading_error_replies(tool, self._held_path) for tool in super().get_tools()]
+
+    def pin_sample(self, path: str | None) -> None:
+        """The mirror this provider's session opens, set by the analyst node; ``None`` clears it."""
+        self._pinned_path = path or None
+
+    def _held_path(self) -> str | None:
+        """The path radare2 can open for this sample: the pin, else the job's mirror."""
+        pinned = getattr(self, "_pinned_path", None) or getattr(
+            getattr(self, "_job", None), "mirror_sample_path", None
+        )
+        return pinned if isinstance(pinned, str) and pinned else None
+
+    def open_sample(self, path: str | None = None) -> bool:
+        """Open the job's mirror in r2mcp's session before the loop, as Ghidra loads its program.
+
+        r2mcp answers every tool but ``open_file`` with an open-first refusal
+        until a file is open, and a model that tried another path first, or a
+        listing tool first, spent its turns on refusals. The mirror is opened
+        here with r2mcp's own ``open_file``; the model may still open it
+        again. A failure is logged and changes nothing else: the model's own
+        open is answered as before, with the path radare2 can open named.
+        Returns whether the file opened.
+        """
+        target = path or self._held_path()
+        tool = next((t for t in self.get_tools() if t.name == _R2_OPEN_TOOL), None)
+        coroutine = getattr(tool, "coroutine", None)
+        if not target or coroutine is None:
+            return False
+        from maljan.agents.base_agent import run_coro_blocking
+        from maljan.core.config import get_settings
+        from maljan.providers.server_guard import deployment_call_budget
+
+        budget = deployment_call_budget(get_settings())
+        try:
+            reply = run_coro_blocking(
+                coroutine(file_path=target),
+                hard_timeout=budget if budget > 0 else None,
+                label="r2-open",
+            )
+        except Exception as exc:  # noqa: BLE001 — the model's own open is still there
+            logger.warning("r2: the job's sample was not opened at session start (%s).", exc)
+            return False
+        if error_parts(reply) is not None or r2_error_reply(_R2_OPEN_TOOL, reply) is not None:
+            logger.warning(
+                "r2: the job's sample was not opened at session start: %s", str(reply)[:300]
+            )
+            return False
+        logger.info("r2: opened the job's sample at session start.")
+        return True
 
     def mirror_spec(self) -> MirrorSpec:
         return MirrorSpec(work_subdir=Path(self._mirror_dir).name, container_prefix="")

@@ -3873,6 +3873,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             path_by_server=self._path_by_server,
             agent_name=self.name,
             captures=tuple(getattr(self, "_captures", ()) or ()),
+            staged_path=(getattr(self, "sample_path_choices", None) or {}).get("host"),
         )
 
     def _run_state_body(
