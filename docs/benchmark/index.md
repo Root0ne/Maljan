@@ -61,13 +61,13 @@ In short, for the default-team iterations:
 
 In short, for the all-tools series:
 
-- On the hosted model the report found 45 of 57 core items, partly found 9,
+- In run 4 on the hosted model the report found 45 of 57 core items, partly found 9,
   missed 2 and got 1 wrong (command 0xf labelled "uninstall"), and stated 19
   facts beyond the human reports, from the decoder and handler addresses to
   the TLS flags the request routine sets.
 - A second hosted run, with no spend ceiling and parallel analysts, found 43,
   partly found 11, missed 2 and got 1 wrong (command 0xf again), and stated 27
-  facts beyond the human reports. It cost 3.07 USD against 1.39 for run 4, and
+  facts beyond the human reports. It cost 3.07 USD against 1.39 for run 4 counted the same way (1.36 charged), and
   part of that came from platform defects the run exposed, which were fixed
   afterwards.
 - On the local model the best run found 15, with none wrong, and stated 12

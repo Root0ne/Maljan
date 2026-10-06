@@ -67,7 +67,7 @@ Against [run 4](latrodectus-all-tools-run4.md) (45 / 9 / 2 / 1): 6 items better,
   43 host-identifier rows hold their value in a cited entry, every one of 19
   sandbox addresses is marked `no:` with a reason, and no redaction mask appears
   in the report.
-- **More than twice run 4's cost, and slower.** 3.07 against 1.39 USD, and 9,578
+- **More than twice run 4's cost, and slower.** 3.07 against 1.39 USD for run 4 counted the same way (1.36 charged), and 9,578
   against 7,603 s. Part of that came from the platform defects listed below, not
   from the analysis.
 
@@ -173,7 +173,7 @@ line.
 7. Resolver layout: hash tables at **0x9484 (90), 0x904C (24), 0xA59C (37 ntdll), 0xAC50 (3 ole32)**, with module-name hashes at 0x84E4, 0xA47C and 0xABD4 — `ev_0020` `resolve_api_hashes`.
 8. The export resolver at 0x869c reads `e_lfanew`, the export directory, the name count and the name array; the PEB getter at 0x8690 reads `gs:[0x60]` — `ev_0008` capa; `ev_0110` and `ev_0114` Ghidra `batch_decompile`; `ev_0122` Ghidra `read_memory`.
 9. Crypto and hash routines: CRC32 at 0x6aa4 (polynomial 0xEDB88320), FNV-1a at 0xc99c (basis 0x811C9DC5, prime 0x01000193), RC4 PRGA at 0xcaac and KSA at 0xcbe0 — `ev_0008` capa; `ev_0334`, `ev_0344`, `ev_0341`, `ev_0343` Ghidra `decompile_function`.
-10. **This hash's C2 pair**, both on `/live/`, decoded by 0xae78 inside 0x6988 and referenced at 0x69b3 and 0x6a1f (`hxxps://titnovacrion[.]top/live/`, `hxxps://skinnyjeanso[.]com/live/`) — `ev_0019` FLOSS; `ev_0021` `decode_string_blobs`.
+10. **This hash's C2 pair**, both on `/live/`, decoded by 0xae78 inside 0x6988 and referenced at 0x69b3 and 0x6a1f — `ev_0019` FLOSS; `ev_0021` `decode_string_blobs`.
 11. The decoder's output slot becomes argument 1 of the call to 0xbc1c at 0x69e2 and 0x6a4e — `ev_0021` `decode_string_blobs`.
 12. The C2 bases go into a two-entry gateway array at **0x10568**; an operator list at 0x109a8 is preferred when non-empty, and the base is chosen by the beacon counter modulo the count — `ev_0107` and `ev_0135` Ghidra decompiles.
 13. **This hash's group string is `Littlehw`** (blob 0xfb10, used in 0x463c), FNV-1a-hashed into `group=` — `ev_0021` `decode_string_blobs`; `ev_0344` Ghidra `decompile_function`.
@@ -225,23 +225,26 @@ The run exposed platform defects. Each was fixed in the code that followed:
 - **The debate ends when nothing is left to settle.** One contradiction in the
   mediator's list, however immaterial, kept the debate open: a count of decoded
   blobs, then a claim its author had already withdrawn. The debate ran five
-  rounds, four of them with revisions. Consensus is now blocked only by a
-  contradiction that touches a published fact, a technique, an indicator or the
-  verdict, and claims an author no longer carries are not passed to the
-  mediator.
+  rounds, four of them with revisions. The mediator now marks each
+  contradiction it lists as blocking or not blocking, and an unmarked one
+  blocks. The counts held by the cited evidence entries are put to it, and a
+  revision round that changes nothing ends the debate as converged. The debate
+  stage's recorded duration now also counts the revision rounds; this run's
+  summary under-recorded it by about 40 minutes.
 - **Revisions record what they drop.** A revision replaced the answer in force
   wholesale, and the reverser's claims fell from 52 to 17 across the rounds
   with nothing recording it; the beacon-type mapping (K6.6) was lost this way.
   A revision's dropped claims are now recorded.
 - **The whole technique line is read.** The reader accepted one technique per
-  claim, and a line such as "T1027, T1140" was re-asked. It was the cause of 29
-  re-asks. The line is now read as a whole.
+  claim, and a line such as "T1027, T1140" was re-asked. It was behind 29
+  re-asks, and the only reason for 13. The line is now read as a whole.
 - **The validator reads inflections.** It flagged a true claim ("deobfuscates
   its own obfuscated strings") for sharing no term with the technique it
   supports. It now matches word forms.
 - **The family is on the STIX malware object.** The object was passed through
   as the judge wrote it ("UpdaterTag.dll loader", not a family) although the
-  report's family is Latrodectus. It is now built from the verdict's family.
+  report's family is Latrodectus. A family object is now added from the
+  verdict's family, and the judge's object is related to it.
 - **Network values are defanged everywhere in the report.** The strings-of-note
   table and one quoted claim printed the C2 URLs and domains live.
 - **Raw unparsed answers are kept.** Five revision answers read no claims on
