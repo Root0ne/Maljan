@@ -67,7 +67,6 @@ from maljan.reporting.models import (
     stated_family,
 )
 from maljan.schemas.isr_models import UNVERIFIED_TECHNIQUE_MARKER
-from maljan.tools.strings import FILE_EXTENSION_TLDS
 
 # ---------------------------------------------------------------------------
 # Voices
@@ -2838,7 +2837,11 @@ _DOTNET_NAME = re.compile(r"(?i)(?:" + _PIPE.join(("ASP", "ADO", "VB")) + r")\.N
 # name under one ("lib.rs", "README.md", "install.sh", "archive.zip") is read
 # as a file in free prose. Under a scheme, a "//", "www." or "@" it is a host
 # and defanged, and so is any value the run itself recorded.
-_FILE_EXTENSION_TLDS = FILE_EXTENSION_TLDS | frozenset({"py", "so", "pl", "md", "rs"})
+# A display rule of this report alone: no extraction, tool or publish check
+# reads it.
+_FILE_EXTENSION_TLDS = frozenset(
+    {"zip", "mov", "py", "so", "sh", "ps", "ai", "pl", "md", "rs", "pm", "cat", "one", "cab"}
+)
 # What a dotted quad of a version number follows: "FileVersion", "version",
 # "ProductVersion:" or a "v" written against it, and how far before the quad
 # that is looked for.

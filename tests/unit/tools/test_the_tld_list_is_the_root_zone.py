@@ -2,9 +2,11 @@
 
 The list is ``data/tlds-alpha-by-domain.txt`` as the registry publishes it,
 refreshed by ``scripts/knowledge/refresh_iana_tlds.py``; nothing here reads the
-network. A two-label name under a TLD that is also a file extension a binary
-carries in bulk (``install.sh``, ``archive.zip``) is a file to the sweep; a
-longer name under one is a host.
+network. The list only adds hosts: everything the sweep extracted with the
+shorter curated list (``tests/fixtures/strings/dev_extraction.json``, written
+by that version) it still extracts, and a file-shaped host (``update.zip``,
+``c2.sh``) is a candidate indicator. The report's file-name rule is a display
+rule of the report alone.
 """
 
 from __future__ import annotations
@@ -44,19 +46,27 @@ def test_the_sweep_reads_hosts_under_the_new_tlds() -> None:
     assert {"cdn.evil.sh", "bit.ly", "panel.evil.ai", "update.example.is"} <= set(found)
 
 
-def test_the_sweep_reads_a_file_under_a_file_extension_tld_as_no_host() -> None:
-    found = _domains("install.sh archive.zip clip.mov logo.ai invoice.one oem1.cat Module.pm")
+def test_the_sweep_reads_a_file_shaped_host_as_a_candidate() -> None:
+    found = set(_domains("update.zip then cdn.mov then install.sh then panel.ai"))
 
-    assert found == []
+    assert {"update.zip", "cdn.mov", "install.sh", "panel.ai"} <= found
+    # A one- or two-letter name is read under a new TLD exactly as under an old one.
+    assert ("c2.sh" in _domains("beacon c2.sh")) == ("c2.ru" in _domains("beacon c2.ru"))
+    assert ("x.ai" in _domains("beacon x.ai")) == ("x.ru" in _domains("beacon x.ru"))
 
 
 def test_the_sweep_still_reads_the_country_codes_it_always_read() -> None:
     assert set(_domains("evil.pl and evil.rs")) == {"evil.pl", "evil.rs"}
 
 
-def test_a_detection_name_wearing_a_shouted_generic_tld_is_no_host() -> None:
-    assert _domains("Latrodectus.CPA and Lactrodectus.CPA, authrootstl.cab") == []
+def test_the_sweep_extracts_everything_it_extracted_with_the_shorter_list() -> None:
+    import json
 
+    golden = json.loads(
+        resolve_data("tests/fixtures/strings/dev_extraction.json").read_text(encoding="utf-8")
+    )
+    rows = iocs_from_text(golden["text"])["iocs"]
+    found = {f"{row['kind']}\t{row['value']}" for row in rows}
 
-def test_a_host_somebody_capitalised_is_still_a_host() -> None:
-    assert set(_domains("Evil.COM and Relay.NET")) == {"Evil.COM", "Relay.NET"}
+    assert sorted(set(golden["expected"]) - found) == []
+    assert len(found) > len(golden["expected"])

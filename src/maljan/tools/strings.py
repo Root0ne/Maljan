@@ -535,15 +535,6 @@ def read_tld_list(text: str) -> tuple[str, frozenset[str]]:
 
 _KNOWN_TLDS = read_tld_list(TLD_LIST_PATH.read_text(encoding="ascii"))[1]
 
-# The TLDs that are also extensions of files a binary carries in bulk: a
-# two-label name under one ("install.sh", "archive.zip", "authroot.cab") is a
-# file to the sweep, and a longer one ("cdn.evil.sh") a host. ".py", ".so" and
-# ".md" are already file suffixes above; ".pl" and ".rs" are country codes the
-# sweep has always read as hosts, and still does.
-FILE_EXTENSION_TLDS = frozenset({"zip", "mov", "sh", "ps", "ai", "pm", "cat", "one", "cab"})
-# The generic TLDs a hostname is written in capitals with (`Evil.COM`).
-_CAPITALISED_HOST_TLDS = frozenset({"com", "net", "org", "info", "biz"})
-
 
 def _looks_like_path(text: str) -> bool:
     """Reject path *fragments*, which the regex produces in bulk.
@@ -655,8 +646,6 @@ def _looks_like_domain(text: str) -> bool:
     # does not.
     if labels[-1] not in _KNOWN_TLDS:
         return False
-    if len(labels) == 2 and labels[-1] in FILE_EXTENSION_TLDS:
-        return False
 
     # Nothing registrable in it. `co.uk` and `ne.jp` are the registry's own
     # level, not names, and a sample carrying a public-suffix table was
@@ -673,12 +662,6 @@ def _looks_like_domain(text: str) -> bool:
     # for rather than for an upper-case letter in any suffix at all.
     tld = text.rsplit(".", 1)[1]
     if len(tld) == 2 and any(ch.isupper() for ch in tld) and not text.isupper():
-        return False
-    # The same table's longer suffixes (`Latrodectus.CPA`) wear a generic TLD
-    # in capitals. A hostname is capitalised with the classic generic TLDs
-    # only, so any other one spelled in capitals on a name that is not is a
-    # detection name's suffix.
-    if tld.isupper() and tld.lower() not in _CAPITALISED_HOST_TLDS and not text.isupper():
         return False
 
     # Namespace shape. Most .NET identifiers die on the TLD check already
