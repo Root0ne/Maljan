@@ -3171,7 +3171,10 @@ is assembled from what the run gathered rather than recomputed beside it:
   run recorded them; under a scheme, a `//`, `www.` or `@` such a name is
   always defanged; a name of more than four labels opening with a
   reverse-DNS root (`com.`, `org.`, `android.`, `java.`, …) is read as a
-  package, not a host, unless the run's network evidence holds it; a draft rule's
+  package, not a host, unless the run's network evidence holds it; so is a
+  dotted name written after a kernel object's namespace (`Global\`, `Local\`,
+  `Session\<n>\`, `BaseNamedObjects\`: a mutex such as `Global\mtx.app`),
+  which neither the string sweep nor the prose host reader reads; a draft rule's
   body is printed as it compiles; a VirusTotal (`/gui/file|url/<hex>`,
   `/gui/domain|ip-address/<value>`), MalwareBazaar (`/sample/<sha256>/`) or
   ATT&CK (`/techniques/…`, `/tactics/…`, `/software/…`, `/matrices/…`) lookup

@@ -3906,7 +3906,7 @@ def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, s
     evidence does, so a host named ``com.evil-c2.update.cdn.ru`` that the
     run resolved is never skipped.
     """
-    from maljan.tools.strings import iocs_from_text
+    from maljan.tools.strings import iocs_from_text, written_as_an_object_name
 
     plain = _refanged(text)
     found: list[tuple[str, str]] = []
@@ -3956,13 +3956,58 @@ def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, s
         labels = value.split(".")
         if not packages and package_shaped(value):
             continue
+        if not packages and written_as_an_object_name(plain, match.start()):
+            continue
         # A one-letter name is a letter ("x.icu"); a digit there ("3.cz") is
         # the tail of a version or of noise.
         short = len(labels) == 2 and (len(labels[0]) < 2 or len(value) < 5)
         if len(labels) > 4 or (short and labels[0].isalpha()):
             held.add(("domain", value))
             found.append(("domain", value))
+    if packages:
+        # A name written as a kernel object's (``Global\mtx.app``), which the
+        # sweep does not read: the caller asks the run's evidence for it.
+        for match in _NAME_AFTER_AN_OBJECT_NAMESPACE.finditer(plain):
+            if not written_as_an_object_name(plain, match.start()):
+                continue
+            for row in iocs_from_text(match.group(0), ["domain"]).get("iocs") or []:
+                value = str(row.get("value") or "").strip().lower().rstrip(".")
+                if value and ("domain", value) not in held:
+                    held.add(("domain", value))
+                    found.append(("domain", value))
     return found
+
+
+# A dotted name standing right after a backslash, for the object-name reading.
+_NAME_AFTER_AN_OBJECT_NAMESPACE = re.compile(r"(?<=\\)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
+
+
+def written_only_as_an_object_name(text: str, value: str) -> bool:
+    """Whether every place ``text`` writes ``value`` is a kernel object's name.
+
+    A mutex named under the ``Global`` namespace is one. Such a name is no
+    host unless the run's network evidence holds it: a caller that can ask
+    the evidence drops it only when no evidence does.
+    """
+    plain = _refanged(text)
+    places = [
+        found.start()
+        for found in re.finditer(
+            r"(?<![\w.-])" + re.escape(str(value or "")) + r"(?![\w-])", plain, re.IGNORECASE
+        )
+    ]
+    from maljan.tools.strings import written_as_an_object_name
+
+    return bool(places) and all(written_as_an_object_name(plain, start) for start in places)
+
+
+def needs_network_evidence(text: str, value: str) -> bool:
+    """Whether ``value``, as ``text`` writes it, is a host only where the network evidence holds it.
+
+    A package-shaped name (:func:`package_shaped`) and a name written only as
+    a kernel object's (:func:`written_only_as_an_object_name`).
+    """
+    return package_shaped(value) or written_only_as_an_object_name(text, value)
 
 
 # An IPv6 address written in text, bare or in brackets ("[2001:db8::1]:443"):
@@ -4061,8 +4106,9 @@ def recommendation_indicator_violations(
             answer = str(answers(kind, value) or "")
             if publishes(answer):
                 continue
-            # A package name no row of the run's evidence holds is code.
-            if not answer and package_shaped(value):
+            # A package name or a kernel object's name no row of the run's
+            # evidence holds is no host.
+            if not answer and needs_network_evidence(text, value):
                 continue
             if not answer and kind == "domain" and is_well_known_benign_host(value):
                 # A reference or vendor host the run never recorded: a place to
@@ -4135,11 +4181,12 @@ def _unstated_values(
             return f"no: {NO_TABLE_ANSWER}"
 
     plain = _refanged(sentence).lower()
-    # A package name no row of the run's evidence holds is code, not a host.
+    # A package name or a kernel object's name no row of the run's evidence
+    # holds is no host.
     values = [
         (kind, value)
         for kind, value in network_values_in(sentence, packages=True)
-        if not package_shaped(value) or _answer(kind, value)
+        if not needs_network_evidence(sentence, value) or _answer(kind, value)
     ]
     places = sorted((plain.find(value.lower()), kind, value) for kind, value in values if value)
     out: list[tuple[str, str, str]] = []

@@ -2806,6 +2806,7 @@ def _mark_mailboxes(text: str, marks: dict[int, str]) -> None:
 def _mark_hosts(text: str, marks: dict[int, str]) -> None:
     """Every ``www.`` host, ``.onion`` name, host under a real TLD and address: dots, or a colon."""
     from maljan.pipeline.validation import ONION_NAME, ipv6_addresses_in, network_values_in
+    from maljan.tools.strings import written_as_an_object_name
 
     for pattern in (_WWW_HOST, ONION_NAME):
         for found in pattern.finditer(text):
@@ -2813,16 +2814,20 @@ def _mark_hosts(text: str, marks: dict[int, str]) -> None:
     for found in ipv6_addresses_in(text):
         _bracket(text, text.index(":", found.start()), marks)
     # Read with "@" and backslashes as spaces as well, so a host written after
-    # either ("…/\@evil.com") is found; the mailbox itself is read above.
+    # either ("…/\@evil.com") is found; the mailbox itself is read above. The
+    # backslash that ends a kernel object's namespace stays, so a mutex name
+    # ("Global\mtx.app") is read as the reader reads it: no host.
     values = {
         value: kind
-        for kind, value in network_values_in(re.sub(r"[@\\]", " ", text))
+        for kind, value in network_values_in(_at_and_backslash_as_spaces(text))
         if not _file_name_host(kind, value)
     }
     # A host written in capitals ("EVIL.COM") is read as the host it spells;
     # the string sweep's reader takes an inner capital for a type name.
     for found in _SHOUTED_HOST.finditer(text):
-        if not _DOTNET_NAME.fullmatch(found.group(0)):
+        if not _DOTNET_NAME.fullmatch(found.group(0)) and not written_as_an_object_name(
+            text, found.start()
+        ):
             for kind, value in network_values_in(found.group(0).lower()):
                 if not _file_name_host(kind, value):
                     values.setdefault(value, kind)
@@ -2850,6 +2855,21 @@ def _mark_hosts(text: str, marks: dict[int, str]) -> None:
             continue
         for start, end in found_at:
             _bracket_dots(text, start, end, marks)
+
+
+def _at_and_backslash_as_spaces(text: str) -> str:
+    """``text`` with each "@" and backslash a space, but a kernel object namespace's backslashes."""
+    from maljan.tools.strings import OBJECT_NAMESPACE
+
+    kept = {
+        index
+        for found in OBJECT_NAMESPACE.finditer(text)
+        for index in range(found.start(), found.end())
+    }
+    return "".join(
+        " " if char == "@" or (char == "\\" and index not in kept) else char
+        for index, char in enumerate(text)
+    )
 
 
 # The reference services a report links to, each with the shape of its own
