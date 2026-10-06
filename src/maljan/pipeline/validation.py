@@ -3224,6 +3224,25 @@ def _listing_text(output: str) -> str:
     return "" if isinstance(parsed, dict | list) else output
 
 
+def listed_function(output: str) -> tuple[str, str | int] | None:
+    """The function a decompiler's answer is the listing of, as a key two answers share.
+
+    ``("start", address)`` when the listing's signature prints a decompiler's
+    generic name, which carries the function's start (``FUN_00401000``,
+    ``fcn.00401000``); ``("name", name)`` for any other printed name; ``None``
+    when the answer prints no signature (a batch answer, an error, prose).
+    Read off the answer alone: a call given an address inside a function is
+    answered with the whole function, under the same signature.
+    """
+    name = _signature_name(_listing_text(str(output or "")))
+    if not name:
+        return None
+    generic = _GENERIC_FUNCTION_NAME.fullmatch(name.lower())
+    if generic is not None:
+        return ("start", int(generic.group(1), 16))
+    return ("name", name)
+
+
 def _address_key(key: str) -> int | None:
     """A batch answer's key as an address: ``0x`` and hex digits, or four hex digits or more."""
     match = _ADDRESS_KEY.fullmatch(str(key).strip())

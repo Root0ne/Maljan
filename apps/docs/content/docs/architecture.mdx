@@ -1659,6 +1659,24 @@ chunk's block or seeded guard reads a repeat: each reads the entry it names. A
 reverser's second chunk once made nine calls, all answered this way, and left
 no entry and no event.
 
+A decompile is also a repeat when its answer is a function an earlier entry
+already holds, whatever address it was given: a call given an address inside
+a function is answered with the whole function. The function the answer prints
+(`validation.listed_function`: the start a decompiler's generic name carries,
+`FUN_00401000` or `fcn.00401000`, else the printed name) only finds the
+candidate entries; it is text the sample can shape, a forged or a shared name,
+so the call is a repeat only when its listing is a candidate's listing, or that
+listing cut shorter (the guardrail's cut marker aside). Any other listing under
+the same name is a new entry kept whole. The tool
+has run by then, so the model is still handed the answer, stamped with the
+entry that holds the function and one sentence saying so
+(`same_function_notice`); the entry is filed as a repeat of it and keeps the
+note, not a second copy. An answer that shows more of the function than the
+entry holding it is new evidence and holds the function from then on. An
+earlier chunk's listing holds its function for a later chunk the same way. One
+r2 analyst decompiled a function at its start and again at an address inside
+it, and the ledger held the same listing twice as two different calls.
+
 An analyst that has read a function sees its function map in the run-state
 block on every turn (`agents.function_map`). The platform keeps it from facts
 only, and the model does not write to it. It lists:

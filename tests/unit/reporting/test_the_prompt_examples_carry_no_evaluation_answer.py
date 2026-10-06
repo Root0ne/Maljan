@@ -41,7 +41,7 @@ from maljan.agents.delegation import (
     WAITING_ON_EACH_OTHER_REFUSAL,
     _what_an_ask_gets_sentence,
 )
-from maljan.agents.evidence_recorder import earlier_chunk_answer
+from maljan.agents.evidence_recorder import earlier_chunk_answer, same_function_notice
 from maljan.agents.ghidra_http_client import no_program_as_error
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
@@ -983,6 +983,9 @@ PROMPTS: dict[str, str] = {
     ),
     "a later chunk's answer from an earlier chunk's recorded result": earlier_chunk_answer(
         "a", "ev_0001", "a recorded result"
+    ),
+    "a decompile answered with a function an earlier entry holds": same_function_notice(
+        "FUN_00401000", "ev_0001"
     ),
     "the function map block": _function_map_text(),
     "a tool answer the conversation had no room for, as told and as recorded": " ".join(

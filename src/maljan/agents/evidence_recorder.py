@@ -36,6 +36,7 @@ from maljan.pipeline.events import (
     summarize_args,
     summarize_result,
 )
+from maljan.pipeline.validation import listed_function
 from maljan.schemas.evidence import (
     EvidenceCounter,
     LedgerEntry,
@@ -465,6 +466,13 @@ class RepeatGuard:
         # the first answer is the first time this model hears of the earlier
         # call, and only asking again after it is a repeat.
         self._told: set[str] = set()
+        # The listings each decompile answered with, by the key the answer
+        # prints (``validation.listed_function``), with the entry that holds
+        # each. The printed name only finds candidates: it is text the sample
+        # can shape (a forged or a shared name), so a call is a repeat only
+        # when its listing is the held one, or a prefix of it.
+        self._functions: dict[tuple[str, Any], list[tuple[str, str]]] = {}
+        self._seeded_functions: dict[tuple[str, Any], list[tuple[str, str]]] = {}
 
     def _seeded_count(self, key: str) -> int:
         """Where a seeded call's count starts: one served retry for a failure or an unkept result."""
@@ -531,6 +539,32 @@ class RepeatGuard:
         self._told.add(key)
         return True
 
+    def note_function(
+        self, key: tuple[str, Any] | None, entry_id: str, listing: str, *, seeded: bool = False
+    ) -> None:
+        """Record that ``entry_id`` holds ``listing``, a listing of the function ``key`` names."""
+        body = listing_body(listing)
+        if key is None or not entry_id or not body:
+            return
+        self._functions.setdefault(key, []).append((str(entry_id), body))
+        if seeded:
+            self._seeded_functions.setdefault(key, []).append((str(entry_id), body))
+
+    def function_entry(self, key: tuple[str, Any] | None, listing: str) -> str | None:
+        """The entry whose listing already holds all of ``listing``, or ``None``.
+
+        Content decides, never the name alone: the listing must be the held
+        one, or the held one cut shorter. A listing under a name another entry
+        printed that says anything else, or shows more, is new evidence.
+        """
+        body = listing_body(listing)
+        if key is None or not body:
+            return None
+        for entry_id, held in self._functions.get(key, ()):
+            if held.startswith(body):
+                return entry_id
+        return None
+
     def seeded_failure(self, entry_id: str) -> bool:
         """Whether a seeded entry recorded a failure."""
         return str(entry_id) in self._seeded_failures
@@ -593,6 +627,7 @@ class RepeatGuard:
         self._first = dict(self._seeded)
         self._count = {key: self._seeded_count(key) for key in self._seeded}
         self._told = set()
+        self._functions = {key: list(rows) for key, rows in self._seeded_functions.items()}
         self.served_repeats = 0
 
     def ending_the_loop(self) -> bool:
@@ -642,8 +677,46 @@ def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
         if not holds_its_answer(entry):
             guard.seed(tool, args, entry_id, rerun=True)
             continue
-        guard.seed(tool, args, entry_id, recorded=str(getattr(entry, "output", "") or ""))
+        output = str(getattr(entry, "output", "") or "")
+        guard.seed(tool, args, entry_id, recorded=output)
+        if decompiles(tool):
+            guard.note_function(listed_function(output), entry_id, output, seeded=True)
     return guard
+
+
+# The marker both tool-output guardrails end a character cut with
+# (``mcp_client.TRUNCATION_MARKER``, ``ghidra_http_client.TRUNCATION_MARKER``).
+_CUT_MARKER = "\n\n[OUTPUT TRUNCATED]"
+
+
+def listing_body(listing: str) -> str:
+    """A listing without the guardrail's cut marker, so a cut copy is a prefix of the whole."""
+    text = str(listing or "")
+    return text[: -len(_CUT_MARKER)] if text.endswith(_CUT_MARKER) else text
+
+
+def decompiles(tool: str) -> bool:
+    """Whether a tool's name says it decompiles, the way the decompiled-function list reads it."""
+    return "decompil" in str(tool or "").lower()
+
+
+def _function_label(text: str, key: tuple[str, Any] | None) -> str:
+    """The function's name as the listing prints it, for the notice."""
+    from maljan.pipeline.validation import _listing_text, _signature_name
+
+    printed = _signature_name(_listing_text(text))
+    if printed:
+        return printed
+    return f"the function at {key[1]:#x}" if key and key[0] == "start" else "the same function"
+
+
+def same_function_notice(name: str, entry_id: str) -> str:
+    """What a decompile is told when its answer is a function an earlier entry already holds."""
+    return (
+        f"The answer above is {name} again, the function [{entry_id}] already holds: an "
+        f"address inside a function is answered with the whole function. Cite [{entry_id}] "
+        "for it."
+    )
 
 
 def earlier_chunk_answer(
@@ -1074,19 +1147,43 @@ def _record_tool(
     ) -> str:
         text = result_text(value)
         raw = _was_repaired(kwargs)
+        # The function a decompile answered with, and the entry that already
+        # holds it: a call given an address inside a function an earlier call
+        # read is answered with that same function, and is a repeat of it
+        # whatever address it was given. Not for a served repeat, which the
+        # guard already names, nor an answer the conversation had no room for.
+        function = (
+            listed_function(text)
+            if repeats is not None and decompiles(name) and repeated is None and not_shown is None
+            else None
+        )
+        holder = repeats.function_entry(function, text) if repeats is not None else None
+        same = same_function_notice(_function_label(text, function), holder) if holder else ""
         entry = recorder.record(
             tool=name,
             args=kwargs,
             server=server,
-            output=text,
+            # A repeat keeps the note, not a second copy of the listing the
+            # entry it names already holds.
+            output=same or text,
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
+            repeated_of=holder,
             args_repaired=raw is not None,
             args_raw=raw,
             not_shown=not_shown,
             cut=cut,
         )
         _note(kwargs, entry.id)
+        if same:
+            # Still handed the answer: the earlier listing may be gone from
+            # what the window keeps of this conversation. It is stamped with
+            # the entry that holds the function, which is the one to cite.
+            shortened = shortened_notice(text, narrowing=narrowing)
+            repaired = REPAIRED_NOTICE if raw is not None else ""
+            return f"[{holder}]\n{text}{repaired}{shortened}\n\n{same}"
+        if repeats is not None and entry.ok and function is not None:
+            repeats.note_function(function, entry.id, text)
         # Read off the answer itself, before any notice is appended to it: a
         # notice is prose and prose does not parse.
         shortened = shortened_notice(text, narrowing=narrowing)
