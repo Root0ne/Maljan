@@ -194,9 +194,11 @@ class TestTheFindingMessages:
             _clean(line)
             assert "198[.]51[.]100[.]7" in line
 
-    def test_a_finding_of_another_code_prints_as_before(self) -> None:
+    def test_a_finding_of_another_code_is_defanged_and_otherwise_as_written(self) -> None:
         message = "'evil.example.com' is not in ev_0001, which the text cites for it"
         rows = [{"agent": "composer:x", "code": "report.citation_wrong_entry", "message": message}]
         report = _report(run_summary={"validation": {"retries": 1, "unresolved": rows}})
+        text = MarkdownRenderer().render(report)
 
-        assert message in MarkdownRenderer().render(report)
+        assert "'evil[.]example[.]com' is not in ev_0001, which the text cites for it" in text
+        assert "evil.example.com" not in text

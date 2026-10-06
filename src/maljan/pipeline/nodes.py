@@ -623,6 +623,15 @@ def _validation_update(agent: Any, agent_name: str) -> dict[str, Any]:
             not_run = []
         if not_run:
             update["validation_not_run"] = not_run
+    drain_unparsed = getattr(agent, "drain_unparsed_answers", None)
+    if callable(drain_unparsed):
+        try:
+            unparsed = [dict(row) for row in (drain_unparsed() or []) if isinstance(row, dict)]
+        except Exception as exc:  # noqa: BLE001 — a record is never worth a lost run
+            logger.debug("unparsed answers read skipped for %s: %s", agent_name, exc)
+            unparsed = []
+        if unparsed:
+            update["validation_unparsed_answers"] = unparsed
     return update
 
 
@@ -637,7 +646,7 @@ def _merge_validation_update(into: dict[str, Any], update: dict[str, Any]) -> No
             counts = into.setdefault(key, {})
             for code, count in dict(value).items():
                 counts[code] = counts.get(code, 0) + int(count)
-        elif key == "validation_not_run":
+        elif key in ("validation_not_run", "validation_unparsed_answers"):
             into.setdefault(key, []).extend(value)
 
 
@@ -4643,7 +4652,11 @@ def make_judge_node(
                     .set_isr_stats(isr_reports, no_data=_no_data_analysts)
                     .set_validation(
                         validation_metrics(
-                            _retries, _unresolved, _fed_back, not_run=sorted(_not_run)
+                            _retries,
+                            _unresolved,
+                            _fed_back,
+                            not_run=sorted(_not_run),
+                            unparsed_answers=list(state.get("validation_unparsed_answers") or []),
                         )
                     )
                     .set_corroboration(_corroboration)

@@ -1,0 +1,5510 @@
+{
+ "source": "the report's defanger at 60a3f9ae, before the single reading: per payload, the network-shaped tokens it printed defanged, and the HTML anchors and images it made",
+ "rows": [
+  {
+   "payload": "https://www.virustotal.com/gui/url/%68ttp:%2F%2Fevil.com",
+   "defanged": [
+    "www.virustotal.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com/gui/file/..%2F..%2Fevil",
+   "defanged": [
+    "www.virustotal.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://attack.mitre.org/techniques/T1055/%2e%2e/%2e%2e/x",
+   "defanged": [
+    "attack.mitre.org"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com/gui/domain/evil.com",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com/gui/ip-address/8.8.8.8",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com:443/gui/file/abc",
+   "defanged": [
+    "www.virustotal.com:443"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com/gui/file/abc?x=http://evil.com",
+   "defanged": [
+    "evil.com",
+    "www.virustotal.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com/gui/file/abc http://x/r?u=http://evil.com/q",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](https://www.virustotal.com/gui/domain/evil.com)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment",
+    "https://www.virustotal.com/gui/domain/evil.com"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://attack.mitre.org/techniques/T1055/\\@evil.com",
+   "defanged": [
+    "attack.mitre.org",
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "x_www.evil.com",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "x_http://evil.sh/p",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://a.x*http://b.x*http://c.x*http://d.x*https://evil.com/p",
+   "defanged": [
+    "a.x",
+    "b.x",
+    "c.x",
+    "d.x"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](foo%2F%2Fevil.com)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](a:b)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](.//evil.com)",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment",
+    ".//evil%5B.%5Dcom"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](%2f%2fevil.com)",
+   "defanged": [
+    "2fevil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](  //evil.com)",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//evil.com)",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "![a](data:image/png;base64,AAAA)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://WWW.VIRUSTOTAL.COM/gui/file/abc",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com/gui/domain/evil.com/..",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com/gui/ip-address/evil.com:8080",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](\\\\evil.com\\s)",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//eViL.com/a)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//EviL.CoM/b)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//evil.rs/c)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//2130706433/d)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//0x7f000001/e)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//intranet/f)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//evil.unknowntld/g)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "![i](//eViL.com/p.png)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "<//eViL.com>",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//eViL.com:8443)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//user@eViL.com/)",
+   "defanged": [
+    "user@eViL.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//\\eViL.com)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//www.evil.xyz)",
+   "defanged": [
+    "www.evil.xyz"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//evil.top)",
+   "defanged": [
+    "evil.top"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//[2001:db8::9]/)",
+   "defanged": [
+    "2001:db8::9"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://evil.example.com/a",
+   "defanged": [
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://evil.com/x",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "ftp://files.evil.net/x",
+   "defanged": [
+    "files.evil.net"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "sftp://evil.net",
+   "defanged": [
+    "evil.net"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "www.evil.xyz",
+   "defanged": [
+    "www.evil.xyz"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "www.evil.unknowntld",
+   "defanged": [
+    "www.evil.unknowntld"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "user@evil.com",
+   "defanged": [
+    "user@evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "10.1.2.3",
+   "defanged": [
+    "10.1.2.3"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "version 8.8.8.8",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "v8.8.4.4",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "2001:db8::1",
+   "defanged": [
+    "2001:db8::1"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[2001:db8::1]:443",
+   "defanged": [
+    "2001:db8::1"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "fe80::1%eth0",
+   "defanged": [
+    "fe80::1"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "::ffff:1.2.3.4",
+   "defanged": [
+    "ffff:1.2.3.4"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "EviL.CoM",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "eViL.com",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "Evil.Com",
+   "defanged": [
+    "Evil.Com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "abc.onion",
+   "defanged": [
+    "abc.onion"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "<http://evil.com/a>",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "<hxxp://evil[.]com>",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](http://evil.com/b)",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//evil.com/c)",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](\\\\evil.com\\c)",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](evil.com)",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment",
+    "evil%5B.%5Dcom"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "`http://evil.com/d`",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](https://www.virustotal.com@evil.com/)",
+   "defanged": [
+    "www.virustotal.com@evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com/gui/url/http://evil.com/e",
+   "defanged": [
+    "evil.com",
+    "www.virustotal.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](https://attack.mitre.org/x)",
+   "defanged": [
+    "attack.mitre.org"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "<evil@evil.com>",
+   "defanged": [
+    "evil@evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](mailto:a@evil.com)",
+   "defanged": [
+    "mailto:a@evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment",
+    "mailto:a%5B@%5Devil%5B.%5Dcom"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](javascript:alert(1))",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](HTTPS://evil.com)",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x]( <//evil.com/f> )",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "ws://evil.com:8080/",
+   "defanged": [
+    "evil.com:8080"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "evil.com:443",
+   "defanged": [
+    "evil.com:443"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "1.2.3.4:8080",
+   "defanged": [
+    "1.2.3.4:8080"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://[2001:db8::2]/x",
+   "defanged": [
+    "2001:db8::2"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](data:text/html,hi)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](file://evil.com/share)",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](%2F%2Fevil.com)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "lib.rs",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "ASP.NET",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "FileVersion 10.0.0.1",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "evil.rs",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "c2.evil.rs",
+   "defanged": [
+    "c2.evil.rs"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "evil.md",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "HXXP://EVIL.COM/G",
+   "defanged": [
+    "EVIL.COM"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "www.virustotal.com.evil.com/x",
+   "defanged": [
+    "www.virustotal.com.evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://bazaar.abuse.ch/../\\@evil.com",
+   "defanged": [
+    "bazaar.abuse.ch",
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x][r]\n\n[r]: //evil.com/ref",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "![i](//evil.com/p.png)",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "a.ru",
+   "defanged": [
+    "a.ru"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "x.icu",
+   "defanged": [
+    "x.icu"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "HTTPS://evil.example.com/a",
+   "defanged": [
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "hxxp://evil.example.com/a",
+   "defanged": [
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "ftp://evil.example.com/a",
+   "defanged": [
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "<http://evil.example.com/a>",
+   "defanged": [
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](http://evil.example.com/a)",
+   "defanged": [
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//evil.example.com/a)",
+   "defanged": [
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "![i](//evil.example.com/p.png)",
+   "defanged": [
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "![i](http://evil.example.com/p.png)",
+   "defanged": [
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](javascript:alert('evil.example.com'))",
+   "defanged": [
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](data:text/html,evil.example.com)",
+   "defanged": [
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](%2F%2Fevil.example.com/a)",
+   "defanged": [
+    "2Fevil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](\\\\evil.example.com\\share)",
+   "defanged": [
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x]( //evil.example.com/a )",
+   "defanged": [
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](<//evil.example.com/a>)",
+   "defanged": [
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "www.evil.example.com",
+   "defanged": [
+    "www.evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "op@evil.example.com",
+   "defanged": [
+    "op@evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "mailto:op@evil.example.com",
+   "defanged": [
+    "mailto:op@evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "`evil.example.com`",
+   "defanged": [
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "EVIL.EXAMPLE.COM",
+   "defanged": [
+    "EVIL.EXAMPLE.COM"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "Evil.Example.Com",
+   "defanged": [
+    "Evil.Example.Com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com/gui/url/http://evil.example.com/e",
+   "defanged": [
+    "evil.example.com",
+    "www.virustotal.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com/gui/file/%2e%2e/%2e%2e/evil.example.com",
+   "defanged": [
+    "evil.example.com",
+    "www.virustotal.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com/gui/domain/..%2fevil.example.com",
+   "defanged": [
+    "2fevil.example.com",
+    "www.virustotal.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com/gui/file/aa\\..\\evil.example.com",
+   "defanged": [
+    "evil.example.com",
+    "www.virustotal.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com/gui/file/aa@evil.example.com",
+   "defanged": [
+    "aa@evil.example.com",
+    "www.virustotal.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com/gui/file//evil.example.com",
+   "defanged": [
+    "evil.example.com",
+    "www.virustotal.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com@evil.example.com/gui/file/aa",
+   "defanged": [
+    "www.virustotal.com@evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://www.virustotal.com:443/gui/file/aa?x=evil.example.com",
+   "defanged": [
+    "evil.example.com",
+    "www.virustotal.com:443"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://attack.mitre.org/techniques/T1055/?r=http://evil.example.com",
+   "defanged": [
+    "attack.mitre.org",
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://attack.mitre.org/techniques/T1055/%2e%2e/evil.example.com",
+   "defanged": [
+    "attack.mitre.org",
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://bazaar.abuse.ch/../\\@evil.example.com",
+   "defanged": [
+    "bazaar.abuse.ch",
+    "evil.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "https://bazaar.abuse.ch/sample/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/%2f%2fevil.example.com",
+   "defanged": [
+    "2fevil.example.com",
+    "bazaar.abuse.ch"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "see https://www.virustotal.com/gui/file/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa and http://x.example.net/r?u=http://evil.example.com",
+   "defanged": [
+    "evil.example.com",
+    "x.example.net"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It posts to https://relay.example.net/gate.",
+   "defanged": [
+    "relay.example.net"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It fetches ftp://files.example.org/a.bin.",
+   "defanged": [
+    "files.example.org"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It opens sftp://drop.example.org/in.",
+   "defanged": [
+    "drop.example.org"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It talks over ws://chat.example.org/sock.",
+   "defanged": [
+    "chat.example.org"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It reads www.relay-example.zz first.",
+   "defanged": [
+    "www.relay-example.zz"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It reads WWW.RELAY.EXAMPLE.COM first.",
+   "defanged": [
+    "WWW.RELAY.EXAMPLE.COM"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "Mail goes to op@mail.example.org.",
+   "defanged": [
+    "op@mail.example.org"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It connects to 203.0.113.9 on 443.",
+   "defanged": [
+    "203.0.113.9"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It connects to 2001:db8::1 on 443.",
+   "defanged": [
+    "2001:db8::1"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It beacons to relay.example.net.",
+   "defanged": [
+    "relay.example.net"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It beacons to RELAY.EXAMPLE.NET.",
+   "defanged": [
+    "RELAY.EXAMPLE.NET"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It resolves dl.delivery.mp.example.com.",
+   "defanged": [
+    "dl.delivery.mp.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "Its panel is at abcdefghij234567.onion.",
+   "defanged": [
+    "abcdefghij234567.onion"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It wrote <https://relay.example.net/a> in its config.",
+   "defanged": [
+    "relay.example.net"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It wrote [the panel](http://relay.example.net/p) in its notes.",
+   "defanged": [
+    "relay.example.net"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It is an ASP.NET page handler.",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It targets .NET and calls System.IO.File.",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "The crate ships lib.rs.",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "FileVersion 10.0.0.1 is in its resources.",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "The build is v1.2.3.4 of the loader.",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "![i](//evil.sh/p.png)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "![i](//c2.pl/p.png)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//1432778632/)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](/absolute/path)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](\\\\server\\share)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](rel\\path)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "![i](https://img.example.org/p.png)",
+   "defanged": [
+    "img.example.org"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "![i](p.png)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "foo_http://c2.ps/x",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "1http://evil.com/p",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "a.http://evil.com/p",
+   "defanged": [
+    "evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "x_op@evil.com",
+   "defanged": [
+    "x_op@evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "op@evil_x.com",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "(www.evil.com)",
+   "defanged": [
+    "www.evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "~www.evil.com~",
+   "defanged": [
+    "www.evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "*www.evil.com*",
+   "defanged": [
+    "www.evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "/www.evil.com",
+   "defanged": [
+    "www.evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://a.x~http://b.x~http://c.x~http://d.x~https://evil.com/p",
+   "defanged": [
+    "a.x",
+    "b.x",
+    "c.x",
+    "d.x"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://a.x/http://b.x/http://c.x/http://d.x/https://evil.com/p",
+   "defanged": [
+    "a.x",
+    "b.x",
+    "c.x",
+    "d.x"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.com/http://h1.com/http://h2.com/http://h3.com/http://h4.com/http://h5.com",
+   "defanged": [
+    "h0.com",
+    "h1.com",
+    "h2.com",
+    "h3.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "[x](//c2.ps/a)",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http:///evil.sh/p",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "x_https:////c2.ps/x",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com*http://h1.example.com*http://h2.example.com*http://h3.example.com*http://h4.example.com*https://evil.com/p",
+   "defanged": [
+    "h0.example.com",
+    "h1.example.com",
+    "h2.example.com",
+    "h3.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com~http://h1.example.com~http://h2.example.com~http://h3.example.com~http://h4.example.com~https://evil.com/p",
+   "defanged": [
+    "h0.example.com",
+    "h1.example.com",
+    "h2.example.com",
+    "h3.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com/http://h1.example.com/http://h2.example.com/http://h3.example.com/http://h4.example.com/https://evil.com/p",
+   "defanged": [
+    "h0.example.com",
+    "h1.example.com",
+    "h2.example.com",
+    "h3.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com_http://h1.example.com_http://h2.example.com_http://h3.example.com_http://h4.example.com_https://evil.com/p",
+   "defanged": [
+    "evil.com",
+    "h0.example.com_http",
+    "h4.example.com_https"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com(http://h1.example.com(http://h2.example.com(http://h3.example.com(http://h4.example.com(https://evil.com/p",
+   "defanged": [
+    "evil.com",
+    "h0.example.com",
+    "h1.example.com",
+    "h2.example.com",
+    "h3.example.com",
+    "h4.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com-http://h1.example.com-http://h2.example.com-http://h3.example.com-http://h4.example.com-https://evil.com/p",
+   "defanged": [
+    "h0.example.com-http",
+    "h1.example.com-http",
+    "h2.example.com-http",
+    "h3.example.com-http"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com*http://h1.example.com*http://h2.example.com*http://h3.example.com*http://h4.example.com*http://h5.example.com*http://h6.example.com*http://h7.example.com*https://evil.com/p",
+   "defanged": [
+    "h0.example.com",
+    "h1.example.com",
+    "h2.example.com",
+    "h3.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com~http://h1.example.com~http://h2.example.com~http://h3.example.com~http://h4.example.com~http://h5.example.com~http://h6.example.com~http://h7.example.com~https://evil.com/p",
+   "defanged": [
+    "h0.example.com",
+    "h1.example.com",
+    "h2.example.com",
+    "h3.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com/http://h1.example.com/http://h2.example.com/http://h3.example.com/http://h4.example.com/http://h5.example.com/http://h6.example.com/http://h7.example.com/https://evil.com/p",
+   "defanged": [
+    "h0.example.com",
+    "h1.example.com",
+    "h2.example.com",
+    "h3.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com_http://h1.example.com_http://h2.example.com_http://h3.example.com_http://h4.example.com_http://h5.example.com_http://h6.example.com_http://h7.example.com_https://evil.com/p",
+   "defanged": [
+    "evil.com",
+    "h0.example.com_http",
+    "h7.example.com_https"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com(http://h1.example.com(http://h2.example.com(http://h3.example.com(http://h4.example.com(http://h5.example.com(http://h6.example.com(http://h7.example.com(https://evil.com/p",
+   "defanged": [
+    "evil.com",
+    "h0.example.com",
+    "h1.example.com",
+    "h2.example.com",
+    "h3.example.com",
+    "h4.example.com",
+    "h5.example.com",
+    "h6.example.com",
+    "h7.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com-http://h1.example.com-http://h2.example.com-http://h3.example.com-http://h4.example.com-http://h5.example.com-http://h6.example.com-http://h7.example.com-https://evil.com/p",
+   "defanged": [
+    "h0.example.com-http",
+    "h1.example.com-http",
+    "h2.example.com-http",
+    "h3.example.com-http"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com*http://h1.example.com*http://h2.example.com*http://h3.example.com*http://h4.example.com*http://h5.example.com*http://h6.example.com*http://h7.example.com*http://h8.example.com*http://h9.example.com*http://h10.example.com*http://h11.example.com*http://h12.example.com*http://h13.example.com*http://h14.example.com*http://h15.example.com*http://h16.example.com*http://h17.example.com*http://h18.example.com*http://h19.example.com*http://h20.example.com*http://h21.example.com*http://h22.example.com*http://h23.example.com*http://h24.example.com*http://h25.example.com*http://h26.example.com*http://h27.example.com*http://h28.example.com*http://h29.example.com*http://h30.example.com*http://h31.example.com*http://h32.example.com*http://h33.example.com*http://h34.example.com*http://h35.example.com*http://h36.example.com*http://h37.example.com*http://h38.example.com*http://h39.example.com*https://evil.com/p",
+   "defanged": [
+    "h0.example.com",
+    "h1.example.com",
+    "h2.example.com",
+    "h3.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com~http://h1.example.com~http://h2.example.com~http://h3.example.com~http://h4.example.com~http://h5.example.com~http://h6.example.com~http://h7.example.com~http://h8.example.com~http://h9.example.com~http://h10.example.com~http://h11.example.com~http://h12.example.com~http://h13.example.com~http://h14.example.com~http://h15.example.com~http://h16.example.com~http://h17.example.com~http://h18.example.com~http://h19.example.com~http://h20.example.com~http://h21.example.com~http://h22.example.com~http://h23.example.com~http://h24.example.com~http://h25.example.com~http://h26.example.com~http://h27.example.com~http://h28.example.com~http://h29.example.com~http://h30.example.com~http://h31.example.com~http://h32.example.com~http://h33.example.com~http://h34.example.com~http://h35.example.com~http://h36.example.com~http://h37.example.com~http://h38.example.com~http://h39.example.com~https://evil.com/p",
+   "defanged": [
+    "h0.example.com",
+    "h1.example.com",
+    "h2.example.com",
+    "h3.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com/http://h1.example.com/http://h2.example.com/http://h3.example.com/http://h4.example.com/http://h5.example.com/http://h6.example.com/http://h7.example.com/http://h8.example.com/http://h9.example.com/http://h10.example.com/http://h11.example.com/http://h12.example.com/http://h13.example.com/http://h14.example.com/http://h15.example.com/http://h16.example.com/http://h17.example.com/http://h18.example.com/http://h19.example.com/http://h20.example.com/http://h21.example.com/http://h22.example.com/http://h23.example.com/http://h24.example.com/http://h25.example.com/http://h26.example.com/http://h27.example.com/http://h28.example.com/http://h29.example.com/http://h30.example.com/http://h31.example.com/http://h32.example.com/http://h33.example.com/http://h34.example.com/http://h35.example.com/http://h36.example.com/http://h37.example.com/http://h38.example.com/http://h39.example.com/https://evil.com/p",
+   "defanged": [
+    "h0.example.com",
+    "h1.example.com",
+    "h2.example.com",
+    "h3.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com_http://h1.example.com_http://h2.example.com_http://h3.example.com_http://h4.example.com_http://h5.example.com_http://h6.example.com_http://h7.example.com_http://h8.example.com_http://h9.example.com_http://h10.example.com_http://h11.example.com_http://h12.example.com_http://h13.example.com_http://h14.example.com_http://h15.example.com_http://h16.example.com_http://h17.example.com_http://h18.example.com_http://h19.example.com_http://h20.example.com_http://h21.example.com_http://h22.example.com_http://h23.example.com_http://h24.example.com_http://h25.example.com_http://h26.example.com_http://h27.example.com_http://h28.example.com_http://h29.example.com_http://h30.example.com_http://h31.example.com_http://h32.example.com_http://h33.example.com_http://h34.example.com_http://h35.example.com_http://h36.example.com_http://h37.example.com_http://h38.example.com_http://h39.example.com_https://evil.com/p",
+   "defanged": [
+    "evil.com",
+    "h0.example.com_http",
+    "h39.example.com_https"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com(http://h1.example.com(http://h2.example.com(http://h3.example.com(http://h4.example.com(http://h5.example.com(http://h6.example.com(http://h7.example.com(http://h8.example.com(http://h9.example.com(http://h10.example.com(http://h11.example.com(http://h12.example.com(http://h13.example.com(http://h14.example.com(http://h15.example.com(http://h16.example.com(http://h17.example.com(http://h18.example.com(http://h19.example.com(http://h20.example.com(http://h21.example.com(http://h22.example.com(http://h23.example.com(http://h24.example.com(http://h25.example.com(http://h26.example.com(http://h27.example.com(http://h28.example.com(http://h29.example.com(http://h30.example.com(http://h31.example.com(http://h32.example.com(http://h33.example.com(http://h34.example.com(http://h35.example.com(http://h36.example.com(http://h37.example.com(http://h38.example.com(http://h39.example.com(https://evil.com/p",
+   "defanged": [
+    "evil.com",
+    "h0.example.com",
+    "h1.example.com",
+    "h10.example.com",
+    "h11.example.com",
+    "h12.example.com",
+    "h13.example.com",
+    "h14.example.com",
+    "h15.example.com",
+    "h16.example.com",
+    "h17.example.com",
+    "h18.example.com",
+    "h19.example.com",
+    "h2.example.com",
+    "h20.example.com",
+    "h21.example.com",
+    "h22.example.com",
+    "h23.example.com",
+    "h24.example.com",
+    "h25.example.com",
+    "h26.example.com",
+    "h27.example.com",
+    "h28.example.com",
+    "h29.example.com",
+    "h3.example.com",
+    "h30.example.com",
+    "h31.example.com",
+    "h32.example.com",
+    "h33.example.com",
+    "h34.example.com",
+    "h35.example.com",
+    "h36.example.com",
+    "h37.example.com",
+    "h38.example.com",
+    "h39.example.com",
+    "h4.example.com",
+    "h5.example.com",
+    "h6.example.com",
+    "h7.example.com",
+    "h8.example.com",
+    "h9.example.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://h0.example.com-http://h1.example.com-http://h2.example.com-http://h3.example.com-http://h4.example.com-http://h5.example.com-http://h6.example.com-http://h7.example.com-http://h8.example.com-http://h9.example.com-http://h10.example.com-http://h11.example.com-http://h12.example.com-http://h13.example.com-http://h14.example.com-http://h15.example.com-http://h16.example.com-http://h17.example.com-http://h18.example.com-http://h19.example.com-http://h20.example.com-http://h21.example.com-http://h22.example.com-http://h23.example.com-http://h24.example.com-http://h25.example.com-http://h26.example.com-http://h27.example.com-http://h28.example.com-http://h29.example.com-http://h30.example.com-http://h31.example.com-http://h32.example.com-http://h33.example.com-http://h34.example.com-http://h35.example.com-http://h36.example.com-http://h37.example.com-http://h38.example.com-http://h39.example.com-https://evil.com/p",
+   "defanged": [
+    "h0.example.com-http",
+    "h1.example.com-http",
+    "h2.example.com-http",
+    "h3.example.com-http"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It drops install.sh and run.ps beside archive.zip.",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It records clip.mov and logo.ai.",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It runs app.py and Module.pm.",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It reads notes.md and libc.so.",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It installs oem1.cat and opens invoice.one.",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It is an ASP.NET page handler on .NET.",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It beacons to cdn.evil.sh.",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It shortens through bit.ly first.",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It posts to panel.evil.ai.",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It resolves update.example.is.",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It calls home to x.ly.",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It fetches http://evil.sh/p.",
+   "defanged": [
+    "evil.sh"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "Mail goes to op@evil.zip.",
+   "defanged": [
+    "op@evil.zip"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "It reads www.evil.mov first.",
+   "defanged": [
+    "www.evil.mov"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "see evil.pl now",
+   "defanged": [
+    "evil.pl"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "panel.ml",
+   "defanged": [
+    "panel.ml"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "version 8.8.8.8 and later 8.8.8.8",
+   "defanged": [
+    "8.8.8.8"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "evil.com_x",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "x-www.evil.com",
+   "defanged": [
+    "x-www.evil.com"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "op@ASP.NET",
+   "defanged": [
+    "op@ASP.NET"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "Evil.COM",
+   "defanged": [
+    "Evil.COM"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "EVIL.SH",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "cdn.EVIL.SH",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "a.b.c.d.e.evil.sh",
+   "defanged": [],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "http://evil.sh",
+   "defanged": [
+    "evil.sh"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  },
+  {
+   "payload": "x@evil.sh",
+   "defanged": [
+    "x@evil.sh"
+   ],
+   "anchors": [
+    "#sec-attribution-and-related-activity",
+    "#sec-detection",
+    "#sec-evidence-index",
+    "#sec-execution-flow",
+    "#sec-indicators-of-compromise",
+    "#sec-key-findings",
+    "#sec-limitations-and-analysis-notes",
+    "#sec-methodology",
+    "#sec-mitre-att-ck-mapping",
+    "#sec-observed-behaviour",
+    "#sec-recommendations",
+    "#sec-references",
+    "#sec-run-summary",
+    "#sec-sample-overview",
+    "#sec-static-properties",
+    "#sec-technical-analysis",
+    "#sec-verdict-and-assessment"
+   ],
+   "images": 0
+  }
+ ]
+}

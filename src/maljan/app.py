@@ -500,6 +500,7 @@ class MaljanApp:
             "revision_rounds": [],
             "dropped_claims": [],
             "validation_not_run": [],
+            "validation_unparsed_answers": [],
             "triage_facts": {},
             "nudge_retry_modes": {},
             "budget_records": {},

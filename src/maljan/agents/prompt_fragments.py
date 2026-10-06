@@ -196,7 +196,7 @@ CLAIM_FORMAT_FRAGMENT = (
     "EVIDENCE: <artifact reference, naming the tool result you read it from, "
     "for example [ev_0002]>\n"
     "CONFIDENCE: <float>\n"
-    "TECHNIQUE: <T-ID or NONE>\n"
+    "TECHNIQUE: <T-ID, several separated by commas, or NONE>\n"
     "---\n"
 )
 

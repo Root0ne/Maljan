@@ -80,6 +80,41 @@ _EMAIL_RE = re.compile(rb"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 _DOMAIN_RE = re.compile(
     rb"(?<![A-Za-z0-9._@-])(?:[A-Za-z0-9-]{1,63}\.){1,3}[A-Za-z]{2,24}(?![A-Za-z0-9._])"
 )
+# ``_EMAIL_RE``'s two halves, for reading a mailbox from its "@": a mailbox
+# name's characters, and the domain read forward from just after the "@".
+_EMAIL_NAME_BYTES = frozenset(
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._%+-"
+)
+_EMAIL_DOMAIN_RE = re.compile(rb"[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+
+
+def emails_in(data: bytes) -> list[bytes]:
+    """``_EMAIL_RE.findall(data)``, the same matches in the same order, in linear time.
+
+    The regex tries a start at every character of a long run of name
+    characters with no "@" after it, and each try reads the rest of the run
+    again. This reads from each "@" instead: the name back over the run (never
+    before the previous match's end), the domain forward. The runs before two
+    "@"s and the domains after them never overlap, so each byte is read a
+    bounded number of times.
+    """
+    found: list[bytes] = []
+    floor = 0
+    at = data.find(b"@")
+    while at != -1:
+        start = at
+        while start > floor and data[start - 1] in _EMAIL_NAME_BYTES:
+            start -= 1
+        domain = _EMAIL_DOMAIN_RE.match(data, at + 1) if start < at else None
+        if domain is not None:
+            found.append(data[start : domain.end()])
+            floor = domain.end()
+            at = data.find(b"@", floor)
+        else:
+            at = data.find(b"@", at + 1)
+    return found
+
+
 _MUTEX_RE = re.compile(rb"\\BaseNamedObjects\\[A-Za-z0-9_\-]+")
 _PRINTABLE_RE = re.compile(rb"[\x20-\x7e]{%d,}" % _MIN_STRING_LENGTH)
 # UTF-16LE runs. Windows binaries are full of wide strings — every ...W API call
@@ -190,7 +225,7 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
             candidate = match.decode("ascii", errors="ignore")
             if _looks_like_path(candidate):
                 _add("path", candidate)
-        for match in _EMAIL_RE.findall(text.encode("ascii", errors="ignore")):
+        for match in emails_in(text.encode("ascii", errors="ignore")):
             _add("email", match.decode("ascii", errors="ignore"))
         for match in _MUTEX_RE.findall(text.encode("ascii", errors="ignore")):
             _add("mutex", match.decode("ascii", errors="ignore"))
@@ -227,6 +262,10 @@ def _domains_in(text: str) -> list[str]:
         candidate = match.group().decode("ascii", errors="ignore")
         if _looks_like_domain(candidate):
             found.append((match.start(), match.end(), candidate))
+    # Spans that do not overlap, as ``finditer`` yields them, nest nowhere:
+    # checked in one pass, so a run of many names is not compared pairwise.
+    if all(found[index][1] <= found[index + 1][0] for index in range(len(found) - 1)):
+        return [value for _start, _end, value in found]
     return [value for start, end, value in found if not _inside_a_longer_host(start, end, found)]
 
 
@@ -507,156 +546,33 @@ _TWO_PART_PUBLIC_SUFFIXES = frozenset(
 # hostname — the concrete example being `System.Collections.Generic`, which was
 # emitted as a `domain` IOC on every .NET sample.
 #
-# Deliberately not the full IANA list: the goal is to reject compile artefacts,
-# and a curated set of TLDs that actually appear in malware C2 does that with a
-# far smaller false-negative surface than trying to be exhaustive would create
-# false positives.
-_KNOWN_TLDS = frozenset(
-    {
-        # generic
-        "com",
-        "net",
-        "org",
-        "info",
-        "biz",
-        "io",
-        "co",
-        "app",
-        "dev",
-        "xyz",
-        "site",
-        "online",
-        "store",
-        "shop",
-        "club",
-        "space",
-        "website",
-        "tech",
-        "live",
-        "life",
-        "world",
-        "today",
-        "top",
-        "icu",
-        "cyou",
-        "monster",
-        "click",
-        "link",
-        "fun",
-        "pw",
-        "cc",
-        "tv",
-        "me",
-        "ws",
-        "su",
-        "sbs",
-        "digital",
-        "cloud",
-        "email",
-        "network",
-        "systems",
-        "services",
-        "host",
-        "press",
-        "wiki",
-        "art",
-        "blog",
-        "page",
-        "rest",
-        "zone",
-        "run",
-        "bar",
-        # ccTLDs that show up in real C2
-        "ru",
-        "cn",
-        "br",
-        "in",
-        "ir",
-        "ua",
-        "pl",
-        "de",
-        "fr",
-        "uk",
-        "nl",
-        "it",
-        "es",
-        "tr",
-        "jp",
-        "kr",
-        "vn",
-        "id",
-        "th",
-        "my",
-        "ph",
-        "hk",
-        "tw",
-        "sg",
-        "za",
-        "ng",
-        "ke",
-        "eg",
-        "sa",
-        "ae",
-        "il",
-        "gr",
-        "pt",
-        "ro",
-        "cz",
-        "sk",
-        "hu",
-        "bg",
-        "rs",
-        "hr",
-        "si",
-        "lt",
-        "lv",
-        "ee",
-        "fi",
-        "se",
-        "no",
-        "dk",
-        "be",
-        "at",
-        "ch",
-        "ie",
-        "us",
-        "ca",
-        "mx",
-        "ar",
-        "cl",
-        "pe",
-        "ve",
-        "au",
-        "nz",
-        "kz",
-        "by",
-        "md",
-        "ge",
-        "am",
-        "az",
-        "uz",
-        "pk",
-        "bd",
-        "lk",
-        "np",
-        "tk",
-        "ml",
-        "ga",
-        "cf",
-        "gq",
-        "to",
-        "st",
-        "cx",
-        "nu",
-        "im",
-        "gg",
-        "je",
-        # ".onion" is deliberately absent. Hidden services have a fixed address
-        # shape that a dedicated pattern validates, and routing them through the
-        # generic domain path would accept any `word.onion` while losing the
-        # note that says what it is.
-    }
-)
+# The list is the root zone's own: IANA's ``tlds-alpha-by-domain.txt``,
+# vendored under ``data/`` with its version line and refreshed by
+# ``scripts/knowledge/refresh_iana_tlds.py``. A host under any delegated TLD
+# (``.sh``, ``.ly``, ``.ai``, ``.zip``) is read as one; the shape rules below,
+# not a shortened list, keep compile artefacts out. ".onion" is not in the
+# root zone: hidden services have a fixed address shape that a dedicated
+# pattern validates.
+TLD_LIST_PATH = Path(__file__).resolve().parents[3] / "data" / "tlds-alpha-by-domain.txt"
+
+
+def read_tld_list(text: str) -> tuple[str, frozenset[str]]:
+    """The version line and the lower-case TLDs of an IANA ``tlds-alpha-by-domain.txt``.
+
+    The first line must be the registry's ``# Version …`` line, and every
+    other line one TLD: letters, digits and hyphens. Anything else is refused
+    with ``ValueError``, so a truncated or foreign file is never read as the list.
+    """
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    if not lines or not lines[0].startswith("# Version "):
+        raise ValueError("the TLD list has no version line")
+    tlds = frozenset(line.lower() for line in lines[1:])
+    if not tlds or not all(re.fullmatch(r"[a-z0-9-]+", tld) for tld in tlds):
+        raise ValueError("the TLD list holds a line that is no TLD")
+    return lines[0], tlds
+
+
+_KNOWN_TLDS = read_tld_list(TLD_LIST_PATH.read_text(encoding="ascii"))[1]
 
 
 def _looks_like_path(text: str) -> bool:

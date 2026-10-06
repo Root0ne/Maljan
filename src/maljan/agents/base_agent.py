@@ -70,8 +70,10 @@ from maljan.pipeline.validation import (
     analyst_cut_violation,
     analyst_repeated_violation,
     chunk_cut_unread_sentence,
+    claim_block_indexes,
     claims_kept_under_disputes_finding,
     claims_repeated,
+    count_claim_blocks,
     decompiled_functions,
     decompiled_not_described_violation,
     image_bases_in,
@@ -81,6 +83,7 @@ from maljan.pipeline.validation import (
     parse_violations,
     retry_with_feedback_sync,
     undescribed_decompiles,
+    unparsed_answer_rows,
     validate_isr,
     validity_check_available,
 )
@@ -1388,6 +1391,12 @@ async def retry_on_connection_error(
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+def _library_blocks(isr: AgentISR) -> int:
+    """How many claim blocks of ``isr`` are library-only claims, each block once."""
+    blocks = claim_block_indexes(isr.claims)
+    return len({blocks[index] for index in library_only_claims(isr) if index < len(blocks)})
+
+
 def describe_exception_for_log(exc: BaseException) -> str:
     """Return a non-empty, diagnosable description of ``exc``, for the log.
 
@@ -1510,25 +1519,44 @@ def _field(
 _ONE_TECHNIQUE_RE = re.compile(r"T\d{4}(?:\.\d{3})?", re.IGNORECASE)
 # What a TECHNIQUE line says to claim none.
 _NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
+# What separates the ids of a list on one TECHNIQUE line: a comma, "and", both
+# ("T1027, T1140, and T1106"), or a slash ("T1027 / T1140"). Every part must be
+# an id and nothing else; "or", "and/or", a doubled or trailing slash, or any
+# word beside an id leaves the line whole and asked about.
+_TECHNIQUE_LIST_SEPARATOR_RE = re.compile(r"\s*,\s*(?:and\s+)?|\s+and\s+|\s*/\s*", re.IGNORECASE)
+# The claim format's own block separator, "---", written at the end of a
+# TECHNIQUE line with a dot or bar before it ("TECHNIQUE: T1027 · ---", the
+# next claim on the line after). It is no part of what the line claims. A
+# next claim written on the same line after it is not read by this.
+_TRAILING_BLOCK_SEPARATOR_RE = re.compile(r"[\s·•|]*-{3,}\s*$")
 
 
-def read_technique_line(line: str) -> tuple[str | None, str | None]:
-    """``(technique_id, unread line)`` for one claim's TECHNIQUE line as written.
+def _bare_technique(text: str) -> str:
+    """One id as written, without the emphasis or code marks and the full stop around it."""
+    return text.strip().strip("*`_ ").rstrip(".").strip().strip("*`_ ")
 
-    Exactly one id, and nothing else, is the claimed technique; ``NONE`` or a
-    dash claims none. Anything else — words after an id ("T1027.002 not
-    supported"), a qualifier ("T1055 (unproven)"), several ids ("T1055,
-    T1106") — claims no technique the reader could name without deciding what
-    the words mean, so no id is read and the line is returned as written, for
-    the validation turn to ask about (``isr.technique_line_unread``).
+
+def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
+    """``(technique ids, unread line)`` for one claim's TECHNIQUE line as written.
+
+    One id, or a list of ids separated by commas, "and" or slashes ("T1027, T1140"),
+    and nothing else, is the claimed techniques, each once, in the order
+    written; ``NONE`` or a dash claims none. A block separator closing the
+    line (``· ---``) is not part of it. Anything else — words after an id
+    ("T1027.002 not supported"), a qualifier ("T1055 (unproven)"), a list
+    joined by another word ("T1027 or T1140") — claims no technique the
+    reader could name without deciding what the words mean, so no id is read
+    and the line is returned as written, for the validation turn to ask about
+    (``isr.technique_line_unread``).
     """
     text = str(line or "").strip()
-    bare = text.strip("*`_ ").rstrip(".").strip()
+    bare = _bare_technique(_TRAILING_BLOCK_SEPARATOR_RE.sub("", text))
     if bare.upper() in _NO_TECHNIQUE:
-        return None, None
-    if _ONE_TECHNIQUE_RE.fullmatch(bare):
-        return bare.upper(), None
-    return None, text
+        return (), None
+    parts = [_bare_technique(part) for part in _TECHNIQUE_LIST_SEPARATOR_RE.split(bare)]
+    if parts and all(_ONE_TECHNIQUE_RE.fullmatch(part) for part in parts):
+        return tuple(dict.fromkeys(part.upper() for part in parts)), None
+    return (), text
 
 
 # Model tool-call scaffolding, which is not prose and is never a finding.
@@ -1686,6 +1714,11 @@ class ClaimRead:
     section, which are not the analyst's own and are not read. They count as
     unread only when none of the answer's own claims was read: then they may
     be the answer's only claims, and saying nothing would lose them silently.
+
+    ``blocks_read`` is the blocks the claims were read from. A block whose
+    TECHNIQUE line lists several ids is one claim per id, so it is the blocks,
+    not the claims, that are counted against the claims begun. ``None`` (a
+    read built by hand) counts one block per claim.
     """
 
     claims: list[ClaimEvidence]
@@ -1693,13 +1726,19 @@ class ClaimRead:
     begun: int
     after_disputes: int = 0
     confidence_unreadable: tuple[str, ...] = ()
+    blocks_read: int | None = None
+
+    @property
+    def read(self) -> int:
+        """The claim blocks read, each once however many techniques it lists."""
+        return len(self.claims) if self.blocks_read is None else int(self.blocks_read)
 
     @property
     def unread(self) -> int:
         """Claims begun that are neither read nor counted as stating no confidence."""
         own = max(
             len(self.confidence_unreadable),
-            self.begun - len(self.claims) - self.without_confidence,
+            self.begun - self.read - self.without_confidence,
             0,
         )
         return own + (self.after_disputes if not self.claims else 0)
@@ -1711,8 +1750,9 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
     The answer is split at every claim heading where a block can begin
     (``claim_headings.claims_headed``: plain, numbered or marked, with or
     without a ``---`` line between claims) and at the model's own ``---``
-    lines. Each block yields at most one claim; the heading count says how
-    many the model began, so a block the reader could not split is visible.
+    lines. Each block yields one claim, or one per id its TECHNIQUE line
+    lists; the heading count says how many the model began, so a block the
+    reader could not split is visible.
 
     ``require_evidence`` is the static, dynamic and network analysts'
     stricter reading: a block without an ``EVIDENCE:`` line, or with one that
@@ -1725,6 +1765,7 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
     claims: list[ClaimEvidence] = []
     without_confidence = 0
     unreadable: list[str] = []
+    blocks_read = 0
     # Stripped per field rather than over the whole text: removing a block
     # that sat between ``CLAIM:`` and ``EVIDENCE:`` would leave the claim
     # marker with nothing after it, and the next line would slide up into the
@@ -1762,17 +1803,20 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
             unreadable.append(_confidence_as_written(stated))
             continue
 
-        # One id is kept as written. Whether it is real, retired or a
+        # Each id is kept as written. Whether it is real, retired or a
         # placeholder is ``attck.unknown_id``'s question, asked with feedback
-        # and recorded; a line that is more than one id is kept whole and
-        # asked about, never cut to its first id.
+        # and recorded; a line that is more than ids is kept whole and asked
+        # about, never cut to its first id. A list of ids is one claim per id,
+        # each the analyst's sentence, evidence and confidence as written —
+        # what the analyst was asked to rewrite it as — so each id is checked
+        # as a technique on its own claim.
         technique_match = _field(tail, _LINE_TECHNIQUE_RE, _BLOCK_TECHNIQUE_LINE_RE)
-        technique_id, technique_line = read_technique_line(
+        technique_ids, technique_line = read_technique_line(
             technique_match.group(1) if technique_match else ""
         )
 
-        claims.append(
-            ClaimEvidence(
+        for technique_id in technique_ids or (None,):
+            read_claim = ClaimEvidence(
                 # Whole, as written: a claim stored at a fixed width was
                 # checked, retried and published as the cut text.
                 claim=claim_text,
@@ -1781,13 +1825,17 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
                 technique_id=technique_id,
                 technique_line=technique_line,
             )
-        )
+            # The block it was read from, so blocks are counted as written.
+            read_claim.note_block(blocks_read)
+            claims.append(read_claim)
+        blocks_read += 1
     return ClaimRead(
         claims=claims,
         without_confidence=without_confidence,
         begun=count_claims_begun(text or ""),
         after_disputes=count_claims_after_disputes(text or ""),
         confidence_unreadable=tuple(unreadable),
+        blocks_read=blocks_read,
     )
 
 
@@ -1809,7 +1857,7 @@ def claims_unread_sentence(agent: str, read: ClaimRead, revision_round: int = 0)
     )
     return (
         f"The {agent} analyst's answer{stage} began {read.begun} claim(s){quoted}, and "
-        f"{len(read.claims)} were read{declined}; {read.unread} could not be read as a "
+        f"{read.read} were read{declined}; {read.unread} could not be read as a "
         f"claim and are not in its findings.{unreadable}"
     )
 
@@ -3409,6 +3457,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # retry fixed leaves no other trace, and a run summary that counts only
         # the leftovers cannot say what the retry was for.
         self.validation_fed_back: dict[str, int] = {}
+        # Every answer of this analyst no claim could be read from, whole and
+        # masked, for the run record (``validation.unparsed_answer_rows``).
+        self.validation_unparsed_answers: list[dict[str, str]] = []
         # Whether the last tool loop ended on something that was not a report,
         # after its one nudge. Read by ``_text_to_isr`` so the ISR says why it
         # is empty instead of leaving the reader to infer it from a claim list.
@@ -6676,6 +6727,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             if only_cut:
                 return _whole_answer_questions(candidate)
             unread = [] if nudged else parse_violations(candidate)
+            # Every answer checked that no claim could be read from, the first
+            # and its retry alike, goes to the run record whole.
+            self._keep_unparsed_answers(unread, candidate.revision_round)
             undescribed = decompiled_not_described_violation(
                 undescribed_decompiles(candidate, decompiled, image_bases)
             )
@@ -6698,7 +6752,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             ]
 
         if nudged and not only_cut:
-            self.validation_findings.extend(parse_violations(isr))
+            unasked = parse_violations(isr)
+            self.validation_findings.extend(unasked)
+            self._keep_unparsed_answers(unasked, isr.revision_round)
 
         # The findings and artifacts the answer being checked carried are its
         # own from here on: a retry's are kept apart (``_parse``) and go with
@@ -6991,32 +7047,36 @@ class BaseAnalyst(BudgetMeter, ABC):
             # an answer that folds them away stands, as long as it keeps at
             # least as many other claims as the first answer had. Only where
             # the question was asked: a chunk's cut turn never asks it.
-            library_first = len(library_only_claims(first_answer))
-            library_retried = len(library_only_claims(retried))
+            # Counted in the claim blocks the analyst wrote, not in claims: a
+            # block listing several ids is one claim per id, and taking a
+            # rejected id off its line is an answer, not lost work.
+            blocks_first = count_claim_blocks(first_answer.claims)
+            blocks_retried = count_claim_blocks(retried.claims)
+            library_first = _library_blocks(first_answer)
+            library_retried = _library_blocks(retried)
             if (
                 not only_cut
                 and library_first
                 and retried.claims
-                and len(retried.claims) < len(first_answer.claims)
-                and len(retried.claims) - library_retried
-                >= len(first_answer.claims) - library_first
+                and blocks_retried < blocks_first
+                and blocks_retried - library_retried >= blocks_first - library_first
             ):
                 self.logger.info(
-                    "Validation: '%s' answered the library-claims question with %d claim(s) "
-                    "against %d, %d of them library-only; its answer is kept.",
+                    "Validation: '%s' answered the library-claims question with %d claim "
+                    "block(s) against %d, %d of them library-only; its answer is kept.",
                     self.name,
-                    len(retried.claims),
-                    len(first_answer.claims),
+                    blocks_retried,
+                    blocks_first,
                     library_first,
                 )
                 return retried
-            if len(retried.claims) < len(first_answer.claims):
+            if blocks_retried < blocks_first:
                 self.logger.warning(
-                    "Validation: the retry for '%s' returned %d claim(s) against %d; "
+                    "Validation: the retry for '%s' returned %d claim block(s) against %d; "
                     "keeping the first answer and recording what is wrong with it.",
                     self.name,
-                    len(retried.claims),
-                    len(first_answer.claims),
+                    blocks_retried,
+                    blocks_first,
                 )
                 return first_answer
             return retried
@@ -7118,6 +7178,22 @@ class BaseAnalyst(BudgetMeter, ABC):
         mode = getattr(self, "_nudge_retry_mode", None)
         self._nudge_retry_mode = None
         return str(mode) if mode else None
+
+    def _keep_unparsed_answers(self, violations: Sequence[Violation], revision_round: int) -> None:
+        """Keep each answer no claim could be read from for the run record, once."""
+        kept = getattr(self, "validation_unparsed_answers", None)
+        if not isinstance(kept, list):
+            kept = []
+            self.validation_unparsed_answers = kept
+        for row in unparsed_answer_rows(str(self.name), int(revision_round or 0), violations):
+            if row not in kept:
+                kept.append(row)
+
+    def drain_unparsed_answers(self) -> list[dict[str, str]]:
+        """The answers no claim could be read from, handed over once."""
+        rows = list(getattr(self, "validation_unparsed_answers", None) or [])
+        self.validation_unparsed_answers = []
+        return rows
 
     def drain_validation_not_run(self) -> list[str]:
         """The checks that could not run, handed over once."""

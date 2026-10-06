@@ -618,3 +618,26 @@ class TestTheFallbackPathExportsAValidBundle:
         assert _NOTE_ID not in [o.id for o in exported.objects]
         assert any("name at least one" in why for _code, why in renderer.declined)
         assert _errors(exported) == []
+
+
+def test_a_judge_sample_object_beside_the_stated_family_is_valid() -> None:
+    """The judge's sample object, the family's object and the variant-of edge between them."""
+    report = _report("Malware")
+    report.attribution.family = "Examplefamily"
+    report.attribution.family_source = "judge"
+    judge = _judge(
+        {
+            "type": "bundle",
+            "objects": [
+                {"type": "malware", "id": "malware--1", "name": "shell", "is_family": False}
+            ],
+        }
+    )
+    bundle = ExtendedSTIXRenderer().render(report, judge)
+
+    shapes = sorted(
+        (str(o.name), o.is_family) for o in bundle.objects if getattr(o, "type", "") == "malware"
+    )
+    assert shapes == [("Examplefamily", True), ("shell", False)]
+    assert any(getattr(o, "relationship_type", "") == "variant-of" for o in bundle.objects)
+    assert _errors(bundle) == []
