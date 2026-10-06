@@ -28,6 +28,7 @@ from typing import Any
 
 from maljan.analysis.capture_reader import Capture, Packet, ReadNotes
 from maljan.core.logger import logger
+from maljan.utils.written_forms import pack_escaped
 
 # Beaconing: a destination contacted at least this many times with a stable
 # inter-arrival interval (coefficient of variation below the threshold) is a
@@ -235,8 +236,12 @@ def _extract_sni(pkt: Packet) -> str | None:
                 name_len = int.from_bytes(data[idx + 3 : idx + 5], "big")
                 name = data[idx + 5 : idx + 5 + name_len]
                 # A host name is ASCII (RFC 6066, an A-label for an IDN); a
-                # byte outside it is written as an escape, not dropped.
-                return name.decode("ascii", "backslashreplace") if name else None
+                # byte outside it is written as an escape, not dropped. The
+                # name is the sender's text, written as the triage pack
+                # writes a sample's strings: control characters escaped.
+                if not name:
+                    return None
+                return pack_escaped(name.decode("ascii", "backslashreplace"))
             idx += elen
     except Exception:
         return None

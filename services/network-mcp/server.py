@@ -19,6 +19,15 @@ from maljan.tools.errors import (
     tool_error,
 )
 from maljan.tools.roots import PathOutsideRoots, resolve_under_roots
+from maljan.utils.written_forms import pack_escaped
+
+# Every name, request line and header read out of a capture is the sender's
+# text. It is written the way the triage pack writes a sample's own strings
+# (``utils.written_forms.pack_escaped``): newlines, control and format
+# characters (bidirectional overrides, zero-width marks) as escapes, every
+# other character as it is, so a value stays one fact on its own line and
+# cannot start a line of its own text. Renderers fence a block with a fence
+# longer than any backtick run inside it.
 
 mcp = FastMCP("NetworkMCP")
 
@@ -188,7 +197,8 @@ def extract_dns(pcap_path: str, packet_limit: int | None = None) -> str:
 
         def _visit(pkt: Packet) -> None:
             if pkt.dns_qname is not None:
-                queries.setdefault(pkt.dns_qname.decode("utf-8", errors="ignore"), None)
+                name = pkt.dns_qname.decode("utf-8", errors="ignore")
+                queries.setdefault(pack_escaped(name), None)
 
         read = each_packet(str(capture), _visit, packet_limit)
         head = f"{read.statement()}."
@@ -213,7 +223,7 @@ def extract_http(pcap_path: str, packet_limit: int | None = None) -> str:
                     # The request line, and the Host header when there is one.
                     lines = payload.split("\r\n")
                     host = next((x for x in lines[1:] if x.lower().startswith("host: ")), "")
-                    requests.append(f"{lines[0]} | {host}")
+                    requests.append(f"{pack_escaped(lines[0])} | {pack_escaped(host)}")
 
         read = each_packet(str(capture), _visit, packet_limit)
         head = f"{read.statement()}."

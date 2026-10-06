@@ -1077,6 +1077,11 @@ change landed on `main`.
   - simple packet blocks on an interface with snapshot length 0 (no limit)
     yield their packets.
 
+  Every DNS name, request line, Host header and TLS server name read out of a
+  capture is written the way the triage pack writes a sample's own strings
+  (`utils.written_forms.pack_escaped`): newlines, control and format
+  characters as escapes, so a sender's text stays one fact on its own line.
+
   Outside the corpus: a record is read up to the snapshot length the capture
   declares, and records longer than 65,535 bytes within it count in full (scapy
   cut them at 65,535); a gzip capture is decompressed as a stream and no
