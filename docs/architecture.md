@@ -3130,12 +3130,18 @@ is assembled from what the run gathered rather than recomputed beside it:
   every URL of any scheme, `www.` host, mailbox, IPv4 or IPv6 address and host
   under a real top-level domain (the string sweep's list, the root zone's;
   any number of labels, in capitals, `.onion`): everything a viewer could
-  link. Every `://`, `//`, `www.` and `@` is read where it stands, after any
-  character (`_`, `*`, `~`, `(`, `/`, a digit) and at any nesting depth, in
-  one reading of the text: the scheme's letters, the host's dots, the `@` and
-  an IPv6 address's first colon are rewritten in place, and a kept reference
-  lookup is split off before the reading, so the time is linear in the text
-  and no character of it is ever used as a placeholder. The HTML
+  link. What a viewer can link is decided by form alone, never by a TLD or an
+  exemption: a scheme before `//`, a scheme a link or autolink syntax opens
+  (`<…>`, `[x](…)`, `[r]: …`), a `mailto:`, `xmpp:`, `javascript:`,
+  `vbscript:` or `data:` before a target, a `www.` prefix, and a mailbox. Each
+  is defanged wherever it stands, after any character (`_`, `*`, `~`, `(`,
+  `/`, a digit) and at any nesting depth: http, https and ftp, read whole from
+  the scheme's first letter, become `hxxp`, `hxxps` and `fxp`, any other
+  scheme's colon is bracketed (`ws[:]//`, `irc[:]`), and the host's dots, the
+  `@` and an IPv6 address's first colon are bracketed. The TLD list and the
+  file-name rule below decide only bare hosts and addresses, which no viewer
+  links. A kept reference lookup is split off first; the rest is read once, in
+  time linear in the text, with no character used as a placeholder. The HTML
   report links no bare text (CommonMark, no linkify); it makes an anchor only
   of an http, https or mailto target, a place in the page (`#…`) or a relative
   path with no leading `/` and no backslash, so neither a defanged URL nor a

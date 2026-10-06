@@ -2644,6 +2644,7 @@ def _defanged_piece(text: str) -> str:
         return text
     marks: dict[int, str] = {}
     _mark_links(text, marks)
+    _mark_scheme_openers(text, marks)
     _mark_mailboxes(text, marks)
     _mark_hosts(text, marks)
     if not marks:
@@ -2671,27 +2672,17 @@ def _bracket_dots(text: str, start: int, end: int, marks: dict[int, str]) -> Non
 
 
 def _mark_links(text: str, marks: dict[int, str]) -> None:
-    """Every ``//`` target and every scheme: the authority's dots, and http, https or ftp renamed.
+    """Every ``//`` target and every scheme before one: the authority's dots, and the scheme.
 
-    GFM reads a scheme from the letters right before ``://``, after any
-    character at all, so the letters are read back to the first non-letter.
-    The authority runs to the first separator; a defanged mark inside it is
-    read past. Each ``//`` starts its own authority, so a URL nested in
-    another's path is read where it stands, at any depth.
+    Each ``//`` starts its own authority, so a URL nested in another's path is
+    read where it stands, at any depth. The authority runs to the first
+    separator; a defanged mark inside it is read past. A scheme before the
+    ``//`` is defanged by form, whatever its host (:func:`_defang_scheme`).
     """
-    from maljan.reporting.defang import _SCHEMES
-
     at = text.find("//")
     while at != -1:
         if at > 0 and text[at - 1] == ":":
-            letters = at - 1
-            while letters > 0 and text[letters - 1].isascii() and text[letters - 1].isalpha():
-                letters -= 1
-            scheme = text[letters : at - 1]
-            renamed = _SCHEMES.get(scheme.lower(), "")
-            for offset, (was, now) in enumerate(zip(scheme.lower(), renamed, strict=False)):
-                if was != now:
-                    marks[letters + offset] = now.upper() if scheme[offset].isupper() else now
+            _defang_scheme(text, at - 1, marks)
         # A browser reads past more slashes and backslashes to the host.
         index = at + 2
         while index < len(text) and text[index] in "/\\":
@@ -2707,6 +2698,68 @@ def _mark_links(text: str, marks: dict[int, str]) -> None:
                 _bracket(text, index, marks)
             index += 1
         at = text.find("//", max(index, at + 2))
+
+
+def _defang_scheme(text: str, colon: int, marks: dict[int, str]) -> None:
+    """Defang the scheme that ends at ``colon``, whatever follows it.
+
+    The scheme is the run of scheme characters before the colon, from its
+    first letter, read whole: http, https or ftp is renamed (``hxxp``,
+    ``hxxps``, ``fxp``); a defanged spelling is left as it is; any other scheme
+    (``ws``, ``irc``, ``a.http``, ``com-http``) has its colon bracketed
+    (``ws[:]//``), so no viewer reads a scheme there at all, whichever of its
+    characters a viewer would take for the scheme.
+    """
+    from maljan.reporting.defang import _SCHEMES
+
+    start = colon
+    while (
+        start > 0
+        and text[start - 1].isascii()
+        and (text[start - 1].isalnum() or text[start - 1] in "+.-")
+    ):
+        start -= 1
+    while start < colon and not text[start].isalpha():
+        start += 1
+    if start == colon:
+        return
+    scheme = text[start:colon]
+    renamed = _SCHEMES.get(scheme.lower(), "")
+    if renamed:
+        for offset, (was, now) in enumerate(zip(scheme.lower(), renamed, strict=False)):
+            if was != now:
+                marks[start + offset] = now.upper() if scheme[offset].isupper() else now
+    elif scheme.lower() not in _DEFANGED_SCHEMES:
+        _bracket(text, colon, marks)
+
+
+# The spellings a defanged scheme is written in.
+_DEFANGED_SCHEMES = frozenset({"hxxp", "hxxps", "fxp"})
+# A scheme a link or autolink syntax opens: ``<scheme:…>``, ``[x](scheme:…)``,
+# ``[x](<scheme:…>)`` and a reference definition's ``[r]: scheme:…``.
+_SCHEME_IN_LINK_SYNTAX = re.compile(
+    r"(?:<" + _PIPE + r"\]\(<?" + _PIPE + r"(?<!\[[.:@])\]:[ \t]*)[A-Za-z][A-Za-z0-9+.-]{1,31}:"
+)
+# A scheme a viewer links with no "//" after it, before a target: not before
+# a space or a second colon ("Data::Data::Modulo" names a capa namespace).
+_SCHEME_WITHOUT_SLASHES = re.compile(
+    r"(?i)(?<![a-z0-9+.-])(?:mailto"
+    + _PIPE
+    + r"xmpp"
+    + _PIPE
+    + r"javascript"
+    + _PIPE
+    + r"vbscript"
+    + _PIPE
+    + r"data):(?=[^\s:])"
+)
+
+
+def _mark_scheme_openers(text: str, marks: dict[int, str]) -> None:
+    """Every scheme a link syntax opens, and every ``mailto:``-style scheme: defanged by form."""
+    for pattern in (_SCHEME_IN_LINK_SYNTAX, _SCHEME_WITHOUT_SLASHES):
+        for found in pattern.finditer(text):
+            _defang_scheme(text, found.end() - 1, marks)
 
 
 def _mark_mailboxes(text: str, marks: dict[int, str]) -> None:

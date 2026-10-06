@@ -43,6 +43,8 @@ SHAPES = {
     ),
     "mailbox runs": "a." * (SIZE // 4) + "a@" * (SIZE // 4),
     "nested schemes": "http://a.b*" * (SIZE // 11),
+    "link syntax": "<irc:a](ws:b]: x:" * (SIZE // 17),
+    "scheme characters": "a.b-c+" * (SIZE // 6) + "://evil.com",
     "private use": "".join(chr(cp) for cp in range(0xE000, 0xF900)) * 4,
 }
 
