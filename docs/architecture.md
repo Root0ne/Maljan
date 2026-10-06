@@ -1478,7 +1478,8 @@ says why.
 
 An analyst answer that ended at its output cap (`llm.expert_max_tokens`, or the
 cap derived from the window when it is 0; for a call the spend ceiling held to
-less, the held cap it was sent with; by the
+less, the held cap it was sent with, recorded per loop turn as it is sent, so a
+later turn the loop did not keep never stands in for it; by the
 server's finish reason or by a generated count equal to the cap, since
 ik_llama.cpp reports `stop` for an answer it cut) is asked once for a whole
 shorter one, the way the judge's and a report section's are:

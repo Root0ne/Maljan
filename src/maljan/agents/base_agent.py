@@ -4025,6 +4025,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         recorder: Any = None,
         spend_slot: Any = None,
         held_binding: Any = None,
+        turn_holds: dict[int, int | None] | None = None,
     ) -> Any:
         """The per-turn hook that regenerates the run-state block's budget line.
 
@@ -4043,7 +4044,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         ``spend_slot`` is the key the loop's turn in flight is reserved under
         with the spend ceiling, and ``held_binding`` the loop's model binding
         a turn's held output cap is set on (:func:`_hold_the_turn`); without
-        one a turn is admitted only at its whole cap.
+        one a turn is admitted only at its whole cap. ``turn_holds`` records
+        the cap each turn was sent with, keyed by its place among the
+        conversation's model turns (1 for the first), so the turn the loop
+        keeps is checked against its own cap, not against a later turn's.
         """
         ledger = budget if budget is not None else LoopBudget(max_steps, timeout, started)
         from maljan.pipeline.events import BUDGET_TICK_EVERY
@@ -4088,6 +4092,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             if held_binding is not None:
                 _hold_the_turn(held_binding, self.llm, held)
+                if turn_holds is not None:
+                    turn_holds[sum(1 for m in messages if is_model_turn(m)) + 1] = turn_held_cap(
+                        held_binding, self.llm
+                    )
             # The meter, every few steps: a tick per turn would be a stream
             # of near-identical events on a forty-step loop.
             used = steps_used(messages)
@@ -4306,8 +4314,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         loop_model = _model_that_closes_off_truncated_calls(
             self.llm, recorded, _close_off_truncated_calls
         )
-        # Where each turn's held cap is set, and read back for the last turn's cut check.
+        # Where each turn's held cap is set, and the cap each turn was sent
+        # with, read back for the kept last turn's cut check.
         held_binding = _loop_binding(loop_model, self.llm)
+        turn_holds: dict[int, int | None] = {}
         agent_executor = create_react_agent(
             loop_model,
             recorded,
@@ -4319,6 +4329,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 recorder=recorder,
                 spend_slot=spend_key,
                 held_binding=held_binding,
+                turn_holds=turn_holds,
             ),
         )
 
@@ -4887,10 +4898,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Record every AI turn the executor produced (each carries its own
         # ``usage_metadata``) so the ledger reflects real LLM spend.
         # The last turn is the answer the validation turn checks for a cut, so
-        # it is checked against the cap it was sent with: the binding still
-        # holds the cap the spend ceiling set for that turn, or none.
+        # it is checked against the cap it was sent with, recorded when it was
+        # sent: a turn the loop sent later and did not keep (the question's
+        # pass rolled back, a turn the clock ended) held its own cap.
         turns = [m for m in msgs if is_model_turn(m)]
-        last_held = turn_held_cap(held_binding, self.llm)
+        last_held = turn_holds.get(len(turns))
         for index, _m in enumerate(turns):
             self._record_usage(
                 _m,

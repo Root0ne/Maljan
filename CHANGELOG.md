@@ -2386,6 +2386,9 @@ change landed on `main`.
 
 ### Fixed
 
+- **A loop's kept last answer is checked for a cut against the cap that turn was sent with**, recorded as each turn is sent, not against a later turn's hold left on the binding (a question pass rolled back, a turn the clock ended).
+### Fixed
+
 - **The worker log states a revision's dropped values as one count line per analyst and round at INFO**, each claim's sentence at DEBUG; the run summary keeps every sentence.
 ### Fixed
 
