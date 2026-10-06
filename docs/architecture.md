@@ -346,6 +346,15 @@ before. A run's mediator listed five contradictions, one of them a claim the
 ledger contradicted, argued them away, wrote `agreement_confidence: 1.0`, and
 no analyst was asked to revise.
 
+The debate ends when nothing is left to settle (`pipeline/debate_facts.py`,
+`pipeline/claim_drops.py`, `pipeline/routing.py`):
+
+- The mediator ends each line of its block with `[blocking: <reason>]` or `[not blocking: <reason>]`; consensus is its confidence at the threshold with no line marked blocking, an unmarked line blocks, and the platform overrides a mark in neither direction. The reason may hold one level of brackets (`[not blocking: see [ev_0021]]`); a mark with no reason, conflicting marks and a mark that cannot be read block and go to `negotiation.unread_marks`.
+- For a listed line whose cited entries (cited by the line or by a claim it names) hold, in a field named for a count or a total, a number the line itself states, every such value is stated; a size or a time is not a count. No call is made for them: they ride on the revision directive of the analysts the line names and on the next mediation's prompt, and a debate that ends at this mediation spends nothing on them.
+- A revision round whose every revision is the answer in force again, whitespace aside, ends the debate as `converged`; the router reads only the record of the round right before the mediation it routes.
+- A revision is made against the analyst's answer in force and its peers'; each value of the answer in force it states nowhere is recorded in `run_summary.negotiation.dropped_claims` (a decimal only as a stated value, never a claim, round or list number, nor the round's own number), the report's run appendix prints one count line per analyst and round (`dropped_value_counts`), and nothing is asked.
+- The debate stage's duration adds the revision rounds' time to the mediations', and `termination_reason` comes from the router's own rules, `hard_limit` only when the debate would have gone on.
+
 A single local model server has one slot, and fanning out three analysts onto
 it produces queue thrash rather than speed; a hosted API serves each request on
 its own. `auto` tells them apart per job (`pipeline/analyst_mode.py`), on a
