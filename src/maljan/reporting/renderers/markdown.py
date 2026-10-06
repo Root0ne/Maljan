@@ -2604,6 +2604,10 @@ _BARE_AT_HOST = re.compile(r"(?<![\w.+-])@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
 _WWW_HOST = re.compile(r"(?i)(?<![^\W_])www\.[\w-]+(?:\.[\w-]+)*")
 # An IPv6 address written in text: hex groups and colons, read by ``ipaddress``.
 _IPV6_CANDIDATE = re.compile(r"(?<![\w:.\]])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![\w:])")
+# The same with an IPv4 tail read whole ("::ffff:192.0.2.1").
+_IPV6_WITH_A_TAIL = re.compile(
+    r"(?<![\w:.\]])(?:[0-9A-Fa-f]{0,4}:){2,7}\d{1,3}(?:\.\d{1,3}){3}(?![\w:])(?!\.\d)"
+)
 # A mailbox: GFM's name characters (``_`` among them) and a dotted domain.
 _EMAIL_IN_TEXT = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 # The characters that make Markdown of a sample's text: a code span, a link or
@@ -2817,6 +2821,11 @@ def _mark_hosts(text: str, marks: dict[int, str]) -> None:
     # reader (``validation.ipv6_addresses_in``) decides which is a value.
     for found in _IPV6_CANDIDATE.finditer(text):
         if _is_ipv6(found.group(0)):
+            _bracket(text, text.index(":", found.start()), marks)
+    # An address with an IPv4 tail written in full ("2001:db8:0:0:0:0:1.2.3.4"),
+    # which the run above stops short of, read whole by the checks' candidate.
+    for found in _IPV6_WITH_A_TAIL.finditer(text):
+        if "." in found.group(0) and _is_ipv6(found.group(0)):
             _bracket(text, text.index(":", found.start()), marks)
     # Read with "@" and backslashes as spaces as well, so a host written after
     # either ("…/\@evil.com") is found; the mailbox itself is read above.

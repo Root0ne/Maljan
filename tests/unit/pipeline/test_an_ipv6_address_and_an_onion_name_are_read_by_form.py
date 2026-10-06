@@ -104,3 +104,31 @@ class TestThePublishCheck:
 
         assert V6 in found.message
         assert NO_TABLE_ROW in found.message
+
+
+class TestNoFormADefangerReadsIsLeftLive:
+    """The forms around the shared readers: zone ids, ports, IPv4 tails, onion spellings."""
+
+    CASES = (
+        ("[fe80::1%eth0]:443", "[fe80[:]:1%eth0]:443"),
+        ("http://[fe80::1%25eth0]:8080/x", "hxxp://[fe80[:]:1%25eth0]:8080/x"),
+        ("https://[::ffff:192.0.2.1]:443/", "hxxps://[[:]:ffff:192[.]0[.]2[.]1]:443/"),
+        ("::ffff:1.2.3.4:80", "[:]:ffff:1[.]2[.]3[.]4:80"),
+        ("2001:db8:0:0:0:0:1.2.3.4", "2001[:]db8:0:0:0:0:1[.]2[.]3[.]4"),
+        ("[2001:db8::1.2.3.4]", "[2001[:]db8::1[.]2[.]3[.]4]"),
+        ("2001:db8::1 evil.com", "2001[:]db8::1 evil[.]com"),
+        ("2001:db8::1/evil.com", "2001[:]db8::1/evil[.]com"),
+        ("[2001:db8::1]evil.com", "[2001[:]db8::1]evil[.]com"),
+        ("::1.evil.com", "[:]:1[.]evil[.]com"),
+        ("ABCDEFGHIJKLMNOP.ONION", "ABCDEFGHIJKLMNOP[.]ONION"),
+        ("abcdefghijklmnop.onion.", "abcdefghijklmnop[.]onion."),
+        ("abcdefghijklmnop.onion:80/x", "abcdefghijklmnop[.]onion:80/x"),
+        ("http://abcdefghijklmnop.onion/x", "hxxp://abcdefghijklmnop[.]onion/x"),
+        ("sub.abcdefghijklmnop.onion/path", "sub[.]abcdefghijklmnop[.]onion/path"),
+        ("std::vector<evil.com>", "std::vector<evil[.]com>"),
+        ("a::b::c evil.com", "a::b::c evil[.]com"),
+    )
+
+    def test_each_is_defanged_whole(self) -> None:
+        for written, defanged_as in self.CASES:
+            assert _defanged_text(written) == defanged_as, written
