@@ -3961,7 +3961,10 @@ def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, s
         # A one-letter name is a letter ("x.icu"); a digit there ("3.cz") is
         # the tail of a version or of noise.
         short = len(labels) == 2 and (len(labels[0]) < 2 or len(value) < 5)
-        if len(labels) > 4 or (short and labels[0].isalpha()):
+        # Two letters ("ab.ru") are a word as often as a name: read only for a
+        # caller that asks the run's network evidence (``needs_network_evidence``).
+        lettered = packages and two_letter_name(value)
+        if len(labels) > 4 or (short and labels[0].isalpha()) or lettered:
             held.add(("domain", value))
             found.append(("domain", value))
     if packages:
@@ -4004,10 +4007,21 @@ def written_only_as_an_object_name(text: str, value: str) -> bool:
 def needs_network_evidence(text: str, value: str) -> bool:
     """Whether ``value``, as ``text`` writes it, is a host only where the network evidence holds it.
 
-    A package-shaped name (:func:`package_shaped`) and a name written only as
-    a kernel object's (:func:`written_only_as_an_object_name`).
+    A package-shaped name (:func:`package_shaped`), a two-label name whose
+    first label is two letters (:func:`two_letter_name`) and a name written
+    only as a kernel object's (:func:`written_only_as_an_object_name`).
     """
-    return package_shaped(value) or written_only_as_an_object_name(text, value)
+    return (
+        package_shaped(value)
+        or two_letter_name(value)
+        or written_only_as_an_object_name(text, value)
+    )
+
+
+def two_letter_name(value: str) -> bool:
+    """Whether a dotted name is two labels, the first of two letters (``ab.ru``, ``to.do``)."""
+    labels = str(value or "").lower().split(".")
+    return len(labels) == 2 and len(labels[0]) == 2 and labels[0].isascii() and labels[0].isalpha()
 
 
 # An IPv6 address written in text, bare or in brackets ("[2001:db8::1]:443"):

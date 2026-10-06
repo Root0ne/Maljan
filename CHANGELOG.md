@@ -2384,6 +2384,7 @@ change landed on `main`.
 
 ### Fixed
 
+- **A bare two-label host with a two-character first label is read when the label holds a digit and a letter** (`c2.ru`, `x1.top`), by the string sweep and the report's host reader; one of two letters (`ab.ru`) is read only where the run's network evidence holds it, so prose such as `to.do` stays as written.
 - **A dotted name written after a kernel object's namespace (`Global\mtx.app`) is no host** to the string sweep or the report's host reader, so a mutex name prints as written; a value the run's network evidence holds is still defanged and still asked about.
 - **An IPv6 address, bare or bracketed, and a `.onion` name of any labels are network values to every reader**: the publish checks, the run summary's sentences and a cell's state note read them by the form the report's defanger reads them by, and a run of colons with no hex digit is no address.
 - **`/iocs` and the report's §9 read the IOC table from one source** (`builder.ioc_table`, rebuilt from the stored report), so an old report's analyst rows and their notes read the same in both.
