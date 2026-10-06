@@ -1374,24 +1374,37 @@ def safe_finding_value(value: Any) -> str:
 def _mask_short_secrets(text: str) -> str:
     """``text`` with every configured value shorter than the floor masked as a whole word.
 
-    A value of fewer than four characters is not masked as a word, which would
-    take ordinary words out of the row; where it is a URL's password, the
+    A value of fewer than four characters is not masked as a word anywhere,
+    which would take ordinary words out of the row; it is masked as the whole
+    word after an authorization scheme (``Bearer``, ``Basic``, ``token``),
+    where it stands as the credential, and where it is a URL's password, the
     userinfo removal takes it.
     """
-    values = sorted(
-        {value for values in _SHORT_SECRETS.values() for value in values if len(value) >= 4},
-        key=len,
-        reverse=True,
-    )
-    if not values:
-        return text
-    pattern = (
-        _SECRET_BOUNDARY_BEFORE
-        + "(?:"
-        + "|".join(re.escape(value) for value in values)
-        + r")(?![A-Za-z0-9_])"
-    )
-    return re.sub(pattern, _REDACTED, text)
+    short = {value for values in _SHORT_SECRETS.values() for value in values}
+    values = sorted((value for value in short if len(value) >= 4), key=len, reverse=True)
+    tiny = sorted((value for value in short if len(value) < 4), key=len, reverse=True)
+    if values:
+        pattern = (
+            _SECRET_BOUNDARY_BEFORE
+            + "(?:"
+            + "|".join(re.escape(value) for value in values)
+            + r")(?![A-Za-z0-9_])"
+        )
+        text = re.sub(pattern, _REDACTED, text)
+    if tiny:
+        after_a_scheme = (
+            r"(?<![A-Za-z0-9_])(?i:bearer|basic|token)(\s+)(?:"
+            + "|".join(re.escape(value) for value in tiny)
+            + r")(?![A-Za-z0-9_])"
+        )
+        text = re.sub(
+            after_a_scheme,
+            lambda found: (
+                found.group(0)[: found.start(1) - found.start(0)] + found.group(1) + _REDACTED
+            ),
+            text,
+        )
+    return text
 
 
 # One query parameter of a URL, its key and its value.

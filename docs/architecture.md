@@ -4031,7 +4031,8 @@ bundle cannot hold — goes through `pipeline.events.safe_finding_value`. A
 validation row, a degradation reason and an export decline are report text.
 With the operator's configured values registered (the worker registers them
 per job), a row keeps the evidence's words and loses every operator
-credential: each configured value by value (a short one as a whole word), a
+credential: each configured value by value (a short one as a whole word, one
+under four characters only as the word after `Bearer`, `Basic` or `token`), a
 URL's userinfo and each credential-named query value. Registration reads a
 configured URL's password of any length, a token in its username slot and its
 `api_key`, `apikey`, `access_token`, `token` and `key` values. With nothing
