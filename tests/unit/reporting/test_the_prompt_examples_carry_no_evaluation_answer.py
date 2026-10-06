@@ -67,6 +67,7 @@ from maljan.agents.judge_agent import (
 )
 from maljan.agents.network_analyst import NO_PACKET_TOOL_LINE, OTHER_TOOLS_THEN_ANALYZE
 from maljan.agents.prompt_fragments import (
+    CLAIM_FORMAT_FRAGMENT,
     ENDPOINTS_ROW_SHAPE,
     NO_TOOLS_STATEMENT,
     TOOL_FREE_TURN_STATEMENT,
@@ -100,6 +101,10 @@ from maljan.extractors.capability_matrix import (
 from maljan.llm.context_window import no_room_sentence
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.pipeline import triage_pack
+from maljan.pipeline.debate_facts import (
+    ledger_count_facts,
+    with_ledger_facts,
+)
 from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
@@ -114,6 +119,7 @@ from maljan.pipeline.nodes import (
 )
 from maljan.pipeline.run_state import NO_LIMIT, budget_line
 from maljan.pipeline.validation import (
+    _UNPARSED_ANSWER_MESSAGE,
     ANALYST_FEEDBACK_CLOSING,
     MALWARE_TYPES,
     UNATTRIBUTED_INDICATOR_CODE,
@@ -460,6 +466,13 @@ def _message_of(violation: Violation | None) -> str:
     return violation.message
 
 
+def _every_message(found: list[Any]) -> str:
+    """The messages of questions every one of which must be asked; one not asked fails here."""
+    missing = [index for index, violation in enumerate(found) if violation is None]
+    assert not missing, f"the questions at {missing} were not asked of their synthetic claims"
+    return " ".join(violation.message for violation in found)
+
+
 PROMPTS: dict[str, str] = {
     "example team document prompts": _TEAM_DOCUMENT_PROMPTS,
     "narrative contract": EXPECTED_OBJECT,
@@ -507,6 +520,31 @@ PROMPTS: dict[str, str] = {
             )
         ]
         if v is not None
+    ),
+    "the absence and describe questions on one id of a technique list": _every_message(
+        [
+            absence_claim_violation(
+                ClaimEvidence(
+                    claim="The file holds no persistence mechanism.",
+                    evidence_ref="[ev_0001]",
+                    confidence=0.9,
+                    technique_id="T1547",
+                ),
+                "T1547",
+                listed=True,
+            ),
+            claim_does_not_describe_violation(
+                ClaimEvidence(
+                    claim="The file opens a window.",
+                    evidence_ref="[ev_0001]",
+                    confidence=0.9,
+                    technique_id="T1003",
+                ),
+                "T1003",
+                knowledge,
+                listed=True,
+            ),
+        ]
     ),
     "capability questions for evading analysis and packing": " ".join(
         v.message
@@ -1066,8 +1104,11 @@ PROMPTS: dict[str, str] = {
         f"{NO_REPLY_RECORDED} {NOT_RUN_REPLY}"
     ),
     "analyst question for technique lines no single id was read from": technique_line_violation(
-        ["T1000 (candidate)", "T1001, T1002"]
+        ["T1000 (candidate)", "T1001 or T1002"]
     ).message,
+    "the claim format the analysts are given and the unparsed-answer question": " ".join(
+        [CLAIM_FORMAT_FRAGMENT, _UNPARSED_ANSWER_MESSAGE]
+    ),
     "the question and the reason for claim headings under DISPUTES": (
         f"{claims_under_disputes_violation(2).message} "
         f"{claims_under_disputes_sentence('reverser', 2, 1)}"
@@ -1136,6 +1177,15 @@ PROMPTS: dict[str, str] = {
                 DecompiledFunction(address=None, names=("F",), entries=("ev_0002",)),
             ]
         )
+    ),
+    "ledger counts told to a revision round and to the next mediation": with_ledger_facts(
+        "mediator feedback",
+        ledger_count_facts(
+            ["A Claim 1 counts 3 [ev_0001]; B Claim 1 counts 2."],
+            {},
+            [{"id": "ev_0001", "tool": "t", "structured": {"total": 3}}],
+            ["a", "b"],
+        ),
     ),
     "claims that say only that a library is used": _message_of(
         library_only_claims_violation(

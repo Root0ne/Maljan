@@ -50,14 +50,16 @@ def _analyst() -> StaticAnalyst:
     return analyst
 
 
+# Each fixture has one claim whose TECHNIQUE line lists two ids, read as two claims.
 @pytest.mark.parametrize(("text", "count"), [(REVISION, 13), (FINAL_ISR, 21)])
 def test_blank_line_separated_claims_are_all_read_by_both_readings(text: str, count: int) -> None:
     lenient = read_claim_blocks(text)
     assert lenient.begun == count
-    assert len(lenient.claims) == count
+    assert lenient.read == count
+    assert len(lenient.claims) == count + 1
     assert lenient.unread == 0
-    assert len(_parse_claim_blocks(text)) == count
-    assert len(parse_structured_claims_counted(text)[0]) == count
+    assert len(_parse_claim_blocks(text)) == count + 1
+    assert len(parse_structured_claims_counted(text)[0]) == count + 1
 
 
 def test_the_revision_keeps_the_techniques_of_its_later_claims() -> None:
@@ -65,9 +67,11 @@ def test_the_revision_keeps_the_techniques_of_its_later_claims() -> None:
     techniques = [c.technique_id for c in claims]
     assert techniques[:3] == ["T1218.011", "T1027.007", "T1027.005"]
     assert "T1070" in techniques and "T1620" in techniques
-    # "TECHNIQUE: T1055, T1106" claims two: neither is read, the line is kept whole.
-    (both,) = [c for c in claims if c.technique_line]
-    assert (both.technique_id, both.technique_line) == (None, "T1055, T1106")
+    # "TECHNIQUE: T1055, T1106" claims two: one claim per id, the sentence the same.
+    both = [c for c in claims if c.technique_id in ("T1055", "T1106")]
+    assert [c.technique_id for c in both] == ["T1055", "T1106"]
+    assert both[0].claim == both[1].claim
+    assert not any(c.technique_line for c in claims)
     # The DISPUTES section after the last claim is not read as a claim.
     assert not any("DISPUTED" in c.claim for c in read_claim_blocks(REVISION).claims)
 
@@ -75,7 +79,7 @@ def test_the_revision_keeps_the_techniques_of_its_later_claims() -> None:
 def test_the_base_analyst_path_reads_every_claim_and_records_nothing() -> None:
     analyst = _analyst()
     isr = analyst._text_to_isr(REVISION, revision_round=2)
-    assert len(isr.claims) == 13
+    assert len(isr.claims) == 14
     assert isr.claims_unread_reason == ""
 
 
@@ -214,7 +218,6 @@ def test_a_technique_the_analyst_rejects_is_not_read_as_claimed() -> None:
         ("-", None, None),
         ("T1027.002 not supported", None, "T1027.002 not supported"),
         ("T1055 (unproven)", None, "T1055 (unproven)"),
-        ("T1055, T1106", None, "T1055, T1106"),
         ("T1105; T1620 (candidate)", None, "T1105; T1620 (candidate)"),
     ],
 )
@@ -231,11 +234,11 @@ def test_a_kept_technique_line_is_asked_about_once() -> None:
     from maljan.pipeline.validation import TECHNIQUE_LINE_UNREAD_CODE, parse_violations
 
     isr = _analyst()._text_to_isr(
-        "CLAIM: x\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.5\nTECHNIQUE: T1055, T1106\n", 0
+        "CLAIM: x\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.5\nTECHNIQUE: T1055 or T1106\n", 0
     )
     (question,) = [v for v in parse_violations(isr) if v.code == TECHNIQUE_LINE_UNREAD_CODE]
-    assert '"T1055, T1106"' in question.message
-    assert "one claim per technique" in question.message
+    assert '"T1055 or T1106"' in question.message
+    assert "several separated by commas" in question.message
 
 
 def test_only_the_answers_in_force_carry_their_unread_claims_reason() -> None:

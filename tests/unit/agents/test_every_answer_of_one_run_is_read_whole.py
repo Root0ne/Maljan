@@ -40,15 +40,16 @@ def test_every_block_with_a_confidence_is_read_through_both_readings(name: str) 
     stated = sum(1 for block in _blocks(text) if _STATES_A_CONFIDENCE.search(block))
     lenient = read_claim_blocks(text)
     strict = read_claim_blocks(text, require_evidence=True)
-    assert len(lenient.claims) == stated
-    assert len(strict.claims) == stated
+    # Blocks read: a block whose TECHNIQUE line lists ids is one claim per id.
+    assert lenient.read == stated
+    assert strict.read == stated
     assert lenient.unread == 0
 
 
 @pytest.mark.parametrize("name", sorted(n for n in ANSWERS if n.endswith("final answer")))
 def test_a_whole_answer_reads_every_claim_it_began(name: str) -> None:
     read = read_claim_blocks(ANSWERS[name])
-    assert len(read.claims) == read.begun
+    assert read.read == read.begun
     assert read.without_confidence == 0
 
 
@@ -56,8 +57,8 @@ def test_a_whole_answer_reads_every_claim_it_began(name: str) -> None:
 def test_an_answer_cut_at_the_event_bound_loses_at_most_the_claim_it_was_cut_in(name: str) -> None:
     text = ANSWERS[name]
     read = read_claim_blocks(text)
-    assert read.begun - len(read.claims) <= 1
-    if read.begun > len(read.claims):
+    assert read.begun - read.read <= 1
+    if read.begun > read.read:
         # The one not read is the last, cut before its CONFIDENCE line.
         assert not _STATES_A_CONFIDENCE.search(_blocks(text)[-1])
         assert read.without_confidence == 1

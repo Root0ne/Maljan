@@ -64,6 +64,7 @@ from maljan.reporting.models import (
     RegistryMod,
     SandboxSignature,
     TechnicalSubsection,
+    stated_family,
 )
 from maljan.schemas.isr_models import UNVERIFIED_TECHNIQUE_MARKER
 
@@ -265,7 +266,7 @@ class MarkdownRenderer:
         lines.append(_verdict_line(report))
         for row in ctx.verdict_findings:
             lines.append(
-                f"  \n_Unresolved on the verdict: `{row['code']}`: {_one_line(row['message'])}_"
+                f"  \n_Unresolved on the verdict: `{row['code']}`: {_one_line(_finding_text(row))}_"
             )
 
         if report.overall_confidence is None:
@@ -496,6 +497,13 @@ class MarkdownRenderer:
                 )
             elif reason == "consensus":
                 said = f"the analysts reached consensus after {rounds} round(s)"
+                # Agreement over lines the mediator set aside says so.
+                set_aside = int(negotiation.get("not_blocking_at_end") or 0)
+                if set_aside:
+                    said += (
+                        f"; {set_aside} listed line{'s were' if set_aside != 1 else ' was'} "
+                        "marked not blocking by the mediator"
+                    )
             else:
                 said = f"the negotiation ended after {rounds} round(s)" + (
                     f" ({reason})" if reason and reason != "unknown" else ""
@@ -504,7 +512,7 @@ class MarkdownRenderer:
         if ctx.verdict_findings:
             lines.extend(["", "**Unresolved findings on the verdict:**", ""])
             lines.extend(
-                _item(f"`{row['code']}`: {row['message']}") for row in ctx.verdict_findings
+                _item(f"`{row['code']}`: {_finding_text(row)}") for row in ctx.verdict_findings
             )
         return "\n".join(lines)
 
@@ -1197,8 +1205,8 @@ class MarkdownRenderer:
         if static.interesting_strings:
             lines.extend([_plain_heading("Strings of note"), ""])
             lines.append(
-                "_Values extracted from the file's bytes, printed as they are. A "
-                "network-looking string is not an observed endpoint._"
+                "_Values extracted from the file's bytes, printed as they are, network "
+                "values defanged. A network-looking string is not an observed endpoint._"
             )
             lines.append("")
             answers = {(row.kind, row.value.lower()): row.published for row in ctx.iocs}
@@ -1206,11 +1214,14 @@ class MarkdownRenderer:
             lines.append(_divider(4))
             for ioc in static.interesting_strings[:60]:
                 published = ctx.plain(answers.get((ioc.kind, ioc.value.strip().lower())) or "-")
+                # Defanged whole, then cut: a value cut first could leave a
+                # host the defanger no longer reads as one.
+                value = _truncate(_defanged_text(ctx.plain(ioc.value)), _CELL_LIMIT)
                 lines.append(
                     _row(
-                        f"`{_truncate(ioc.value, _CELL_LIMIT)}`",
+                        _code_span(value),
                         ioc.kind,
-                        ioc.notes or "-",
+                        _defanged_text(ctx.plain(ioc.notes)) if ioc.notes else "-",
                         published,
                     )
                 )
@@ -1365,8 +1376,11 @@ class MarkdownRenderer:
                 lines.append(
                     _row(
                         row.type,
-                        f"`{row.value}`",
-                        row.context or "-",
+                        # A file or host value that holds a network value
+                        # ("//relay.example.net/live/" read as a path) holds
+                        # it defanged; any other is printed as it is.
+                        _code_span(ctx.plain(row.value)),
+                        ctx.plain(row.context) if row.context else "-",
                         row.source or "-",
                         ctx.plain(row.published or "-"),
                     )
@@ -1398,7 +1412,8 @@ class MarkdownRenderer:
                     "; ".join(
                         part
                         for part in (
-                            row.context,
+                            # "the host of <url>": the URL is defanged too.
+                            ctx.plain(row.context) if row.context else "",
                             f"recovered by {row.recovered_by}" if row.recovered_by else "",
                         )
                         if part
@@ -1461,12 +1476,15 @@ class MarkdownRenderer:
             body.append("")
             for rule in report.detection_signatures:
                 status = (
-                    f"compile error: {_one_line(rule.compile_error)}"
+                    f"compile error: {ctx.plain(_one_line(rule.compile_error))}"
                     if rule.compile_error
                     else "compiled"
                 )
+                # The line naming the values a rule was drafted from is read
+                # as prose and defanged; the rule's body is the rule to deploy
+                # and is printed as it compiles.
                 source = (
-                    f"; auto-generated from {_ids(rule.source_evidence)}"
+                    f"; auto-generated from {ctx.plain(_ids(rule.source_evidence))}"
                     if rule.source_evidence
                     else ""
                 )
@@ -1724,7 +1742,7 @@ class MarkdownRenderer:
                 server = f" ({row['server']})" if row.get("server") else ""
                 count = int(row.get("count") or 1)
                 times = f" ×{count}" if count > 1 else ""
-                message = str(row.get("error") or "").strip() or "failed"
+                message = ctx.plain(str(row.get("error") or "").strip()) or "failed"
                 remedy = str(row.get("remediation") or "").strip()
                 lines.append(
                     _item(
@@ -1782,7 +1800,7 @@ class MarkdownRenderer:
         if exports:
             lines.extend(["**Export decisions:**", ""])
             for row in exports:
-                lines.append(_item(f"`{row.get('code', '')}`: {row.get('message') or ''}"))
+                lines.append(_item(f"`{row.get('code', '')}`: {_finding_text(row)}"))
             lines.append("")
         lines.append(
             "Values in Measured sections come from tools and are reported as the tools "
@@ -1880,6 +1898,28 @@ class MarkdownRenderer:
             for sentence in negotiation.get("revision_replacements") or []:
                 lines.append(_item(str(sentence)))
             for sentence in negotiation.get("mediation_notes") or []:
+                lines.append(_item(str(sentence)))
+            # What the platform recorded of the debate: how many values each
+            # revision states nowhere (the claims themselves are in the run
+            # summary), the lines the mediator marked not blocking, the marks
+            # it wrote that were not read, and the ledger counts. Each
+            # sentence is written defanged.
+            for row in negotiation.get("dropped_value_counts") or []:
+                if isinstance(row, dict):
+                    lines.append(
+                        _item(
+                            f"{row.get('agent')}, round {row.get('round')}: "
+                            f"{row.get('values')} value{'' if row.get('values') == 1 else 's'} "
+                            f"from {row.get('claims')} earlier "
+                            f"claim{'' if row.get('claims') == 1 else 's'} "
+                            f"{'is' if row.get('values') == 1 else 'are'} no longer stated"
+                        )
+                    )
+            for sentence in negotiation.get("not_blocking") or []:
+                lines.append(_item(f"Marked not blocking by the mediator: {sentence}"))
+            for sentence in negotiation.get("unread_marks") or []:
+                lines.append(_item(f"A mark that was not read; the line blocked: {sentence}"))
+            for sentence in negotiation.get("ledger_facts") or []:
                 lines.append(_item(str(sentence)))
         for line in generation_lines(run_summary.get("generation")):
             lines.append(_item(line))
@@ -2145,7 +2185,11 @@ class _Context:
         for key in recovered.recovered_by if recovered is not None else {}:
             indicators += [(value, kind) for kind, value in cell_network_values(key, None)]
         self.indicators = indicators
-        self._defang = ProseDefanger(indicators)
+        run_values = ProseDefanger(indicators)
+        # The run's own values first, then every other URL, mailbox, address
+        # and host the text names: a model's prose can name one the run never
+        # recorded, and it is printed for reading like any other.
+        self._defang = lambda text: _defanged_text(run_values(text)) if text else text
         self.reputations = _reputations(report)
         # The report model's sentences a check asked about and the retry left
         # standing, each with the mark printed after it. Longest first, so a
@@ -2548,26 +2592,384 @@ _VALUE_FINDING_CODES = frozenset({"report.value_not_in_cited_entry", "report.unp
 # The table separator, named rather than written: a literal one in this module
 # is a table row assembled by hand (``test_a_table_row_is_never_assembled_by_hand``).
 _PIPE = chr(124)
-# A URL and a mailbox in free text, for defanging what no indicator list holds.
-_URL_IN_TEXT = re.compile(
-    r"(?i)\b(?:https?" + _PIPE + r"ftp" + _PIPE + r"hxxps?)://[^\s<>()\[\]`'\"" + _PIPE + r"]+"
+# A URL in free text, for telling whether a cell names one. Any scheme a
+# viewer may make a link of ("https", "ftp", "sftp", "ws", a defanged "hxxps"),
+# wherever it starts: no word boundary before it, since GFM starts a link after
+# a digit or "_" as readily as after a space.
+_URL_IN_TEXT = re.compile(r"(?i)[a-z][a-z0-9+.-]{0,31}://[^\s<>()\[\]`'\"" + _PIPE + r"]+")
+# A host after an "@" no mailbox name stands before.
+_BARE_AT_HOST = re.compile(r"(?<![\w.+-])@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
+# A "www." host, which a forge links whatever its top-level label, after any
+# character that is no letter or digit ("_", "*", "~", "(", "/" and the rest).
+_WWW_HOST = re.compile(r"(?i)(?<![^\W_])www\.[\w-]+(?:\.[\w-]+)*")
+# An IPv6 address written in text: hex groups and colons, read by ``ipaddress``.
+_IPV6_CANDIDATE = re.compile(r"(?<![\w:.\]])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![\w:])")
+# The same with an IPv4 tail read whole ("::ffff:192.0.2.1").
+_IPV6_WITH_A_TAIL = re.compile(
+    r"(?<![\w:.\]])(?:[0-9A-Fa-f]{0,4}:){2,7}\d{1,3}(?:\.\d{1,3}){3}(?![\w:])(?!\.\d)"
 )
-_EMAIL_IN_TEXT = re.compile(r"(?<![\w.+-])[\w.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
+# A mailbox: GFM's name characters (``_`` among them) and a dotted domain.
+_EMAIL_IN_TEXT = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 # The characters that make Markdown of a sample's text: a code span, a link or
 # image, an HTML tag, a table cell, emphasis, and the backslash itself.
 _INLINE_META = re.compile(r"([\\`\[\]<>*" + _PIPE + r"])")
 _INLINE_META_NO_PIPE = re.compile(r"([\\`\[\]<>*])")
+# A link a reference service may own: https, at no scheme character's end.
+_REFERENCE_CANDIDATE = re.compile(r"(?i)(?<![a-z0-9+.-])https://[^\s<>()\[\]`'\"" + _PIPE + r"]+")
+# What ends the authority of a URL, or of a "//" target: a separator, a space,
+# or a character Markdown or a sentence puts around a link.
+_AUTHORITY_END = frozenset("/?#\\<>()[]{}\"'`" + _PIPE)
+# The bracketed characters a defanged value is written with.
+_DEFANGED_MARKS = ("[.]", "[:]", "[@]")
 
 
 def _defanged_text(text: str) -> str:
-    """``text`` with every URL, mailbox, address and host in it defanged, as the report does."""
-    from maljan.pipeline.validation import network_values_in
-    from maljan.reporting.defang import defang_text
+    """``text`` with every network indicator in it defanged, as the report does.
 
-    indicators = [(found.group(0), "url") for found in _URL_IN_TEXT.finditer(text)]
-    indicators += [(found.group(0), "email") for found in _EMAIL_IN_TEXT.finditer(text)]
-    indicators += [(value, kind) for kind, value in network_values_in(text)]
-    return defang_text(text, indicators)
+    A URL, a mailbox, a host under a real top-level domain (the string sweep's
+    own list, the root zone's) and an address are defanged. What names no
+    network value prints as written: a version number ("FileVersion 10.0.0.1",
+    "v1.2.3.4"), a .NET name ("ASP.NET"), and a two-label name whose top-level
+    label is also a file's extension ("lib.rs", "install.sh"). A reference
+    service's own lookup (``_REFERENCE_LOOKUPS``) stays a link, exactly as it
+    was checked; the text is split around those links and only the pieces
+    between them are read. A value the run itself recorded is defanged before
+    this, by the context's own pass, wherever it stands.
+    """
+    out: list[str] = []
+    at = 0
+    for start, end in _reference_spans(text):
+        out += [_defanged_piece(text[at:start]), text[start:end]]
+        at = end
+    out.append(_defanged_piece(text[at:]))
+    return "".join(out)
+
+
+def _reference_spans(text: str) -> list[tuple[int, int]]:
+    """Where ``text`` holds a reference service's own lookup, kept as checked.
+
+    A sentence's punctuation after the link is trimmed before the check, and
+    only what was checked is kept: the trimmed characters are read with the
+    rest of the text. A link the run's own indicator was defanged inside is no
+    lookup.
+    """
+    spans: list[tuple[int, int]] = []
+    for found in _REFERENCE_CANDIDATE.finditer(text):
+        if text[found.end() : found.end() + 3] in _DEFANGED_MARKS:
+            continue
+        checked = found.group(0).rstrip(",.;:!?")
+        if _reference_lookup(checked):
+            spans.append((found.start(), found.start() + len(checked)))
+    return spans
+
+
+def _defanged_piece(text: str) -> str:
+    """``text``, holding no kept link, with every network value in it defanged, in one reading.
+
+    Each place a viewer starts a link is read where it stands, whatever is
+    around it and however deeply it is nested, and the characters that make it
+    live are rewritten in place: a scheme's letters (``hxxp``), the dots of a
+    host (``[.]``), a mailbox's ``@`` and an IPv6 address's first colon. Nothing
+    is read twice and no pass is repeated, so a text of any length and any
+    nesting is read in time linear in its length.
+    """
+    if not text:
+        return text
+    marks: dict[int, str] = {}
+    _mark_links(text, marks)
+    _mark_scheme_openers(text, marks)
+    _mark_mailboxes(text, marks)
+    _mark_hosts(text, marks)
+    if not marks:
+        return text
+    out: list[str] = []
+    at = 0
+    for index in sorted(marks):
+        out += [text[at:index], marks[index]]
+        at = index + 1
+    out.append(text[at:])
+    return "".join(out)
+
+
+def _bracket(text: str, index: int, marks: dict[int, str]) -> None:
+    """Write the ``.``, ``:`` or ``@`` at ``index`` bracketed, unless it already is."""
+    if 0 < index < len(text) - 1 and text[index - 1] == "[" and text[index + 1] == "]":
+        return
+    marks[index] = f"[{text[index]}]"
+
+
+def _bracket_dots(text: str, start: int, end: int, marks: dict[int, str]) -> None:
+    for index in range(start, end):
+        if text[index] == ".":
+            _bracket(text, index, marks)
+
+
+def _mark_links(text: str, marks: dict[int, str]) -> None:
+    """Every ``//`` target and every scheme before one: the authority's dots, and the scheme.
+
+    Each ``//`` starts its own authority, so a URL nested in another's path is
+    read where it stands, at any depth. The authority runs to the first
+    separator; a defanged mark inside it is read past. A scheme before the
+    ``//`` is defanged by form, whatever its host (:func:`_defang_scheme`).
+    """
+    at = text.find("//")
+    while at != -1:
+        if at > 0 and text[at - 1] == ":":
+            _defang_scheme(text, at - 1, marks)
+        # A browser reads past more slashes and backslashes to the host.
+        index = at + 2
+        while index < len(text) and text[index] in "/\\":
+            index += 1
+        while index < len(text):
+            if text[index : index + 3] in _DEFANGED_MARKS:
+                index += 3
+                continue
+            char = text[index]
+            if char in _AUTHORITY_END or char.isspace():
+                break
+            if char == ".":
+                _bracket(text, index, marks)
+            index += 1
+        at = text.find("//", max(index, at + 2))
+
+
+def _defang_scheme(text: str, colon: int, marks: dict[int, str]) -> None:
+    """Defang the scheme that ends at ``colon``, whatever follows it.
+
+    The scheme is the run of scheme characters before the colon, from its
+    first letter, read whole: http, https or ftp is renamed (``hxxp``,
+    ``hxxps``, ``fxp``); a defanged spelling is left as it is; any other scheme
+    (``ws``, ``irc``, ``a.http``, ``com-http``) has its colon bracketed
+    (``ws[:]//``), so no viewer reads a scheme there at all, whichever of its
+    characters a viewer would take for the scheme.
+    """
+    from maljan.reporting.defang import _SCHEMES
+
+    start = colon
+    while (
+        start > 0
+        and text[start - 1].isascii()
+        and (text[start - 1].isalnum() or text[start - 1] in "+.-")
+    ):
+        start -= 1
+    while start < colon and not text[start].isalpha():
+        start += 1
+    if start == colon:
+        return
+    scheme = text[start:colon]
+    renamed = _SCHEMES.get(scheme.lower(), "")
+    if renamed:
+        for offset, (was, now) in enumerate(zip(scheme.lower(), renamed, strict=False)):
+            if was != now:
+                marks[start + offset] = now.upper() if scheme[offset].isupper() else now
+    elif scheme.lower() not in _DEFANGED_SCHEMES:
+        _bracket(text, colon, marks)
+
+
+# The spellings a defanged scheme is written in.
+_DEFANGED_SCHEMES = frozenset({"hxxp", "hxxps", "fxp"})
+# A scheme a link or autolink syntax opens: ``<scheme:…>``, ``[x](scheme:…)``,
+# ``[x](<scheme:…>)`` and a reference definition's ``[r]: scheme:…``.
+_SCHEME_IN_LINK_SYNTAX = re.compile(
+    r"(?:<" + _PIPE + r"\]\(<?" + _PIPE + r"(?<!\[[.:@])\]:[ \t]*)[A-Za-z][A-Za-z0-9+.-]{1,31}:"
+)
+# A scheme a viewer links with no "//" after it, before a target: not before
+# a space or a second colon ("Data::Data::Modulo" names a capa namespace).
+_SCHEME_WITHOUT_SLASHES = re.compile(
+    r"(?i)(?<![a-z0-9+.-])(?:mailto"
+    + _PIPE
+    + r"xmpp"
+    + _PIPE
+    + r"javascript"
+    + _PIPE
+    + r"vbscript"
+    + _PIPE
+    + r"data):(?=[^\s:])"
+)
+
+
+def _mark_scheme_openers(text: str, marks: dict[int, str]) -> None:
+    """Every scheme a link syntax opens, and every ``mailto:``-style scheme: defanged by form."""
+    for pattern in (_SCHEME_IN_LINK_SYNTAX, _SCHEME_WITHOUT_SLASHES):
+        for found in pattern.finditer(text):
+            _defang_scheme(text, found.end() - 1, marks)
+
+
+def _mark_mailboxes(text: str, marks: dict[int, str]) -> None:
+    """Every mailbox, and every host after a bare ``@``: the ``@`` and the domain's dots."""
+    from maljan.pipeline.validation import network_values_in
+
+    for found in _EMAIL_IN_TEXT.finditer(text):
+        at = text.index("@", found.start())
+        _bracket(text, at, marks)
+        _bracket_dots(text, at + 1, found.end(), marks)
+    for found in _BARE_AT_HOST.finditer(text):
+        if network_values_in(found.group(1)):
+            _bracket(text, found.start(), marks)
+            _bracket_dots(text, found.start(1), found.end(1), marks)
+
+
+def _mark_hosts(text: str, marks: dict[int, str]) -> None:
+    """Every ``www.`` host, ``.onion`` name, host under a real TLD and address: dots, or a colon."""
+    from maljan.pipeline.validation import network_values_in
+
+    for pattern in (_WWW_HOST, _ONION_HOST):
+        for found in pattern.finditer(text):
+            _bracket_dots(text, found.start(), found.end(), marks)
+    # Any run an IPv6 address could be is defanged, a short one too ("fe80::1"):
+    # only its first colon is bracketed, and the publish checks' stricter
+    # reader (``validation.ipv6_addresses_in``) decides which is a value.
+    for found in _IPV6_CANDIDATE.finditer(text):
+        if _is_ipv6(found.group(0)):
+            _bracket(text, text.index(":", found.start()), marks)
+    # An address with an IPv4 tail written in full ("2001:db8:0:0:0:0:1.2.3.4"),
+    # which the run above stops short of, read whole by the checks' candidate.
+    for found in _IPV6_WITH_A_TAIL.finditer(text):
+        if "." in found.group(0) and _is_ipv6(found.group(0)):
+            _bracket(text, text.index(":", found.start()), marks)
+    # Read with "@" and backslashes as spaces as well, so a host written after
+    # either ("…/\@evil.com") is found; the mailbox itself is read above.
+    values = {
+        value: kind
+        for kind, value in network_values_in(re.sub(r"[@\\]", " ", text))
+        if not _file_name_host(kind, value)
+    }
+    # A host written in capitals ("EVIL.COM") is read as the host it spells;
+    # the string sweep's reader takes an inner capital for a type name.
+    for found in _SHOUTED_HOST.finditer(text):
+        if not _DOTNET_NAME.fullmatch(found.group(0)):
+            for kind, value in network_values_in(found.group(0).lower()):
+                if not _file_name_host(kind, value):
+                    values.setdefault(value, kind)
+    if not values:
+        return
+    # Where each value stands: a dotted token, or the part of one after a dot,
+    # that ends where the token ends. One reading of the text's tokens, each
+    # looked up by its suffixes, longest first.
+    lengths = {len(value) for value in values}
+    places: dict[str, list[tuple[int, int]]] = {}
+    for token in _DOTTED_TOKEN.finditer(text):
+        written = token.group(0).lower()
+        starts = [0] + [index + 1 for index, char in enumerate(written) if char == "."]
+        for start in starts:
+            if len(written) - start in lengths and written[start:] in values:
+                places.setdefault(written[start:], []).append((token.start() + start, token.end()))
+                break
+    for value, found_at in places.items():
+        # An address is a version number only where every place it stands
+        # follows a version word; one place that does not makes it an address.
+        if values[value] == "ip" and all(
+            _VERSION_BEFORE.search(text[max(0, start - _VERSION_WORD_REACH) : start])
+            for start, _end in found_at
+        ):
+            continue
+        for start, end in found_at:
+            _bracket_dots(text, start, end, marks)
+
+
+# The reference services a report links to, each with the shape of its own
+# lookups: a link of that shape, with no query, fragment, userinfo, backslash
+# or dot segment, stays a link; anything else on those hosts is defanged.
+_REFERENCE_LOOKUPS: dict[str, re.Pattern[str]] = {
+    "www.virustotal.com": re.compile(
+        r"/gui/(?:(?:file"
+        + _PIPE
+        + r"url)/[0-9a-f]+"
+        + _PIPE
+        + r"(?:domain"
+        + _PIPE
+        + r"ip-address)/[A-Za-z0-9.:-]+)/?"
+    ),
+    "bazaar.abuse.ch": re.compile(r"/sample/[0-9a-f]{64}/?"),
+    "attack.mitre.org": re.compile(
+        r"/(?:"
+        + _PIPE.join(
+            (
+                r"techniques/T\d{4}(?:/\d{3})?",
+                r"tactics/TA\d{4}",
+                r"software/S\d{4}",
+                r"matrices/[a-z]+(?:/[a-z]+)?",
+            )
+        )
+        + r")/?"
+    ),
+}
+
+
+def _reference_lookup(url: str) -> bool:
+    """Whether ``url`` is one of a reference service's own lookups, and so stays a link.
+
+    The path is decoded (``%2e``, ``%2f``, ``%5c`` and the rest, repeatedly)
+    and the service's pattern must match the whole decoded path. A backslash,
+    an ``@``, a dot segment or a second ``//`` anywhere, raw or decoded, and a
+    query, fragment, port or userinfo make it no lookup.
+    """
+    from urllib.parse import unquote
+
+    try:
+        parts = urlparse(url)
+    except ValueError:
+        return False
+    shape = _REFERENCE_LOOKUPS.get((parts.hostname or "").lower())
+    if (
+        shape is None
+        or parts.scheme.lower() != "https"
+        or parts.query
+        or parts.fragment
+        or parts.username is not None
+        or parts.port is not None
+        or parts.netloc.lower() != (parts.hostname or "").lower()
+    ):
+        return False
+    path = parts.path
+    for _ in range(4):
+        decoded = unquote(path)
+        if decoded == path:
+            break
+        path = decoded
+    else:
+        return False
+    if any(mark in path for mark in ("\\", "@", "//", "%")) or "/." in path:
+        return False
+    return shape.fullmatch(path) is not None
+
+
+# A dotted name written wholly in capitals, and a name under ``.onion``.
+# A dotted token: labels of letters, digits and hyphens joined by dots.
+_DOTTED_TOKEN = re.compile(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
+_SHOUTED_HOST = re.compile(r"(?<![\w.-])[A-Z0-9-]+(?:\.[A-Z0-9-]+)+(?![\w-])")
+_ONION_HOST = re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+onion(?![\w-])")
+# A .NET technology's name, which ends in a real top-level domain.
+_DOTNET_NAME = re.compile(r"(?i)(?:" + _PIPE.join(("ASP", "ADO", "VB")) + r")\.NET")
+# The top-level domains that are also common files' extensions: a two-label
+# name under one ("lib.rs", "README.md", "install.sh", "archive.zip") is read
+# as a file in free prose. ".pl" and ".ml" are country codes a sample's hosts
+# use often enough that a name under them stays a host. Under a scheme, a
+# "//", "www." or "@" such a name is a host and defanged, and so is any value
+# the run itself recorded. A display rule of this report alone: no
+# extraction, tool or publish check reads it.
+_FILE_EXTENSION_TLDS = frozenset(
+    {"zip", "mov", "py", "so", "sh", "ps", "ai", "md", "rs", "pm", "cat", "one", "cab"}
+)
+# What a dotted quad of a version number follows: "FileVersion", "version",
+# "ProductVersion:" or a "v" written against it, and how far before the quad
+# that is looked for.
+_VERSION_BEFORE = re.compile(r"(?i)(?:version\s*[:=]?\s*" + _PIPE + r"\bv)$")
+_VERSION_WORD_REACH = 64
+
+
+def _is_ipv6(text: str) -> bool:
+    """Whether ``text`` is an IPv6 address."""
+    try:
+        return ipaddress.ip_address(text).version == 6
+    except ValueError:
+        return False
+
+
+def _file_name_host(kind: str, value: str) -> bool:
+    """Whether a host the reader found is a two-label name under a file-extension TLD."""
+    labels = value.lower().split(".")
+    return kind == "domain" and len(labels) == 2 and labels[-1] in _FILE_EXTENSION_TLDS
 
 
 def _inline_safe(text: Any, *, pipes: bool = True) -> str:
@@ -2608,11 +3010,16 @@ def _code_span(text: str) -> str:
 
 
 def _finding_text(row: dict[str, Any]) -> str:
-    """A finding's message as the report prints it: the value findings defanged and escaped."""
+    """A finding's message as the report prints it, every network value in it defanged.
+
+    The value findings are escaped too. Every other message is defanged and
+    left as written: it quotes the claim or the object it is about, and a
+    claim's URL was printed live in the list of findings.
+    """
     message = str(row.get("message") or "")
-    if row.get("code") not in _VALUE_FINDING_CODES:
-        return message
     try:
+        if row.get("code") not in _VALUE_FINDING_CODES:
+            return _defanged_text(message)
         return _inline_safe(message)
     except Exception as exc:  # noqa: BLE001 — never the raw values
         logger.debug("markdown: a finding was not written (%s).", exc)
@@ -2642,7 +3049,7 @@ def _findings_beside(rows: list[dict[str, str]]) -> list[str]:
 def _family_voice(report: MalwareReport) -> str:
     """Who named the family: the judge, the sandbox's own classification, or a model unnamed."""
     attr = report.attribution
-    if not attr.family or attr.family.lower() == "unknown":
+    if not stated_family(attr.family):
         return JUDGE
     if attr.family_source == "sandbox":
         return MEASURED
@@ -2654,17 +3061,16 @@ def _family_voice(report: MalwareReport) -> str:
 def _indicator_rows(report: MalwareReport) -> list[ConsolidatedIOC]:
     """The IOC table's rows, answered by the publish rule on this render.
 
-    Built on request from the stored report, the way ``/reports/{id}/iocs``
-    is, so an enrichment that ran after the report was stored is reflected and
-    a report stored before the table carried a kind prints in the new shape.
+    Built on request from the stored report by the reader
+    ``/reports/{id}/iocs`` uses for its analyst rows (``builder.ioc_table``),
+    so an enrichment that ran after the report was stored is reflected and a
+    report stored before the table carried a kind prints in the new shape. A
+    cell's publish state reads the stored table first
+    (``narrative_agent.published_answers``).
     """
-    from maljan.reporting.builder import build_consolidated_iocs
+    from maljan.reporting.builder import ioc_table
 
-    try:
-        return build_consolidated_iocs(report)
-    except Exception:  # noqa: BLE001 — the stored rows are the fallback
-        logger.exception("markdown_renderer: the IOC table could not be rebuilt.")
-        return [row for row in report.consolidated_iocs if row.kind]
+    return ioc_table(report)
 
 
 def _reputations(report: MalwareReport) -> dict[str, str]:
@@ -3019,9 +3425,9 @@ def report_title(report: MalwareReport) -> str:
     does one only a sandbox's classification named.
     """
     attr = report.attribution
-    family = _one_line(attr.family).strip()
+    family = stated_family(_one_line(attr.family))
     named = attr.family_source != "sandbox" and bool(attr.family_evidence_ids)
-    if family and family.lower() != "unknown" and named:
+    if family and named:
         category = _one_line(report.malware_category).strip()
         if category and category.lower() != "unknown":
             return f"{family} {category} analysis"
@@ -3200,7 +3606,7 @@ def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
         lines.append(
             _row(
                 ctx.cell(item.kind),
-                _code_span(_defanged_text(_one_line(item.value))) + ctx.publish_state(item.value),
+                _code_span(ctx.plain(_one_line(item.value))) + ctx.publish_state(item.value),
                 ctx.cell(item.purpose) if item.purpose.strip() else PURPOSE_NOT_STATED,
                 cited,
             )
@@ -3313,14 +3719,14 @@ def _attack_row(
     if not cell.technique_id_valid:
         status = f"unverified id ({UNVERIFIED_TECHNIQUE_MARKER})"
     elif cell.not_published:
-        status = f"claimed, not published: {_truncate(cell.not_published, 200)}"
+        status = f"claimed, not published: {_truncate(ctx.plain(cell.not_published), 200)}"
     else:
         status = "published" + _corroborated_words(mapping, rules)
         rule_only = ctx.rule_only.get(cell.technique_id)
         if rule_only:
             status += f"; {rule_only}"
         if cell.note:
-            status += f"; {cell.note}"
+            status += f"; {ctx.plain(cell.note)}"
     # The platform's unresolved findings about this technique, beside its
     # row: the ATT&CK checks, and the judge crediting a source that never
     # named it. Matched on what the finding is about (``subject``), because

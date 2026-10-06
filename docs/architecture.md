@@ -346,6 +346,15 @@ before. A run's mediator listed five contradictions, one of them a claim the
 ledger contradicted, argued them away, wrote `agreement_confidence: 1.0`, and
 no analyst was asked to revise.
 
+The debate ends when nothing is left to settle (`pipeline/debate_facts.py`,
+`pipeline/claim_drops.py`, `pipeline/routing.py`):
+
+- The mediator ends each line of its block with `[blocking: <reason>]` or `[not blocking: <reason>]`; consensus is its confidence at the threshold with no line marked blocking, an unmarked line blocks, and the platform overrides a mark in neither direction. The reason may hold one level of brackets (`[not blocking: see [ev_0021]]`); a `[not blocking]` mark with no reason, conflicting marks and a mark that cannot be read block and go to `negotiation.unread_marks`, and a `[blocking]` mark with no reason blocks as it asks.
+- For a listed line whose cited entries (cited by the line or by a claim it names) hold, in a field named for a count or a total, a number the line itself states, every such value is stated; a size or a time is not a count. No call is made for them: they ride on the revision directive of the analysts the line names and on the next mediation's prompt, and a debate that ends at this mediation spends nothing on them.
+- A revision round whose every revision is the answer in force again, whitespace aside, ends the debate as `converged`; the router reads only the record of the round right before the mediation it routes.
+- A revision is made against the analyst's answer in force and its peers'; each value of the answer in force it states nowhere is recorded in `run_summary.negotiation.dropped_claims` (a decimal only as a stated value, never a claim, round, step, stage, phase or list number, nor the round's own number; nor a cross-reference to the answer's own numbering such as "#3" or "item 3"; a number after any other word, such as "line 75", is compared as a value), the report's run appendix prints one count line per analyst and round (`dropped_value_counts`), the worker log one count line per analyst and round at INFO with each claim's sentence at DEBUG, and nothing is asked.
+- The debate stage's duration adds the revision rounds' time to the mediations', and `termination_reason` comes from the router's own rules, `hard_limit` only when the debate would have gone on.
+
 A single local model server has one slot, and fanning out three analysts onto
 it produces queue thrash rather than speed; a hosted API serves each request on
 its own. `auto` tells them apart per job (`pipeline/analyst_mode.py`), on a
@@ -986,7 +995,12 @@ as written), or a `malware_types` value outside STIX 2.1's `malware-type-ov`
 vocabulary, which the question lists (`validation.MALWARE_TYPES`). The judge's
 prompt says an object named after the attributed family stands for it and that
 its kind goes under `malware_types` from that vocabulary. Nothing is rewritten:
-what the judge keeps is published as written.
+what the judge keeps is published as written. When the run states a family (the
+judge's, else the sandbox's; "Unknown", "none", "n/a" or empty is none) and
+no malware object is named for it, the export adds the family's object
+(`is_family: true`, the family's ledger ids) and relates the judge's object to
+it as `variant-of`; the platform's own object, minted when the judge wrote
+none, says `is_family: true` when it is named for the family.
 
 A judge malware object the export declines for a property the standard
 requires does not take the judge's relationships with it. The platform's own
@@ -1101,7 +1115,10 @@ decides.
    stricter than the capability check's about which cue governs a mention: no
    comma and no coordinator ("and", "instead", "only", "but") between them,
    and not a cue that opens an assertion ("no longer", "not merely", "never
-   stops"). Two more readings of absence do not need the cue next to the
+   stops") nor "never-" before a listed past participle ("a never-exercised
+   web C2"). A pair of dashes around an aside is read as if the aside were not
+   there; a single dash is a clause break where a clause with its own verb
+   follows it or the cue before it is "instead of" or "rather than". Two more readings of absence do not need the cue next to the
    mention: an item of a noun list a cue in the clause negates, the list
    joined by commas and a final "or"/"and" and ending at its head noun ("does
    not contain persistence, lateral movement, or exfiltration mechanisms"), and
@@ -1129,7 +1146,11 @@ decides.
    (`attck.claim_does_not_describe`). A claim whose sentence shares no term
    with the technique it carries — no capability term listing the id, no word
    of its catalogue name or its parent's (compared with common endings off:
-   "obfuscation" and "Obfuscated Files or Information" share one), no tactic
+   "obfuscation" and "Obfuscated Files or Information" share one; the verb a
+   name opens with, when it ends in a silent "e", also by its -s, -d and -ing
+   forms compared whole, so "deobfuscates" and "decoded" share one with
+   Deobfuscate/Decode Files or Information while "stated", "computer" and
+   "officer" share none with State, Compute or Office), no tactic
    as a category phrase — is asked once to keep the technique only if the
    sample does it, and then to say what it does. Decided only where the
    catalogue gives the id's name, and not asked of an absence claim or a
@@ -1438,9 +1459,17 @@ paragraph (`nodes.run_quality_note`) says a run that is not degraded is not,
 and adds only the sentences that fit its limitations: that a missing tool is an
 absence of evidence when a reason other than such a note is listed, and that a
 note on part of an answer leaves the claims it read standing when one is. A TECHNIQUE line is one
-id, or `NONE` or a dash for none; any other line (a qualifier, a negation,
-several ids) claims no id, is kept on the claim as `technique_line`, and the
-validation turn asks once for one id per claim (`isr.technique_line_unread`).
+id, a list of ids separated by commas, "and" or slashes (read as one claim per id, each
+with the claim's sentence, evidence and confidence, and each checked as a
+technique), or `NONE` or a dash for none; a closing block separator (`· ---`)
+is no part of it. Any other line (a qualifier, a negation, ids joined by
+another word) claims no id, is kept on the claim as `technique_line`, and the
+validation turn asks once for the ids alone, an id the claim does not assert
+left off the line (`isr.technique_line_unread`). The claims begun are counted
+against the blocks read, not the claims; a retry is compared with the answer
+it replaces by claim blocks, so an id taken off a list when asked is the
+answer kept, and a question about one id of a list asks to remove that id from
+the line rather than to write NONE. Findings name the block the analyst wrote.
 Every validation turn after a loop gets what that loop left of its time, not
 a fresh budget, and is not asked when that cannot hold one answer at the pace
 the loop measured (its final-answer reserve); what it would have asked is then
@@ -1449,7 +1478,8 @@ says why.
 
 An analyst answer that ended at its output cap (`llm.expert_max_tokens`, or the
 cap derived from the window when it is 0; for a call the spend ceiling held to
-less, the held cap it was sent with; by the
+less, the held cap it was sent with, recorded per loop turn as it is sent, so a
+later turn the loop did not keep never stands in for it; by the
 server's finish reason or by a generated count equal to the cap, since
 ik_llama.cpp reports `stop` for an answer it cut) is asked once for a whole
 shorter one, the way the judge's and a report section's are:
@@ -1627,10 +1657,13 @@ argument position, call and callee, so one text passed to two calls is two
 facts. An offset and its virtual address are one function only through an
 image base the run read: exactly one of the two is below the base, and they are
 apart by it. Two virtual addresses a base apart stay two functions. With no
-base, both are kept as written. A claim gives a function its summary by the
-decompiled-not-described check's reading when a base is known. With none, it
-needs the same address written out, or a name the decompiler gave the function.
-No address is guessed. A visited function with neither an artefact nor a
+base, both are kept as written. A claim gives a function its summary by an
+address that is the same function by that rule (with no base, the same address),
+by the function's own hex spelling written as digits alone, or by a name the
+decompiler gave it; a name that is an ordinary word (`entry`, `start`, or the
+last label of `sym.entry`) counts only written as code or beside a word such as
+"function" or "export". No
+address is guessed. A visited function with neither an artefact nor a
 summary appears on one "also visited" line, by address. Names other than a
 decompiler's generic `FUN_`, `sub_` or `fcn.` name are kept beside it, such as
 an export name.
@@ -2512,7 +2545,8 @@ plain text — goes to the `FunctionSummarizer` when
 `preprocessing.use_function_summarizer` is on and to the character cut
 otherwise, exactly as before. A summary that ended at its output limit, by the
 analysts' rule, begins with a note saying its end is missing, and the cut is
-recorded with the run's shortened inputs.
+recorded with the run's shortened inputs, in one sentence per output limit that
+counts the summaries cut at it.
 
 The shortening runs **before** the summariser, and for a JSON object it is the
 better of the two: the summariser answers in English prose, and prose is what
@@ -2604,7 +2638,7 @@ and the console draws the running analysis from them.
 | `model_fallback` | an agent, on the turn its model list moved on — published whether or not deltas stream | `stage`, `agent`, `model` (the model that answers from here), `reason` |
 | `tool_call_started` | the evidence recorder | `stage`, `agent`, `tool`, `server`, `args_summary` |
 | `tool_call_finished` | the evidence recorder, as each entry is written | `stage`, `agent`, `tool`, `server`, `evidence_id`, `ok`, `duration_ms`, `summary` |
-| `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index`, `state`, `path` |
+| `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index`, `state`, `path`; `answer_kept` on an unread answer's question: one sentence saying where the answer is kept (`run_summary.validation.unparsed_answers`, one masked row per answer with its analyst and round), never the answer |
 | `judge_question` | the judge's ReAct loop | `stage`, `text`, `addressed_to` |
 | `budget_tick` / `stage_ended_at_cap` | the budget meter | see *The evidence ledger* |
 | `tool_server_rested` | a tool server's guard, when its breaker opens | `server`, `failures`, `cooldown_s`, `reason` |
@@ -3103,7 +3137,58 @@ is assembled from what the run gathered rather than recomputed beside it:
   mutex, a pipe, a user agent and a command come back unchanged, so
   `update_data.dat` is never bracketed. The same rule reaches model prose and
   the evidence dump through `ProseDefanger`, which touches exactly the values
-  the run's network block and IOC table hold, as whole tokens. The JSON report,
+  the run's network block and IOC table hold, as whole tokens. Strings of note,
+  every indicator column, the platform's findings (section 13, the verdict,
+  the export decisions), a tool failure's error, a draft rule's source line and
+  compile error, and model prose and cells beyond the run's own values defang
+  every URL of any scheme, `www.` host, mailbox, IPv4 or IPv6 address and host
+  under a real top-level domain (the string sweep's list, the root zone's;
+  any number of labels, in capitals, `.onion`): everything a viewer could
+  link. The host reader the publish checks, the run summary's sentences and
+  a cell's state note use (`validation.network_values_in`) reads a `.onion`
+  name of any labels by the same form reader, and an IPv6 address whole (an
+  IPv4 tail included) when it is bracketed or has at least three groups and a
+  digit, so a scope name such as `dead::beef` is no value; the defanger still
+  brackets any shorter form. What a viewer can link is decided by form alone, never by a TLD or an
+  exemption: a scheme before `//`, a scheme a link or autolink syntax opens
+  (`<…>`, `[x](…)`, `[r]: …`), a `mailto:`, `xmpp:`, `javascript:`,
+  `vbscript:` or `data:` before a target, a `www.` prefix, and a mailbox. Each
+  is defanged wherever it stands, after any character (`_`, `*`, `~`, `(`,
+  `/`, a digit) and at any nesting depth: http, https and ftp, read whole from
+  the scheme's first letter, become `hxxp`, `hxxps` and `fxp`, any other
+  scheme's colon is bracketed (`ws[:]//`, `irc[:]`), and the host's dots, the
+  `@` and an IPv6 address's first colon are bracketed. The TLD list and the
+  file-name rule below decide only bare hosts and addresses, which no viewer
+  links. A kept reference lookup is split off first; the rest is read once, in
+  time linear in the text, with no character used as a placeholder. The HTML
+  report links no bare text (CommonMark, no linkify); it makes an anchor only
+  of an http, https or mailto target, a place in the page (`#…`) or a relative
+  path with no leading `/` and no backslash, so neither a defanged URL nor a
+  protocol-relative `//host` is one; it renders a Markdown image as its alt
+  text and fetches none; and its `<meta http-equiv="Content-Security-Policy">`
+  is `default-src 'none'; style-src 'unsafe-inline'; img-src data:` (the
+  inline stylesheet and the figures' style attributes need `'unsafe-inline'`;
+  the figures are inline SVG and need nothing more). A version
+  number ("FileVersion 10.0.0.1"), a .NET name ("ASP.NET") and a two-label
+  name in free prose under a TLD that is also a file extension (`.zip`,
+  `.mov`, `.py`, `.so`, `.sh`, `.ps`, `.ai`, `.md`, `.rs`, `.pm`,
+  `.cat`, `.one`, `.cab`: "lib.rs", "install.sh") print as written unless the
+  run recorded them; under a scheme, a `//`, `www.` or `@` such a name is
+  always defanged; a name of more than four labels opening with a
+  reverse-DNS root (`com.`, `org.`, `android.`, `java.`, …) is read as a
+  package, not a host, unless the run's network evidence holds it; a two-label
+  name whose first label is two characters is read when that label holds a
+  digit and a letter (`c2.ru`), and one of two letters (`ab.ru`, `to.do`) only
+  by a check that asks the run's network evidence, or defanged where the run
+  recorded it, while every name read before is still read; a draft rule's
+  body is printed as it compiles; a VirusTotal (`/gui/file|url/<hex>`,
+  `/gui/domain|ip-address/<value>`), MalwareBazaar (`/sample/<sha256>/`) or
+  ATT&CK (`/techniques/…`, `/tactics/…`, `/software/…`, `/matrices/…`) lookup
+  with no query, matched whole on its decoded path (no dot segment, backslash,
+  `@` or second `//`) after a sentence's trailing punctuation is trimmed, and
+  kept exactly as matched, stays a link unless the run's indicator is in it, anything
+  else on those hosts is defanged, and the configured model endpoint stays as
+  written. The JSON report,
   the STIX bundle, MISP and `/reports/{id}/iocs` carry every value live, and
   the indicator section says so under its tables. A §7 string is printed as
   the file's bytes are, and says it is not an observed endpoint.
@@ -3240,7 +3325,9 @@ is assembled from what the run gathered rather than recomputed beside it:
   `strings`, the reason saying it is read from the sections the stored report
   keeps; otherwise it says only that no tool answer it keeps holds it.
   `/iocs?include=all` carries the analysts' listed non-network rows exactly
-  as the report's IOC table shows them. The judge
+  as the report's IOC table shows them, both read by one reader
+  (`builder.ioc_table`: rebuilt from the stored report, the stored rows only
+  when the rebuild fails), so an old report reads the same in both. The judge
   naming such a value keeps the standing it had before, so it is published.
   One run's sixteen capture addresses were told no tool saw them before the
   capture was read. The drafts read the table's
@@ -3960,7 +4047,8 @@ bundle cannot hold — goes through `pipeline.events.safe_finding_value`. A
 validation row, a degradation reason and an export decline are report text.
 With the operator's configured values registered (the worker registers them
 per job), a row keeps the evidence's words and loses every operator
-credential: each configured value by value (a short one as a whole word), a
+credential: each configured value by value (a short one as a whole word, one
+under four characters only as the word after `Bearer`, `Basic` or `token`), a
 URL's userinfo and each credential-named query value. Registration reads a
 configured URL's password of any length, a token in its username slot and its
 `api_key`, `apikey`, `access_token`, `token` and `key` values. With nothing

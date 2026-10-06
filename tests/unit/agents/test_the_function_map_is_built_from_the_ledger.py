@@ -415,6 +415,99 @@ class TestNothingIsGuessed:
 
         assert [e.address for e in found.visited] == [0x401000]
 
+    def test_a_claim_about_one_of_two_virtual_addresses_a_base_apart_is_its_summary_alone(
+        self,
+    ) -> None:
+        own = [_decompiled("ev_0001", "0x401000"), _decompiled("ev_0002", "0x801000")]
+        claim = _claim("0x801000 decrypts the configuration it reads.")
+
+        found = build_function_map(own, None, [claim], (0x400000,))
+
+        assert [(e.address, e.summary) for e in found.visited] == [
+            (0x401000, ""),
+            (0x801000, "0x801000 decrypts the configuration it reads."),
+        ]
+
+    def test_with_a_base_an_offset_in_a_claim_still_names_its_virtual_address(self) -> None:
+        own = [_decompiled("ev_0001", "0x401000"), _decompiled("ev_0002", "0x801000")]
+
+        found = build_function_map(own, None, [_claim("0x1000 opens the thing.")], (0x400000,))
+
+        assert [(e.address, e.summary) for e in found.visited] == [
+            (0x401000, "0x1000 opens the thing."),
+            (0x801000, ""),
+        ]
+
+    def test_with_no_base_the_function_s_own_digits_without_0x_name_it(self) -> None:
+        own = [_decompiled("ev_0001", "0x401230"), _decompiled("ev_0002", "0x411230")]
+
+        found = build_function_map(own, None, [_claim("401230 reads a value.")], ())
+
+        assert [(e.address, e.summary) for e in found.visited] == [
+            (0x401230, "401230 reads a value."),
+            (0x411230, ""),
+        ]
+
+
+class TestANameThatIsAWord:
+    @staticmethod
+    def _entry_map(*claims: str) -> str:
+        own = [_decompiled("ev_0001", "0x1360bc03c7c", "void entry(void)\n{\n}\n")]
+        return (
+            build_function_map(own, None, [_claim(c) for c in claims], (BASE,)).visited[0].summary
+        )
+
+    def test_the_word_in_a_sentence_names_no_function(self) -> None:
+        assert self._entry_map("A Run key entry starts the loader at logon.") == ""
+
+    def test_the_word_beside_a_function_cue_names_it(self) -> None:
+        for said in (
+            "The entry function writes the Run key.",
+            "The exported function entry writes the Run key.",
+            "`entry` writes the Run key.",
+            "entry() writes the Run key.",
+            "The routine 'entry' writes the Run key.",
+        ):
+            assert self._entry_map(said) == said, said
+
+    def test_the_first_claim_that_names_it_as_a_function_is_taken(self) -> None:
+        assert (
+            self._entry_map(
+                "A Run key entry starts the loader at logon.",
+                "The entry export writes the Run key.",
+            )
+            == "The entry export writes the Run key."
+        )
+
+    def test_a_dotted_decompiler_name_s_last_word_takes_the_same_rule(self) -> None:
+        for name, said, cued in (
+            ("sym.entry", "Persistence via a Run key entry.", "The sym.entry routine runs first."),
+            ("fcn.main", "The main payload is decrypted.", "The main function decrypts it."),
+            ("sub.start", "At start the loader sleeps.", "`start` sleeps first."),
+        ):
+            own = [_decompiled("ev_0001", "0x1360bc03c7c", f"void {name}(void)\n{{\n}}\n")]
+            for claim, summary in ((said, ""), (cued, cued)):
+                found = build_function_map(own, None, [_claim(claim)], (BASE,))
+                entry = found.visited[0]
+                assert name in entry.names, (name, entry.names)
+                assert entry.summary == summary, (name, claim)
+
+    def test_a_dotted_name_with_a_distinctive_last_label_names_it_alone(self) -> None:
+        own = [_decompiled("ev_0001", "0x1360bc03c7c", "void sym.DecryptConfig(void)\n{\n}\n")]
+        claim = _claim("DecryptConfig decrypts the configuration.")
+
+        found = build_function_map(own, None, [claim], (BASE,))
+
+        assert found.visited[0].summary == "DecryptConfig decrypts the configuration."
+
+    def test_a_name_that_is_no_word_still_names_it_alone(self) -> None:
+        own = [_decompiled("ev_0001", "0x1360bc03c7c", "void DecryptConfig(void)\n{\n}\n")]
+        claim = _claim("DecryptConfig decrypts the configuration.")
+
+        found = build_function_map(own, None, [claim], (BASE,))
+
+        assert found.visited[0].summary == "DecryptConfig decrypts the configuration."
+
 
 class TestTheFoldAndTheFacts:
     def test_the_fold_keeps_a_name_that_is_not_a_decompiler_s_generic_one(self) -> None:

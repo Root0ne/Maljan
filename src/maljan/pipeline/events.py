@@ -1374,24 +1374,37 @@ def safe_finding_value(value: Any) -> str:
 def _mask_short_secrets(text: str) -> str:
     """``text`` with every configured value shorter than the floor masked as a whole word.
 
-    A value of fewer than four characters is not masked as a word, which would
-    take ordinary words out of the row; where it is a URL's password, the
+    A value of fewer than four characters is not masked as a word anywhere,
+    which would take ordinary words out of the row; it is masked as the whole
+    word after an authorization scheme (``Bearer``, ``Basic``, ``token``),
+    where it stands as the credential, and where it is a URL's password, the
     userinfo removal takes it.
     """
-    values = sorted(
-        {value for values in _SHORT_SECRETS.values() for value in values if len(value) >= 4},
-        key=len,
-        reverse=True,
-    )
-    if not values:
-        return text
-    pattern = (
-        _SECRET_BOUNDARY_BEFORE
-        + "(?:"
-        + "|".join(re.escape(value) for value in values)
-        + r")(?![A-Za-z0-9_])"
-    )
-    return re.sub(pattern, _REDACTED, text)
+    short = {value for values in _SHORT_SECRETS.values() for value in values}
+    values = sorted((value for value in short if len(value) >= 4), key=len, reverse=True)
+    tiny = sorted((value for value in short if len(value) < 4), key=len, reverse=True)
+    if values:
+        pattern = (
+            _SECRET_BOUNDARY_BEFORE
+            + "(?:"
+            + "|".join(re.escape(value) for value in values)
+            + r")(?![A-Za-z0-9_])"
+        )
+        text = re.sub(pattern, _REDACTED, text)
+    if tiny:
+        after_a_scheme = (
+            r"(?<![A-Za-z0-9_])(?i:bearer|basic|token)(\s+)(?:"
+            + "|".join(re.escape(value) for value in tiny)
+            + r")(?![A-Za-z0-9_])"
+        )
+        text = re.sub(
+            after_a_scheme,
+            lambda found: (
+                found.group(0)[: found.start(1) - found.start(0)] + found.group(1) + _REDACTED
+            ),
+            text,
+        )
+    return text
 
 
 # One query parameter of a URL, its key and its value.
@@ -1446,6 +1459,34 @@ def _bound_whole(text: str, limit: int) -> str:
                 cut = found.start()
             break
     return text[:cut] + CUT_MARK
+
+
+# Where the run record keeps an analyst answer no claim could be read from.
+UNPARSED_ANSWERS_RECORD = "run_summary.validation.unparsed_answers"
+
+
+def unparsed_answer_kept_sentence(answer: str) -> str:
+    """What an event says of an answer no claim could be read from: never the answer."""
+    return (
+        f"The answer ({len(str(answer or '')):,} characters) could not be read as claims; "
+        f"it is kept whole in the run record ({UNPARSED_ANSWERS_RECORD})."
+    )
+
+
+def safe_answer_text(value: Any) -> str:
+    """A whole model answer, made fit to keep in the run record.
+
+    The masking a finding row gets (:func:`safe_finding_value`) — every
+    configured value, a URL's userinfo and a credential-named query value; the
+    whole event scrub where no values are registered — with the answer's own
+    lines kept and no bound: the answer is as long as it is, and kept to be
+    read for why it could not be parsed.
+    """
+    text = str(value or "")
+    if not _rows_kept_as_written():
+        return scrub_keeping_layout(text)
+    kept = _mask_short_secrets(_mask_configured_values(text))
+    return _URL_RUN.sub(_without_credentials, kept)
 
 
 def scrub_keeping_layout(text: Any) -> str:
@@ -1677,6 +1718,7 @@ def emit_validation_feedback(
     retry_index: int,
     state: str = VALIDATION_RETRIED,
     path: str = "",
+    answer_kept: str = "",
 ) -> None:
     """One violation, and what became of it.
 
@@ -1699,6 +1741,13 @@ def emit_validation_feedback(
     judge's bundle — and it is what separates two violations of one code on
     different claims; it is ``""`` for a violation about the answer as a whole,
     where ``(agent, code)`` is already the whole key.
+
+    ``answer_kept`` is one short sentence, for a violation that says none of
+    the producer's answer could be read: that it could not, how long it was,
+    and where the run record keeps it (``unparsed_answer_kept_sentence``). The
+    answer itself never rides on an event: events reach every connected
+    browser, the Redis stream and ``job_events``, and each field on them is
+    bounded. Left out when empty.
     """
     emit(
         sink,
@@ -1711,6 +1760,7 @@ def emit_validation_feedback(
             "retry_index": max(0, int(retry_index)),
             "state": str(state),
             "path": str(path),
+            **({"answer_kept": str(answer_kept)} if answer_kept else {}),
         },
     )
 

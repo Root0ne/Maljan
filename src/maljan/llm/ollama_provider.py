@@ -11,6 +11,13 @@ from maljan.llm.registry import register_provider
 _WATCHED_CLASSES: dict[type, type] = {}
 
 
+def _text_joined(content: Any, pieces: list[str]) -> Any:
+    """``content`` with the text ``pieces`` after it, joined as langchain joins message content."""
+    from langchain_core.messages.base import merge_content
+
+    return merge_content(content, "".join(pieces))
+
+
 class _OllamaJoin:
     """``ChatOllama``'s own join of a stream (``final_chunk += chunk``), holding no chunk.
 
@@ -26,10 +33,20 @@ class _OllamaJoin:
         self.reasoning: list[str] = []
 
     def add(self, chunk: Any) -> None:
+        # Its own message, so the chunk the run's callbacks were handed (a
+        # LangSmith trace keeps it) stays as the server sent it.
         message = chunk.message
-        if isinstance(message.content, str) and message.content:
-            self.text.append(message.content)
-            message.content = ""
+        message = message.model_copy(update={"additional_kwargs": dict(message.additional_kwargs)})
+        chunk = chunk.model_copy(update={"message": message})
+        if isinstance(message.content, str):
+            if message.content:
+                self.text.append(message.content)
+                message.content = ""
+        elif self.text:
+            # Content that is not a string is added with langchain's own join,
+            # so the text before it goes in first and keeps its place.
+            self.joined.message.content = _text_joined(self.joined.message.content, self.text)
+            self.text = []
         piece = message.additional_kwargs.get("reasoning_content")
         if isinstance(piece, str):
             self.reasoning.append(piece)
@@ -44,7 +61,7 @@ class _OllamaJoin:
         message = self.joined.message
         update: dict[str, Any] = {}
         if self.text:
-            update["content"] = "".join(self.text)
+            update["content"] = _text_joined(message.content, self.text)
         if self.reasoning:
             update["additional_kwargs"] = {
                 **message.additional_kwargs,

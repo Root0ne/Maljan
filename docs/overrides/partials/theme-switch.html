@@ -1,0 +1,28 @@
+{#-
+  The appearance switch: one pill with a choice per palette (system, light,
+  dark). With `inputs`, it renders the radio inputs the theme's palette script
+  listens to, each followed by its label; without, it renders labels only,
+  which point at those same inputs, so a second copy of the switch (the one
+  in the navigation drawer) drives the same choice. The current choice is
+  read from the body's data-md-color-media attribute, which the theme sets.
+  Each choice is named by its palette's toggle name in mkdocs.yml, spoken
+  through visually hidden text as well as shown as a tooltip; the group is
+  named by extra.appearance_label, "Appearance" when unset.
+-#}
+{% macro render(inputs) %}
+  {% set tag = "form" if inputs else "div" %}
+  <{{ tag }} class="mj-theme{% if inputs %} md-header__option{% endif %}"{% if inputs %} data-md-component="palette"{% endif %} role="group" aria-label="{{ config.extra.appearance_label | d('Appearance', true) | e }}">
+    {% for option in config.theme.palette %}
+      {% if inputs %}
+        {% set scheme  = option.scheme  | d("default", true) %}
+        {% set primary = option.primary | d("indigo", true) %}
+        {% set accent  = option.accent  | d("indigo", true) %}
+        <input class="md-option" data-md-color-media="{{ option.media }}" data-md-color-scheme="{{ scheme | replace(' ', '-') }}" data-md-color-primary="{{ primary | replace(' ', '-') }}" data-md-color-accent="{{ accent | replace(' ', '-') }}" aria-label="{{ option.toggle.name }}" type="radio" name="__palette" id="__palette_{{ loop.index0 }}">
+      {% endif %}
+      <label class="mj-theme__option" title="{{ option.toggle.name }}" for="__palette_{{ loop.index0 }}" data-mj-media="{{ option.media }}">
+        {% include ".icons/" ~ option.toggle.icon ~ ".svg" %}
+        <span class="mj-sr-only">{{ option.toggle.name }}</span>
+      </label>
+    {% endfor %}
+  </{{ tag }}>
+{% endmacro %}

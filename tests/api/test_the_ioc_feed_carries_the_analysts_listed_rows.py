@@ -82,9 +82,40 @@ def test_the_published_feed_does_not(client: TestClient) -> None:
     assert all(row["value"] != MUTEX for row in _rows(client))
 
 
-def test_the_feed_reads_the_stored_table_rather_than_rebuilding_it() -> None:
+def test_an_old_report_s_stored_table_does_not_decide_the_feed() -> None:
+    """The feed reads the table the report prints: rebuilt from the stored report.
+
+    A report stored before the analyst rows existed holds no such row in its
+    stored table; its sections still hold the analyst's listing, and the
+    report prints the row. So does the feed.
+    """
+    from app.services.report_service import _with_the_analysts_listed_rows
+    from maljan.reporting.models import ConsolidatedIOC, MalwareReport
+    from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+    stored = MalwareReport.model_validate(
+        {
+            **_malware_report(),
+            "consolidated_iocs": [
+                ConsolidatedIOC(
+                    type="SHA-256", kind="hash", value="f" * 64, source="identity", published="yes"
+                ).model_dump()
+            ],
+        }
+    )
+    out: list[dict[str, Any]] = []
+
+    _with_the_analysts_listed_rows(out, stored, None)
+
+    assert [row["value"] for row in out] == [MUTEX]
+    assert str(out[0]["notes"]).startswith("no: named only by an analyst")
+    assert "relay-mutex-7f3c" in MarkdownRenderer().render(stored)
+
+
+def test_a_stored_row_the_report_no_longer_prints_is_not_served() -> None:
     from app.services.report_service import _with_the_analysts_listed_rows
     from maljan.reporting.models import ConsolidatedIOC, FileHashes, MalwareReport, SampleIdentity
+    from maljan.reporting.renderers.markdown import MarkdownRenderer
 
     stored = MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="f" * 64)),
@@ -96,6 +127,36 @@ def test_the_feed_reads_the_stored_table_rather_than_rebuilding_it() -> None:
                 value=f"{MUTEX}-stored",
                 source="analyst",
                 context="listed by the dynamic analyst",
+                published="no: named only by an analyst (an artifact of the dynamic analyst)",
+            )
+        ],
+    )
+    out: list[dict[str, Any]] = []
+
+    _with_the_analysts_listed_rows(out, stored, None)
+
+    assert out == []
+    assert "relay-mutex-7f3c-stored" not in MarkdownRenderer().render(stored)
+
+
+def test_the_stored_table_is_read_when_the_rebuild_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services.report_service import _with_the_analysts_listed_rows
+    from maljan.reporting import builder
+    from maljan.reporting.models import ConsolidatedIOC, FileHashes, MalwareReport, SampleIdentity
+
+    def _broken(_report: Any) -> list[Any]:
+        raise RuntimeError("unbuildable")
+
+    monkeypatch.setattr(builder, "build_consolidated_iocs", _broken)
+    stored = MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="f" * 64)),
+        verdict="Malware",
+        consolidated_iocs=[
+            ConsolidatedIOC(
+                type="Mutex",
+                kind="mutex",
+                value=f"{MUTEX}-stored",
+                source="analyst",
                 published="no: named only by an analyst (an artifact of the dynamic analyst)",
             )
         ],

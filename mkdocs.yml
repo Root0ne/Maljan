@@ -6,6 +6,10 @@ repo_url: https://github.com/Root0ne/Maljan
 edit_uri: edit/dev/docs/
 
 docs_dir: docs
+# Theme overrides live beside the pages so a change to them runs the docs
+# workflow; they are templates, not pages.
+exclude_docs: |
+  /overrides/
 
 nav:
   - Get started:
@@ -46,7 +50,8 @@ nav:
   - Benchmark:
       - benchmark/index.md
       - "Score: all-tools, local Qwen3.6-35B": benchmark/scores/latrodectus-all-tools-local6.md
-      - "Score: all-tools, hosted DeepSeek": benchmark/scores/latrodectus-all-tools-run4.md
+      - "Score: all-tools, hosted DeepSeek, run 5": benchmark/scores/latrodectus-all-tools-run5.md
+      - "Score: all-tools, hosted DeepSeek, run 4": benchmark/scores/latrodectus-all-tools-run4.md
       - "Score: iteration 6, default model": benchmark/scores/latrodectus-iteration6-default.md
       - "Score: iteration 5, default model": benchmark/scores/latrodectus-iteration5-default.md
       - "Score: iteration 4, default model": benchmark/scores/latrodectus-iteration4-default.md
@@ -58,6 +63,7 @@ nav:
 
 theme:
   name: material
+  custom_dir: docs/overrides
   language: en
   logo: assets/logo.svg
   favicon: assets/logo.svg
@@ -66,29 +72,40 @@ theme:
     admonition:
       warning: material/shield-alert-outline
   font:
-    text: Inter
-    code: JetBrains Mono
+    text: Geist
+    code: Geist Mono
   palette:
-    # Dark first. Flat colours only: the custom swatches are defined in
-    # assets/extra.css, and nothing on the site eases between colours.
-    - scheme: slate
+    # Three choices in one switch: follow the system, light, dark. Dark is the
+    # default: a first visit stores the last entry here (see the header
+    # override), so it must stay the dark one. The system entry's scheme is
+    # what paints before the page script runs. The custom swatches are
+    # defined in assets/extra.css, and nothing on the site eases between
+    # colours.
+    - media: "(prefers-color-scheme)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/monitor
+        name: Follow the system appearance
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
       primary: custom
       accent: custom
       toggle:
         icon: material/weather-sunny
-        name: Switch to light mode
-    - scheme: default
+        name: Light appearance
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
       primary: custom
       accent: custom
       toggle:
         icon: material/weather-night
-        name: Switch to dark mode
+        name: Dark appearance
   features:
     - navigation.instant
     - navigation.instant.progress
     - navigation.tracking
-    - navigation.tabs
-    - navigation.tabs.sticky
     - navigation.sections
     - navigation.indexes
     - navigation.top
@@ -111,6 +128,7 @@ plugins:
 markdown_extensions:
   - toc:
       permalink: true
+      title: On this page
   - tables
   - fenced_code
   - admonition

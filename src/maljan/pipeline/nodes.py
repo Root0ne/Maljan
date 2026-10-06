@@ -44,6 +44,11 @@ from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop
 from maljan.memory.long_term_memory import build_stored_case
+from maljan.pipeline.claim_drops import (
+    answer_unchanged,
+    dropped_values,
+    dropped_values_sentence,
+)
 from maljan.pipeline.conditions import (
     ConditionError,
     StageContext,
@@ -51,6 +56,7 @@ from maljan.pipeline.conditions import (
     TriageFacts,
     evaluate,
 )
+from maljan.pipeline.debate_facts import facts_naming, ledger_count_facts, with_ledger_facts
 from maljan.pipeline.events import (
     claims_to_payload,
     describe_exception,
@@ -617,6 +623,15 @@ def _validation_update(agent: Any, agent_name: str) -> dict[str, Any]:
             not_run = []
         if not_run:
             update["validation_not_run"] = not_run
+    drain_unparsed = getattr(agent, "drain_unparsed_answers", None)
+    if callable(drain_unparsed):
+        try:
+            unparsed = [dict(row) for row in (drain_unparsed() or []) if isinstance(row, dict)]
+        except Exception as exc:  # noqa: BLE001 — a record is never worth a lost run
+            logger.debug("unparsed answers read skipped for %s: %s", agent_name, exc)
+            unparsed = []
+        if unparsed:
+            update["validation_unparsed_answers"] = unparsed
     return update
 
 
@@ -631,7 +646,7 @@ def _merge_validation_update(into: dict[str, Any], update: dict[str, Any]) -> No
             counts = into.setdefault(key, {})
             for code, count in dict(value).items():
                 counts[code] = counts.get(code, 0) + int(count)
-        elif key == "validation_not_run":
+        elif key in ("validation_not_run", "validation_unparsed_answers"):
             into.setdefault(key, []).extend(value)
 
 
@@ -3054,7 +3069,9 @@ def _debate_record(stage: Any, started: float, *, reason: str = "") -> dict[str,
     """One round's contribution to the debate stage's result.
 
     The reducer adds the durations up, so a debate of four rounds records the
-    time all four of them took rather than the time the last one did.
+    time all four of them took rather than the time the last one did. Both the
+    mediation and the revision node write one, so the debate's duration is the
+    time its mediations and its revision rounds took together.
 
     The only reason this stage ever gives is a mediation that failed or timed
     out, and that is the stage's own — it belongs to the round, not to a member
@@ -3063,13 +3080,19 @@ def _debate_record(stage: Any, started: float, *, reason: str = "") -> dict[str,
     """
     if stage is None:
         return {}
-    return stage_record(
+    record = stage_record(
         stage,
         ran=True,
         reason=reason,
         failure=bool(reason),
         duration_ms=int((time.monotonic() - started) * 1000),
     )
+    # A debate's mediations and revision rounds follow one another, whatever
+    # mode the stage carries for its revisions: their times add up. Said as a
+    # flag of its own, so the stage's mode stays as configured.
+    for entry in record["stage_results"].values():
+        entry["rounds_add_up"] = True
+    return record
 
 
 def _agents_that_ran(container: ServiceContainer, state: AnalysisState) -> list[str]:
@@ -3183,6 +3206,26 @@ _NO_CONSENSUS_MEASURED: dict[str, Any] = {
     "consensus_applicable": False,
     "confidence_history": [],
 }
+
+
+def _ledger_counts(state: AnalysisState, agent_names: Sequence[str], argument: Any) -> list[str]:
+    """The ledger counts for the lines a mediation listed, blocking or not. Never raises."""
+    lines = [
+        *(getattr(argument, "contradictions", None) or []),
+        *(getattr(argument, "not_blocking", None) or []),
+    ]
+    if not lines:
+        return []
+    try:
+        return ledger_count_facts(
+            lines,
+            dict(state.get("isr_reports") or {}),
+            list(state.get("evidence_ledger") or []),
+            list(agent_names),
+        )
+    except Exception as exc:  # noqa: BLE001 — no fact is stated
+        logger.debug("negotiation: the ledger counts were not read (%s).", exc)
+        return []
 
 
 def make_negotiation_node(
@@ -3397,6 +3440,23 @@ def make_negotiation_node(
                 # the team, so it is a notice that names itself.
                 kind="system",
             )
+            # The counts the ledger states for the lines this mediation listed.
+            # No call is made for them: they ride on the next revision of the
+            # analysts each line names and on the next mediation's prompt, and
+            # a debate that ends here spends nothing on them.
+            platform_said = _ledger_counts(state, agent_names, argument)
+            if platform_said:
+                argument.ledger_facts = list(platform_said)
+                emit_agent_message(
+                    container.event_sink,
+                    speaker=ROOM_SPEAKER,
+                    role="system",
+                    text="\n".join(str(sentence) for sentence in platform_said),
+                    round_index=iteration + 1,
+                    status="complete",
+                    stage=stage_key_of(stage, "debate"),
+                    kind="system",
+                )
             if syco:
                 emit_agent_message(
                     container.event_sink,
@@ -3521,20 +3581,34 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
     """Factory: creates the revision node where all agents revise concurrently."""
 
     async def node_fn(state: AnalysisState) -> dict[str, Any]:
+        started = time.monotonic()
         agent_names = _debate_participants(container, stage, state)
         iteration = state.get("iteration_count", 0)
 
         history = state.get("discussion_history") or []
         mediator_feedback = ""
+        ledger_facts: list[str] = []
         for arg in reversed(history):
             if arg.agent_name == "Mediator":
                 mediator_feedback = arg.finding
+                ledger_facts = list(getattr(arg, "ledger_facts", None) or [])
                 break
 
         syco_detected = state.get("sycophancy_detected", False)
         revision_directive = build_revision_directive(syco_detected, mediator_feedback)
 
         original_reports = state.get("reports") or {}
+        # The answer each analyst has in force before this round: its last
+        # revision that stood, or its first answer. A revision revises that
+        # answer, beside its peers' answers in force: those are what the
+        # mediator read, and a round shown the first answers again rewrote
+        # them from the start every round.
+        kept_isrs = state.get("isr_reports") or {}
+        kept_texts = state.get("revised_reports") or {}
+        reports_in_force = {
+            name: kept_texts.get(name) or original_reports.get(name, "")
+            for name in dict.fromkeys([*original_reports, *kept_texts])
+        }
 
         if container.is_mock:
             mock_isrs: dict[str, AgentISR] = {
@@ -3545,6 +3619,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     name: f"MOCK REVISED: {name} analysis updated." for name in agent_names
                 },
                 "isr_reports": mock_isrs,
+                **_debate_record(stage, started),
             }
 
         async def _revise_one(name: str) -> tuple[str, AgentISR]:
@@ -3589,14 +3664,15 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             data = _build_revision_context(state, container, name)
             agent = container.get_agent(name)
             brief_agent(agent, state, container)
-            own_report = original_reports.get(name, "")
-            peer_reports = {k: v for k, v in original_reports.items() if k != name}
+            own_report = reports_in_force.get(name, "")
+            peer_reports = {k: v for k, v in reports_in_force.items() if k != name}
             return await asyncio.to_thread(
                 agent.safe_revise_isr,
                 data,
                 own_report,
                 peer_reports,
-                revision_directive,
+                # The ledger counts of the lines that name this analyst.
+                with_ledger_facts(revision_directive, facts_naming(name, ledger_facts)),
                 iteration,
             )
 
@@ -3649,11 +3725,13 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         # A revision that stands with fewer claims than the answer it replaces,
         # said: the model decided, and the run summary states the replacement.
         revision_replacements: list[str] = []
-
-        # The answer each analyst has in force before this round: its last
-        # revision that stood, or its first answer.
-        kept_isrs = state.get("isr_reports") or {}
-        kept_texts = state.get("revised_reports") or {}
+        # The values of the answer in force a revision that stood states
+        # nowhere any more, per analyst and claim: recorded, never asked.
+        dropped_rows: list[dict[str, Any]] = []
+        # How many revisions stood, and whether every one of them is the
+        # answer in force again, word for word: the router's convergence test.
+        made = 0
+        identical = True
 
         def _keep_the_answer_in_force(
             name: str, why: str, status: str = "", report: str = ""
@@ -3749,8 +3827,35 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                         name, "its answer carried no structured report", report=revised_text
                     )
                     continue
+                in_force_text = kept_texts.get(name) or original_reports.get(name, "")
                 revised[name] = revised_text
                 revised_isrs[name] = isr
+                made += 1
+                identical = identical and answer_unchanged(in_force_text, revised_text)
+                dropped_here = dropped_values(
+                    kept_isrs.get(name), isr, revised_text, revision_round=iteration
+                )
+                if dropped_here:
+                    logger.info(
+                        "The %s analyst's round-%d revision states nowhere %d value(s) "
+                        "from %d claim(s) of its answer in force; each is in the run summary.",
+                        name,
+                        int(iteration),
+                        sum(len(d.missing) for d in dropped_here),
+                        len(dropped_here),
+                    )
+                for dropped in dropped_here:
+                    sentence = dropped_values_sentence(name, iteration, dropped)
+                    logger.debug("%s", sentence)
+                    dropped_rows.append(
+                        {
+                            "agent": name,
+                            "round": int(iteration),
+                            "claim": dropped.claim,
+                            "missing": list(dropped.missing),
+                            "sentence": sentence,
+                        }
+                    )
                 replaced = revision_replacement_sentence(name, iteration, kept_isrs.get(name), isr)
                 if replaced:
                     logger.warning("%s", replaced)
@@ -3787,6 +3892,20 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         out.update(revision_validation)
         if revision_replacements:
             out["revision_replacements"] = revision_replacements
+        if dropped_rows:
+            out["dropped_claims"] = dropped_rows
+        # What this round did, for the router: how many revisions stood, and
+        # whether each is the answer in force again after whitespace.
+        out["revision_rounds"] = [
+            {
+                "round": int(iteration),
+                "stage": stage_key_of(stage, "debate"),
+                "made": made,
+                "identical": bool(made) and identical,
+            }
+        ]
+        # The round's own time, added to the debate stage's.
+        out.update(_debate_record(stage, started))
         return out
 
     node_fn.__name__ = "revision_node"
@@ -3796,6 +3915,28 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
 # ---------------------------------------------------------------------------
 # Judge node
 # ---------------------------------------------------------------------------
+
+
+def debate_options(container: Any) -> tuple[int, bool]:
+    """The round limit and the sycophancy switch the debate's router read.
+
+    The last debate stage of the active profile, the one that hands over to
+    the verdict; the global negotiation settings where the profile has none,
+    which is what a router built without a stage reads.
+    """
+    max_rounds = int(container.config.negotiation.max_iterations)
+    try:
+        stages = list(getattr(container.active_profile(), "stages", None) or [])
+    except Exception:  # noqa: BLE001 — a double without a profile keeps the global
+        return max_rounds, True
+    for candidate in reversed(stages):
+        options = getattr(candidate, "debate", None)
+        if getattr(candidate, "kind", "") == "debate" and options is not None:
+            rounds = getattr(options, "max_rounds", None)
+            check = getattr(options, "sycophancy_check", True)
+            if isinstance(rounds, int) and not isinstance(rounds, bool):
+                return rounds, check if isinstance(check, bool) else True
+    return max_rounds, True
 
 
 def _verdict_record(stage: Any, started: float, *, ran: bool, reason: str = "") -> dict[str, Any]:
@@ -4498,7 +4639,7 @@ def make_judge_node(
 
             run_summary_dict = None
             try:
-                max_iters = container.config.negotiation.max_iterations
+                max_iters, sycophancy_check = debate_options(container)
                 negotiation_state = {
                     "confidence_history": state.get("confidence_history") or [],
                     "iteration_count": state.get("iteration_count", 0),
@@ -4506,16 +4647,26 @@ def make_judge_node(
                     "consensus_applicable": state.get("consensus_applicable", True),
                     "sycophancy_detected": state.get("sycophancy_detected", False),
                     "discussion_history": state.get("discussion_history") or [],
+                    "revision_rounds": state.get("revision_rounds") or [],
+                    "dropped_claims": state.get("dropped_claims") or [],
                 }
                 summary = (
                     RunSummaryBuilder(start_time=start_time)
                     .set_sample(state.get("file_hash", ""), state.get("file_name"))
                     .set_verdict(decision, len(bundle.objects) if isinstance(bundle, Bundle) else 0)
-                    .set_negotiation(negotiation_state, max_iterations=max_iters)
+                    .set_negotiation(
+                        negotiation_state,
+                        max_iterations=max_iters,
+                        sycophancy_check=sycophancy_check,
+                    )
                     .set_isr_stats(isr_reports, no_data=_no_data_analysts)
                     .set_validation(
                         validation_metrics(
-                            _retries, _unresolved, _fed_back, not_run=sorted(_not_run)
+                            _retries,
+                            _unresolved,
+                            _fed_back,
+                            not_run=sorted(_not_run),
+                            unparsed_answers=list(state.get("validation_unparsed_answers") or []),
                         )
                     )
                     .set_corroboration(_corroboration)
