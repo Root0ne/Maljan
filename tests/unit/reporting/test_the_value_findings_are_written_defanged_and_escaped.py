@@ -94,12 +94,20 @@ class TestTheStateBesideACell:
             c2_channels=[C2Channel(name="relay", endpoints=[HOST])],
         )
 
-        text = MarkdownRenderer().render(report)
+        # The table a cell's state reads is the one the report prints, rebuilt
+        # by the publish rule, whose answers carry no such words: it is read
+        # here as the hostile rows above, to see what a hostile answer becomes.
+        with patch(
+            "maljan.reporting.builder.build_consolidated_iocs",
+            lambda built: list(built.consolidated_iocs),
+        ):
+            text = MarkdownRenderer().render(report)
 
         for start, cells in (("| Fallback", 4), ("| Address", 4), ("| relay", 6)):
             line = next(line for line in text.splitlines() if line.startswith(start))
             state = line.split("(no:", 1)[1]
             _clean(state)
+            assert "evil[.]example[.]com" in state, line
             assert line.replace("\\|", "").count("|") == cells + 1, line
 
     def test_a_table_that_cannot_be_read_refuses_every_value(self) -> None:

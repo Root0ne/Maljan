@@ -490,17 +490,16 @@ NARRATIVE_PROSE = ("executive_summary", "key_findings")
 def published_answers(report: MalwareReport) -> Any:
     """``(kind, value) -> the IOC table's answer`` for a value, ``""`` when no row holds it.
 
-    The table the report prints and ``/iocs`` serves
-    (``builder.build_consolidated_iocs``): what a recommendation is checked
-    against, so it acts on the indicators the run publishes.
+    The table the report's §9 prints and ``/iocs`` serves, by their one
+    reader (``builder.ioc_table``): what a recommendation is checked against,
+    so it acts on the indicators the run publishes, and what a cell's state
+    note says, so it words an answer as §9 does. A table that cannot be read
+    raises, and each caller then refuses every value for that reason.
     """
+    from maljan.reporting.builder import ioc_table
     from maljan.reporting.ledger_projection import value_key
 
-    rows = list(report.consolidated_iocs or [])
-    if not rows:
-        from maljan.reporting.builder import build_consolidated_iocs
-
-        rows = build_consolidated_iocs(report)
+    rows = ioc_table(report, raise_unread=True)
     table: dict[tuple[str, str], str] = {}
     for row in rows:
         kind = str(row.kind or "")

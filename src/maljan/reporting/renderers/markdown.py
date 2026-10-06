@@ -3066,7 +3066,7 @@ def _indicator_rows(report: MalwareReport) -> list[ConsolidatedIOC]:
     ``/reports/{id}/iocs`` uses for its analyst rows (``builder.ioc_table``),
     so an enrichment that ran after the report was stored is reflected and a
     report stored before the table carried a kind prints in the new shape. A
-    cell's publish state reads the stored table first
+    cell's publish state reads the same table
     (``narrative_agent.published_answers``).
     """
     from maljan.reporting.builder import ioc_table
