@@ -1,5 +1,6 @@
 import copy
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,34 @@ CAPABILITIES = manifest("network", TOOL_NEEDS)
 # The one argument every tool here takes a file in. Named once, because the
 # refusal below names it and the platform's pinning hides it by this name.
 CAPTURE_ARGUMENT = "pcap_path"
+
+
+def _written(value: bytes, unwritten: list[BaseException]) -> str | None:
+    """One value read out of a capture, as the sender's text; ``None`` when it could not be.
+
+    Bytes that are not UTF-8 are written as escapes rather than dropped, so
+    two different names never read as one. A value that cannot be written
+    (``MemoryError`` included) is counted in ``unwritten`` and costs no other.
+    """
+    try:
+        return pack_escaped(value.decode("utf-8", errors="backslashreplace"))
+    except Exception as exc:  # noqa: BLE001 - one value, counted and stated
+        unwritten.append(exc)
+        return None
+
+
+def _isolated(
+    visit: Callable[[Packet], None], unwritten: list[BaseException]
+) -> Callable[[Packet], None]:
+    """``visit`` for one packet at a time: a failure on one is counted, not the answer."""
+
+    def _one(pkt: Packet) -> None:
+        try:
+            visit(pkt)
+        except Exception as exc:  # noqa: BLE001 - one packet, counted and stated
+            unwritten.append(exc)
+
+    return _one
 
 
 def _text_error(code: str, message: str, tool: str, remediation: str | None = None) -> str:
@@ -194,13 +223,22 @@ def extract_dns(pcap_path: str, packet_limit: int | None = None) -> str:
         return capture
     try:
         queries: dict[str, None] = {}
+        malformed: list[int] = []
+        unwritten: list[BaseException] = []
 
         def _visit(pkt: Packet) -> None:
+            if pkt.dns_name_octets_malformed is not None:
+                malformed.append(pkt.dns_name_octets_malformed)
             if pkt.dns_qname is not None:
-                name = pkt.dns_qname.decode("utf-8", errors="ignore")
-                queries.setdefault(pack_escaped(name), None)
+                written = _written(pkt.dns_qname, unwritten)
+                if written is not None:
+                    queries.setdefault(written, None)
 
-        read = each_packet(str(capture), _visit, packet_limit)
+        read = each_packet(str(capture), _isolated(_visit, unwritten), packet_limit)
+        for octets in malformed:
+            read.malformed_dns_name(octets)
+        for failure in unwritten:
+            read.unwritable(failure)
         head = f"{read.statement()}."
         return "\n".join([head, *queries]) if queries else f"{head} No DNS queries in them."
     except Exception as e:  # noqa: BLE001 - a tool server answers, it does not raise
@@ -216,16 +254,24 @@ def extract_http(pcap_path: str, packet_limit: int | None = None) -> str:
     try:
         requests: list[str] = []
 
-        def _visit(pkt: Packet) -> None:
-            if pkt.tcp is not None and pkt.tcp.rest:
-                payload = pkt.tcp.rest.decode("utf-8", errors="ignore")
-                if payload.startswith(("GET ", "POST ", "PUT ", "DELETE ", "HEAD ")):
-                    # The request line, and the Host header when there is one.
-                    lines = payload.split("\r\n")
-                    host = next((x for x in lines[1:] if x.lower().startswith("host: ")), "")
-                    requests.append(f"{pack_escaped(lines[0])} | {pack_escaped(host)}")
+        unwritten: list[BaseException] = []
 
-        read = each_packet(str(capture), _visit, packet_limit)
+        def _visit(pkt: Packet) -> None:
+            # The segment's payload as its IP header bounds it; trailing
+            # link-layer bytes are not the sender's request.
+            data = pkt.tcp.data if pkt.tcp is not None else b""
+            if not data.startswith((b"GET ", b"POST ", b"PUT ", b"DELETE ", b"HEAD ")):
+                return
+            # The request line, and the Host header when there is one.
+            lines = data.split(b"\r\n")
+            host = next((x for x in lines[1:] if x.lower().startswith(b"host: ")), b"")
+            line, written_host = _written(lines[0], unwritten), _written(host, unwritten)
+            if line is not None and written_host is not None:
+                requests.append(f"{line} | {written_host}")
+
+        read = each_packet(str(capture), _isolated(_visit, unwritten), packet_limit)
+        for failure in unwritten:
+            read.unwritable(failure)
         head = f"{read.statement()}."
         return "\n".join([head, *requests]) if requests else f"{head} No HTTP requests in them."
     except Exception as e:  # noqa: BLE001 - a tool server answers, it does not raise

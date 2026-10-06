@@ -1,4 +1,543 @@
 {
+ "deep_ipip_tunnels.pcap": {
+  "capture_facts": {
+   "packets_read": 5,
+   "packets_in_capture": 5,
+   "packet_limit": null,
+   "bytes": 20334,
+   "duration_s": 4.0,
+   "protocols": {
+    "tcp": 2,
+    "udp": 3
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 3,
+     "bytes": 20174
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 160
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 5,
+   "packet_limit": 3,
+   "bytes": 20196,
+   "duration_s": 2.0,
+   "protocols": {
+    "tcp": 1,
+    "udp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 20116
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 80
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 5,
+   "packets_in_capture": 5,
+   "packet_limit": null,
+   "bytes": 20334,
+   "duration_s": 4.0,
+   "protocols": {
+    "tcp": 2,
+    "udp": 3
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 3,
+     "bytes": 20174
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 160
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary_page": "Packets 3 to 4 of the 5 in the capture.\nPacket 3: 10.0.0.2 -> 8.8.8.8 (UDP 5000->53)\nPacket 4: 10.0.0.2 -> 8.8.8.8 (TCP 5001->4444)",
+  "extract_dns": "5 of 5 packets in the capture read.\nevil.example.",
+  "extract_dns_limit_5": "5 of 5 packets in the capture read.\nevil.example.",
+  "extract_http": "5 of 5 packets in the capture read.\nGET /c2 HTTP/1.1 | Host: evil.example\nGET /c2 HTTP/1.1 | Host: evil.example",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 5,
+   "packets_in_capture": 5,
+   "packet_limit": null,
+   "bytes": 20334,
+   "duration_s": 4.0,
+   "protocols": {
+    "tcp": 2,
+    "udp": 3
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 3,
+     "bytes": 20174
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4444,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 160
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
+ "edge_layers.pcap": {
+  "capture_facts": {
+   "packets_read": 60,
+   "packets_in_capture": 60,
+   "packet_limit": null,
+   "bytes": 4863,
+   "duration_s": 44.2,
+   "protocols": {
+    "other": 10,
+    "tcp": 13,
+    "udp": 26
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 18,
+     "bytes": 1266
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 10,
+     "bytes": 857
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 7,
+     "bytes": 629
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4789,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 208
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 117
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 116
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4790,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 107
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 8293,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 98,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 99,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 67,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 5355,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 50,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 71
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 6000,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 70
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 7,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 50
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "capture_facts_limit_3": {
+   "packets_read": 3,
+   "packets_in_capture": 60,
+   "packet_limit": 3,
+   "bytes": 291,
+   "duration_s": 1.5,
+   "protocols": {
+    "other": 1,
+    "tcp": 2
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 8293,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n60 of 60 packets in the capture read: 4863 bytes over 44.2s. Protocols: other=10, tcp=13, udp=26\n\nExternal conversations (all 15, by volume):\n- 8.8.8.8:53/udp — 18 pkts, 1266 bytes\n- 8.8.8.8:0/other — 10 pkts, 857 bytes\n- 8.8.8.8:80/tcp — 7 pkts, 629 bytes\n- 8.8.8.8:4789/udp — 2 pkts, 208 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 117 bytes\n- 8.8.8.8:53/tcp — 2 pkts, 116 bytes\n- 8.8.8.8:4790/udp — 1 pkts, 107 bytes\n- 8.8.8.8:8293/tcp — 1 pkts, 97 bytes\n- 8.8.8.8:98/tcp — 1 pkts, 90 bytes\n- 8.8.8.8:99/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:67/udp — 1 pkts, 82 bytes\n- 8.8.8.8:5355/udp — 1 pkts, 73 bytes\n- 8.8.8.8:50/udp — 1 pkts, 71 bytes\n- 8.8.8.8:6000/udp — 1 pkts, 70 bytes\n- 8.8.8.8:7/udp — 1 pkts, 50 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "tool_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n60 of 60 packets in the capture read: 4863 bytes over 44.2s. Protocols: other=10, tcp=13, udp=26\n\nExternal conversations (all 15, by volume):\n- 8.8.8.8:53/udp — 18 pkts, 1266 bytes\n- 8.8.8.8:0/other — 10 pkts, 857 bytes\n- 8.8.8.8:80/tcp — 7 pkts, 629 bytes\n- 8.8.8.8:4789/udp — 2 pkts, 208 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 117 bytes\n- 8.8.8.8:53/tcp — 2 pkts, 116 bytes\n- 8.8.8.8:4790/udp — 1 pkts, 107 bytes\n- 8.8.8.8:8293/tcp — 1 pkts, 97 bytes\n- 8.8.8.8:98/tcp — 1 pkts, 90 bytes\n- 8.8.8.8:99/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:67/udp — 1 pkts, 82 bytes\n- 8.8.8.8:5355/udp — 1 pkts, 73 bytes\n- 8.8.8.8:50/udp — 1 pkts, 71 bytes\n- 8.8.8.8:6000/udp — 1 pkts, 70 bytes\n- 8.8.8.8:7/udp — 1 pkts, 50 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 60,
+   "packets_in_capture": 60,
+   "packet_limit": null,
+   "bytes": 4863,
+   "duration_s": 44.2,
+   "protocols": {
+    "other": 10,
+    "tcp": 13,
+    "udp": 26
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 18,
+     "bytes": 1266
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 10,
+     "bytes": 857
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 7,
+     "bytes": 629
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4789,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 208
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 117
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 116
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4790,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 107
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 8293,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 98,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 99,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 67,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 5355,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 50,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 71
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 6000,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 70
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 7,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 50
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  },
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n60 of 60 packets in the capture read: 4863 bytes over 44.2s. Protocols: other=10, tcp=13, udp=26\n\nExternal conversations (all 15, by volume):\n- 8.8.8.8:53/udp — 18 pkts, 1266 bytes\n- 8.8.8.8:0/other — 10 pkts, 857 bytes\n- 8.8.8.8:80/tcp — 7 pkts, 629 bytes\n- 8.8.8.8:4789/udp — 2 pkts, 208 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 117 bytes\n- 8.8.8.8:53/tcp — 2 pkts, 116 bytes\n- 8.8.8.8:4790/udp — 1 pkts, 107 bytes\n- 8.8.8.8:8293/tcp — 1 pkts, 97 bytes\n- 8.8.8.8:98/tcp — 1 pkts, 90 bytes\n- 8.8.8.8:99/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:67/udp — 1 pkts, 82 bytes\n- 8.8.8.8:5355/udp — 1 pkts, 73 bytes\n- 8.8.8.8:50/udp — 1 pkts, 71 bytes\n- 8.8.8.8:6000/udp — 1 pkts, 70 bytes\n- 8.8.8.8:7/udp — 1 pkts, 50 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary_page": "Packets 3 to 9 of the 60 in the capture; the next page starts at offset 10.\nPacket 3: 10.0.0.1 -> 8.8.8.8 (TCP 40000->80)\nPacket 4: 10.0.0.1 -> 8.8.8.8 (TCP 40000->80)\nPacket 5: 10.0.0.1 -> 8.8.8.8 (UDP 40001->53)\nPacket 6: 10.0.0.1 -> 8.8.8.8 (UDP 40001->53)\nPacket 7: 10.0.0.1 -> 8.8.8.8 (UDP 40001->53)\nPacket 8: 10.0.0.1 -> 8.8.8.8 (UDP 40001->53)\nPacket 9: 10.0.0.1 -> 8.8.8.8 (UDP 40001->53)",
+  "extract_dns": "60 of 60 packets in the capture read.\nu.example.\nsix.example.\next.example.\nf0.example.\nerr6.example.\npppoe.example.\ngpe.example.\nbridged.example.\nnb.example.\ndhcp6.example.\nll.example.\n.\na.bcd.\nerr.example.\nfrag41.example.",
+  "extract_dns_limit_5": "5 of 60 packets in the capture read (the caller asked for 5). No DNS queries in them.",
+  "extract_http": "60 of 60 packets in the capture read.\nGET /e HTTP/1.1 | Host: edge.example.com\nGET /e HTTP/1.1 | Host: edge.example.com\nGET /e HTTP/1.1 | Host: edge.example.com\nGET / HTTP/1.1 | Host: x\nPOST /v HTTP/1.1 | Host: vlan.example.com",
+  "network_pcap_summary": {
+   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n60 of 60 packets in the capture read: 4863 bytes over 44.2s. Protocols: other=10, tcp=13, udp=26\n\nExternal conversations (all 15, by volume):\n- 8.8.8.8:53/udp — 18 pkts, 1266 bytes\n- 8.8.8.8:0/other — 10 pkts, 857 bytes\n- 8.8.8.8:80/tcp — 7 pkts, 629 bytes\n- 8.8.8.8:4789/udp — 2 pkts, 208 bytes\n- 8.8.8.8:443/tcp — 1 pkts, 117 bytes\n- 8.8.8.8:53/tcp — 2 pkts, 116 bytes\n- 8.8.8.8:4790/udp — 1 pkts, 107 bytes\n- 8.8.8.8:8293/tcp — 1 pkts, 97 bytes\n- 8.8.8.8:98/tcp — 1 pkts, 90 bytes\n- 8.8.8.8:99/tcp — 1 pkts, 86 bytes\n- 8.8.8.8:67/udp — 1 pkts, 82 bytes\n- 8.8.8.8:5355/udp — 1 pkts, 73 bytes\n- 8.8.8.8:50/udp — 1 pkts, 71 bytes\n- 8.8.8.8:6000/udp — 1 pkts, 70 bytes\n- 8.8.8.8:7/udp — 1 pkts, 50 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "empty": false,
+   "packets_read": 60,
+   "packets_in_capture": 60,
+   "packet_limit": null,
+   "bytes": 4863,
+   "duration_s": 44.2,
+   "protocols": {
+    "other": 10,
+    "tcp": 13,
+    "udp": 26
+   },
+   "conversations": [
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "udp",
+     "packets": 18,
+     "bytes": 1266
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 0,
+     "proto": "other",
+     "packets": 10,
+     "bytes": 857
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 80,
+     "proto": "tcp",
+     "packets": 7,
+     "bytes": 629
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4789,
+     "proto": "udp",
+     "packets": 2,
+     "bytes": 208
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 443,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 117
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 53,
+     "proto": "tcp",
+     "packets": 2,
+     "bytes": 116
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 4790,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 107
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 8293,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 97
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 98,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 90
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 99,
+     "proto": "tcp",
+     "packets": 1,
+     "bytes": 86
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 67,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 82
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 5355,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 73
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 50,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 71
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 6000,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 70
+    },
+    {
+     "dst": "8.8.8.8",
+     "dport": 7,
+     "proto": "udp",
+     "packets": 1,
+     "bytes": 50
+    }
+   ],
+   "sni": {},
+   "beacons": []
+  }
+ },
  "ethernet_mixed.pcap": {
   "capture_facts": {
    "packets_read": 67,
@@ -1970,134 +2509,6 @@
    ]
   }
  },
- "hostile_ipip_nesting.pcap": {
-  "capture_facts": {
-   "packets_read": 5,
-   "packets_in_capture": 5,
-   "packet_limit": null,
-   "bytes": 20334,
-   "duration_s": 4.0,
-   "protocols": {
-    "tcp": 2,
-    "udp": 3
-   },
-   "conversations": [
-    {
-     "dst": "8.8.8.8",
-     "dport": 53,
-     "proto": "udp",
-     "packets": 3,
-     "bytes": 20174
-    },
-    {
-     "dst": "8.8.8.8",
-     "dport": 4444,
-     "proto": "tcp",
-     "packets": 2,
-     "bytes": 160
-    }
-   ],
-   "sni": {},
-   "beacons": []
-  },
-  "capture_facts_limit_3": {
-   "packets_read": 3,
-   "packets_in_capture": 5,
-   "packet_limit": 3,
-   "bytes": 20196,
-   "duration_s": 2.0,
-   "protocols": {
-    "tcp": 1,
-    "udp": 2
-   },
-   "conversations": [
-    {
-     "dst": "8.8.8.8",
-     "dport": 53,
-     "proto": "udp",
-     "packets": 2,
-     "bytes": 20116
-    },
-    {
-     "dst": "8.8.8.8",
-     "dport": 4444,
-     "proto": "tcp",
-     "packets": 1,
-     "bytes": 80
-    }
-   ],
-   "sni": {},
-   "beacons": []
-  },
-  "summarize_pcap": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
-  "tool_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
-   "empty": false,
-   "packets_read": 5,
-   "packets_in_capture": 5,
-   "packet_limit": null,
-   "bytes": 20334,
-   "duration_s": 4.0,
-   "protocols": {
-    "tcp": 2,
-    "udp": 3
-   },
-   "conversations": [
-    {
-     "dst": "8.8.8.8",
-     "dport": 53,
-     "proto": "udp",
-     "packets": 3,
-     "bytes": 20174
-    },
-    {
-     "dst": "8.8.8.8",
-     "dport": 4444,
-     "proto": "tcp",
-     "packets": 2,
-     "bytes": 160
-    }
-   ],
-   "sni": {},
-   "beacons": []
-  },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
-  "read_pcap_summary_page": "Packets 3 to 4 of the 5 in the capture.\nPacket 3: 10.0.0.2 -> 8.8.8.8 (UDP 5000->53)\nPacket 4: 10.0.0.2 -> 8.8.8.8 (TCP 5001->4444)",
-  "extract_dns": "5 of 5 packets in the capture read.\nevil.example.",
-  "extract_dns_limit_5": "5 of 5 packets in the capture read.\nevil.example.",
-  "extract_http": "5 of 5 packets in the capture read.\nGET /c2 HTTP/1.1 | Host: evil.example\nGET /c2 HTTP/1.1 | Host: evil.example",
-  "network_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, whole capture):\n5 of 5 packets in the capture read: 20334 bytes over 4.0s. Protocols: tcp=2, udp=3\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:53/udp — 3 pkts, 20174 bytes\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n\nNo regular beaconing interval detected in the packets read.",
-   "empty": false,
-   "packets_read": 5,
-   "packets_in_capture": 5,
-   "packet_limit": null,
-   "bytes": 20334,
-   "duration_s": 4.0,
-   "protocols": {
-    "tcp": 2,
-    "udp": 3
-   },
-   "conversations": [
-    {
-     "dst": "8.8.8.8",
-     "dport": 53,
-     "proto": "udp",
-     "packets": 3,
-     "bytes": 20174
-    },
-    {
-     "dst": "8.8.8.8",
-     "dport": 4444,
-     "proto": "tcp",
-     "packets": 2,
-     "bytes": 160
-    }
-   ],
-   "sni": {},
-   "beacons": []
-  }
- },
  "hostile_vlan_stack.pcap": {
   "capture_facts": {
    "packets_read": 5,
@@ -2360,9 +2771,12 @@
    "packets_in_capture": 0,
    "packet_limit": null,
    "blocks_unreadable": 1,
-   "unreadable_reasons": [
-    "an enhanced packet block names interface 0, which no interface description declared"
-   ],
+   "unreadable_reasons": {
+    "an enhanced packet block names an interface no interface description declared": {
+     "count": 1,
+     "first": "at byte 40, interface 0"
+    }
+   },
    "bytes": 0,
    "duration_s": 0.0,
    "protocols": {},
@@ -2375,9 +2789,12 @@
    "packets_in_capture": 0,
    "packet_limit": 3,
    "blocks_unreadable": 1,
-   "unreadable_reasons": [
-    "an enhanced packet block names interface 0, which no interface description declared"
-   ],
+   "unreadable_reasons": {
+    "an enhanced packet block names an interface no interface description declared": {
+     "count": 1,
+     "first": "at byte 40, interface 0"
+    }
+   },
    "bytes": 0,
    "duration_s": 0.0,
    "protocols": {},
@@ -2393,11 +2810,11 @@
    "packets_in_capture": 0,
    "packet_limit": null
   },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n0 packets read, 1 blocks unreadable: an enhanced packet block names interface 0, which no interface description declared: 0 bytes over 0.0s. Protocols: no IP packets\nNo external (public) endpoints contacted — traffic stayed internal to the sandbox.",
-  "read_pcap_summary_page": "Packets 3 to 3 of the 0 in the capture (0 packets read, 1 blocks unreadable: an enhanced packet block names interface 0, which no interface description declared). No IP packets in them.",
-  "extract_dns": "0 packets read, 1 blocks unreadable: an enhanced packet block names interface 0, which no interface description declared. No DNS queries in them.",
-  "extract_dns_limit_5": "0 packets read, 1 blocks unreadable: an enhanced packet block names interface 0, which no interface description declared. No DNS queries in them.",
-  "extract_http": "0 packets read, 1 blocks unreadable: an enhanced packet block names interface 0, which no interface description declared. No HTTP requests in them.",
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n0 packets read, 1 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 40, interface 0): 0 bytes over 0.0s. Protocols: no IP packets\nNo external (public) endpoints contacted — traffic stayed internal to the sandbox.",
+  "read_pcap_summary_page": "Packets 3 to 3 of the 0 in the capture (0 packets read, 1 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 40, interface 0)). No IP packets in them.",
+  "extract_dns": "0 packets read, 1 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 40, interface 0). No DNS queries in them.",
+  "extract_dns_limit_5": "0 packets read, 1 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 40, interface 0). No DNS queries in them.",
+  "extract_http": "0 packets read, 1 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 40, interface 0). No HTTP requests in them.",
   "network_pcap_summary": {
    "summary": "",
    "empty": true,
@@ -4158,11 +4575,20 @@
    "packets_in_capture": 4,
    "packet_limit": null,
    "blocks_unreadable": 3,
-   "unreadable_reasons": [
-    "an enhanced packet block names interface 7, which no interface description declared",
-    "an enhanced packet block is shorter than its fixed part",
-    "an interface description is shorter than its fixed part"
-   ],
+   "unreadable_reasons": {
+    "an enhanced packet block names an interface no interface description declared": {
+     "count": 1,
+     "first": "at byte 252, interface 7"
+    },
+    "an enhanced packet block is shorter than its fixed part": {
+     "count": 1,
+     "first": "at byte 344"
+    },
+    "an interface description is shorter than its fixed part": {
+     "count": 1,
+     "first": "at byte 364"
+    }
+   },
    "bytes": 276,
    "duration_s": 0.0,
    "protocols": {
@@ -4193,11 +4619,20 @@
    "packets_in_capture": 4,
    "packet_limit": 3,
    "blocks_unreadable": 3,
-   "unreadable_reasons": [
-    "an enhanced packet block names interface 7, which no interface description declared",
-    "an enhanced packet block is shorter than its fixed part",
-    "an interface description is shorter than its fixed part"
-   ],
+   "unreadable_reasons": {
+    "an enhanced packet block names an interface no interface description declared": {
+     "count": 1,
+     "first": "at byte 252, interface 7"
+    },
+    "an enhanced packet block is shorter than its fixed part": {
+     "count": 1,
+     "first": "at byte 344"
+    },
+    "an interface description is shorter than its fixed part": {
+     "count": 1,
+     "first": "at byte 364"
+    }
+   },
    "bytes": 196,
    "duration_s": 0.0,
    "protocols": {
@@ -4223,19 +4658,28 @@
    "sni": {},
    "beacons": []
   },
-  "summarize_pcap": "#### Packet Capture Analysis (deterministic, part of the capture):\n4 packets read, 3 blocks unreadable: an enhanced packet block names interface 7, which no interface description declared; an enhanced packet block is shorter than its fixed part; an interface description is shorter than its fixed part: 276 bytes over 0.0s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n- 8.8.8.8:53/udp — 2 pkts, 116 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "summarize_pcap": "#### Packet Capture Analysis (deterministic, part of the capture):\n4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364): 276 bytes over 0.0s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n- 8.8.8.8:53/udp — 2 pkts, 116 bytes\n\nNo regular beaconing interval detected in the packets read.",
   "tool_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n4 packets read, 3 blocks unreadable: an enhanced packet block names interface 7, which no interface description declared; an enhanced packet block is shorter than its fixed part; an interface description is shorter than its fixed part: 276 bytes over 0.0s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n- 8.8.8.8:53/udp — 2 pkts, 116 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364): 276 bytes over 0.0s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n- 8.8.8.8:53/udp — 2 pkts, 116 bytes\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 4,
    "packets_in_capture": 4,
    "packet_limit": null,
    "blocks_unreadable": 3,
-   "unreadable_reasons": [
-    "an enhanced packet block names interface 7, which no interface description declared",
-    "an enhanced packet block is shorter than its fixed part",
-    "an interface description is shorter than its fixed part"
-   ],
+   "unreadable_reasons": {
+    "an enhanced packet block names an interface no interface description declared": {
+     "count": 1,
+     "first": "at byte 252, interface 7"
+    },
+    "an enhanced packet block is shorter than its fixed part": {
+     "count": 1,
+     "first": "at byte 344"
+    },
+    "an interface description is shorter than its fixed part": {
+     "count": 1,
+     "first": "at byte 364"
+    }
+   },
    "bytes": 276,
    "duration_s": 0.0,
    "protocols": {
@@ -4261,23 +4705,32 @@
    "sni": {},
    "beacons": []
   },
-  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n4 packets read, 3 blocks unreadable: an enhanced packet block names interface 7, which no interface description declared; an enhanced packet block is shorter than its fixed part; an interface description is shorter than its fixed part: 276 bytes over 0.0s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n- 8.8.8.8:53/udp — 2 pkts, 116 bytes\n\nNo regular beaconing interval detected in the packets read.",
-  "read_pcap_summary_page": "Packets 3 to 3 of the 4 in the capture (4 packets read, 3 blocks unreadable: an enhanced packet block names interface 7, which no interface description declared; an enhanced packet block is shorter than its fixed part; an interface description is shorter than its fixed part).\nPacket 3: 10.0.0.2 -> 8.8.8.8 (TCP 5001->4444)",
-  "extract_dns": "4 packets read, 3 blocks unreadable: an enhanced packet block names interface 7, which no interface description declared; an enhanced packet block is shorter than its fixed part; an interface description is shorter than its fixed part.\nevil.example.",
-  "extract_dns_limit_5": "4 packets read, 3 blocks unreadable: an enhanced packet block names interface 7, which no interface description declared; an enhanced packet block is shorter than its fixed part; an interface description is shorter than its fixed part.\nevil.example.",
-  "extract_http": "4 packets read, 3 blocks unreadable: an enhanced packet block names interface 7, which no interface description declared; an enhanced packet block is shorter than its fixed part; an interface description is shorter than its fixed part.\nGET /c2 HTTP/1.1 | Host: evil.example\nGET /c2 HTTP/1.1 | Host: evil.example",
+  "read_pcap_summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364): 276 bytes over 0.0s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n- 8.8.8.8:53/udp — 2 pkts, 116 bytes\n\nNo regular beaconing interval detected in the packets read.",
+  "read_pcap_summary_page": "Packets 3 to 3 of the 4 in the capture (4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364)).\nPacket 3: 10.0.0.2 -> 8.8.8.8 (TCP 5001->4444)",
+  "extract_dns": "4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364).\nevil.example.",
+  "extract_dns_limit_5": "4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364).\nevil.example.",
+  "extract_http": "4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364).\nGET /c2 HTTP/1.1 | Host: evil.example\nGET /c2 HTTP/1.1 | Host: evil.example",
   "network_pcap_summary": {
-   "summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n4 packets read, 3 blocks unreadable: an enhanced packet block names interface 7, which no interface description declared; an enhanced packet block is shorter than its fixed part; an interface description is shorter than its fixed part: 276 bytes over 0.0s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n- 8.8.8.8:53/udp — 2 pkts, 116 bytes\n\nNo regular beaconing interval detected in the packets read.",
+   "summary": "#### Packet Capture Analysis (deterministic, part of the capture):\n4 packets read, 3 blocks unreadable: an enhanced packet block names an interface no interface description declared (1, the first at byte 252, interface 7); an enhanced packet block is shorter than its fixed part (1, the first at byte 344); an interface description is shorter than its fixed part (1, the first at byte 364): 276 bytes over 0.0s. Protocols: tcp=2, udp=2\n\nExternal conversations (all 2, by volume):\n- 8.8.8.8:4444/tcp — 2 pkts, 160 bytes\n- 8.8.8.8:53/udp — 2 pkts, 116 bytes\n\nNo regular beaconing interval detected in the packets read.",
    "empty": false,
    "packets_read": 4,
    "packets_in_capture": 4,
    "packet_limit": null,
    "blocks_unreadable": 3,
-   "unreadable_reasons": [
-    "an enhanced packet block names interface 7, which no interface description declared",
-    "an enhanced packet block is shorter than its fixed part",
-    "an interface description is shorter than its fixed part"
-   ],
+   "unreadable_reasons": {
+    "an enhanced packet block names an interface no interface description declared": {
+     "count": 1,
+     "first": "at byte 252, interface 7"
+    },
+    "an enhanced packet block is shorter than its fixed part": {
+     "count": 1,
+     "first": "at byte 344"
+    },
+    "an interface description is shorter than its fixed part": {
+     "count": 1,
+     "first": "at byte 364"
+    }
+   },
    "bytes": 276,
    "duration_s": 0.0,
    "protocols": {

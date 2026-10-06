@@ -18,10 +18,10 @@ from functools import lru_cache
 from typing import Any, get_args, get_origin
 
 from maljan.core.config import REQUIRED_ENV_ALLOW
+from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 from maljan.core.settings_annotations import GROUP_ORDER
 from maljan.core.settings_catalog import CatalogEntry, FieldType, _bounds, core_catalog
 from maljan.core.settings_overrides import redact_url
-from maljan.providers.sandbox.limits import SAMPLE_UPLOAD_MAX_BYTES
 from pydantic import SecretStr
 
 from app.config import APISettings

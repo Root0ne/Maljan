@@ -86,10 +86,18 @@ IMPROVED: dict[str, tuple[str, tuple[str, ...]]] = {
         "header; the new walk is a loop and reads the DNS query beneath the tags",
         _FACTS_LIMITED,
     ),
-    "hostile_ipip_nesting.pcap": (
-        "a datagram under 1,000 nested IPv4-in-IPv4 headers: the old reader stopped "
-        "at the outer header; the new walk reaches the UDP datagram at the bottom",
+    "deep_ipip_tunnels.pcap": (
+        "a datagram under 1,000 nested IPv4-in-IPv4 headers, each stating its total "
+        "length: the old reader stopped at the outer header; the new walk is a loop "
+        "and reaches the UDP datagram at the bottom",
         _FACTS_LIMITED,
+    ),
+    "edge_layers.pcap": (
+        "two IPv4 headers whose total length (0, 10) is below their own header "
+        "length: the old reader read the bytes after them as a TCP segment carrying "
+        "an HTTP request; the new one reads an IP datagram only up to the length its "
+        "header declares, so neither carries a payload",
+        (*_FACTS_ALL, "extract_http"),
     ),
     "unreadable_blocks.pcapng": (
         "three correctly framed pcapng blocks that cannot be read: the old reader "
@@ -239,7 +247,7 @@ def test_the_server_name_comes_out_and_nothing_else_moves(
         assert "TLS SNI (encrypted destinations):" in answers[name]["summarize_pcap"]
 
 
-@pytest.mark.parametrize("name", ["hostile_vlan_stack.pcap", "hostile_ipip_nesting.pcap"])
+@pytest.mark.parametrize("name", ["hostile_vlan_stack.pcap", "deep_ipip_tunnels.pcap"])
 def test_a_deeply_nested_frame_costs_no_other_packet(
     name: str, answers: dict[str, dict[str, Any]]
 ) -> None:
@@ -263,3 +271,23 @@ def test_skipped_blocks_are_never_called_the_whole_capture(
     assert "part of the capture" in summary
     assert "4 packets read, 3 blocks unreadable: " in summary
     assert " of 4 packets in the capture read" not in summary
+    assert (
+        "an enhanced packet block names an interface no interface description declared "
+        "(1, the first at byte 252, interface 7)"
+    ) in summary
+
+
+def test_nested_headers_that_declare_no_payload_are_read_no_further(
+    answers: dict[str, dict[str, Any]],
+) -> None:
+    """Every level of this nesting says its total length is 0: the outer header
+    is the datagram, as the old reader read it, and the packets around it stay."""
+    facts = answers["hostile_ipip_nesting.pcap"]["capture_facts"]
+    conversations = {
+        (c["dst"], c["dport"], c["proto"]): c["packets"] for c in facts["conversations"]
+    }
+    assert conversations == {
+        ("8.8.8.8", 0, "other"): 1,
+        ("8.8.8.8", 53, "udp"): 2,
+        ("8.8.8.8", 4444, "tcp"): 2,
+    }

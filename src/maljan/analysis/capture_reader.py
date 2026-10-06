@@ -129,6 +129,7 @@ _IPV6_OPTION_HEADERS = (0, 43, 60)  # hop-by-hop, routing, destination options
 _IPV6_FRAGMENT_HEADER = 44
 
 _DNS_MAX_JUMPS = 20  # compression pointers one name may follow
+_DNS_MAX_NAME_OCTETS = 255  # RFC 1035 2.3.4: a name, uncompressed, root included
 
 
 class CaptureFormatError(Exception):
@@ -139,9 +140,8 @@ class CaptureFormatError(Exception):
 class Segment:
     """A TCP header's ports, and where its payload lies in the record.
 
-    ``data`` is the segment's payload inside the IP datagram. ``rest`` is every
-    byte of the record after the TCP header, trailing link-layer padding
-    included. Both are sliced from the record when asked for.
+    ``data`` is the segment's payload as its IP header bounds it, sliced from
+    the record when asked for; bytes past the datagram are trailer or padding.
     """
 
     sport: int
@@ -153,10 +153,6 @@ class Segment:
     @property
     def data(self) -> bytes:
         return self.frame[self.data_start : self.data_end]
-
-    @property
-    def rest(self) -> bytes:
-        return self.frame[self.data_start :]
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,7 +169,9 @@ class Packet:
     none) and ``length`` its captured bytes as read. ``ip_src``/``ip_dst`` are
     the first IPv4 header's, ``tcp`` and ``udp`` the first of each, and
     ``dns_qname`` the first DNS question's name (``b"example.com."``). Each is
-    ``None`` when the record holds none. ``undecoded`` is set when the walk
+    ``None`` when the record holds none. When the first question's name is
+    longer than DNS allows, ``dns_name_octets_malformed`` is its length and
+    ``dns_qname`` stays ``None``. ``undecoded`` is set when the walk
     failed part of the way in; the fields hold what it read before that.
     """
 
@@ -184,6 +182,7 @@ class Packet:
     tcp: Segment | None = None
     udp: Datagram | None = None
     dns_qname: bytes | None = None
+    dns_name_octets_malformed: int | None = None
     undecoded: bool = False
 
 
@@ -199,21 +198,25 @@ class ReadNotes:
     """What a read had to skip, or where it had to stop, and why.
 
     ``blocks_unreadable`` counts correctly framed pcapng blocks that could not
-    be read, with the distinct reasons in ``unreadable_reasons``.
-    ``byte_cap`` is the cap in bytes when a gzip capture's decompressed bytes
-    reached it and the read stopped there. ``packets_undecoded`` counts the
-    records the header walk failed on.
+    be read. ``unreadable_reasons`` holds one entry per kind of reason, from a
+    fixed vocabulary: how many blocks it covered and where the first one was,
+    so its size is bounded by the kinds, never by the blocks. ``byte_cap`` is
+    the cap in bytes when a gzip capture's decompressed bytes reached it and
+    the read stopped there; ``stream_error`` says where a gzip stream could not
+    be decompressed further. ``packets_undecoded`` counts the records the
+    header walk failed on.
     """
 
     blocks_unreadable: int = 0
-    unreadable_reasons: list[str] = field(default_factory=list)
+    unreadable_reasons: dict[str, dict[str, int | str]] = field(default_factory=dict)
     byte_cap: int | None = None
+    stream_error: str | None = None
     packets_undecoded: int = 0
 
-    def unreadable(self, reason: str) -> None:
+    def unreadable(self, reason: str, first: str) -> None:
         self.blocks_unreadable += 1
-        if reason not in self.unreadable_reasons:
-            self.unreadable_reasons.append(reason)
+        entry = self.unreadable_reasons.setdefault(reason, {"count": 0, "first": first})
+        entry["count"] = int(entry["count"]) + 1
 
 
 # ---------------------------------------------------------------- framing
@@ -224,7 +227,16 @@ class _CaptureEnds(Exception):
 
 
 class _Unreadable(Exception):
-    """A correctly framed block that cannot be read; the reason is the message."""
+    """A correctly framed block that cannot be read.
+
+    ``reason`` is one of a fixed vocabulary; ``detail`` is this block's own
+    particular (the interface it named), kept only for the first of its kind.
+    """
+
+    def __init__(self, reason: str, detail: str = "") -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.detail = detail
 
 
 def _capture_byte_cap() -> int:
@@ -232,15 +244,17 @@ def _capture_byte_cap() -> int:
 
     A capture reaches the reader by one of two channels, each with its own cap
     on the bytes it delivers: a sandbox download (``MAX_RESPONSE_BYTES``) or a
-    sample upload (``SAMPLE_UPLOAD_MAX_BYTES``), both in
-    ``providers/sandbox/limits.py``. The reader cannot tell which delivered a
+    sample upload (``SAMPLE_UPLOAD_MAX_BYTES``), both declared in
+    ``core/delivery_limits.py``. The reader cannot tell which delivered a
     file, so it holds the decompressed bytes to the larger, and a capture is
     never cut below what either channel delivers. A plain file is never cut:
     its channel already capped its size.
     """
-    from maljan.providers.sandbox import limits
+    from maljan.core import delivery_limits
 
-    return max(int(limits.MAX_RESPONSE_BYTES), int(limits.SAMPLE_UPLOAD_MAX_BYTES))
+    return max(
+        int(delivery_limits.MAX_RESPONSE_BYTES), int(delivery_limits.SAMPLE_UPLOAD_MAX_BYTES)
+    )
 
 
 class _Source:
@@ -443,7 +457,8 @@ class _PcapNg:
     def _on(self, number: int, block: str) -> _Interface:
         if number >= len(self.interfaces):
             raise _Unreadable(
-                f"{block} names interface {number}, which no interface description declared"
+                f"{block} names an interface no interface description declared",
+                f"interface {number}",
             )
         return self.interfaces[number]
 
@@ -461,6 +476,7 @@ class _PcapNg:
                 length = self._u32(self.source.exact(4))
                 if length < 12:
                     return
+                at = self.source.taken - 8
                 record, unreadable = self._block(block_type, length - 12)
                 self._tail(length)
             except _CaptureEnds:
@@ -468,7 +484,9 @@ class _PcapNg:
             if self.source.capped:
                 return
             if unreadable is not None:
-                self.notes.unreadable(unreadable)
+                reason, detail = unreadable
+                where = f"at byte {at}" + (f", {detail}" if detail else "")
+                self.notes.unreadable(reason, where)
             elif record is not None:
                 yield record
 
@@ -478,7 +496,9 @@ class _PcapNg:
             raise _Unreadable(f"{name} is shorter than its fixed part")
         return self.source.exact(size)
 
-    def _block(self, block_type: int, body_length: int) -> tuple[Record | None, str | None]:
+    def _block(
+        self, block_type: int, body_length: int
+    ) -> tuple[Record | None, tuple[str, str] | None]:
         """One block's body, consumed whole: its record, or why it is unreadable."""
         consumed = 0
         try:
@@ -520,7 +540,7 @@ class _PcapNg:
                 return Record(self._stamp(interface, high, low), data, interface.linktype), None
             return None, None
         except _Unreadable as exc:
-            return None, str(exc)
+            return None, (exc.reason, exc.detail)
         finally:
             self.source.skip_exact(body_length - consumed)
 
@@ -573,8 +593,13 @@ class Capture:
         """Every record, in file order."""
         try:
             yield from self._walk
-        except _GZIP_ERRORS:
-            return  # a gzip stream cut short or corrupt ends the capture there
+        except _GZIP_ERRORS as exc:
+            # A gzip stream cut short, corrupt, or followed by bytes that are
+            # not a gzip member ends the capture there, and the answer says so.
+            self.notes.stream_error = (
+                f"the gzip stream could not be decompressed past byte "
+                f"{self._source.taken} ({type(exc).__name__})"
+            )
         finally:
             if self._source.capped:
                 self.notes.byte_cap = self._source.cap
@@ -620,15 +645,19 @@ def count_records(path: str) -> int:
 # ---------------------------------------------------------------- decoding
 
 
-def _dns_name(message: bytes, start: int) -> tuple[bytes, int]:
-    """The name at ``start`` in a DNS message, and the offset just past it.
+def _dns_name(message: bytes, start: int) -> tuple[bytes | None, int, int]:
+    """The name at ``start`` in a DNS message, the offset just past it, and its octets.
 
     Compression pointers are followed inside the message. A pointer that
     leaves it, a pointer seen before, or a jump past ``_DNS_MAX_JUMPS`` ends
     the name where it got to, and the offset past a name that jumped is the
     one after its first pointer. A name with no label reads as ``b"."``.
+    The octets are the name's length uncompressed, root included; a name
+    longer than ``_DNS_MAX_NAME_OCTETS`` is not a DNS name and comes back as
+    ``None`` with its length.
     """
     labels: list[bytes] = []
+    octets = 1  # the root
     position = start
     after_first_jump: int | None = None
     targets: list[int] = []
@@ -645,30 +674,41 @@ def _dns_name(message: bytes, start: int) -> tuple[bytes, int]:
                 break
             targets.append(target)
             position = target
-        elif length:
-            labels.append(message[position : position + length])
+        elif length:  # a label: 63 octets at most, by the two top bits
+            octets += length + 1
+            if octets <= _DNS_MAX_NAME_OCTETS:
+                labels.append(message[position : position + length])
             position += length
         else:
             break
     end = after_first_jump if after_first_jump is not None else position
-    return b"".join(label + b"." for label in labels) or b".", end
+    if octets > _DNS_MAX_NAME_OCTETS:
+        return None, end, octets
+    return b"".join(label + b"." for label in labels) or b".", end, octets
 
 
-def _dns_question(message: bytes) -> bytes | None:
-    """The first question's name in a DNS or LLMNR message, or ``None``.
+@dataclass(frozen=True, slots=True)
+class _Question:
+    name: bytes | None
+    octets: int
+
+
+def _dns_question(message: bytes) -> _Question | None:
+    """The first question of a DNS or LLMNR message, or ``None``.
 
     The twelve-byte header must be whole, and the question its name, type and
-    class. Compression pointers count from the start of ``message``.
+    class. Compression pointers count from the start of ``message``. A name
+    longer than DNS allows comes back with ``name`` ``None`` and its length.
     """
     if len(message) <= 12 or struct.unpack("!H", message[4:6])[0] == 0:
         return None
-    name, end = _dns_name(message, 12)
+    name, end, octets = _dns_name(message, 12)
     if len(message) - end < 4:
         return None
-    return name
+    return _Question(name, octets)
 
 
-def _dns_over_tcp(data: bytes) -> bytes | None:
+def _dns_over_tcp(data: bytes) -> _Question | None:
     """The first question of a DNS message over TCP, after its two-byte length."""
     if len(data) < 2:
         return None
@@ -676,6 +716,26 @@ def _dns_over_tcp(data: bytes) -> bytes | None:
     if length < 14 or len(data) < length:
         return None
     return _dns_question(data[2:])
+
+
+def _jumbo_length(frame: bytes, position: int, end: int, following: int) -> int:
+    """An IPv6 jumbogram's payload length from its hop-by-hop option, else 0."""
+    if following != 0 or end - position < 8:
+        return 0
+    header_end = min(end, position + (frame[position + 1] + 1) * 8)
+    option = position + 2
+    while option < header_end:
+        kind = frame[option]
+        if kind == 0:  # Pad1
+            option += 1
+            continue
+        if option + 2 > header_end:
+            break
+        size = frame[option + 1]
+        if kind == 0xC2 and size == 4 and option + 6 <= header_end:
+            return int(struct.unpack("!I", frame[option + 2 : option + 6])[0])
+        option += 2 + size
+    return 0
 
 
 def _udp_payload_kind(sport: int, dport: int) -> str:
@@ -810,8 +870,10 @@ class _Walk:
         if header_length < 20:  # below the minimum: nothing past it is read
             return None
         body = min(start + header_length, end)
-        if total_length >= header_length:  # a smaller total (TSO writes 0) is ignored
-            end = min(end, start + total_length)
+        # The datagram ends where its own header says. A total below the header
+        # length (TSO writes 0) declares no payload, and nothing past the header
+        # is read as one; bytes past the total are trailer or padding.
+        end = min(end, start + max(total_length, header_length))
         if quoted:
             if fragment_offset == 0:
                 return self.transport(protocol, body, end, quoted=True)
@@ -837,6 +899,10 @@ class _Walk:
         payload_length = struct.unpack("!H", frame[start + 4 : start + 6])[0]
         following = frame[start + 6]
         position = start + 40
+        if payload_length == 0 and not quoted:
+            # A jumbogram states its length in a hop-by-hop option; with none,
+            # a payload length of 0 declares no payload.
+            payload_length = _jumbo_length(frame, position, end, following)
         end = min(end, position + payload_length)
         if quoted:
             return self.transport(following, position, end, quoted=True)
@@ -950,9 +1016,16 @@ class _Walk:
             return None
         return (self.ethernet, inner, end, False)
 
-    def question(self, name: bytes | None) -> None:
-        if name is not None and self.packet.dns_qname is None:
-            self.packet.dns_qname = name
+    def question(self, question: _Question | None) -> None:
+        packet = self.packet
+        if question is None or packet.dns_qname is not None:
+            return
+        if packet.dns_name_octets_malformed is not None:
+            return
+        if question.name is None:
+            packet.dns_name_octets_malformed = question.octets
+        else:
+            packet.dns_qname = question.name
 
 
 def decode(record: Record) -> Packet:

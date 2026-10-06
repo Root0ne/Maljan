@@ -45,24 +45,43 @@ class CaptureRead:
     ``limit`` is the caller's own, and ``None`` when it gave none — a read with
     no limit reads the whole capture. The rest is what the reader had to skip
     or where it stopped (``capture_reader.ReadNotes``): pcapng blocks it could
-    not read and why, the byte cap a gzip capture reached, and records whose
-    headers could not be walked to the end. Each appears in the fields only
-    when it happened.
+    not read, by kind of reason; the byte cap a gzip capture reached; where a
+    gzip stream could not be decompressed further; records whose headers could
+    not be walked to the end. A surface adds what it could not extract: DNS
+    names longer than DNS allows, and values it could not write. Each appears
+    in the fields only when it happened, and the statement grows with the
+    kinds of what happened, never with how many times.
     """
 
     packets_read: int = 0
     packets_in_capture: int = 0
     limit: int | None = None
     blocks_unreadable: int = 0
-    unreadable_reasons: list[str] = field(default_factory=list)
+    unreadable_reasons: dict[str, dict[str, Any]] = field(default_factory=dict)
     byte_cap: int | None = None
+    stream_error: str | None = None
     packets_undecoded: int = 0
+    dns_names_malformed: int = 0
+    dns_name_octets_first: int = 0
+    values_unwritable: int = 0
+    unwritable_reason: str = ""
 
     def note(self, notes: ReadNotes) -> None:
         self.blocks_unreadable = notes.blocks_unreadable
-        self.unreadable_reasons = list(notes.unreadable_reasons)
+        self.unreadable_reasons = {k: dict(v) for k, v in notes.unreadable_reasons.items()}
         self.byte_cap = notes.byte_cap
+        self.stream_error = notes.stream_error
         self.packets_undecoded = notes.packets_undecoded
+
+    def malformed_dns_name(self, octets: int) -> None:
+        if not self.dns_names_malformed:
+            self.dns_name_octets_first = octets
+        self.dns_names_malformed += 1
+
+    def unwritable(self, exc: BaseException) -> None:
+        if not self.values_unwritable:
+            self.unwritable_reason = type(exc).__name__
+        self.values_unwritable += 1
 
     @property
     def whole(self) -> bool:
@@ -70,16 +89,18 @@ class CaptureRead:
             self.packets_read >= self.packets_in_capture
             and not self.blocks_unreadable
             and self.byte_cap is None
+            and self.stream_error is None
         )
 
     def statement(self) -> str:
         """``"14887 of 14887 packets in the capture read"``, and why fewer when fewer.
 
-        When blocks were skipped or a byte cap stopped the read, the capture's
-        own count is not known, and the statement says what was read and why
-        instead: ``"6 packets read, 1 blocks unreadable: <reason>"``.
+        When blocks were skipped, a byte cap stopped the read or a gzip stream
+        broke off, the capture's own count is not known, and the statement says
+        what was read and why instead: ``"6 packets read, 1 blocks unreadable:
+        <reason> (1, the first at byte 72, interface 7)"``.
         """
-        partial = self.blocks_unreadable or self.byte_cap is not None
+        partial = self.blocks_unreadable or self.byte_cap is not None or self.stream_error
         if partial:
             said = f"{self.packets_read} packets read"
         else:
@@ -88,17 +109,29 @@ class CaptureRead:
             said += f" (the caller asked for {self.limit})"
         if self.blocks_unreadable:
             said += f", {self.blocks_unreadable} blocks unreadable: " + "; ".join(
-                self.unreadable_reasons
+                f"{reason} ({entry['count']}, the first {entry['first']})"
+                for reason, entry in self.unreadable_reasons.items()
             )
         if self.byte_cap is not None:
             said += (
                 f", reading stopped at the {self.byte_cap} decompressed bytes the platform "
                 "allows a capture"
             )
+        if self.stream_error:
+            said += f", reading stopped where {self.stream_error}"
         if self.packets_undecoded:
             said += (
                 f", {self.packets_undecoded} of them read only to the headers before "
                 "one that could not be decoded"
+            )
+        if self.dns_names_malformed:
+            said += (
+                f", {self.dns_names_malformed} DNS question names malformed: longer than "
+                f"the 255 octets DNS allows (the first {self.dns_name_octets_first} octets)"
+            )
+        if self.values_unwritable:
+            said += (
+                f", {self.values_unwritable} values read but not written ({self.unwritable_reason})"
             )
         return said
 
@@ -110,23 +143,32 @@ class CaptureRead:
         }
         if self.blocks_unreadable:
             fields["blocks_unreadable"] = self.blocks_unreadable
-            fields["unreadable_reasons"] = list(self.unreadable_reasons)
+            fields["unreadable_reasons"] = {k: dict(v) for k, v in self.unreadable_reasons.items()}
         if self.byte_cap is not None:
             fields["byte_cap"] = self.byte_cap
+        if self.stream_error:
+            fields["stream_error"] = self.stream_error
         if self.packets_undecoded:
             fields["packets_undecoded"] = self.packets_undecoded
+        if self.values_unwritable:
+            fields["values_unwritable"] = self.values_unwritable
+            fields["unwritable_reason"] = self.unwritable_reason
         return fields
 
     @classmethod
     def from_fields(cls, facts: dict[str, Any]) -> CaptureRead:
+        reasons = facts.get("unreadable_reasons")
         return cls(
             packets_read=int(facts.get("packets_read") or 0),
             packets_in_capture=int(facts.get("packets_in_capture") or 0),
             limit=facts.get("packet_limit"),
             blocks_unreadable=int(facts.get("blocks_unreadable") or 0),
-            unreadable_reasons=list(facts.get("unreadable_reasons") or []),
+            unreadable_reasons=dict(reasons) if isinstance(reasons, dict) else {},
             byte_cap=facts.get("byte_cap"),
+            stream_error=facts.get("stream_error"),
             packets_undecoded=int(facts.get("packets_undecoded") or 0),
+            values_unwritable=int(facts.get("values_unwritable") or 0),
+            unwritable_reason=str(facts.get("unwritable_reason") or ""),
         )
 
 
@@ -202,12 +244,12 @@ def _cv(xs: list[float]) -> float:
     return float((var**0.5) / m)
 
 
-def _extract_sni(pkt: Packet) -> str | None:
+def _extract_sni(pkt: Packet) -> bytes | None:
     """Best-effort TLS SNI from a ClientHello, parsed from the raw TCP payload.
 
-    Walks the TLS record -> handshake -> extensions to the server_name.
-    Returns None on any shape mismatch — SNI is a bonus signal, never a hard
-    dependency.
+    Walks the TLS record -> handshake -> extensions to the server_name and
+    answers the name's bytes. Returns None on any shape mismatch — SNI is a
+    bonus signal, never a hard dependency.
     """
     try:
         if pkt.tcp is None or not pkt.tcp.data:
@@ -235,17 +277,21 @@ def _extract_sni(pkt: Packet) -> str | None:
                 # server_name_list(2) + entry: type(1) + name_len(2) + name
                 name_len = int.from_bytes(data[idx + 3 : idx + 5], "big")
                 name = data[idx + 5 : idx + 5 + name_len]
-                # A host name is ASCII (RFC 6066, an A-label for an IDN); a
-                # byte outside it is written as an escape, not dropped. The
-                # name is the sender's text, written as the triage pack
-                # writes a sample's strings: control characters escaped.
-                if not name:
-                    return None
-                return pack_escaped(name.decode("ascii", "backslashreplace"))
+                return name or None
             idx += elen
     except Exception:
         return None
     return None
+
+
+def _server_name(name: bytes) -> str:
+    """A TLS server name as the sender's text.
+
+    A host name is ASCII (RFC 6066, an A-label for an IDN); a byte outside it
+    is written as an escape, not dropped, and the name is written as the
+    triage pack writes a sample's strings: control characters escaped.
+    """
+    return pack_escaped(name.decode("ascii", "backslashreplace"))
 
 
 def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | None:
@@ -263,6 +309,7 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
     # (dst, dport, proto) -> {pkts, bytes, times}
     convs: dict[tuple[str, int, str], dict[str, Any]] = {}
     snis: dict[str, int] = defaultdict(int)
+    unwritten: list[BaseException] = []
     total_bytes = 0
 
     def _visit(pkt: Packet) -> None:
@@ -280,9 +327,12 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
                 proto = "tcp"
                 dport = pkt.tcp.dport
                 if dport == 443:
-                    sni = _extract_sni(pkt)
-                    if sni:
-                        snis[sni] += 1
+                    name = _extract_sni(pkt)
+                    if name:
+                        try:
+                            snis[_server_name(name)] += 1
+                        except Exception as exc:  # noqa: BLE001 - one value, counted
+                            unwritten.append(exc)
             elif pkt.udp is not None:
                 proto = "udp"
                 dport = pkt.udp.dport
@@ -305,6 +355,8 @@ def capture_facts(pcap_path: str, packet_limit: Any = None) -> dict[str, Any] | 
     except Exception as exc:
         logger.warning("pcap_summary: the capture could not be read (%s).", type(exc).__name__)
         return None
+    for failure in unwritten:
+        read.unwritable(failure)
 
     logger.info("pcap_summary: %s", read.statement())
 
