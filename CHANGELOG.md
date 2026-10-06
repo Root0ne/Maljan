@@ -2392,6 +2392,7 @@ change landed on `main`.
 
 ### Fixed
 
+- **A judge's reason in the ATT&CK table is cut at a sentence under one rule**, kept and dropped alike: whole sentences up to the first that opens the model's own working ("Wait, …") and as many as fit 200 characters, marked where anything is left out; the record keeps it whole.
 - **An identical unresolved finding is listed once with its count** in `run_summary.validation.unresolved` (`count`) and in section 13 ("left N times"), a stored report's rows folded when it is rendered; `by_code` still counts every one.
 - **A sub-technique is not described by its parent's words alone**: a claim that writes none of the sub-technique's own distinctive words and writes a sibling sub-technique's whole name is asked once whether its technique is right, naming the sibling (Change Default File Association on an accessibility features sentence passed on "persistence").
 - **A TECHNIQUE line that writes an id with the vendored catalogue's own name for it in brackets is read as that id** (`T1027 (Obfuscated Files or Information)`); any other bracketed words keep the line whole and asked about, as before.

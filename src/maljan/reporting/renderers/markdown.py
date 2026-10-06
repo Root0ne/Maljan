@@ -50,6 +50,7 @@ from maljan.analysis.run_summary import (
 )
 from maljan.core.logger import logger
 from maljan.reporting.defang import ProseDefanger, defang
+from maljan.reporting.judge_reasons import judge_reasons_shown, word_cut
 from maljan.reporting.ledger_projection import cell_network_values, listing_kind
 from maljan.reporting.ledger_report import (
     ANALYST_SECTION_SOURCES,
@@ -3737,14 +3738,23 @@ def _attack_row(
     if not cell.technique_id_valid:
         status = f"unverified id ({UNVERIFIED_TECHNIQUE_MARKER})"
     elif cell.not_published:
-        status = f"claimed, not published: {_truncate(ctx.plain(cell.not_published), 200)}"
+        said, through = judge_reasons_shown(cell.not_published)
+        # A judge's reason is shortened by its own rule and never cut into;
+        # what follows it, and any other reason, keeps the cell's cut.
+        head, tail = said[:through], said[through:]
+        room = max(0, 200 - len(head))
+        status = (
+            "claimed, not published: "
+            + ctx.plain(head)
+            + (word_cut(ctx.plain(tail), room) if head else _truncate(ctx.plain(tail), room))
+        )
     else:
         status = "published" + _corroborated_words(mapping, rules)
         rule_only = ctx.rule_only.get(cell.technique_id)
         if rule_only:
             status += f"; {rule_only}"
         if cell.note:
-            status += f"; {ctx.plain(cell.note)}"
+            status += f"; {ctx.plain(judge_reasons_shown(cell.note)[0])}"
     # The platform's unresolved findings about this technique, beside its
     # row: the ATT&CK checks, and the judge crediting a source that never
     # named it. Matched on what the finding is about (``subject``), because

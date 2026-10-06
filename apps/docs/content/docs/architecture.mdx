@@ -2948,7 +2948,12 @@ is assembled from what the run gathered rather than recomputed beside it:
   (`x_maljan_technique_review`, never exported) and the matrix publishes per
   it: a dropped technique is not published and reads "the judge dropped it
   (\<reason>)", a kept one is published — a finding's technique included — with
-  "kept by the judge when asked (\<reason>)" on its row. With no answer — the
+  "kept by the judge when asked (\<reason>)" on its row. The record keeps the
+  reason whole; the report's ATT&CK table prints it by one rule for both
+  (`reporting.judge_reasons.judge_reason_shown`): whole sentences up to the
+  first that opens the model's own working ("Wait, …", "Let me …") and as many
+  as fit 200 characters, a first sentence longer than that cut at a word, and
+  the cut mark where anything is left out. With no answer — the
   question timed out or failed, the verdict itself timed out, or no line of
   the answer is in the form asked — nothing is withheld: each technique is what
   it would have been without the question, and a published one is marked "not
