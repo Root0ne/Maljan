@@ -183,9 +183,10 @@ def _report_link(url: str) -> bool:
         return True
     if re.match(r"[a-z][a-z0-9+.-]*:", lowered):
         return False
-    # The parser hands the target over percent-encoded: a backslash is "%5C".
-    backslash = "\\" in target or "%5c" in lowered
-    return bool(target) and not target.startswith("/") and not backslash
+    # The parser hands the target over percent-encoded: a backslash is "%5C",
+    # an encoded slash "%2F", which some viewers decode before resolving.
+    backslash = "\\" in target or "%5c" in lowered or "%2f" in lowered
+    return bool(target) and not target.startswith("/") and not backslash and ":" not in target
 
 
 def _no_image(renderer: Any, tokens: Any, idx: int, options: Any, env: Any) -> str:

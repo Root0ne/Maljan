@@ -3140,12 +3140,14 @@ is assembled from what the run gathered rather than recomputed beside it:
   the figures are inline SVG and need nothing more). A version
   number ("FileVersion 10.0.0.1"), a .NET name ("ASP.NET") and a two-label
   name under `.rs` or `.md` ("lib.rs", "README.md") print as written unless
-  the run recorded them; a package name opening with a reverse-DNS root
-  (`com.`, `org.`, `android.`, `java.`, …) is not read as a host; a draft rule's
+  the run recorded them; a name of more than four labels opening with a
+  reverse-DNS root (`com.`, `org.`, `android.`, `java.`, …) is read as a
+  package, not a host, unless the run's network evidence holds it; a draft rule's
   body is printed as it compiles; a VirusTotal (`/gui/file|url/<hex>`,
   `/gui/domain|ip-address/<value>`), MalwareBazaar (`/sample/<sha256>/`) or
   ATT&CK (`/techniques/…`, `/tactics/…`, `/software/…`, `/matrices/…`) lookup
-  with no query stays a link unless the run's indicator is in it, anything
+  with no query, matched whole on its decoded path (no dot segment, backslash,
+  `@` or second `//`), stays a link unless the run's indicator is in it, anything
   else on those hosts is defanged, and the configured model endpoint stays as
   written. The JSON report,
   the STIX bundle, MISP and `/reports/{id}/iocs` carry every value live, and

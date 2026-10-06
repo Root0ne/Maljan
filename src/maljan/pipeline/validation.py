@@ -3893,12 +3893,18 @@ def _refanged(text: str) -> str:
     return re.sub(r"\bhxxp", "http", out, flags=re.IGNORECASE)
 
 
-def network_values_in(text: str) -> list[tuple[str, str]]:
+def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, str]]:
     """The addresses and hosts a sentence names, ``(kind, value)``, once each, in order.
 
     A URL is read as its host. An address is any dotted quad that parses as
     one; a host is what the string sweep's own reader takes for one
     (``tools.strings.iocs_from_text``), so a file name is not a host.
+
+    A long name opening with a reverse-DNS root (``package_shaped``) is read
+    only with ``packages``: a caller that can ask whether the run's network
+    evidence holds a value passes it and drops such a name only when no
+    evidence does, so a host named ``com.evil-c2.update.cdn.ru`` that the
+    run resolved is never skipped.
     """
     from maljan.tools.strings import iocs_from_text
 
@@ -3926,9 +3932,7 @@ def network_values_in(text: str) -> list[tuple[str, str]]:
         if ("domain", value) in found or not _host_under_a_known_tld(match.group(0)):
             continue
         labels = value.split(".")
-        # A package name ("com.facebook.react.bridge.app") opens with a
-        # reverse-DNS root; it names code, not a host.
-        if labels[0] in _REVERSE_DNS_ROOTS:
+        if not packages and package_shaped(value):
             continue
         # A one-letter name is a letter ("x.icu"); a digit there ("3.cz") is
         # the tail of a version or of noise.
@@ -3936,6 +3940,17 @@ def network_values_in(text: str) -> list[tuple[str, str]]:
         if len(labels) > 4 or (short and labels[0].isalpha()):
             found.append(("domain", value))
     return found
+
+
+def package_shaped(value: str) -> bool:
+    """Whether a dotted name reads as a Java, Kotlin or Android package rather than a host.
+
+    More than four labels and a reverse-DNS root first
+    (``com.facebook.react.bridge.app``). A name only the evidence can tell
+    apart: a caller drops one only when no network evidence holds it.
+    """
+    labels = str(value or "").lower().split(".")
+    return len(labels) > 4 and labels[0] in _REVERSE_DNS_ROOTS
 
 
 # The first labels of a Java, Kotlin or Android package name.
@@ -3988,9 +4003,12 @@ def recommendation_indicator_violations(
     for index, row in enumerate(_rows_of(payload, "defensive_recommendations")):
         text = " ".join(str(row.get(key) or "") for key in ("action", "rationale", "detection"))
         refused: list[str] = []
-        for kind, value in network_values_in(text):
+        for kind, value in network_values_in(text, packages=True):
             answer = str(answers(kind, value) or "")
             if publishes(answer):
+                continue
+            # A package name no row of the run's evidence holds is code.
+            if not answer and package_shaped(value):
                 continue
             if not answer and kind == "domain" and is_well_known_benign_host(value):
                 # A reference or vendor host the run never recorded: a place to
@@ -4056,7 +4074,12 @@ def _unstated_values(
     from maljan.reporting.renderers.stix_renderer import publishes
 
     plain = _refanged(sentence).lower()
-    values = network_values_in(sentence)
+    # A package name no row of the run's evidence holds is code, not a host.
+    values = [
+        (kind, value)
+        for kind, value in network_values_in(sentence, packages=True)
+        if not package_shaped(value) or answers(kind, value)
+    ]
     places = sorted((plain.find(value.lower()), kind, value) for kind, value in values if value)
     out: list[tuple[str, str, str]] = []
     for position, (start, kind, value) in enumerate(places):

@@ -1372,8 +1372,8 @@ class MarkdownRenderer:
                         # A file or host value that holds a network value
                         # ("//relay.example.net/live/" read as a path) holds
                         # it defanged; any other is printed as it is.
-                        _code_span(_defanged_text(row.value)),
-                        _defanged_text(row.context) if row.context else "-",
+                        _code_span(ctx.plain(row.value)),
+                        ctx.plain(row.context) if row.context else "-",
                         row.source or "-",
                         ctx.plain(row.published or "-"),
                     )
@@ -1406,7 +1406,7 @@ class MarkdownRenderer:
                         part
                         for part in (
                             # "the host of <url>": the URL is defanged too.
-                            _defanged_text(row.context) if row.context else "",
+                            ctx.plain(row.context) if row.context else "",
                             f"recovered by {row.recovered_by}" if row.recovered_by else "",
                         )
                         if part
@@ -1469,7 +1469,7 @@ class MarkdownRenderer:
             body.append("")
             for rule in report.detection_signatures:
                 status = (
-                    f"compile error: {_defanged_text(_one_line(rule.compile_error))}"
+                    f"compile error: {ctx.plain(_one_line(rule.compile_error))}"
                     if rule.compile_error
                     else "compiled"
                 )
@@ -1477,7 +1477,7 @@ class MarkdownRenderer:
                 # as prose and defanged; the rule's body is the rule to deploy
                 # and is printed as it compiles.
                 source = (
-                    f"; auto-generated from {_defanged_text(_ids(rule.source_evidence))}"
+                    f"; auto-generated from {ctx.plain(_ids(rule.source_evidence))}"
                     if rule.source_evidence
                     else ""
                 )
@@ -1735,7 +1735,7 @@ class MarkdownRenderer:
                 server = f" ({row['server']})" if row.get("server") else ""
                 count = int(row.get("count") or 1)
                 times = f" ×{count}" if count > 1 else ""
-                message = _defanged_text(str(row.get("error") or "").strip()) or "failed"
+                message = ctx.plain(str(row.get("error") or "").strip()) or "failed"
                 remedy = str(row.get("remediation") or "").strip()
                 lines.append(
                     _item(
@@ -2592,9 +2592,6 @@ def _defanged_text(text: str) -> str:
     already defanged inside it. A value the run itself recorded is defanged
     before this, by the context's own pass, wherever it stands.
     """
-    from maljan.pipeline.validation import network_values_in
-    from maljan.reporting.defang import defang_text
-
     kept: dict[str, str] = {}
     # A placeholder for a kept link: a private-use character the text does
     # not hold, around the link's index, so nothing the text says is replaced.
@@ -2610,6 +2607,31 @@ def _defanged_text(text: str) -> str:
         return token
 
     written = _URL_IN_TEXT.sub(_keep, text)
+    # A value inside a URL that was defanged whole ("…/gui/url/http://evil…")
+    # is read again: the URL's own defanging ends where its first bracket is.
+    # Passes repeat until nothing changes, a bounded number of times: each one
+    # only adds brackets, and none re-reads what an earlier one kept.
+    defanged = written
+    for _ in range(_DEFANG_PASSES):
+        again = _defang_pass(defanged)
+        if again == defanged:
+            break
+        defanged = again
+    for token, url in kept.items():
+        defanged = defanged.replace(token, url)
+    return defanged
+
+
+# How many times a text is read for values inside values a pass defanged.
+# Nesting deeper than this is not a URL anyone writes.
+_DEFANG_PASSES = 4
+
+
+def _defang_pass(written: str) -> str:
+    """One reading of ``written`` and every network value it finds, defanged."""
+    from maljan.pipeline.validation import network_values_in
+    from maljan.reporting.defang import defang_text
+
     indicators = [(found.group(0), "url") for found in _URL_IN_TEXT.finditer(written)]
     indicators += [(found.group(0), "email") for found in _EMAIL_IN_TEXT.finditer(written)]
     # A host written after a bare "@" ("…/\\@evil.com"), with no mailbox name.
@@ -2645,14 +2667,7 @@ def _defanged_text(text: str) -> str:
         for found in _IPV6_CANDIDATE.finditer(written)
         if _is_ipv6(found.group(0))
     ]
-    defanged = defang_text(written, indicators)
-    # A value inside a URL that was defanged whole ("…/gui/url/http://evil…")
-    # is read again: the URL's own defanging ends where its first bracket is.
-    if defanged != written:
-        defanged = _defanged_text(defanged) if not kept else defanged
-    for token, url in kept.items():
-        defanged = defanged.replace(token, url)
-    return defanged
+    return defang_text(written, indicators)
 
 
 # The reference services a report links to, each with the shape of its own
@@ -2685,23 +2700,43 @@ _REFERENCE_LOOKUPS: dict[str, re.Pattern[str]] = {
 
 
 def _reference_lookup(url: str) -> bool:
-    """Whether ``url`` is one of a reference service's own lookups, and so stays a link."""
-    if "\\" in url or "@" in url or "/." in url:
-        return False
+    """Whether ``url`` is one of a reference service's own lookups, and so stays a link.
+
+    The path is decoded (``%2e``, ``%2f``, ``%5c`` and the rest, repeatedly)
+    and the service's pattern must match the whole decoded path. A backslash,
+    an ``@``, a dot segment or a second ``//`` anywhere, raw or decoded, and a
+    query, fragment, port or userinfo make it no lookup.
+    """
+    from urllib.parse import unquote
+
     # A sentence's punctuation after the link is not part of it.
+    trimmed = url.rstrip(",.;:!?")
     try:
-        parts = urlparse(url.rstrip(",.;:!?"))
+        parts = urlparse(trimmed)
     except ValueError:
         return False
     shape = _REFERENCE_LOOKUPS.get((parts.hostname or "").lower())
-    return (
-        shape is not None
-        and parts.scheme.lower() == "https"
-        and not parts.query
-        and not parts.fragment
-        and parts.port is None
-        and shape.fullmatch(parts.path) is not None
-    )
+    if (
+        shape is None
+        or parts.scheme.lower() != "https"
+        or parts.query
+        or parts.fragment
+        or parts.username is not None
+        or parts.port is not None
+        or parts.netloc.lower() != (parts.hostname or "").lower()
+    ):
+        return False
+    path = parts.path
+    for _ in range(4):
+        decoded = unquote(path)
+        if decoded == path:
+            break
+        path = decoded
+    else:
+        return False
+    if any(mark in path for mark in ("\\", "@", "//", "%")) or "/." in path:
+        return False
+    return shape.fullmatch(path) is not None
 
 
 # A dotted name written wholly in capitals, and a name under ``.onion``.
@@ -3373,7 +3408,7 @@ def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
         lines.append(
             _row(
                 ctx.cell(item.kind),
-                _code_span(_defanged_text(_one_line(item.value))) + ctx.publish_state(item.value),
+                _code_span(ctx.plain(_one_line(item.value))) + ctx.publish_state(item.value),
                 ctx.cell(item.purpose) if item.purpose.strip() else PURPOSE_NOT_STATED,
                 cited,
             )
@@ -3486,14 +3521,14 @@ def _attack_row(
     if not cell.technique_id_valid:
         status = f"unverified id ({UNVERIFIED_TECHNIQUE_MARKER})"
     elif cell.not_published:
-        status = f"claimed, not published: {_truncate(_defanged_text(cell.not_published), 200)}"
+        status = f"claimed, not published: {_truncate(ctx.plain(cell.not_published), 200)}"
     else:
         status = "published" + _corroborated_words(mapping, rules)
         rule_only = ctx.rule_only.get(cell.technique_id)
         if rule_only:
             status += f"; {rule_only}"
         if cell.note:
-            status += f"; {_defanged_text(cell.note)}"
+            status += f"; {ctx.plain(cell.note)}"
     # The platform's unresolved findings about this technique, beside its
     # row: the ATT&CK checks, and the judge crediting a source that never
     # named it. Matched on what the finding is about (``subject``), because
