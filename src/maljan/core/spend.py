@@ -1309,7 +1309,8 @@ class SpendMeter:
         A call that does not fit only because other calls in flight hold their
         worst case waits for them to settle: at most until ``deadline_s``, or
         ``wait_s`` when the caller's own clock (a tool loop's) ends sooner, and
-        never past the job's cancellation (:meth:`close`), which wakes it. The
+        never past the job's cancellation (:meth:`close`), which wakes it and
+        raises ``JobCancelled``, so the caller ends as cancelled. The
         wait blocks the calling thread. The calls that can run beside another —
         analyst nodes, revisions, tool loops — each run on a thread of their
         own; the verdict and report calls, which admit from a coroutine, run
@@ -1395,8 +1396,14 @@ class SpendMeter:
             break
         if decision.refused:
             if gave_up:
-                # Not the spend's refusal: the job is ending.
-                raise SpendCeilingStop(f"a {kind} call of {name} was not made: {gave_up}")
+                # Not the spend's refusal: the job is ending, and its loops
+                # record a cancellation, not the spend cap.
+                from maljan.core.cancellation import JobCancelled
+
+                where = f"while a {kind} call of {name} waited for calls in flight"
+                if job is not None and job.is_cancelled:
+                    job.check(where)
+                raise JobCancelled(f"the job was cancelled; stopped {where}")
             said = f"a {kind} call of {name} was not made: {decision.refused}"
             with self._lock:
                 self._refused += 1

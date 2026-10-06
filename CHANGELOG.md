@@ -2386,6 +2386,9 @@ change landed on `main`.
 
 ### Fixed
 
+- **A call waiting on the spend ceiling for calls in flight ends as cancelled when its job is cancelled** (`JobCancelled`, with where it stopped), so its loop records a cancellation rather than the spend cap.
+### Fixed
+
 - **A kind of call a stage will make and has not made yet is asked about on the model of the call the job made last**, where it was the model of the kind first made last.
 ### Fixed
 
