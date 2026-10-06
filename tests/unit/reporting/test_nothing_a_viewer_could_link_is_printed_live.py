@@ -102,3 +102,60 @@ def test_the_html_renderer_links_no_bare_text_and_no_defanged_scheme() -> None:
     )
 
     assert _hrefs(html) == ["https://attack.mitre.org/techniques/T1055/"]
+
+
+# Targets no reader can be sure of: the HTML report makes no anchor and no image of any.
+SCHEMELESS = (
+    "![i](//evil.sh/p.png)",
+    "![i](//c2.pl/p.png)",
+    "[x](//1432778632/)",
+    "[x](//intranet/f)",
+    "[x](//evil.unknowntld/g)",
+    "[x](//0x7f000001/e)",
+    "[x](//evil.rs/c)",
+    "[x](/absolute/path)",
+    "[x](\\\\server\\share)",
+    "[x](rel\\path)",
+    "![i](https://img.example.org/p.png)",
+    "![i](p.png)",
+)
+
+
+@pytest.mark.parametrize("markdown", SCHEMELESS)
+def test_a_schemeless_or_image_target_is_no_anchor_and_no_image(markdown: str) -> None:
+    html = HtmlRenderer()._markdown_to_html(f"Before {markdown} after.")
+
+    assert _hrefs(html) == []
+    assert "<img" not in html
+
+
+def test_an_in_page_target_and_a_relative_path_stay_links() -> None:
+    html = HtmlRenderer()._markdown_to_html("[a](#section-8) and [b](appendix/figures.html)")
+
+    assert _hrefs(html) == ["#section-8", "appendix/figures.html"]
+
+
+@pytest.mark.parametrize("cell", ["[x](//eViL.com/a)", "![i](//eViL.com/p.png)"])
+def test_a_mixed_case_host_in_a_context_cell_is_no_anchor_and_no_image(cell: str) -> None:
+    from maljan.reporting.models import StaticAnalysis, StringIOC
+
+    report = MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+        verdict="Malware",
+        static=StaticAnalysis(
+            interesting_strings=[StringIOC(value="/a C", kind="path", notes=cell)]
+        ),
+    )
+    html = HtmlRenderer().render(report)
+
+    assert not [href for href in _hrefs(html) if "evil" in href.lower()]
+    assert "<img" not in html
+
+
+def test_the_html_report_carries_a_content_security_policy() -> None:
+    html = HtmlRenderer().render(_report("It beacons."))
+
+    assert (
+        '<meta http-equiv="Content-Security-Policy" '
+        "content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data:\">"
+    ) in html
