@@ -145,6 +145,7 @@ from maljan.pipeline.validation import (
     malware_object_violations,
     misstated_entry_contents,
     recommendation_indicator_violations,
+    recommendation_technique_violations,
     repeated_item_violations,
     section_cut_violation,
     stated_value_violations,
@@ -668,6 +669,13 @@ PROMPTS: dict[str, str] = {
                 ]
             },
             lambda kind, value: "no: x" if kind == "ip" else "",
+        )
+    ),
+    "narrative question about a recommendation naming a technique not published": " ".join(
+        v.message
+        for v in recommendation_technique_violations(
+            {"defensive_recommendations": [{"action": "Alert on it.", "technique_id": "T1001"}]},
+            ["T1002"],
         )
     ),
     "composer question about table rows no cited entry holds": " ".join(

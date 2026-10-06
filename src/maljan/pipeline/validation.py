@@ -3859,6 +3859,9 @@ CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
 # publish. Asked once with the IOC table's own answer; a value kept after it
 # is recorded beside the recommendation.
 UNPUBLISHED_RECOMMENDATION_CODE = "narrative.unpublished_indicator"
+# A recommendation or hunting note that names a technique id this run does not
+# publish. Asked once with the fact; an id kept after it is recorded.
+UNPUBLISHED_RECOMMENDATION_TECHNIQUE_CODE = "narrative.unpublished_technique"
 ENTRY_CONTENTS_MISSTATED_CODE = "report.entry_contents_misstated"
 UNCITED_IDENTIFIER_CODE = "report.identifier_uncited"
 # A table row whose whole value is in none of the entries it cites
@@ -3894,6 +3897,7 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         RULE_MATCH_AS_ACTION_CODE,
         REPEATED_ITEMS_CODE,
         UNPUBLISHED_RECOMMENDATION_CODE,
+        UNPUBLISHED_RECOMMENDATION_TECHNIQUE_CODE,
     }
 )
 
@@ -4225,6 +4229,49 @@ def recommendation_indicator_violations(
                     "publishes. Write it over the published indicators, or without the value."
                 ),
                 path=f"defensive_recommendations.{index}",
+            )
+        )
+    return out
+
+
+def recommendation_technique_violations(
+    payload: Any, published: Iterable[str] | None
+) -> list[Violation]:
+    """Recommendations that name a technique id this run does not publish.
+
+    ``published`` is the technique ids the report's ATT&CK table publishes
+    (``report.ttp_mappings``). Every field the recommendation table and the
+    hunting notes print is read — the action, the rationale, the detection and
+    the technique column — and each id written there that the run does not
+    publish is named, one question per recommendation, as an unpublished
+    indicator is (:func:`recommendation_indicator_violations`). ``None`` reads
+    nothing: with no list to compare with there is no fact to state. Nothing
+    is removed: what the model answers stands.
+    """
+    if published is None:
+        return []
+    known = {str(tid).strip().upper() for tid in published if str(tid).strip()}
+    out: list[Violation] = []
+    for index, row in enumerate(_rows_of(payload, "defensive_recommendations")):
+        text = " ".join(
+            str(row.get(key) or "") for key in ("action", "rationale", "detection", "technique_id")
+        )
+        named = list(dict.fromkeys(tid.upper() for tid in _TID_IN_MESSAGE_RE.findall(text)))
+        unpublished = [tid for tid in named if tid not in known]
+        if not unpublished:
+            continue
+        ids = ", ".join(safe_finding_value(tid) for tid in unpublished)
+        out.append(
+            Violation(
+                code=UNPUBLISHED_RECOMMENDATION_TECHNIQUE_CODE,
+                message=(
+                    f"recommendation {safe_finding_value(index + 1)} names a technique this run "
+                    f"does not publish: {ids}. The report's ATT&CK table does not carry it. A "
+                    "recommendation acts on the techniques this run publishes. Write it with a "
+                    "published technique, or without the id."
+                ),
+                path=f"defensive_recommendations.{index}",
+                subject=unpublished[0],
             )
         )
     return out
