@@ -951,3 +951,11 @@ class TestAnApkFactAndroguardCouldNotRead:
         for reason in _APK_UNREAD_REASONS:
             line = apk_line({"package": f"{reason} (BadZipFile)", "dex_count": 1})
             assert "package" not in line, reason
+            assert "package" not in apk_line({"package": reason, "dex_count": 1}), reason
+
+    def test_a_package_name_that_begins_with_a_reason_s_words_is_printed(self) -> None:
+        from maljan.pipeline.triage_pack import _apk as apk_line
+        from maljan.tools.binary import MANIFEST_UNPARSED
+
+        name = f"{MANIFEST_UNPARSED}.com.example"
+        assert f"package {name}" in apk_line({"package": name, "dex_count": 1})

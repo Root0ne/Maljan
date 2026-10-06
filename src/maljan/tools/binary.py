@@ -770,12 +770,21 @@ def _apk_facts_wanted(
 def is_apk_unread(value: Any) -> bool:
     """Whether an ``apk_info`` fact, or any part of one, is one of this tool's ``no: <reason>``.
 
-    Matched against the tool's own reasons, not any ``no: `` prefix: a value
-    read from the manifest is the sample's text and may begin that way.
+    Matched exactly against the tool's own reasons, each alone or with the
+    exception's type in brackets after it (``… (BadZipFile)``), never by a
+    prefix: a value read from the manifest is the sample's text and may begin
+    with a reason's words.
     """
     if isinstance(value, dict):
         return any(is_apk_unread(part) for part in value.values())
-    return isinstance(value, str) and value.startswith(_APK_UNREAD_REASONS)
+    return isinstance(value, str) and _APK_UNREAD_RE.fullmatch(value) is not None
+
+
+# A refusal reason as the tool writes it: alone, or with an exception's type.
+_APK_UNREAD_RE = re.compile(
+    "(?:" + "|".join(re.escape(reason) for reason in _APK_UNREAD_REASONS) + r")"
+    r"(?: \([A-Za-z_][\w.]*\))?"
+)
 
 
 def _manifest_unread(apk: Any, *, present: bool) -> str | None:
