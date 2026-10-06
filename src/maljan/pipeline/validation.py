@@ -4073,12 +4073,19 @@ def _unstated_values(
     from maljan.extractors.network_extractor import is_well_known_benign_host
     from maljan.reporting.renderers.stix_renderer import publishes
 
+    def _answer(kind: str, value: str) -> str:
+        try:
+            return str(answers(kind, value) or "")
+        except Exception as exc:  # noqa: BLE001 — a value the table cannot answer is refused
+            logger.debug("validation: no publish answer for a value (%s).", exc)
+            return f"no: {NO_TABLE_ANSWER}"
+
     plain = _refanged(sentence).lower()
     # A package name no row of the run's evidence holds is code, not a host.
     values = [
         (kind, value)
         for kind, value in network_values_in(sentence, packages=True)
-        if not package_shaped(value) or answers(kind, value)
+        if not package_shaped(value) or _answer(kind, value)
     ]
     places = sorted((plain.find(value.lower()), kind, value) for kind, value in values if value)
     out: list[tuple[str, str, str]] = []
@@ -4086,11 +4093,7 @@ def _unstated_values(
         end = places[position + 1][0] if position + 1 < len(places) else len(plain)
         if start >= 0 and _PUBLISH_STATE_RE.search(plain[start + len(value) : max(end, start)]):
             continue
-        try:
-            answer = str(answers(kind, value) or "")
-        except Exception as exc:  # noqa: BLE001 — a value the table cannot answer is refused
-            logger.debug("validation: no publish answer for a value (%s).", exc)
-            answer = f"no: {NO_TABLE_ANSWER}"
+        answer = _answer(kind, value)
         if publishes(answer):
             continue
         if not answer and kind == "domain" and is_well_known_benign_host(value):

@@ -378,6 +378,21 @@ class TestOddAndLargeInput:
         (found,) = unpublished_value_violations(_body(f"It reaches {REFUSED}."), _broken)
         assert NO_TABLE_ANSWER in found.message
 
+    def test_a_lookup_raising_on_a_package_shaped_name_refuses_that_name_only(self) -> None:
+        package = "com.evil-c2.update.cdn.ru"
+
+        def _raises_on_the_package(kind: str, value: str) -> str:
+            if value == package:
+                raise ValueError("no table")
+            return ""
+
+        (found,) = unpublished_value_violations(
+            _body(f"It reaches {REFUSED} and resolves {package}."), _raises_on_the_package
+        )
+        assert package in found.message
+        assert NO_TABLE_ANSWER in found.message
+        assert REFUSED in found.message
+
     def test_a_long_section_finishes_quickly(self) -> None:
         import time
 
