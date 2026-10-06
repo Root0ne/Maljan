@@ -15,20 +15,21 @@ Usage::
 from __future__ import annotations
 
 import sys
-import urllib.request
 from pathlib import Path
+
+import httpx
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from maljan.tools.strings import TLD_LIST_PATH, read_tld_list  # noqa: E402
 
-SOURCE_URL = "https://data.iana.org/TLD/tlds-alpha-by-domain.txt"
-
 
 def main() -> int:
-    with urllib.request.urlopen(SOURCE_URL, timeout=60) as response:  # noqa: S310 — fixed https URL
-        text = response.read().decode("ascii")
+    # The root zone list, at the one fixed https address IANA publishes it.
+    response = httpx.get("https://data.iana.org/TLD/tlds-alpha-by-domain.txt", timeout=60)
+    response.raise_for_status()
+    text = response.content.decode("ascii")
     version, tlds = read_tld_list(text)
     previous = TLD_LIST_PATH.read_text(encoding="ascii") if TLD_LIST_PATH.is_file() else ""
     TLD_LIST_PATH.write_text(text if text.endswith("\n") else text + "\n", encoding="ascii")
