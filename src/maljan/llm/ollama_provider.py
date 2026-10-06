@@ -33,7 +33,11 @@ class _OllamaJoin:
         self.reasoning: list[str] = []
 
     def add(self, chunk: Any) -> None:
+        # Its own message, so the chunk the run's callbacks were handed (a
+        # LangSmith trace keeps it) stays as the server sent it.
         message = chunk.message
+        message = message.model_copy(update={"additional_kwargs": dict(message.additional_kwargs)})
+        chunk = chunk.model_copy(update={"message": message})
         if isinstance(message.content, str):
             if message.content:
                 self.text.append(message.content)

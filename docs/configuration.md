@@ -1165,7 +1165,9 @@ answer the server would have sent whole: the same text, finish reason,
 ik_llama.cpp repeats a running total on every chunk), and tool calls read as
 strictly as a whole answer's, so a call cut mid-argument stays an invalid
 call. A chunk whose content is not a string is joined by langchain's own rule,
-with the text before it and after it kept in its place. A server error sent inside the stream is raised as the status error it
+with the text before it and after it kept in its place. The join works on its
+own copy of each chunk, so the chunks the run's callbacks were handed (a
+LangSmith trace keeps them) stay as the server sent them. A server error sent inside the stream is raised as the status error it
 is on a whole answer, and a connection that drops while the answer streams as
 the `APIConnectionError` it is on a whole answer. Ollama's client streams every
 answer. DeepSeek (`compat: deepseek`) is read as a stream too, its reasoning

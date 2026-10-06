@@ -400,6 +400,23 @@ _STREAMED_LLAMA_CLASSES: dict[tuple[type, bool], type] = {}
 _LAST_ONLY = ("token_usage", "timings")
 
 
+def _own_copy(chunk: Any) -> Any:
+    """``chunk`` with its own message, metadata and call pieces, so emptying them leaves it as sent.
+
+    The run's callbacks were handed the chunk before the join (a LangSmith
+    trace keeps it), and they keep what the server sent.
+    """
+    message = chunk.message
+    extra = dict(message.additional_kwargs)
+    if isinstance(extra.get("tool_calls"), list):
+        extra["tool_calls"] = [dict(c) if isinstance(c, dict) else c for c in extra["tool_calls"]]
+    update: dict[str, Any] = {"additional_kwargs": extra}
+    calls = getattr(message, "tool_call_chunks", None)
+    if calls:
+        update["tool_call_chunks"] = [dict(c) for c in calls]
+    return chunk.model_copy(update={"message": message.model_copy(update=update)})
+
+
 def _text_joined(content: Any, pieces: list[str]) -> Any:
     """``content`` with the text ``pieces`` after it, joined as langchain joins message content."""
     from langchain_core.messages.base import merge_content
@@ -442,6 +459,7 @@ class _Join:
         self.last: dict[str, Any] = {}
 
     def add(self, chunk: Any) -> None:
+        chunk = _own_copy(chunk)
         message = chunk.message
         if getattr(message, "usage_metadata", None):
             self.usage = message.usage_metadata

@@ -2386,6 +2386,9 @@ change landed on `main`.
 
 ### Fixed
 
+- **A LangSmith trace shows each streamed chunk as the server sent it**: the llama.cpp, DeepSeek and Ollama joins take the text, reasoning and call arguments out of their own copy of the chunk, where they emptied the chunk the trace keeps.
+### Fixed
+
 - **A streamed answer's text is kept beside a chunk whose content is not a string**: llama.cpp, DeepSeek and Ollama joins add such content by langchain's own rule, with the text before and after it in place, where the text pieces were dropped.
 - **A TECHNIQUE line listing ids separated by commas, "and" or slashes is read as one claim per id**, each checked as a technique, and an id taken off the list when asked is the answer kept; a closing `· ---` is read past, the claim format says several ids are separated by commas, and only a line with words beside an id is asked about.
 - **The verb a catalogue name opens with, ending in a silent "e", is matched by its -s, -d and -ing forms**, so "deobfuscates" and "decoded" describe Deobfuscate/Decode Files or Information and no word of its own ("stated", "computer") matches; and on the absence question a dash ends a negation's reach only before a new clause or after "instead of" or "rather than", an aside between dashes keeps the negation with its verb, and "never-" before a listed past participle negates nothing.

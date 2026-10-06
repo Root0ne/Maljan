@@ -372,6 +372,46 @@ def test_four_times_an_ollama_answer_costs_about_four_times_the_time() -> None:
     assert long < short * 4 * 2.5
 
 
+def _as_sent(chunk: Any) -> Any:
+    return (copy.deepcopy(chunk.message.model_dump()), copy.deepcopy(chunk.generation_info))
+
+
+@pytest.mark.parametrize("name", sorted(SHAPES))
+def test_a_chunk_the_callbacks_were_handed_is_left_as_sent(name: str) -> None:
+    compat, raws = SHAPES[name]
+    chunks = _chunks(compat, raws)
+    sent = [_as_sent(chunk) for chunk in chunks]
+    join = _Join(keep_reasoning=compat == "deepseek")
+    for chunk in chunks:
+        join.add(chunk)
+    join.result()
+
+    assert [_as_sent(chunk) for chunk in chunks] == sent
+
+
+def test_an_ollama_chunk_the_callbacks_were_handed_is_left_as_sent() -> None:
+    from langchain_core.outputs import ChatGenerationChunk
+
+    from maljan.llm.ollama_provider import _OllamaJoin
+
+    chunks = [
+        ChatGenerationChunk(
+            message=AIMessageChunk(content="", additional_kwargs={"reasoning_content": "Think "})
+        ),
+        ChatGenerationChunk(message=AIMessageChunk(content="piece ")),
+        ChatGenerationChunk(message=AIMessageChunk(content="two"), generation_info={"done": True}),
+    ]
+    sent = [_as_sent(chunk) for chunk in chunks]
+    join = _OllamaJoin()
+    for chunk in chunks:
+        join.add(chunk)
+    got = join.result().message
+
+    assert [_as_sent(chunk) for chunk in chunks] == sent
+    assert got.content == "piece two"
+    assert got.additional_kwargs["reasoning_content"] == "Think "
+
+
 def _content_chunks(contents: list[Any]) -> list[Any]:
     from langchain_core.outputs import ChatGenerationChunk
 
