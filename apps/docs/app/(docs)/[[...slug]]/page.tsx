@@ -9,7 +9,8 @@ import {
 import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/components/mdx';
 import type { Metadata } from 'next';
-import { editBranch, repoUrl } from '@/lib/shared';
+import { basePath, editBranch, repoUrl } from '@/lib/shared';
+import { slugify } from '@/lib/slug';
 
 export default async function Page(props: PageProps<'/[[...slug]]'>) {
   const params = await props.params;
@@ -26,7 +27,8 @@ export default async function Page(props: PageProps<'/[[...slug]]'>) {
       {!home && (
         <header className="mj-page-head">
           {section && <p className="mj-eyebrow">{section}</p>}
-          <DocsTitle>{page.data.title}</DocsTitle>
+          {/* The id MkDocs gave the page title, so old links to it still land. */}
+          <DocsTitle id={slugify(page.data.title)}>{page.data.title}</DocsTitle>
           {page.data.description && <DocsDescription>{page.data.description}</DocsDescription>}
         </header>
       )}
@@ -54,6 +56,7 @@ export async function generateMetadata(props: PageProps<'/[[...slug]]'>): Promis
   return {
     title: home ? { absolute: page.data.title } : page.data.title,
     description: page.data.description,
-    alternates: { canonical: page.url },
+    // Next adds no basePath to metadata URLs; the address carries it here.
+    alternates: { canonical: `${basePath}${home ? '/' : `${page.url}/`}` },
   };
 }
