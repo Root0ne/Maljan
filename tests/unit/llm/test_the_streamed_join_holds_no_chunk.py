@@ -370,3 +370,48 @@ def test_four_times_an_ollama_answer_costs_about_four_times_the_time() -> None:
     long = _seconds(16_000)
 
     assert long < short * 4 * 2.5
+
+
+def _content_chunks(contents: list[Any]) -> list[Any]:
+    from langchain_core.outputs import ChatGenerationChunk
+
+    return [
+        ChatGenerationChunk(message=AIMessageChunk(content=copy.deepcopy(content), id="run-1"))
+        for content in contents
+    ]
+
+
+_LIST_PIECE = [{"type": "text", "text": "listed"}]
+CONTENT_SHAPES: dict[str, list[Any]] = {
+    "text, then a list, then text": ["one ", "two ", _LIST_PIECE, " three", " four"],
+    "a list first, then text": [_LIST_PIECE, "after ", "more"],
+    "text between two lists": ["a", _LIST_PIECE, "b", "c", [{"type": "text", "text": "x"}], "d"],
+    "text only": ["a", "b", "c"],
+}
+
+
+@pytest.mark.parametrize("name", sorted(CONTENT_SHAPES))
+def test_text_pieces_keep_their_place_beside_content_that_is_not_a_string(name: str) -> None:
+    contents = CONTENT_SHAPES[name]
+    join = _Join()
+    for chunk in _content_chunks(contents):
+        join.add(chunk)
+    got = join.result().generations[0].message.content
+    want = _reference(_content_chunks(contents), keep_reasoning=False)
+
+    assert got == want.generations[0].message.content
+
+
+@pytest.mark.parametrize("name", sorted(CONTENT_SHAPES))
+def test_an_ollama_join_keeps_text_beside_content_that_is_not_a_string(name: str) -> None:
+    from maljan.llm.ollama_provider import _OllamaJoin
+
+    join = _OllamaJoin()
+    for chunk in _content_chunks(CONTENT_SHAPES[name]):
+        join.add(chunk)
+    want = _content_chunks(CONTENT_SHAPES[name])
+    joined = want[0]
+    for chunk in want[1:]:
+        joined += chunk
+
+    assert join.result().message.content == joined.message.content
