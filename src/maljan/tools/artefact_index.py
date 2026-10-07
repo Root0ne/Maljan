@@ -58,8 +58,9 @@ What it states, and nothing else:
   load from it set, is a call of that name (``slot_calls``), and leaves the
   count of calls that name nothing. A slot two names fill is ambiguous
   (``ambiguous_slots``) and names nothing. A table names nothing when a store
-  of a pointer's width lies outside its records; a narrower store (a loop
-  counter, a flag) is no record's. On x86 a 32-bit counter is a pointer's
+  of a pointer's width or more (or of a width not read, or a pop into the
+  frame) lies outside its records; a narrower store (a loop counter, a flag)
+  is no record's. On x86 a 32-bit counter is a pointer's
   width, so a counter stored beside an x86 table makes it name nothing.
 * **Callers and callees**, and the **indirect artefacts**: how many of its
   direct callees hold artefacts of their own, and how many those are, each
@@ -646,14 +647,27 @@ class _Reader:
         if not is64 and at < len(code) and 0x40 <= code[at] <= 0x4F:
             return []
         stored = _frame_store(code, at)
+        found = _operand_bytes(code, at, is64)
+        if found is not None and found[0] == 0x8F:
+            # A pop into the frame writes a whole word there, whatever width
+            # ``_frame_store`` reads for it, at an address read after the pop
+            # has moved the stack pointer.
+            popped = _frame_ref(code, at)
+            if popped is None or popped[2] & 7:
+                return []
+            word = 8 if is64 else 4
+            base, displacement = popped[3], popped[4]
+            moved = self.pushed - word if base == 4 else 0
+            return [("frame store", base, displacement - moved)]
         if stored is None:
             return []
-        # A store of a pointer's width (or a record's own hash or address) is
-        # where a table's records may lie: one outside them means they are not
-        # a table. A narrower store (a loop counter, a flag) is no record's.
+        # A store of a pointer's width or more, or of a width not read (or a
+        # record's own hash or address), is where a table's records may lie:
+        # one outside them means they are not a table. A narrower store (a
+        # loop counter, a flag) is no record's.
         word = 8 if is64 else 4
         store = ("frame store", stored[0], stored[1] - (self.pushed if stored[0] == 4 else 0))
-        out: list[tuple[Any, ...]] = [store] if stored[2] == word else []
+        out: list[tuple[Any, ...]] = [store] if stored[2] is None or stored[2] >= word else []
         reference = _frame_ref(code, at)
         if reference is None:
             return out

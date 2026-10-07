@@ -784,6 +784,40 @@ class TestAStoreOfAPointerSWidthOutsideTheRecordsCounts:
         assert answer["resolved_slots"] == {}
 
 
+class TestAPointerStoredByAnyEncodingOutsideTheRecordsCounts:
+    def test_each_eight_byte_store_and_a_pop_into_the_frame_make_the_table_name_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        to_xmm0 = b"\x66\x48\x0f\x6e\xc3"  # movq xmm0, rbx
+        for store in (
+            to_xmm0 + b"\x66\x0f\xd6\x04\x24",  # movq [rsp], xmm0
+            to_xmm0 + b"\x66\x48\x0f\x7e\x04\x24",  # movq [rsp], xmm0 (REX.W 0F 7E)
+            to_xmm0 + b"\xf2\x0f\x11\x04\x24",  # movsd [rsp], xmm0
+            to_xmm0 + b"\xc5\xf9\xd6\x04\x24",  # vmovq [rsp], xmm0
+            to_xmm0 + b"\x0f\x13\x04\x24",  # movlps [rsp], xmm0
+            b"\x8f\x04\x24",  # pop qword [rsp]
+            b"\x48\xc7\x04\x24" + struct.pack("<I", 0),  # mov qword [rsp], 0
+        ):
+            image, code = _image()
+            code.go(BUILDER)
+            code.raw(b"\x48\x8b\x1d" + struct.pack("<i", 0))  # mov rbx, [rip+0]
+            code.raw(store)  # the first record's pointer, before its hash
+            first = code.hash_in_record(0x08, FIRST)
+            code.lea_rax(SLOT_B)
+            code.rax_to_frame(0x10)
+            second = code.hash_in_record(0x18, SECOND)
+            code.lea_rax(SLOT_C)
+            code.rax_to_frame(0x20)
+            code.ret()
+            code.go(USER).call_slot(SLOT_B)
+            code.call_slot(SLOT_C)
+            code.ret()
+
+            answer = _index(image, tmp_path, _two(first, second))
+
+            assert answer["resolved_slots"] == {}, store.hex()
+
+
 class TestAnAddressHeldAcrossACallIsNotKnown:
     def test_an_address_taken_before_a_call_and_stored_after_it_is_no_address(
         self, tmp_path: Path

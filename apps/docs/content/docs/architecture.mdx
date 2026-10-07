@@ -618,10 +618,10 @@ instruction count), two ways:
   called). The table names nothing when a record holds two such addresses,
   when records name addresses at different places within them, when fewer
   than two hashed values give no stride, when their spacings differ, when a
-  store to the frame of a pointer's width (a hashed value, an address, or any
-  other value that wide) lies outside every record, when the records do not
-  share one layout
-  of addresses, or when the stack or frame pointer moves between the stores by
+  store to the frame of a pointer's width or more (a hashed value, an address,
+  any other value that wide, a store whose width is not read, or a pop into
+  the frame) lies outside every record, when the records do not share one
+  layout of addresses, or when the stack or frame pointer moves between the stores by
   an amount the run cannot read (any other write of either, or an x86 call,
   whose callee may pop its arguments). A narrower store (a loop counter, a
   flag) is no record's and does not count; on x86 a 32-bit counter is a
