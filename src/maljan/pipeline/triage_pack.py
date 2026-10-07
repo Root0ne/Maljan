@@ -57,8 +57,8 @@ Last of all, for a PE, the function index (``maljan.tools.function_index``):
 every function the run knows, from the file's own tables, capa's starts and
 the call targets the platform's decoder reaches, each with the imports it
 calls, the names its hashes resolve to, the strings it refers to, the capa
-rules matched in it, its callers and callees and the artefacts its callees
-hold beyond its own, each cell naming the entry it comes from. It joins the
+rules matched in it, its callers and callees and how many artefacts its
+callees hold, each cell naming the entry it comes from. It joins the
 pack's own answers above, so it comes after them.
 
 When the pack does not fit its room, every pass line takes only the room the
@@ -1541,6 +1541,14 @@ def _index_block(entry: LedgerEntry, room: int | None) -> str | None:
     return "\n".join(lines)
 
 
+_ADDRESS = re.compile(r"0x[0-9a-f]{1,16}")
+
+
+def _sample_text(value: Any) -> str:
+    """A value the sample wrote (a name from its tables), quoted with the pack's escaping."""
+    return f'"{pack_escaped(str(value or ""))}"'
+
+
 def _rows_left_out(n: int, entry_id: str) -> str:
     return INDEX_ROWS_LEFT_OUT.format(n=n, noun="row" if n == 1 else "rows", entry=entry_id)
 
@@ -1588,7 +1596,7 @@ def _index_row(row: Any, entry_id: str) -> str:
     def named(key: str, verb: str, field: str) -> None:
         cells = [c for c in row.get(key) or [] if isinstance(c, dict)]
         if cells:
-            names = ", ".join(str(c.get(field) or "") for c in cells)
+            names = ", ".join(_sample_text(c.get(field)) for c in cells)
             parts.append(f"{verb} {names} ({', '.join(_index_ids(cells, entry_id))})")
 
     named("imports", "calls", "name")
@@ -1616,13 +1624,21 @@ def _index_row(row: Any, entry_id: str) -> str:
     reached, through = int(indirect.get("artefacts") or 0), int(indirect.get("through") or 0)
     if reached:
         parts.append(
-            f"reaches {reached} more {'artefact' if reached == 1 else 'artefacts'} through "
-            f"{through} {'callee' if through == 1 else 'callees'}"
+            f"{through} {'callee holds' if through == 1 else 'callees hold'} {reached} "
+            f"{'artefact' if reached == 1 else 'artefacts'} of their own"
         )
-    names = [str(n) for n in row.get("names") or []]
-    where = str(row.get("function") or "")
-    if names:
-        where += f" ({', '.join(names)})"
+    # Export names and import names are the sample's own text: quoted and
+    # escaped as the pack writes every recovered string, never prose.
+    said = [f"export {_sample_text(n)}" for n in row.get("names") or []]
+    if row.get("entry_point"):
+        said.append("entry point")
+    where = (
+        _sample_text(row.get("function"))
+        if not _ADDRESS.fullmatch(str(row.get("function") or ""))
+        else str(row.get("function"))
+    )
+    if said:
+        where += f" ({', '.join(said)})"
     return f"- {where}: {'; '.join(parts)}"
 
 

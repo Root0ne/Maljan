@@ -36,10 +36,20 @@ What it states, and nothing else:
 * **The names its hashes resolve to** where the hash resolution states the
   place inside it, and **the capa rules** that matched at its start or at an
   address inside it.
-* **Callers and callees**, and the **indirect artefacts**: the distinct
-  artefacts its direct callees hold that it does not hold itself, counted, with
-  how many callees hold them. One call deep, so the count is linear in the
-  calls and the artefacts.
+* **Callers and callees**, and the **indirect artefacts**: how many of its
+  direct callees hold artefacts of their own, and how many those are, each
+  callee's own distinct count added. One call deep and added per callee, so
+  the count costs one step per call: a union of the callees' artefacts would
+  cost a callee's artefacts once per caller, which a file with one function
+  holding many artefacts and called from many places makes quadratic. An
+  artefact two callees, or the function and a callee, both hold is counted
+  for each, and the answer says so.
+
+Every walk is bounded by the file: each code byte is decoded at most once in
+all, whichever functions, ranges and branches lead to it (a byte another
+function's decoding already read ends the path, so code two functions share is
+read for the first); every list is built from the answers' own entries and
+the decoder's calls, and stored once per distinct value. Nothing recurses.
 
 A place is inside a function when an instruction the decoder read in that
 function covers it, or else when the exception directory's range holds it; a
@@ -212,6 +222,10 @@ class _Reader:
         self.known: set[int] = set()
         self.ranges_of: dict[int, list[tuple[int, int]]] = {}
         self.code = {section.rva: image.section_bytes(section) for section in image.code_sections()}
+        # One mark per code byte: an instruction start any function's decoding
+        # already read. Each byte is decoded once in all, so the walk is linear
+        # in the code however the starts, ranges and branches overlap.
+        self.read = {rva: bytearray(len(code)) for rva, code in self.code.items()}
 
     def add(self, start: int, source: str) -> None:
         function = self.graph.functions.get(start)
@@ -271,8 +285,12 @@ class _Reader:
         if found is None:
             return
         base, code = found
+        read = self.read[base]
         at = begin - base
         while base + at < end and at < len(code):
+            if read[at]:
+                return
+            read[at] = 1
             ins = decode(code, at, self.image.is64)
             if ins is None:
                 function.undecoded = True
@@ -291,15 +309,15 @@ class _Reader:
             self.sorted_seeds[later] if later < len(self.sorted_seeds) else base + len(code),
             base + len(code),
         )
-        seen: set[int] = set()
+        read = self.read[base]
         pending = [function.start]
         while pending:
             rva = pending.pop()
-            while function.start <= rva < bound and rva not in seen:
+            while function.start <= rva < bound and not read[rva - base]:
                 if rva != function.start and rva in self.known:
                     break
-                seen.add(rva)
                 at = rva - base
+                read[at] = 1
                 ins = decode(code, at, self.image.is64)
                 if ins is None:
                     function.undecoded = True
@@ -488,6 +506,7 @@ def index_image(
 
     seeds: dict[str, list[int]] = {}
     names: dict[int, list[str]] = {}
+    entry_points: set[int] = set()
     exports = [row for row in info.get("export_rows") or [] if isinstance(row, Mapping)]
     for row in exports:
         rva = _hex(row.get("rva"))
@@ -499,7 +518,7 @@ def index_image(
     entry = info.get("entry_point")
     if isinstance(entry, int) and entry > 0:
         seeds[_ENTRY_POINT] = [entry]
-        names.setdefault(entry, []).append("entry point")
+        entry_points = {entry}
     starts = [s for s in map(_hex, capa_data.get("function_starts") or []) if s is not None]
     if starts:
         seeds[_CAPA] = starts
@@ -575,7 +594,7 @@ def index_image(
             where = placer.stated(hex(address)) or placer.holders(address)
             place(where, "capa", str(capability["rule"]), capa_id, "capa")
 
-    return _answer(image, graph, rows, names, unplaced)
+    return _answer(image, graph, rows, names, unplaced, entry_points)
 
 
 def _answer(
@@ -584,8 +603,10 @@ def _answer(
     rows: _Rows,
     names: Mapping[int, list[str]],
     unplaced: Mapping[str, int],
+    entry_points: Iterable[int] = (),
 ) -> dict[str, Any]:
     base = image.image_base
+    entries = set(entry_points)
     callers: dict[int, set[int]] = {}
     for start, function in graph.functions.items():
         for callee in function.callees:
@@ -598,16 +619,13 @@ def _answer(
     out: list[dict[str, Any]] = []
     for start, cells in rows.cells.items():
         held = graph.functions.get(start)
-        own = set(cells)
-        reached: set[tuple[str, str]] = set()
+        reached = 0
         through = 0
-        for callee in sorted(held.callees if held else ()):
-            if callee == start:
-                continue
-            more = set(rows.cells.get(callee, {})) - own
-            if more:
+        for callee in held.callees if held else ():
+            theirs = len(rows.cells.get(callee, ())) if callee != start else 0
+            if theirs:
                 through += 1
-                reached |= more
+                reached += theirs
         listed = sorted(cells.values(), key=lambda c: (_KIND_ORDER[c.kind], c.value))
         row: dict[str, Any] = {
             "function": va(start),
@@ -620,10 +638,12 @@ def _answer(
             "capa": [_cell(c) for c in listed if c.kind == "capa"],
             "callers": [va(c) for c in sorted(callers.get(start, ()))],
             "callees": [va(c) for c in sorted(held.callees if held else ())],
-            "indirect": {"artefacts": len(reached), "through": through},
+            "indirect": {"artefacts": reached, "through": through},
         }
         if names.get(start):
             row["names"] = list(dict.fromkeys(names[start]))
+        if start in entries:
+            row["entry_point"] = True
         out.append(row)
     out.sort(key=lambda r: (-int(r["direct"]), int(r["offset"], 16)))
 

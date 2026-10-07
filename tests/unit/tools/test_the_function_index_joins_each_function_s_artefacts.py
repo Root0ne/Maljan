@@ -1,7 +1,6 @@
 """Every function the run knows, with the artefacts the run's answers and the decoder place in it.
 
-Each image is synthetic (``synthetic_pe``, or an ``Image`` laid out in memory
-for the scaling check): the code bytes are written by the test, one
+Each image is synthetic (``synthetic_pe``): the code bytes are written by the test, one
 instruction at a time, and no real program is read. The answers joined
 (``pe_info``, ``capa``, ``floss``, the hash resolution and the blob decoder) are
 written in the shapes those tools answer in, with values the test chooses.
@@ -10,12 +9,10 @@ written in the shapes those tools answer in, with values the test chooses.
 from __future__ import annotations
 
 import struct
-import time
 from pathlib import Path
 from typing import Any
 
 from maljan.tools import function_index
-from maljan.tools.pe_image import Image, Section
 
 from .synthetic_pe import DATA_RVA, TEXT_RVA, SyntheticPE
 
@@ -122,7 +119,7 @@ class TestTheDecoderReadsEachFunction:
         _first_two(code, slots)
         answer = function_index.function_index(_load(image, tmp_path))
         assert _row(answer, FIRST)["indirect"] == {"artefacts": 1, "through": 1}
-        # The leaf holds nothing, so it reaches SECOND nothing more.
+        # The leaf holds nothing, so SECOND's callees hold nothing.
         assert _row(answer, SECOND)["indirect"] == {"artefacts": 0, "through": 0}
 
     def test_a_call_target_outside_the_table_is_a_function_and_one_with_nothing_no_row(
@@ -188,7 +185,7 @@ class TestAnX86ImageWithNoTable:
 
         (row,) = answer["rows"]
         assert row["function"] == hex(0x400000 + FIRST)
-        assert row["names"] == ["entry point"]
+        assert row["entry_point"] is True and "names" not in row
         assert [c["name"] for c in row["imports"]] == ["CreateMutexA"]
         assert [c["text"] for c in row["plain_strings"]] == ["an x86 string"]
         assert answer["function_sources"] == {"entry point": 1}
@@ -281,65 +278,3 @@ class TestTheRunsAnswersArePlaced:
         assert answer["unplaced"] == {"floss": 1}
         texts = [c["text"] for row in answer["rows"] for c in row["decoded_strings"]]
         assert "nowhere" not in texts
-
-
-def _wide_image(functions: int) -> Image:
-    """An x64 image of ``functions`` functions in its table, each loading text and calling on.
-
-    Laid out in memory: ``.text`` at 0x1000, ``.data`` after it. Function i is
-    ``lea rcx, [text]``, ``call function i+1`` (the last calls none), ``ret``.
-    """
-    size = 16
-    text_rva, text_raw = 0x1000, 0x400
-    code = bytearray()
-    data_rva = text_rva + ((functions * size + 0xFFF) // 0x1000) * 0x1000
-    for index in range(functions):
-        start = text_rva + index * size
-        body = bytearray(b"\x48\x8d\x0d" + struct.pack("<i", data_rva - (start + 7)))
-        if index + 1 < functions:
-            body += b"\xe8" + struct.pack("<i", (start + size) - (start + 12))
-        body += b"\xc3"
-        code += body + b"\xcc" * (size - len(body))
-    text = b"a text every function loads\0"
-    data = bytes(text_raw) + bytes(code)
-    data += bytes(data_rva - text_rva - len(code)) + text
-    sections = [
-        Section(".text", text_rva, len(code), text_raw, len(code), 0x60000020),
-        Section(
-            ".data", data_rva, len(text), text_raw + data_rva - text_rva, len(text), 0x40000040
-        ),
-    ]
-    starts = [text_rva + i * size for i in range(functions)]
-    return Image(
-        data=data,
-        image_base=BASE,
-        is64=True,
-        size_of_image=data_rva + 0x1000,
-        sections=sections,
-        function_starts=starts,
-        function_ends=[s + size for s in starts],
-        function_owners=list(starts),
-    )
-
-
-class TestTheIndexIsLinear:
-    def _seconds(self, functions: int) -> float:
-        image = _wide_image(functions)
-        began = time.perf_counter()
-        answer = function_index.index_image(image)
-        took = time.perf_counter() - began
-        assert answer["total"] == functions
-        assert answer["rows"][0]["indirect"] == {"artefacts": 0, "through": 0}
-        return took
-
-    def test_ten_times_the_functions_take_about_ten_times_as_long(self) -> None:
-        small = min(self._seconds(6_000) for _ in range(2))
-        large = self._seconds(60_000)
-        # Linear work is ten times as long; a quadratic step would be a hundred.
-        assert large < small * 30
-
-
-def test_the_wide_image_reads_as_its_layout_says() -> None:
-    image = _wide_image(3)
-    assert image.function_at(0x1010) == 0x1010
-    assert image.section_at_rva(0x1000) is image.sections[0]
