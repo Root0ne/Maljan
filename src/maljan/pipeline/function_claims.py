@@ -730,8 +730,15 @@ class _Region:
     low: int
     high: int
     lists: list[tuple[int, int]] = field(default_factory=list)
+    # The lists' starts in order, and the farthest any list from one of the
+    # first k reaches: a value is in a list when one starting before it ends
+    # after it.
+    list_starts: list[int] = field(default_factory=list)
+    list_reach: list[int] = field(default_factory=list)
     nouns: list[_NounCue] = field(default_factory=list)
+    noun_ends: list[int] = field(default_factory=list)
     verbs: list[tuple[int, int]] = field(default_factory=list)
+    verb_ends: list[int] = field(default_factory=list)
     spaces: list[int] = field(default_factory=list)
 
 
@@ -744,7 +751,9 @@ class _Clauses:
     the ", such as" list a noun negation names, and a negated verb's object.
     Each clause's cues are found in one pass and their far readings worked out
     once; a value is then read by ``_is_negated`` within the window around it
-    and against those readings by its place, so the total is linear in the
+    (back to the break before the value, on to the break after it, so a value
+    holding a break of its own, "settings.ini", still meets the "is absent"
+    after it) and against those readings by its place, so the total is linear in the
     text however many values one clause holds. A clause holding no word a
     statement of absence is read from is read for none.
     """
@@ -758,20 +767,33 @@ class _Clauses:
         self.regions: dict[int, _Region | None] = {}
 
     def negated(self, begin: int, end: int) -> bool:
-        from bisect import bisect_right
+        from bisect import bisect_left, bisect_right
 
         k = bisect_right(self.lows, begin) - 1
+        # The window reads back to the break before the value and on to the
+        # break after it: a value may hold a break of its own ("settings.ini"),
+        # and the absence predicate after it ("is absent") is read past it.
+        after = bisect_left(self.highs, end)
+        low = max(self.lows[k], begin - _NEGATION_WINDOW)
+        high = min(
+            self.highs[after] if after < len(self.highs) else len(self.text), end + _NEGATION_WINDOW
+        )
+        high = max(high, end)
+        # Read on the window as cut, as ``_is_negated`` reads it: a cue word
+        # the cut leaves at its start ("cannot" cut to "not") counts there.
+        window = self.text[low:high]
+        if _ABSENCE_WORDS.search(window) is not None and _is_negated(
+            window, begin - low, end - low
+        ):
+            return True
         if k not in self.regions:
             self.regions[k] = self._read(self.lows[k], max(self.highs[k], self.lows[k]))
         region = self.regions[k]
         if region is None:
             return False
-        low = max(region.low, begin - _NEGATION_WINDOW)
-        high = min(max(region.high, end), end + _NEGATION_WINDOW)
-        if _is_negated(self.text[low:high], begin - low, end - low):
-            return True
+        j = bisect_right(region.list_starts, begin) - 1
         return (
-            any(a <= begin < b for a, b in region.lists)
+            (j >= 0 and region.list_reach[j] > begin)
             or self._in_named_list(region, begin)
             or self._in_negated_object(region, begin)
         )
@@ -820,7 +842,15 @@ class _Clauses:
                     list_ends=ended.end() if ended else high + 1,
                 )
             )
+        region.lists.sort()
+        region.list_starts = [a for a, _b in region.lists]
+        farthest = low
+        for _a, b in region.lists:
+            farthest = max(farthest, b)
+            region.list_reach.append(farthest)
+        region.noun_ends = [cue.end for cue in region.nouns]
         region.verbs = [(m.start(), m.end()) for m in _NEGATED_VERB_RE.finditer(text, low, high)]
+        region.verb_ends = [end for _start, end in region.verbs]
         region.spaces = [m.start() for m in re.finditer(r"\s+", text[low:high])]
         region.spaces = [low + at for at in region.spaces]
         return region
@@ -829,7 +859,7 @@ class _Clauses:
         """``_in_a_named_list`` read by place against the last noun negation before begin."""
         from bisect import bisect_right
 
-        k = bisect_right([cue.end for cue in region.nouns], begin) - 1
+        k = bisect_right(region.noun_ends, begin) - 1
         if k < 0:
             return False
         cue = region.nouns[k]
@@ -848,7 +878,7 @@ class _Clauses:
         object can still reach it."""
         from bisect import bisect_left, bisect_right
 
-        k = bisect_right([end for _start, end in region.verbs], begin) - 1
+        k = bisect_right(region.verb_ends, begin) - 1
         if k < 0:
             return False
         start, verb_end = region.verbs[k]

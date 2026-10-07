@@ -419,6 +419,15 @@ class TestWhereAValueHolds:
         found = _check(f"{MAIN_VA} shows no evidence of process injection, such as VirtualAllocEx.")
         assert found.violations == [] and found.checked == 1
 
+    def test_a_quoted_value_said_to_be_absent_or_missing_is_no_claimed_string(self) -> None:
+        for sentence in (
+            f'In {MAIN_VA} "settings.ini path" is absent, and it calls CreateMutexW.',
+            f'{MAIN_VA} calls CreateMutexW; "settings.ini path" is absent.',
+            f'{MAIN_VA} calls CreateMutexW; "settings.ini path" is missing from it.',
+        ):
+            found = _check(sentence)
+            assert found.violations == [] and found.checked == 1, sentence
+
     def test_a_negation_in_an_earlier_clause_does_not_reach_a_later_one(self) -> None:
         found = _check(f"{MAIN_VA} shows no evidence of process injection: it calls SleepEx.")
         (violation,) = found.violations
