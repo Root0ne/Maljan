@@ -1690,22 +1690,26 @@ def emit_tool_call_finished(
     ok: bool = True,
     duration_ms: int = 0,
     summary: str = "",
+    repeated_of: str = "",
 ) -> None:
-    """One tool call, as it answers, with the ledger id its result is under."""
-    emit(
-        sink,
-        TOOL_CALL_FINISHED,
-        {
-            "stage": str(stage),
-            "agent": str(agent),
-            "tool": str(tool),
-            "server": str(server) if server else None,
-            "evidence_id": str(evidence_id),
-            "ok": bool(ok),
-            "duration_ms": max(0, int(duration_ms)),
-            "summary": str(summary),
-        },
-    )
+    """One tool call, as it answers, with the ledger id its result is under.
+
+    ``repeated_of`` is the earlier entry a call the repeat guard answered
+    without running repeats; the key is sent only for such a call.
+    """
+    payload: dict[str, Any] = {
+        "stage": str(stage),
+        "agent": str(agent),
+        "tool": str(tool),
+        "server": str(server) if server else None,
+        "evidence_id": str(evidence_id),
+        "ok": bool(ok),
+        "duration_ms": max(0, int(duration_ms)),
+        "summary": str(summary),
+    }
+    if repeated_of:
+        payload["repeated_of"] = str(repeated_of)
+    emit(sink, TOOL_CALL_FINISHED, payload)
 
 
 def emit_validation_feedback(

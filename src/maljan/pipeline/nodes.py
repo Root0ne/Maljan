@@ -821,6 +821,9 @@ def _pin_sample_path(agent: Any, state: AnalysisState) -> None:
         "static": state.get("static_sample_path") or None,
         "host": _absolute_host_sample_path(state) or None,
     }
+    # The worker's own copy, for the static role's family classifier, which
+    # reads the bytes on this host. Kept off the chunk the model reads.
+    agent._host_sample_path = state.get("sample_path") or None
     # And the per-server overrides, for a tool server that was handed the
     # bytes instead of sharing this filesystem. Assigned unconditionally for
     # the same reason the path above is: an agent is cached across samples.
@@ -838,7 +841,6 @@ def _augment_static_chunks_with_path(
     state: AnalysisState,
     *,
     provider_id: str | None = None,
-    host_path_reader: bool = True,
 ) -> list:
     """Inject the container-visible sample path into the static analyst's chunks.
 
@@ -910,17 +912,12 @@ def _augment_static_chunks_with_path(
         value = state.get(key)
         if isinstance(value, str) and value and value != "unknown":
             parsed[key] = value
-    # Also carry the HOST-readable path (when present) so the static-feature
-    # family classifier can read the raw bytes — ember reads the file on the
-    # host, unlike Ghidra which reads the container-visible ``analysis_file_path``.
-    #
-    # Only for the reader that uses it (``host_path_reader``, the static role's
-    # family classifier). A generic agent has no such reader, and a second path
-    # in its head chunk is one a model can hand its tools instead of the one
-    # they read — the host path, which a containerised Ghidra cannot open.
+    # The host path is not written here for any agent. The static role's
+    # family classifier reads it from the agent (``_pin_sample_path``), and a
+    # second path in the chunk is one a model hands its tools instead of the
+    # one they read: an r2 analyst sent the worker's staging path, which
+    # radare2 will not open, beside the mirror it had been given.
     host_path = state.get("sample_path")
-    if host_path_reader and isinstance(host_path, str) and host_path:
-        parsed["host_sample_path"] = host_path
     # The toolchain: knowing a sample is AutoIt or PyInstaller rather than
     # "a PE" changes which tools are worth spending steps on, and it costs one
     # line of prompt. It is the one fact here no tool answers directly.
@@ -1178,14 +1175,29 @@ def evidence_summary(ledger: Sequence[Any]) -> dict[str, Any]:
     by_tool: dict[str, int] = {}
     for entry in ledger:
         by_tool[entry.tool] = by_tool.get(entry.tool, 0) + 1
-    return {
+    # A call the repeat guard answered from an earlier entry is an entry and is
+    # counted apart: it neither worked nor failed, it was not run.
+    ran = [e for e in ledger if not getattr(e, "repeated_of", None)]
+    # An answer the tool-output guardrail cut keeps what the model read and is
+    # counted as cut, not as trimmed to the budget, unless the budget then
+    # blanked it too.
+    cut = [e for e in ledger if int(getattr(e, "chars_dropped", 0) or 0) > 0]
+    cut_ids = {id(e) for e in cut}
+    summary: dict[str, Any] = {
         "entries": len(ledger),
-        "ok": sum(1 for e in ledger if e.ok),
-        "failed": sum(1 for e in ledger if not e.ok),
-        "trimmed": sum(1 for e in ledger if e.truncated),
+        "ok": sum(1 for e in ran if e.ok),
+        "failed": sum(1 for e in ran if not e.ok),
+        "trimmed": sum(1 for e in ledger if e.truncated and (id(e) not in cut_ids or not e.output)),
         "by_tool": dict(sorted(by_tool.items())),
         "failures": tool_failures(ledger),
     }
+    repeats = len(ledger) - len(ran)
+    if repeats:
+        summary["repeats"] = repeats
+    if cut:
+        summary["cut"] = len(cut)
+        summary["chars_dropped"] = sum(int(e.chars_dropped) for e in cut)
+    return summary
 
 
 def with_verdict_fallback(validation: Any, failure: str) -> dict[str, Any]:
@@ -2596,7 +2608,6 @@ def make_stage_agent_node(
                     chunks,
                     state,
                     provider_id=agent._resolved.static_provider_id,
-                    host_path_reader=role == "static",
                 )
 
             # The no-data guard runs on what the *loaders* produced. Injecting

@@ -34,6 +34,9 @@ class EvidenceEntryResponse(BaseModel):
     # It is the only thing that says so, and a reader has to say it from this
     # rather than from an empty ``output``: a failed call is empty too.
     truncated: bool = False
+    # The characters the tool-output guardrail cut from the answer the model
+    # read; 0 for an answer stored whole, and for a row older than the column.
+    chars_dropped: int = 0
     # The earlier identical call this one was answered from, the label the
     # recorder parsed out of the arguments, and the run-clock time the call
     # started at. ``None`` where the row predates the columns.
@@ -47,6 +50,12 @@ class EvidenceEntryResponse(BaseModel):
     def _absent_is_false(cls, value: Any) -> bool:
         """A row written before the column existed made an ordinary call."""
         return bool(value)
+
+    @field_validator("chars_dropped", mode="before")
+    @classmethod
+    def _absent_is_zero(cls, value: Any) -> int:
+        """A row written before the column existed recorded no cut."""
+        return int(value or 0)
 
 
 class EvidenceListResponse(BaseModel):

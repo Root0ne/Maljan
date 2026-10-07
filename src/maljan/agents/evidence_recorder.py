@@ -36,10 +36,12 @@ from maljan.pipeline.events import (
     summarize_args,
     summarize_result,
 )
+from maljan.pipeline.validation import listed_function
 from maljan.schemas.evidence import (
     EvidenceCounter,
     LedgerEntry,
     build_entry,
+    holds_its_answer,
     not_shown_record,
 )
 
@@ -229,6 +231,9 @@ class EvidenceRecorder:
         # monotonic within this loop rather than within a job.
         self.counter = counter if counter is not None else EvidenceCounter()
         self.entries: list[LedgerEntry] = []
+        # Each entry by its id, kept beside the list so following a repeat to
+        # its holder is one lookup per hop.
+        self._by_id: dict[str, LedgerEntry] = {}
         # ``None`` outside a job, which makes every emit a no-op, exactly as
         # it does everywhere else in the pipeline.
         self.sink = sink
@@ -261,6 +266,19 @@ class EvidenceRecorder:
             args_summary=summarize_args(args),
         )
 
+    def holder_of(self, entry_id: str) -> str:
+        """The entry that holds the answer ``entry_id`` names: itself, or its repeat chain's end.
+
+        So no repeat is ever filed as a repeat of a repeat, and no id a model
+        is told to cite is one whose entry holds only a note.
+        """
+        by_id = self._by_id
+        wanted, seen = str(entry_id or "").strip(), set()
+        while wanted in by_id and by_id[wanted].repeated_of and wanted not in seen:
+            seen.add(wanted)
+            wanted = str(by_id[wanted].repeated_of)
+        return wanted
+
     def entry_failed(self, entry_id: str) -> bool:
         """Whether the entry with this id recorded a failure.
 
@@ -290,14 +308,19 @@ class EvidenceRecorder:
         args_repaired: bool = False,
         args_raw: str | None = None,
         not_shown: int | None = None,
+        cut: int | None = None,
     ) -> LedgerEntry:
         """Append one entry and return it, so the caller can quote its id.
 
         ``not_shown`` is the length of an answer the conversation had no room
         for: the entry is recorded as cut (``schemas.evidence.not_shown_record``)
         and ``output``, what the model was handed instead, is what the run's
-        corpus remembers.
+        corpus remembers. ``cut`` is the characters the tool-output guardrail
+        dropped from an answer it cut to fit: the entry keeps what the model
+        read and is marked ``truncated`` with ``chars_dropped``.
         """
+        if repeated_of:
+            repeated_of = self.holder_of(repeated_of)
         entry_id, seq = self.counter.next_id()
         entry = build_entry(
             entry_id=entry_id,
@@ -318,18 +341,27 @@ class EvidenceRecorder:
             args_raw=args_raw,
             model=self.model or None,
             not_shown=not_shown is not None,
+            chars_dropped=int(cut or 0) if not_shown is None else 0,
         )
         self.entries.append(entry)
+        self._by_id[entry.id] = entry
         # The function names a hash resolution read are names, and the event
         # and transcript scrub keeps them as written for the rest of the job.
         # Only this platform's own resolver answers them: the pack's call and
         # the analysis server's tool. Another server's tool of that name is not.
-        if tool == "resolve_api_hashes" and entry.ok and server in _RESOLVING_SERVERS:
+        if (
+            tool == "resolve_api_hashes"
+            and entry.ok
+            and server in _RESOLVING_SERVERS
+            and not repeated_of
+        ):
             remember_resolved_names(output)
         # ``output``, the text the model was handed, and not ``entry.output``,
         # which the ledger has already trimmed and the byte budget may blank
         # to nothing. What the run saw is what a grounding check must search.
-        if self.corpus is not None:
+        # A repeat holds the note the guard wrote, not a tool's answer: the
+        # answer is the earlier entry's, and the corpus already has it.
+        if self.corpus is not None and not repeated_of:
             try:
                 self.corpus.remember(entry.id, tool, output)
             except Exception:  # noqa: BLE001 — a record is never worth a lost call
@@ -358,8 +390,43 @@ class EvidenceRecorder:
             summary=summarize_result(
                 entry.output, ok=entry.ok, remediation=entry.remediation or ""
             ),
+            repeated_of=entry.repeated_of or "",
         )
         return entry
+
+    def record_repeat(
+        self,
+        *,
+        tool: str,
+        args: dict[str, Any] | None,
+        server: str | None,
+        first: str,
+        said: str,
+        ok: bool = True,
+    ) -> LedgerEntry:
+        """File a call the repeat guard answered without running, as a repeat of ``first``.
+
+        The call was made, so it is written down and announced like any other:
+        a chunk whose every call an earlier chunk had already answered left no
+        entry and no event at all, and a reader of the ledger could not tell
+        nine calls from none. ``repeated_of`` says which entry holds the
+        answer, and ``said`` is the note the model was handed in its place.
+        ``ok`` is false when the earlier entry is a failure. The model is never
+        shown this entry's id: the answer it reads carries the earlier one,
+        which is the one to cite.
+        """
+        self.call_started(tool=tool, args=args, server=server)
+        return self.record(
+            tool=tool,
+            args=args,
+            server=server,
+            output=said,
+            ok=ok,
+            error=None if ok else said,
+            started_at=time.time(),
+            duration_ms=0,
+            repeated_of=str(first),
+        )
 
 
 class RepeatGuard:
@@ -418,6 +485,13 @@ class RepeatGuard:
         # the first answer is the first time this model hears of the earlier
         # call, and only asking again after it is a repeat.
         self._told: set[str] = set()
+        # The listings each decompile answered with, by the key the answer
+        # prints (``validation.listed_function``), with the entry that holds
+        # each. The printed name only finds candidates: it is text the sample
+        # can shape (a forged or a shared name), so a call is a repeat only
+        # when its listing is the held one, or a prefix of it.
+        self._functions: dict[tuple[str, Any], list[tuple[str, str]]] = {}
+        self._seeded_functions: dict[tuple[str, Any], list[tuple[str, str]]] = {}
 
     def _seeded_count(self, key: str) -> int:
         """Where a seeded call's count starts: one served retry for a failure or an unkept result."""
@@ -484,6 +558,32 @@ class RepeatGuard:
         self._told.add(key)
         return True
 
+    def note_function(
+        self, key: tuple[str, Any] | None, entry_id: str, listing: str, *, seeded: bool = False
+    ) -> None:
+        """Record that ``entry_id`` holds ``listing``, a listing of the function ``key`` names."""
+        body = listing_body(listing)
+        if key is None or not entry_id or not body:
+            return
+        self._functions.setdefault(key, []).append((str(entry_id), body))
+        if seeded:
+            self._seeded_functions.setdefault(key, []).append((str(entry_id), body))
+
+    def function_entry(self, key: tuple[str, Any] | None, listing: str) -> str | None:
+        """The entry whose listing already holds all of ``listing``, or ``None``.
+
+        Content decides, never the name alone: the listing must be the held
+        one, or the held one cut shorter. A listing under a name another entry
+        printed that says anything else, or shows more, is new evidence.
+        """
+        body = listing_body(listing)
+        if key is None or not body:
+            return None
+        for entry_id, held in self._functions.get(key, ()):
+            if held.startswith(body):
+                return entry_id
+        return None
+
     def seeded_failure(self, entry_id: str) -> bool:
         """Whether a seeded entry recorded a failure."""
         return str(entry_id) in self._seeded_failures
@@ -546,6 +646,7 @@ class RepeatGuard:
         self._first = dict(self._seeded)
         self._count = {key: self._seeded_count(key) for key in self._seeded}
         self._told = set()
+        self._functions = {key: list(rows) for key, rows in self._seeded_functions.items()}
         self.served_repeats = 0
 
     def ending_the_loop(self) -> bool:
@@ -573,9 +674,11 @@ def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
     """A loop's repeat guard, seeded with the calls earlier chunks made (``RepeatGuard.seed``).
 
     An answered call is seeded with the result its entry recorded, which is
-    what a later identical call is answered with. A call whose entry holds no
-    whole result — the byte budget blanked it, or a ceiling cut it — has
-    nothing recorded to answer with and is served once more.
+    what a later identical call is answered with. A call whose entry does not
+    hold the answer the model read — the byte budget blanked it, a ceiling cut
+    it, or the conversation had no room for it — has nothing recorded to
+    answer with and is served once more. An answer the tool-output guardrail
+    cut is held as the model read it, which a second call would hand back.
     """
     guard = RepeatGuard()
     for entry in entries or ():
@@ -584,15 +687,55 @@ def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
         args = getattr(entry, "args", None)
         if not (tool and entry_id and isinstance(args, dict)):
             continue
+        # A repeat names the entry that answered it, which is seeded itself.
+        if getattr(entry, "repeated_of", None):
+            continue
         if not bool(getattr(entry, "ok", True)):
             guard.seed(tool, args, entry_id, failed=True)
             continue
-        output = str(getattr(entry, "output", "") or "")
-        if not output or bool(getattr(entry, "truncated", False)):
+        if not holds_its_answer(entry):
             guard.seed(tool, args, entry_id, rerun=True)
             continue
+        output = str(getattr(entry, "output", "") or "")
         guard.seed(tool, args, entry_id, recorded=output)
+        if decompiles(tool):
+            guard.note_function(listed_function(output), entry_id, output, seeded=True)
     return guard
+
+
+# The marker both tool-output guardrails end a character cut with
+# (``mcp_client.TRUNCATION_MARKER``, ``ghidra_http_client.TRUNCATION_MARKER``).
+_CUT_MARKER = "\n\n[OUTPUT TRUNCATED]"
+
+
+def listing_body(listing: str) -> str:
+    """A listing without the guardrail's cut marker, so a cut copy is a prefix of the whole."""
+    text = str(listing or "")
+    return text[: -len(_CUT_MARKER)] if text.endswith(_CUT_MARKER) else text
+
+
+def decompiles(tool: str) -> bool:
+    """Whether a tool's name says it decompiles, the way the decompiled-function list reads it."""
+    return "decompil" in str(tool or "").lower()
+
+
+def _function_label(text: str, key: tuple[str, Any] | None) -> str:
+    """The function's name as the listing prints it, for the notice."""
+    from maljan.pipeline.validation import _listing_text, _signature_name
+
+    printed = _signature_name(_listing_text(text))
+    if printed:
+        return printed
+    return f"the function at {key[1]:#x}" if key and key[0] == "start" else "the same function"
+
+
+def same_function_notice(name: str, entry_id: str) -> str:
+    """What a decompile is told when its answer is a function an earlier entry already holds."""
+    return (
+        f"The answer above is {name} again, the function [{entry_id}] already holds: an "
+        f"address inside a function is answered with the whole function. Cite [{entry_id}] "
+        "for it."
+    )
 
 
 def earlier_chunk_answer(
@@ -602,14 +745,19 @@ def earlier_chunk_answer(
 
     The result as its entry recorded it, stamped with that entry's id the way
     a call's own answer is stamped, and one sentence saying where it came
-    from. No tool runs and nothing is written to the ledger: the entry that
-    holds the result already exists, and it is the one to cite.
+    from. No tool runs. The call is filed as a repeat of that entry
+    (``EvidenceRecorder.record_repeat``), whose id the model is not shown:
+    the entry that holds the result is the one to cite.
     """
     # The notice the original answer carried when it was shortened, read off
     # the recorded text the same way (``_stamp``).
     shortened = shortened_notice(recorded, narrowing=narrowing)
+    return f"[{entry_id}]\n{recorded}{shortened}\n\n{earlier_chunk_sentence(tool, entry_id)}"
+
+
+def earlier_chunk_sentence(tool: str, entry_id: str) -> str:
+    """The sentence under an earlier chunk's result, and the note its repeat entry keeps."""
     return (
-        f"[{entry_id}]\n{recorded}{shortened}\n\n"
         f"This call to {tool} with these arguments was made in an earlier chunk of this "
         f"input and is not run again: the text above is the result recorded in [{entry_id}]."
     )
@@ -696,10 +844,11 @@ def repeat_notice(
 ) -> str:
     """What the model is told instead of the same answer a third time.
 
-    A message to the model and nothing else: no tool ran, so there is no entry
-    to write and no id to hand out. It used to be recorded as a successful
-    call — ``ok=true``, ``duration_ms=0`` — which inflated the ledger, inflated
-    the report's "tool call(s) recorded" line, and gave the model a citable
+    No tool ran, so no id is handed out: the call is filed as a repeat of the
+    entry named here (``EvidenceRecorder.record_repeat``), counted apart from
+    the calls that ran, and the model cites the earlier entry. It was once
+    recorded as a successful call — ``ok=true``, ``duration_ms=0`` — which
+    inflated the report's count of calls made and gave the model a citable
     evidence id whose entry held no evidence.
 
     ``failed`` says the entry it points at is a failure rather than an answer,
@@ -867,8 +1016,7 @@ def _record_tool(
         run-state block carries the same fact every turn at no cumulative cost.
 
         Nothing is written to the ledger: no tool ran, and an entry here would
-        be a citable id for evidence that does not exist — the same rule the
-        repeat guard follows.
+        be a citable id for evidence that does not exist.
         """
         from maljan.llm.context_window import TOOL_PHASE_ENDED_NOTICE, ContextBudget
 
@@ -892,9 +1040,9 @@ def _record_tool(
     def _names_its_own_parameter(kwargs: dict[str, Any]) -> str | None:
         """The question for a call whose argument is its own parameter's name, if it is one.
 
-        Not run and not written to the ledger, like a refused repeat: no tool
-        ran, and an entry would be a citable id for evidence that does not
-        exist. The model is told which argument and why, and the value is
+        Not run and not written to the ledger: no tool ran, no earlier entry
+        holds an answer to it, and an entry would be a citable id for evidence
+        that does not exist. The model is told which argument and why, and the value is
         left exactly as it wrote it.
         """
         found = self_named_arguments(kwargs)
@@ -929,19 +1077,32 @@ def _record_tool(
         # and not a repeat.
         recorded = repeats.recorded_answer(name, kwargs)
         if recorded is not None:
+            earlier, _text = recorded
+            recorder.record_repeat(
+                tool=name,
+                args=kwargs,
+                server=server,
+                first=earlier,
+                said=earlier_chunk_sentence(name, earlier),
+            )
             return earlier_chunk_answer(name, *recorded, narrowing)
         if not repeats.first_touch_of_seed(name, kwargs):
             repeats.note_repeat()
-        # Told to the model, written nowhere. No tool ran: an entry here would
-        # be a successful call that made none, and the id on it would be an
-        # evidence id a report could cite for evidence that does not exist.
-        return repeat_notice(
+        failed = recorder.entry_failed(first) or repeats.seeded_failure(first)
+        notice = repeat_notice(
             name,
             first,
             narrowing,
             last_warning=repeats.warning_of_the_end(),
-            failed=recorder.entry_failed(first) or repeats.seeded_failure(first),
+            failed=failed,
         )
+        # Filed as a repeat of the entry that holds the answer, and the model
+        # is handed the notice with no id of its own: an id here would be one
+        # a report could cite for evidence that does not exist.
+        recorder.record_repeat(
+            tool=name, args=kwargs, server=server, first=first, said=notice, ok=not failed
+        )
+        return notice
 
     def _note(kwargs: dict[str, Any], entry_id: str) -> None:
         """Count the call against the repeat budget, however it turned out.
@@ -1001,21 +1162,59 @@ def _record_tool(
         value: Any,
         repeated: str | None,
         not_shown: int | None = None,
+        cut: int | None = None,
     ) -> str:
         text = result_text(value)
         raw = _was_repaired(kwargs)
+        # The function a decompile answered with, and the entry that already
+        # holds it: a call given an address inside a function an earlier call
+        # read is answered with that same function, and is a repeat of it
+        # whatever address it was given; a served identical call whose listing
+        # the holder holds is one too. Content decides (``function_entry``).
+        # Not for an answer the conversation had no room for.
+        function = (
+            listed_function(text)
+            if repeats is not None and decompiles(name) and not_shown is None
+            else None
+        )
+        holder = repeats.function_entry(function, text) if repeats is not None else None
+        holder = recorder.holder_of(holder) if holder else None
+        same = ""
+        if holder:
+            same = (
+                served_repeat_notice(
+                    name, holder, narrowing, last_warning=repeats.warning_of_the_end()
+                )
+                if repeated is not None and repeats is not None
+                else same_function_notice(_function_label(text, function), holder)
+            )
         entry = recorder.record(
             tool=name,
             args=kwargs,
             server=server,
-            output=text,
+            # A repeat keeps the note, not a second copy of the listing the
+            # entry it names already holds.
+            output=same or text,
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
+            repeated_of=holder,
             args_repaired=raw is not None,
             args_raw=raw,
             not_shown=not_shown,
+            cut=cut,
         )
-        _note(kwargs, entry.id)
+        # A repeat is noted under the entry that holds its answer, so a later
+        # served or refused identical call names that entry, never the repeat.
+        _note(kwargs, entry.repeated_of or entry.id)
+        if same:
+            # Still handed the answer: the earlier listing may be gone from
+            # what the window keeps of this conversation. It is stamped with
+            # the entry that holds the function, which is the one to cite.
+            shortened = shortened_notice(text, narrowing=narrowing)
+            repaired = REPAIRED_NOTICE if raw is not None else ""
+            return f"[{holder}]\n{text}{repaired}{shortened}\n\n{same}"
+        if repeats is not None and entry.ok and function is not None:
+            repeats.note_function(function, entry.id, text)
         # Read off the answer itself, before any notice is appended to it: a
         # notice is prose and prose does not parse.
         shortened = shortened_notice(text, narrowing=narrowing)
@@ -1085,10 +1284,11 @@ def _record_tool(
     if func is not None:
 
         def wrapped_func(**kwargs: Any) -> str:  # noqa: F811
-            # The guards first, and nothing is announced when one refuses: no
-            # tool runs, no entry is written, and a start with no finish behind
-            # it would leave the console holding a bubble open for a call that
-            # never happened.
+            # The guards first. A call the repeat guard answers is filed and
+            # announced as a repeat of the entry that holds its answer
+            # (``record_repeat``); the other guards' answers are questions, and
+            # a start with no finish behind it would leave the console holding
+            # a bubble open for a call that never happened.
             ended = _the_room_is_gone()
             if ended is not None:
                 return ended
@@ -1110,7 +1310,15 @@ def _record_tool(
                 # analyst's answer (``BaseAnalyst._claims_watched``).
                 with answering_for(recorder.agent) as call_answer, watching(None):
                     value = func(**kwargs)
-                return _stamp(kwargs, started, wall_clock, value, repeated, call_answer.not_shown)
+                return _stamp(
+                    kwargs,
+                    started,
+                    wall_clock,
+                    value,
+                    repeated,
+                    call_answer.not_shown,
+                    call_answer.cut,
+                )
             except SampleNotOpened as exc:
                 return _stopped(kwargs, started, wall_clock, exc, repeated)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
@@ -1139,7 +1347,15 @@ def _record_tool(
                 # the guardrail to, because that copies the context.
                 with answering_for(recorder.agent) as call_answer, watching(None):
                     value = await coroutine(**kwargs)
-                return _stamp(kwargs, started, wall_clock, value, repeated, call_answer.not_shown)
+                return _stamp(
+                    kwargs,
+                    started,
+                    wall_clock,
+                    value,
+                    repeated,
+                    call_answer.not_shown,
+                    call_answer.cut,
+                )
             except SampleNotOpened as exc:
                 return _stopped(kwargs, started, wall_clock, exc, repeated)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
