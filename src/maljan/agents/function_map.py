@@ -16,7 +16,8 @@ again. The map is kept for it by the platform, from facts only:
   names the function;
 * whether the function is a row of the pack's function index
   (``tools.artefact_index``): with an index, the coverage line counts the
-  visited functions among the index's rows.
+  visited functions among the index's rows, and the not-visited line lists
+  the other rows in the pack's rank order.
 
 The model never writes to it. The block is rendered fresh on every turn beside
 the run-state lines and replaces nothing the model already sees.
