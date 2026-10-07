@@ -968,8 +968,11 @@ def question_evidence(ledger: Iterable[Any], corpus: Any = None) -> dict[str, Qu
             partial=bool(getattr(entry, "truncated", False)),
             lowered=lowered,
         )
-    for repeat, holder in repeat_holders(ledger).items():
-        if holder in shown:
+    holders = repeat_holders(ledger)
+    for repeat, holder in holders.items():
+        # A loop, or a chain to an id the ledger lacks, holds no answer: shown
+        # as nothing, as the citation check reads it.
+        if holder and holder in shown and holder not in holders:
             shown[repeat] = shown[holder]
         else:
             shown.pop(repeat, None)

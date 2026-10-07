@@ -4629,11 +4629,13 @@ class EntryTexts:
             if text:
                 texts[entry_id] = text
                 tools[entry_id] = str(getattr(entry, "tool", "") or "")
-        for repeat, holder in repeat_holders(ledger).items():
+        holders = repeat_holders(ledger)
+        for repeat in holders:
             texts.pop(repeat, None)
             tools.pop(repeat, None)
             partial.discard(repeat)
-            if holder in texts:
+        for repeat, holder in holders.items():
+            if holder and holder in texts:
                 texts[repeat] = texts[holder]
                 tools[repeat] = tools[holder]
             if holder in partial:

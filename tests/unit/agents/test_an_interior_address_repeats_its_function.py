@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
@@ -209,6 +210,51 @@ class TestACitedRepeatReadsAsItsHolder:
         orphan = [LedgerEntry(id="ev_0009", tool="strings", output="a note", repeated_of="ev_0004")]
 
         assert "ev_0009" not in EntryTexts.from_ledger(orphan).texts
+
+
+class TestALoopingOrOrphanRepeatHoldsNothing:
+    @pytest.mark.parametrize(
+        "rows",
+        [
+            [("ev_0001", "ev_0002"), ("ev_0002", "ev_0001")],
+            [("ev_0001", "ev_0001")],
+            [("ev_0001", "ev_0009")],
+        ],
+        ids=["two-entry-loop", "names-itself", "orphan"],
+    )
+    def test_the_judge_and_the_citation_check_both_read_nothing(self, rows: Any) -> None:
+        from maljan.agents.judge_agent import question_evidence
+        from maljan.pipeline.validation import EntryTexts
+
+        ledger = [
+            LedgerEntry(id=entry_id, tool="strings", output="a note", repeated_of=first)
+            for entry_id, first in rows
+        ]
+
+        texts = EntryTexts.from_ledger(ledger).texts
+        shown = question_evidence(ledger)
+
+        for entry_id, _first in rows:
+            assert entry_id not in texts
+            assert entry_id not in shown
+
+
+class TestFilingRepeatsIsLinear:
+    def test_eight_thousand_repeats_after_eight_thousand_entries(self) -> None:
+        import time
+
+        recorder = EvidenceRecorder("static_r2", counter=EvidenceCounter())
+        for n in range(8000):
+            recorder.record(tool="strings", args={"n": n}, server=None, output="x")
+        started = time.monotonic()
+        for n in range(8000):
+            recorder.record_repeat(
+                tool="strings", args={"n": n}, server=None, first=f"ev_{n + 1:04d}", said="note"
+            )
+        elapsed = time.monotonic() - started
+
+        assert elapsed < 3.0, elapsed
+        assert recorder.entries[-1].repeated_of == "ev_8000"
 
 
 class TestTheSampleCannotForgeARepeat:

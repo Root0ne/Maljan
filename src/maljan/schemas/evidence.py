@@ -152,9 +152,10 @@ def repeat_holders(entries: Any) -> dict[str, str]:
     """Each repeat's id mapped to the id of the entry that holds its answer, lower-cased.
 
     A repeat names the entry it was answered from (``repeated_of``); a chain is
-    followed to its end, so the id is always that of an entry that ran. An id
-    whose chain leads nowhere in ``entries``, or round in a loop, maps to the
-    last entry reached. Entries that ran are not in the map.
+    followed to its end. A chain that comes round to an entry it already
+    passed holds no answer and maps to ``""``; one that leads to an id not in
+    ``entries`` maps to that id, which names nothing a reader holds. Entries
+    that ran are not in the map.
     """
     named: dict[str, str] = {}
     for entry in entries or ():
@@ -168,7 +169,7 @@ def repeat_holders(entries: Any) -> dict[str, str]:
         while first in named and first not in seen:
             seen.add(first)
             first = named[first]
-        holders[entry_id] = first
+        holders[entry_id] = "" if first in seen else first
     return holders
 
 

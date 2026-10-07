@@ -231,6 +231,9 @@ class EvidenceRecorder:
         # monotonic within this loop rather than within a job.
         self.counter = counter if counter is not None else EvidenceCounter()
         self.entries: list[LedgerEntry] = []
+        # Each entry by its id, kept beside the list so following a repeat to
+        # its holder is one lookup per hop.
+        self._by_id: dict[str, LedgerEntry] = {}
         # ``None`` outside a job, which makes every emit a no-op, exactly as
         # it does everywhere else in the pipeline.
         self.sink = sink
@@ -269,7 +272,7 @@ class EvidenceRecorder:
         So no repeat is ever filed as a repeat of a repeat, and no id a model
         is told to cite is one whose entry holds only a note.
         """
-        by_id = {entry.id: entry for entry in self.entries}
+        by_id = self._by_id
         wanted, seen = str(entry_id or "").strip(), set()
         while wanted in by_id and by_id[wanted].repeated_of and wanted not in seen:
             seen.add(wanted)
@@ -341,6 +344,7 @@ class EvidenceRecorder:
             chars_dropped=int(cut or 0) if not_shown is None else 0,
         )
         self.entries.append(entry)
+        self._by_id[entry.id] = entry
         # The function names a hash resolution read are names, and the event
         # and transcript scrub keeps them as written for the rest of the job.
         # Only this platform's own resolver answers them: the pack's call and
