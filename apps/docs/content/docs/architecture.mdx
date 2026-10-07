@@ -3199,11 +3199,17 @@ is assembled from what the run gathered rather than recomputed beside it:
   stay as they compile), the command-line flags table, the sandbox's command
   lines (§5.5 and the process tree), the persistence targets and payloads,
   the registry keys and value names, the file operations and dropped files,
-  the shadow-copy commands, and model prose and cells beyond the run's own values defang
+  the shadow-copy commands, the mutexes, the notable APIs, the kill and
+  spared lists, the file name as submitted and the internal and export names,
+  and model prose and cells beyond the run's own values defang
   every URL of any scheme, `www.` host, mailbox, IPv4 or IPv6 address and host
   under a real top-level domain (the string sweep's list, the root zone's;
   any number of labels, in capitals, `.onion`): everything a viewer could
-  link. The host reader the publish checks, the run summary's sentences and
+  link. A closing pass reads every section of the rendered Markdown once more
+  with the same defanger, so a cell or code span a section did not pass
+  through it prints defanged too; it leaves the draft rules' fenced bodies,
+  which print as they compile, and the run summary's appendix, whose model
+  endpoint prints as configured. The host reader the publish checks, the run summary's sentences and
   a cell's state note use (`validation.network_values_in`) reads a `.onion`
   name of any labels by the same form reader, and an IPv6 address whole (an
   IPv4 tail included) when it is bracketed or has at least three groups and a

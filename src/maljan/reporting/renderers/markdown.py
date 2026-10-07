@@ -232,11 +232,25 @@ class MarkdownRenderer:
             self._safe_section("attribution", lambda: self._section_attribution(report, ctx)),
             self._safe_section("limitations", lambda: self._section_limitations(report, ctx)),
             self._safe_section("appendix_evidence", lambda: self._appendix_evidence(report, ctx)),
-            self._safe_section("appendix_run_summary", lambda: self._appendix_run(report)),
+            # The run's own configuration, the model endpoint among it, prints
+            # as configured; it is the one section the closing pass leaves.
+            _RUN_SUMMARY_MARK
+            + self._safe_section("appendix_run_summary", lambda: self._appendix_run(report)),
             self._safe_section("appendix_references", lambda: self._appendix_references(report)),
             self._safe_section("appendix_methodology", lambda: self._appendix_method(report, ctx)),
         ]
-        return "\n\n".join(s.rstrip() for s in sections if s).rstrip() + "\n"
+        # Every value a viewer could follow, wherever a section printed it, is
+        # read once more by the report's defanger: a cell or a code span a
+        # sandbox, the sample's bytes or a model filled prints defanged even
+        # where its section did not pass it through the context. A draft
+        # rule's fenced body is the rule to deploy and prints as it compiles.
+        read = [
+            text[len(_RUN_SUMMARY_MARK) :]
+            if text.startswith(_RUN_SUMMARY_MARK)
+            else _defanged_outside_rule_bodies(text)
+            for text in sections
+        ]
+        return "\n\n".join(text.rstrip() for text in read if text).rstrip() + "\n"
 
     @staticmethod
     def _safe_section(name: str, fn: Callable[[], str]) -> str:
@@ -380,7 +394,9 @@ class MarkdownRenderer:
         lines = [_heading(2, "Sample overview", MEASURED), ""]
         lines.append(_row("Field", "Value"))
         lines.append(_divider(2))
-        lines.append(_row("File name (as submitted)", f"`{ident.file_name or 'unknown'}`"))
+        lines.append(
+            _row("File name (as submitted)", _code_span(ctx.plain(ident.file_name or "unknown")))
+        )
         lines.append(_row("Size", f"{ident.file_size_bytes:,} bytes"))
         header = _header_facts(report)
         kind = ident.file_type
@@ -400,7 +416,7 @@ class MarkdownRenderer:
         if ident.mime_type:
             lines.append(_row("MIME", ident.mime_type))
         if ident.magic_bytes:
-            lines.append(_row("Magic bytes", f"`{ident.magic_bytes}`"))
+            lines.append(_row("Magic bytes", _code_span(ctx.plain(str(ident.magic_bytes)))))
         if header["compile_timestamp"]:
             lines.append(
                 _row(
@@ -411,9 +427,11 @@ class MarkdownRenderer:
         if ident.language_or_compiler:
             lines.append(_row("Compiler / language", ident.language_or_compiler))
         if header["export_name"]:
-            lines.append(_row("Export directory name", f"`{header['export_name']}`"))
+            lines.append(
+                _row("Export directory name", _code_span(ctx.plain(str(header["export_name"]))))
+            )
         if ident.internal_name:
-            lines.append(_row("Internal name", f"`{ident.internal_name}`"))
+            lines.append(_row("Internal name", _code_span(ctx.plain(str(ident.internal_name)))))
         signing = ident.signing
         cited = f" ({signing.evidence_id})" if signing.evidence_id else ""
         lines.append(_row("Signed", f"{'yes' if signing.is_signed else 'no'}{cited}"))
@@ -582,7 +600,7 @@ class MarkdownRenderer:
         measured: list[str] = []
         if static is not None and static.sections:
             entropies = ", ".join(
-                f"`{_one_line(sec.name)}` {sec.entropy:.2f}"
+                f"{_code_span(ctx.plain(_one_line(sec.name)))} {sec.entropy:.2f}"
                 + (" [HIGH]" if sec.entropy > 7.0 else "")
                 for sec in _distinct(
                     static.sections, lambda s: (s.name, s.virtual_address, s.raw_offset)
@@ -600,7 +618,9 @@ class MarkdownRenderer:
             measured.append(_row(*head))
             measured.append(_divider(len(head)))
             for pm in static.packer_matches:
-                evidence = ", ".join(f"`{e}`" for e in (pm.get("evidence") or []))
+                evidence = ", ".join(
+                    _code_span(ctx.plain(str(e))) for e in (pm.get("evidence") or [])
+                )
                 stated = pm.get("confidence")
                 cells = [pm.get("name") or "not recorded", pm.get("kind") or "-"]
                 if rated:
@@ -908,7 +928,8 @@ class MarkdownRenderer:
                 size = res.get("size")
                 measured.append(
                     _row(
-                        f"`{res.get('id') or 'not recorded'}` ({res.get('source') or '-'})",
+                        f"{_code_span(ctx.plain(str(res.get('id') or 'not recorded')))} "
+                        f"({ctx.plain(str(res.get('source') or '-'))})",
                         f"{size} bytes" if isinstance(size, int) and size > 0 else "not recorded",
                         f"`{str(res.get('sha256')).lower()}`" if res.get("sha256") else "-",
                         res.get("type") or "not recorded",
@@ -978,7 +999,7 @@ class MarkdownRenderer:
             )
             return "\n".join(lines)
         if dyn.unavailable:
-            names = ", ".join(f"`{_one_line(name)}`" for name in dyn.unavailable)
+            names = ", ".join(_code_span(ctx.plain(_one_line(name))) for name in dyn.unavailable)
             lines.extend([f"_Not provided by this sandbox: {names}._", ""])
 
         if dyn.process_tree:
@@ -1030,7 +1051,7 @@ class MarkdownRenderer:
         ]
         if mutexes:
             lines.extend([_plain_heading("Mutexes"), ""])
-            lines.extend(_item(f"`{name}`") for name in mutexes[:40])
+            lines.extend(_item(_code_span(ctx.plain(name))) for name in mutexes[:40])
             lines.extend(_left_out(len(mutexes), 40, "mutexes"))
             lines.append("")
 
@@ -1051,8 +1072,8 @@ class MarkdownRenderer:
                     count = api.get("count")
                     lines.append(
                         _row(
-                            f"`{api.get('api', '-')}`",
-                            f"`{api.get('process') or '-'}`",
+                            _code_span(ctx.plain(str(api.get("api", "-")))),
+                            _code_span(ctx.plain(str(api.get("process") or "-"))),
                             count if isinstance(count, int) else "not recorded",
                         )
                     )
@@ -1104,7 +1125,7 @@ class MarkdownRenderer:
                     flag = "[SUSPICIOUS]"
                 lines.append(
                     _row(
-                        f"`{sec.name}`",
+                        _code_span(ctx.plain(str(sec.name))),
                         sec.virtual_address,
                         sec.virtual_size,
                         f"0x{sec.raw_offset:x}",
@@ -1124,9 +1145,9 @@ class MarkdownRenderer:
                 lines.append(_row("Library", "Functions"))
                 lines.append(_divider(2))
                 for dll, functions in list(by_dll.items())[:40]:
-                    shown = ", ".join(f"`{f}`" for f in functions[:12])
+                    shown = ", ".join(_code_span(ctx.plain(str(f))) for f in functions[:12])
                     more = f" and {len(functions) - 12} more" if len(functions) > 12 else ""
-                    lines.append(_row(f"`{dll}`", shown + more))
+                    lines.append(_row(_code_span(ctx.plain(str(dll))), shown + more))
                 lines.extend(_left_out(len(by_dll), 40, "libraries"))
                 lines.append("")
             if static.api_capabilities:
@@ -1177,7 +1198,11 @@ class MarkdownRenderer:
                 distinct = _distinct(static.export_rows, lambda e: (e.name, e.ordinal, e.rva))
                 for exp in distinct[:60]:
                     lines.append(
-                        _row(f"`{exp.name or '(unnamed)'}`", exp.ordinal or "-", exp.rva or "-")
+                        _row(
+                            _code_span(ctx.plain(exp.name or "(unnamed)")),
+                            exp.ordinal or "-",
+                            exp.rva or "-",
+                        )
                     )
                 lines.extend(_left_out(len(distinct), 60, "exports"))
                 rvas = [
@@ -1192,7 +1217,7 @@ class MarkdownRenderer:
             else:
                 names = list(dict.fromkeys(static.exports))
                 for name in names[:60]:
-                    lines.append(_row(f"`{name}`", "-", "-"))
+                    lines.append(_row(_code_span(ctx.plain(str(name))), "-", "-"))
                 lines.extend(_left_out(len(names), 60, "exports"))
             lines.append("")
 
@@ -1468,7 +1493,7 @@ class MarkdownRenderer:
                 body.append(
                     _item(
                         f"{section.title}{ids}: "
-                        + ((", ".join(f"`{n}`" for n in names) + more) or "none")
+                        + ((", ".join(_code_span(ctx.plain(n)) for n in names) + more) or "none")
                     )
                 )
             body.extend(
@@ -1603,7 +1628,9 @@ class MarkdownRenderer:
             )
             for match in attr.function_hash_matches[:10]:
                 example_functions = list(match.get("example_functions") or [])
-                examples = ", ".join(f"`{f}`" for f in example_functions[:3]) or "-"
+                examples = (
+                    ", ".join(_code_span(ctx.plain(str(f))) for f in example_functions[:3]) or "-"
+                )
                 if len(example_functions) > 3:
                     examples += f" and {len(example_functions) - 3} more"
                 stated = match.get("confidence")
@@ -3284,6 +3311,57 @@ def _is_delimiter_row(line: str) -> bool:
     )
 
 
+# Marks the run summary's appendix for the closing defang pass, which leaves it.
+_RUN_SUMMARY_MARK = "\x00run-summary\x00"
+# A fenced block's opening line, its fence and its info string.
+_FENCE_OPEN_RE = re.compile(r"^(`{3,})(\S*)[ \t]*$", re.MULTILINE)
+# The heading the draft rules print under.
+_RULE_SUBSECTION_RE = re.compile(r"^### 10\.2 ", re.MULTILINE)
+# Any heading line, and one below the draft rules' own level.
+_ANY_HEADING_RE = re.compile(r"^#{1,6} ")
+_DEEPER_HEADING_RE = re.compile(r"^#{4,6} ")
+
+
+def _defanged_outside_rule_bodies(markdown: str) -> str:
+    """``markdown`` defanged everywhere but inside the draft rules' fenced bodies.
+
+    The rule bodies are the fenced blocks under the "10.2" heading, up to the
+    next heading of its level or above; every other line, fenced or not, is
+    read by :func:`_defanged_text`, which leaves a value already defanged as
+    it is and a reference service's lookup a link. One pass over the lines.
+    """
+    lines = markdown.split("\n")
+    out: list[str] = []
+    plain: list[str] = []
+    in_rules = False
+    index = 0
+
+    def _flush() -> None:
+        if plain:
+            out.append(_defanged_text("\n".join(plain)))
+            plain.clear()
+
+    while index < len(lines):
+        line = lines[index]
+        if _ANY_HEADING_RE.match(line):
+            in_rules = bool(_RULE_SUBSECTION_RE.match(line)) or (
+                in_rules and bool(_DEEPER_HEADING_RE.match(line))
+            )
+        opened = _FENCE_OPEN_RE.match(line) if in_rules else None
+        if opened is None:
+            plain.append(line)
+            index += 1
+            continue
+        close = index + 1
+        while close < len(lines) and lines[close].strip() != opened.group(1):
+            close += 1
+        _flush()
+        out.append("\n".join(lines[index : close + 1]))
+        index = close + 1
+    _flush()
+    return "\n".join(out)
+
+
 def _fenced(text: str, info: str = "") -> list[str]:
     """``text`` in a code fence longer than any backtick run inside it."""
     longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
@@ -3421,11 +3499,15 @@ def _ransomware_block(ta: Any, ctx: _Context) -> str:
         if spk.mechanism:
             lines.append(_item(f"Mechanism: {ctx.line(spk.mechanism)}"))
         if spk.kill_list:
-            lines.append(_item("Kill list: " + ", ".join(f"`{x}`" for x in spk.kill_list)))
+            lines.append(
+                _item("Kill list: " + ", ".join(_code_span(ctx.plain(x)) for x in spk.kill_list))
+            )
         if spk.white_list:
             # The exclusions are often the more identifying half: a list that
             # spares the attacker's own tooling names it.
-            lines.append(_item("Spared: " + ", ".join(f"`{x}`" for x in spk.white_list)))
+            lines.append(
+                _item("Spared: " + ", ".join(_code_span(ctx.plain(x)) for x in spk.white_list))
+            )
         lines.append("")
     if ta.shadow_copy_destruction:
         lines.extend(["Shadow copy destruction:", ""])
@@ -3811,7 +3893,10 @@ def _attack_row(
 
 def _rule_words(hit: dict[str, Any]) -> str:
     """One rule hit as the Procedure cell names it: the rule, where it looked, its base rate."""
-    matched = ", ".join(f"`{a}`" for a in (hit.get("matched_apis") or [])[:6]) or "-"
+    matched = (
+        ", ".join(_code_span(_defanged_text(str(a))) for a in (hit.get("matched_apis") or [])[:6])
+        or "-"
+    )
     rule = str(hit.get("rule") or hit.get("name") or "").strip()
     # capa names the namespace a rule lives in; the knowledge table names the
     # imports its rule matched, and the names it matched that the run resolved
@@ -3939,7 +4024,7 @@ def _matched_names(hit: dict[str, Any]) -> str:
 
 
 def _quoted_names(names: list[str]) -> str:
-    return ", ".join(f"`{a}`" for a in names[:6]) or "-"
+    return ", ".join(_code_span(_defanged_text(str(a))) for a in names[:6]) or "-"
 
 
 def _with_rules(procedure: str, rules: list[dict[str, Any]]) -> str:
