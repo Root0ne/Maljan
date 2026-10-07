@@ -29,11 +29,19 @@ _SELF_TALK_RE = re.compile(
 )
 
 
+# A sentence that takes back the one before it.
+_RETRACTION_RE = re.compile(
+    r"^\W*(?:wait,?\s+no\b|no\b\s*[,.!]|actually,?\s+no\b|on second thought\b)",
+    re.IGNORECASE,
+)
+
+
 def judge_reason_shown(reason: str, width: int = JUDGE_REASON_WIDTH) -> str:
     """A judge's reason as the ATT&CK table prints it, under one rule.
 
     The sentences that are the model's own working ("Wait, …", "Let me …")
-    are left out wherever they stand; the others are printed in order, as
+    are left out wherever they stand, and a sentence a retraction takes back
+    ("Wait, no.", "No, …") with them; the others are printed in order, as
     many as fit ``width``, so a conclusion written after the working is
     printed. A reason that is all working prints its last sentence, its
     conclusion. A first sentence longer than the width is cut at a word.
@@ -44,7 +52,14 @@ def judge_reason_shown(reason: str, width: int = JUDGE_REASON_WIDTH) -> str:
     if not text:
         return ""
     sentences = _SENTENCE_BREAK_RE.split(text)
-    kept = [sentence for sentence in sentences if not _SELF_TALK_RE.match(sentence)]
+    kept: list[str] = []
+    for sentence in sentences:
+        # A retraction ("Wait, no.", "No, …", "Actually no, …") takes back the
+        # sentence written just before it: that sentence is not the reason.
+        if _RETRACTION_RE.match(sentence) and kept:
+            kept.pop()
+        if not _SELF_TALK_RE.match(sentence):
+            kept.append(sentence)
     if not kept:
         kept = sentences[-1:]
     shown: list[str] = []

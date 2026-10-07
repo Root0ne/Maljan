@@ -161,3 +161,20 @@ def test_the_list_of_claims_not_published_prints_by_the_same_rule_defanged() -> 
     assert "hxxps://relay[.]example[.]net/live/" in listed
     assert "https://relay" not in listed
     assert "Wait, more" not in listed
+
+
+def test_a_retracted_sentence_is_left_out_with_its_retraction() -> None:
+    reason = "The claim describes T1027. Wait, no. It does not describe T1027 at all; it is T1140."
+
+    assert judge_reason_shown(reason) == (
+        f"It does not describe T1027 at all; it is T1140. {CUT_MARK}"
+    )
+
+
+def test_a_no_and_an_actually_no_take_back_the_sentence_before() -> None:
+    assert judge_reason_shown("It is kept. No, it is dropped.") == (
+        f"No, it is dropped. {CUT_MARK}"
+    )
+    assert judge_reason_shown("It is kept. Actually no, it is dropped.") == (
+        f"Actually no, it is dropped. {CUT_MARK}"
+    )
