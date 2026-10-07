@@ -2579,16 +2579,24 @@ def _with_capa(answer: dict[str, Any], capa_rows: list[dict[str, Any]]) -> dict[
     return marked
 
 
+# A capa rule that agrees with a TEB/PEB read: its own anti-analysis rules, or
+# a rule that names the PEB or TEB it reads (capa's ``PEB access`` sits in no
+# anti-analysis namespace).
+_PEB_RULE = re.compile(r"\b(?:PEB|TEB)\b")
+
+
 def _anti_analysis_with_capa(
     answer: dict[str, Any], capa_rows: list[dict[str, Any]], starts: list[str]
 ) -> dict[str, Any]:
-    """The anti-analysis answer, each stated match marked where a capa rule agrees.
+    """The anti-analysis answer, each match marked where a capa rule agrees.
 
     A match agrees with capa when a capa rule of its ``anti-analysis``
     namespaces matched in the same function: the nearest capa function start
-    at or before the match is the nearest one at or before a capa address.
+    at or before the match is the nearest one at or before a capa address. An
+    exact TEB/PEB read (``beside_capa``) is stated only with such a rule, or
+    one naming the PEB or TEB, in its function; without one it is counted.
     """
-    if not isinstance(answer, dict) or not capa_rows or not answer.get("stated"):
+    if not isinstance(answer, dict) or ("stated" not in answer and "beside_capa" not in answer):
         return answer
     from bisect import bisect_right
 
@@ -2603,15 +2611,21 @@ def _anti_analysis_with_capa(
         return points[index] if index >= 0 else None
 
     by_start: dict[int, list[dict[str, str]]] = {}
+    peb_by_start: dict[int, list[dict[str, str]]] = {}
     for capa in capa_rows:
-        if not str(capa.get("namespace") or "").startswith("anti-analysis"):
+        rule = str(capa.get("rule") or "")
+        anti = str(capa.get("namespace") or "").startswith("anti-analysis")
+        peb = anti or bool(_PEB_RULE.search(rule))
+        if not peb:
             continue
         for address in capa.get("addresses") or []:
             begin = start_of(str(address))
-            if begin is not None:
-                by_start.setdefault(begin, []).append(
-                    {"rule": str(capa.get("rule") or ""), "at": str(address)}
-                )
+            if begin is None:
+                continue
+            said = {"rule": rule, "at": str(address)}
+            if anti:
+                by_start.setdefault(begin, []).append(said)
+            peb_by_start.setdefault(begin, []).append(said)
     marked = dict(answer)
     rows = []
     for row in answer.get("stated") or []:
@@ -2620,7 +2634,15 @@ def _anti_analysis_with_capa(
         if begin is not None and begin in by_start:
             row["capa"] = by_start[begin]
         rows.append(row)
+    counted = 0
+    for row in marked.pop("beside_capa", None) or []:
+        begin = start_of(str(row.get("offset") or ""))
+        if begin is not None and begin in peb_by_start:
+            rows.append({**row, "capa": peb_by_start[begin]})
+        else:
+            counted += 1
     marked["stated"] = rows
+    marked["not_stated"] = int(answer.get("not_stated") or 0) + counted
     return marked
 
 
@@ -2709,13 +2731,20 @@ def _anti_analysis_item(group: tuple[tuple[str, str], list[dict[str, Any]]]) -> 
     said = " ".join(shown)
     if len(shown) < len(places):
         said += f" (+{len(places) - len(shown)} more places)"
-    return f"{category}: {what} @ {said}"
+    rules = list(
+        dict.fromkeys(
+            str(c.get("rule")) for row in rows for c in row.get("capa") or [] if isinstance(c, dict)
+        )
+    )
+    agrees = f" (agrees with capa: {', '.join(rules)})" if rules else ""
+    return f"{category}: {what} @ {said}{agrees}"
 
 
 def _anti_analysis(data: dict[str, Any], max_chars: int | None = None) -> str:
     """The exact part of Ghidra's scan, each match once with its places; a ``no:`` without."""
     rows = [r for r in (data.get("stated") or []) if isinstance(r, dict)]
-    not_stated = int(data.get("not_stated") or 0)
+    # A TEB/PEB read no capa comparison has stated yet is counted.
+    not_stated = int(data.get("not_stated") or 0) + len(data.get("beside_capa") or [])
     total = int(data.get("total_findings") or 0)
     returned = int(data.get("returned") or total)
     checks = f"Ghidra's scan ({SCAN_CHECKS_SHORT})"

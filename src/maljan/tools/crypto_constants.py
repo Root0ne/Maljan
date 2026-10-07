@@ -38,6 +38,7 @@ value is listed. The sample is only read; nothing in it is run.
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
@@ -544,12 +545,16 @@ REQUIRED_NEAR = 64
 
 def _required_beside(entry: ConstantSet, offsets: dict[Any, list[int]]) -> bool:
     """Whether a distinguishing value stands within ``REQUIRED_NEAR`` bytes of another value."""
-    others = [
+    others = sorted(
         at for value, places in offsets.items() if value not in entry.requires for at in places
-    ]
+    )
+    if not others:
+        return False
     for value in entry.requires:
         for at in offsets.get(value, []):
-            if any(abs(at - other) <= REQUIRED_NEAR for other in others):
+            # The nearest other place at or after ``at - REQUIRED_NEAR`` decides.
+            index = bisect_left(others, at - REQUIRED_NEAR)
+            if index < len(others) and others[index] <= at + REQUIRED_NEAR:
                 return True
     return False
 

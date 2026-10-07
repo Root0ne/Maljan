@@ -23,7 +23,9 @@ only the part of it that is exact (``read_findings``):
   within 32 bytes after it with nothing writing ECX in between (a runtime's
   feature probe asks other leaves);
 * a TEB/PEB read, when the instruction reads through ``FS:[0x30]`` or
-  ``FS:[0x18]`` exactly.
+  ``FS:[0x18]`` exactly and a capa rule in the same function agrees (the
+  triage pack decides that; a read with no such rule is counted, since a
+  language runtime's own code reads the PEB as well).
 
 An API call is never stated, only counted. Ghidra matches symbol names by
 substring over a broad list and lists every call site, a language runtime's
@@ -67,8 +69,9 @@ STATED_RULE = (
     "stated: an instruction that is the listed one (the same mnemonic and operand), an INT3 only "
     "alone, not as padding before a function and not right after a call, jump or return, a "
     "CPUID only where the code sets the hypervisor leaf or sets leaf 1 and tests ECX bit 31 "
-    "before ECX is written again, and a read through FS:[0x30] or FS:[0x18] exactly; API "
-    "calls, and every other distinct match, are counted, not stated"
+    "before ECX is written again, and a read through FS:[0x30] or FS:[0x18] exactly where a "
+    "capa rule in the same function agrees; API calls, and every other distinct match, are "
+    "counted, not stated"
 )
 
 GHIDRA_SWITCHED_OFF = "Ghidra is switched off (core.static.ghidra.enabled)"
@@ -293,9 +296,16 @@ def read_findings(
     sets leaf 1 and then tests ECX's bit 31. Without the bytes neither is
     stated. ``function_starts`` (offsets from the image base) add to the
     image's own table. Ghidra's rows are read once per place and match.
+
+    An exact TEB/PEB read is not stated here: it goes in ``beside_capa``, for
+    the pack to state where a capa rule in the same function agrees and to
+    count otherwise (``triage_pack._anti_analysis_with_capa``). A language
+    runtime reads the PEB too (the UCRT's exit path reads ``NtGlobalFlag``),
+    and capa leaves the library functions it recognises out.
     """
     code = _Code(image, function_starts)
     stated: list[dict[str, Any]] = []
+    beside_capa: list[dict[str, Any]] = []
     stated_keys: set[tuple[str, str]] = set()
     unstated_keys: set[tuple[str, str]] = set()
     for row in findings:
@@ -328,8 +338,12 @@ def read_findings(
         fact = {"category": category, "what": what, "offset": where}
         if row.get("function"):
             fact["function"] = str(row["function"])
-        stated.append(fact)
-    return {"stated": stated, "not_stated": len(unstated_keys - stated_keys)}
+        (beside_capa if category == _TEB_CATEGORY else stated).append(fact)
+    return {
+        "stated": stated,
+        "beside_capa": beside_capa,
+        "not_stated": len(unstated_keys - stated_keys),
+    }
 
 
 @dataclass

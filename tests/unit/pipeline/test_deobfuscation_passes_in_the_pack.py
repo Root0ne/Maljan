@@ -239,6 +239,62 @@ class TestGhidraAnswers:
         assert "no: nothing Ghidra's scan" in line
         assert "2 more of its matches are not stated (an API call" in line
 
+    def test_a_runtime_s_peb_read_with_no_capa_rule_is_counted_not_stated(self) -> None:
+        """The 32-bit UCRT's exit path reads NtGlobalFlag: 64 a1 30 00 00 00 / 8b 40 68."""
+        answer = {
+            "stated": [],
+            "not_stated": 0,
+            "beside_capa": [
+                {
+                    "category": "peb_teb_access",
+                    "what": "MOV EAX,FS:[0x30]",
+                    "offset": "0x3b3c2",
+                    "function": "FUN_0043b3a0",
+                },
+                {
+                    "category": "peb_teb_access",
+                    "what": "MOV EAX,FS:[0x30]",
+                    "offset": "0x43d65",
+                    "function": "FUN_00443d50",
+                },
+            ],
+        }
+        capa_rows = [
+            {"namespace": "host-interaction/file-system", "rule": "r", "addresses": ["0x3b3a0"]}
+        ]
+        marked = triage_pack._anti_analysis_with_capa(answer, capa_rows, ["0x3b3a0", "0x43d50"])
+        assert marked["stated"] == [] and marked["not_stated"] == 2
+        assert "beside_capa" not in marked
+        assert triage_pack._anti_analysis(marked).startswith("no: nothing Ghidra's scan")
+        alone = triage_pack._anti_analysis_with_capa(answer, [], [])
+        assert alone["stated"] == [] and alone["not_stated"] == 2
+
+    def test_a_peb_read_capa_agrees_with_is_stated_with_that_agreement(self) -> None:
+        answer = {
+            "stated": [],
+            "not_stated": 0,
+            "beside_capa": [
+                {"category": "peb_teb_access", "what": "MOV EAX,FS:[0x30]", "offset": "0x1210"},
+                {"category": "peb_teb_access", "what": "MOV EAX,FS:[0x30]", "offset": "0x2210"},
+            ],
+        }
+        capa_rows = [
+            {
+                "namespace": "anti-analysis/anti-debugging/debugger-detection",
+                "rule": "check for PEB NtGlobalFlag flag",
+                "addresses": ["0x1220"],
+            },
+            {"namespace": "", "rule": "PEB access", "addresses": ["0x2210"]},
+        ]
+        marked = triage_pack._anti_analysis_with_capa(answer, capa_rows, ["0x1200", "0x2200"])
+        assert [row["offset"] for row in marked["stated"]] == ["0x1210", "0x2210"]
+        assert marked["not_stated"] == 0
+        line = triage_pack._anti_analysis(marked)
+        assert line.endswith(
+            "peb_teb_access: MOV EAX,FS:[0x30] @ 0x1210 0x2210 "
+            "(agrees with capa: check for PEB NtGlobalFlag flag, PEB access)"
+        )
+
     def test_a_match_in_a_function_capa_names_for_anti_analysis_is_marked(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -130,7 +130,7 @@ class TestWhatIsStated:
         ]
         assert read["not_stated"] == 2
 
-    def test_a_teb_read_is_stated_only_through_the_exact_operand(self) -> None:
+    def test_only_a_teb_read_through_the_exact_operand_waits_for_capa(self) -> None:
         peb = {"category": "peb_teb_access", "technique": "Direct PEB/TEB access"}
         read = read_findings(
             [
@@ -138,7 +138,8 @@ class TestWhatIsStated:
                 {**peb, "address": "140001070", "instruction": "MOV EAX,dword ptr FS:[EAX + 0x30]"},
             ],
         )
-        assert [f["what"] for f in read["stated"]] == ["MOV EAX,dword ptr FS:[0x30]"]
+        assert read["stated"] == []
+        assert [f["what"] for f in read["beside_capa"]] == ["MOV EAX,dword ptr FS:[0x30]"]
         assert read["not_stated"] == 1
 
     def test_an_api_call_is_counted_and_never_stated(self) -> None:

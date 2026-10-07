@@ -28,8 +28,9 @@ change landed on `main`.
     function is said to agree with capa. The analysis server serves it too,
     and the Ghidra workflow now points at it.
   - Ghidra's anti-analysis scan, of which only the exact part is stated: the
-    listed instruction and the exact TEB/PEB operand. API calls are counted,
-    not stated, and an `INT3` right after a call, jump or return is not a trap.
+    listed instruction, and the exact TEB/PEB operand where a capa rule in the
+    same function agrees. API calls and other TEB/PEB reads are counted, not
+    stated, and an `INT3` right after a call, jump or return is not a trap.
 
   A Ghidra that cannot be asked (switched off, over stdio, or without a copy of
   the sample) is one `no: <reason>` line and not a failure. A pass line with no

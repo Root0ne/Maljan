@@ -378,3 +378,49 @@ class TestFunctionStartsFromElsewhere:
         )
         place = _found(answer)["sha256_k"]["values"][0]["places"][0]
         assert place["after_function_start"] == hex(TEXT_RVA + 0x100)
+
+
+def _beside_by_pairs(entry: crypto_constants.ConstantSet, offsets: dict) -> bool:
+    """The neighbour check as every pair of places would decide it."""
+    others = [
+        at for value, places in offsets.items() if value not in entry.requires for at in places
+    ]
+    return any(
+        abs(at - other) <= crypto_constants.REQUIRED_NEAR
+        for value in entry.requires
+        for at in offsets.get(value, [])
+        for other in others
+    )
+
+
+class TestTheNeighbourCheckScales:
+    def test_it_decides_as_every_pair_would(self) -> None:
+        import random
+
+        entry = _set("sha1_init")
+        chooser = random.Random(7)
+        for _ in range(500):
+            offsets = {
+                value: sorted(chooser.sample(range(4_000), chooser.randint(0, 6)))
+                for value in entry.values
+            }
+            offsets = {value: places for value, places in offsets.items() if places}
+            assert crypto_constants._required_beside(entry, offsets) == _beside_by_pairs(
+                entry, offsets
+            ), offsets
+
+    def test_a_megabyte_of_far_apart_values_is_scanned_in_seconds(self, tmp_path: Path) -> None:
+        import time
+
+        count = 1_048_576 // 8
+        data = (
+            struct.pack("<I", 0x67452301) * count
+            + bytes(128)
+            + struct.pack("<I", 0xC3D2E1F0) * count
+        )
+        path = tmp_path / "far.bin"
+        path.write_bytes(data)
+        started = time.monotonic()
+        answer = find_crypto_constants(str(path))
+        assert time.monotonic() - started < 5.0
+        assert "sha1_init" not in _found(answer)

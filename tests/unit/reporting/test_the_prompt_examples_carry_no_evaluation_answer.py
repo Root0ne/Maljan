@@ -489,6 +489,14 @@ def _deobfuscation_lines() -> str:
             triage_pack._constant_sets({"found": [], "lone": [], "sets_searched": 3}),
             triage_pack._anti_analysis(findings),
             triage_pack._anti_analysis({**findings, "also_stated": 2}),
+            triage_pack._anti_analysis(
+                {
+                    "stated": [
+                        {"category": "c", "what": "t", "offset": "0x1", "capa": [{"rule": "r"}]}
+                    ],
+                    "beside_capa": [{"category": "c", "what": "t", "offset": "0x2"}],
+                }
+            ),
             triage_pack._constant_sets({**constants, "agreeing": 1}),
             triage_pack._anti_analysis(findings, max_chars=200),
             triage_pack._anti_analysis({"stated": [], "not_stated": 2, "total_findings": 2}),
