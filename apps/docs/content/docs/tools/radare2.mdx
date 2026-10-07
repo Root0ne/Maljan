@@ -47,6 +47,19 @@ setting refuses a hidden segment and says why.
 
 </Callout>
 
+The r2 analyst is handed the mirror and only the mirror. No analyst's chunk
+carries the worker's own copy (its staging path, under a hidden directory);
+the static role's family classifier reads that from the agent. A path argument
+that spells the worker's copy in full is replaced with the mirror before the
+call, as the bare file name always was. Before the analyst's loop, the r2
+provider opens the mirror in r2mcp's session with r2mcp's own `open_file`
+(`R2StaticProvider.open_sample`), as the Ghidra provider loads its program, so
+a listing tool called first is answered rather than refused; a failed early
+open is logged and changes nothing else. A failed `open_file` names the path it
+tried and the mirror radare2 can open, and r2mcp's open-first refusal, whether
+written as a reply or raised as a protocol error, names the mirror in its
+remediation.
+
 The same directory is how r2mcp on another host can read the sample through a
 shared volume; see [Tool servers on another
 host](/configuration/#tool-servers-on-another-host).

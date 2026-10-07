@@ -171,11 +171,13 @@ def _print_run_summary_inline(run_summary_dict: dict) -> None:
             typer.echo(f"  {tid:14s} {', '.join(corroboration_sources(row))}")
 
     if validation:
+        from maljan.pipeline.validation import unresolved_total
+
         unresolved = validation.get("unresolved") or []
         typer.echo(
             f"\nValidation: {validation.get('retries', 0)} feedback retr"
             f"{'y' if validation.get('retries', 0) == 1 else 'ies'} | "
-            f"{len(unresolved)} unresolved"
+            f"{unresolved_total(unresolved)} unresolved"
         )
         for row in unresolved[:3]:
             typer.echo(

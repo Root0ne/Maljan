@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+import ipaddress
 import json
+import struct
 import sys
 from pathlib import Path
 from typing import Any
@@ -24,8 +26,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 NETWORK_SERVER = ROOT / "services" / "network-mcp" / "server.py"
 JOB_LEAF = "job-0123abcd"
-
-scapy_all = pytest.importorskip("scapy.all")
 
 
 @pytest.fixture(scope="module")
@@ -49,22 +49,42 @@ def job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return base / JOB_LEAF
 
 
+def _udp(dst: str, sport: int, dport: int, payload: bytes = b"") -> bytes:
+    """An Ethernet frame carrying one IPv4/UDP datagram from 10.0.2.15."""
+    udp = struct.pack("!HHHH", sport, dport, 8 + len(payload), 0) + payload
+    ip = struct.pack(
+        "!BBHHHBBH4s4s",
+        0x45,
+        0,
+        20 + len(udp),
+        1,
+        0,
+        64,
+        17,
+        0,
+        ipaddress.IPv4Address("10.0.2.15").packed,
+        ipaddress.IPv4Address(dst).packed,
+    )
+    return b"\x52\x54\x00\x12\x35\x02\x52\x54\x00\x12\x34\x56\x08\x00" + ip + udp
+
+
+def _dns_query(name: str) -> bytes:
+    labels = b"".join(bytes([len(part)]) + part.encode() for part in name.split("."))
+    return struct.pack("!HHHHHH", 1, 0x0100, 1, 0, 0, 0) + labels + b"\x00\x00\x01\x00\x01"
+
+
 def _capture(target: Path, dns_at: int, total: int) -> Path:
     """``total`` UDP packets to a documentation address, one DNS query at ``dns_at``."""
-    packets = []
-    for index in range(total):
-        if index == dns_at:
-            packets.append(
-                scapy_all.IP(src="10.0.2.15", dst="192.0.2.53")
-                / scapy_all.UDP(sport=50000, dport=53)
-                / scapy_all.DNS(rd=1, qd=scapy_all.DNSQR(qname="late.example.net"))
-            )
-        else:
-            packets.append(
-                scapy_all.IP(src="10.0.2.15", dst="198.51.100.7")
-                / scapy_all.UDP(sport=50001, dport=9)
-            )
-    scapy_all.wrpcap(str(target), packets)
+    frames = [
+        _udp("192.0.2.53", 50000, 53, _dns_query("late.example.net"))
+        if index == dns_at
+        else _udp("198.51.100.7", 50001, 9)
+        for index in range(total)
+    ]
+    out = struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 1)
+    for index, frame in enumerate(frames):
+        out += struct.pack("<IIII", 1_700_000_000 + index, 0, len(frame), len(frame)) + frame
+    target.write_bytes(out)
     return target
 
 

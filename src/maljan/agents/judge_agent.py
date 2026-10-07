@@ -78,6 +78,7 @@ from maljan.llm.context_window import (
 from maljan.llm.generation_rate import GenerationRates, ModelCallDeadline, model_name_of
 from maljan.memory.attck_loader import technique_label
 from maljan.memory.long_term_memory import a_past_case_technique
+from maljan.memory.technique_cards import technique_card_lines
 from maljan.pipeline.debate_facts import read_marks, with_ledger_facts
 from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
 from maljan.pipeline.mediation_models import (
@@ -879,6 +880,15 @@ EVIDENCE_SHORTENED_NOTICE = (
     "ends in …."
 )
 
+# Said once above the techniques when any of them shows its card, so a
+# question without cards carries none of it.
+TECHNIQUE_CARDS_INTRO = (
+    "A technique with a card shows it under its claims, as reference: whether the action "
+    "alone is the technique or it needs a stated purpose, what the evidence has to show, "
+    "what to look for, and sibling techniques it is confused with, each with what tells "
+    "them apart."
+)
+
 # An ATT&CK technique id where it stands in an answer.
 # A sub-technique written with a slash is the same id: read, and written
 # back with its dot (``_technique_id``).
@@ -942,10 +952,15 @@ def question_evidence(ledger: Iterable[Any], corpus: Any = None) -> dict[str, Qu
 
     The output as stored, in its own case; where the byte budget blanked it,
     the run's search copy, which is lower-cased and says so. An entry the
-    ledger records as trimmed is marked incomplete. Never raises.
+    ledger records as trimmed is marked incomplete. A repeat is shown as the
+    entry that holds its answer (``repeated_of``, followed to its end), never
+    as the guard's note. Never raises.
     """
+    from maljan.schemas.evidence import repeat_holders
+
+    ledger = list(ledger or ())
     shown: dict[str, QuestionEvidence] = {}
-    for entry in ledger or ():
+    for entry in ledger:
         written = str(getattr(entry, "id", "") or "").strip()
         if not written:
             continue
@@ -963,6 +978,14 @@ def question_evidence(ledger: Iterable[Any], corpus: Any = None) -> dict[str, Qu
             partial=bool(getattr(entry, "truncated", False)),
             lowered=lowered,
         )
+    holders = repeat_holders(ledger)
+    for repeat, holder in holders.items():
+        # A loop, or a chain to an id the ledger lacks, holds no answer: shown
+        # as nothing, as the citation check reads it.
+        if holder and holder in shown and holder not in holders:
+            shown[repeat] = shown[holder]
+        else:
+            shown.pop(repeat, None)
     return shown
 
 
@@ -975,16 +998,18 @@ def technique_question_text(
     evidence: Mapping[str, Any] | None = None,
     *,
     notice: str = "",
+    cards: bool = True,
 ) -> str:
     """The question's list of techniques and the answer's form, as the judge reads it.
 
     ``questions`` are ``capability_matrix.TechniqueQuestion`` rows; each is
     listed with every claim or finding that names it, in the analyst's words,
-    and the evidence ids it cites. ``evidence`` is what is shown for each id
+    and the evidence ids it cites, then the check's finding it carries and the
+    technique's card where it has one. ``evidence`` is what is shown for each id
     (text, or :class:`QuestionEvidence`), looked up whatever the case the id
     was cited in, and listed once under the techniques with the tool behind
     it and a mark when it is not the whole answer as stored; ``notice`` says
-    what was shortened.
+    what was shortened. ``cards=False`` leaves the technique cards out.
     """
     shown = {str(k).lower(): _as_evidence(v) for k, v in (evidence or {}).items()}
     lines = ["TECHNIQUES TO DECIDE"]
@@ -1005,6 +1030,10 @@ def technique_question_text(
         check = str(getattr(question, "check", "") or "")
         if check:
             lines.append(f"   check: {check}")
+        card = technique_card_lines(question.technique_id) if cards else []
+        if card and TECHNIQUE_CARDS_INTRO not in lines:
+            lines.insert(1, TECHNIQUE_CARDS_INTRO)
+        lines.extend(f"   {line}" for line in card)
     if cited:
         lines += ["", "EVIDENCE CITED"]
         if notice:
@@ -3163,7 +3192,7 @@ class JudgeAgent(BudgetMeter):
         entries = {i: known.get(i, QuestionEvidence("")) for i in cited}
         cap = self._output_cap().tokens or None
         bare = technique_question_text(
-            questions, {i: e._replace(text="") for i, e in entries.items()}
+            questions, {i: e._replace(text="") for i, e in entries.items()}, cards=False
         )
         empty_head = lead + technique_question_head("", decided, carried)
         room = self._question_room(
@@ -3187,9 +3216,25 @@ class JudgeAgent(BudgetMeter):
         if notice:
             self.logger.warning("JudgeAgent technique question: %s", notice)
         fitted = {i: e._replace(text=texts[i]) for i, e in entries.items()}
+        # The technique cards are reference beside the claims: they go in only
+        # where the window has room left after the reports and the evidence,
+        # so they never shorten either.
+        question_text = technique_question_text(questions, fitted, notice=notice)
+        if evidence_room is not None:
+            without_cards = technique_question_text(questions, fitted, notice=notice, cards=False)
+            left = evidence_room - sum(len(t) for t in texts.values())
+            if len(question_text) - len(without_cards) > left:
+                self.logger.info(
+                    "JudgeAgent technique question: the technique cards (%d characters) are "
+                    "left out; %d characters of the window were left after the reports and "
+                    "the evidence.",
+                    len(question_text) - len(without_cards),
+                    max(0, left),
+                )
+                question_text = without_cards
         messages: list[Any] = [
             SystemMessage(content=TECHNIQUE_QUESTION_SYSTEM),
-            HumanMessage(content=head + technique_question_text(questions, fitted, notice=notice)),
+            HumanMessage(content=head + question_text),
         ]
         timeout = self._verdict_timeout(
             _seconds_or_none(loop_limits("judge")[0]),

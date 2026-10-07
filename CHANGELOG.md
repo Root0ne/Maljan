@@ -8,12 +8,38 @@ change landed on `main`.
 
 ### Added
 
+- **One reasoning card per ATT&CK technique, beside the vendored table** (`data/attck_technique_cards.json`, 98 cards): its kind (behaviour-focused or intent-critical), what the evidence has to show, the indicators and the confusable sibling techniques with the criterion that tells each apart, written from the ATT&CK definitions and held to the vendored table by tests; the leak test reads every card's words with no allowance, so a sibling whose label the evaluation key scores is left off.
+- **The analysts' does-not-describe question, as sent, ends with the named technique's card**; the finding recorded keeps the check's message alone, a sub-technique with no card of its own is shown none, each card is shown once per turn, and a retry turn carrying cards is measured against the window with an answer of the output cap on every path and sent without them when it does not fit with them.
+- **The judge's technique question shows each asked technique's card under its claims, as reference**, only where the window has room left after the reports and the evidence; the techniques asked, the answer and the report row are unchanged.
 - **An analyst that has read a function sees a function map, kept by the
   platform.** It is built from the agent's ledger entries of the job, the
   pack's analysis-server artefacts and its parsed claims. It rides the
   run-state block on every turn and replaces nothing.
 - **"Functions examined" in the report carries the function map's coverage in
   one line.**
+
+- **The deobfuscation passes run on every run, and every analyst reads their
+  results as facts in the pre-analysis pack.** After every earlier pack step,
+  so no earlier id moves, and in the room the earlier lines leave, so no
+  earlier line loses a character:
+  - `find_crypto_constants`, the platform's scan of an executable for the
+    published constants of ciphers, hash functions and checksums (Ghidra's
+    `detect_crypto_constants` answers "not yet implemented"). Each set is
+    computed from its definition; a table is found whole, other sets by two of
+    their values, and sets that share values are named only by a value that
+    tells them apart (else as their family). A set capa names in the same
+    function is said to agree with capa. The analysis server serves it too,
+    and the Ghidra workflow now points at it.
+  - Ghidra's anti-analysis scan, of which only the exact part is stated: the
+    listed instruction, and the exact TEB/PEB operand where a capa rule in the
+    same function agrees. API calls and other TEB/PEB reads are counted, not
+    stated, and an `INT3` right after a call, jump or return is not a trap.
+
+  A Ghidra that cannot be asked (switched off, over stdio, or without a copy of
+  the sample) is one `no: <reason>` line and not a failure. A pass line with no
+  room is counted in the "N more pack entries not shown" line, which takes only
+  free room or capa's addresses; with neither, the pack is unchanged and the
+  run summary's pack record lists the entry with the reason "no pack room".
 
 - **A function an analyst decompiled and no claim describes is listed to it,
   once.** The functions come from the analyst's own ledger entries that
@@ -1057,6 +1083,7 @@ change landed on `main`.
 
 ### Changed
 
+- **Captures are read by Maljan's own pcap/pcapng reader (`maljan.analysis.capture_reader`) instead of the GPL-2.0 scapy**; `tests/unit/analysis/test_pcap_reader_parity.py` pins every answer against the old one and names each difference and its reason.
 - **The documentation site is built with Fumadocs.** The pages are MDX under
   `apps/docs/content/docs/` and the images under `apps/docs/public/assets/`;
   `mkdocs.yml`, the theme overrides and the `docs` dependency group are gone,
@@ -2392,6 +2419,24 @@ change landed on `main`.
 
 ### Fixed
 
+- **Every section of the Markdown report is read once more by the report's defanger**, so a code span or cell a sandbox, the sample's bytes or a model filled (mutexes, notable APIs, kill and spared lists, the submitted file name, internal and export names, section and import names) prints defanged; only the draft rules' bodies and a configured model endpoint where a generation or prompt-rate line names its model (`<model> @ <endpoint>`), which the renderer sets aside when it writes them, print as written; the same endpoint, or a URL that begins with it, anywhere else prints defanged.
+- **Every code span a sandbox or the report model fills prints its network values defanged**: the §5.5 command lines, the process tree, persistence targets and payloads, registry keys and value names, file operations and dropped files, and shadow-copy commands, as the flags table does.
+- **A kept validation retry that no longer states claims or findings of the first answer no longer drops them silently**: each item is named to the analyst once to keep or withdraw with a reason, its answer is read in the forms a model writes (one or several decisions on a line, after a sentence's end or a list number, labels first, `all others` / `the rest`) without reading a decision word inside a reason, its answer stands, an unanswered item stays as the first answer wrote it, and every item is recorded in `run_summary.validation.retry_drops` and section 13.
+- **Every validation retry answer the first answer is kept over is kept whole in the run record** (`run_summary.validation.discarded_retry_answers`, with why), and the answers no claim could be read from now reach the stored summary's `unparsed_answers`, which the summary builder dropped.
+- **Report text stating persistence the sandbox did not record is put to the report model once**: the Persistence section's prose (`report.persistence_not_observed`) and an execution-flow step marked observed (`report.flow_voice`), where the section prints "no persistence observed".
+- **A recommendation or hunting note that names a technique the run does not publish is asked about once** (`narrative.unpublished_technique`), as one naming an unpublished indicator is; an id kept after it is recorded.
+- **A chunk is named by its place in the list the analyst is handed**, in its prompt header and in the cut-at-cap and repeated-claims questions; chunks from two data sources both read "1 of 1", and the question named the wrong chunk.
+- **A judge's reason in the ATT&CK table and in the list of claims not published is printed under one rule**, kept and dropped alike: the sentences that are the model's own working ("Wait, …") are left out wherever they stand, the others printed as many as fit the cell, a reason that is all working prints its last sentence, marked where anything is left out and defanged; the record keeps it whole.
+- **An identical unresolved finding is listed once with its count** in `run_summary.validation.unresolved` (`count`) and in section 13 ("left N times"), a stored report's rows folded when it is rendered; every count (the headline, the run summary, the CLI, `by_code`) still counts every finding left.
+- **A sub-technique is not described by its parent's words alone**: a claim that writes none of the sub-technique's own distinctive words and writes a sibling sub-technique's whole name is asked once whether its technique is right, naming the sibling (Change Default File Association on an accessibility features sentence passed on "persistence").
+- **A TECHNIQUE line that writes an id with the vendored catalogue's own name for it in brackets is read as that id** (`T1027 (Obfuscated Files or Information)`); any other bracketed words keep the line whole and asked about, as before.
+- **The command-line flags table and a draft rule's comments print network values defanged**, through the report's own defanger; the strings a draft rule matches on stay as they compile.
+- **The r2 analyst is handed only the mirror radare2 can open, and its session opens it before the loop**: no chunk carries the worker's staging path (the family classifier reads it from the agent), a path argument spelling the staging path is replaced with the mirror, the r2 provider opens the mirror with r2mcp's `open_file` first, and a failed open names the path tried and the mirror, as r2mcp's open-first refusal names the mirror.
+- **A decompile whose answer is a function an earlier entry already holds is filed as a repeat of that entry**, found by the function the answer prints (its generic name's start, else its name) and decided by content: its listing must be the held listing or that listing cut shorter, so a forged or shared name never makes new content a repeat, and a call through an address inside the function is recognised; the model is still handed the answer under the earlier entry's id with one sentence saying so.
+- **A tool answer the guardrail cut, shortened or summarised is recorded as `truncated` with `chars_dropped`** (a new `evidence_entries` column), and §13's evidence bounds count it ("2 cut by the tool-output guardrail (5,817 characters dropped)"), where such an entry was stored as whole.
+- **Every call the repeat guard answers without running is a ledger entry and a pair of tool-call events**, filed as a repeat of the entry that holds its answer (`repeated_of`) and always naming the entry that holds the answer, never another repeat, read as that entry by the citation check and the judge's evidence, charged nothing against the agent's byte budget, and counted apart in `run_summary.evidence.repeats`, the report header, §13's evidence bounds and Appendix A ("repeat of ev_…"); a later chunk's calls an earlier chunk had made, and a refused third identical call, left no trace before.
+- **A five-character string that is wholly such a host is read on its own** (`c2.ru` stored NUL-terminated, ASCII or UTF-16LE, or a table cell that is exactly `c2.ru`), by the string sweep, the host reader and the defanger; every other run under six characters stays below the sweep's floor.
+- **A cell's publish state, the composer's checks and the narrative's recommendation check read the IOC table §9 prints** (`builder.ioc_table`, rebuilt from the stored report), where they read the stored table first, so an old report's state notes word an answer as §9 does; a table that cannot be read at all still refuses every value for that reason.
 - **A bare two-label host with a two-character first label is read when the label holds a digit and a letter** (`c2.ru`, `x1.top`), by the string sweep and the report's host reader; one of two letters (`ab.ru`) is read only where the run's network evidence holds it, so prose such as `to.do` stays as written.
 - **An IPv6 address, bare or bracketed, and a `.onion` name of any labels are network values to every reader**: the publish checks, the run summary's sentences and a cell's state note read them by form: an IPv6 address whole, an embedded IPv4 tail included, in brackets or with at least three groups and a digit, so a scope name such as `dead::beef` is no address.
 - **`/iocs` and the report's §9 read the IOC table from one source** (`builder.ioc_table`, rebuilt from the stored report), so an old report's analyst rows and their notes read the same in both.

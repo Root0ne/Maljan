@@ -56,6 +56,7 @@ from maljan.pipeline.validation import (
     narrative_capability_violations,
     pack_line_ids,
     recommendation_indicator_violations,
+    recommendation_technique_violations,
     record_flagged_statements,
     retry_with_feedback,
     schema_violations,
@@ -487,20 +488,35 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
 NARRATIVE_PROSE = ("executive_summary", "key_findings")
 
 
-def published_answers(report: MalwareReport) -> Any:
+def published_technique_ids(report: MalwareReport) -> list[str]:
+    """The technique ids the report's ATT&CK table publishes, in its order."""
+    return list(
+        dict.fromkeys(
+            str(m.technique_id).strip().upper()
+            for m in (getattr(report, "ttp_mappings", None) or [])
+            if str(getattr(m, "technique_id", "") or "").strip()
+        )
+    )
+
+
+def published_answers(report: MalwareReport, *, rows: list[Any] | None = None) -> Any:
     """``(kind, value) -> the IOC table's answer`` for a value, ``""`` when no row holds it.
 
-    The table the report prints and ``/iocs`` serves
-    (``builder.build_consolidated_iocs``): what a recommendation is checked
-    against, so it acts on the indicators the run publishes.
+    The table the report's §9 prints and ``/iocs`` serves, by their one
+    reader (``builder.ioc_table``), or ``rows`` when the caller has already
+    read it: what a recommendation is checked against, so it acts on the
+    indicators the run publishes, and what a cell's state note says, so it
+    words an answer as §9 does. A table that cannot be read raises. The
+    composer (``composer._published_answers``) and the renderer's cell
+    states then refuse every value for that reason; the narrative round's
+    own call is not guarded, so the round ends and the report node writes
+    the fallback narrative.
     """
+    from maljan.reporting.builder import ioc_table
     from maljan.reporting.ledger_projection import value_key
 
-    rows = list(report.consolidated_iocs or [])
-    if not rows:
-        from maljan.reporting.builder import build_consolidated_iocs
-
-        rows = build_consolidated_iocs(report)
+    if rows is None:
+        rows = ioc_table(report, raise_unread=True)
     table: dict[tuple[str, str], str] = {}
     for row in rows:
         kind = str(row.kind or "")
@@ -717,8 +733,10 @@ class NarrativeAgent:
         # the ISRs, a capability an analyst stated in a claim would be a
         # violation here and a pass there, on one run.
         grounding = CapabilityGrounding.from_report(report, isr_reports)
-        # What the run publishes, which is what a recommendation may act on.
+        # What the run publishes, which is what a recommendation may act on:
+        # its indicators and its techniques.
         answers = published_answers(report)
+        published = published_technique_ids(report)
         # The entries a key finding may cite: the ledger's, which the pack's
         # own entries are part of.
         known_ids = [row.id for row in report.evidence_index]
@@ -770,7 +788,7 @@ class NarrativeAgent:
                     )
                 if isinstance(result, NarrativeOutput):
                     return self._kept_with_ungrounded_recorded(
-                        result, grounding, known_ids, citable, evidence, answers
+                        result, grounding, known_ids, citable, evidence, answers, published
                     )
                 # Some providers return a dict — coerce defensively.
                 if isinstance(result, dict):
@@ -781,6 +799,7 @@ class NarrativeAgent:
                         citable,
                         evidence,
                         answers,
+                        published,
                     )
                 logger.warning(
                     "NarrativeAgent: unexpected structured-output type %s; "
@@ -852,6 +871,7 @@ class NarrativeAgent:
                     lambda p: misstated_entry_contents(p, evidence, prose=NARRATIVE_PROSE),
                     technique_name_violations,
                     lambda p: recommendation_indicator_violations(p, answers),
+                    lambda p: recommendation_technique_violations(p, published),
                 ],
                 parse=_narrative_payload,
                 on_feedback=self.validation_tally.count,
@@ -917,6 +937,7 @@ class NarrativeAgent:
         citable: Sequence[str] = (),
         evidence: EntryTexts | None = None,
         answers: Any = None,
+        published: list[str] | None = None,
     ) -> NarrativeOutput:
         """The structured path's answer, with its over-claims and stray citations recorded.
 
@@ -934,6 +955,7 @@ class NarrativeAgent:
             *misstated_entry_contents(answer, evidence, prose=NARRATIVE_PROSE),
             *technique_name_violations(answer),
             *(recommendation_indicator_violations(answer, answers) if answers else []),
+            *recommendation_technique_violations(answer, published),
         ]
         self.validation_tally.count(found)
         self._record_ungrounded(found, asked=False)

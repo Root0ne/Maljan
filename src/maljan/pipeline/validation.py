@@ -271,14 +271,41 @@ Validator = Callable[[Any], list[Violation]]
 # ---------------------------------------------------------------------------
 
 
-def feedback_text(violations: Sequence[Violation], *, closing: str = FEEDBACK_CLOSING) -> str:
-    """The retry turn's text for a set of violations, ending on ``closing``."""
+def feedback_text(
+    violations: Sequence[Violation], *, closing: str = FEEDBACK_CLOSING, cards: bool = True
+) -> str:
+    """The retry turn's text for a set of violations, ending on ``closing``.
+
+    ``cards=False`` leaves out the technique cards a does-not-describe question
+    carries (:func:`_card_after`); each technique's card is shown once per turn,
+    after the first question about it.
+    """
     lines = [FEEDBACK_PREAMBLE]
+    carded: set[str] = set()
     for violation in violations:
         where = f" ({violation.path})" if violation.path else ""
-        lines.append(f"- [{violation.code}]{where} {violation.message}")
+        card = _card_after(violation) if cards and violation.subject not in carded else ""
+        if card:
+            carded.add(violation.subject)
+        lines.append(f"- [{violation.code}]{where} {violation.message}{card}")
     lines.append(closing)
     return "\n".join(lines)
+
+
+def _card_after(violation: Violation) -> str:
+    """The named technique's card after a does-not-describe question, or ``""``.
+
+    The card (``memory.technique_cards``) is reference beside the question the
+    analyst is asked: what the evidence for the technique has to show and the
+    sibling techniques it is confused with. Only the question sent carries it;
+    the finding recorded is the check's message alone.
+    """
+    if violation.code != CLAIM_DOES_NOT_DESCRIBE_CODE or not violation.subject:
+        return ""
+    from maljan.memory.technique_cards import technique_card_lines
+
+    lines = technique_card_lines(violation.subject)
+    return " The technique's " + " | ".join(lines) if lines else ""
 
 
 # ---------------------------------------------------------------------------
@@ -1125,15 +1152,6 @@ def claim_does_not_describe_violation(
     name, stems, forms = _name_terms(technique_id, attck)
     if not name:
         return None
-    pattern = behaviour_pattern(technique_id, attck)
-    if pattern is not None and pattern.search(text):
-        return None
-    if any(
-        _stem(word) in stems or word.lower() in forms
-        for word in re.findall(r"[A-Za-z0-9]+", text)
-        if len(word) >= 3
-    ):
-        return None
     tid = safe_finding_value(technique_id)
     otherwise = (
         f"give that behaviour's technique in its place or remove {tid} from this claim's "
@@ -1141,6 +1159,33 @@ def claim_does_not_describe_violation(
         if listed
         else "give that behaviour's technique or write TECHNIQUE: NONE"
     )
+    pattern = behaviour_pattern(technique_id, attck)
+    if (pattern is not None and pattern.search(text)) or any(
+        _stem(word) in stems or word.lower() in forms
+        for word in re.findall(r"[A-Za-z0-9]+", text)
+        if len(word) >= 3
+    ):
+        named = sibling_named_instead(text, technique_id)
+        if named is None:
+            return None
+        sibling_id, sibling_name, parent_id, parent_name = named
+        sibling = safe_finding_value(sibling_id)
+        parent = safe_finding_value(parent_id)
+        return Violation(
+            code=CLAIM_DOES_NOT_DESCRIBE_CODE,
+            message=(
+                f"CLAIM {safe_finding_value(text)!r} carries TECHNIQUE {tid} "
+                f"{safe_finding_value(name)}, and its sentence names {sibling} "
+                f"{safe_finding_value(sibling_name)}, another sub-technique of {parent} "
+                f"{safe_finding_value(parent_name)}, and none of {tid}'s own words: what it "
+                f"shares with {tid} is only what every technique under {parent} shares. A "
+                f"technique on a claim is published as something the sample does. Keep {tid} "
+                f"only if the sample does it, and then say in the claim what it does that is "
+                f"{tid}; if the claim describes {sibling}, {otherwise}."
+            ),
+            path=path,
+            subject=str(technique_id).strip().upper(),
+        )
     return Violation(
         code=CLAIM_DOES_NOT_DESCRIBE_CODE,
         message=(
@@ -1154,6 +1199,54 @@ def claim_does_not_describe_violation(
         path=path,
         subject=str(technique_id).strip().upper(),
     )
+
+
+def _name_stems(name: str) -> set[str]:
+    """The stems of a catalogue name's words, its filler words left out."""
+    return {
+        _stem(word)
+        for word in re.findall(r"[A-Za-z0-9]+", str(name or ""))
+        if len(word) >= 3 and word.lower() not in _NAME_FILLER_WORDS
+    }
+
+
+def sibling_named_instead(text: str, technique_id: str) -> tuple[str, str, str, str] | None:
+    """Another sub-technique of the same parent that ``text`` names, when it names none of its own.
+
+    A sub-technique's sentence may share terms with it only through what every
+    technique under its parent shares: the parent's name, the parent's
+    capability terms, its tactic ("persistence" under Boot or Logon Autostart
+    Execution). When the sentence writes none of the sub-technique's own
+    distinctive words (its vendored name's words that are not its parent's)
+    and writes the whole vendored name of a sibling of more than one word,
+    the sentence describes that sibling. ``(sibling id, sibling name, parent
+    id, parent name)``, or ``None`` when the id is no sub-technique, the
+    sentence writes one of its own words, or names no sibling.
+    """
+    from maljan.memory.attck_loader import sub_technique_entries, technique_entry
+
+    tid = str(technique_id or "").strip().upper()
+    if "." not in tid:
+        return None
+    own = technique_entry(tid)
+    parent = technique_entry(tid.split(".")[0])
+    if own is None or parent is None or not own.name:
+        return None
+    distinctive = _name_stems(own.name) - _name_stems(parent.name)
+    forms = _inflected_forms(own.name)
+    if any(
+        _stem(word) in distinctive or word.lower() in forms
+        for word in re.findall(r"[A-Za-z0-9]+", text)
+        if len(word) >= 3
+    ):
+        return None
+    for entry in sub_technique_entries(parent.technique_id):
+        if entry.technique_id == tid or len(entry.name.split()) < 2:
+            continue
+        phrase = _phrase(entry.name.replace("/", " "))
+        if phrase and re.search(phrase, text, re.IGNORECASE):
+            return entry.technique_id, entry.name, parent.technique_id, parent.name
+    return None
 
 
 def undescribed_technique_finding(technique_id: str, attck: Any, claims: int) -> str:
@@ -2943,6 +3036,10 @@ def citation_violations(
 # or rewrites what the model wrote.
 UNGROUNDED_FINDING_CODE = "narrative.ungrounded_finding"
 FLOW_VOICE_CODE = "report.flow_voice"
+# A section's prose states persistence where the sandbox, watching the
+# registry and the files, recorded none: the report prints "no persistence
+# observed" under that same section. Asked once; the prose kept is recorded.
+PERSISTENCE_NOT_OBSERVED_CODE = "report.persistence_not_observed"
 UNCITED_CONFIGURATION_CODE = "report.configuration_uncited"
 # A report section answer the output cap ended. Its JSON is cut before it
 # closes, so the schema check could only say "not JSON at all" — and a model
@@ -3224,6 +3321,25 @@ def _listing_text(output: str) -> str:
     return "" if isinstance(parsed, dict | list) else output
 
 
+def listed_function(output: str) -> tuple[str, str | int] | None:
+    """The function a decompiler's answer is the listing of, as a key two answers share.
+
+    ``("start", address)`` when the listing's signature prints a decompiler's
+    generic name, which carries the function's start (``FUN_00401000``,
+    ``fcn.00401000``); ``("name", name)`` for any other printed name; ``None``
+    when the answer prints no signature (a batch answer, an error, prose).
+    Read off the answer alone: a call given an address inside a function is
+    answered with the whole function, under the same signature.
+    """
+    name = _signature_name(_listing_text(str(output or "")))
+    if not name:
+        return None
+    generic = _GENERIC_FUNCTION_NAME.fullmatch(name.lower())
+    if generic is not None:
+        return ("start", int(generic.group(1), 16))
+    return ("name", name)
+
+
 def _address_key(key: str) -> int | None:
     """A batch answer's key as an address: ``0x`` and hex digits, or four hex digits or more."""
     match = _ADDRESS_KEY.fullmatch(str(key).strip())
@@ -3338,7 +3454,8 @@ def decompiled_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
 
     An entry counts when its tool's name says it decompiles and the call
     answered with something the model read: an answer the conversation had no
-    room for (``schemas.evidence.answer_not_shown``) is no listing read. A
+    room for (``schemas.evidence.answer_not_shown``) is no listing read, and
+    neither is a repeat the guard answered from an earlier entry. A
     batch answer keyed by address is one function per key, its ``Error`` keys
     left out; a batch whose answer is not keyed takes the
     addresses it was given. Otherwise the address is the one the call was
@@ -3352,6 +3469,10 @@ def decompiled_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
     for entry in entries:
         tool = str(getattr(entry, "tool", "") or "").lower()
         if "decompil" not in tool or not getattr(entry, "ok", True) or answer_not_shown(entry):
+            continue
+        # A repeat holds the guard's note, not a listing: the function it
+        # asked for is the earlier entry's.
+        if getattr(entry, "repeated_of", None):
             continue
         entry_id = str(getattr(entry, "id", "") or "")
         for address, names in _entry_functions(entry):
@@ -3795,6 +3916,9 @@ CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
 # publish. Asked once with the IOC table's own answer; a value kept after it
 # is recorded beside the recommendation.
 UNPUBLISHED_RECOMMENDATION_CODE = "narrative.unpublished_indicator"
+# A recommendation or hunting note that names a technique id this run does not
+# publish. Asked once with the fact; an id kept after it is recorded.
+UNPUBLISHED_RECOMMENDATION_TECHNIQUE_CODE = "narrative.unpublished_technique"
 ENTRY_CONTENTS_MISSTATED_CODE = "report.entry_contents_misstated"
 UNCITED_IDENTIFIER_CODE = "report.identifier_uncited"
 # A table row whose whole value is in none of the entries it cites
@@ -3830,6 +3954,8 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         RULE_MATCH_AS_ACTION_CODE,
         REPEATED_ITEMS_CODE,
         UNPUBLISHED_RECOMMENDATION_CODE,
+        UNPUBLISHED_RECOMMENDATION_TECHNIQUE_CODE,
+        PERSISTENCE_NOT_OBSERVED_CODE,
     }
 )
 
@@ -4166,6 +4292,49 @@ def recommendation_indicator_violations(
     return out
 
 
+def recommendation_technique_violations(
+    payload: Any, published: Iterable[str] | None
+) -> list[Violation]:
+    """Recommendations that name a technique id this run does not publish.
+
+    ``published`` is the technique ids the report's ATT&CK table publishes
+    (``report.ttp_mappings``). Every field the recommendation table and the
+    hunting notes print is read — the action, the rationale, the detection and
+    the technique column — and each id written there that the run does not
+    publish is named, one question per recommendation, as an unpublished
+    indicator is (:func:`recommendation_indicator_violations`). ``None`` reads
+    nothing: with no list to compare with there is no fact to state. Nothing
+    is removed: what the model answers stands.
+    """
+    if published is None:
+        return []
+    known = {str(tid).strip().upper() for tid in published if str(tid).strip()}
+    out: list[Violation] = []
+    for index, row in enumerate(_rows_of(payload, "defensive_recommendations")):
+        text = " ".join(
+            str(row.get(key) or "") for key in ("action", "rationale", "detection", "technique_id")
+        )
+        named = list(dict.fromkeys(tid.upper() for tid in _TID_IN_MESSAGE_RE.findall(text)))
+        unpublished = [tid for tid in named if tid not in known]
+        if not unpublished:
+            continue
+        ids = ", ".join(safe_finding_value(tid) for tid in unpublished)
+        out.append(
+            Violation(
+                code=UNPUBLISHED_RECOMMENDATION_TECHNIQUE_CODE,
+                message=(
+                    f"recommendation {safe_finding_value(index + 1)} names a technique this run "
+                    f"does not publish: {ids}. The report's ATT&CK table does not carry it. A "
+                    "recommendation acts on the techniques this run publishes. Write it with a "
+                    "published technique, or without the id."
+                ),
+                path=f"defensive_recommendations.{index}",
+                subject=unpublished[0],
+            )
+        )
+    return out
+
+
 # A publish state written beside a value: ``no: <reason>``, as the IOC table
 # prints it.
 _PUBLISH_STATE_RE = re.compile(r"(?<![\w-])no:\s*\S", re.IGNORECASE)
@@ -4409,6 +4578,90 @@ def flow_voice_violations(
     return out
 
 
+# The behaviour the persistence question is about, and the words that say a
+# text already states it was not seen in this run.
+_PERSISTENCE_RE = re.compile(r"\bpersist\w*", re.IGNORECASE)
+_NOT_OBSERVED_RE = re.compile(
+    r"\b(?:not|never)\s+(?:been\s+|yet\s+)?(?:observed|seen|created|established|exercised"
+    r"|executed|triggered)\b|\bunobserved\b|\bunexercised\b|\bno\s+persistence\b",
+    re.IGNORECASE,
+)
+NO_PERSISTENCE_OBSERVED_FACT = (
+    "the sandbox watched this sample's registry and files and recorded no persistence; the "
+    'report prints "no persistence observed" under its Persistence section'
+)
+
+
+def _states_persistence(text: str) -> bool:
+    """Whether ``text`` names persistence as something the sample does, not as absent."""
+    return bool(_PERSISTENCE_RE.search(text)) and not states_absence(text, _PERSISTENCE_RE)
+
+
+def persistence_not_observed_violations(
+    payload: Any, saw_none: bool, *, section: str
+) -> list[Violation]:
+    """Report text that states persistence where the sandbox recorded none.
+
+    ``saw_none`` is the fact the report's Persistence section prints as "no
+    persistence observed" (``evidence_bundles.sandbox_saw_no_persistence``):
+    the sandbox watched the registry and the files and no persistence row was
+    recorded. Two places contradict it. The Persistence section's own prose
+    (``section="persistence_detail"``) stating persistence with no word that
+    it was not observed in this run is asked once; an execution-flow step
+    (``section="execution_flow"``) marked observed that states persistence is
+    asked once per step, as a flow-voice question. What the model answers
+    stands; nothing is removed.
+    """
+    if not saw_none:
+        return []
+    fact = NO_PERSISTENCE_OBSERVED_FACT
+    if section == "execution_flow":
+        out: list[Violation] = []
+        for index, row in enumerate(_rows_of(payload, "steps")):
+            if str(row.get("voice") or "").strip().lower() != "observed":
+                continue
+            action = str(row.get("action") or "")
+            if not _states_persistence(action):
+                continue
+            out.append(
+                Violation(
+                    code=FLOW_VOICE_CODE,
+                    message=(
+                        f"step {safe_finding_value(_step_order(row, index))} is marked observed "
+                        f"and states persistence, and {fact}. A step marked observed says the "
+                        "sandbox watched it happen. Mark the step assessed, or cite the sandbox "
+                        "entry that records the persistence."
+                    ),
+                    path=f"steps.{index}.voice",
+                )
+            )
+        return out
+    texts = _prose_of_a_section(payload)
+    whole = " ".join(texts)
+    if not whole or not _states_persistence(whole) or _NOT_OBSERVED_RE.search(whole):
+        return []
+    first = next(
+        (
+            sentence.strip()
+            for text in texts
+            for sentence in _SENTENCE_END_RE.split(text)
+            if _states_persistence(sentence)
+        ),
+        whole,
+    )
+    return [
+        Violation(
+            code=PERSISTENCE_NOT_OBSERVED_CODE,
+            message=(
+                f"the section states persistence ({safe_finding_value(_sentence_start(first))}), "
+                f"and {fact}. Say in the section that persistence was not observed in this run "
+                "and what the reading rests on, or write what in this run's evidence shows it."
+            ),
+            path="body",
+        )
+    ]
+
+
 def configuration_citation_violations(payload: Any, known_ids: Iterable[str]) -> list[Violation]:
     """Configuration values said to be decrypted or observed that cite no entry.
 
@@ -4576,11 +4829,19 @@ class EntryTexts:
 
     @classmethod
     def from_ledger(cls, ledger: Iterable[Any], corpus: Any = None) -> EntryTexts:
-        """One text per entry: the corpus's copy first, the stored output after it."""
+        """One text per entry: the corpus's copy first, the stored output after it.
+
+        A repeat reads as the entry that holds its answer (``repeated_of``,
+        followed to its end): citing it is citing that entry, whose text is the
+        answer the model read, where the repeat's own text is the guard's note.
+        """
+        from maljan.schemas.evidence import repeat_holders
+
+        ledger = list(ledger or ())
         texts: dict[str, str] = {}
         tools: dict[str, str] = {}
         partial: set[str] = set()
-        for entry in ledger or ():
+        for entry in ledger:
             written = str(getattr(entry, "id", "") or "").strip()
             entry_id = written.lower()
             if not entry_id:
@@ -4597,6 +4858,17 @@ class EntryTexts:
             if text:
                 texts[entry_id] = text
                 tools[entry_id] = str(getattr(entry, "tool", "") or "")
+        holders = repeat_holders(ledger)
+        for repeat in holders:
+            texts.pop(repeat, None)
+            tools.pop(repeat, None)
+            partial.discard(repeat)
+        for repeat, holder in holders.items():
+            if holder and holder in texts:
+                texts[repeat] = texts[holder]
+                tools[repeat] = tools[holder]
+            if holder in partial:
+                partial.add(repeat)
         return cls(texts=texts, tools=tools, partial=frozenset(partial))
 
     def holds(self, entry_id: str, value: str) -> bool:
@@ -7345,6 +7617,7 @@ def _with_feedback(
     *,
     keep_answer: bool = True,
     closing: str = FEEDBACK_CLOSING,
+    cards: bool = True,
 ) -> list[Any]:
     """The conversation plus the model's answer plus the correction turn.
 
@@ -7361,7 +7634,7 @@ def _with_feedback(
     turns = list(messages)
     if keep_answer:
         turns.append(AIMessage(content=str(content if content is not None else answer)))
-    return with_question(turns, feedback_text(violations, closing=closing))
+    return with_question(turns, feedback_text(violations, closing=closing, cards=cards))
 
 
 def _announce_feedback(
@@ -7587,6 +7860,7 @@ def retry_with_feedback_sync[T](
     keep: Callable[[T, T], T] | None = None,
     drop_answer_for: frozenset[str] = frozenset(),
     closing: str = FEEDBACK_CLOSING,
+    cards: bool = True,
 ) -> tuple[T, list[Violation], int]:
     """:func:`retry_with_feedback` for the analysts, whose loop is synchronous.
 
@@ -7605,7 +7879,8 @@ def retry_with_feedback_sync[T](
     ``drop_answer_for`` is :func:`retry_with_feedback`'s: the codes whose
     correction describes the answer instead of following it. ``closing`` is
     the retry turn's last line; the analysts' names the block format their
-    parser reads (``ANALYST_FEEDBACK_CLOSING``).
+    parser reads (``ANALYST_FEEDBACK_CLOSING``). ``cards=False`` sends the
+    retry turn without technique cards (:func:`feedback_text`).
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
@@ -7619,7 +7894,9 @@ def retry_with_feedback_sync[T](
         _announce_feedback(violations, on_feedback, feed, retries + 1)
         shown.extend(violations)
         keep_answer = not any(v.code in drop_answer_for for v in violations)
-        turns = _with_feedback(turns, answer, violations, keep_answer=keep_answer, closing=closing)
+        turns = _with_feedback(
+            turns, answer, violations, keep_answer=keep_answer, closing=closing, cards=cards
+        )
         retries += 1
         with validation_retry():
             answer = run(turns)
@@ -7658,6 +7935,357 @@ def unparsed_answer_rows(
         for violation in violations
         if violation.code == UNPARSED_ANSWER_CODE and violation.answer
     ]
+
+
+def folded_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+    """Each identical finding row once, in first-seen order, with its count.
+
+    Two rows are identical when every field but the count is: the same agent,
+    code and message, the same flags. A row left more than once carries
+    ``count`` (as a string, like every field of a row); a row left once
+    carries none, so a record with no repeat is the record it always was. A
+    row that already carries a count adds it, so folding twice changes nothing.
+    """
+    order: list[tuple[tuple[str, str], ...]] = []
+    counts: dict[tuple[tuple[str, str], ...], int] = {}
+    kept: dict[tuple[tuple[str, str], ...], dict[str, str]] = {}
+    for row in rows:
+        fields = {str(k): str(v) for k, v in dict(row).items() if k != "count"}
+        key = tuple(sorted(fields.items()))
+        try:
+            times = max(1, int(str(dict(row).get("count") or 1)))
+        except ValueError:
+            times = 1
+        if key not in counts:
+            order.append(key)
+            counts[key] = 0
+            kept[key] = fields
+        counts[key] += times
+    return [
+        {**kept[key], **({"count": str(counts[key])} if counts[key] > 1 else {})} for key in order
+    ]
+
+
+# What a run-record row of the validation answers is, when it is not an answer
+# no claim could be read from: a retry answer the analyst's first answer was
+# kept over.
+DISCARDED_RETRY_RECORD = "discarded_retry"
+
+
+def discarded_retry_row(agent: str, revision_round: int, answer: str, why: str) -> dict[str, str]:
+    """A retry answer the first answer was kept over, as the run record keeps it.
+
+    The answer whole and masked as model text in the record is
+    (``events.safe_answer_text``), bounded only by itself, with why the first
+    answer was kept. Read into ``run_summary.validation.discarded_retry_answers``.
+    """
+    return {
+        "record": DISCARDED_RETRY_RECORD,
+        "agent": str(agent),
+        "round": str(int(revision_round or 0)),
+        "why": str(why),
+        "answer": safe_answer_text(answer),
+    }
+
+
+# ---------------------------------------------------------------------------
+# What a kept retry left out of the first answer
+# ---------------------------------------------------------------------------
+
+# A retry kept as the analyst's answer that no longer states claims or
+# findings its first answer had. The platform states which, per analyst, and
+# asks the analyst once to keep or withdraw each with a reason; its answer
+# stands. Unanswered, the first answer's items stay, their state said.
+RETRY_DROPPED_CODE = "isr.retry_dropped"
+RETRY_DROP_RECORD = "retry_drop"
+# How an item the question named ended, as the record says it.
+RETRY_DROP_KEPT = "kept when asked"
+RETRY_DROP_WITHDRAWN = "withdrawn when asked"
+RETRY_DROP_NOT_ANSWERED = "not answered; kept as the first answer wrote it"
+# One answer line: ``KEEP C2: reason``, ``WITHDRAW F1 - reason``,
+# ``KEEP C1, C2 and F1: reason``, ``KEEP C3 because reason``, ``C2: WITHDRAW -
+# reason`` or ``1. KEEP C1: reason``, marks allowed.
+_RETRY_DROP_LABEL = r"[CF]\d+"
+# Every item asked about that no decision of its own settles: ``all``,
+# ``all others``, ``the rest``, ``everything else``.
+_RETRY_DROP_ALL = (
+    r"(?:all(?:\s++(?:others|other\s++(?:items|ones)|the\s++rest|remaining|else))?"
+    r"|the\s++(?:rest|others|remaining)|everything(?:\s++else)?)"
+)
+_RETRY_DROP_LABEL_RUN = rf"(?:[\s*_`]*+(?:,|&|\band\b)?+[\s*_`]*+{_RETRY_DROP_LABEL}\b)*+"
+_RETRY_DROP_LABELS = rf"(?:{_RETRY_DROP_LABEL}|{_RETRY_DROP_ALL})\b{_RETRY_DROP_LABEL_RUN}"
+# What may come before a decision where a clause begins: list marks, quote
+# marks and a list number (``1.``, ``2)``).
+_RETRY_DROP_LEAD = r"[\s>*_`-]*+(?:\d++[.)][\s>*_`-]*+)?+"
+_RETRY_DROP_EXCEPT = (
+    rf"(?:[\s*_`]++(?:except|but(?:\s++not)?+)[\s*_`]++(?P<except>{_RETRY_DROP_LABELS}))?+"
+)
+# A decision, read only where a clause begins: KEEP or WITHDRAW, the labels
+# it is about (``C1``, ``C1, C2 and F1``, ``C1 C2``, ``all``, ``the rest``), and
+# the labels ``all`` leaves out (``all except C1``).
+_RETRY_DROP_DECISION_RE = re.compile(
+    rf"{_RETRY_DROP_LEAD}(?P<decision>keep|withdraw)\b"
+    r"(?:[\s*_`]*+:[\s*_`]*+|[\s*_`]++)"
+    rf"(?P<labels>{_RETRY_DROP_LABELS}){_RETRY_DROP_EXCEPT}",
+    re.IGNORECASE,
+)
+# The same decision written labels first: ``C2: WITHDRAW``, ``C1 C2 - KEEP``.
+_RETRY_DROP_LABEL_FIRST_RE = re.compile(
+    rf"{_RETRY_DROP_LEAD}(?P<labels>{_RETRY_DROP_LABEL}\b{_RETRY_DROP_LABEL_RUN})"
+    r"[\s*_`]*+(?:=>|->|[:\-–—.)=])?+[\s*_`]*+(?P<decision>keep|withdraw)\b",
+    re.IGNORECASE,
+)
+# What opens a decision's reason, after its labels: from there on, the clause
+# is the reason, and a decision word in it is a word.
+_RETRY_DROP_REASON_RE = re.compile(r"[\s*_`]*+(?:[:\-–—.)]|\bbecause\b)\s*+", re.IGNORECASE)
+# A comma after a decision's labels, ``and`` or ``then`` allowed, when another
+# decision follows it.
+_RETRY_DROP_NEXT_RE = re.compile(r"[\s*_`]*+,(?:[\s*_`]*+(?:and|then)\b)?+", re.IGNORECASE)
+# A sentence's end inside a reason: a decision may begin after it.
+_RETRY_DROP_SENTENCE_END_RE = re.compile(r"[.!?]++\s++")
+# What a decision begun after a sentence's end has to be followed by, so a
+# sentence of a reason that opens with a decision word ("Withdraw C2 would
+# lose data") stays a sentence: its reason, a mark, or the clause's end.
+_RETRY_DROP_DECIDED_RE = re.compile(r"[\s*_`]*+(?:[:\-–—.,!)]|\bbecause\b|$)", re.IGNORECASE)
+
+
+_RETRY_DROP_NAMED_RE = re.compile(
+    rf"(?P<label>{_RETRY_DROP_LABEL})|\b(?:all|rest|others|remaining|everything)\b", re.IGNORECASE
+)
+
+
+def _retry_drop_labels(found: str) -> list[str]:
+    """The labels a decision names, upper-cased; every ``all`` form is ``ALL``."""
+    return [(m.group("label") or "ALL").upper() for m in _RETRY_DROP_NAMED_RE.finditer(found)]
+
+
+def _retry_drop_decision_at(
+    clause: str, at: int, *, after_sentence: bool = False
+) -> tuple[str, list[str], set[str], int] | None:
+    """``(decision, labels, labels left out, end)`` of a decision beginning at ``at``."""
+    match = _RETRY_DROP_DECISION_RE.match(clause, at)
+    if match is not None:
+        excepted = set(_retry_drop_labels(match.group("except") or ""))
+        found = (match.group("decision").upper(), _retry_drop_labels(match.group("labels")))
+        decision = (*found, excepted, match.end())
+    else:
+        first = _RETRY_DROP_LABEL_FIRST_RE.match(clause, at)
+        if first is None:
+            return None
+        named = _retry_drop_labels(first.group("labels"))
+        decision = (first.group("decision").upper(), named, set(), first.end())
+    if after_sentence and _RETRY_DROP_DECIDED_RE.match(clause, decision[3]) is None:
+        return None
+    return decision
+
+
+@dataclass(frozen=True)
+class RetryDrops:
+    """The claims and findings of a first answer a kept retry no longer states.
+
+    ``claims`` pairs each claim with the values of it the retry states
+    nowhere (``pipeline.claim_drops.dropped_values``), the technique ids the
+    retry was asked about aside: taking such an id off is the answer to the
+    question, not lost work. ``findings`` are the first answer's findings no
+    finding of the retry carries the title of.
+    """
+
+    claims: tuple[tuple[Any, tuple[str, ...]], ...] = ()
+    findings: tuple[Any, ...] = ()
+
+    def __bool__(self) -> bool:
+        return bool(self.claims or self.findings)
+
+    def labelled(self) -> list[tuple[str, str, Any, tuple[str, ...]]]:
+        """``(label, kind, item, missing values)`` for each item, ``C1``… then ``F1``…."""
+        rows: list[tuple[str, str, Any, tuple[str, ...]]] = [
+            (f"C{n}", "claim", claim, missing)
+            for n, (claim, missing) in enumerate(self.claims, start=1)
+        ]
+        rows += [(f"F{n}", "finding", finding, ()) for n, finding in enumerate(self.findings, 1)]
+        return rows
+
+
+def _folded_title(value: Any) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).split())
+
+
+def retry_drops(
+    first: Any,
+    retried: Any,
+    answer: str = "",
+    asked_about: Iterable[str] = (),
+    set_aside: Sequence[Any] = (),
+) -> RetryDrops:
+    """What of ``first`` the kept ``retried`` answer states nowhere (:class:`RetryDrops`).
+
+    Each claim is the first answer's own claim object, its sentence, its
+    technique id and its block with it: a list split on commas gives several
+    claims one sentence, and the one the retry left out is the one put back.
+    ``set_aside`` are claims of ``first`` the retry was asked to fold away (the
+    library-only claims, when that question was asked): leaving them out is
+    the answer to it.
+    """
+    from maljan.pipeline.claim_drops import dropped_claims
+
+    asked = {str(value).strip().upper() for value in asked_about if str(value).strip()}
+    claims: list[tuple[Any, tuple[str, ...]]] = []
+    for claim, missing in dropped_claims(first, retried, answer):
+        if any(claim is other for other in set_aside):
+            continue
+        kept_values = tuple(value for value in missing if value.upper() not in asked)
+        if kept_values:
+            claims.append((claim, kept_values))
+    titles = {
+        _folded_title(getattr(f, "title", "")) for f in getattr(retried, "findings", None) or []
+    }
+    findings = tuple(
+        finding
+        for finding in getattr(first, "findings", None) or []
+        if _folded_title(getattr(finding, "title", "")) not in titles
+    )
+    return RetryDrops(claims=tuple(claims), findings=findings)
+
+
+def retry_drop_question(drops: RetryDrops) -> str:
+    """The one question a kept retry's dropped items are put to the analyst with."""
+    lines = []
+    for label, kind, item, missing in drops.labelled():
+        if kind == "claim":
+            stated = safe_finding_value(", ".join(missing))
+            technique = str(getattr(item, "technique_id", "") or "")
+            on_line = f", TECHNIQUE {safe_finding_value(technique)}" if technique else ""
+            values = f" (it stated {stated}, which your retry states nowhere)"
+            lines.append(f"{label}. CLAIM: {safe_finding_value(item.claim)}{on_line}{values}")
+        else:
+            detail = str(getattr(item, "detail", "") or "").strip()
+            said = f": {detail}" if detail else ""
+            lines.append(f"{label}. FINDING: {safe_finding_value(f'{item.title}{said}')}")
+    return (
+        "Your retry stands as your answer, and it no longer states these items of your first "
+        "answer:\n"
+        + "\n".join(lines)
+        + "\nFor each item, write one line: KEEP <label>: <reason> to keep it in your answer "
+        "as your first answer wrote it, or WITHDRAW <label>: <reason> to leave it out. Write "
+        "nothing else."
+    )
+
+
+def read_retry_drop_answers(text: str, labels: Iterable[str]) -> dict[str, tuple[str, str]]:
+    """``{label: (KEEP or WITHDRAW, reason)}`` for each named label the answer decided, once.
+
+    A decision is read only where a clause begins: at the start of a line
+    (after a list mark or number), after a ``;``, after a ``,`` (``and`` or
+    ``then`` allowed) that follows a decision's labels, or after a sentence's
+    end when what follows is a whole decision (its labels then its reason, a
+    mark or the clause's end). It is written decision first (``KEEP C1``) or
+    labels first (``C1: KEEP``). Once a decision's reason opens (``:``, a
+    dash, ``.``, ``because``), the rest of its sentence is the reason and
+    nothing in it is read as a decision. ``all`` (``all others``, ``the
+    rest``) decides every item a decision of its own does not, except the
+    labels it names after ``except``, which stay undecided unless decided
+    elsewhere. Each line is read in one pass.
+    """
+    wanted = [str(label).upper() for label in labels]
+    decided: dict[str, tuple[str, str]] = {}
+    for_all: tuple[tuple[str, str], set[str]] | None = None
+
+    def _said(reason: str) -> str:
+        return reason.strip().rstrip(",").strip().strip("*_`").strip()
+
+    for line in str(text or "").splitlines():
+        for clause in line.split(";"):
+            read: list[tuple[str, list[str], set[str], str]] = []
+            found = _retry_drop_decision_at(clause, 0)
+            while found is not None:
+                decision, named, excepted, end = found
+                follows = _RETRY_DROP_NEXT_RE.match(clause, end)
+                if follows is not None:
+                    found = _retry_drop_decision_at(clause, follows.end())
+                    if found is not None:
+                        read.append((decision, named, excepted, ""))
+                        continue
+                opened = _RETRY_DROP_REASON_RE.match(clause, end)
+                if opened is None:
+                    read.append((decision, named, excepted, ""))
+                    break
+                # The reason runs to the sentence's end a whole decision
+                # follows, or to the clause's end. A reason opened by a
+                # sentence's end is itself such an end.
+                start, until, found = opened.end(), len(clause), None
+                if clause[opened.start() : opened.end()].strip(" \t*_`").startswith("."):
+                    found = _retry_drop_decision_at(clause, start, after_sentence=True)
+                    until = opened.start() if found is not None else until
+                scan = start
+                while found is None:
+                    ended = _RETRY_DROP_SENTENCE_END_RE.search(clause, scan)
+                    if ended is None:
+                        break
+                    found = _retry_drop_decision_at(clause, ended.end(), after_sentence=True)
+                    if found is not None:
+                        until = ended.start()
+                    scan = ended.end()
+                read.append((decision, named, excepted, _said(clause[start:until])))
+            for decision, named, excepted, said in read:
+                for label in named:
+                    if label == "ALL":
+                        if for_all is None:
+                            for_all = ((decision, said), excepted)
+                    elif label in wanted and label not in decided:
+                        decided[label] = (decision, said)
+    if for_all is not None:
+        everything, left_out = for_all
+        for label in wanted:
+            if label not in left_out:
+                decided.setdefault(label, everything)
+    return decided
+
+
+def retry_drop_row(
+    agent: str,
+    revision_round: int,
+    kind: str,
+    text: str,
+    missing: Sequence[str],
+    state: str,
+    reason: str,
+) -> dict[str, str]:
+    """One item a kept retry left out, as the run record keeps it, with its sentence."""
+    # Masked first, as model text in the record is, then the sentence a
+    # reader sees defanged: a mask run over a defanged URL rewrites it.
+    from maljan.reporting.renderers.markdown import _defanged_text
+
+    item = safe_answer_text(text)
+    stated = safe_answer_text(", ".join(missing))
+    said = safe_answer_text(reason)
+    values = f", stating {stated}," if stated else ""
+    why = f" ({said})" if said else ""
+    sentence = (
+        f"The {agent} analyst's kept validation retry left out the {kind} "
+        f'"{item}"{values} of its first answer: {state}{why}.'
+    )
+    return {
+        "record": RETRY_DROP_RECORD,
+        "agent": str(agent),
+        "round": str(int(revision_round or 0)),
+        "kind": str(kind),
+        "item": item,
+        "missing": stated,
+        "state": state,
+        "reason": said,
+        "sentence": _defanged_text(sentence),
+    }
+
+
+def unresolved_total(rows: Sequence[Mapping[str, Any]]) -> int:
+    """How many findings ``rows`` stand for, each folded row by its count (:func:`folded_rows`)."""
+    total = 0
+    for row in rows:
+        try:
+            total += max(1, int(str(dict(row).get("count") or 1)))
+        except ValueError:
+            total += 1
+    return total
 
 
 def validation_metrics(
@@ -7702,14 +8330,35 @@ def validation_metrics(
     out: dict[str, Any] = {
         "retries": int(retries),
         "by_code": dict(sorted(by_code.items())),
-        "unresolved": rows,
+        # Each identical row once, with how many times it was left: ``by_code``
+        # still counts every one.
+        "unresolved": folded_rows(rows),
         "not_run": sorted({str(code) for code in (not_run or []) if str(code).strip()}),
     }
     # The answers no claim could be read from, whole, so why can be read
-    # later (``unparsed_answer_rows``). Left out when there were none.
-    kept = [dict(row) for row in (unparsed_answers or []) if isinstance(row, Mapping)]
-    if kept:
-        out["unparsed_answers"] = kept
+    # later (``unparsed_answer_rows``), and the retry answers a first answer
+    # was kept over (``discarded_retry_row``), whole. Each left out when there
+    # were none.
+    rows_kept = [dict(row) for row in (unparsed_answers or []) if isinstance(row, Mapping)]
+    unparsed = [row for row in rows_kept if not row.get("record")]
+    discarded = [
+        {k: v for k, v in row.items() if k != "record"}
+        for row in rows_kept
+        if row.get("record") == DISCARDED_RETRY_RECORD
+    ]
+    drops = [
+        {k: v for k, v in row.items() if k != "record"}
+        for row in rows_kept
+        if row.get("record") == RETRY_DROP_RECORD
+    ]
+    if unparsed:
+        out["unparsed_answers"] = unparsed
+    if discarded:
+        out["discarded_retry_answers"] = discarded
+    # The items a kept retry left out of the first answer, and what became of
+    # each when the analyst was asked (``retry_drop_row``).
+    if drops:
+        out["retry_drops"] = drops
     return out
 
 

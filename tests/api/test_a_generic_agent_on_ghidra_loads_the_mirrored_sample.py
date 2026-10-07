@@ -210,18 +210,14 @@ def test_a_generic_agent_s_head_chunk_names_only_the_path_its_tools_read() -> No
             domain="static",
         )
     ]
-    generic = json.loads(
-        _augment_static_chunks_with_path(
-            chunks, state, provider_id="ghidra", host_path_reader=False
-        )[0].content
-    )
-    static = json.loads(
+    head = json.loads(
         _augment_static_chunks_with_path(chunks, state, provider_id="ghidra")[0].content
     )
-    assert generic["analysis_file_path"] == MIRROR
-    assert "host_sample_path" not in generic
-    assert HOST not in json.dumps(generic)
-    assert static["host_sample_path"] == HOST, "the static role's family classifier keeps it"
+    assert head["analysis_file_path"] == MIRROR
+    # No role's chunk carries the worker's path: the static role's family
+    # classifier reads it from the agent (``_pin_sample_path``).
+    assert "host_sample_path" not in head
+    assert HOST not in json.dumps(head)
 
 
 def test_only_the_provider_s_own_mirror_is_pinned(ghidra) -> None:

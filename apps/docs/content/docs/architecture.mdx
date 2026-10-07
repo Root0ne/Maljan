@@ -463,6 +463,71 @@ hidden text the platform recovered, and the publish rule reads it as it reads
 a FLOSS decoded string (see "A value a tool recovered from hidden text is a
 source of its own" under the indicator rule).
 
+**The deobfuscation passes** come after all of that, last for the same reason,
+and run on every run rather than when a model asks. First
+`find_crypto_constants` (`tools.crypto_constants`) over an executable image,
+given capa's function starts: the published constants of ciphers, hash
+functions and checksums, each set computed from its definition, a table found
+whole and other sets by two of their values, each with the places it stands and
+the function around them. Sets that share values are named only by a value that
+tells them apart: MD5's initial values are SHA-1's first four, so a set needs
+SHA-1's fifth, within 64 bytes of them (found by bisecting the sorted places, so the check stays O(n log n) on any layout), to be SHA-1 and is otherwise the MD5/SHA-1 family; SHA-256's and
+SHA-224's values are halves of SHA-512's and SHA-384's, so a half that sits
+inside a 64-bit value found is that value's, and halves standing beside the
+other halves are the SHA-2 family. A set whose algorithm capa's rules name at
+the function its place stands in is said to agree with capa there, not
+repeated. Ghidra's own `detect_crypto_constants` answers "not yet implemented",
+so the platform scans itself; the analysis server serves the same function.
+
+Then Ghidra's `find_anti_analysis_techniques` (`analysis.ghidra_passes`), the
+sample opened the way the sink pre-pass opens it (load, switch,
+auto-analysis). Ghidra's answer is kept whole, each address also as an offset
+from the image base Ghidra reports, and only its exact part is stated: an
+instruction that is the listed one (Ghidra matches mnemonics by prefix, so it
+files `INT3` under `INT 0x2d`), and a read through `FS:[0x30]` or
+`FS:[0x18]` exactly where a capa rule in the same function agrees (an
+anti-analysis rule, or one naming the PEB or TEB, such as `PEB access`); the
+line names the rule. A TEB/PEB read with no such rule is counted: the 32-bit
+UCRT's exit path reads the PEB's `NtGlobalFlag` itself, and capa leaves the
+library functions it recognises out. An `INT3` counts only alone, not as the byte before a
+function and not right after a call, jump or return (compilers put one after a
+call that never returns and pad with one where nothing falls through); a
+`CPUID` counts only where the code sets the hypervisor leaf in `eax`, or sets
+leaf 1 and tests ECX bit 31 before ECX is written again, all read in the file's
+bytes. An API call is counted and never stated: Ghidra lists every call site of
+a broad list, a language runtime's own included (the MSVC runtime calls
+`IsDebuggerPresent` on its failure path), while capa leaves the library
+functions it recognises out and the catalogue line already reads the imports.
+The rest are counted once per place. A scan that
+matched nothing says what it checks, never that the sample has no
+anti-analysis code. The node hands the pack the Ghidra it may call — switched
+on, over `http`, with the mirror the worker made for Ghidra — or the sentence
+saying why there is none, which is one entry `not run: <reason>` whose pack
+line is `no: <reason>`, not a failure. A scan Ghidra did not complete is a
+failed entry with Ghidra's own words (`no: the pass failed: …`).
+
+Ghidra's emulation is not run by the pack: Ghidra's `emulate_function`
+ignores its step limit and cannot be stopped, and one emulation took 130 to
+560 ms in a stored run. It stays a tool the reverser may call.
+
+When the pack does not fit its room, the passes' lines take only the room the
+other lines leave. **Decision:** a pass fact never shortens a decoded string
+or any other line the pack printed before the passes existed. A pass with a
+fact no other line carries — a constant set no capa rule agrees with, an exact
+instruction or TEB read at a function no capa anti-analysis rule matched — is
+offered that room first. A line that cannot show one item is left out, and every
+pass entry left out is counted in the "N more pack entries not shown" line,
+which comes after the pass lines. That line may take only room the other
+lines leave free, or room from capa's addresses; never a decoded string or any
+other fact line. **Decision:** when neither kind of room exists, the pack stays
+exactly as the other lines are, and the pass entries it lacks are recorded in
+the run summary's pack record instead (`run_summary.triage.pack_left_out`:
+their ids and tools, with the reason "no pack room"), read at the same bound
+every agent is shown the pack at. So a pass is never skipped unsaid, and no
+fact an earlier line states gives way to a pass. On the stored benchmark runs
+no pass fact is new, so the pack is as dev renders it except for capa's
+addresses where the trailer needed room.
+
 The pack states facts and draws no conclusion, and it never fails a job: a
 tool that raises or answers with an error is an entry with `ok=False` and a
 degradation reason `triage.<tool>_failed`, the next tool runs, and a
@@ -1146,7 +1211,37 @@ decides.
    claims. The outcome every finding is published with in the
    conversation is the kept answer's: an analyst whose retry lost claims keeps
    its first answer, and the loop checks that answer again before it says what
-   became of each finding (`retry_with_feedback_sync(keep=)`).
+   became of each finding (`retry_with_feedback_sync(keep=)`). A retry that
+   is kept although it no longer states claims or findings of the first answer
+   — the claims by the values of theirs it states nowhere
+   (`claim_drops.dropped_values`), the technique ids the retry was asked about
+   aside; the findings by title — is followed by one question naming each item
+   (`isr.retry_dropped`, `validation.retry_drop_question`), with a
+   `validation_feedback` event when it is asked and when it is answered: the
+   analyst answers `KEEP <label>: <reason>` or `WITHDRAW <label>: <reason>`
+   per item, several labels at once (`KEEP C1, C2: …`, `KEEP C1 C2: …`,
+   `WITHDRAW C3 because …`), several decisions on one line (`KEEP C1: …;
+   WITHDRAW C2: …`, `KEEP C1, WITHDRAW C2`), or `KEEP all` / `WITHDRAW all`
+   (`all others`, `the rest`) for every item a decision of its own does not
+   name, `all except C1` leaving the listed items undecided. A decision is
+   read only where a clause begins: a line's start (after a list mark or a
+   list number such as `1.`), after `;`, after a `,` (or `, and`) that
+   follows a decision's labels, or after a sentence's end when a whole
+   decision follows (`KEEP C1. WITHDRAW C2.`, `WITHDRAW C2: no. KEEP all
+   others.`). It may name its labels first (`C2: WITHDRAW - guess`). Once its
+   reason opens (`:`, a dash, `.`, `because`) the rest of its sentence is the
+   reason and no word in it is read as a decision, so `KEEP C1: it holds.
+   Withdraw C2 would lose data` decides C1 only. Each line is read in one
+   pass. Each item is the first answer's own claim, its sentence,
+   technique id and block with it (`claim_drops.dropped_claims`), so of a
+   technique list split on commas the claim left out is the one put back. A
+   kept item goes back into the answer as the first answer wrote it, a
+   withdrawn one stays out, and an item with no answer stays as the first
+   answer wrote it. Each item, its state and the reason are recorded per
+   analyst in `run_summary.validation.retry_drops`, listed in the run summary
+   and in the report's section 13 (`validation.retry_drop_row`): every value
+   masked as model text in the record is, in the case the claim wrote it,
+   and the sentence defanged after the mask.
    **A claim that does not describe its technique**
    (`attck.claim_does_not_describe`). A claim whose sentence shares no term
    with the technique it carries — no capability term listing the id, no word
@@ -1166,6 +1261,43 @@ decides.
    technique id) it asks 18, three of them true claims whose sentences used
    none of the technique's words (Ingress Tool Transfer on "downloads and
    writes a file", Native API on "the raw syscall() entry point").
+   A sub-technique whose sentence shares terms with it only through what
+   every sub-technique of its parent shares (the parent's name and capability
+   terms, its tactic) is asked the same question, naming the sibling, when
+   the sentence writes none of its own distinctive words (its vendored name's
+   words that are not its parent's) and writes the whole vendored name of a
+   sibling of more than one word: Change Default File Association on a
+   sentence about accessibility features and "persistence"
+   (`validation.sibling_named_instead`). It only adds a question where the
+   check used to pass: a sentence that writes one of the sub-technique's own
+   words, or names no sibling by its whole name, is read as before.
+   The question as sent ends with the named technique's card, where it has one;
+   the finding recorded is the check's message alone. Each technique's card
+   is shown once per turn. A retry turn that carries cards is measured
+   against the window with an answer of the output cap, on every path, and
+   is sent without them when it does not fit with them: a card never costs a
+   question.
+   **One reasoning card per technique** (`memory.technique_cards`, data in
+   `data/attck_technique_cards.json` beside the vendored table). A card holds
+   its kind (behaviour-focused: the action alone is the technique;
+   intent-critical: the action needs a stated adversarial purpose), what the
+   evidence has to show, the indicators to look for, and the sibling
+   techniques it is confused with, each with the criterion that tells them
+   apart (removing hooks from a security tool is T1685 Disable or Modify
+   Tools, the current id of the retired T1562, not T1070 Indicator Removal).
+   The cards are written from the ATT&CK definitions of the techniques the
+   vendored table carries and cover every technique the capability terms
+   list and every technique the analysts named in the recorded local3,
+   local4 and hosted run2 to run4 benchmark runs; techniques first named in
+   later runs may have none. A card
+   is reference shown beside a technique a model already named: in this
+   question and in the judge's technique question. Nothing is decided from
+   it, no question is asked because of it, and the report does not print it.
+   A sub-technique with no card of its own is shown none, since its parent's
+   kind and requirements need not be its own. Tests hold every card's id,
+   name and sibling ids to the vendored table, and the leak test reads every
+   card's words with no allowance: a sibling whose label is a term the
+   evaluation key scores is left off its card (115 pairs).
 2. **Domain and platform consistency** (`attck.platform_mismatch`, exact). The
    catalogue's domain and platforms for the id against the routed sample —
    a Windows PE is `enterprise`/Windows, an APK `mobile`/Android, an ELF
@@ -1394,7 +1526,12 @@ once for the claim format (`isr.unparsed_answer`) — unless the final-answer
 nudge already asked — and an answer that is still prose leaves the analyst
 with no claims, its prose as its report, status `no_claims` with the reason,
 and the run's degradation reasons naming it ("analyst answers kept as prose,
-…"). A CLAIM block that states no confidence, or one that is not a number, is
+…"). Such an answer is kept whole in `run_summary.validation.unparsed_answers`,
+and every validation retry answer the analyst's first answer is kept over (no
+claim block, fewer claim blocks, a retry that repeats again) is kept whole in
+`run_summary.validation.discarded_retry_answers` with why the first answer was
+kept (`validation.discarded_retry_row`); both are masked as model text in the
+record is, bounded only by the answer, and an answer is kept once. A CLAIM block that states no confidence, or one that is not a number, is
 not a claim either: it is counted and asked about
 (`isr.claim_without_confidence`), where the parsers used to write 0.5.
 Every path that reads claims reads them through one reader,
@@ -1467,7 +1604,10 @@ note on part of an answer leaves the claims it read standing when one is. A TECH
 id, a list of ids separated by commas, "and" or slashes (read as one claim per id, each
 with the claim's sentence, evidence and confidence, and each checked as a
 technique), or `NONE` or a dash for none; a closing block separator (`· ---`)
-is no part of it. Any other line (a qualifier, a negation, ids joined by
+is no part of it. An id followed by the vendored catalogue's own name for it
+in brackets (`T1027 (Obfuscated Files or Information)`; for a sub-technique its
+own name, or its parent's and its own joined by a colon) is that id. Any other
+line (bracketed words that are not that name, a qualifier, a negation, ids joined by
 another word) claims no id, is kept on the claim as `technique_line`, and the
 validation turn asks once for the ids alone, an id the claim does not assert
 left off the line (`isr.technique_line_unread`). The claims begun are counted
@@ -1619,7 +1759,11 @@ A chunked analysis answers each chunk's cut inside that chunk, before the
 merge: the cut is taken as the chunk ends (in a `finally`, so a chunk that
 raises leaves none for the next), and that chunk's own answer is asked once for
 a whole shorter one over that chunk's own input, the question naming it ("Your
-answer to chunk 1 of 2 stopped at the output limit …"). What comes back stands
+answer to chunk 1 of 2 stopped at the output limit …"; a repeated-claims
+question names its chunk the same way). A chunk is named by its place in the
+list the analyst is handed, in its prompt header as in the question: chunks
+from several data sources each count within their own source, and two of them
+both read "1 of 1". What comes back stands
 for that chunk alone in the merge; the merged answer is never replaced by one
 retry. A chunk still cut after its question is kept as it was cut and recorded
 as unread for that chunk. Before, a cut in chunk 1 was overwritten by a short
@@ -1642,6 +1786,47 @@ asking again after it counts as any repeat does. A failed earlier call is served
 once more, as any retry after a failure is. A replayed conversation keeps the
 seeds. A run's second chunk re-ran ten
 decompiles the first had done.
+
+Every call the repeat guard answers without running is filed in the ledger as
+a repeat of the entry that holds its answer (`EvidenceRecorder.record_repeat`):
+an earlier chunk's call answered from its entry, and a refused third identical
+call. The entry carries `repeated_of`, the note the model was handed in place
+of a result and a duration of 0 ms, and its `tool_call_started` and
+`tool_call_finished` events go out like any call's, the finish naming
+`repeated_of`. The model is never shown the repeat's own id: the answer it
+reads carries the earlier entry's, which is the one to cite. A repeat always
+names the entry that holds the answer, never another repeat
+(`EvidenceRecorder.holder_of`), and later identical calls are noted under that
+entry, so every served or refused answer names it too. The citation check
+(`EntryTexts.from_ledger`) and the judge's evidence (`question_evidence`) read a
+cited repeat as the entry that holds its answer. A repeat's note is not
+charged against the agent's byte budget (`report.evidence_budget_bytes`): it
+holds no new content, and charging it could blank a later answer. A repeat is
+counted apart in `run_summary.evidence.repeats` and in neither `ok` nor
+`failed`; the report header and §13's evidence bounds say how many calls were
+answered from an earlier entry, and Appendix A marks each such row "repeat of
+ev_…". No report section, decompiled-function list, function map, later
+chunk's block or seeded guard reads a repeat: each reads the entry it names. A
+reverser's second chunk once made nine calls, all answered this way, and left
+no entry and no event.
+
+A decompile is also a repeat when its answer is a function an earlier entry
+already holds, whatever address it was given: a call given an address inside
+a function is answered with the whole function. The function the answer prints
+(`validation.listed_function`: the start a decompiler's generic name carries,
+`FUN_00401000` or `fcn.00401000`, else the printed name) only finds the
+candidate entries; it is text the sample can shape, a forged or a shared name,
+so the call is a repeat only when its listing is a candidate's listing, or that
+listing cut shorter (the guardrail's cut marker aside). Any other listing under
+the same name is a new entry kept whole. The tool
+has run by then, so the model is still handed the answer, stamped with the
+entry that holds the function and one sentence saying so
+(`same_function_notice`); the entry is filed as a repeat of it and keeps the
+note, not a second copy. An answer that shows more of the function than the
+entry holding it is new evidence and holds the function from then on. An
+earlier chunk's listing holds its function for a later chunk the same way. One
+r2 analyst decompiled a function at its start and again at an address inside
+it, and the ledger held the same listing twice as two different calls.
 
 An analyst that has read a function sees its function map in the run-state
 block on every turn (`agents.function_map`). The platform keeps it from facts
@@ -2616,6 +2801,18 @@ failure with a cause that did not happen. `truncated` is persisted alongside
 `repeated_of` (the earlier identical call a repeat was answered from), `symbol`
 and `started_at`, and the evidence endpoint returns all four.
 
+An answer the tool-output guardrail cut, shortened or summarised to fit is
+`truncated` too, and carries `chars_dropped`, the characters it lost: the
+guardrail tells the call it is answering (`context_window.note_answer_cut`),
+and the entry keeps exactly what the model read. A compact form, which loses no
+value, is not a cut. `run_summary.evidence` counts such entries apart from the
+budget's trims (`cut`, `chars_dropped`), and §13's evidence bounds say
+"N cut by the tool-output guardrail (X characters dropped)"; a summary written
+before the count reads the guardrail's own count from `run_summary.truncation`.
+A cut entry still holds its answer for a later chunk, which is answered from it
+as from any kept result. Two decompilations once cut by thousands of characters
+were stored as `truncated: false`, and the report said nothing was cut.
+
 The rows are written in one batch when the run ends, so `created_at` used to be
 the flush for every one of them — thirty entries of one run had one distinct
 value between them, and a ledger sorted by it said nothing about when anything
@@ -2909,7 +3106,12 @@ is assembled from what the run gathered rather than recomputed beside it:
   whose id the catalogue does not know or the sample cannot host), and its
   finding is stated as the term match it is: no claim naming the technique uses
   the catalogue's terms for it. The review keeps each finding it asked with
-  (`undescribed`), and the row prints it beside the judge's answer and reason. Each id is named as the
+  (`undescribed`), and the row prints it beside the judge's answer and reason.
+  Each asked technique that has a reasoning card shows the card's lines under
+  its claims, as reference, with one line above the techniques saying what a
+  card is; the techniques asked are the same with or without cards. The cards
+  go in only where the judge's window has room left after the reports and the
+  evidence, so they never shorten either. Each id is named as the
   vendored ATT&CK table names it (`attck_loader.technique_label`), in the list,
   in the techniques the question says the bundle carries and in the evidence
   summary: asked about bare ids, a judge dropped a Winlogon Helper DLL id as
@@ -2935,7 +3137,17 @@ is assembled from what the run gathered rather than recomputed beside it:
   (`x_maljan_technique_review`, never exported) and the matrix publishes per
   it: a dropped technique is not published and reads "the judge dropped it
   (\<reason>)", a kept one is published — a finding's technique included — with
-  "kept by the judge when asked (\<reason>)" on its row. With no answer — the
+  "kept by the judge when asked (\<reason>)" on its row. The record keeps the
+  reason whole; the report's ATT&CK table prints it by one rule for both
+  (`reporting.judge_reasons.judge_reason_shown`), in the table's Status
+  column and in the list of claims not published under it alike: the
+  sentences that are the model's own working ("Wait, …", "Let me …") are left
+  out wherever they stand, a sentence a retraction takes back ("Wait, no.",
+  "No, …", "Actually no, …") with them, the others printed in order as many as fit the
+  cell (200 characters in the table, 300 in the list), a reason that is all
+  working prints its last sentence, a first sentence longer than the cell is
+  cut at a word, and the cut mark stands where anything is left out; every
+  network value in it is defanged. With no answer — the
   question timed out or failed, the verdict itself timed out, or no line of
   the answer is in the form asked — nothing is withheld: each technique is what
   it would have been without the question, and a published one is marked "not
@@ -3144,12 +3356,29 @@ is assembled from what the run gathered rather than recomputed beside it:
   the evidence dump through `ProseDefanger`, which touches exactly the values
   the run's network block and IOC table hold, as whole tokens. Strings of note,
   every indicator column, the platform's findings (section 13, the verdict,
-  the export decisions), a tool failure's error, a draft rule's source line and
-  compile error, and model prose and cells beyond the run's own values defang
+  the export decisions), a tool failure's error, a draft rule's source line,
+  compile error and comments (each `<value>: published because <reason>` line
+  of a YARA or Suricata draft; the strings and contents the rule matches on
+  stay as they compile), the command-line flags table, the sandbox's command
+  lines (§5.5 and the process tree), the persistence targets and payloads,
+  the registry keys and value names, the file operations and dropped files,
+  the shadow-copy commands, the mutexes, the notable APIs, the kill and
+  spared lists, the file name as submitted and the internal and export names,
+  and model prose and cells beyond the run's own values defang
   every URL of any scheme, `www.` host, mailbox, IPv4 or IPv6 address and host
   under a real top-level domain (the string sweep's list, the root zone's;
   any number of labels, in capitals, `.onion`): everything a viewer could
-  link. The host reader the publish checks, the run summary's sentences and
+  link. A closing pass reads every section of the rendered Markdown once more
+  with the same defanger, so a cell or code span a section did not pass
+  through it prints defanged too. It leaves only what the renderer itself set
+  aside when it wrote it, under a token drawn for that render: each draft
+  rule's body, which prints as it compiles, and in the run summary's appendix
+  a model's endpoint where a generation or prompt-rate line names the model
+  (`<model> @ <endpoint>`) and the endpoint is one the settings configure
+  (`model_assignments.configured_endpoint_labels`). The same endpoint
+  anywhere else, or a URL that begins with it (`http://127.0.0.1:8080/gate`
+  beside a configured `http://127.0.0.1:8080`), prints defanged. No heading or fence in a
+  sample's or a model's text makes a region the pass leaves. The host reader the publish checks, the run summary's sentences and
   a cell's state note use (`validation.network_values_in`) reads a `.onion`
   name of any labels by the same form reader, and an IPv6 address whole (an
   IPv4 tail included) when it is bracketed or has at least three groups and a
@@ -3509,11 +3738,20 @@ is assembled from what the run gathered rather than recomputed beside it:
   every statement of an observed step is one the sandbox watched; or names an
   address or a host no flow of the sample's process tree reached, by
   `evidence_bundles.sample_flow_fact`, a name judged by the addresses its DNS
-  answers gave (`NetworkDomain.resolved_ips`)),
+  answers gave (`NetworkDomain.resolved_ips`); or states persistence where
+  the sandbox watched the registry and the files and recorded none, the fact
+  the Persistence section prints as "no persistence observed",
+  `evidence_bundles.sandbox_saw_no_persistence`),
+  `report.persistence_not_observed` (the Persistence section's prose states
+  persistence under that same fact with no word that it was not observed in
+  this run; asked once with the fact and the sentence's start),
   `narrative.unpublished_indicator` (the narrative round's: a recommendation's
   action, rationale or detection names an address or a host the IOC table does
   not publish, a well-known reference host no row holds aside; asked with the
-  table's answer), `report.configuration_uncited` (a value said to be decrypted or
+  table's answer), `narrative.unpublished_technique` (the narrative round's: a
+  recommendation's action, rationale, detection or technique column names a
+  technique id the report's ATT&CK table does not publish; one question per
+  recommendation, naming the ids), `report.configuration_uncited` (a value said to be decrypted or
   observed cites no entry), `report.identifier_uncited` (a host identifier
   cites no entry of the run), `report.value_not_in_cited_entry` (a host
   identifier's or a configuration value's whole value is in none of the entries

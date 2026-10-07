@@ -44,6 +44,7 @@ from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop
 from maljan.memory.long_term_memory import build_stored_case
+from maljan.pipeline import triage_pack
 from maljan.pipeline.claim_drops import (
     answer_unchanged,
     dropped_values,
@@ -821,6 +822,9 @@ def _pin_sample_path(agent: Any, state: AnalysisState) -> None:
         "static": state.get("static_sample_path") or None,
         "host": _absolute_host_sample_path(state) or None,
     }
+    # The worker's own copy, for the static role's family classifier, which
+    # reads the bytes on this host. Kept off the chunk the model reads.
+    agent._host_sample_path = state.get("sample_path") or None
     # And the per-server overrides, for a tool server that was handed the
     # bytes instead of sharing this filesystem. Assigned unconditionally for
     # the same reason the path above is: an agent is cached across samples.
@@ -838,7 +842,6 @@ def _augment_static_chunks_with_path(
     state: AnalysisState,
     *,
     provider_id: str | None = None,
-    host_path_reader: bool = True,
 ) -> list:
     """Inject the container-visible sample path into the static analyst's chunks.
 
@@ -910,17 +913,12 @@ def _augment_static_chunks_with_path(
         value = state.get(key)
         if isinstance(value, str) and value and value != "unknown":
             parsed[key] = value
-    # Also carry the HOST-readable path (when present) so the static-feature
-    # family classifier can read the raw bytes — ember reads the file on the
-    # host, unlike Ghidra which reads the container-visible ``analysis_file_path``.
-    #
-    # Only for the reader that uses it (``host_path_reader``, the static role's
-    # family classifier). A generic agent has no such reader, and a second path
-    # in its head chunk is one a model can hand its tools instead of the one
-    # they read — the host path, which a containerised Ghidra cannot open.
+    # The host path is not written here for any agent. The static role's
+    # family classifier reads it from the agent (``_pin_sample_path``), and a
+    # second path in the chunk is one a model hands its tools instead of the
+    # one they read: an r2 analyst sent the worker's staging path, which
+    # radare2 will not open, beside the mirror it had been given.
     host_path = state.get("sample_path")
-    if host_path_reader and isinstance(host_path, str) and host_path:
-        parsed["host_sample_path"] = host_path
     # The toolchain: knowing a sample is AutoIt or PyInstaller rather than
     # "a PE" changes which tools are worth spending steps on, and it costs one
     # line of prompt. It is the one fact here no tool answers directly.
@@ -1178,14 +1176,29 @@ def evidence_summary(ledger: Sequence[Any]) -> dict[str, Any]:
     by_tool: dict[str, int] = {}
     for entry in ledger:
         by_tool[entry.tool] = by_tool.get(entry.tool, 0) + 1
-    return {
+    # A call the repeat guard answered from an earlier entry is an entry and is
+    # counted apart: it neither worked nor failed, it was not run.
+    ran = [e for e in ledger if not getattr(e, "repeated_of", None)]
+    # An answer the tool-output guardrail cut keeps what the model read and is
+    # counted as cut, not as trimmed to the budget, unless the budget then
+    # blanked it too.
+    cut = [e for e in ledger if int(getattr(e, "chars_dropped", 0) or 0) > 0]
+    cut_ids = {id(e) for e in cut}
+    summary: dict[str, Any] = {
         "entries": len(ledger),
-        "ok": sum(1 for e in ledger if e.ok),
-        "failed": sum(1 for e in ledger if not e.ok),
-        "trimmed": sum(1 for e in ledger if e.truncated),
+        "ok": sum(1 for e in ran if e.ok),
+        "failed": sum(1 for e in ran if not e.ok),
+        "trimmed": sum(1 for e in ledger if e.truncated and (id(e) not in cut_ids or not e.output)),
         "by_tool": dict(sorted(by_tool.items())),
         "failures": tool_failures(ledger),
     }
+    repeats = len(ledger) - len(ran)
+    if repeats:
+        summary["repeats"] = repeats
+    if cut:
+        summary["cut"] = len(cut)
+        summary["chars_dropped"] = sum(int(e.chars_dropped) for e in cut)
+    return summary
 
 
 def with_verdict_fallback(validation: Any, failure: str) -> dict[str, Any]:
@@ -1262,6 +1275,69 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
         )
 
     return step
+
+
+def _ghidra_passes_step(container: ServiceContainer, state: AnalysisState) -> Any:
+    """The Ghidra the pack's passes call, or the sentence saying why there is none.
+
+    Ghidra has to be switched on, reached over its REST API (``http``: Ghidra
+    over stdio serves no endpoint the pack can call), and holding a copy of
+    this job's sample where it reads: the mirror the worker made for Ghidra as
+    a static provider of the run's profile. Each request waits what one tool
+    call of this deployment may take, as the sink pre-pass's do.
+    """
+    from maljan.analysis.ghidra_passes import (
+        GHIDRA_HAS_NO_COPY,
+        GHIDRA_NOT_OVER_HTTP,
+        GHIDRA_SWITCHED_OFF,
+        GhidraPasses,
+    )
+    from maljan.providers.server_guard import deployment_call_budget
+
+    cfg = container.config
+    ghidra = cfg.static.ghidra
+    paths = state.get("static_sample_paths") or {}
+    path = paths.get("ghidra") or (
+        state.get("static_sample_path") if cfg.static.provider == "ghidra" else None
+    )
+    if not bool(getattr(ghidra, "enabled", True)):
+        reason = GHIDRA_SWITCHED_OFF
+    elif ghidra.transport != "http":
+        reason = GHIDRA_NOT_OVER_HTTP.format(transport=ghidra.transport)
+    elif not path:
+        reason = GHIDRA_HAS_NO_COPY
+    else:
+        budget = deployment_call_budget(cfg)
+        return GhidraPasses(
+            base_url=str(ghidra.url),
+            token=ghidra.auth_token.get_secret_value(),
+            sample_path=str(path),
+            call_timeout=budget if budget > 0 else None,
+        )
+    return GhidraPasses(unavailable=reason)
+
+
+def _pack_left_out(entries: list[Any], container: ServiceContainer) -> dict[str, Any] | None:
+    """The pack record of the pass entries the pack neither shows nor counts, or ``None``.
+
+    Read at the bound every agent is shown the pack at (:func:`upstream_chars`).
+    The pack's trailer takes only room the other lines leave or room from
+    capa's addresses; when there is neither, the pack stays as the other lines
+    are, and the run summary's pack record says which entries it lacks and why.
+    Never raises.
+    """
+    try:
+        unsaid = triage_pack.pack_unsaid(pack_entries(entries), upstream_chars(container))
+    except Exception as exc:  # noqa: BLE001 — a record is never worth a lost stage
+        logger.debug("triage pack: the pack's room was not read (%s).", exc)
+        return None
+    if not unsaid:
+        return None
+    return {
+        "entries": [entry.id for entry in unsaid],
+        "tools": [entry.tool for entry in unsaid],
+        "reason": triage_pack.NO_PACK_ROOM,
+    }
 
 
 def _analysis_server_environ(container: ServiceContainer) -> dict[str, str]:
@@ -1376,6 +1452,7 @@ def make_triage_node(
                 inputs,
                 reputation=_reputation_lookup(container, inputs.sha256),
                 function_matches=_function_matches_step(container, state),
+                ghidra=_ghidra_passes_step(container, state),
             )
         except Exception as exc:  # noqa: BLE001 — the pack never fails the job
             logger.warning(
@@ -1427,6 +1504,9 @@ def make_triage_node(
             "triage_facts": result.to_state(),
             **stage_record(stage, ran=True, duration_ms=_elapsed_ms()),
         }
+        left_out = _pack_left_out(result.entries, container)
+        if left_out:
+            update["triage_facts"]["pack_left_out"] = left_out
         if result.entries:
             update["evidence_ledger"] = [e.model_dump(mode="json") for e in result.entries]
         if stage.key in finishes:
@@ -2596,7 +2676,6 @@ def make_stage_agent_node(
                     chunks,
                     state,
                     provider_id=agent._resolved.static_provider_id,
-                    host_path_reader=role == "static",
                 )
 
             # The no-data guard runs on what the *loaders* produced. Injecting

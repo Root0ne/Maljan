@@ -21,6 +21,7 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
 from maljan.agents.base_agent import BaseAnalyst
+from maljan.agents.evidence_recorder import same_function_notice
 from maljan.agents.function_map import FUNCTION_MAP_HEAD, function_artefacts
 from maljan.schemas.evidence import LedgerEntry
 
@@ -126,7 +127,10 @@ def test_every_call_runs_and_the_map_rides_the_latest_answer() -> None:
 
     assert len(calls) == 2, "another spelling of the address is run, as before"
     last = [str(m.content) for m in model.seen[2] if isinstance(m, ToolMessage)][-1]
-    assert last.startswith(f"[ev_0002]\n{LISTING}")
+    # Its answer is the function ev_0001 holds, so it is handed under that id
+    # and filed as a repeat of it.
+    assert last.startswith(f"[ev_0001]\n{LISTING}")
+    assert same_function_notice("FUN_1360bc0904c", "ev_0001") in last
     assert FUNCTION_MAP_HEAD in last
     assert "also visited: 0x1360bc0904c" in last
     assert "ledger_answers" not in analyst.drain_budget_records()[0]
