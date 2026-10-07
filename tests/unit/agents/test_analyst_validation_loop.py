@@ -313,15 +313,26 @@ class TestFindingsFollowTheKeptAnswer:
         assert [f.title for f in result.findings] == ["first finding"]
         assert analyst._findings_buffer == []
 
-    def test_a_kept_retry_carries_its_own_findings_only(self) -> None:
+    def test_a_kept_retry_carries_its_own_findings_and_the_ones_the_analyst_keeps(
+        self,
+    ) -> None:
         written = f"{_BLOCK_ANSWER}\n{_fenced('first finding')}"
         retry = f"{_BLOCK_ANSWER.replace('T9999', 'T1055')}\n{_fenced('retry finding')}"
-        analyst = _WrittenAnalyst(written, [retry])
+        analyst = _WrittenAnalyst(written, [retry, "WITHDRAW F1: the retry finding says it"])
 
         result = analyst.safe_analyze_isr("raw data")
 
         assert [f.title for f in result.findings] == ["retry finding"]
         assert analyst._findings_buffer == []
+
+    def test_a_first_finding_the_analyst_keeps_goes_back_with_the_kept_retry(self) -> None:
+        written = f"{_BLOCK_ANSWER}\n{_fenced('first finding')}"
+        retry = f"{_BLOCK_ANSWER.replace('T9999', 'T1055')}\n{_fenced('retry finding')}"
+        analyst = _WrittenAnalyst(written, [retry, "KEEP F1: it stands"])
+
+        result = analyst.safe_analyze_isr("raw data")
+
+        assert [f.title for f in result.findings] == ["retry finding", "first finding"]
 
     def test_a_later_drain_after_a_discarded_retry_keeps_the_first_findings(self) -> None:
         written = f"{_BLOCK_ANSWER}\n{_fenced('first finding')}"
@@ -338,14 +349,15 @@ class TestFindingsFollowTheKeptAnswer:
 
         result = analyst.safe_analyze_isr("raw data")
 
-        assert result.findings == []
+        # Unanswered, the first answer's finding stays, its state recorded.
+        assert [f.title for f in result.findings] == ["first finding"]
         record = analyst._budget_records[-1]["validation_retry"]
         assert (record["first_findings"], record["retry_findings"], record["kept"]) == (
             1,
             0,
             "retry",
         )
-        assert "carries no findings" in caplog.text
+        assert "no longer states 0 claim(s) and 1 finding(s)" in caplog.text
 
 
 class TestTheReplayIsTheAnswerWithoutScaffolding:

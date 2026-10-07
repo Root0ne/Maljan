@@ -373,3 +373,64 @@ def test_a_reference_lookup_before_a_comma_stays_a_link() -> None:
 
     text = "report_url=https://www.virustotal.com/gui/ip-address/198.51.100.20, coverage=91"
     assert _defanged_text(text) == text
+
+
+def test_the_command_line_flags_table_prints_its_network_values_defanged() -> None:
+    from maljan.reporting.models import CliFlag, TechnicalAnalysis
+
+    report = _report(
+        technical_analysis=TechnicalAnalysis(
+            cli_flags=[
+                CliFlag(flag=URL, description=f"the base it reaches, {HOST}", evidence_ref="ev_1"),
+                CliFlag(flag="--quiet", description="no window", evidence_ref="ev_2"),
+            ]
+        )
+    )
+    section = MarkdownRenderer().render(report).split("Command-line flags:", 1)[1]
+    section = section.split("\n## ", 1)[0].split("\n### ", 1)[0]
+
+    assert "`hxxps://relay[.]example[.]net/live/`" in section
+    assert "`--quiet`" in section
+    assert _live_in(section) == []
+
+
+def test_a_draft_rule_s_comments_print_defanged_and_its_strings_compile_as_written() -> None:
+    from maljan.reporting.detection_signatures import build_detection_rules
+    from maljan.reporting.models import ConsolidatedIOC
+
+    report = _report(
+        malware_category="loader",
+        consolidated_iocs=[
+            ConsolidatedIOC(
+                type="Domain",
+                value=HOST,
+                kind="domain",
+                is_network=True,
+                published=f"yes: the host of {URL}, which this run publishes",
+            ),
+            ConsolidatedIOC(
+                type="URL",
+                value=URL,
+                kind="url",
+                is_network=True,
+                published="yes: recovered by emulation (decoded strings), ev_0003",
+            ),
+        ],
+    )
+    bodies = {rule.kind: rule.body for rule in build_detection_rules(report)}
+
+    for kind in ("yara", "suricata"):
+        body = bodies[kind]
+        comments = [
+            line.rsplit(" // ", 1)[1] if kind == "yara" else line
+            for line in body.splitlines()
+            if (kind == "yara" and "published because" in line)
+            or (kind == "suricata" and line.startswith("#") and "published because" in line)
+        ]
+        assert len(comments) == 2, body
+        for comment in comments:
+            assert _live_in(comment.replace("hxxps://", "")) == [], comment
+            assert "relay[.]example[.]net" in comment
+    # The rule itself matches on the value as it is written.
+    assert f'"{HOST}"' in bodies["yara"]
+    assert f'content:"{HOST}"' in bodies["suricata"]

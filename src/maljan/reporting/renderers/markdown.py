@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import secrets
 from collections.abc import Callable, Iterable
 from types import SimpleNamespace
 from typing import Any
@@ -50,6 +51,11 @@ from maljan.analysis.run_summary import (
 )
 from maljan.core.logger import logger
 from maljan.reporting.defang import ProseDefanger, defang
+from maljan.reporting.judge_reasons import (
+    JUDGE_REASON_WIDTH,
+    judge_reasons_shown,
+    status_shown,
+)
 from maljan.reporting.ledger_projection import cell_network_values, listing_kind
 from maljan.reporting.ledger_report import (
     ANALYST_SECTION_SOURCES,
@@ -227,11 +233,20 @@ class MarkdownRenderer:
             self._safe_section("attribution", lambda: self._section_attribution(report, ctx)),
             self._safe_section("limitations", lambda: self._section_limitations(report, ctx)),
             self._safe_section("appendix_evidence", lambda: self._appendix_evidence(report, ctx)),
-            self._safe_section("appendix_run_summary", lambda: self._appendix_run(report)),
+            self._safe_section("appendix_run_summary", lambda: self._appendix_run(report, ctx)),
             self._safe_section("appendix_references", lambda: self._appendix_references(report)),
             self._safe_section("appendix_methodology", lambda: self._appendix_method(report, ctx)),
         ]
-        return "\n\n".join(s.rstrip() for s in sections if s).rstrip() + "\n"
+        # Every value a viewer could follow, wherever a section printed it, is
+        # read once more by the report's defanger: a cell or a code span a
+        # sandbox, the sample's bytes or a model filled prints defanged even
+        # where its section did not pass it through the context. What this
+        # renderer itself wrote to print as written — each draft rule's body,
+        # a configured model endpoint where a rate line names its model — was
+        # set aside under a token no text can name, and only that comes back
+        # unread.
+        read = [ctx.restore(_defanged_text(text)) for text in sections]
+        return "\n\n".join(text.rstrip() for text in read if text).rstrip() + "\n"
 
     @staticmethod
     def _safe_section(name: str, fn: Callable[[], str]) -> str:
@@ -377,7 +392,9 @@ class MarkdownRenderer:
         lines = [_heading(2, "Sample overview", MEASURED), ""]
         lines.append(_row("Field", "Value"))
         lines.append(_divider(2))
-        lines.append(_row("File name (as submitted)", f"`{ident.file_name or 'unknown'}`"))
+        lines.append(
+            _row("File name (as submitted)", _code_span(ctx.plain(ident.file_name or "unknown")))
+        )
         lines.append(_row("Size", f"{ident.file_size_bytes:,} bytes"))
         header = _header_facts(report)
         kind = ident.file_type
@@ -397,7 +414,7 @@ class MarkdownRenderer:
         if ident.mime_type:
             lines.append(_row("MIME", ident.mime_type))
         if ident.magic_bytes:
-            lines.append(_row("Magic bytes", f"`{ident.magic_bytes}`"))
+            lines.append(_row("Magic bytes", _code_span(ctx.plain(str(ident.magic_bytes)))))
         if header["compile_timestamp"]:
             lines.append(
                 _row(
@@ -408,9 +425,11 @@ class MarkdownRenderer:
         if ident.language_or_compiler:
             lines.append(_row("Compiler / language", ident.language_or_compiler))
         if header["export_name"]:
-            lines.append(_row("Export directory name", f"`{header['export_name']}`"))
+            lines.append(
+                _row("Export directory name", _code_span(ctx.plain(str(header["export_name"]))))
+            )
         if ident.internal_name:
-            lines.append(_row("Internal name", f"`{ident.internal_name}`"))
+            lines.append(_row("Internal name", _code_span(ctx.plain(str(ident.internal_name)))))
         signing = ident.signing
         cited = f" ({signing.evidence_id})" if signing.evidence_id else ""
         lines.append(_row("Signed", f"{'yes' if signing.is_signed else 'no'}{cited}"))
@@ -579,7 +598,7 @@ class MarkdownRenderer:
         measured: list[str] = []
         if static is not None and static.sections:
             entropies = ", ".join(
-                f"`{_one_line(sec.name)}` {sec.entropy:.2f}"
+                f"{_code_span(ctx.plain(_one_line(sec.name)))} {sec.entropy:.2f}"
                 + (" [HIGH]" if sec.entropy > 7.0 else "")
                 for sec in _distinct(
                     static.sections, lambda s: (s.name, s.virtual_address, s.raw_offset)
@@ -597,7 +616,9 @@ class MarkdownRenderer:
             measured.append(_row(*head))
             measured.append(_divider(len(head)))
             for pm in static.packer_matches:
-                evidence = ", ".join(f"`{e}`" for e in (pm.get("evidence") or []))
+                evidence = ", ".join(
+                    _code_span(ctx.plain(str(e))) for e in (pm.get("evidence") or [])
+                )
                 stated = pm.get("confidence")
                 cells = [pm.get("name") or "not recorded", pm.get("kind") or "-"]
                 if rated:
@@ -709,8 +730,10 @@ class MarkdownRenderer:
                 measured.append(
                     _row(
                         mech.kind,
-                        f"`{_truncate(mech.target, _CELL_LIMIT)}`",
-                        f"`{_truncate(mech.payload, _CELL_LIMIT)}`" if mech.payload else "-",
+                        _code_span(_truncate(ctx.plain(mech.target), _CELL_LIMIT)),
+                        _code_span(_truncate(ctx.plain(mech.payload), _CELL_LIMIT))
+                        if mech.payload
+                        else "-",
                         mech.technique_id or "-",
                         ctx.source_of(mech.evidence_ref),
                         mech.evidence_ref or "-",
@@ -738,8 +761,8 @@ class MarkdownRenderer:
                 measured.append(
                     _row(
                         listed_row["kind"] or "-",
-                        f"`{_truncate(listed_row['target'], _CELL_LIMIT)}`",
-                        f"`{_truncate(listed_row['payload'], _CELL_LIMIT)}`"
+                        _code_span(_truncate(ctx.plain(listed_row["target"]), _CELL_LIMIT)),
+                        _code_span(_truncate(ctx.plain(listed_row["payload"]), _CELL_LIMIT))
                         if listed_row["payload"]
                         else "-",
                         f"the {listed_row['listed_by']} analyst"
@@ -770,7 +793,9 @@ class MarkdownRenderer:
             measured.append(_row("PID", "Command line"))
             measured.append(_divider(2))
             for node in commands[:20]:
-                measured.append(_row(node.pid, f"`{_truncate(node.command_line, _CELL_LIMIT)}`"))
+                measured.append(
+                    _row(node.pid, _code_span(_truncate(ctx.plain(node.command_line), _CELL_LIMIT)))
+                )
             measured.extend(_left_out(len(commands), 20, "commands"))
         blocks.append(
             _subsection(
@@ -805,9 +830,11 @@ class MarkdownRenderer:
                 body.append(_row("Flag", "Meaning", "Evidence"))
                 body.append(_divider(3))
                 for flag in ta.cli_flags:
+                    # A flag is the sample's own text, and a URL or host in it
+                    # is defanged like every other value the body prints.
                     body.append(
                         _row(
-                            f"`{flag.flag}`",
+                            _code_span(ctx.plain(flag.flag)),
                             ctx.cell(flag.description or "-"),
                             flag.evidence_ref or "no evidence cited",
                         )
@@ -899,7 +926,8 @@ class MarkdownRenderer:
                 size = res.get("size")
                 measured.append(
                     _row(
-                        f"`{res.get('id') or 'not recorded'}` ({res.get('source') or '-'})",
+                        f"{_code_span(ctx.plain(str(res.get('id') or 'not recorded')))} "
+                        f"({ctx.plain(str(res.get('source') or '-'))})",
                         f"{size} bytes" if isinstance(size, int) and size > 0 else "not recorded",
                         f"`{str(res.get('sha256')).lower()}`" if res.get("sha256") else "-",
                         res.get("type") or "not recorded",
@@ -910,7 +938,7 @@ class MarkdownRenderer:
                 named = str(op.get("path") or op.get("name") or "not recorded")
                 measured.append(
                     _row(
-                        f"`{_truncate(named, _CELL_LIMIT)}`",
+                        _code_span(_truncate(ctx.plain(named), _CELL_LIMIT)),
                         f"{op['size']} bytes" if op.get("size") else "not recorded",
                         f"`{str(op.get('sha256')).lower()}`" if op.get("sha256") else "-",
                         op.get("type") or "-",
@@ -969,11 +997,15 @@ class MarkdownRenderer:
             )
             return "\n".join(lines)
         if dyn.unavailable:
-            names = ", ".join(f"`{_one_line(name)}`" for name in dyn.unavailable)
+            names = ", ".join(_code_span(ctx.plain(_one_line(name))) for name in dyn.unavailable)
             lines.extend([f"_Not provided by this sandbox: {names}._", ""])
 
         if dyn.process_tree:
-            tree = [line for root in dyn.process_tree for line in _process_tree_lines(root, 0)]
+            tree = [
+                line
+                for root in dyn.process_tree
+                for line in _process_tree_lines(root, 0, ctx.plain)
+            ]
             lines.extend([_plain_heading("Process tree"), "", *_fenced("\n".join(tree)), ""])
 
         files = [op for op in dyn.file_operations if isinstance(op, dict) and op.get("path")]
@@ -989,7 +1021,7 @@ class MarkdownRenderer:
             for op in files[:40]:
                 lines.append(
                     _row(
-                        f"`{_truncate(str(op.get('path', '')), _CELL_LIMIT)}`",
+                        _code_span(_truncate(ctx.plain(str(op.get("path", ""))), _CELL_LIMIT)),
                         op.get("operation", "-"),
                         op.get("api", "-"),
                     )
@@ -1006,7 +1038,7 @@ class MarkdownRenderer:
                     _divider(4),
                 ]
             )
-            lines.extend(_registry_row(reg) for reg in dyn.registry_mods[:40])
+            lines.extend(_registry_row(reg, ctx.plain) for reg in dyn.registry_mods[:40])
             lines.extend(_left_out(len(dyn.registry_mods), 40, "registry modifications"))
             lines.append("")
 
@@ -1017,7 +1049,7 @@ class MarkdownRenderer:
         ]
         if mutexes:
             lines.extend([_plain_heading("Mutexes"), ""])
-            lines.extend(_item(f"`{name}`") for name in mutexes[:40])
+            lines.extend(_item(_code_span(ctx.plain(name))) for name in mutexes[:40])
             lines.extend(_left_out(len(mutexes), 40, "mutexes"))
             lines.append("")
 
@@ -1038,8 +1070,8 @@ class MarkdownRenderer:
                     count = api.get("count")
                     lines.append(
                         _row(
-                            f"`{api.get('api', '-')}`",
-                            f"`{api.get('process') or '-'}`",
+                            _code_span(ctx.plain(str(api.get("api", "-")))),
+                            _code_span(ctx.plain(str(api.get("process") or "-"))),
                             count if isinstance(count, int) else "not recorded",
                         )
                     )
@@ -1091,7 +1123,7 @@ class MarkdownRenderer:
                     flag = "[SUSPICIOUS]"
                 lines.append(
                     _row(
-                        f"`{sec.name}`",
+                        _code_span(ctx.plain(str(sec.name))),
                         sec.virtual_address,
                         sec.virtual_size,
                         f"0x{sec.raw_offset:x}",
@@ -1111,9 +1143,9 @@ class MarkdownRenderer:
                 lines.append(_row("Library", "Functions"))
                 lines.append(_divider(2))
                 for dll, functions in list(by_dll.items())[:40]:
-                    shown = ", ".join(f"`{f}`" for f in functions[:12])
+                    shown = ", ".join(_code_span(ctx.plain(str(f))) for f in functions[:12])
                     more = f" and {len(functions) - 12} more" if len(functions) > 12 else ""
-                    lines.append(_row(f"`{dll}`", shown + more))
+                    lines.append(_row(_code_span(ctx.plain(str(dll))), shown + more))
                 lines.extend(_left_out(len(by_dll), 40, "libraries"))
                 lines.append("")
             if static.api_capabilities:
@@ -1164,7 +1196,11 @@ class MarkdownRenderer:
                 distinct = _distinct(static.export_rows, lambda e: (e.name, e.ordinal, e.rva))
                 for exp in distinct[:60]:
                     lines.append(
-                        _row(f"`{exp.name or '(unnamed)'}`", exp.ordinal or "-", exp.rva or "-")
+                        _row(
+                            _code_span(ctx.plain(exp.name or "(unnamed)")),
+                            exp.ordinal or "-",
+                            exp.rva or "-",
+                        )
                     )
                 lines.extend(_left_out(len(distinct), 60, "exports"))
                 rvas = [
@@ -1179,7 +1215,7 @@ class MarkdownRenderer:
             else:
                 names = list(dict.fromkeys(static.exports))
                 for name in names[:60]:
-                    lines.append(_row(f"`{name}`", "-", "-"))
+                    lines.append(_row(_code_span(ctx.plain(str(name))), "-", "-"))
                 lines.extend(_left_out(len(names), 60, "exports"))
             lines.append("")
 
@@ -1254,7 +1290,7 @@ class MarkdownRenderer:
             lines.append("_No ATT&CK techniques mapped._")
             return "\n".join(
                 lines
-                + _not_published_lines(report)
+                + _not_published_lines(report, ctx)
                 + _mbc_lines(report)
                 + _unmapped_behaviour_lines(report)
             )
@@ -1353,7 +1389,7 @@ class MarkdownRenderer:
             )
         return "\n".join(
             lines
-            + _not_published_lines(report)
+            + _not_published_lines(report, ctx)
             + _mbc_lines(report)
             + _unmapped_behaviour_lines(report)
         ).rstrip()
@@ -1455,7 +1491,7 @@ class MarkdownRenderer:
                 body.append(
                     _item(
                         f"{section.title}{ids}: "
-                        + ((", ".join(f"`{n}`" for n in names) + more) or "none")
+                        + ((", ".join(_code_span(ctx.plain(n)) for n in names) + more) or "none")
                     )
                 )
             body.extend(
@@ -1495,7 +1531,11 @@ class MarkdownRenderer:
                 body.append(f"**{kind}** `{_one_line(rule.name)}` — {status}{source}")
                 body.append("")
                 fence = rule.kind if rule.kind in {"yara", "sigma"} else ""
-                body.extend([*_fenced(rule.body.rstrip(), fence), ""])
+                # The rule's body is the rule to deploy: it prints as it
+                # compiles, set aside from the closing pass by its own token.
+                fenced = _fenced(rule.body.rstrip(), fence)
+                fenced[1] = ctx.keep(fenced[1])
+                body.extend([*fenced, ""])
             blocks.append("\n".join(body).rstrip())
         else:
             blocks.append(
@@ -1590,7 +1630,9 @@ class MarkdownRenderer:
             )
             for match in attr.function_hash_matches[:10]:
                 example_functions = list(match.get("example_functions") or [])
-                examples = ", ".join(f"`{f}`" for f in example_functions[:3]) or "-"
+                examples = (
+                    ", ".join(_code_span(ctx.plain(str(f))) for f in example_functions[:3]) or "-"
+                )
                 if len(example_functions) > 3:
                     examples += f" and {len(example_functions) - 3} more"
                 stated = match.get("confidence")
@@ -1771,7 +1813,13 @@ class MarkdownRenderer:
                 lines.extend([_one_line(" ".join(said_parts)), ""])
 
         validation = summary.get("validation") or {}
-        unresolved = [row for row in (validation.get("unresolved") or []) if isinstance(row, dict)]
+        # Each identical finding once, with how many times it was left: a
+        # record stored before the run summary folded them is folded here.
+        from maljan.pipeline.validation import folded_rows, unresolved_total
+
+        unresolved = folded_rows(
+            [row for row in (validation.get("unresolved") or []) if isinstance(row, dict)]
+        )
         exports = [row for row in unresolved if str(row.get("code", "")).startswith("stix.")]
         others = [row for row in unresolved if row not in exports]
         # A question the producer answered as it allows is not left unresolved:
@@ -1782,7 +1830,7 @@ class MarkdownRenderer:
             not_run = validation.get("not_run") or []
             lines.append(
                 f"**Validation:** {validation.get('retries', 0)} feedback retries, "
-                f"{len(others)} finding(s) left unresolved"
+                f"{unresolved_total(others)} finding(s) left unresolved"
                 + (f"; checks that could not run: {', '.join(not_run)}" if not_run else "")
                 + "."
             )
@@ -1791,18 +1839,25 @@ class MarkdownRenderer:
                 advisory = " (advisory)" if row.get("advisory") else ""
                 lines.append(
                     _item(
-                        f"`{row.get('code', '')}` ({row.get('agent', '')}){advisory}: "
-                        f"{_finding_text(row)}"
+                        f"`{row.get('code', '')}` ({row.get('agent', '')}){advisory}"
+                        f"{_times(row)}: {_finding_text(row)}"
                     )
                 )
             for row in answered:
                 lines.append(
                     _item(
-                        f"`{row.get('code', '')}` ({row.get('agent', '')}) (answered): "
-                        f"{_finding_text(row)}"
+                        f"`{row.get('code', '')}` ({row.get('agent', '')}) (answered)"
+                        f"{_times(row)}: {_finding_text(row)}"
                     )
                 )
             if others or answered:
+                lines.append("")
+            # What a kept validation retry left out of an analyst's first
+            # answer, and what became of each item when the analyst was asked.
+            drops = [row for row in validation.get("retry_drops") or [] if isinstance(row, dict)]
+            if drops:
+                lines.extend(["**Items a kept validation retry left out:**", ""])
+                lines.extend(_item(ctx.plain(str(row.get("sentence") or ""))) for row in drops)
                 lines.append("")
         if exports:
             lines.extend(["**Export decisions:**", ""])
@@ -1867,7 +1922,7 @@ class MarkdownRenderer:
             lines.append("")
         return "\n".join(lines).rstrip()
 
-    def _appendix_run(self, report: MalwareReport) -> str:
+    def _appendix_run(self, report: MalwareReport, ctx: _Context | None = None) -> str:
         run_summary = report.run_summary or {}
         lines = [_appendix_heading("B", "Run summary", MEASURED), ""]
         if not run_summary:
@@ -1931,7 +1986,10 @@ class MarkdownRenderer:
                 lines.append(_item(f"A mark that was not read; the line blocked: {sentence}"))
             for sentence in negotiation.get("ledger_facts") or []:
                 lines.append(_item(str(sentence)))
-        for line in generation_lines(run_summary.get("generation")):
+        # A model's configured endpoint prints as configured, set aside where
+        # this line writes it and nowhere else.
+        model_name = ctx.endpoint_kept if ctx is not None else None
+        for line in generation_lines(run_summary.get("generation"), model_name):
             lines.append(_item(line))
         ungrounded = run_summary.get("sections_without_evidence")
         if ungrounded:
@@ -2074,6 +2132,12 @@ class _Context:
 
     def __init__(self, report: MalwareReport) -> None:
         self.report = report
+        # What the renderer set aside from the closing defang pass, by token.
+        # The token carries a value drawn for this render, so no text a
+        # sample, a sandbox or a model wrote can name one.
+        self._kept: dict[str, str] = {}
+        self._nonce = secrets.token_hex(8)
+        self._labels: set[str] | None = None
         summary = report.run_summary or {}
         validation = summary.get("validation") or {}
         self.unresolved = [
@@ -2155,11 +2219,9 @@ class _Context:
         # "No persistence observed" is a sandbox's to say only when it watched
         # the places persistence is written: a run whose sandbox recorded one
         # URL and nothing about the host looked at none of them.
-        dyn = report.dynamic
-        blind = {name.strip().lower() for name in (dyn.unavailable if dyn else [])}
-        self.sandbox_watched_persistence = dyn is not None and not blind.intersection(
-            {"registry", "files", "file", "file_operations", "filesystem"}
-        )
+        from maljan.reporting.evidence_bundles import sandbox_watched_persistence
+
+        self.sandbox_watched_persistence = sandbox_watched_persistence(report)
         self.analysts = _AnalystStates(report)
         team = _team(report)
         self.no_analyst_claims = bool(team) and set(team) <= self.analysts.idle
@@ -2340,6 +2402,44 @@ class _Context:
     def line(self, text: Any) -> str:
         """Model prose that has to stay on one line: a list item, a step."""
         return _one_line(self._defang(self.marked(str(text or ""))))
+
+    def keep(self, text: str) -> str:
+        """``text`` set aside from the closing pass: a token now, ``text`` again after it."""
+        token = f"\x00{self._nonce}k{len(self._kept)}\x00"
+        self._kept[token] = text
+        return token
+
+    def restore(self, text: str) -> str:
+        """``text`` with every token :meth:`keep` handed out replaced by what it stands for."""
+        if not self._kept or "\x00" not in text:
+            return text
+        return _KEPT_TOKEN_RE.sub(lambda m: self._kept.get(m.group(0), m.group(0)), text)
+
+    def endpoint_kept(self, model: str) -> str:
+        """A model's recorded name, its endpoint set aside where it is a configured one.
+
+        A run records a model as ``<model> @ <label>``. Only a label equal to
+        one the settings configure (``model_assignments.configured_endpoint_labels``),
+        as the whole of what follows the last `` @ ``, is kept from the closing
+        pass; the same text anywhere else in the report is defanged.
+        """
+        name, sep, label = model.rpartition(" @ ")
+        if sep and label in self._endpoint_labels():
+            return f"{name} @ {self.keep(label)}"
+        return model
+
+    def _endpoint_labels(self) -> set[str]:
+        """The configured model endpoints' labels, read once per render."""
+        if self._labels is None:
+            try:
+                from maljan.core.config import get_settings
+                from maljan.core.model_assignments import configured_endpoint_labels
+
+                self._labels = set(configured_endpoint_labels(get_settings()))
+            except Exception as exc:  # noqa: BLE001 — with none read, every value is defanged
+                logger.debug("markdown: the configured model endpoints were not read (%s).", exc)
+                self._labels = set()
+        return self._labels
 
     def cell(self, text: Any) -> str:
         """A model-written table cell: defanged like prose, cut like every cell."""
@@ -3038,6 +3138,15 @@ def _names_a_network_value(text: Any) -> bool:
         return True
 
 
+def _times(row: dict[str, Any]) -> str:
+    """`` (left N times)`` for a folded finding row left more than once, else ``""``."""
+    try:
+        count = int(str(row.get("count") or 1))
+    except ValueError:
+        return ""
+    return f" (left {count} times)" if count > 1 else ""
+
+
 def _code_span(text: str) -> str:
     """``text`` as one code span, fenced longer than any backtick run inside it.
 
@@ -3286,6 +3395,10 @@ def _is_delimiter_row(line: str) -> bool:
     )
 
 
+# A token :meth:`_Context.keep` hands out.
+_KEPT_TOKEN_RE = re.compile(r"\x00[0-9a-f]{16}k\d+\x00")
+
+
 def _fenced(text: str, info: str = "") -> list[str]:
     """``text`` in a code fence longer than any backtick run inside it."""
     longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
@@ -3423,15 +3536,19 @@ def _ransomware_block(ta: Any, ctx: _Context) -> str:
         if spk.mechanism:
             lines.append(_item(f"Mechanism: {ctx.line(spk.mechanism)}"))
         if spk.kill_list:
-            lines.append(_item("Kill list: " + ", ".join(f"`{x}`" for x in spk.kill_list)))
+            lines.append(
+                _item("Kill list: " + ", ".join(_code_span(ctx.plain(x)) for x in spk.kill_list))
+            )
         if spk.white_list:
             # The exclusions are often the more identifying half: a list that
             # spares the attacker's own tooling names it.
-            lines.append(_item("Spared: " + ", ".join(f"`{x}`" for x in spk.white_list)))
+            lines.append(
+                _item("Spared: " + ", ".join(_code_span(ctx.plain(x)) for x in spk.white_list))
+            )
         lines.append("")
     if ta.shadow_copy_destruction:
         lines.extend(["Shadow copy destruction:", ""])
-        lines.extend(_item(f"`{cmd}`") for cmd in ta.shadow_copy_destruction)
+        lines.extend(_item(_code_span(ctx.plain(cmd))) for cmd in ta.shadow_copy_destruction)
         lines.append("")
     enc = ta.encryption_scheme
     if enc is not None and _encrypts_files(enc):
@@ -3770,14 +3887,18 @@ def _attack_row(
     if not cell.technique_id_valid:
         status = f"unverified id ({UNVERIFIED_TECHNIQUE_MARKER})"
     elif cell.not_published:
-        status = f"claimed, not published: {_truncate(ctx.plain(cell.not_published), 200)}"
+        # A judge's reason is shortened by its own rule and never cut into;
+        # what follows it, and any other reason, keeps the cell's cut.
+        status = "claimed, not published: " + status_shown(
+            cell.not_published, JUDGE_REASON_WIDTH, ctx.plain
+        )
     else:
         status = "published" + _corroborated_words(mapping, rules)
         rule_only = ctx.rule_only.get(cell.technique_id)
         if rule_only:
             status += f"; {rule_only}"
         if cell.note:
-            status += f"; {ctx.plain(cell.note)}"
+            status += f"; {ctx.plain(judge_reasons_shown(cell.note)[0])}"
     # The platform's unresolved findings about this technique, beside its
     # row: the ATT&CK checks, and the judge crediting a source that never
     # named it. Matched on what the finding is about (``subject``), because
@@ -3809,7 +3930,10 @@ def _attack_row(
 
 def _rule_words(hit: dict[str, Any]) -> str:
     """One rule hit as the Procedure cell names it: the rule, where it looked, its base rate."""
-    matched = ", ".join(f"`{a}`" for a in (hit.get("matched_apis") or [])[:6]) or "-"
+    matched = (
+        ", ".join(_code_span(_defanged_text(str(a))) for a in (hit.get("matched_apis") or [])[:6])
+        or "-"
+    )
     rule = str(hit.get("rule") or hit.get("name") or "").strip()
     # capa names the namespace a rule lives in; the knowledge table names the
     # imports its rule matched, and the names it matched that the run resolved
@@ -3937,7 +4061,7 @@ def _matched_names(hit: dict[str, Any]) -> str:
 
 
 def _quoted_names(names: list[str]) -> str:
-    return ", ".join(f"`{a}`" for a in names[:6]) or "-"
+    return ", ".join(_code_span(_defanged_text(str(a))) for a in names[:6]) or "-"
 
 
 def _with_rules(procedure: str, rules: list[dict[str, Any]]) -> str:
@@ -4253,7 +4377,7 @@ def _mbc_lines(report: MalwareReport) -> list[str]:
     return lines
 
 
-def _not_published_lines(report: MalwareReport) -> list[str]:
+def _not_published_lines(report: MalwareReport, ctx: _Context | None = None) -> list[str]:
     """The techniques a producer claimed and this report does not publish.
 
     They are in the table above, with the reason in the Status column. This
@@ -4269,11 +4393,21 @@ def _not_published_lines(report: MalwareReport) -> list[str]:
     if not rows:
         return []
     lines = ["", _plain_heading("Claims that were not published as techniques"), ""]
+    # The reason by the table's own rule, a judge's reason sentence by
+    # sentence, and every network value in it defanged.
+    plain = ctx.plain if ctx is not None else _defanged_text
     lines.extend(
-        _item(f"{cell.technique_id} {cell.technique_name}: {_truncate(cell.not_published, 300)}")
+        _item(
+            f"{cell.technique_id} {cell.technique_name}: "
+            f"{status_shown(cell.not_published, _NOT_PUBLISHED_WIDTH, plain)}"
+        )
         for cell in rows
     )
     return lines
+
+
+# How much of a reason the list of claims not published prints.
+_NOT_PUBLISHED_WIDTH = 300
 
 
 def _unmapped_behaviour_lines(report: MalwareReport) -> list[str]:
@@ -4373,25 +4507,29 @@ def _truncate(value: Any, length: int) -> str:
     return s[: length - 1] + "…"
 
 
-def _process_tree_lines(node: ProcessNode, depth: int) -> list[str]:
+def _process_tree_lines(
+    node: ProcessNode, depth: int, plain: Callable[[str], str] = lambda text: text
+) -> list[str]:
+    """The process tree, one line per process, each name and command line defanged."""
     indent = "  " * depth
     prefix = "└─ " if depth > 0 else ""
-    label = _one_line(node.name) or f"pid={node.pid}"
-    extra = f"  ({_one_line(node.command_line)})" if node.command_line else ""
+    label = _one_line(plain(node.name)) or f"pid={node.pid}"
+    extra = f"  ({_one_line(plain(node.command_line))})" if node.command_line else ""
     line = f"{indent}{prefix}pid={node.pid} ppid={node.ppid} {label}{extra}"
     out = [line]
     if node.injected_into:
         out.append(f"{indent}    [injected_into={', '.join(str(p) for p in node.injected_into)}]")
     for child in node.children:
-        out.extend(_process_tree_lines(child, depth + 1))
+        out.extend(_process_tree_lines(child, depth + 1, plain))
     return out
 
 
-def _registry_row(reg: RegistryMod) -> str:
+def _registry_row(reg: RegistryMod, plain: Callable[[str], str] = lambda text: text) -> str:
+    """One registry modification, its key and value name defanged."""
     return _row(
         reg.hive,
-        f"`{_truncate(reg.key, _CELL_LIMIT)}`",
-        f"`{_truncate(reg.value_name or '-', 80)}`",
+        _code_span(_truncate(plain(reg.key), _CELL_LIMIT)),
+        _code_span(_truncate(plain(reg.value_name or "-"), 80)),
         reg.operation,
     )
 

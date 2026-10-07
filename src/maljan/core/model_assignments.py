@@ -258,6 +258,24 @@ def global_model_label(settings: object, role: str = "expert") -> str:
         return ""
 
 
+def configured_endpoint_labels(settings: object) -> set[str]:
+    """The model endpoints the settings configure, each as a run records it (its label).
+
+    The global provider's endpoint for each role, the OpenAI-compatible and
+    Ollama base URLs, and every endpoint an agent's own entry or its
+    fallbacks name. A vendor API's own name is no address and is left out.
+    """
+    llm = settings.llm  # type: ignore[attr-defined]
+    where: list[str] = [
+        endpoint_for(settings, str(llm.provider)),
+        endpoint_for(settings, "openai"),
+        endpoint_for(settings, "ollama"),
+    ]
+    for agent in list(getattr(llm, "agents", {}) or {}):
+        where.extend(a.endpoint for a in assignment_chain_for(settings, agent))
+    return {endpoint_label(w) for w in where if "://" in str(w or "")}
+
+
 def assignments_for(settings: object, agents: list[str]) -> list[ModelAssignment]:
     """Every model the named agents may call, each agent's list in its own order.
 

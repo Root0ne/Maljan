@@ -22,6 +22,7 @@ from maljan.pipeline.validation import (
     unattributed_indicator_violations,
 )
 from maljan.reporting.builder import build_consolidated_iocs
+from maljan.reporting.defang import defang
 from maljan.reporting.detection_signatures import build_detection_rules
 from maljan.reporting.models import (
     FileHashes,
@@ -257,7 +258,10 @@ class TestEveryPublishedRowSaysWhy:
         bodies = {rule.kind: rule.body for rule in build_detection_rules(report)}
 
         for kind in ("suricata", "yara"):
-            assert f"{TLS_ONLY}: published because kept as an indicator" in bodies[kind], kind
+            assert (
+                f"{defang(TLS_ONLY, 'domain')}: published because kept as an indicator"
+                in (bodies[kind])
+            ), kind
 
 
 class TestTheVerdictAsksOnce:

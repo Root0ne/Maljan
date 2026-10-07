@@ -166,10 +166,22 @@ def _published_rows(report: MalwareReport) -> list[Any]:
 
 
 def _why_published(row: Any) -> str:
-    """``<value>: published because <reason>``, one line a draft's comment carries."""
+    """``<value>: published because <reason>``, one line a draft's comment carries.
+
+    The comment is reading text beside the rule, not the rule: the value and
+    every network value in the reason are defanged by the report's own
+    defanger, as on every other surface. The rule's strings and contents stay
+    as they compile.
+    """
+    from maljan.reporting.defang import defang
+    from maljan.reporting.renderers.markdown import _defanged_text
+
     answer = str(getattr(row, "published", "") or "")
     why = answer.split(":", 1)[1].strip() if ":" in answer else "the publish rule published it"
-    said = f"{getattr(row, 'value', '')}: published because {why}"
+    value = str(getattr(row, "value", "") or "")
+    kind = str(getattr(row, "kind", "") or "")
+    shown = defang(value, kind) if kind in _DRAFT_NETWORK_KINDS else value
+    said = f"{_defanged_text(shown)}: published because {_defanged_text(why)}"
     # A comment is one line: no control character reaches it.
     return "".join(c if c >= " " else " " for c in said)
 

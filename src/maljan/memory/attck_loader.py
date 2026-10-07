@@ -576,6 +576,15 @@ def technique_label(technique_id: str) -> str:
     return f"{tid} {entry.name}" if entry is not None and entry.name else tid
 
 
+def sub_technique_entries(parent_id: str) -> list[VendoredTechnique]:
+    """The vendored rows of every sub-technique under ``parent_id``, in id order."""
+    parent = (parent_id or "").strip().upper().split(".")[0]
+    if not parent:
+        return []
+    prefix = f"{parent}."
+    return [entry for tid, entry in sorted(_technique_table()[0].items()) if tid.startswith(prefix)]
+
+
 def technique_ids_named(name: str) -> list[str]:
     """The ids the vendored table gives ``name`` to, compared without case or punctuation.
 

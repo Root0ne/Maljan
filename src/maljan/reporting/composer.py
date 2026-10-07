@@ -58,6 +58,7 @@ from maljan.pipeline.validation import (
     keep_known_keys,
     misstated_entry_contents,
     pack_line_ids,
+    persistence_not_observed_violations,
     quoted_values,
     record_flagged_statements,
     repeated_item_violations,
@@ -75,6 +76,7 @@ from maljan.reporting.evidence_bundles import (
     is_empty,
     sample_flow_fact,
     sandbox_entry_ids,
+    sandbox_saw_no_persistence,
 )
 from maljan.reporting.models import (
     C2Channel,
@@ -771,6 +773,9 @@ class ReportComposer:
         # names.
         entry_tools = {row.id: str(row.tool or "") for row in report.evidence_index}
         flow_fact = sample_flow_fact(report)
+        # What the Persistence section prints as "no persistence observed":
+        # a step or that section's prose stating persistence is asked once.
+        saw_no_persistence = sandbox_saw_no_persistence(report)
 
         # 2. The execution flow, entry to steady state.
         flow = await self._author(
@@ -782,7 +787,10 @@ class ReportComposer:
             validators=[
                 lambda p: flow_voice_violations(
                     p, sandbox_ids, tools=entry_tools, flow_fact=flow_fact
-                )
+                ),
+                lambda p: persistence_not_observed_violations(
+                    p, saw_no_persistence, section="execution_flow"
+                ),
             ],
         )
         if flow and isinstance(flow, _FlowOut) and flow.steps:
@@ -797,6 +805,15 @@ class ReportComposer:
                 isr_reports,
                 _ProseOut,
                 _INSTRUCTIONS["prose"].format(title=title),
+                validators=(
+                    [
+                        lambda p: persistence_not_observed_violations(
+                            p, saw_no_persistence, section="persistence_detail"
+                        )
+                    ]
+                    if section == "persistence_detail"
+                    else None
+                ),
             )
             if out and isinstance(out, _ProseOut) and out.body.strip():
                 sub = TechnicalSubsection(

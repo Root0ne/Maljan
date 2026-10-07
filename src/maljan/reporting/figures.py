@@ -118,7 +118,10 @@ def build_process_tree(report: MalwareReport) -> Figure | None:
         y = 20 + i * row_h
         x = 12 + depth * 26
         injected = " ⤳ injects" if node.injected_into else ""
-        label = f"{node.name or 'proc'} (pid {node.pid}){injected}"
+        # The name a sandbox recorded, defanged as the report's text is.
+        from maljan.reporting.renderers.markdown import _defanged_text
+
+        label = f"{_defanged_text(node.name or 'proc')} (pid {node.pid}){injected}"
         if depth > 0:
             parts.append(
                 f'<line x1="{x - 13}" y1="{y - 6}" x2="{x - 3}" y2="{y - 6}" stroke="{_LINE}"/>'

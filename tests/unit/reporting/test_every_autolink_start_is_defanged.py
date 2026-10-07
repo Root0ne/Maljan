@@ -218,3 +218,75 @@ def test_a_file_shaped_name_the_run_recorded_is_defanged() -> None:
 
     assert "evil.sh" not in prose.split("drops", 1)[0]
     assert "install.sh" in prose
+
+
+def _sandbox_report(text: str) -> MalwareReport:
+    """Every surface that prints a sandbox's or the model's value in a code span."""
+    from maljan.reporting.models import (
+        CliFlag,
+        DynamicBehavior,
+        PersistenceMechanism,
+        PESection,
+        ProcessNode,
+        RegistryMod,
+        ServiceProcessKill,
+    )
+
+    return MalwareReport(
+        identity=SampleIdentity(
+            hashes=FileHashes(sha256="a" * 64), file_name=text, internal_name=text
+        ),
+        verdict="Malware",
+        static=StaticAnalysis(
+            sections=[PESection(name=text, virtual_address="0x1000", entropy=7.5)],
+            interesting_strings=[StringIOC(value="/a C", kind="path", notes=text)],
+        ),
+        dynamic=DynamicBehavior(
+            notable_apis=[{"api": text, "process": text}],
+            process_tree=[
+                ProcessNode(
+                    pid=1,
+                    name="a.exe",
+                    children=[ProcessNode(pid=2, ppid=1, name="b.exe", command_line=text)],
+                )
+            ],
+            registry_mods=[RegistryMod(key=f"HKCU\\Software\\{text}", value_name=text)],
+            file_operations=[
+                {"path": f"C:\\x\\{text}", "operation": "write"},
+                {"name": text, "operation": "mutex"},
+            ],
+        ),
+        persistence=[PersistenceMechanism(kind="registry_run", target=text, payload=text)],
+        technical_analysis=TechnicalAnalysis(
+            cli_flags=[CliFlag(flag=text, description="x")],
+            shadow_copy_destruction=[text],
+            service_process_kill=ServiceProcessKill(kill_list=[text], white_list=[text]),
+        ),
+    )
+
+
+@pytest.mark.parametrize("payload", AUTOLINK_STARTS)
+def test_no_autolink_start_survives_on_any_sandbox_or_rule_surface(payload: str) -> None:
+    markdown = MarkdownRenderer().render(_sandbox_report(f"run {payload} now"))
+
+    assert _live(markdown) == []
+
+
+def test_every_surface_of_the_sweep_holds_the_payload() -> None:
+    """The surfaces above print the value at all, defanged: the test reads each one."""
+    markdown = MarkdownRenderer().render(_sandbox_report("run x_www.evil.com now"))
+
+    assert markdown.count("x_www[.]evil[.]com") >= 14
+
+
+def test_a_draft_rule_s_body_still_prints_as_it_compiles() -> None:
+    from maljan.reporting.models import DetectionRule
+
+    body = 'rule Example { strings: $s1 = "https://relay.example.net/live/" condition: $s1 }'
+    report = MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+        verdict="Malware",
+        detection_signatures=[DetectionRule(kind="yara", name="Example", body=body)],
+    )
+
+    assert body in MarkdownRenderer().render(report)

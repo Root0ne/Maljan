@@ -127,6 +127,7 @@ from maljan.pipeline.validation import (
     ClaimsRepeated,
     DecompiledFunction,
     EntryTexts,
+    RetryDrops,
     Violation,
     _term_ids_said,
     absence_claim_violation,
@@ -144,8 +145,11 @@ from maljan.pipeline.validation import (
     library_only_claims_violation,
     malware_object_violations,
     misstated_entry_contents,
+    persistence_not_observed_violations,
     recommendation_indicator_violations,
+    recommendation_technique_violations,
     repeated_item_violations,
+    retry_drop_question,
     section_cut_violation,
     stated_value_violations,
     technique_line_violation,
@@ -223,6 +227,7 @@ from maljan.schemas.isr_models import (
     JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
     AgentISR,
     ClaimEvidence,
+    Finding,
     judge_and_findings_note,
     judge_dropped_reason,
     judge_kept_note,
@@ -663,6 +668,18 @@ PROMPTS: dict[str, str] = {
         ]
         if v is not None
     ),
+    "analyst question for a claim that names a sibling sub-technique": _message_of(
+        claim_does_not_describe_violation(
+            ClaimEvidence(
+                claim="The program persists by registering its own accessibility features handler.",
+                evidence_ref="[ev_0001]",
+                confidence=0.9,
+                technique_id="T1546.001",
+            ),
+            "T1546.001",
+            knowledge,
+        )
+    ),
     "the absence and describe questions on one id of a technique list": _every_message(
         [
             absence_claim_violation(
@@ -798,6 +815,43 @@ PROMPTS: dict[str, str] = {
                 ]
             },
             lambda kind, value: "no: x" if kind == "ip" else "",
+        )
+    ),
+    "narrative question about a recommendation naming a technique not published": " ".join(
+        v.message
+        for v in recommendation_technique_violations(
+            {"defensive_recommendations": [{"action": "Alert on it.", "technique_id": "T1001"}]},
+            ["T1002"],
+        )
+    ),
+    "composer questions about persistence the sandbox did not record": _every_message(
+        [
+            *persistence_not_observed_violations(
+                {"body": "The program persists through a task it registers [ev_0001]."},
+                True,
+                section="persistence_detail",
+            ),
+            *persistence_not_observed_violations(
+                {"steps": [{"order": 1, "action": "It persists at logon.", "voice": "observed"}]},
+                True,
+                section="execution_flow",
+            ),
+        ]
+    ),
+    "analyst question about what a kept retry left out": retry_drop_question(
+        RetryDrops(
+            claims=(
+                (
+                    ClaimEvidence(
+                        claim="The file opens a window.",
+                        evidence_ref="[ev_0001]",
+                        confidence=0.9,
+                        technique_id="T1001",
+                    ),
+                    ("T1001", "0x40"),
+                ),
+            ),
+            findings=(Finding(title="The file opens a window", detail="It names it."),),
         )
     ),
     "composer question about table rows no cited entry holds": " ".join(
