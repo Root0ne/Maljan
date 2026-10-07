@@ -2,9 +2,9 @@
 
 Every id a card names, its own and each sibling's, is one the vendored table
 carries; the card's name is the table's; the fields it cites are fields the
-table has; it renders to a few lines; and the techniques the catalogue check
-already handles, with every technique the analysts named in the recorded runs,
-each have one.
+table has; it renders whole to a few lines; its kind agrees with what it
+requires; and the techniques the catalogue check already handles, with every
+technique the analysts named in the recorded runs, each have one.
 """
 
 from __future__ import annotations
@@ -19,15 +19,12 @@ from maljan.memory.technique_cards import (
     BEHAVIOUR_KIND,
     CARDS_FILE,
     INTENT_KIND,
-    MAX_CARD_LINES,
     SOURCE_FIELDS,
     card_lines,
-    holds_behaviour,
     load_cards,
-    mentions,
-    read_card,
     read_cards,
     technique_card,
+    technique_card_lines,
 )
 from maljan.pipeline.validation import CAPABILITY_TERMS
 
@@ -47,6 +44,9 @@ NAMED_IN_RECORDED_RUNS: tuple[str, ...] = (
     "T1547.014", "T1555", "T1564", "T1564.001", "T1564.012", "T1568", "T1571", "T1572",
     "T1573.001", "T1574.001", "T1574.007", "T1599", "T1620", "T1622",
 )  # fmt: skip
+
+# The words a requirement uses to ask for a stated purpose.
+_STATED = "the claim states"
 
 
 def _catalogue_check_ids() -> set[str]:
@@ -77,19 +77,27 @@ class TestTheCardsAreHeldToTheTable:
     def test_every_card_is_short_and_whole(self, tid: str) -> None:
         card = CARDS[tid]
         assert card.kind in (BEHAVIOUR_KIND, INTENT_KIND)
-        assert card.requires and all(r.what and r.terms for r in card.requires)
-        assert card.indicators and card.siblings
-        assert all(s.criterion and s.terms for s in card.siblings)
+        assert card.requires and card.indicators
+        assert all(s.criterion for s in card.siblings)
         lines = card_lines(card)
-        assert len(lines) <= MAX_CARD_LINES
-        # Every sibling is shown: a cut card would drop a criterion silently.
-        assert len(lines) == 1 + 1 + 1 + len(card.siblings)
+        # Nothing is cut: every sibling is shown, and the data keeps cards short.
+        assert len(lines) == 3 + len(card.siblings)
+        assert len(lines) <= 8
 
     @pytest.mark.parametrize("tid", sorted(CARDS))
-    def test_an_intent_critical_card_asks_for_a_stated_purpose(self, tid: str) -> None:
+    def test_only_an_intent_critical_card_asks_for_a_stated_purpose(self, tid: str) -> None:
         card = CARDS[tid]
-        claim_only = [r for r in card.requires if r.claim_only]
-        assert bool(claim_only) == (card.kind == INTENT_KIND), tid
+        stated = [r for r in card.requires if r.startswith(_STATED)]
+        assert bool(stated) == (card.kind == INTENT_KIND), tid
+
+
+class TestTheKinds:
+    @pytest.mark.parametrize("tid", ["T1497", "T1497.001", "T1497.002", "T1622", "T1564.012"])
+    def test_a_check_or_an_exclusion_alone_is_the_technique(self, tid: str) -> None:
+        # The environment and debugging checks sit under Discovery as well as
+        # Stealth: the check alone is the technique. An exclusion's purpose is
+        # its own.
+        assert CARDS[tid].kind == BEHAVIOUR_KIND
 
 
 class TestCoverage:
@@ -101,108 +109,63 @@ class TestCoverage:
     def test_every_technique_named_in_the_recorded_runs_has_a_card(self) -> None:
         assert set(NAMED_IN_RECORDED_RUNS) - set(CARDS) == set()
 
-    def test_a_sub_technique_without_a_card_is_read_by_its_parent_s(self) -> None:
-        card = technique_card("T1055.012")
+    def test_a_sub_technique_without_a_card_of_its_own_is_shown_none(self) -> None:
+        # Its parent's kind and requirements need not be its own.
+        assert "T1055" in CARDS
+        assert technique_card("T1055.012") is None
+        assert technique_card_lines("T1055.012") == []
 
-        assert card is not None and card.technique_id == "T1055"
-        assert (
-            "the parent's card; T1055.012 has none of its own" in card_lines(card, "T1055.012")[0]
-        )
-
-    def test_an_id_with_no_card_and_no_parent_card_has_none(self) -> None:
+    def test_an_id_with_no_card_has_none(self) -> None:
         assert technique_card("T1112") is None
         assert technique_card("") is None
+        assert technique_card_lines("T1112") == []
 
 
-class TestTheSiblingCriteria:
+class TestTheSiblings:
     def test_unhooking_is_told_apart_from_indicator_removal(self) -> None:
-        card = CARDS["T1070"]
-        siblings = {s.technique_id for s in card.siblings}
+        # T1685 is the current id of what ATT&CK 19 retired as T1562.
+        assert "T1685" in {s.technique_id for s in CARDS["T1070"].siblings}
 
-        # The current id of what ATT&CK 19 retired as T1562.
-        assert "T1685" in siblings
-        reading = read_card(
-            card, ["The sample removes the hooks security tools placed in ntdll"], []
-        )
-        assert [s.technique_id for s in reading.siblings] == ["T1685"]
+    @pytest.mark.parametrize(
+        ("tid", "kept_out"),
+        [
+            ("T1036", "T1027.007"),
+            ("T1036.005", "T1027.007"),
+            ("T1003", "T1497"),
+            ("T1564", "T1518.001"),
+            ("T1564", "T1497"),
+            ("T1012", "T1010"),
+        ],
+    )
+    def test_no_sibling_pairs_techniques_ATT_CK_does_not_relate(
+        self, tid: str, kept_out: str
+    ) -> None:
+        assert kept_out not in {s.technique_id for s in CARDS[tid].siblings}
 
-    def test_run_time_api_resolution_is_told_apart_from_a_legitimate_name(self) -> None:
-        card = CARDS["T1036.005"]
-        sentence = (
-            "The sample uses API hashing (CRC32) to dynamically resolve Windows API calls at "
-            "runtime, evading static signature detection."
-        )
-
-        reading = read_card(card, [sentence], ["export table walk"])
-
-        assert [s.technique_id for s in reading.siblings] == ["T1027.007"]
-        assert {r.what for r in reading.unmet} == {r.what for r in card.requires}
-
-    def test_a_sentence_in_the_card_s_own_words_fits_no_sibling(self) -> None:
-        card = CARDS["T1036.005"]
-        sentence = "The sample copies itself as svchost.exe to masquerade as a legitimate file"
-
-        assert not read_card(card, [sentence], [None])
-
-    def test_a_sibling_fits_only_when_every_sentence_fits_it(self) -> None:
-        card = CARDS["T1036.005"]
-
-        reading = read_card(
-            card,
-            ["resolves API addresses by hash", "copies itself under System32 as a system file"],
-            [None],
-        )
-
-        assert not reading.siblings
+    @pytest.mark.parametrize(
+        ("tid", "sibling"),
+        [("T1003", "T1555"), ("T1564", "T1564.001"), ("T1012", "T1518"), ("T1204", "T1218")],
+    )
+    def test_a_general_confusable_is_named(self, tid: str, sibling: str) -> None:
+        assert sibling in {s.technique_id for s in CARDS[tid].siblings}
 
 
-class TestTheRequirements:
-    def test_a_component_a_cited_entry_shows_is_met(self) -> None:
-        card = CARDS["T1055"]
+class TestTheLines:
+    def test_a_card_reads_as_kind_requirements_indicators_and_siblings(self) -> None:
+        card = CARDS["T1003"]
 
-        reading = read_card(
-            card,
-            ["The sample places code in explorer"],
-            ["kernel32!WriteProcessMemory kernel32!CreateRemoteThread"],
-        )
+        lines = card_lines(card)
 
-        assert not reading.unmet
+        assert lines[0] == "card: behaviour-focused, the action alone is the technique"
+        assert lines[1] == "requires: " + "; ".join(card.requires)
+        assert lines[2] == "indicators: " + "; ".join(card.indicators)
+        assert lines[3].startswith("not T1555 Credentials from Password Stores when ")
 
-    def test_a_component_nothing_shows_is_unmet_when_every_cited_entry_is_known(self) -> None:
-        card = CARDS["T1055"]
+    def test_the_technique_itself_and_the_card_s_provenance_are_not_written(self) -> None:
+        text = "\n".join(card_lines(CARDS["T1003"]))
 
-        reading = read_card(card, ["The sample does something"], ["an unrelated entry"])
-
-        assert [r.what for r in reading.unmet] == [r.what for r in card.requires]
-
-    def test_a_component_is_not_decided_while_a_cited_entry_is_unknown(self) -> None:
-        card = CARDS["T1055"]
-
-        assert not read_card(card, ["The sample does something"], [None]).unmet
-
-    def test_a_stated_purpose_is_read_from_the_sentences_alone(self) -> None:
-        card = CARDS["T1622"]
-        purpose = next(r for r in card.requires if r.claim_only)
-
-        reading = read_card(
-            card, ["The sample calls IsDebuggerPresent"], ["the sample exits when debugged"]
-        )
-
-        assert reading.unmet == (purpose,)
-
-
-class TestTheMatchWords:
-    def test_a_term_is_read_from_a_word_start_without_case(self) -> None:
-        assert mentions(["inject"], "Process Injection into explorer")
-        assert not mentions(["inject"], "reinjected")
-        assert mentions(["\\run"], "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run")
-
-    def test_an_entry_holds_the_behaviour_by_the_card_s_words(self) -> None:
-        card = CARDS["T1055"]
-
-        assert holds_behaviour(card, "kernel32!VirtualAllocEx", None)
-        assert not holds_behaviour(card, "PE: 5 imports from 2 libraries", None)
-        assert not holds_behaviour(card, "", None)
+        assert "OS Credential Dumping" not in text
+        assert "written from" not in text
 
 
 def test_an_unreadable_file_reads_as_no_cards(tmp_path: Path) -> None:

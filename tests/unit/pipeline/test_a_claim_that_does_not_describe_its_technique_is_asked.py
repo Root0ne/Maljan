@@ -15,11 +15,14 @@ from __future__ import annotations
 
 import pytest
 
+from maljan.memory.technique_cards import technique_card_lines
 from maljan.pipeline.validation import (
     ABSENCE_CLAIM_CODE,
     CLAIM_DOES_NOT_DESCRIBE_CODE,
     PLATFORM_MISMATCH_CODE,
+    Violation,
     claim_does_not_describe_violation,
+    feedback_text,
     mark_invalid_technique_ids,
     validate_isr,
 )
@@ -70,27 +73,40 @@ class TestTheNarrowCaseIsAsked:
         assert "Keep T1003 only if the sample does it" in violation.message
         assert violation.path == "claims[0]"
 
-    def test_the_question_shows_the_technique_s_card(self) -> None:
-        from maljan.memory.technique_cards import card_lines, technique_card
+    def test_the_question_sent_shows_the_technique_s_card(self) -> None:
+        violation = claim_does_not_describe_violation(
+            _claim("The sample opens a window.", "T1003"), "T1003", knowledge
+        )
+        assert violation is not None
 
+        sent = feedback_text([violation])
+
+        lines = technique_card_lines("T1003")
+        assert lines
+        assert f"{violation.message} The technique's " + " | ".join(lines) in sent
+        assert "not T1555 Credentials from Password Stores when" in sent
+
+    def test_the_finding_recorded_is_the_check_s_message_alone(self) -> None:
         violation = claim_does_not_describe_violation(
             _claim("The sample opens a window.", "T1003"), "T1003", knowledge
         )
 
-        card = technique_card("T1003")
-        assert violation is not None and card is not None
-        assert violation.message.endswith(
-            "TECHNIQUE: NONE. The technique's card: " + " | ".join(card_lines(card, "T1003"))
-        )
-        assert "not T1497 Virtualization/Sandbox Evasion when" in violation.message
+        assert violation is not None
+        assert "card:" not in violation.message
+        assert violation.message.endswith("write TECHNIQUE: NONE.")
 
     def test_a_technique_with_no_card_is_asked_as_before(self) -> None:
         violation = claim_does_not_describe_violation(
             _claim("The sample opens a window.", "T1112"), "T1112", knowledge
         )
-
         assert violation is not None
-        assert violation.message.endswith("write TECHNIQUE: NONE.")
+
+        assert "card:" not in feedback_text([violation])
+
+    def test_no_other_question_carries_a_card(self) -> None:
+        other = Violation(code=PLATFORM_MISMATCH_CODE, message="m", subject="T1003")
+
+        assert "card:" not in feedback_text([other])
 
 
 class TestASentenceThatSharesATermIsNotAsked:

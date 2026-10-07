@@ -41,9 +41,8 @@ read.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from types import SimpleNamespace
 from typing import Any
 
 from maljan.analysis.technique_ids import attack_reference_id, says_no_technique
@@ -93,10 +92,6 @@ _TACTIC_BY_SLUG: dict[str, tuple[str, str]] = {
 # when the live ATT&CK bundle renames a tactic (v19 relabelled TA0005
 # "Defense Evasion" -> "Stealth"). The frontend pins the same table.
 _TACTIC_NAME_BY_ID: dict[str, str] = {tid: name for tid, _slug, name in _TACTIC_TABLE}
-
-
-# The word a technique row's note opens its anchor check's finding with.
-UNANCHORED_MARK = "unanchored"
 
 
 def build_capability_matrix(
@@ -181,26 +176,19 @@ def build_capability_matrix(
         undescribed = (
             (review.undescribed.get(tid, "") if review is not None else "") if asked else ""
         )
-        # The card check's finding the question carried, and the anchor check's
-        # mark, which every claimed technique it found carries, asked or not.
-        card_check = (review.card.get(tid, "") if review is not None else "") if asked else ""
-        unanchored = review.unanchored.get(tid, "") if review is not None else ""
-        asked_after = "; ".join(f for f in (undescribed, card_check) if f)
         if not valid:
             not_published = unknown_id_reason(tid)
         elif out_of_scope.get(tid):
             not_published = out_of_scope[tid]
         elif decided is not None and decided.decision == "drop":
             not_published = judge_dropped_reason(decided.reason)
-            if asked_after:
-                not_published = f"{not_published}, asked after {asked_after}"
+            if undescribed:
+                not_published = f"{not_published}, asked after {undescribed}"
         elif not info.get("claimed") and not (decided is not None and decided.decision == "keep"):
             not_published = FINDING_ONLY_REASON
         else:
             not_published = ""
         notes: list[str] = []
-        if unanchored:
-            notes.append(f"{UNANCHORED_MARK}: {unanchored}")
         if info.get("noted") and all(info["noted"]):
             # Every analyst claim naming it reads as absence and was kept
             # when asked. Published all the same: the analyst decided.
@@ -214,8 +202,8 @@ def build_capability_matrix(
             notes.append(
                 judge_and_findings_note(on_findings) if on_findings else JUDGE_ONLY_TECHNIQUE_MARKER
             )
-        if asked_after and not not_published:
-            notes.append(asked_after)
+        if undescribed and not not_published:
+            notes.append(undescribed)
         if decided is not None and decided.decision == "keep":
             notes.append(judge_kept_note(decided.reason))
         elif asked and decided is None and not not_published:
@@ -754,20 +742,17 @@ class TechniqueQuestion:
     ``kind`` is ``claimed`` for a technique an analyst claimed that the judge's
     bundle does not carry, ``finding`` for one named only on a finding, and
     ``undescribed`` for one the bundle carries that no claim naming it
-    describes, and ``card`` for one the bundle carries whose card the claims
-    naming it do not meet. Each mention is ``(agent, the claim's or the
-    finding's text, its evidence ids)``, the text as the analyst wrote it.
-    ``check`` is the ATT&CK check's finding when no claim naming the technique
-    describes it (``validation.undescribed_technique_finding``), shown with the
-    question, and ``""`` otherwise. ``card_check`` is the technique card
-    check's finding (``validation.card_check_finding``), and ``""`` otherwise.
+    describes. Each mention is ``(agent, the claim's or the finding's text, its
+    evidence ids)``, the text as the analyst wrote it. ``check`` is the ATT&CK
+    check's finding when no claim naming the technique describes it
+    (``validation.undescribed_technique_finding``), shown with the question,
+    and ``""`` otherwise.
     """
 
     technique_id: str
     kind: str
     mentions: list[tuple[str, str, list[str]]] = field(default_factory=list)
     check: str = ""
-    card_check: str = ""
 
 
 def technique_review(stix_output: dict[str, Any] | None) -> TechniqueReview | None:
@@ -827,7 +812,6 @@ def judge_questions(
     sample: dict[str, Any] | None = None,
     *,
     attck: Any = None,
-    evidence_texts: Mapping[str, Any] | None = None,
 ) -> tuple[list[TechniqueQuestion], dict[str, str]]:
     """The techniques to put to the judge after its verdict, and the ones left out, with why.
 
@@ -836,12 +820,6 @@ def judge_questions(
     (``validation.claim_does_not_describe_violation``) is asked about too,
     once, with the check's finding: as ``undescribed`` when the bundle carries
     it, and on its ``claimed`` question when it does not.
-
-    With ``evidence_texts``, the text of each ledger entry by id, (d) each
-    technique whose card the claims naming it do not meet
-    (``validation.card_check_finding``) is asked about too, once, with that
-    finding: as ``card`` when the bundle carries it and nothing else asks it,
-    and on its other question when one does.
 
     (a) Each technique an analyst claimed that the judge's bundle carries
     neither as an attack-pattern nor on an edge, and (b) each technique named
@@ -888,19 +866,6 @@ def judge_questions(
                 )
                 questions[tid] = question
             question.check = check
-    if evidence_texts is not None:
-        texts = {str(k).lower(): v for k, v in evidence_texts.items()}
-        for tid, rows in by_technique.items():
-            card_check = _card_check(tid, [claim for _agent, claim, _mention in rows], texts)
-            if not card_check:
-                continue
-            question = questions.get(tid)
-            if question is None:
-                question = TechniqueQuestion(
-                    tid, "card", [mention for _agent, _claim, mention in rows]
-                )
-                questions[tid] = question
-            question.card_check = card_check
     for agent_name, isr in (isr_reports or {}).items():
         agent = str(getattr(isr, "agent_id", "") or agent_name)
         for finding in getattr(isr, "findings", None) or []:
@@ -915,18 +880,6 @@ def judge_questions(
                 questions.setdefault(tid, TechniqueQuestion(tid, "finding")).mentions.append(
                     (agent, text, ids)
                 )
-    if evidence_texts is not None:
-        # A technique named only on a finding is asked already; the card check
-        # reads the findings' text and evidence ids as it reads claims.
-        texts = {str(k).lower(): v for k, v in evidence_texts.items()}
-        for question in questions.values():
-            if question.kind != "finding":
-                continue
-            read = [
-                SimpleNamespace(claim=text, evidence_ref=" ".join(f"[{i}]" for i in cited))
-                for _agent, text, cited in question.mentions
-            ]
-            question.card_check = _card_check(question.technique_id, read, texts)
     ids = list(questions)
     unknown = flagged | _unknown_to_the_catalogue(ids)
     out_of_scope = _out_of_scope(ids, sample)
@@ -965,51 +918,6 @@ def _undescribed(
             "capability_matrix: the describe check for %s did not run (%s)", technique_id, exc
         )
         return ""
-
-
-def _card_check(technique_id: str, claims: list[Any], texts: Mapping[str, Any]) -> str:
-    """The card check's finding on ``claims`` (``validation.card_check_finding``), or ``""``."""
-    try:
-        from maljan.pipeline.validation import card_check_finding
-
-        return card_check_finding(technique_id, claims, texts)
-    except Exception as exc:  # noqa: BLE001 — a check that cannot run asks nothing
-        logger.debug("capability_matrix: the card check for %s did not run (%s)", technique_id, exc)
-        return ""
-
-
-def unanchored_techniques(
-    isr_reports: dict[str, Any] | None,
-    evidence_texts: Mapping[str, Any] | None,
-    attck: Any = None,
-) -> dict[str, str]:
-    """Each claimed technique no claim naming which is anchored to an entry holding it, with why.
-
-    Read over every analyst claim naming a technique with the text of each
-    entry it cites (``validation.unanchored_technique_finding``). The report
-    marks each one; nothing is withheld for it. ``{}`` without the texts.
-    """
-    if evidence_texts is None:
-        return {}
-    texts = {str(k).lower(): v for k, v in evidence_texts.items()}
-    by_technique: dict[str, list[Any]] = {}
-    for isr in (isr_reports or {}).values():
-        for claim in getattr(isr, "claims", None) or []:
-            tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
-            if tid and not says_no_technique(tid) and getattr(claim, "technique_id_valid", True):
-                by_technique.setdefault(tid, []).append(claim)
-    found: dict[str, str] = {}
-    try:
-        from maljan.pipeline.validation import unanchored_technique_finding
-
-        for tid, claims in by_technique.items():
-            reason = unanchored_technique_finding(tid, claims, texts, attck)
-            if reason:
-                found[tid] = reason
-    except Exception as exc:  # noqa: BLE001 — a check that cannot run marks nothing
-        logger.debug("capability_matrix: the anchor check did not run (%s)", exc)
-        return {}
-    return found
 
 
 def techniques_for_the_judge(

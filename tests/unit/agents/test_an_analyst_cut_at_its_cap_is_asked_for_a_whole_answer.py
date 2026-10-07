@@ -180,6 +180,37 @@ class TestTheWindowIsMeasuredWithTheQuestions:
         assert measured == [len(turns)]
 
 
+class TestATechniqueCardNeverCostsAQuestion:
+    def test_a_turn_that_fits_without_its_cards_is_sent_without_them(self) -> None:
+        # The first claim names a technique its sentence does not describe, so
+        # the turn carries that question and, with it, the technique's card.
+        first = FIRST.replace("TECHNIQUE: NONE", "TECHNIQUE: T1003", 1)
+        analyst = _Analyst([(WHOLE, 300)])
+        measured: list[bool] = []
+
+        def _fits(_self: Any, messages: list[Any], _cap: int) -> bool:
+            carded = "card:" in str(messages[-1].content)
+            measured.append(carded)
+            return not carded
+
+        isr = analyst._text_to_isr(first, 0)
+        with (
+            patch("maljan.agents.base_agent.analyst_output_cap", return_value=CAP),
+            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch.object(BaseAnalyst, "_fits_the_window", _fits),
+        ):
+            analyst._record_usage(_message(first, CAP))
+            analyst._validate_isr(isr, "evidence")
+
+        assert measured == [True, False]
+        (turns,) = analyst.seen_turns
+        question = str(turns[-1].content)
+        assert ANALYST_CUT_CODE in question
+        assert "attck.claim_does_not_describe" in question
+        assert "card:" not in question
+        assert ANALYST_CUT_CODE not in [v.code for v in analyst.validation_findings]
+
+
 class TestTheWindow:
     def test_a_conversation_and_the_cap_that_fit_are_asked(self) -> None:
         analyst = _Analyst([])

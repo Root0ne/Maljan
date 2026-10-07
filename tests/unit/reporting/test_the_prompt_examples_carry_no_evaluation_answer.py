@@ -100,7 +100,6 @@ from maljan.extractors.capability_matrix import (
 )
 from maljan.llm.context_window import no_room_sentence
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
-from maljan.memory.attck_loader import technique_label
 from maljan.memory.technique_cards import card_lines, load_cards
 from maljan.pipeline import triage_pack
 from maljan.pipeline.debate_facts import (
@@ -134,13 +133,13 @@ from maljan.pipeline.validation import (
     absence_claim_violation,
     analyst_cut_violation,
     analyst_repeated_violation,
-    card_check_finding,
     chunk_cut_unread_sentence,
     claim_does_not_describe_violation,
     claims_kept_under_disputes_finding,
     claims_under_disputes_violation,
     confidence_violation,
     decompiled_not_described_violation,
+    feedback_text,
     flow_voice_violations,
     gate_removed_note,
     kept_after_the_sandbox_fact,
@@ -152,7 +151,6 @@ from maljan.pipeline.validation import (
     section_cut_violation,
     stated_value_violations,
     technique_line_violation,
-    unanchored_technique_finding,
     unattributed_indicator_violations,
     undescribed_technique_finding,
     ungrounded_capabilities,
@@ -1225,75 +1223,28 @@ PROMPTS: dict[str, str] = {
             ]
         )
     ),
-    "judge technique question's card lines, card check and its kind's label": (
-        technique_question_text(
-            [
-                TechniqueQuestion(
-                    "T1136",
-                    "card",
-                    [("static", "The file opens a window.", ["ev_0001"])],
-                    card_check=card_check_finding(
-                        "T1136",
-                        [
-                            ClaimEvidence(
-                                claim="The file opens a window.",
-                                evidence_ref="[ev_0001]",
-                                confidence=0.5,
-                                technique_id="T1136",
-                            )
-                        ],
-                        {"ev_0001": "entry text"},
+    "judge technique question's card lines": technique_question_text(
+        [
+            TechniqueQuestion("T1003", "claimed", [("static", "The file opens a window.", [])]),
+            TechniqueQuestion("T1564", "finding", [("static", "The file opens a window.", [])]),
+        ]
+    ),
+    "analyst retry turn showing the technique's card": feedback_text(
+        [
+            v
+            for v in [
+                claim_does_not_describe_violation(
+                    ClaimEvidence(
+                        claim="The file opens a window.",
+                        evidence_ref="[ev_0001]",
+                        confidence=0.9,
+                        technique_id="T1003",
                     ),
+                    "T1003",
+                    knowledge,
                 )
             ]
-        )
-    ),
-    "card check naming a sibling and a stated purpose": card_check_finding(
-        "T1564.012",
-        [
-            ClaimEvidence(
-                claim="The file checks for the presence of security software.",
-                evidence_ref="[ev_0001]",
-                confidence=0.5,
-                technique_id="T1564.012",
-            )
-        ],
-        {"ev_0001": "entry text"},
-    ),
-    "unanchored technique marks": " ".join(
-        [
-            unanchored_technique_finding(
-                "T1136",
-                [
-                    ClaimEvidence(
-                        claim="The file adds an account.",
-                        evidence_ref="[ev_0001]",
-                        confidence=0.5,
-                        technique_id="T1136",
-                    ),
-                    ClaimEvidence(
-                        claim="The file adds an account.",
-                        evidence_ref="none",
-                        confidence=0.5,
-                        technique_id="T1136",
-                    ),
-                ],
-                {"ev_0001": "entry text"},
-                knowledge,
-            ),
-            unanchored_technique_finding(
-                "T1136",
-                [
-                    ClaimEvidence(
-                        claim="The file adds an account.",
-                        evidence_ref="none",
-                        confidence=0.5,
-                        technique_id="T1136",
-                    )
-                ],
-                {},
-                knowledge,
-            ),
+            if v is not None
         ]
     ),
     "question to an analyst whose first answer called no tool": no_tool_call_question(
@@ -1421,71 +1372,25 @@ def _without_the_listed_vocabulary(text: str) -> str:
     return text.replace(_LISTED_VOCABULARY, " ")
 
 
-# The entries that show a technique's card, and the places in them a renderer
-# writes a catalogue label (an id with the vendored table's name): the card's
-# own head, each sibling line and the sibling a card check names. Those are the
-# vendored table's words for the card's techniques, shown only for a technique
-# an analyst named; the allowance takes the labels out there and nowhere else,
-# and every other word of a card (each requirement, indicator and criterion) is
-# scanned as it stands (``test_no_card_carries_a_term_the_key_scores``).
-RENDERED_CARDS: frozenset[str] = frozenset(
-    {
-        "analyst question for a claim that does not describe its technique",
-        "the absence and describe questions on one id of a technique list",
-        "judge technique question",
-        "judge technique question's describe-check finding and its kind's label",
-        "judge technique question's card lines, card check and its kind's label",
-        "card check naming a sibling and a stated purpose",
-    }
-)
-_CARD_LABELS: tuple[str, ...] = tuple(
-    sorted(
-        {
-            technique_label(tid).lower()
-            for card in load_cards().values()
-            for tid in (card.technique_id, *(s.technique_id for s in card.siblings))
-        },
-        key=len,
-        reverse=True,
-    )
-)
-
-
-def _without_card_labels(text: str) -> str:
-    """``text`` with each catalogue label a card renderer wrote, in its place, taken out."""
-    for label in _CARD_LABELS:
-        text = text.replace(f"card {label}", "card").replace(f"not {label} when", "not when")
-        text = text.replace(f"fits {label} by", "fits by")
-    return text
-
-
 def _scanned(name: str) -> str:
     """The text of one ``PROMPTS`` entry as the scan reads it."""
     text = PROMPTS[name].lower()
     if name in STIX_VOCABULARY_LISTED:
         text = _without_the_listed_vocabulary(text)
-    if name in RENDERED_CARDS:
-        text = _without_card_labels(text)
     return _without_rendered_identifiers(text) if name in RENDERED_TOOL_OUTPUT else text
 
 
 @pytest.mark.parametrize("tid", sorted(load_cards()))
 def test_no_card_carries_a_term_the_key_scores(tid: str) -> None:
-    """Every word a card shows a model, its catalogue labels aside, is free of the key's terms."""
-    card = load_cards()[tid]
-    text = _without_card_labels("\n".join(card_lines(card)).lower())
-    shared = [term for term in KEY_TERMS if term in text]
+    """Every word a card shows a model is free of the key's terms, with no allowance.
+
+    A card is read as written and again with its hyphens, underscores and
+    slashes as spaces, so a term is not let through by its spelling.
+    """
+    text = "\n".join(card_lines(load_cards()[tid])).lower()
+    spaced = re.sub(r"[-_/]+", " ", text)
+    shared = [term for term in KEY_TERMS if term in text or term in spaced]
     assert not shared, f"the {tid} card carries {shared}"
-
-
-def test_the_card_allowance_takes_out_a_label_only_where_a_renderer_puts_one() -> None:
-    assert RENDERED_CARDS <= set(PROMPTS)
-    label = technique_label("T1497").lower()
-    assert "t1497" not in _without_card_labels(f"not {label} when the check is for a vm")
-    assert "t1497" not in _without_card_labels(f"card {label} — behaviour-focused")
-    # The same label written anywhere else is scanned as it stands.
-    assert "t1497" in _without_card_labels(f"write {label} on the claim")
-    assert "t1497" in _without_card_labels("not t1497 when")
 
 
 def test_the_vocabulary_allowance_is_the_whole_listing_and_nothing_else() -> None:

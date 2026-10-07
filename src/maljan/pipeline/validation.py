@@ -50,7 +50,7 @@ from maljan.pipeline.events import (
     safe_finding_value,
     unparsed_answer_kept_sentence,
 )
-from maljan.schemas.evidence import ENTRY_ID_RE, answer_not_shown, entry_ids_in
+from maljan.schemas.evidence import answer_not_shown, entry_ids_in
 from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
 from maljan.schemas.stix_pattern import read_comparisons
 from maljan.utils.marked_cut import marked_cut
@@ -271,14 +271,37 @@ Validator = Callable[[Any], list[Violation]]
 # ---------------------------------------------------------------------------
 
 
-def feedback_text(violations: Sequence[Violation], *, closing: str = FEEDBACK_CLOSING) -> str:
-    """The retry turn's text for a set of violations, ending on ``closing``."""
+def feedback_text(
+    violations: Sequence[Violation], *, closing: str = FEEDBACK_CLOSING, cards: bool = True
+) -> str:
+    """The retry turn's text for a set of violations, ending on ``closing``.
+
+    ``cards=False`` leaves out the technique cards a does-not-describe question
+    carries (:func:`_card_after`).
+    """
     lines = [FEEDBACK_PREAMBLE]
     for violation in violations:
         where = f" ({violation.path})" if violation.path else ""
-        lines.append(f"- [{violation.code}]{where} {violation.message}")
+        card = _card_after(violation) if cards else ""
+        lines.append(f"- [{violation.code}]{where} {violation.message}{card}")
     lines.append(closing)
     return "\n".join(lines)
+
+
+def _card_after(violation: Violation) -> str:
+    """The named technique's card after a does-not-describe question, or ``""``.
+
+    The card (``memory.technique_cards``) is reference beside the question the
+    analyst is asked: what the evidence for the technique has to show and the
+    sibling techniques it is confused with. Only the question sent carries it;
+    the finding recorded is the check's message alone.
+    """
+    if violation.code != CLAIM_DOES_NOT_DESCRIBE_CODE or not violation.subject:
+        return ""
+    from maljan.memory.technique_cards import technique_card_lines
+
+    lines = technique_card_lines(violation.subject)
+    return " The technique's " + " | ".join(lines) if lines else ""
 
 
 # ---------------------------------------------------------------------------
@@ -1149,30 +1172,11 @@ def claim_does_not_describe_violation(
             f"technique: not its name, its tactic or the words that describe it. A technique "
             f"on a claim is published as something the sample does. Keep {tid} only if the "
             f"sample does it, and then say in the claim what it does that is {tid}; if the "
-            f"claim describes another behaviour, {otherwise}." + technique_card_block(technique_id)
+            f"claim describes another behaviour, {otherwise}."
         ),
         path=path,
         subject=str(technique_id).strip().upper(),
     )
-
-
-def technique_card_block(technique_id: str) -> str:
-    """The named technique's card as a question shows it after its text, or ``""`` without one.
-
-    The card (``memory.technique_cards``) says what the evidence for the
-    technique has to show and which sibling techniques it is confused with; the
-    question it follows is unchanged.
-    """
-    try:
-        from maljan.memory.technique_cards import card_lines, technique_card
-
-        card = technique_card(technique_id)
-        if card is None:
-            return ""
-        return " The technique's card: " + " | ".join(card_lines(card, technique_id))
-    except Exception as exc:  # noqa: BLE001 — a card unread is a question without it
-        logger.debug("validation: the card for %s was not read (%s)", technique_id, exc)
-        return ""
 
 
 def undescribed_technique_finding(technique_id: str, attck: Any, claims: int) -> str:
@@ -1214,156 +1218,6 @@ def claim_asked_whether_it_describes(
     if platform_mismatch_message(tid, attck, expected_technique_scope(sample)):
         return False
     return claim_does_not_describe_violation(claim, tid, attck) is not None
-
-
-# ---------------------------------------------------------------------------
-# The technique's card, and the entry a claim is anchored to
-# ---------------------------------------------------------------------------
-
-
-def _cited_texts(
-    claim: Any, evidence_texts: Mapping[str, Any]
-) -> tuple[list[str], list[str | None]]:
-    """The entry ids ``claim`` cites, in its order, and each one's text (``None`` when unknown)."""
-    ref = str(getattr(claim, "evidence_ref", "") or "")
-    ids = list(dict.fromkeys(found.lower() for found in ENTRY_ID_RE.findall(ref)))
-    texts: list[str | None] = []
-    for entry_id in ids:
-        value = evidence_texts.get(entry_id)
-        text = str(getattr(value, "text", value) or "") if value is not None else ""
-        texts.append(text or None)
-    return ids, texts
-
-
-def _asserting_claims(claims: Sequence[Any], technique_id: str) -> list[Any]:
-    """``claims`` less those that read as the behaviour's absence: they have their own question."""
-    return [c for c in claims if absence_claim_violation(c, technique_id, None) is None]
-
-
-def card_check_finding(
-    technique_id: str, claims: Sequence[Any], evidence_texts: Mapping[str, Any]
-) -> str:
-    """What the technique's card says of the claims naming it, as a fact, or ``""``.
-
-    Read off the card (``memory.technique_cards.read_card``) over every claim
-    naming the technique and the text of every entry they cite: the required
-    components none of them shows, a stated purpose none of the sentences
-    gives, and the sibling techniques every sentence fits by its criterion
-    while none uses the card's own words. A component an unknown entry might
-    show is not called unmet, a claim that reads as the behaviour's absence is
-    left to its own question, and a technique with no card has no finding.
-    """
-    from maljan.memory.attck_loader import technique_label
-    from maljan.memory.technique_cards import read_card, technique_card
-
-    card = technique_card(technique_id)
-    kept = _asserting_claims(claims, technique_id)
-    if card is None or not kept:
-        return ""
-    cited: list[str | None] = []
-    for claim in kept:
-        cited.extend(_cited_texts(claim, evidence_texts)[1])
-    reading = read_card(card, [str(getattr(c, "claim", "") or "") for c in kept], cited)
-    if not reading:
-        return ""
-    label = safe_finding_value(technique_label(technique_id))
-    parts: list[str] = []
-    shown = [r.what for r in reading.unmet if not r.claim_only]
-    stated = [r.what for r in reading.unmet if r.claim_only]
-    if shown:
-        parts.append(
-            f"no claim naming {label}, and no entry those claims cite, shows what its card "
-            f"requires: {'; '.join(shown)}"
-        )
-    if stated:
-        parts.append(
-            f"no claim naming it gives what its card asks it to state: {'; '.join(stated)}"
-        )
-    for sibling in reading.siblings:
-        parts.append(
-            f"every claim sentence naming it fits {technique_label(sibling.technique_id)} by "
-            f"the card's criterion ({sibling.criterion}), and neither those sentences nor the "
-            "entries they cite use the card's own words for it"
-        )
-    return f"the technique card check found that {'; '.join(parts)}"
-
-
-# What a claim sentence names its behaviour's place with: an address, a
-# function's name as a decompiler writes it, an API-shaped name, a module's
-# export, or a quoted or backticked value.
-_CLAIM_IDENTIFIER_RE = re.compile(
-    r"(?i:0x[0-9a-f]{3,})"
-    r"|(?i:\b(?:fun|fcn|sub|loc)[._][0-9a-f_]{3,}\b)"
-    r"|(?i:\b\w+\.dll!\w+)"
-    r"|\b[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+\b"
-    r"|`[^`\n]{4,}`"
-    r'|"[^"\n]{4,}"'
-)
-
-
-def _claim_identifiers(text: str) -> list[str]:
-    """The identifiers a claim sentence names (:data:`_CLAIM_IDENTIFIER_RE`), lower-cased."""
-    found: list[str] = []
-    for match in _CLAIM_IDENTIFIER_RE.finditer(str(text or "")):
-        value = match.group(0).strip('`"').lower()
-        if len(value) >= 4 and value not in found:
-            found.append(value)
-    return found
-
-
-def unanchored_technique_finding(
-    technique_id: str,
-    claims: Sequence[Any],
-    evidence_texts: Mapping[str, Any],
-    attck: Any = None,
-) -> str:
-    """Why no claim naming the technique is anchored to an entry holding it, or ``""``.
-
-    A claim is anchored when one entry it cites holds the behaviour: a word of
-    the technique's card, or — where the catalogue can be read — of the
-    vocabulary the describe check reads (:func:`behaviour_pattern`), or an
-    identifier the claim's own sentence names the behaviour's place with (an
-    address, a function, an API, a quoted value; a decompiled routine holds
-    its code, not the technique's words). A claim citing no entry id is not
-    anchored. Nothing is said while any cited entry's
-    text is unknown, or while any claim naming the technique is anchored; a
-    claim that reads as the behaviour's absence has its own question.
-    """
-    from maljan.memory.attck_loader import technique_label
-    from maljan.memory.technique_cards import holds_behaviour, technique_card
-
-    kept = _asserting_claims(claims, technique_id)
-    if not kept:
-        return ""
-    card = technique_card(technique_id)
-    pattern = behaviour_pattern(technique_id, attck) if attck is not None else None
-    if card is None and pattern is None:
-        return ""
-    cited_ids: list[str] = []
-    bare = 0
-    for claim in kept:
-        ids, texts = _cited_texts(claim, evidence_texts)
-        if not ids:
-            bare += 1
-            continue
-        if any(text is None for text in texts):
-            return ""
-        named = _claim_identifiers(str(getattr(claim, "claim", "") or ""))
-        for text in texts:
-            lowered = str(text).lower()
-            if holds_behaviour(card, str(text), pattern) or any(n in lowered for n in named):
-                return ""
-        cited_ids.extend(i for i in ids if i not in cited_ids)
-    label = safe_finding_value(technique_label(technique_id))
-    if not cited_ids:
-        return f"no claim naming {label} cites an evidence id"
-    words = "its card or its catalogue entry" if card is not None else "its catalogue entry"
-    words += ", nor an identifier the claims name"
-    tail = f"; {bare} claim(s) naming it cite no evidence id" if bare else ""
-    return (
-        f"no claim naming {label} cites a ledger entry that holds the behaviour: the claims cite "
-        f"{', '.join(cited_ids)}, and none of those entries holds a word of {words}{tail}"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -7557,6 +7411,7 @@ def _with_feedback(
     *,
     keep_answer: bool = True,
     closing: str = FEEDBACK_CLOSING,
+    cards: bool = True,
 ) -> list[Any]:
     """The conversation plus the model's answer plus the correction turn.
 
@@ -7573,7 +7428,7 @@ def _with_feedback(
     turns = list(messages)
     if keep_answer:
         turns.append(AIMessage(content=str(content if content is not None else answer)))
-    return with_question(turns, feedback_text(violations, closing=closing))
+    return with_question(turns, feedback_text(violations, closing=closing, cards=cards))
 
 
 def _announce_feedback(
@@ -7799,6 +7654,7 @@ def retry_with_feedback_sync[T](
     keep: Callable[[T, T], T] | None = None,
     drop_answer_for: frozenset[str] = frozenset(),
     closing: str = FEEDBACK_CLOSING,
+    cards: bool = True,
 ) -> tuple[T, list[Violation], int]:
     """:func:`retry_with_feedback` for the analysts, whose loop is synchronous.
 
@@ -7817,7 +7673,8 @@ def retry_with_feedback_sync[T](
     ``drop_answer_for`` is :func:`retry_with_feedback`'s: the codes whose
     correction describes the answer instead of following it. ``closing`` is
     the retry turn's last line; the analysts' names the block format their
-    parser reads (``ANALYST_FEEDBACK_CLOSING``).
+    parser reads (``ANALYST_FEEDBACK_CLOSING``). ``cards=False`` sends the
+    retry turn without technique cards (:func:`feedback_text`).
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
@@ -7831,7 +7688,9 @@ def retry_with_feedback_sync[T](
         _announce_feedback(violations, on_feedback, feed, retries + 1)
         shown.extend(violations)
         keep_answer = not any(v.code in drop_answer_for for v in violations)
-        turns = _with_feedback(turns, answer, violations, keep_answer=keep_answer, closing=closing)
+        turns = _with_feedback(
+            turns, answer, violations, keep_answer=keep_answer, closing=closing, cards=cards
+        )
         retries += 1
         with validation_retry():
             answer = run(turns)

@@ -6892,9 +6892,20 @@ class BaseAnalyst(BudgetMeter, ABC):
         if loop_repeat is not None:
             # A whole answer is asked for, and one may take the whole cap.
             widest = max(widest, int(self.output_cap_tokens() or 0))
-        if (loop_cuts or loop_repeat is not None) and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
+        too_big = (loop_cuts or loop_repeat is not None) and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
             self, sent, widest
-        ):
+        )
+        # The technique cards are reference beside a question: a turn that
+        # fits without them is sent without them, never left unasked for them.
+        cards = True
+        if too_big:
+            without_cards = with_question(
+                messages, feedback_text(initial, closing=closing, cards=False)
+            )
+            if BaseAnalyst._fits_the_window(self, without_cards, widest):  # type: ignore[arg-type]
+                cards = False
+                too_big = False
+        if too_big:
             detail = (
                 "not asked: the conversation the question is sent in and the "
                 f"{widest}-token answer it asks for do not fit this model's window"
@@ -7122,6 +7133,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     frozenset() if shown_repeat is not None else frozenset({ANALYST_CUT_CODE})
                 ),
                 closing=closing,
+                cards=cards,
             )
         except Exception as exc:  # noqa: BLE001 — a retry that fails keeps the first answer
             self.logger.warning("Validation retry failed (%s); keeping the first answer.", exc)
