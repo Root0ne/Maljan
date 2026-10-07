@@ -1154,8 +1154,10 @@ decides.
    (`isr.retry_dropped`, `validation.retry_drop_question`), with a
    `validation_feedback` event when it is asked and when it is answered: the
    analyst answers `KEEP <label>: <reason>` or `WITHDRAW <label>: <reason>`
-   per item, or several labels at once (`KEEP C1, C2: …`, `WITHDRAW C3
-   because …`). Each item is the first answer's own claim, its sentence,
+   per item, several labels at once (`KEEP C1, C2: …`, `KEEP C1 C2: …`,
+   `WITHDRAW C3 because …`), several decisions on one line (`KEEP C1: …;
+   WITHDRAW C2: …`), or `KEEP all` / `WITHDRAW all` for every item a decision
+   of its own does not name; each line is read in one pass. Each item is the first answer's own claim, its sentence,
    technique id and block with it (`claim_drops.dropped_claims`), so of a
    technique list split on commas the claim left out is the one put back. A
    kept item goes back into the answer as the first answer wrote it, a

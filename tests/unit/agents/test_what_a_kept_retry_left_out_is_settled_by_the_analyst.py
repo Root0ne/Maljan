@@ -337,3 +337,59 @@ def test_a_url_is_masked_then_defanged_whole() -> None:
     assert '"The sample beacons to "hxxps://relay[.]example[.]net/' in row["sentence"]
     assert "https://relay" not in row["sentence"]
     assert "relay[…" not in row["sentence"]
+
+
+class TestSeveralDecisionsOnALine:
+    LABELS = ["C1", "C2", "C3", "F1"]
+
+    def test_two_decisions_with_reasons(self) -> None:
+        assert read_retry_drop_answers("KEEP C1: yes; WITHDRAW C2: no", self.LABELS) == {
+            "C1": ("KEEP", "yes"),
+            "C2": ("WITHDRAW", "no"),
+        }
+
+    def test_two_decisions_without_reasons(self) -> None:
+        assert read_retry_drop_answers("KEEP C1, WITHDRAW C2", self.LABELS) == {
+            "C1": ("KEEP", ""),
+            "C2": ("WITHDRAW", ""),
+        }
+
+    def test_labels_separated_by_spaces(self) -> None:
+        assert read_retry_drop_answers("KEEP C1 C2: x", self.LABELS) == {
+            "C1": ("KEEP", "x"),
+            "C2": ("KEEP", "x"),
+        }
+
+    def test_all_decides_every_item_asked_and_a_label_of_its_own_wins(self) -> None:
+        assert read_retry_drop_answers(
+            "KEEP all: they hold\nWITHDRAW C2: a guess", self.LABELS
+        ) == {
+            "C1": ("KEEP", "they hold"),
+            "C2": ("WITHDRAW", "a guess"),
+            "C3": ("KEEP", "they hold"),
+            "F1": ("KEEP", "they hold"),
+        }
+
+    def test_withdraw_all(self) -> None:
+        decided = read_retry_drop_answers("WITHDRAW all", self.LABELS)
+
+        assert set(decided) == set(self.LABELS)
+        assert {d for d, _r in decided.values()} == {"WITHDRAW"}
+
+    def test_a_decision_word_inside_a_reason_is_a_word(self) -> None:
+        assert read_retry_drop_answers("KEEP C1: I keep it because it holds", self.LABELS) == {
+            "C1": ("KEEP", "I keep it because it holds"),
+        }
+
+    def test_a_long_hostile_line_is_read_in_linear_time(self) -> None:
+        import time
+
+        lines = [
+            "KEEP " + " ".join(f"C{n}" for n in range(40_000)) + " " + "keep " * 40_000,
+            ("KEEP C1" + " " * 100_000) * 3 + "x",
+            "KEEP C1" + " and" * 100_000 + " x",
+        ]
+        started = time.perf_counter()
+        for line in lines:
+            read_retry_drop_answers(line, self.LABELS)
+        assert time.perf_counter() - started < 2.0

@@ -7930,12 +7930,18 @@ RETRY_DROP_NOT_ANSWERED = "not answered; kept as the first answer wrote it"
 # One answer line: ``KEEP C2: reason``, ``WITHDRAW F1 - reason``,
 # ``KEEP C1, C2 and F1: reason`` or ``KEEP C3 because reason``, marks allowed.
 _RETRY_DROP_LABEL = r"[CF]\d+"
-_RETRY_DROP_ANSWER_RE = re.compile(
-    r"^[\s>*_`-]*(?P<decision>keep|withdraw)[\s*_`]+"
-    rf"(?P<labels>{_RETRY_DROP_LABEL}(?:[\s*_`]*(?:,|&|\band\b)[\s*_`]*{_RETRY_DROP_LABEL})*)"
-    r"[\s*_`]*(?:(?:[:\-–—.)]|\bbecause\b)\s*(?P<reason>.*))?$",
+# A decision: KEEP or WITHDRAW, then the labels it is about (``C1``, ``C1, C2
+# and F1``, ``C1 C2``, or ``all`` for every item asked), then, after a mark or
+# "because", its reason. Several decisions may stand on one line; a decision
+# word not followed by a label is a word of a reason.
+_RETRY_DROP_DECISION_RE = re.compile(
+    r"\b(?P<decision>keep|withdraw)\b[\s*_`]++"
+    rf"(?P<labels>(?:{_RETRY_DROP_LABEL}|all)\b"
+    rf"(?:[\s*_`]*+(?:,|&|\band\b)?+[\s*_`]*+(?:{_RETRY_DROP_LABEL}|all)\b)*+)",
     re.IGNORECASE,
 )
+# What opens a decision's reason, after its labels.
+_RETRY_DROP_REASON_RE = re.compile(r"^[\s*_`]*+(?:[:\-–—.)]|\bbecause\b)\s*+", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -8031,18 +8037,36 @@ def retry_drop_question(drops: RetryDrops) -> str:
 
 
 def read_retry_drop_answers(text: str, labels: Iterable[str]) -> dict[str, tuple[str, str]]:
-    """``{label: (KEEP or WITHDRAW, reason)}`` for each named label the answer decided, once."""
-    wanted = {str(label).upper() for label in labels}
+    """``{label: (KEEP or WITHDRAW, reason)}`` for each named label the answer decided, once.
+
+    Every decision on a line is read, each with the reason written up to the
+    next decision; ``all`` decides every item a decision of its own does not.
+    One pass over each line.
+    """
+    wanted = [str(label).upper() for label in labels]
     decided: dict[str, tuple[str, str]] = {}
+    for_all: tuple[str, str] | None = None
     for line in str(text or "").splitlines():
-        match = _RETRY_DROP_ANSWER_RE.match(line.strip())
-        if match is None:
-            continue
-        reason = (match.group("reason") or "").strip().strip("*_`").strip()
-        for label in re.findall(_RETRY_DROP_LABEL, match.group("labels"), re.IGNORECASE):
-            label = label.upper()
-            if label in wanted and label not in decided:
-                decided[label] = (match.group("decision").upper(), reason)
+        found = list(_RETRY_DROP_DECISION_RE.finditer(line))
+        for at, match in enumerate(found):
+            end = found[at + 1].start() if at + 1 < len(found) else len(line)
+            rest = line[match.end() : end]
+            opened = _RETRY_DROP_REASON_RE.match(rest)
+            reason = rest[opened.end() :] if opened else ""
+            reason = reason.strip().rstrip(";,").strip().strip("*_`").strip()
+            decision = (match.group("decision").upper(), reason)
+            for label in re.findall(
+                rf"{_RETRY_DROP_LABEL}|all", match.group("labels"), re.IGNORECASE
+            ):
+                label = label.upper()
+                if label == "ALL":
+                    if for_all is None:
+                        for_all = decision
+                elif label in wanted and label not in decided:
+                    decided[label] = decision
+    if for_all is not None:
+        for label in wanted:
+            decided.setdefault(label, for_all)
     return decided
 
 
