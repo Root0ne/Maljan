@@ -463,6 +463,71 @@ hidden text the platform recovered, and the publish rule reads it as it reads
 a FLOSS decoded string (see "A value a tool recovered from hidden text is a
 source of its own" under the indicator rule).
 
+**The deobfuscation passes** come after all of that, last for the same reason,
+and run on every run rather than when a model asks. First
+`find_crypto_constants` (`tools.crypto_constants`) over an executable image,
+given capa's function starts: the published constants of ciphers, hash
+functions and checksums, each set computed from its definition, a table found
+whole and other sets by two of their values, each with the places it stands and
+the function around them. Sets that share values are named only by a value that
+tells them apart: MD5's initial values are SHA-1's first four, so a set needs
+SHA-1's fifth, within 64 bytes of them (found by bisecting the sorted places, so the check stays O(n log n) on any layout), to be SHA-1 and is otherwise the MD5/SHA-1 family; SHA-256's and
+SHA-224's values are halves of SHA-512's and SHA-384's, so a half that sits
+inside a 64-bit value found is that value's, and halves standing beside the
+other halves are the SHA-2 family. A set whose algorithm capa's rules name at
+the function its place stands in is said to agree with capa there, not
+repeated. Ghidra's own `detect_crypto_constants` answers "not yet implemented",
+so the platform scans itself; the analysis server serves the same function.
+
+Then Ghidra's `find_anti_analysis_techniques` (`analysis.ghidra_passes`), the
+sample opened the way the sink pre-pass opens it (load, switch,
+auto-analysis). Ghidra's answer is kept whole, each address also as an offset
+from the image base Ghidra reports, and only its exact part is stated: an
+instruction that is the listed one (Ghidra matches mnemonics by prefix, so it
+files `INT3` under `INT 0x2d`), and a read through `FS:[0x30]` or
+`FS:[0x18]` exactly where a capa rule in the same function agrees (an
+anti-analysis rule, or one naming the PEB or TEB, such as `PEB access`); the
+line names the rule. A TEB/PEB read with no such rule is counted: the 32-bit
+UCRT's exit path reads the PEB's `NtGlobalFlag` itself, and capa leaves the
+library functions it recognises out. An `INT3` counts only alone, not as the byte before a
+function and not right after a call, jump or return (compilers put one after a
+call that never returns and pad with one where nothing falls through); a
+`CPUID` counts only where the code sets the hypervisor leaf in `eax`, or sets
+leaf 1 and tests ECX bit 31 before ECX is written again, all read in the file's
+bytes. An API call is counted and never stated: Ghidra lists every call site of
+a broad list, a language runtime's own included (the MSVC runtime calls
+`IsDebuggerPresent` on its failure path), while capa leaves the library
+functions it recognises out and the catalogue line already reads the imports.
+The rest are counted once per place. A scan that
+matched nothing says what it checks, never that the sample has no
+anti-analysis code. The node hands the pack the Ghidra it may call — switched
+on, over `http`, with the mirror the worker made for Ghidra — or the sentence
+saying why there is none, which is one entry `not run: <reason>` whose pack
+line is `no: <reason>`, not a failure. A scan Ghidra did not complete is a
+failed entry with Ghidra's own words (`no: the pass failed: …`).
+
+Ghidra's emulation is not run by the pack: Ghidra's `emulate_function`
+ignores its step limit and cannot be stopped, and one emulation took 130 to
+560 ms in a stored run. It stays a tool the reverser may call.
+
+When the pack does not fit its room, the passes' lines take only the room the
+other lines leave. **Decision:** a pass fact never shortens a decoded string
+or any other line the pack printed before the passes existed. A pass with a
+fact no other line carries — a constant set no capa rule agrees with, an exact
+instruction or TEB read at a function no capa anti-analysis rule matched — is
+offered that room first. A line that cannot show one item is left out, and every
+pass entry left out is counted in the "N more pack entries not shown" line,
+which comes after the pass lines. That line may take only room the other
+lines leave free, or room from capa's addresses; never a decoded string or any
+other fact line. **Decision:** when neither kind of room exists, the pack stays
+exactly as the other lines are, and the pass entries it lacks are recorded in
+the run summary's pack record instead (`run_summary.triage.pack_left_out`:
+their ids and tools, with the reason "no pack room"), read at the same bound
+every agent is shown the pack at. So a pass is never skipped unsaid, and no
+fact an earlier line states gives way to a pass. On the stored benchmark runs
+no pass fact is new, so the pack is as dev renders it except for capa's
+addresses where the trailer needed room.
+
 The pack states facts and draws no conclusion, and it never fails a job: a
 tool that raises or answers with an error is an entry with `ok=False` and a
 degradation reason `triage.<tool>_failed`, the next tool runs, and a

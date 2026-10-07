@@ -47,7 +47,10 @@ which is far cheaper than walking every function manually:
 === ADVANCED TOOLS (reach for these when the triage signals call for them) ===
 - API names resolved by hash (a hashing loop, sparse imports): call
   `emulate_hash_batch` to brute-force the obfuscated API names.
-- Suspected encryption / ransomware: `detect_crypto_constants`.
+- Suspected encryption / ransomware: the pack's crypto constants line names the
+  published constants and where they stand; `find_crypto_constants` on the
+  analysis server gives its whole answer (Ghidra's `detect_crypto_constants`
+  is not implemented).
 - Trace a key, config value, or decoded buffer through a function:
   `analyze_dataflow(address=<addr>, direction=backward|forward)`.
 - Run a small hash / decode routine to see its output: `emulate_function`.

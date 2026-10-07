@@ -44,6 +44,7 @@ from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop
 from maljan.memory.long_term_memory import build_stored_case
+from maljan.pipeline import triage_pack
 from maljan.pipeline.claim_drops import (
     answer_unchanged,
     dropped_values,
@@ -1276,6 +1277,69 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
     return step
 
 
+def _ghidra_passes_step(container: ServiceContainer, state: AnalysisState) -> Any:
+    """The Ghidra the pack's passes call, or the sentence saying why there is none.
+
+    Ghidra has to be switched on, reached over its REST API (``http``: Ghidra
+    over stdio serves no endpoint the pack can call), and holding a copy of
+    this job's sample where it reads: the mirror the worker made for Ghidra as
+    a static provider of the run's profile. Each request waits what one tool
+    call of this deployment may take, as the sink pre-pass's do.
+    """
+    from maljan.analysis.ghidra_passes import (
+        GHIDRA_HAS_NO_COPY,
+        GHIDRA_NOT_OVER_HTTP,
+        GHIDRA_SWITCHED_OFF,
+        GhidraPasses,
+    )
+    from maljan.providers.server_guard import deployment_call_budget
+
+    cfg = container.config
+    ghidra = cfg.static.ghidra
+    paths = state.get("static_sample_paths") or {}
+    path = paths.get("ghidra") or (
+        state.get("static_sample_path") if cfg.static.provider == "ghidra" else None
+    )
+    if not bool(getattr(ghidra, "enabled", True)):
+        reason = GHIDRA_SWITCHED_OFF
+    elif ghidra.transport != "http":
+        reason = GHIDRA_NOT_OVER_HTTP.format(transport=ghidra.transport)
+    elif not path:
+        reason = GHIDRA_HAS_NO_COPY
+    else:
+        budget = deployment_call_budget(cfg)
+        return GhidraPasses(
+            base_url=str(ghidra.url),
+            token=ghidra.auth_token.get_secret_value(),
+            sample_path=str(path),
+            call_timeout=budget if budget > 0 else None,
+        )
+    return GhidraPasses(unavailable=reason)
+
+
+def _pack_left_out(entries: list[Any], container: ServiceContainer) -> dict[str, Any] | None:
+    """The pack record of the pass entries the pack neither shows nor counts, or ``None``.
+
+    Read at the bound every agent is shown the pack at (:func:`upstream_chars`).
+    The pack's trailer takes only room the other lines leave or room from
+    capa's addresses; when there is neither, the pack stays as the other lines
+    are, and the run summary's pack record says which entries it lacks and why.
+    Never raises.
+    """
+    try:
+        unsaid = triage_pack.pack_unsaid(pack_entries(entries), upstream_chars(container))
+    except Exception as exc:  # noqa: BLE001 — a record is never worth a lost stage
+        logger.debug("triage pack: the pack's room was not read (%s).", exc)
+        return None
+    if not unsaid:
+        return None
+    return {
+        "entries": [entry.id for entry in unsaid],
+        "tools": [entry.tool for entry in unsaid],
+        "reason": triage_pack.NO_PACK_ROOM,
+    }
+
+
 def _analysis_server_environ(container: ServiceContainer) -> dict[str, str]:
     """This process's environment with the analysis server's own ``env`` map over it.
 
@@ -1388,6 +1452,7 @@ def make_triage_node(
                 inputs,
                 reputation=_reputation_lookup(container, inputs.sha256),
                 function_matches=_function_matches_step(container, state),
+                ghidra=_ghidra_passes_step(container, state),
             )
         except Exception as exc:  # noqa: BLE001 — the pack never fails the job
             logger.warning(
@@ -1439,6 +1504,9 @@ def make_triage_node(
             "triage_facts": result.to_state(),
             **stage_record(stage, ran=True, duration_ms=_elapsed_ms()),
         }
+        left_out = _pack_left_out(result.entries, container)
+        if left_out:
+            update["triage_facts"]["pack_left_out"] = left_out
         if result.entries:
             update["evidence_ledger"] = [e.model_dump(mode="json") for e in result.entries]
         if stage.key in finishes:

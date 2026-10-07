@@ -31,7 +31,14 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from maljan.core.paths import resolve_data
-from maljan.tools import api_hashes, children, emulated_strings, staging, string_blobs
+from maljan.tools import (
+    api_hashes,
+    children,
+    crypto_constants,
+    emulated_strings,
+    staging,
+    string_blobs,
+)
 from maljan.tools import binary as binary_tools
 from maljan.tools import identify as identify_tools
 from maljan.tools import rules as rule_tools
@@ -101,6 +108,7 @@ TOOL_NEEDS: list[ToolNeeds] = [
     ),
     ToolNeeds("resolve_api_hashes"),
     ToolNeeds("decode_string_blobs"),
+    ToolNeeds(crypto_constants.TOOL),
     ToolNeeds("put_sample"),
     ToolNeeds("put_sample_begin"),
     ToolNeeds("put_sample_chunk"),
@@ -1118,6 +1126,31 @@ def decode_string_blobs(
         offset=offset,
         limit=limit,
         include_unreferenced=include_unreferenced,
+    )
+
+
+@mcp.tool()
+@reads_a_carved_file
+def find_crypto_constants(path: str, carved_path: str = "") -> dict[str, Any]:
+    """Find the published constants of ciphers, hash functions and checksums in a file.
+
+    Every set is computed from its algorithm's definition: substitution boxes
+    and round tables of block ciphers, the round constants and initial values
+    of hash functions, a checksum's lookup table and single magic numbers. The
+    rule the file is searched by is stated under ``how``: a table only whole,
+    in either byte order for words; round constants and initial values value
+    by value. ``found`` holds each set found, with every place its values or
+    its table stand: the file offset and, for a PE, the offset from the image
+    base, the section and the function the file's own table puts around it.
+    ``lone`` holds the sets of which only one value stands, which one value
+    alone often does by chance. Nothing is run. The triage pack already ran it
+    once on an executable and shows its sets with the ledger id.
+    """
+    return _guard(
+        crypto_constants.TOOL,
+        crypto_constants.find_crypto_constants,
+        path=path,
+        carved_path=carved_path,
     )
 
 

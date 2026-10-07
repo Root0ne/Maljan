@@ -42,6 +42,23 @@ values the file holds that are hashes of Windows function names
 (``maljan.tools.api_hashes``) and the text its data sections keep encoded
 under simple key schemes (``maljan.tools.string_blobs``), each with the
 addresses where it stands and the functions around them.
+
+After them, the deobfuscation passes, last for the same reason. The
+platform's scan of an executable's bytes for the published constants of
+ciphers, hash functions and checksums (``maljan.tools.crypto_constants``;
+Ghidra's ``detect_crypto_constants`` answers "not yet implemented"), then
+Ghidra's anti-analysis scan over the sample (``maljan.analysis.ghidra_passes``),
+of which only the exact part is stated. The node hands the pack the Ghidra it
+may call, or the sentence saying why there is none; a pass that cannot run is
+one entry saying ``no:`` and why, and is not a failure. A call directly to
+``run_pack`` with no Ghidra handed over makes no Ghidra entry.
+
+When the pack does not fit its room, every pass line takes only the room the
+earlier lines leave, a pass with a fact no other line carries first; a pass
+entry with no room is counted in the trailer, which takes only free room or
+room from capa's addresses. With neither, the pack
+stays as it is and the triage node records the entry in its pack record,
+"no pack room" (``render_pack``, ``pack_unsaid``).
 """
 
 from __future__ import annotations
@@ -58,6 +75,12 @@ from pathlib import Path
 from typing import Any, cast
 
 from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
+from maljan.analysis.ghidra_passes import (
+    ANTI_ANALYSIS_TOOL,
+    GHIDRA_FORMATS,
+    GhidraPasses,
+    run_pass,
+)
 from maljan.analysis.pcap_summary import conversation_line
 from maljan.analysis.technique_ids import technique_ids_in
 from maljan.core.logger import logger
@@ -74,6 +97,7 @@ from maljan.schemas.evidence import LedgerEntry, apply_budget
 from maljan.tools import (
     api_hashes,
     binary,
+    crypto_constants,
     emulated_strings,
     identify,
     knowledge,
@@ -503,11 +527,13 @@ class _Pack:
         *,
         reputation: ReputationLookup | None,
         function_matches: FunctionMatches | None,
+        ghidra: GhidraPasses | None = None,
     ) -> None:
         self.recorder = recorder
         self.inputs = inputs
         self.reputation = reputation
         self.function_matches = function_matches
+        self.ghidra = ghidra
         self.result = PackResult()
         self.started = time.monotonic()
         self.steps_run = 0
@@ -517,6 +543,9 @@ class _Pack:
         # Where capa found functions, for the readers of an image with no
         # function table of its own.
         self.capa_function_starts: list[str] = []
+        # capa's rules as it answered them, which the constant scan's answer
+        # is compared with; empty when capa gave no answer.
+        self.capa_rows: list[dict[str, Any]] = []
         self.reputation_malicious: int | None = None
         # FLOSS, started beside the rest of the pack when it can be. Recorded
         # in its own place at the end, so every id keeps its value.
@@ -662,9 +691,13 @@ class _Pack:
             self._function_matches()
             self._decoded_strings(routed)
             self._resolved_values(routed, format_facts)
+            self._crypto_constants(routed)
+            self._ghidra_passes(routed)
         finally:
             if self._floss_pool is not None:
                 self._floss_pool.shutdown(wait=False)
+            if self.ghidra is not None:
+                self.ghidra.close()
 
         # The recorder holds every entry in the order the ids were issued,
         # the reputation call's included, so it is the one list to publish.
@@ -730,6 +763,9 @@ class _Pack:
         if found is not None:
             self.capa_hits = len(found.get("capabilities") or [])
             self.capa_function_starts = list(found.get("function_starts") or [])
+            self.capa_rows = [
+                row for row in found.get("capabilities") or [] if isinstance(row, dict)
+            ]
         report = observed_report(self.inputs.sandbox_report)
         if report:
             self.record(
@@ -1041,6 +1077,75 @@ class _Pack:
                 lambda: knowledge.api_capability([], platform=platform, resolved_names=names),
             )
 
+    # -- the deobfuscation passes -------------------------------------------
+
+    def _record_absent(self, tool: str, args: dict[str, Any], reason: str) -> None:
+        """The entry for a pass that could not run: why, with no call made and no failure."""
+        message = f"{NOT_RUN_PREFIX} {reason}"
+        self.recorder.record(
+            tool=tool,
+            args=args,
+            server=PIPELINE,
+            output=message,
+            ok=False,
+            error=message,
+            started_at=time.time(),
+        )
+        logger.info("triage pack: %s %s", tool, message)
+
+    def _crypto_constants(self, routed: str) -> None:
+        """The platform's scan of an executable for published constants, read from its bytes.
+
+        Given capa's function starts, as the other readings of the bytes are,
+        and compared with capa's own rules afterwards (``_with_capa``).
+        """
+        if routed not in CONSTANT_FORMATS:
+            return
+        path = self.inputs.sample_path
+        starts = list(self.capa_function_starts)
+        args: dict[str, Any] = {"path": path}
+        if starts:
+            args["function_starts"] = f"capa's {len(starts)} function starts"
+        rows = self.capa_rows
+        self.record(
+            crypto_constants.TOOL,
+            args,
+            lambda: _with_capa(
+                crypto_constants.find_crypto_constants(path, function_starts=starts), rows
+            ),
+        )
+
+    def _ghidra_passes(self, routed: str) -> None:
+        """Ghidra's anti-analysis scan, or the one entry saying why there is none.
+
+        Only with a Ghidra handed over by the caller. A reason that holds for
+        the whole deployment is one entry; a scan Ghidra did not complete is a
+        failed entry with Ghidra's words.
+        """
+        passes = self.ghidra
+        if passes is None or routed not in GHIDRA_FORMATS:
+            return
+        args = {"program": passes.sample_path or "the job's sample"}
+        if passes.unavailable:
+            self._record_absent(ANTI_ANALYSIS_TOOL, args, passes.unavailable)
+            return
+        path = self.inputs.sample_path
+        starts = list(self.capa_function_starts)
+        rows = self.capa_rows
+        self.record(
+            ANTI_ANALYSIS_TOOL,
+            args,
+            lambda: _anti_analysis_with_capa(
+                run_pass(lambda: passes.anti_analysis(path, starts), ANTI_ANALYSIS_TOOL),
+                rows,
+                starts,
+            ),
+        )
+
+
+# The formats the constant scan reads: the executable images.
+CONSTANT_FORMATS = frozenset({"pe", "elf", "macho"})
+
 
 def run_pack(
     recorder: EvidenceRecorder,
@@ -1048,6 +1153,7 @@ def run_pack(
     *,
     reputation: ReputationLookup | None = None,
     function_matches: FunctionMatches | None = None,
+    ghidra: GhidraPasses | None = None,
 ) -> PackResult:
     """Run the whole pack over ``inputs``, recording every step on ``recorder``.
 
@@ -1055,7 +1161,13 @@ def run_pack(
     spawns a subprocess, so the node runs this on a worker thread the way the
     report node runs the evidence-only provider.
     """
-    result = _Pack(recorder, inputs, reputation=reputation, function_matches=function_matches).run()
+    result = _Pack(
+        recorder,
+        inputs,
+        reputation=reputation,
+        function_matches=function_matches,
+        ghidra=ghidra,
+    ).run()
     budget = int(inputs.evidence_budget_bytes or 0)
     trimmed, _ = apply_budget(result.entries, budget)
     if trimmed:
@@ -1276,10 +1388,179 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
     not fit is an entry left out, and the block then ends with a line saying
     how many and that their full output is a tool call away. ``max_chars`` at
     or below zero means no bound.
+
+    The deobfuscation passes' lines (``PASS_TOOLS``) take only the room the
+    other lines leave, whole or shortened, so no other line gives way to a
+    pass. A pass with a fact no other line carries (``_novel_view``: a
+    constant set no capa rule agrees with, an exact instruction or TEB read at
+    a function no capa anti-analysis rule matched) is offered that room
+    first. A line that cannot show one item is left
+    out, and every pass entry left out is counted in the trailer, which comes
+    after the pass lines. The trailer takes only room the other lines leave,
+    or room from capa's addresses; with neither, the pack stays as the other
+    lines are and the uncounted entries are the triage node's to record
+    (``pack_unsaid``).
     """
     whole = _render_lines(entries, WHOLE)
     if max_chars <= 0 or _joined_len(whole) <= max_chars:
         return "\n".join(whole)
+    passes = [entry for entry in entries if entry.tool in PASS_TOOLS]
+    if not passes:
+        return _render_fitted(entries, max_chars)
+    return _render_with_passes(entries, max_chars)[0]
+
+
+# Why a pass entry is in neither the pack nor its trailer, as the pack record says it.
+NO_PACK_ROOM = "no pack room"
+
+
+def pack_unsaid(entries: list[LedgerEntry], max_chars: int) -> list[LedgerEntry]:
+    """The pass entries a pack of ``max_chars`` neither shows nor counts in its trailer.
+
+    They are the ones for which the trailer found no room of its own and capa's
+    addresses had none to give: the pack then stays as the earlier lines are,
+    and the triage node records them in its pack record (``NO_PACK_ROOM``).
+    """
+    if max_chars <= 0 or not any(entry.tool in PASS_TOOLS for entry in entries):
+        return []
+    if _joined_len(_render_lines(entries, WHOLE)) <= max_chars:
+        return []
+    return _render_with_passes(entries, max_chars)[1]
+
+
+def _render_with_passes(
+    entries: list[LedgerEntry], max_chars: int
+) -> tuple[str, list[LedgerEntry]]:
+    """The pack with its pass lines, and the pass entries it could neither show nor count."""
+    earlier = [entry for entry in entries if entry.tool not in PASS_TOOLS]
+    # Every pass line takes only the room the earlier lines leave, so no line
+    # dev prints gives way to a pass. A pass with a fact no other line carries
+    # is offered that room first.
+    passes = [entry for entry in entries if entry.tool in PASS_TOOLS]
+    leftover = [e for e in passes if _novel_view(e) is not None] + [
+        e for e in passes if _novel_view(e) is None
+    ]
+    fitted = earlier
+    kept, left_out = _fitted_parts(fitted, max_chars)
+    trailer = [_left_out(left_out)] if left_out else []
+    room = max_chars - _joined_len(kept + trailer) - 1
+    placed, dropped = _place_lines(leftover, room)
+    if not dropped:
+        return "\n".join(kept + placed + trailer), []
+    # A pass line with no room is counted in the trailer. The trailer may take
+    # only room the fitted lines already leave, or room from capa's
+    # addresses, which are the part of the pack that takes what is left;
+    # never a fact line. With neither, the pack stays as it is and the entries
+    # are recorded in the pack record instead.
+    bound = len(_left_out(left_out + len(leftover))) + 1
+    room = max_chars - _joined_len(kept) - bound - (1 if kept else 0)
+    if room >= -1:
+        placed, dropped = _place_lines(leftover, room)
+        return "\n".join(kept + placed + [_left_out(left_out + len(dropped))]), []
+    shrunk = _without_rule_addresses_for(fitted, kept, max_chars, -room)
+    if shrunk is not None:
+        return "\n".join(shrunk + [_left_out(left_out + len(leftover))]), []
+    placed, dropped = _place_lines(leftover, max_chars - _joined_len(kept + trailer) - 1)
+    return "\n".join(kept + placed + trailer), dropped
+
+
+def _without_rule_addresses_for(
+    entries: list[LedgerEntry], kept: list[str], max_chars: int, need: int
+) -> list[str] | None:
+    """``kept`` with capa's line showing fewer addresses, ``need`` characters shorter."""
+    capa = next((entry for entry in entries if entry.tool == "capa"), None)
+    if capa is None:
+        return None
+    index = next((i for i, line in enumerate(kept) if line.startswith(f"[{capa.id}] ")), None)
+    if index is None:
+        return None
+    addresses_token = _RULE_ADDRESSES.set(0)
+    try:
+        detail = _detail_for(entries, max_chars)
+    finally:
+        _RULE_ADDRESSES.reset(addresses_token)
+    token = _DETAIL.set(detail)
+    try:
+        target = len(kept[index]) - need
+        data = capa.structured if isinstance(capa.structured, dict) else {}
+        rows = [r for r in data.get("capabilities") or [] if isinstance(r, dict)]
+        low, high = 0, max((len(r.get("addresses") or []) for r in rows), default=0)
+        best: str | None = None
+        while low <= high:
+            middle = (low + high) // 2
+            line = _rule_line(capa, middle)
+            if len(line) <= target:
+                best, low = line, middle + 1
+            else:
+                high = middle - 1
+    finally:
+        _DETAIL.reset(token)
+    if best is None:
+        return None
+    return [*kept[:index], best, *kept[index + 1 :]]
+
+
+_LEFT_OUT_LINE = re.compile(r"\A(\d+) more pack entr(?:y|ies) not shown here; ")
+
+
+def _fitted_parts(entries: list[LedgerEntry], max_chars: int) -> tuple[list[str], int]:
+    """``entries`` fitted as ``_render_fitted`` fits them: the lines, and how many were left out."""
+    if not entries:
+        return [], 0
+    lines = _render_fitted(entries, max_chars).split("\n")
+    said = _LEFT_OUT_LINE.match(lines[-1]) if lines else None
+    if said:
+        return lines[:-1], int(said.group(1))
+    return lines, 0
+
+
+def _place_lines(entries: list[LedgerEntry], room: int) -> tuple[list[str], list[LedgerEntry]]:
+    """Each entry's line in what is left of ``room``, whole or shortened; the ones with none."""
+    placed: list[str] = []
+    dropped: list[LedgerEntry] = []
+    for entry in entries:
+        line: str | None = _pack_line(entry)
+        if line is not None and len(line) > room:
+            line = _within_room(entry, room)
+        if line is None or len(line) > room:
+            dropped.append(entry)
+            continue
+        placed.append(line)
+        room -= len(line) + 1
+    return placed, dropped
+
+
+def _novel_view(entry: LedgerEntry) -> LedgerEntry | None:
+    """A pass entry narrowed to the facts no other line of the pack carries, or ``None``.
+
+    A constant set no capa rule agrees with, and an exact instruction or TEB
+    read at a function no capa anti-analysis rule matched, are new: the view
+    keeps those and counts the rest. An entry with a view is offered the
+    pack's leftover room before the other pass entries; it never takes room
+    from a line that is not a pass.
+    """
+    data = entry.structured if isinstance(entry.structured, dict) else None
+    if not entry.ok or data is None:
+        return None
+    if entry.tool == crypto_constants.TOOL:
+        rows = [r for r in data.get("found") or [] if isinstance(r, dict)]
+        new = [r for r in rows if not r.get("capa")]
+        if not new:
+            return None
+        view = {**data, "found": new, "agreeing": len(rows) - len(new)}
+    elif entry.tool == ANTI_ANALYSIS_TOOL:
+        rows = [r for r in data.get("stated") or [] if isinstance(r, dict)]
+        new = [r for r in rows if not r.get("capa")]
+        if not new:
+            return None
+        view = {**data, "stated": new, "also_stated": len(rows) - len(new)}
+    else:
+        return None
+    return entry.model_copy(update={"structured": view})
+
+
+def _render_fitted(entries: list[LedgerEntry], max_chars: int) -> str:
+    """``entries`` fitted to ``max_chars``: the shared detail level, then capa's addresses."""
     # The shared level is fitted with no rule addresses at all: a capa result
     # with hundreds of matches would otherwise lower what every other line may
     # show. The addresses then take what room the fitted lines leave.
@@ -1427,6 +1708,15 @@ def pack_block(entries: list[LedgerEntry], max_chars: int) -> str:
 def _pack_line(entry: LedgerEntry) -> str:
     """One entry as one line. Never raises: an unreadable answer is named as such."""
     label = _GROUP_LABELS.get(entry.tool, entry.tool)
+    if not entry.ok and entry.tool in PASS_TOOLS:
+        # A deobfuscation pass that did not run, or ran and broke, is one
+        # ``no:`` line with the reason, as a pass that found nothing is.
+        said = str(entry.error or entry.output or "")
+        if _was_not_made(entry):
+            return f"[{entry.id}] {label}: no: {_short(said[len(NOT_RUN_PREFIX) :].strip())}"
+        # The failure is Ghidra's own words; the class they travelled in is not.
+        said = said.removeprefix("GhidraPassFailed: ")
+        return f"[{entry.id}] {label}: no: the pass failed: {_short(said)}"
     if not entry.ok:
         # A call the pipeline did not make — a lookup with no server to ask,
         # a step after the budget — is not a failure and is not called one;
@@ -2236,6 +2526,291 @@ def _decoded_blobs(data: dict[str, Any], max_chars: int | None = None) -> str:
     return _fit(_line, shown, max_chars)
 
 
+# ---------------------------------------------------------------------------
+# The deobfuscation passes' lines
+# ---------------------------------------------------------------------------
+
+PASS_TOOLS = frozenset({crypto_constants.TOOL, ANTI_ANALYSIS_TOOL})
+
+# What a pass line says when the room cut its list: how many it shows, and
+# where the rest are.
+PASS_ROOM_SENTENCE = "{shown} of {total} shown; the rest are in this entry's full output"
+
+# What Ghidra's scan looks at, as the pack line says it.
+SCAN_CHECKS_SHORT = "listed API calls, listed x86 instructions, FS:[0x30] and FS:[0x18]"
+
+
+def _with_capa(answer: dict[str, Any], capa_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """The constant scan's answer, each found set marked where capa names the same algorithm.
+
+    A set agrees with capa when a capa rule whose namespace ends in the set's
+    algorithm matched at the start of a function one of the set's places
+    stands in (``function``, or ``after_function_start`` for an image with no
+    table of its own). The mark is ``capa``: each rule and the address.
+    """
+    if not isinstance(answer, dict) or not capa_rows or "found" not in answer:
+        return answer
+    sets = {entry.id: entry for entry in crypto_constants.catalogue()}
+    marked = dict(answer)
+    rows: list[dict[str, Any]] = []
+    for row in answer.get("found") or []:
+        entry = sets.get(str(row.get("id")))
+        places = [t.get("place") or {} for t in row.get("tables") or []] + [
+            p for v in row.get("values") or [] for p in v.get("places") or []
+        ]
+        functions = {
+            str(p.get("function") or p.get("after_function_start") or "")
+            for p in places
+            if isinstance(p, dict)
+        } - {""}
+        agree: list[dict[str, str]] = []
+        for capa in capa_rows:
+            segment = str(capa.get("namespace") or "").rsplit("/", 1)[-1]
+            if entry is None or segment not in entry.capa:
+                continue
+            for address in capa.get("addresses") or []:
+                if str(address) in functions:
+                    agree.append({"rule": str(capa.get("rule") or ""), "at": str(address)})
+        row = dict(row)
+        if agree:
+            row["capa"] = agree
+        rows.append(row)
+    marked["found"] = rows
+    return marked
+
+
+# A capa rule that agrees with a TEB/PEB read: its own anti-analysis rules, or
+# a rule that names the PEB or TEB it reads (capa's ``PEB access`` sits in no
+# anti-analysis namespace).
+_PEB_RULE = re.compile(r"\b(?:PEB|TEB)\b")
+
+
+def _anti_analysis_with_capa(
+    answer: dict[str, Any], capa_rows: list[dict[str, Any]], starts: list[str]
+) -> dict[str, Any]:
+    """The anti-analysis answer, each match marked where a capa rule agrees.
+
+    A match agrees with capa when a capa rule of its ``anti-analysis``
+    namespaces matched in the same function: the nearest capa function start
+    at or before the match is the nearest one at or before a capa address. An
+    exact TEB/PEB read (``beside_capa``) is stated only with such a rule, or
+    one naming the PEB or TEB, in its function; without one it is counted.
+    """
+    if not isinstance(answer, dict) or ("stated" not in answer and "beside_capa" not in answer):
+        return answer
+    from bisect import bisect_right
+
+    points = sorted({int(str(s), 16) for s in starts if str(s).startswith("0x")})
+
+    def start_of(address: str) -> int | None:
+        try:
+            value = int(address, 16)
+        except ValueError:
+            return None
+        index = bisect_right(points, value) - 1
+        return points[index] if index >= 0 else None
+
+    by_start: dict[int, list[dict[str, str]]] = {}
+    peb_by_start: dict[int, list[dict[str, str]]] = {}
+    for capa in capa_rows:
+        rule = str(capa.get("rule") or "")
+        anti = str(capa.get("namespace") or "").startswith("anti-analysis")
+        peb = anti or bool(_PEB_RULE.search(rule))
+        if not peb:
+            continue
+        for address in capa.get("addresses") or []:
+            begin = start_of(str(address))
+            if begin is None:
+                continue
+            said = {"rule": rule, "at": str(address)}
+            if anti:
+                by_start.setdefault(begin, []).append(said)
+            peb_by_start.setdefault(begin, []).append(said)
+    marked = dict(answer)
+    rows = []
+    for row in answer.get("stated") or []:
+        row = dict(row)
+        begin = start_of(str(row.get("offset") or ""))
+        if begin is not None and begin in by_start:
+            row["capa"] = by_start[begin]
+        rows.append(row)
+    counted = 0
+    for row in marked.pop("beside_capa", None) or []:
+        begin = start_of(str(row.get("offset") or ""))
+        if begin is not None and begin in peb_by_start:
+            rows.append({**row, "capa": peb_by_start[begin]})
+        else:
+            counted += 1
+    marked["stated"] = rows
+    marked["not_stated"] = int(answer.get("not_stated") or 0) + counted
+    return marked
+
+
+def _place(place: dict[str, Any]) -> str:
+    """``0x3100 (in 0x3000)``, or ``file 0x40`` for a place with no image address."""
+    where = place.get("rva") or f"file {place.get('offset')}"
+    return f"{where}{_around(place)}"
+
+
+def _places(places: list[dict[str, Any]]) -> str:
+    head = _detail().list_head
+    shown = places if head is None else places[:head]
+    said = " ".join(_place(p) for p in shown)
+    if len(shown) < len(places):
+        said += f" (+{len(places) - len(shown)} more places)"
+    return said
+
+
+def _constant_item(row: dict[str, Any]) -> str:
+    """``AES forward substitution box [table] @ 0x3100``; a set capa names too, in one clause."""
+    name = f"{row.get('algorithm')} {row.get('what')}"
+    capa = [c for c in row.get("capa") or [] if isinstance(c, dict)]
+    if capa:
+        said = ", ".join(f"{c.get('at')} ({c.get('rule')})" for c in capa)
+        return f"{name}: agrees with capa at {said}"
+    items: list[str] = []
+    for table in row.get("tables") or []:
+        if not isinstance(table, dict):
+            continue
+        order = str(table.get("byte_order") or "")
+        form = f"table, {order}" if order and order != "little-endian" else "table"
+        items.append(f"{name} [{form}] @ {_places([table.get('place') or {}])}")
+    values = [v for v in row.get("values") or [] if isinstance(v, dict)]
+    if values and not items:
+        places = [p for v in values for p in v.get("places") or [] if isinstance(p, dict)]
+        said = ", ".join(str(v.get("value")) for v in values)
+        items.append(
+            f"{name} [{_n(row.get('matched'))} of {_n(row.get('of'))}: {said}] @ {_places(places)}"
+        )
+    return "; ".join(items)
+
+
+def _constant_sets(data: dict[str, Any], max_chars: int | None = None) -> str:
+    """The published constant sets the file holds, each where it stands; one ``no:`` without."""
+    rows = [r for r in (data.get("found") or []) if isinstance(r, dict)]
+    lone = [r for r in (data.get("lone") or []) if isinstance(r, dict)]
+    searched = _n(data.get("sets_searched"))
+    lone_said = f"; one value of {_n(len(lone))} more sets, often by chance (lone)" if lone else ""
+    agreeing = int(data.get("agreeing") or 0)
+    if not rows:
+        return f"no: none of the {searched} published constant sets stands in the file{lone_said}"
+    total = len(rows)
+    agree_said = (
+        f"; {_n(agreeing)} more agree with capa at their functions (in this entry)"
+        if agreeing
+        else ""
+    )
+    head = (
+        f"{_n(total + agreeing)} of {searched} published constant sets stand in the file"
+        f"{agree_said}{lone_said}"
+    )
+
+    def _line(shown: int) -> str:
+        said = (
+            ""
+            if shown >= total
+            else f" ({PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(total))})"
+        )
+        items = "; ".join(_constant_item(row) for row in rows[:shown])
+        return f"{head}{said}: {items}"
+
+    head_count = _detail().list_head
+    shown = total if head_count is None else min(total, head_count)
+    return _fit_some(_line, shown, max_chars)
+
+
+def _anti_analysis_item(group: tuple[tuple[str, str], list[dict[str, Any]]]) -> str:
+    """``category: what @ 0x1010 (in F) 0x2020 (in G)``: one exact match, every place."""
+    (category, what), rows = group
+    places = [
+        str(row.get("offset")) + (f" (in {row.get('function')})" if row.get("function") else "")
+        for row in rows
+    ]
+    head = _detail().list_head
+    shown = places if head is None else places[:head]
+    said = " ".join(shown)
+    if len(shown) < len(places):
+        said += f" (+{len(places) - len(shown)} more places)"
+    rules = list(
+        dict.fromkeys(
+            str(c.get("rule")) for row in rows for c in row.get("capa") or [] if isinstance(c, dict)
+        )
+    )
+    agrees = f" (agrees with capa: {', '.join(rules)})" if rules else ""
+    return f"{category}: {what} @ {said}{agrees}"
+
+
+def _anti_analysis(data: dict[str, Any], max_chars: int | None = None) -> str:
+    """The exact part of Ghidra's scan, each match once with its places; a ``no:`` without."""
+    rows = [r for r in (data.get("stated") or []) if isinstance(r, dict)]
+    # A TEB/PEB read no capa comparison has stated yet is counted.
+    not_stated = int(data.get("not_stated") or 0) + len(data.get("beside_capa") or [])
+    total = int(data.get("total_findings") or 0)
+    returned = int(data.get("returned") or total)
+    checks = f"Ghidra's scan ({SCAN_CHECKS_SHORT})"
+    rest = (
+        f"; {_n(not_stated)} more of its matches are not stated (an API call, which the capa and "
+        "catalogue lines read, or not the listed instruction or operand)"
+        if not_stated
+        else ""
+    )
+    cut = (
+        f"; Ghidra returned {_n(returned)} of its {_n(total)} matches, in its own order"
+        if returned < total
+        else ""
+    )
+    if not rows:
+        if not not_stated and not cut:
+            return f"no: {checks} matched nothing"
+        return f"no: nothing {checks} matched is stated as exact{rest}{cut}"
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault((str(row.get("category")), str(row.get("what"))), []).append(row)
+    groups = list(grouped.items())
+    also = int(data.get("also_stated") or 0)
+    also_said = (
+        f"; {_n(also)} more stated in this entry (matches at a function a capa rule names too)"
+        if also
+        else ""
+    )
+    head = (
+        f"{checks} matched, each as Ghidra's category: what @ offsets (in function)"
+        f"{also_said}{rest}{cut}"
+    )
+
+    def _line(shown: int) -> str:
+        said = (
+            ""
+            if shown >= len(groups)
+            else f" ({PASS_ROOM_SENTENCE.format(shown=_n(shown), total=_n(len(groups)))})"
+        )
+        items = "; ".join(_anti_analysis_item(group) for group in groups[:shown])
+        return f"{head}{said}: {items}"
+
+    head_count = _detail().list_head
+    shown = len(groups) if head_count is None else min(len(groups), head_count)
+    return _fit_some(_line, shown, max_chars)
+
+
+def _fit_some(line: Callable[[int], str], shown: int, max_chars: int | None) -> str:
+    """``line(shown)``, or with fewer items until it fits; ``""`` when not even one item fits.
+
+    A pass line with no item says nothing a reader can use, so it is left out
+    rather than printed as a head.
+    """
+    text = line(shown)
+    if max_chars is None or len(text) <= max_chars:
+        return text
+    low, high, best = 1, shown, 0
+    while low <= high:
+        middle = (low + high) // 2
+        if len(line(middle)) <= max_chars:
+            best, low = middle, middle + 1
+        else:
+            high = middle - 1
+    return line(best) if best else ""
+
+
 def _function_matches(data: dict[str, Any]) -> str:
     rows = [r for r in (data.get("matches") or []) if isinstance(r, dict)]
     families = sorted({str(r.get("family") or "") for r in rows if r.get("family")})
@@ -2380,6 +2955,8 @@ _GROUP_LABELS: dict[str, str] = {
     "floss": "decoded strings",
     "resolve_api_hashes": "resolved hashes",
     "decode_string_blobs": "decoded blobs",
+    crypto_constants.TOOL: "crypto constants",
+    ANTI_ANALYSIS_TOOL: "anti-analysis (Ghidra)",
 }
 
 _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
@@ -2410,6 +2987,8 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "floss": _decoded_strings,
     "resolve_api_hashes": _resolved_hashes,
     "decode_string_blobs": _decoded_blobs,
+    crypto_constants.TOOL: _constant_sets,
+    ANTI_ANALYSIS_TOOL: _anti_analysis,
 }
 
 # The lines that can say less and still say something, each given the room it
@@ -2420,4 +2999,6 @@ _SHORTER_RENDERERS: dict[str, Callable[[dict[str, Any], int], str]] = {
     "pcap_summary": lambda data, room: _pcap(data, max_chars=room),
     "resolve_api_hashes": lambda data, room: _resolved_hashes(data, max_chars=room),
     "decode_string_blobs": lambda data, room: _decoded_blobs(data, max_chars=room),
+    crypto_constants.TOOL: lambda data, room: _constant_sets(data, max_chars=room),
+    ANTI_ANALYSIS_TOOL: lambda data, room: _anti_analysis(data, max_chars=room),
 }
