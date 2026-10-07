@@ -487,20 +487,24 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
 NARRATIVE_PROSE = ("executive_summary", "key_findings")
 
 
-def published_answers(report: MalwareReport) -> Any:
+def published_answers(report: MalwareReport, *, rows: list[Any] | None = None) -> Any:
     """``(kind, value) -> the IOC table's answer`` for a value, ``""`` when no row holds it.
 
-    The table the report prints and ``/iocs`` serves
-    (``builder.build_consolidated_iocs``): what a recommendation is checked
-    against, so it acts on the indicators the run publishes.
+    The table the report's §9 prints and ``/iocs`` serves, by their one
+    reader (``builder.ioc_table``), or ``rows`` when the caller has already
+    read it: what a recommendation is checked against, so it acts on the
+    indicators the run publishes, and what a cell's state note says, so it
+    words an answer as §9 does. A table that cannot be read raises. The
+    composer (``composer._published_answers``) and the renderer's cell
+    states then refuse every value for that reason; the narrative round's
+    own call is not guarded, so the round ends and the report node writes
+    the fallback narrative.
     """
+    from maljan.reporting.builder import ioc_table
     from maljan.reporting.ledger_projection import value_key
 
-    rows = list(report.consolidated_iocs or [])
-    if not rows:
-        from maljan.reporting.builder import build_consolidated_iocs
-
-        rows = build_consolidated_iocs(report)
+    if rows is None:
+        rows = ioc_table(report, raise_unread=True)
     table: dict[tuple[str, str], str] = {}
     for row in rows:
         kind = str(row.kind or "")

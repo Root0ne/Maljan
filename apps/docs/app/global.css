@@ -287,3 +287,79 @@ figure.shiki {
   color: var(--mj-accent-fg);
   background: color-mix(in srgb, var(--mj-accent) 85%, var(--mj-fg));
 }
+
+/* The section strip: sticky under the mobile header, scrolling sideways on a
+ * narrow screen. It bleeds to the column's edges over the article's padding. */
+.mj-strip {
+  position: sticky;
+  top: var(--fd-docs-row-3, 0px);
+  z-index: 5;
+  height: 2.75rem;
+  margin: -1.5rem -1rem 0;
+  padding: 0 1rem;
+  background: color-mix(in srgb, var(--mj-bg) 92%, transparent);
+  border-bottom: 1px solid var(--mj-border);
+  backdrop-filter: blur(6px);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.mj-strip::-webkit-scrollbar {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .mj-strip {
+    margin: -2rem -1.5rem 0;
+    padding: 0 1.5rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  .mj-strip {
+    margin: -3.5rem -2rem 0;
+    padding: 0 2rem;
+  }
+}
+
+.mj-strip ul {
+  display: flex;
+  align-items: stretch;
+  gap: 1.25rem;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mj-strip li {
+  display: flex;
+}
+
+.mj-strip-link {
+  display: flex;
+  align-items: center;
+  border-bottom: 2px solid transparent;
+  color: var(--mj-fg-muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.mj-strip-link:hover {
+  color: var(--mj-fg);
+}
+
+.mj-strip-link[aria-current] {
+  border-bottom-color: var(--mj-accent);
+  color: var(--mj-accent);
+}
+
+.mj-strip-link:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Anchors land below the strip. */
+#nd-page [id] {
+  scroll-margin-top: calc(var(--fd-docs-row-3, 0px) + 4.5rem);
+}
