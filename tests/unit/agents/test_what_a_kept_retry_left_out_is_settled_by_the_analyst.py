@@ -215,3 +215,125 @@ def test_section_13_lists_each_item_with_its_state() -> None:
 
     assert "**Items a kept validation retry left out:**" in markdown
     assert markdown.count(f": {RETRY_DROP_WITHDRAWN} (the id was a guess).") == 4
+
+
+class TestTheExactClaimComesBack:
+    """A list split on commas gives claims one sentence; the one left out is the one put back."""
+
+    def test_keeping_a_dropped_t1140_brings_back_t1140(self) -> None:
+        reply = "\n".join(f"KEEP C{n}: the routine decodes it" for n in range(1, 10))
+        analyst = _Analyst("all_tools_static_r2", [RETRY, reply])
+        first = analyst._text_to_isr(FIRST, 0)
+
+        result = _check(analyst, FIRST)
+
+        ids = [c.technique_id for c in result.claims]
+        assert ids.count("T1140") == [c.technique_id for c in first.claims].count("T1140") == 9
+        assert ids.count("T1027") == 31
+        assert len(result.claims) == 41
+
+    def test_the_question_names_each_claim_s_own_technique(self) -> None:
+        analyst = _Analyst("static", [RETRY, "WITHDRAW C1, C2, C3, C4, C5, C6, C7, C8, C9: no"])
+
+        result = _check(analyst, FIRST)
+
+        _retry, question = analyst.questions
+        assert question.count("TECHNIQUE T1140 (it stated T1140") == 9
+        assert [c.technique_id for c in result.claims].count("T1140") == 0
+
+
+class TestTheAnswerForms:
+    def test_a_comma_list_and_a_because_and_a_dash_are_read(self) -> None:
+        text = "KEEP C1, C2 and F1: both decode it\nWITHDRAW C3 because it was a guess\nKEEP C4 - x"
+
+        assert read_retry_drop_answers(text, ["C1", "C2", "C3", "C4", "F1"]) == {
+            "C1": ("KEEP", "both decode it"),
+            "C2": ("KEEP", "both decode it"),
+            "F1": ("KEEP", "both decode it"),
+            "C3": ("WITHDRAW", "it was a guess"),
+            "C4": ("KEEP", "x"),
+        }
+
+
+def test_the_question_and_its_outcome_are_events() -> None:
+    sent: list[tuple[str, dict[str, Any]]] = []
+    analyst = _Analyst("all_tools_static_r2", [RETRY, TestTheStaticReplay.REPLY])
+    analyst._container = MagicMock(event_sink=lambda kind, data: sent.append((kind, data)))
+
+    _check(analyst, FIRST)
+
+    asked = [d for k, d in sent if k == "validation_feedback" and d["code"] == RETRY_DROPPED_CODE]
+    assert [d["state"] for d in asked] == ["retried", "resolved"]
+    assert "9 claim(s) and 0 finding(s)" in asked[0]["message"]
+
+
+class TestNothingUnmaskedInTheRecord:
+    def _secrets(self, monkeypatch: Any) -> tuple[str, str]:
+        from maljan.pipeline import events
+        from maljan.pipeline.events import remember_secret_values
+        from tests.credential_shapes import lowercase_body, password
+
+        monkeypatch.setattr(events, "_SECRET_SCOPES", {})
+        monkeypatch.setattr(events, "_SHORT_SECRETS", {})
+        monkeypatch.setattr(events, "_FAILED_SCOPES", set())
+        monkeypatch.setattr(events, "_CONFIGURED_PATTERN", None)
+        key = lowercase_body(8).upper() + lowercase_body(12)
+        remember_secret_values([key], scope="job")
+        return key, password(12)
+
+    def test_a_configured_value_and_url_userinfo_are_masked_everywhere(
+        self, monkeypatch: Any, caplog: Any
+    ) -> None:
+        import logging
+
+        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+        key, secret = self._secrets(monkeypatch)
+        url = f"http://admin:{secret}@evil.example.org/gate"
+        dropped = f'CLAIM: The sample sends the key "{key}" to "{url}".\n'
+        first = FIRST + dropped + "EVIDENCE: [ev_0001] strings\nCONFIDENCE: 0.7\nTECHNIQUE: NONE\n"
+        retry = RETRY + (
+            "CLAIM: The sample sends a key to its server.\nEVIDENCE: [ev_0001] strings\n"
+            "CONFIDENCE: 0.7\nTECHNIQUE: NONE\n"
+        )
+        analyst = _Analyst("network", [retry, "KEEP C10: it is in the capture"])
+        caplog.set_level(logging.DEBUG)
+
+        _check(analyst, first)
+        rows = analyst.drain_unparsed_answers()
+        metrics = validation_metrics(1, [], unparsed_answers=rows)
+        report = MalwareReport(
+            identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+            verdict="Malware",
+            run_summary={"validation": metrics},
+        )
+        from maljan.analysis.run_summary import RunSummaryBuilder
+
+        summary = RunSummaryBuilder(start_time=0.0).set_validation(metrics).build()
+        surfaces = {
+            "record": repr(metrics["retry_drops"]),
+            "run summary": repr(summary.to_dict()["validation"]) + summary.to_markdown(),
+            "section 13": MarkdownRenderer().render(report),
+            "log": caplog.text,
+            "question": analyst.questions[-1],
+        }
+        for name, text in surfaces.items():
+            for value in (key, key.lower(), secret, secret.lower()):
+                assert value not in text, (name, value)
+        row = next(r for r in metrics["retry_drops"] if "evil" in r["sentence"])
+        assert "evil[.]example[.]org" in row["sentence"]
+
+
+def test_a_url_is_masked_then_defanged_whole() -> None:
+    from maljan.pipeline.validation import retry_drop_row
+
+    text = 'The sample beacons to "https://relay.example.net/live/" every 60 s.'
+    row = retry_drop_row(
+        "network", 0, "claim", text, ("https://relay.example.net/live/",), RETRY_DROP_KEPT, ""
+    )
+
+    # The host whole and defanged; the path as the record's mask writes a URL.
+    assert '"The sample beacons to "hxxps://relay[.]example[.]net/' in row["sentence"]
+    assert "https://relay" not in row["sentence"]
+    assert "relay[…" not in row["sentence"]

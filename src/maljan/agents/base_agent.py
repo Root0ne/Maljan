@@ -7348,6 +7348,28 @@ class BaseAnalyst(BudgetMeter, ABC):
             len(drops.claims),
             len(drops.findings),
         )
+        from maljan.pipeline.events import (
+            VALIDATION_RESOLVED,
+            VALIDATION_RETRIED,
+            VALIDATION_SURVIVED,
+            emit_validation_feedback,
+        )
+
+        stage = str(getattr(self, "pipeline_stage", "") or "analysis")
+        said = (
+            f"The kept retry no longer states {len(drops.claims)} claim(s) and "
+            f"{len(drops.findings)} finding(s) of the first answer; each is named to the "
+            "analyst once, to keep or withdraw with a reason."
+        )
+        emit_validation_feedback(
+            self._event_sink(),
+            stage=stage,
+            agent=str(self.name),
+            code=RETRY_DROPPED_CODE,
+            message=said,
+            retry_index=1,
+            state=VALIDATION_RETRIED,
+        )
         decided: dict[str, tuple[str, str]] = {}
         try:
             from langchain_core.messages import AIMessage, HumanMessage
@@ -7371,6 +7393,19 @@ class BaseAnalyst(BudgetMeter, ABC):
                 self.name,
                 describe_exception_for_log(exc),
             )
+        emit_validation_feedback(
+            self._event_sink(),
+            stage=stage,
+            agent=str(self.name),
+            code=RETRY_DROPPED_CODE,
+            message=said,
+            retry_index=1,
+            state=(
+                VALIDATION_RESOLVED
+                if all(row[0] in decided for row in labelled)
+                else VALIDATION_SURVIVED
+            ),
+        )
         self.validation_retries += 1
         self.validation_fed_back[RETRY_DROPPED_CODE] = (
             self.validation_fed_back.get(RETRY_DROPPED_CODE, 0) + 1

@@ -7927,10 +7927,13 @@ RETRY_DROP_RECORD = "retry_drop"
 RETRY_DROP_KEPT = "kept when asked"
 RETRY_DROP_WITHDRAWN = "withdrawn when asked"
 RETRY_DROP_NOT_ANSWERED = "not answered; kept as the first answer wrote it"
-# One answer line: ``KEEP C2: reason`` or ``WITHDRAW F1 - reason``, marks allowed.
+# One answer line: ``KEEP C2: reason``, ``WITHDRAW F1 - reason``,
+# ``KEEP C1, C2 and F1: reason`` or ``KEEP C3 because reason``, marks allowed.
+_RETRY_DROP_LABEL = r"[CF]\d+"
 _RETRY_DROP_ANSWER_RE = re.compile(
-    r"^[\s>*_`-]*(?P<decision>keep|withdraw)[\s*_`]+(?P<label>[CF]\d+)[\s*_`]*"
-    r"(?:[:\-–—.)]\s*(?P<reason>.*))?$",
+    r"^[\s>*_`-]*(?P<decision>keep|withdraw)[\s*_`]+"
+    rf"(?P<labels>{_RETRY_DROP_LABEL}(?:[\s*_`]*(?:,|&|\band\b)[\s*_`]*{_RETRY_DROP_LABEL})*)"
+    r"[\s*_`]*(?:(?:[:\-–—.)]|\bbecause\b)\s*(?P<reason>.*))?$",
     re.IGNORECASE,
 )
 
@@ -7975,24 +7978,23 @@ def retry_drops(
 ) -> RetryDrops:
     """What of ``first`` the kept ``retried`` answer states nowhere (:class:`RetryDrops`).
 
+    Each claim is the first answer's own claim object, its sentence, its
+    technique id and its block with it: a list split on commas gives several
+    claims one sentence, and the one the retry left out is the one put back.
     ``set_aside`` are claims of ``first`` the retry was asked to fold away (the
     library-only claims, when that question was asked): leaving them out is
     the answer to it.
     """
-    from maljan.pipeline.claim_drops import dropped_values
+    from maljan.pipeline.claim_drops import dropped_claims
 
     asked = {str(value).strip().upper() for value in asked_about if str(value).strip()}
-    by_text: dict[str, Any] = {}
-    for claim in getattr(first, "claims", None) or []:
-        by_text.setdefault(str(getattr(claim, "claim", "") or ""), claim)
     claims: list[tuple[Any, tuple[str, ...]]] = []
-    for dropped in dropped_values(first, retried, answer):
-        missing = tuple(value for value in dropped.missing if value.upper() not in asked)
-        claim = by_text.get(dropped.claim)
+    for claim, missing in dropped_claims(first, retried, answer):
         if any(claim is other for other in set_aside):
             continue
-        if missing and claim is not None and all(claim is not c for c, _m in claims):
-            claims.append((claim, missing))
+        kept_values = tuple(value for value in missing if value.upper() not in asked)
+        if kept_values:
+            claims.append((claim, kept_values))
     titles = {
         _folded_title(getattr(f, "title", "")) for f in getattr(retried, "findings", None) or []
     }
@@ -8009,8 +8011,11 @@ def retry_drop_question(drops: RetryDrops) -> str:
     lines = []
     for label, kind, item, missing in drops.labelled():
         if kind == "claim":
-            values = f" (it stated {', '.join(missing)}, which your retry states nowhere)"
-            lines.append(f"{label}. CLAIM: {safe_finding_value(item.claim)}{values}")
+            stated = safe_finding_value(", ".join(missing))
+            technique = str(getattr(item, "technique_id", "") or "")
+            on_line = f", TECHNIQUE {safe_finding_value(technique)}" if technique else ""
+            values = f" (it stated {stated}, which your retry states nowhere)"
+            lines.append(f"{label}. CLAIM: {safe_finding_value(item.claim)}{on_line}{values}")
         else:
             detail = str(getattr(item, "detail", "") or "").strip()
             said = f": {detail}" if detail else ""
@@ -8033,10 +8038,11 @@ def read_retry_drop_answers(text: str, labels: Iterable[str]) -> dict[str, tuple
         match = _RETRY_DROP_ANSWER_RE.match(line.strip())
         if match is None:
             continue
-        label = match.group("label").upper()
-        if label in wanted and label not in decided:
-            reason = (match.group("reason") or "").strip().strip("*_`").strip()
-            decided[label] = (match.group("decision").upper(), reason)
+        reason = (match.group("reason") or "").strip().strip("*_`").strip()
+        for label in re.findall(_RETRY_DROP_LABEL, match.group("labels"), re.IGNORECASE):
+            label = label.upper()
+            if label in wanted and label not in decided:
+                decided[label] = (match.group("decision").upper(), reason)
     return decided
 
 
@@ -8050,25 +8056,29 @@ def retry_drop_row(
     reason: str,
 ) -> dict[str, str]:
     """One item a kept retry left out, as the run record keeps it, with its sentence."""
-    values = f", stating {', '.join(missing)}," if missing else ""
-    why = f" ({reason})" if reason else ""
+    # Masked first, as model text in the record is, then the sentence a
+    # reader sees defanged: a mask run over a defanged URL rewrites it.
+    from maljan.reporting.renderers.markdown import _defanged_text
+
+    item = safe_answer_text(text)
+    stated = safe_answer_text(", ".join(missing))
+    said = safe_answer_text(reason)
+    values = f", stating {stated}," if stated else ""
+    why = f" ({said})" if said else ""
     sentence = (
         f"The {agent} analyst's kept validation retry left out the {kind} "
-        f'"{text}"{values} of its first answer: {state}{why}.'
+        f'"{item}"{values} of its first answer: {state}{why}.'
     )
-    from maljan.pipeline.claim_drops import defanged
-
     return {
         "record": RETRY_DROP_RECORD,
         "agent": str(agent),
         "round": str(int(revision_round or 0)),
         "kind": str(kind),
-        # Whole, masked as model text in the record is: the record keeps it.
-        "item": safe_answer_text(text),
-        "missing": ", ".join(missing),
+        "item": item,
+        "missing": stated,
         "state": state,
-        "reason": safe_answer_text(reason),
-        "sentence": safe_answer_text(defanged(sentence)),
+        "reason": said,
+        "sentence": _defanged_text(sentence),
     }
 
 
