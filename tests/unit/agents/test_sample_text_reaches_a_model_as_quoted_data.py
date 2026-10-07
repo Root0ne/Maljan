@@ -321,3 +321,23 @@ def test_every_lookalike_angle_has_a_backslash_wherever_it_stands() -> None:
     for room in (500, 5_000, 20_000):
         kept = cut_length(text, room)
         assert kept + escapes(text[:kept]) + fence_lines_room() <= room
+
+
+def test_the_lookalike_set_is_the_one_the_unicode_database_gives() -> None:
+    import sys
+    import unicodedata
+
+    from maljan.agents.tool_fence import LOOKALIKE_ANGLES, LOOKALIKE_NAMES
+
+    named = re.compile(LOOKALIKE_NAMES)
+    built = {
+        chr(code)
+        for code in range(sys.maxunicode + 1)
+        if named.search(unicodedata.name(chr(code), "") or "\0")
+        or code == 0x1438
+        or unicodedata.normalize("NFKC", chr(code)) == "<"
+    } - {"<"}
+    assert set(LOOKALIKE_ANGLES) == built
+    assert len(LOOKALIKE_ANGLES) == len(built)
+    for ch in "≪⋘⪡⟪❰⧼˱⋖⮜":
+        assert ch in built

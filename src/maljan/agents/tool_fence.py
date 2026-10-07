@@ -65,13 +65,26 @@ _BREAK = re.compile("\r\n|[\n\r\x0b\x0c\x1c\x1d\x1e\x85  ]")
 _JSON_CR = re.compile("\r\n?")
 # The breaks valid JSON never holds raw between values, written as escapes.
 _JSON_ESCAPES = {ord(c): f"\\u{ord(c):04x}" for c in "\x0b\x0c\x1c\x1d\x1e\x85  "}
-# The characters that read as ``<`` without being it: the ones NFKC folds to
-# ``<`` (U+FE64, U+FF1C), the angle quotes and angle brackets, and the
-# syllabic and arrowhead lookalikes.
-LOOKALIKE_ANGLES = "\ufe64\uff1c\u2039\u00ab\u2329\u3008\u300a\u27e8\u276e\u276c\u1438\u02c2"
+# The characters that read as ``<`` without being it, generated from the
+# Unicode database (``unicodedata``) and held here so nothing is computed at
+# import: every character whose name matches ``LOOKALIKE_NAMES``, the
+# syllabic U+1438, and every character NFKC folds to ``<``; ``<`` itself is
+# escaped by the run rule. A test rebuilds the set and compares.
+LOOKALIKE_NAMES = r"LESS-THAN|LEFT-POINTING (DOUBLE |CURVED )?ANGLE|LEFT (DOUBLE |CURVED |WHITE |BLACK )?ANGLE|LEFT ARROWHEAD|LEFTWARDS (EQUILATERAL )?ARROWHEAD|MUCH LESS"
+LOOKALIKE_ANGLES = (
+    "\u00ab\u02c2\u02f1\u031a\u0349\u0354\u08f7\u08f9\u1438\u1dfe\u2039\u2264\u2266\u2268"
+    "\u226a\u226e\u2270\u2272\u2274\u2276\u2277\u2278\u2279\u22d6\u22d8\u22da\u22db\u22dc"
+    "\u22e6\u2329\u2343\u276c\u276e\u2770\u27e8\u27ea\u2976\u2977\u2991\u2993\u2996\u29c0"
+    "\u29fc\u2a79\u2a7b\u2a7d\u2a7f\u2a81\u2a83\u2a85\u2a87\u2a89\u2a8b\u2a8c\u2a8d\u2a8f"
+    "\u2a90\u2a91\u2a92\u2a93\u2a94\u2a95\u2a97\u2a99\u2a9b\u2a9d\u2a9f\u2aa1\u2aa3\u2aa4"
+    "\u2aa5\u2aa6\u2aa8\u2af7\u2af9\u2b98\u2b9c\u3008\u300a\ufe3d\ufe3f\ufe64\uff1c"
+    "\U000e003c"
+)
 # What is shown with a backslash before it: each ``<`` beside another ``<``,
 # and each lookalike not already behind one.
-_ANGLE_RUN = re.compile(r"<(?=<)|(?<=<)<|(?<!\\)[" + LOOKALIKE_ANGLES + "]")
+_ANGLE_RUN = re.compile(
+    r"<(?=<)|(?<=<)<|(?<!\\)[" + "".join(map(re.escape, LOOKALIKE_ANGLES)) + "]"
+)
 
 
 def needs_fence(text: str) -> bool:
@@ -127,6 +140,22 @@ def fenced(entry_id: str, text: str) -> str:
     )
 
 
+def fenced_text(entry_id: str, text: str) -> str:
+    """``text`` fenced whatever it is, for a prompt that says its text arrives fenced.
+
+    A JSON document is first written as :func:`json_view` writes it, then
+    fenced as any text is; every other text is fenced as :func:`fenced`
+    fences it.
+    """
+    text = str(text or "")
+    content = escaped(text if needs_fence(text) else json_view(text))
+    digest = digest_of(content)
+    return (
+        f"{FENCE_OPEN.format(entry=entry_id, digest=digest)}\n{content}\n"
+        f"{FENCE_CLOSE.format(entry=entry_id, digest=digest)}"
+    )
+
+
 def excerpt_view(text: str) -> str:
     """An excerpt of an answer shown inside a line of the platform's: one quoted value.
 
@@ -139,12 +168,15 @@ def excerpt_view(text: str) -> str:
     return f'"{pack_escaped(str(text or ""))}"'
 
 
-def fence_lines_room() -> int:
-    """The characters the two fence lines and their line breaks take, at the widest id."""
+def fence_lines_room(entry_id: str = WIDEST_ID) -> int:
+    """The characters the two fence lines and their line breaks take, for ``entry_id``.
+
+    The widest ledger id by default.
+    """
     digest = "0" * DIGEST_WIDTH
     return (
-        len(FENCE_OPEN.format(entry=WIDEST_ID, digest=digest))
-        + len(FENCE_CLOSE.format(entry=WIDEST_ID, digest=digest))
+        len(FENCE_OPEN.format(entry=entry_id, digest=digest))
+        + len(FENCE_CLOSE.format(entry=entry_id, digest=digest))
         + 2
     )
 

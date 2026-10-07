@@ -158,17 +158,25 @@ class FunctionSummarizer:
         """
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        from maljan.agents.tool_fence import fence_lines_room, fenced
+        from maljan.agents.tool_fence import fence_lines_room, fenced_text, json_view, needs_fence
 
         # The text is a tool's answer, shown through the one view of one
-        # (``agents.tool_fence``): fenced, its escapes counted in its room; a
+        # (``agents.tool_fence``) and fenced whatever it is, as the system
+        # text says: a JSON chunk written as ``json_view`` writes it first, so
+        # its growth is in the length fitted, and the escapes and the fence
+        # lines, for the id this fence carries, are counted in its room; a
         # note saying it was shortened stands outside the fence.
+        source = (
+            code_chunk
+            if needs_fence(code_chunk) or not code_chunk.strip()
+            else json_view(code_chunk)
+        )
         note, shown = self._fitted_parts(
-            code_chunk,
-            _SUMMARIZE_SYSTEM + _SUMMARIZE_HUMAN_TMPL + "x" * fence_lines_room(),
+            source,
+            _SUMMARIZE_SYSTEM + _SUMMARIZE_HUMAN_TMPL + "x" * fence_lines_room(SUMMARY_FENCE_ID),
             escaped=True,
         )
-        body = fenced(SUMMARY_FENCE_ID, shown)
+        body = fenced_text(SUMMARY_FENCE_ID, shown)
         prompt = _SUMMARIZE_HUMAN_TMPL.format(
             max_words=self._max_words,
             code_chunk=f"{note}\n{body}" if note else body,
