@@ -15,7 +15,15 @@ import time
 from types import SimpleNamespace
 
 from maljan.agents.function_map import function_artefacts
-from maljan.pipeline.function_claims import check_function_claims, function_facts, listed_functions
+from maljan.pipeline.events import _catalogue_names
+from maljan.pipeline.function_claims import (
+    _catalogue_lower,
+    _clause_starts,
+    check_function_claims,
+    function_facts,
+    listed_functions,
+    named_values,
+)
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import ClaimEvidence
 
@@ -157,3 +165,40 @@ class TestTheCheckGrowsWithClaimsAndGraphTogether:
         high = _grown(1_000)
         print("claims over a graph, 100 over 2,000 and 1,000 over 20,000:", low, high)
         assert high < low * 20
+
+
+class TestASentenceIsReadInWindows:
+    def test_a_text_of_dots_finds_its_sentences_in_well_under_a_second(self) -> None:
+        for unit in ("x. ", "e.g. ", "a."):
+            text = (unit * (200_000 // len(unit) + 1))[:200_000]
+            began = time.perf_counter()
+            _clause_starts(text)
+            seconds = time.perf_counter() - began
+            print("sentences of 200 KB of", repr(unit), round(seconds, 3))
+            assert seconds < 1.0
+
+    def test_an_abbreviation_still_ends_no_sentence_and_a_long_word_still_does(self) -> None:
+        assert _clause_starts("it reads e.g. the key") == [0]
+        assert _clause_starts("it reads xapprox. Then it") == [0, 17]
+
+    def test_four_thousand_distinct_names_in_one_sentence_are_read_in_well_under_a_second(
+        self,
+    ) -> None:
+        names = sorted(n for n in _catalogue_names() if any(ch.isupper() for ch in n[1:]))
+        text = " ".join(names[:4_000])
+        assert len(text) > 60_000
+        known = _catalogue_lower()
+        began = time.perf_counter()
+        apis, _strings = named_values(text, known)
+        seconds = time.perf_counter() - began
+        print("4,000 names in one sentence:", round(seconds, 3))
+        assert len(apis) > 3_000
+        assert seconds < 1.0
+
+    def test_a_statement_of_absence_is_still_read_around_a_name_in_a_long_sentence(
+        self,
+    ) -> None:
+        filler = " ".join(f"step{k}" for k in range(5_000))
+        text = f"{filler} and it does not use CreateRemoteThread, {filler} it calls CreateMutexW"
+        apis, _strings = named_values(text, _catalogue_lower())
+        assert apis == ["CreateMutexW"]

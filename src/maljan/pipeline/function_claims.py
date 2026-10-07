@@ -57,7 +57,7 @@ from __future__ import annotations
 
 import re
 from collections import deque
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -69,6 +69,7 @@ from maljan.pipeline.validation import (
     _GENERIC_FUNCTION_NAME,
     _HEX_ADDRESS,
     _NAME_ARGUMENTS,
+    _NEGATION_WINDOW,
     _QUOTED_SPAN_RE,
     _SUFFIXED_ADDRESS,
     FUNCTION_CLAIM_UNHELD,
@@ -539,7 +540,7 @@ def function_facts(
 # ---------------------------------------------------------------------------
 
 
-def _named_alone(spans: Sequence[str], token: str) -> bool:
+def _named_alone(spans: Collection[str], token: str) -> bool:
     """Whether a code span holds ``token`` alone, or called with nothing in its parentheses:
     a span that is an expression (``(rand%9)``) writes pseudo-code, not a name."""
     return token in spans or f"{token}()" in spans
@@ -551,41 +552,68 @@ def _named_alone(spans: Sequence[str], token: str) -> bool:
 # ``etc.``); a semicolon, a colon or a dash keeps its sentence's subject.
 _CLAUSE_END = re.compile(r"[.!?](?=\s|$)|\n")
 _ABBREVIATIONS = frozenset({"e.g", "i.e", "etc", "cf", "vs", "viz", "approx", "resp"})
+# The farthest back a dot's word is read: the longest abbreviation. A longer run
+# of letters and dots before a dot is no abbreviation.
+_ABBREVIATION_REACH = max(len(word) for word in _ABBREVIATIONS)
+_WORD_OR_DOT = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.")
+
+
+def _abbreviation_before(text: str, dot: int) -> bool:
+    """Whether the run of letters and dots right before ``text[dot]`` is an abbreviation.
+
+    Walked back from the dot over at most ``_ABBREVIATION_REACH`` characters,
+    so a text of dots costs each dot that many steps, not its whole prefix.
+    """
+    begin = dot
+    floor = max(dot - _ABBREVIATION_REACH, 0)
+    while begin > floor and text[begin - 1] in _WORD_OR_DOT:
+        begin -= 1
+    if begin == floor and begin > 0 and text[begin - 1] in _WORD_OR_DOT:
+        return False
+    return text[begin:dot].lower().strip(".") in _ABBREVIATIONS
 
 
 def _clause_starts(text: str) -> list[int]:
     """Where each sentence of ``text`` begins, in order (``_CLAUSE_END``)."""
     starts = [0]
     for match in _CLAUSE_END.finditer(text):
-        if match.group(0) == ".":
-            word = re.search(r"([A-Za-z.]+)$", text[: match.start()])
-            if word is not None and word.group(1).lower().strip(".") in _ABBREVIATIONS:
-                continue
+        if match.group(0) == "." and _abbreviation_before(text, match.start()):
+            continue
         starts.append(match.end())
     return starts
 
 
-def _sentence_of(text: str, starts: Sequence[int], at: int) -> tuple[str, int]:
-    """``(the sentence of text holding at, where it begins)``."""
+def _negation_window(text: str, starts: Sequence[int], begin: int, end: int) -> tuple[str, int]:
+    """``(the text a statement of absence over text[begin:end] is read in, where it begins)``.
+
+    The value's own sentence, cut to ``_NEGATION_WINDOW`` characters before
+    the value (as far back as ``_is_negated`` reads a cue) and as many after
+    it (the absence predicate its helpers read after a value, "functionality
+    remains not established" at its longest, fits in them), so each value
+    costs a window, not its whole sentence.
+    """
     from bisect import bisect_right
 
-    k = bisect_right(starts, at) - 1
-    end = starts[k + 1] if k + 1 < len(starts) else len(text)
-    return text[starts[k] : end], starts[k]
+    k = bisect_right(starts, begin) - 1
+    stop = starts[k + 1] if k + 1 < len(starts) else len(text)
+    low = max(starts[k], begin - _NEGATION_WINDOW)
+    high = min(stop, end + _NEGATION_WINDOW)
+    return text[low:high], low
 
 
 def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, int, bool]]:
     """``(value, where, is an API name)`` of every name and string a sentence claims.
 
     Each name is read once, at its first place: whether a statement of absence
-    holds it is asked there, within the sentence that holds it.
+    holds it is asked there, within a window of the sentence that holds it
+    (``_negation_window``).
     """
-    spans = [m.group(0).strip("`").strip() for m in _CODE_SPAN_RE.finditer(text)]
+    spans = {m.group(0).strip("`").strip() for m in _CODE_SPAN_RE.finditer(text)}
     starts = _clause_starts(text)
 
     def negated(begin: int, end: int) -> bool:
-        sentence, offset = _sentence_of(text, starts, begin)
-        return _is_negated(sentence, begin - offset, end - offset)
+        window, offset = _negation_window(text, starts, begin, end)
+        return _is_negated(window, begin - offset, end - offset)
 
     found: list[tuple[str, int, bool]] = []
     seen: set[str] = set()
