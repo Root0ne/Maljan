@@ -1437,6 +1437,16 @@ def index_image(
         for start, function in sorted(graph.functions.items())
         if start not in rows.cells and function.callees
     }
+    # The exception directory's ranges, by the function each belongs to (a
+    # chained fragment under its owner), end exclusive: where a place inside a
+    # function is that function (``analysis.evidence_roots``).
+    ranges: dict[str, list[list[str]]] = {}
+    for begin, end, owner in zip(
+        image.function_starts, image.function_ends, image.function_owners, strict=False
+    ):
+        start = owner if owner is not None else begin
+        ranges.setdefault(hex(base + start), []).append([hex(base + begin), hex(base + end)])
+    data["function_ranges"] = ranges
     data["function_lists"] = function_lists
     data["absent"] = dict(absent or {})
     if addresses:

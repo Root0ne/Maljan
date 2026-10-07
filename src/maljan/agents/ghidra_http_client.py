@@ -433,6 +433,7 @@ class GhidraHTTPClient:
         and then the character cut, byte for byte as before.
         """
         from maljan.agents.output_shortening import shorten_json_document, shorten_target
+        from maljan.agents.tool_fence import cut_fence_room, fence_room
         from maljan.core.truncation_ledger import record_guardrail_outcome
         from maljan.llm.context_window import note_answer_not_shown, output_limit
 
@@ -452,7 +453,10 @@ class GhidraHTTPClient:
             )
             return said
 
-        if chars_in <= limit:
+        # A text answer is shown fenced (``agents.tool_fence``): the answer and
+        # its fence together are what has to fit.
+        fence = fence_room(output)
+        if chars_in + fence <= limit:
             record_guardrail_outcome(
                 self._truncation_ledger,
                 chars_in=chars_in,
@@ -497,7 +501,7 @@ class GhidraHTTPClient:
             except Exception as exc:
                 logger.warning("Output guardrail failed: %s - falling back to truncation.", exc)
             else:
-                self._charge_overage(len(summarised), limit)
+                self._charge_overage(len(summarised) + fence_room(summarised), limit)
                 record_guardrail_outcome(
                     self._truncation_ledger,
                     chars_in=chars_in,
@@ -508,8 +512,8 @@ class GhidraHTTPClient:
                 )
                 return summarised
 
-        result = output[: truncation_target(limit)] + TRUNCATION_MARKER
-        self._charge_overage(len(result), limit)
+        result = output[: truncation_target(limit - cut_fence_room(output))] + TRUNCATION_MARKER
+        self._charge_overage(len(result) + fence_room(result), limit)
         record_guardrail_outcome(
             self._truncation_ledger,
             chars_in=chars_in,

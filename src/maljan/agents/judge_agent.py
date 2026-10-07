@@ -65,6 +65,7 @@ from maljan.agents.judge_postprocess import (
     PROPERTY_NOT_CARRIED_CODE,
 )
 from maljan.agents.prompt_fragments import tools_statement
+from maljan.agents.tool_fence import FENCE_STATEMENT, escaped, fence_lines_room, fenced, needs_fence
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop, call_deadline_of
@@ -1042,6 +1043,8 @@ def technique_question_text(
         lines.extend(f"   {line}" for line in card)
     if cited:
         lines += ["", "EVIDENCE CITED"]
+        if any(needs_fence(e.text) for e in (shown.get(i) for i in cited) if e is not None):
+            lines.append(FENCE_STATEMENT)
         if notice:
             lines.append(notice)
         for entry_id in cited:
@@ -1060,7 +1063,7 @@ def technique_question_text(
             heading = f"[{entry_id}]" + (f" ({entry.tool})" if entry.tool else "")
             if marks:
                 heading += " — " + "; ".join(marks)
-            lines.append(f"{heading}\n{entry.text}")
+            lines.append(f"{heading}\n{fenced(entry_id, entry.text)}")
     return "\n".join(lines) + "\n\n" + TECHNIQUE_ANSWER_FORM
 
 
@@ -3229,8 +3232,16 @@ class JudgeAgent(BudgetMeter):
         fitted_reports, reports_notice = fit_prompt_parts(report_parts, report_room)
         head = lead + technique_question_head(join_prompt_parts(fitted_reports), decided, carried)
         evidence_room = None if room is None else max(0, room - (len(head) - len(empty_head)))
+        # A text answer is shown fenced (``agents.tool_fence``): its lines are
+        # escaped before it is fitted, and the fence lines and the one sentence
+        # saying what a fence is are kept back from the room, for every entry
+        # with text, since a JSON answer cut to fit is text too.
+        if evidence_room is not None:
+            fences = sum(1 for e in entries.values() if e.text) * fence_lines_room()
+            evidence_room = max(0, evidence_room - fences - len(FENCE_STATEMENT) - 1)
         texts, evidence_notice = _fit_evidence(
-            {i: e.text for i, e in entries.items()}, evidence_room
+            {i: escaped(e.text) if needs_fence(e.text) else e.text for i, e in entries.items()},
+            evidence_room,
         )
         # One notice for both, said in the question and recorded on the answer.
         notice = " ".join(n for n in (reports_notice, evidence_notice) if n)

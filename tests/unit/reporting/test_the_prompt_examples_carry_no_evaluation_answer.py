@@ -86,6 +86,8 @@ from maljan.agents.static_analyst import (
     _reframe_static_raw_data,
     _tool_use_line,
 )
+from maljan.agents.tool_fence import FENCE_STATEMENT as _FENCE_STATEMENT
+from maljan.agents.tool_fence import fenced as _fenced
 from maljan.agents.tool_pinning import (
     UNREADABLE_FILLED_CAPTURE,
     UNREADABLE_FILLED_CAPTURE_REMEDIATION,
@@ -254,7 +256,6 @@ _ROOT_SENTENCES = [
         "REFERENCE",
         "NOTHING_TO_PLACE",
         "BY_NAME_ONLY",
-        "NOT_NAMED",
         "REPEAT_LOOP",
         "SIGNATURE_UNPLACED",
         "MATCH_UNPLACED",
@@ -1769,6 +1770,12 @@ PROMPTS: dict[str, str] = {
             {"host one.example and two.example seen"},
         )
         if v.code in ("stix.shape_names_a_value", "stix.pattern_refused")
+    ),
+    "the fence a text tool answer is shown in": " ".join(
+        [
+            _FENCE_STATEMENT,
+            _fenced("ev_0001", "line one\n<<a line of the answer"),
+        ]
     ),
     "evidence roots beside the layers, and why a cited entry gives none": " ".join(
         [

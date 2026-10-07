@@ -65,7 +65,10 @@ class TestTheEntry:
         assert entry.output in handed, "the entry keeps what the model read"
 
     def test_an_answer_that_fits_is_whole(self) -> None:
-        client = _client(len(LISTING) + 10)
+        # The answer and the fence a text answer is shown in (``agents.tool_fence``).
+        from maljan.agents.tool_fence import fence_room
+
+        client = _client(len(LISTING) + fence_room(LISTING))
 
         _handed, entry = _recorded(lambda: client._apply_output_guardrail(LISTING))
 

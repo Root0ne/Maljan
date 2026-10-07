@@ -16,6 +16,7 @@ from maljan.analysis.evidence_roots import (
     IMPORT_TABLE,
     NO_CITATION,
     WHOLE_FILE,
+    RootCount,
     layers_and_roots,
     roots_phrase,
     run_roots,
@@ -168,10 +169,21 @@ class TestAStatementsRoots:
         imports, _ = roots.of_statement("it imports VirtualAlloc", ["ev_0002"])
         assert imports == [IMPORT_TABLE]
 
-    def test_naming_none_of_them_gives_no_root_and_says_so(self) -> None:
+    def test_naming_none_of_them_leaves_the_whole_set_standing(self) -> None:
         named, unread = run_roots(_ledger()).of_statement("it decodes strings", ["ev_0003"])
-        assert named == []
-        assert unread == ["ev_0003: no: the statement names none of the 2 places ev_0003 holds"]
+        assert named == ["0x5010 in .data", "0x5080 in .data"]
+        assert unread == []
+
+    def test_a_passing_mention_of_a_table_narrows_nothing(self) -> None:
+        roots = run_roots(_ledger())
+        whole = roots.of_entry("ev_0002").roots
+        for said in (
+            "the imports and the export table look ordinary",
+            "the header says it is a DLL",
+            "a resource or an overlay is absent",
+        ):
+            assert roots.of_statement(said, ["ev_0002"]) == (whole, [])
+        assert roots.of_statement("exports `run`", ["ev_0002"])[0] == [EXPORT_TABLE]
 
     def test_a_statement_citing_nothing_says_so(self) -> None:
         assert run_roots(_ledger()).of_statement("no citation", []) == ([], [NO_CITATION])
@@ -348,3 +360,81 @@ class TestTheJudgeQuestion:
     def test_without_the_ledger_no_line_is_added(self) -> None:
         questions, _ = judge_questions({"objects": []}, _isrs())
         assert questions[0].roots == ""
+
+
+class TestAFunctionHoldsTheAddressesInsideIt:
+    """A place inside a function whose range a reader states is that function."""
+
+    @staticmethod
+    def _ledger(*extra: LedgerEntry) -> list[LedgerEntry]:
+        index = {
+            "image_base": hex(BASE),
+            "rows": [],
+            "function_ranges": {
+                hex(BASE + 0x1100): [[hex(BASE + 0x1100), hex(BASE + 0x1400)]],
+                hex(BASE + 0x2000): [[hex(BASE + 0x2000), hex(BASE + 0x2200)]],
+            },
+        }
+        return [
+            _entry("ev_0001", "pe_info", {"sections": SECTIONS}),
+            _entry("ev_0002", "function_index", index),
+            *extra,
+        ]
+
+    def test_a_capa_match_inside_f_and_a_decompile_of_f_are_one_root(self) -> None:
+        led = self._ledger(
+            _entry(
+                "ev_0003",
+                "capa",
+                {"capabilities": [{"rule": "r", "attck": ["T1027"], "addresses": ["0x1300"]}]},
+            ),
+            _entry("ev_0004", "decompile_function", args={"address": hex(BASE + 0x1100)}),
+        )
+        roots = run_roots(led)
+        counted = RootCount()
+        counted.add(*roots.of_statement("the routine at 0x1300", ["ev_0003"]))
+        counted.add(*roots.of_statement("decompiled", ["ev_0004"]))
+        assert counted.roots == ["function 0x1100 in .text"]
+
+    def test_two_matches_in_two_functions_are_two_roots(self) -> None:
+        led = self._ledger(
+            _entry(
+                "ev_0003",
+                "capa",
+                {
+                    "capabilities": [
+                        {"rule": "r", "attck": ["T1027"], "addresses": ["0x1300", "0x2100"]}
+                    ]
+                },
+            ),
+        )
+        assert run_roots(led).of_entry("ev_0003").roots == [
+            "function 0x1100 in .text",
+            "function 0x2000 in .text",
+        ]
+
+    def test_two_addresses_with_no_stated_range_stay_two(self) -> None:
+        led = [
+            _entry("ev_0001", "pe_info", {"sections": SECTIONS}),
+            _entry(
+                "ev_0002",
+                "capa",
+                {"capabilities": [{"rule": "r", "addresses": ["0x1300", "0x1310"]}]},
+            ),
+        ]
+        assert run_roots(led).of_entry("ev_0002").roots == ["0x1300 in .text", "0x1310 in .text"]
+
+    def test_a_disassembler_s_stated_size_is_a_range(self) -> None:
+        listing = "; CALL XREF\n357: fcn.180001100 (int64_t arg1);\n"
+        led = [
+            _entry("ev_0001", "pe_info", {"sections": SECTIONS}),
+            _entry("ev_0002", "hashes", {"image_base": hex(BASE)}),
+            _entry(
+                "ev_0003",
+                "disassemble_function",
+                args={"address": hex(BASE + 0x1100)},
+                output=listing,
+            ),
+            _entry("ev_0004", "read_memory", args={"address": hex(BASE + 0x1200)}),
+        ]
+        assert run_roots(led).of_entry("ev_0004").roots == ["function 0x1100 in .text"]

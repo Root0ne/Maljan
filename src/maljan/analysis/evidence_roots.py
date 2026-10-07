@@ -35,7 +35,7 @@ A statement's roots are those of the entries it cites. An entry holding one
 root gives it. An entry holding several gives the ones the statement names:
 by an address it writes, by a quoted value equal to a row's text, or by a
 name a row carries (an import, an export, a section, a resolved Windows
-name). One that names none of them gives no root, and says so.
+name). One that names none of them gives the entry's whole set of roots.
 
 Every pass is linear in the entries and their rows: roots are kept in dicts
 keyed by address, value and name, never compared pairwise, and the whole
@@ -66,7 +66,6 @@ FAILED = "no: the call failed, so it read nothing"
 REFERENCE = "no: {tool} is a reference lookup and reads nothing of the sample"
 NOTHING_TO_PLACE = "no: {tool}'s answer carries no offset, address, section, event or flow to place"
 BY_NAME_ONLY = "no: the call names its function by name, not by address"
-NOT_NAMED = "no: the statement names none of the {count} places {entry} holds"
 REPEAT_LOOP = "no: {entry} repeats an entry that holds no answer"
 SIGNATURE_UNPLACED = "no: a sandbox signature names no process or event"
 MATCH_UNPLACED = "no: the match names no command line of a process the sandbox recorded"
@@ -104,24 +103,6 @@ _ADDRESS_ARGS = (
 _ADDRESS_LIST_ARGS = ("functions", "addresses")
 _NAME_ARGS = ("name", "function_name", "function", "symbol")
 
-# The words a statement uses for a table of the file, read as naming it.
-_TABLE_WORDS: dict[str, str] = {
-    "import": IMPORT_TABLE,
-    "imports": IMPORT_TABLE,
-    "imported": IMPORT_TABLE,
-    "iat": IMPORT_TABLE,
-    "export": EXPORT_TABLE,
-    "exports": EXPORT_TABLE,
-    "exported": EXPORT_TABLE,
-    "resource": RESOURCE_TABLE,
-    "resources": RESOURCE_TABLE,
-    "pdb": DEBUG_DIRECTORY,
-    "overlay": OVERLAY,
-    "header": PE_HEADER,
-    "timestamp": PE_HEADER,
-    "subsystem": PE_HEADER,
-    "machine": PE_HEADER,
-}
 
 _WORD = re.compile(r"[A-Za-z_.$?@][\w.$?@]*")
 _QUOTED = re.compile(r"`([^`\n]+)`|\"([^\"\n]+)\"|“([^”\n]+)”|'([^'\n]{2,})'")
@@ -133,6 +114,8 @@ _DNS_NAME_LINE = re.compile(r"^(?P<name>(?:[A-Za-z0-9_-]+\.)+[A-Za-z0-9_-]+)\.?$
 _HEX_TEXT = re.compile(r"\s*(?:0x)?([0-9a-fA-F]{1,16})\s*")
 # An image base sits on a 64 KiB boundary.
 _BASE_ALIGNMENT = 0x10000
+# A disassembler's function header: the function's size in bytes, then its name.
+_SIZE_HEADER = re.compile(r"^[^\w\n]*(\d+): [^\s(]+ \(", re.MULTILINE)
 
 
 def _hex(value: Any) -> int | None:
@@ -164,11 +147,36 @@ class Layout:
 
     sections: tuple[_Section, ...] = ()
     bases: tuple[int, ...] = ()
+    # ``(begin, end, function start)`` per range a reader states, offsets from
+    # the image base, end exclusive: the function index's exception-directory
+    # ranges, a disassembler's stated function size, Ghidra's function hash.
+    functions: tuple[tuple[int, int, int], ...] = ()
     _starts: list[int] = field(default_factory=list)
+    _begins: list[int] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.sections = tuple(sorted(self.sections, key=lambda s: s.rva))
         self._starts = [s.rva for s in self.sections]
+        self.functions = tuple(sorted(set(self.functions)))
+        self._begins = [begin for begin, _end, _start in self.functions]
+        self._longest = max((end - begin for begin, end, _s in self.functions), default=0)
+
+    def function_at(self, rva: int) -> int | None:
+        """The start of the function a stated range puts ``rva`` in, or ``None``.
+
+        Found by bisection; a place two stated ranges of different functions
+        both hold is in neither, since which one is not a fact.
+        """
+        index = bisect.bisect_right(self._begins, rva) - 1
+        holders: set[int] = set()
+        while index >= 0:
+            begin, end, start = self.functions[index]
+            if begin <= rva < end:
+                holders.add(start)
+            if begin < rva - self._longest:
+                break
+            index -= 1
+        return holders.pop() if len(holders) == 1 else None
 
     def section_at(self, rva: int) -> _Section | None:
         index = bisect.bisect_right(self._starts, rva) - 1
@@ -198,12 +206,23 @@ class Layout:
                 return list(dict.fromkeys(placed))
         return list(dict.fromkeys(readings))
 
-    def label(self, rva: int) -> str:
-        """A place as its root is written: the offset from the image base and its section."""
+    def _place_label(self, rva: int) -> str:
         if not self.sections:
             return f"{rva:#x}"
         section = self.section_at(rva)
         return f"{rva:#x} in {section.name}" if section else f"{rva:#x} outside every section"
+
+    def label(self, rva: int) -> str:
+        """A place as its root is written: the offset from the image base and its section.
+
+        A place inside a function a reader states the range of is that
+        function: ``function 0x3868 in .text``. Two places in one function with
+        no range stated stay two roots.
+        """
+        start = self.function_at(rva)
+        if start is not None:
+            return f"function {self._place_label(start)}"
+        return self._place_label(rva)
 
 
 @dataclass
@@ -216,7 +235,8 @@ class EntryRoots:
     by_value: dict[str, set[str]] = field(default_factory=dict)
     by_word: dict[str, set[str]] = field(default_factory=dict)
     by_technique: dict[str, set[str]] = field(default_factory=dict)
-    technique_reason: str = ""
+    # The techniques a row names that the row gives no root for, with why.
+    unplaced: dict[str, str] = field(default_factory=dict)
     # Each root's position in ``roots``: membership and order by dict.
     order: dict[str, int] = field(default_factory=dict)
 
@@ -273,7 +293,12 @@ def layout_of(entries: Iterable[Any]) -> Layout:
     """The section table and image bases the ledger states, read once."""
     sections: dict[str, _Section] = {}
     bases: list[int] = []
+    # Ranges as the tools wrote them: (begin, end, start), each an address.
+    stated: list[tuple[int, int, int]] = []
     for entry in entries:
+        if getattr(entry, "ok", True) is False or getattr(entry, "repeated_of", None):
+            continue
+        stated.extend(_stated_ranges(entry))
         data = _structured(entry)
         if not isinstance(data, Mapping):
             continue
@@ -298,7 +323,48 @@ def layout_of(entries: Iterable[Any]) -> Layout:
                 raw=int(row.get("raw_offset") or 0),
                 raw_size=int(row.get("raw_size") or 0),
             )
-    return Layout(sections=tuple(sections.values()), bases=tuple(bases))
+    plain = Layout(sections=tuple(sections.values()), bases=tuple(bases))
+    functions: list[tuple[int, int, int]] = []
+    for begin, end, start in stated:
+        offset = plain.rvas_of(start)[0]
+        shift = start - offset
+        if end > begin and begin - shift >= 0:
+            functions.append((begin - shift, end - shift, offset))
+    return Layout(sections=plain.sections, bases=plain.bases, functions=tuple(functions))
+
+
+def _stated_ranges(entry: Any) -> list[tuple[int, int, int]]:
+    """The function ranges one entry states, as ``(begin, end, start)`` addresses.
+
+    The function index's ``function_ranges`` (the exception directory's
+    ranges, by function); Ghidra's function hash (its address and size in
+    bytes); a disassembly of a function whose header states the function's
+    size, from the address the call was given.
+    """
+    tool = _tool(entry)
+    data = _structured(entry)
+    out: list[tuple[int, int, int]] = []
+    if tool == "function_index" and isinstance(data, Mapping):
+        ranges = data.get("function_ranges")
+        for start, spans in ranges.items() if isinstance(ranges, Mapping) else ():
+            first = _hex(start)
+            for span in spans if isinstance(spans, list) else ():
+                if first is not None and isinstance(span, list | tuple) and len(span) == 2:
+                    begin, end = _hex(span[0]), _hex(span[1])
+                    if begin is not None and end is not None:
+                        out.append((begin, end, first))
+    elif tool == "get_function_hash" and isinstance(data, Mapping):
+        start = _hex(data.get("address"))
+        size = data.get("size_bytes")
+        if start is not None and isinstance(size, int) and size > 1:
+            out.append((start, start + size, start))
+    elif tool == "disassemble_function":
+        args = getattr(entry, "args", None) or {}
+        start = next((_hex(args[k]) for k in _ADDRESS_ARGS if args.get(k) not in (None, "")), None)
+        match = _SIZE_HEADER.search(str(getattr(entry, "output", "") or "")[:4000])
+        if start is not None and match:
+            out.append((start, start + int(match.group(1)), start))
+    return out
 
 
 @dataclass
@@ -352,7 +418,7 @@ def _address_root(found: EntryRoots, layout: Layout, value: Any, **kwargs: Any) 
 
 
 def _read_pe_info(found: EntryRoots, data: Mapping[str, Any]) -> None:
-    found.add(PE_HEADER, words=("header",))
+    found.add(PE_HEADER)
     imports = _rows(data, "imports")
     if imports:
         found.add(
@@ -380,9 +446,6 @@ def _read_pe_info(found: EntryRoots, data: Mapping[str, Any]) -> None:
     overlay = data.get("overlay")
     if isinstance(overlay, Mapping) and overlay.get("present"):
         found.add(OVERLAY)
-    for word, root in _TABLE_WORDS.items():
-        if root in found.roots:
-            found.by_word.setdefault(word, set()).add(root)
 
 
 def _read_entry(entry: Any, layout: Layout, joins: _Joins) -> EntryRoots:
@@ -438,10 +501,14 @@ def _read_entry(entry: Any, layout: Layout, joins: _Joins) -> EntryRoots:
     elif tool == "capa":
         for row in _rows(data, "capabilities"):
             tids = _row_techniques(row)
+            rule = (row.get("rule"),)
+            placed = False
             for address in row.get("addresses") or []:
-                _address_root(found, layout, address, values=(row.get("rule"),), techniques=tids)
-        if found.roots and not found.by_technique:
-            found.technique_reason = NOTHING_TO_PLACE.format(tool=tool)
+                if _address_root(found, layout, address, values=rule, techniques=tids):
+                    placed = True
+            if not placed:
+                for tid in tids:
+                    found.unplaced.setdefault(tid, NOTHING_TO_PLACE.format(tool=tool))
     elif tool == "function_index":
         for row in _rows(data, "rows"):
             rva = _hex(row.get("offset"))
@@ -494,6 +561,9 @@ def _read_entry(entry: Any, layout: Layout, joins: _Joins) -> EntryRoots:
             pid = joins.process_of_command.get(command)
             if pid is not None:
                 found.add(_process(pid), values=(command,), techniques=_row_techniques(row))
+            else:
+                for tid in _row_techniques(row):
+                    found.unplaced.setdefault(tid, MATCH_UNPLACED)
         if not found.roots:
             found.reason = MATCH_UNPLACED
     elif tool == "lolbin_lookup":
@@ -600,9 +670,10 @@ class RunRoots:
                 if offset is not None:
                     candidates.append(offset)
                 for rva in candidates:
-                    root = found.by_rva.get(rva)
-                    if root:
-                        hits.add(root)
+                    # The root this address is: a place, or the function it is in.
+                    label = self.layout.label(rva)
+                    if label in found.order:
+                        hits.add(label)
         if found.by_value:
             for match in _QUOTED.finditer(text):
                 said = next(g for g in match.groups() if g is not None)
@@ -624,14 +695,11 @@ class RunRoots:
             if not found.roots:
                 reasons.append(f"{eid}: {found.reason or NOTHING_TO_PLACE.format(tool=eid)}")
                 continue
-            if len(found.roots) == 1:
-                named = set(found.roots)
-            else:
-                named = self._named(text, found)
-            if not named:
-                reasons.append(f"{eid}: {NOT_NAMED.format(count=len(found.roots), entry=eid)}")
-                continue
-            roots.update(dict.fromkeys(found.ordered(named)))
+            # A statement naming some of the entry's places by an address, a
+            # quoted value or a name gives those; naming none, the entry's
+            # whole set of roots stands.
+            named = self._named(text, found) if len(found.roots) > 1 else set()
+            roots.update(dict.fromkeys(found.ordered(named) if named else found.roots))
         return list(roots), reasons
 
     def of_assertion(self, entry_id: str, technique_id: str) -> tuple[list[str], list[str]]:
@@ -643,10 +711,10 @@ class RunRoots:
         eid = str(entry_id).lower()
         if not found.roots:
             return [], [f"{eid}: {found.reason}"]
-        if len(found.roots) == 1 and not found.by_technique:
-            return list(found.roots), []
-        reason = found.technique_reason or NOT_NAMED.format(count=len(found.roots), entry=eid)
-        return [], [f"{eid}: {reason}"]
+        if str(technique_id).upper() in found.unplaced:
+            return [], [f"{eid}: {found.unplaced[str(technique_id).upper()]}"]
+        # No row is tied to the technique: the entry's whole set of roots stands.
+        return list(found.roots), []
 
 
 def run_roots(ledger: Sequence[Any] | None) -> RunRoots:

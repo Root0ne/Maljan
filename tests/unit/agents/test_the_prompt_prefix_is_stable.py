@@ -218,7 +218,10 @@ class TestAnAnalystsToolLoop:
     def test_a_later_request_carries_it_on_the_latest_tool_answer(self) -> None:
         later = _loop()[1]
         assert isinstance(later[-1], ToolMessage)
-        assert "answer for w0\n\n" + RUN_STATE_BEGIN in str(later[-1].content)
+        # The text answer is shown fenced; the block rides after the fence.
+        assert "answer for w0\n<<end of tool output [ev_0001]>>\n\n" + RUN_STATE_BEGIN in str(
+            later[-1].content
+        )
         # The task it rode on before is sent as it was written.
         assert str(later[1].content) == f"{FACTS}\n\nAnalyse."
 
