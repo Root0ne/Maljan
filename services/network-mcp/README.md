@@ -8,7 +8,9 @@ and `pcap_summary` gives the whole-capture view — external conversations, TLS
 SNI destinations and detected beaconing — from `maljan.tools.pcap`.
 
 Every one of them reads the whole capture as a stream, one packet in memory at
-a time (`maljan.analysis.pcap_summary.each_packet`). `packet_limit` is
+a time (`maljan.analysis.pcap_summary.each_packet`), with Maljan's own
+pcap/pcapng reader (`maljan.analysis.capture_reader`, no optional library, so
+every tool is always available). `packet_limit` is
 optional and has no default: a limit applies only when the caller passes one.
 Every answer states how many packets it read and how many the capture holds —
 the text tools on their first line (`14887 of 14887 packets in the capture

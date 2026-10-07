@@ -33,9 +33,11 @@ from maljan.pipeline.validation import (
 )
 from maljan.reporting.composer import ReportComposer, _C2Out, _ProseOut
 from maljan.reporting.models import (
-    ConsolidatedIOC,
     FileHashes,
     MalwareReport,
+    NetworkDomain,
+    NetworkIOCs,
+    NetworkIP,
     SampleIdentity,
     TechnicalAnalysis,
     TechnicalSubsection,
@@ -45,31 +47,19 @@ from maljan.reporting.renderers.markdown import MarkdownRenderer
 
 PUBLISHED = "gate.example.com"
 REFUSED = "198.51.100.7"
-REFUSAL = "no: the sandbox report does not say which process made the flows to it"
+# What the one publish rule answers for a documentation address the sandbox
+# recorded: the table these checks read is rebuilt from the report's evidence.
+REFUSAL = "no: not an address this run may publish"
 
 
-def _report(**over: Any) -> MalwareReport:
+def _report(*hosts: NetworkDomain, **over: Any) -> MalwareReport:
     return MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
         verdict="Malware",
-        consolidated_iocs=[
-            ConsolidatedIOC(
-                type="Domain",
-                kind="domain",
-                value=PUBLISHED,
-                source="decoded",
-                published="yes: recovered by emulation",
-                is_network=True,
-            ),
-            ConsolidatedIOC(
-                type="IPv4",
-                kind="ip",
-                value=REFUSED,
-                source="sandbox",
-                published=REFUSAL,
-                is_network=True,
-            ),
-        ],
+        network=NetworkIOCs(
+            domains=[NetworkDomain(fqdn=PUBLISHED, source="sandbox"), *hosts],
+            ips=[NetworkIP(address=REFUSED, source="sandbox")],
+        ),
         **over,
     )
 
@@ -301,6 +291,38 @@ class TestAnUnreadableTable:
         (found,) = unpublished_value_violations(_body(f"It uses {REFUSED} as C2."), answers)
         assert "the IOC table could not be read" in found.message
 
+    def test_a_rebuild_that_fails_with_no_stored_row_refuses_every_value(self) -> None:
+        from maljan.reporting import composer as composer_module
+
+        with patch(
+            "maljan.reporting.builder.build_consolidated_iocs",
+            side_effect=RuntimeError("unreadable"),
+        ):
+            answers = composer_module._published_answers(_report())
+
+        (found,) = unpublished_value_violations(_body(f"It uses {PUBLISHED} as C2."), answers)
+        assert "the IOC table could not be read" in found.message
+
+    def test_a_rebuild_that_fails_reads_the_stored_rows_as_section_9_does(self) -> None:
+        from maljan.reporting.models import ConsolidatedIOC
+
+        stored = "no: the stored table's answer"
+        report = _report(
+            consolidated_iocs=[
+                ConsolidatedIOC(
+                    type="IPv4", kind="ip", value=REFUSED, source="sandbox", published=stored
+                )
+            ]
+        )
+        with patch(
+            "maljan.reporting.builder.build_consolidated_iocs",
+            side_effect=RuntimeError("unreadable"),
+        ):
+            answers = published_answers(report)
+
+        assert answers("ip", REFUSED) == stored
+        assert answers("domain", PUBLISHED) == ""
+
 
 class TestTheReportStatesTheState:
     def test_the_kept_sentence_is_printed_with_the_value_s_state_beside_it(self) -> None:
@@ -353,17 +375,15 @@ class TestTheReportStatesTheState:
         from maljan.reporting.models import C2Channel
 
         refused_host = "relay.example.net"
-        report = _report(c2_channels=[C2Channel(name="relay", endpoints=[refused_host])])
-        report.consolidated_iocs.append(
-            report.consolidated_iocs[1].model_copy(
-                update={"type": "Domain", "kind": "domain", "value": refused_host}
-            )
+        report = _report(
+            NetworkDomain(fqdn=refused_host, source="strings"),
+            c2_channels=[C2Channel(name="relay", endpoints=[refused_host])],
         )
 
         text = MarkdownRenderer().render(report)
 
         channel = next(line for line in text.splitlines() if line.startswith("| relay"))
-        assert f"({REFUSAL})" in channel
+        assert "(no: seen only in the file's strings)" in channel
 
 
 class TestOddAndLargeInput:

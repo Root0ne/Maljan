@@ -763,7 +763,7 @@ class ServerHandle:
         and reaching ``CLEANUP_TIMEOUT`` means all of that either did not run
         or did not work. A second SIGTERM would only add its grace period to a
         teardown that has already overrun — and the live case, the network
-        sidecar inside scapy, was exactly a child that sat through one.
+        sidecar inside its capture library, was exactly a child that sat through one.
         """
         import signal
 

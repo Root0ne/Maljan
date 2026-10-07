@@ -18,11 +18,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from maljan.core import delivery_limits
 from maljan.providers.errors import ProviderError
 
 # Read at call time, never bound at import: the tests lower it, and a future
-# setting can point at it without every caller having to be found again.
-MAX_RESPONSE_BYTES = 64 * 1024 * 1024
+# setting can point at it without every caller having to be found again. The
+# value is declared in ``core/delivery_limits.py``, with the sample upload's.
+MAX_RESPONSE_BYTES = delivery_limits.MAX_RESPONSE_BYTES
 CHUNK_BYTES = 64 * 1024
 
 

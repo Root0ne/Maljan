@@ -607,21 +607,26 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         return _build_consolidated_iocs(report)
 
 
-def ioc_table(report: MalwareReport) -> list[ConsolidatedIOC]:
+def ioc_table(report: MalwareReport, *, raise_unread: bool = False) -> list[ConsolidatedIOC]:
     """The IOC table the report's §9 prints and ``/reports/{id}/iocs`` serves, from one source.
 
     Rebuilt from the stored report by the current rule
     (:func:`build_consolidated_iocs`), so a report stored before a row kind or
-    an answer's wording existed reads the same in §9 and in the feed's analyst
-    rows. The stored rows that carry a kind are read only when the rebuild
-    fails. A cell's publish state and the composer's checks read the stored
-    table first (``narrative_agent.published_answers``).
+    an answer's wording existed reads the same in §9, in the feed's analyst
+    rows, in a cell's publish state and in the composer's checks
+    (``narrative_agent.published_answers``). The stored rows that carry a
+    kind are read only when the rebuild fails; with ``raise_unread`` and no
+    such row, the rebuild's error is raised, so a caller that fails closed
+    can tell a table it could not read from a table with no rows.
     """
     try:
         return build_consolidated_iocs(report)
     except Exception:  # noqa: BLE001 — the stored rows are the fallback
+        stored = [row for row in report.consolidated_iocs if row.kind]
+        if raise_unread and not stored:
+            raise
         logger.exception("builder: the IOC table could not be rebuilt; the stored rows are read.")
-        return [row for row in report.consolidated_iocs if row.kind]
+        return stored
 
 
 def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:

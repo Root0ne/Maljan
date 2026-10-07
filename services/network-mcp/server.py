@@ -1,16 +1,17 @@
 import copy
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from maljan.analysis.capture_reader import Packet
 from maljan.analysis.pcap_summary import each_packet
 from maljan.tools import staging
-from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest, module
+from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest
 from maljan.tools.errors import (
     CAPTURES_REMEDIATION,
-    MISSING_DEPENDENCY,
     NO_CAPTURE_REMEDIATION,
     NO_SUCH_FILE,
     PATH_OUTSIDE_ROOTS,
@@ -19,50 +20,65 @@ from maljan.tools.errors import (
     tool_error,
 )
 from maljan.tools.roots import PathOutsideRoots, resolve_under_roots
+from maljan.utils.written_forms import pack_escaped
 
-# scapy is the one library every tool here reads a capture with. Imported
-# guarded so a host without it still starts the server and answers the
-# manifest, and every tool then answers the same error instead of the server
-# never coming up.
-try:
-    from scapy.all import (  # type: ignore[attr-defined]
-        DNSQR,
-        IP,
-        TCP,
-        UDP,
-    )
-
-    _SCAPY_MISSING: str | None = None
-except ModuleNotFoundError as exc:  # pragma: no cover - depends on the host
-    DNSQR = IP = TCP = UDP = None  # type: ignore[assignment]
-    _SCAPY_MISSING = f"scapy is not installed ({exc})"
-except ImportError as exc:  # pragma: no cover - depends on the host
-    # A broken install rather than an absent one. Its message names absolute
-    # paths on this host, and this reason travels to a probe response, the
-    # console and the judge's prompt, so only the type crosses.
-    DNSQR = IP = TCP = UDP = None  # type: ignore[assignment]
-    _SCAPY_MISSING = f"scapy is not installed ({type(exc).__name__})"
+# Every name, request line and header read out of a capture is the sender's
+# text. It is written the way the triage pack writes a sample's own strings
+# (``utils.written_forms.pack_escaped``): newlines, control and format
+# characters (bidirectional overrides, zero-width marks) as escapes, every
+# other character as it is, so a value stays one fact on its own line and
+# cannot start a line of its own text. Renderers fence a block with a fence
+# longer than any backtick run inside it.
 
 mcp = FastMCP("NetworkMCP")
 
 # Every tool here reads the whole capture, one packet at a time
-# (``analysis.pcap_summary.each_packet``), and stops early only where the
+# (``analysis.pcap_summary.each_packet``, over ``analysis.capture_reader``,
+# which needs no optional library), and stops early only where the
 # caller passed ``packet_limit``. Each answer says how many packets it read and
 # how many the capture holds: a capture that held 14,887 packets was once read
 # to its 5,000th, and "No DNS queries found" about the rest of it would have
 # been the platform stating something nobody looked at.
 
 TOOL_NEEDS: list[ToolNeeds] = [
-    ToolNeeds("read_pcap_summary", (module("scapy"),)),
-    ToolNeeds("extract_dns", (module("scapy"),)),
-    ToolNeeds("extract_http", (module("scapy"),)),
-    ToolNeeds("pcap_summary", (module("scapy"),)),
+    ToolNeeds("read_pcap_summary"),
+    ToolNeeds("extract_dns"),
+    ToolNeeds("extract_http"),
+    ToolNeeds("pcap_summary"),
 ]
 CAPABILITIES = manifest("network", TOOL_NEEDS)
 
 # The one argument every tool here takes a file in. Named once, because the
 # refusal below names it and the platform's pinning hides it by this name.
 CAPTURE_ARGUMENT = "pcap_path"
+
+
+def _written(value: bytes, unwritten: list[BaseException]) -> str | None:
+    """One value read out of a capture, as the sender's text; ``None`` when it could not be.
+
+    Bytes that are not UTF-8 are written as escapes rather than dropped, so
+    two different names never read as one. A value that cannot be written
+    (``MemoryError`` included) is counted in ``unwritten`` and costs no other.
+    """
+    try:
+        return pack_escaped(value.decode("utf-8", errors="backslashreplace"))
+    except Exception as exc:  # noqa: BLE001 - one value, counted and stated
+        unwritten.append(exc)
+        return None
+
+
+def _isolated(
+    visit: Callable[[Packet], None], unwritten: list[BaseException]
+) -> Callable[[Packet], None]:
+    """``visit`` for one packet at a time: a failure on one is counted, not the answer."""
+
+    def _one(pkt: Packet) -> None:
+        try:
+            visit(pkt)
+        except Exception as exc:  # noqa: BLE001 - one packet, counted and stated
+            unwritten.append(exc)
+
+    return _one
 
 
 def _text_error(code: str, message: str, tool: str, remediation: str | None = None) -> str:
@@ -153,8 +169,6 @@ def read_pcap_summary(pcap_path: str, packet_limit: int | None = None, offset: i
     contacts. With one, it lists ``packet_limit`` packets from ``offset``, one
     line each, and names the offset of the next page.
     """
-    if _SCAPY_MISSING:
-        return _text_error(MISSING_DEPENDENCY, _SCAPY_MISSING, "read_pcap_summary")
     capture = _opened("read_pcap_summary", pcap_path)
     if isinstance(capture, str):
         return capture
@@ -173,15 +187,15 @@ def read_pcap_summary(pcap_path: str, packet_limit: int | None = None, offset: i
         output: list[str] = []
         index = 0
 
-        def _visit(pkt: Any) -> None:
+        def _visit(pkt: Packet) -> None:
             nonlocal index
-            if index >= start and IP in pkt:
+            if index >= start and pkt.ip_dst is not None:
                 proto = "Unknown"
-                if TCP in pkt:
-                    proto = f"TCP {pkt[TCP].sport}->{pkt[TCP].dport}"
-                elif UDP in pkt:
-                    proto = f"UDP {pkt[UDP].sport}->{pkt[UDP].dport}"
-                output.append(f"Packet {index}: {pkt[IP].src} -> {pkt[IP].dst} ({proto})")
+                if pkt.tcp is not None:
+                    proto = f"TCP {pkt.tcp.sport}->{pkt.tcp.dport}"
+                elif pkt.udp is not None:
+                    proto = f"UDP {pkt.udp.sport}->{pkt.udp.dport}"
+                output.append(f"Packet {index}: {pkt.ip_src} -> {pkt.ip_dst} ({proto})")
             index += 1
 
         read = each_packet(str(capture), _visit, start + page)
@@ -192,6 +206,9 @@ def read_pcap_summary(pcap_path: str, packet_limit: int | None = None, offset: i
         )
         if end < read.packets_in_capture:
             head += f"; the next page starts at offset {end}"
+        if read.blocks_unreadable or read.byte_cap is not None or read.packets_undecoded:
+            # The count above is of what could be read; the statement says what could not.
+            head += f" ({read.statement()})"
         head += "."
         return "\n".join([head, *output]) if output else f"{head} No IP packets in them."
     except Exception as e:  # noqa: BLE001 - a tool server answers, it does not raise
@@ -201,19 +218,27 @@ def read_pcap_summary(pcap_path: str, packet_limit: int | None = None, offset: i
 @mcp.tool()
 def extract_dns(pcap_path: str, packet_limit: int | None = None) -> str:
     """Extract every DNS query name in a PCAP file; ``packet_limit`` reads fewer packets."""
-    if _SCAPY_MISSING:
-        return _text_error(MISSING_DEPENDENCY, _SCAPY_MISSING, "extract_dns")
     capture = _opened("extract_dns", pcap_path)
     if isinstance(capture, str):
         return capture
     try:
         queries: dict[str, None] = {}
+        malformed: list[int] = []
+        unwritten: list[BaseException] = []
 
-        def _visit(pkt: Any) -> None:
-            if DNSQR in pkt:
-                queries.setdefault(pkt[DNSQR].qname.decode("utf-8", errors="ignore"), None)
+        def _visit(pkt: Packet) -> None:
+            if pkt.dns_name_octets_malformed is not None:
+                malformed.append(pkt.dns_name_octets_malformed)
+            if pkt.dns_qname is not None:
+                written = _written(pkt.dns_qname, unwritten)
+                if written is not None:
+                    queries.setdefault(written, None)
 
-        read = each_packet(str(capture), _visit, packet_limit)
+        read = each_packet(str(capture), _isolated(_visit, unwritten), packet_limit)
+        for octets in malformed:
+            read.malformed_dns_name(octets)
+        for failure in unwritten:
+            read.unwritable(failure)
         head = f"{read.statement()}."
         return "\n".join([head, *queries]) if queries else f"{head} No DNS queries in them."
     except Exception as e:  # noqa: BLE001 - a tool server answers, it does not raise
@@ -223,26 +248,45 @@ def extract_dns(pcap_path: str, packet_limit: int | None = None) -> str:
 @mcp.tool()
 def extract_http(pcap_path: str, packet_limit: int | None = None) -> str:
     """Extract every HTTP request line and Host header; ``packet_limit`` reads fewer packets."""
-    if _SCAPY_MISSING:
-        return _text_error(MISSING_DEPENDENCY, _SCAPY_MISSING, "extract_http")
     capture = _opened("extract_http", pcap_path)
     if isinstance(capture, str):
         return capture
     try:
-        requests: list[str] = []
+        # Each distinct request once, in order of first appearance, with how
+        # many times it was sent; a repeat is counted, not written again.
+        requests: dict[tuple[bytes, bytes], list[Any]] = {}
 
-        def _visit(pkt: Any) -> None:
-            if TCP in pkt and pkt[TCP].payload:
-                payload = bytes(pkt[TCP].payload).decode("utf-8", errors="ignore")
-                if payload.startswith(("GET ", "POST ", "PUT ", "DELETE ", "HEAD ")):
-                    # The request line, and the Host header when there is one.
-                    lines = payload.split("\r\n")
-                    host = next((x for x in lines[1:] if x.lower().startswith("host: ")), "")
-                    requests.append(f"{lines[0]} | {host}")
+        unwritten: list[BaseException] = []
 
-        read = each_packet(str(capture), _visit, packet_limit)
+        def _visit(pkt: Packet) -> None:
+            # The segment's payload as its IP header bounds it; trailing
+            # link-layer bytes are not the sender's request.
+            data = pkt.tcp.data if pkt.tcp is not None else b""
+            if not data.startswith((b"GET ", b"POST ", b"PUT ", b"DELETE ", b"HEAD ")):
+                return
+            # The request line, and the Host header when there is one.
+            lines = data.split(b"\r\n")
+            host = next((x for x in lines[1:] if x.lower().startswith(b"host: ")), b"")
+            seen = requests.get((lines[0], host))
+            if seen is not None:
+                seen[1] += 1
+                return
+            line, written_host = _written(lines[0], unwritten), _written(host, unwritten)
+            if line is not None and written_host is not None:
+                requests[(lines[0], host)] = [f"{line} | {written_host}", 1]
+
+        read = each_packet(str(capture), _isolated(_visit, unwritten), packet_limit)
+        for failure in unwritten:
+            read.unwritable(failure)
         head = f"{read.statement()}."
-        return "\n".join([head, *requests]) if requests else f"{head} No HTTP requests in them."
+        if not requests:
+            return f"{head} No HTTP requests in them."
+        # A request line begins with its method, so a count before it cannot be
+        # mistaken for the sender's text.
+        written = [
+            text if count == 1 else f"{count} times: {text}" for text, count in requests.values()
+        ]
+        return "\n".join([head, *written])
     except Exception as e:  # noqa: BLE001 - a tool server answers, it does not raise
         return _text_error(code_for_exception(e), f"{type(e).__name__}: {e}", "extract_http")
 
