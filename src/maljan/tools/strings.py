@@ -128,12 +128,21 @@ _WIDE_RE = re.compile(rb"(?:[\x20-\x7e]\x00){%d,}" % _MIN_STRING_LENGTH)
 # the two patterns above never hand it to the scan. Such a run is read only
 # when the whole of it is a host by the host reader's own rules
 # (``_short_host``); every other five-character run stays below the floor.
+#
+# A five-character host of that shape is a letter and a digit in either
+# order, a dot and a two-letter TLD, so each pattern opens with the dot and
+# reads the run whole in a lookbehind, as its one group: a pattern that opens
+# with a literal is a fast scan over the buffer, where one that tests every
+# isolated five-character run doubled the sweep's time.
 _SHORT_RUN_LENGTH = _MIN_STRING_LENGTH - 1
-_SHORT_PRINTABLE_RE = re.compile(
-    rb"(?<![\x20-\x7e])[\x20-\x7e]{%d}(?![\x20-\x7e])" % _SHORT_RUN_LENGTH
+_SHORT_HOST_RE = re.compile(
+    rb"\.[A-Za-z]{2}(?![\x20-\x7e])"
+    rb"(?<=(?<![\x20-\x7e])((?:[A-Za-z][0-9]|[0-9][A-Za-z])\.[A-Za-z]{2}))"
 )
-_SHORT_WIDE_RE = re.compile(
-    rb"(?<![\x20-\x7e]\x00)(?:[\x20-\x7e]\x00){%d}(?![\x20-\x7e]\x00)" % _SHORT_RUN_LENGTH
+_SHORT_WIDE_HOST_RE = re.compile(
+    rb"\.\x00[A-Za-z]\x00[A-Za-z]\x00(?![\x20-\x7e]\x00)"
+    rb"(?<=(?<![\x20-\x7e]\x00)"
+    rb"((?:[A-Za-z]\x00[0-9]|[0-9]\x00[A-Za-z])\x00\.\x00[A-Za-z]\x00[A-Za-z]\x00))"
 )
 
 # Credentials and wallets. These are the highest-value strings in a stealer and
@@ -263,15 +272,16 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
 
 
 def _short_hosts(blob: bytes) -> Iterator[str]:
-    """The five-character runs that are each a host as a whole, ASCII then UTF-16LE."""
-    for match in _SHORT_PRINTABLE_RE.finditer(blob):
-        host = _short_host(match.group().decode("ascii", errors="ignore"))
-        if host:
-            yield host
-    for match in _SHORT_WIDE_RE.finditer(blob):
-        host = _short_host(match.group()[::2].decode("ascii", errors="ignore"))
-        if host:
-            yield host
+    """The five-character runs that are each a host as a whole, ASCII then UTF-16LE.
+
+    Each distinct run is asked of ``_short_host`` once, in the order it
+    first stands, however often it repeats.
+    """
+    for pattern, width in ((_SHORT_HOST_RE, 1), (_SHORT_WIDE_HOST_RE, 2)):
+        for run in dict.fromkeys(pattern.findall(blob)):
+            host = _short_host(run[::width].decode("ascii"))
+            if host:
+                yield host
 
 
 def _short_host(run: str) -> str:

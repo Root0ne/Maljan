@@ -11,8 +11,11 @@ raw value is never printed in its place.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from unittest.mock import patch
+
+import pytest
 
 from maljan.pipeline.validation import record_flagged_statements, unpublished_value_violations
 from maljan.reporting.models import (
@@ -122,6 +125,49 @@ class TestTheStateBesideACell:
         ):
             text = MarkdownRenderer().render(report)
 
+        line = next(line for line in text.splitlines() if line.startswith("| Fallback"))
+        assert f"({TABLE_NOT_READ})" in line
+
+    def test_a_failed_rebuild_is_logged_once_and_the_stored_state_is_printed(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        report = _report(
+            technical_analysis=TechnicalAnalysis(
+                configuration=[ConfigItem(key="Fallback", value=ADDRESS, how_obtained="decrypted")]
+            )
+        )
+        with (
+            caplog.at_level(logging.ERROR, logger="maljan"),
+            patch(
+                "maljan.reporting.builder.build_consolidated_iocs",
+                side_effect=RuntimeError("unrebuildable"),
+            ),
+        ):
+            text = MarkdownRenderer().render(report)
+
+        assert len([r for r in caplog.records if r.exc_info]) == 1
+        line = next(line for line in text.splitlines() if line.startswith("| Fallback"))
+        assert "evil[.]example[.]com" in line
+
+    def test_a_failed_rebuild_with_no_stored_row_refuses_every_cell_and_logs_once(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        report = _report(
+            technical_analysis=TechnicalAnalysis(
+                configuration=[ConfigItem(key="Fallback", value=ADDRESS, how_obtained="decrypted")]
+            )
+        )
+        report.consolidated_iocs = []
+        with (
+            caplog.at_level(logging.ERROR, logger="maljan"),
+            patch(
+                "maljan.reporting.builder.build_consolidated_iocs",
+                side_effect=RuntimeError("unrebuildable"),
+            ),
+        ):
+            text = MarkdownRenderer().render(report)
+
+        assert len([r for r in caplog.records if r.exc_info]) == 1
         line = next(line for line in text.splitlines() if line.startswith("| Fallback"))
         assert f"({TABLE_NOT_READ})" in line
 
