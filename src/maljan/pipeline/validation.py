@@ -7957,7 +7957,7 @@ _RETRY_DROP_DECISION_RE = re.compile(
 # The same decision written labels first: ``C2: WITHDRAW``, ``C1 C2 - KEEP``.
 _RETRY_DROP_LABEL_FIRST_RE = re.compile(
     rf"{_RETRY_DROP_LEAD}(?P<labels>{_RETRY_DROP_LABEL}\b{_RETRY_DROP_LABEL_RUN})"
-    r"[\s*_`]*+(?:[:\-–—.)=]|=>|->)?+[\s*_`]*+(?P<decision>keep|withdraw)\b",
+    r"[\s*_`]*+(?:=>|->|[:\-–—.)=])?+[\s*_`]*+(?P<decision>keep|withdraw)\b",
     re.IGNORECASE,
 )
 # What opens a decision's reason, after its labels: from there on, the clause

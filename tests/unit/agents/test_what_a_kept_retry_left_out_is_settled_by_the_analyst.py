@@ -428,6 +428,12 @@ class TestMoreClauseStarts:
             "C2": ("WITHDRAW", ""),
         }
 
+    def test_labels_first_with_an_arrow(self) -> None:
+        assert read_retry_drop_answers("C2 -> WITHDRAW\nC1 => KEEP", self.LABELS) == {
+            "C1": ("KEEP", ""),
+            "C2": ("WITHDRAW", ""),
+        }
+
     def test_a_decision_after_a_comma_and(self) -> None:
         assert read_retry_drop_answers("KEEP C1, and WITHDRAW C2: no", self.LABELS) == {
             "C1": ("KEEP", ""),
