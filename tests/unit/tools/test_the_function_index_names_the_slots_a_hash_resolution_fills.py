@@ -312,3 +312,220 @@ class TestATableOfRecords:
 
         assert answer["resolved_slots"] == {} and answer["ambiguous_slots"] == {}
         assert answer["calls_unnamed"] == {hex(BASE + USER): 2}
+
+
+OTHER = TEXT_RVA + 0x180
+
+
+class TestOnlyTheResolverSCallIsTied:
+    def test_a_hash_held_outside_the_arguments_ties_no_call(self, tmp_path: Path) -> None:
+        image, code = _image()
+        image.functions.append((OTHER, OTHER + 0x10))
+        code.go(OTHER).clobber_rax()
+        code.ret()
+        code.go(BUILDER)
+        place = code.raw(b"\x41\xbc" + struct.pack("<I", 0x1111AAAA))  # mov r12d, hash
+        code.call(OTHER)
+        code.store_rax(SLOT_A)  # what the other call answered, not a resolved name
+        code.raw(b"\x44\x89\xe2")  # mov edx, r12d: now an argument
+        code.call(RESOLVER)
+        code.raw(b"\x48\x89\xc3")  # mov rbx, rax: kept in a register, stored nowhere
+        code.ret()
+        code.go(USER).call_slot(SLOT_A)
+        code.ret()
+
+        answer = _index(image, tmp_path, _hits((place, ("OpenThingW",))))
+
+        assert answer["resolved_slots"] == {}
+        assert answer["calls_unnamed"] == {hex(BASE + USER): 1}
+
+    def test_two_function_name_hashes_live_at_one_call_tie_nothing(self, tmp_path: Path) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        first = code.hash_in_edx(0x1111AAAA)
+        second = code.raw(b"\x41\xb8" + struct.pack("<I", 0x2222BBBB))  # mov r8d, hash
+        code.call(RESOLVER)
+        code.store_rax(SLOT_A)
+        code.ret()
+        code.go(USER).call_slot(SLOT_A)
+        code.ret()
+
+        answer = _index(image, tmp_path, _hits((first, ("OpenThingW",)), (second, ("CloseThing",))))
+
+        assert answer["resolved_slots"] == {}
+
+    def test_a_module_hash_beside_the_function_s_does_not_untie_the_call(
+        self, tmp_path: Path
+    ) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        module = code.raw(b"\xb9" + struct.pack("<I", 0x3333CCCC))  # mov ecx, module hash
+        first = code.hash_in_edx(0x1111AAAA)
+        code.call(RESOLVER)
+        code.store_rax(SLOT_A)
+        code.ret()
+        code.go(USER).call_slot(SLOT_A)
+        code.ret()
+
+        answer = _index(image, tmp_path, _hits((module, ()), (first, ("OpenThingW",))))
+
+        assert answer["resolved_slots"] == {hex(BASE + SLOT_A): "OpenThingW"}
+
+    def test_a_second_call_after_the_hash_was_consumed_is_untied(self, tmp_path: Path) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        first = code.hash_in_edx(0x1111AAAA)
+        code.call(RESOLVER)
+        code.store_rax(SLOT_A)
+        code.call(RESOLVER)
+        code.store_rax(SLOT_B)
+        code.ret()
+        _user_calls(code)
+
+        answer = _index(image, tmp_path, _hits((first, ("OpenThingW",))))
+
+        assert answer["resolved_slots"] == {hex(BASE + SLOT_A): "OpenThingW"}
+
+
+class TestARecordReadsOnlyItsOwnAddresses:
+    def test_hashes_written_before_the_addresses_name_nothing(self, tmp_path: Path) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        first = code.hash_in_record(0x30, 0x1111AAAA)
+        second = code.hash_in_record(0x48, 0x2222BBBB)
+        for offset, slot in ((0x38, MODULE), (0x40, SLOT_A), (0x50, MODULE), (0x58, SLOT_B)):
+            code.lea_rax(slot)
+            code.rax_to_frame(offset)
+        code.ret()
+        code.go(USER).call_slot(SLOT_A)
+        code.ret()
+
+        answer = _index(image, tmp_path, _hits((first, ("OpenThingW",)), (second, ("CloseThing",))))
+
+        assert answer["resolved_slots"] == {}
+
+    def test_addresses_written_before_the_hashes_name_nothing(self, tmp_path: Path) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        code.lea_rax(SLOT_A)
+        code.rax_to_frame(0x40)
+        code.lea_rax(SLOT_B)
+        code.rax_to_frame(0x58)
+        first = code.hash_in_record(0x30, 0x1111AAAA)
+        second = code.hash_in_record(0x48, 0x2222BBBB)
+        code.ret()
+        code.go(USER).call_slot(SLOT_B)
+        code.ret()
+
+        answer = _index(image, tmp_path, _hits((first, ("OpenThingW",)), (second, ("CloseThing",))))
+
+        assert answer["resolved_slots"] == {}
+
+    def test_only_slots_some_code_calls_through_are_stated(self, tmp_path: Path) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        first = code.hash_in_edx(0x1111AAAA)
+        code.call(RESOLVER)
+        code.store_rax(SLOT_A)
+        code.ret()
+
+        answer = _index(image, tmp_path, _hits((first, ("OpenThingW",))))
+
+        assert answer["resolved_slots"] == {}
+
+
+X86_BASE = 0x400000
+X86_SLOT_A = DATA_RVA + 0x300
+X86_SLOT_B = DATA_RVA + 0x304
+
+
+def _x86(tmp_path: Path, build: Any, hits: Any, called: list[int]) -> dict[str, Any]:
+    image = SyntheticPE(is64=False, image_base=X86_BASE)
+    code = _Code(image)
+    code.go(RESOLVER).raw(b"\x31\xc0\xc3")
+    code.go(BUILDER)
+    places = build(code)
+    code.call(RESOLVER)
+    code.call(USER)
+    code.ret()
+    code.go(USER)
+    for slot in called:
+        code.raw(b"\xff\x15" + struct.pack("<I", X86_BASE + slot))
+    code.ret()
+    target = tmp_path / "x.exe"
+    target.write_bytes(image.build())
+    return artefact_index.function_index(
+        str(target),
+        pe_info=("ev_0004", {"entry_point": BUILDER, "export_rows": []}),
+        hashes=(HASH_ID, hits(places)),
+    )
+
+
+class TestAnX86Image:
+    def test_a_pushed_hash_ties_the_call_and_its_moffs_store_names_the_slot(
+        self, tmp_path: Path
+    ) -> None:
+        def build(code: _Code) -> list[int]:
+            place = code.raw(b"\x68" + struct.pack("<I", 0x1111AAAA))
+            code.call(RESOLVER)
+            code.raw(b"\xa3" + struct.pack("<I", X86_BASE + X86_SLOT_A))
+            return [place]
+
+        answer = _x86(tmp_path, build, lambda p: _hits((p[0], ("OpenThingW",))), [X86_SLOT_A])
+        assert answer["resolved_slots"] == {hex(X86_BASE + X86_SLOT_A): "OpenThingW"}
+
+    def test_a_hash_equal_to_a_slot_s_address_is_no_address(self, tmp_path: Path) -> None:
+        def build(code: _Code) -> list[int]:
+            place = code.raw(b"\xc7\x44\x24\x00" + struct.pack("<I", X86_BASE + X86_SLOT_B))
+            code.raw(b"\xc7\x44\x24\x04" + struct.pack("<I", X86_BASE + X86_SLOT_A))
+            return [place]
+
+        answer = _x86(tmp_path, build, lambda p: _hits((p[0], ("OpenThingW",))), [X86_SLOT_B])
+        assert answer["resolved_slots"] == {}
+
+    def test_hashes_before_addresses_name_nothing(self, tmp_path: Path) -> None:
+        def build(code: _Code) -> list[int]:
+            first = code.raw(b"\xc7\x44\x24\x00" + struct.pack("<I", 0x1111AAAA))
+            second = code.raw(b"\xc7\x44\x24\x08" + struct.pack("<I", 0x2222BBBB))
+            code.raw(b"\xc7\x44\x24\x04" + struct.pack("<I", X86_BASE + X86_SLOT_A))
+            code.raw(b"\xc7\x44\x24\x0c" + struct.pack("<I", X86_BASE + X86_SLOT_B))
+            return [first, second]
+
+        answer = _x86(
+            tmp_path,
+            build,
+            lambda p: _hits((p[0], ("OpenThingW",)), (p[1], ("CloseThing",))),
+            [X86_SLOT_A],
+        )
+        assert answer["resolved_slots"] == {}
+
+
+class TestEveryIndirectJumpNamesNothing:
+    def test_jumps_and_calls_through_registers_and_operands_are_counted(
+        self, tmp_path: Path
+    ) -> None:
+        for body in (
+            b"\x48\x8b\x43\x08\xff\xe0",  # mov rax, [rbx+8]; jmp rax
+            b"\xff\x60\x10",  # jmp [rax+0x10]
+            b"\xff\x24\xc5" + struct.pack("<I", DATA_RVA),  # jmp [rax*8+table]
+            b"\xff\x50\x10\xc3",  # call [rax+0x10]
+            b"\xff\xd0\xc3",  # call rax
+        ):
+            image, code = _image()
+            code.go(BUILDER).call(USER)
+            code.ret()
+            code.go(USER).raw(body)
+            target = tmp_path / "s.exe"
+            target.write_bytes(image.build())
+            answer = artefact_index.function_index(str(target))
+            assert answer["calls_unnamed"] == {hex(BASE + USER): 1}, body.hex()
+
+    def test_the_graph_lists_the_callees_of_functions_that_are_no_row(self, tmp_path: Path) -> None:
+        image, code = _image()
+        code.go(BUILDER).call(USER)
+        code.ret()
+        code.go(USER).raw(b"\x31\xc0\xc3")
+        target = tmp_path / "s.exe"
+        target.write_bytes(image.build())
+        answer = artefact_index.function_index(str(target))
+        assert answer["other_callees"] == {hex(BASE + BUILDER): [hex(BASE + USER)]}

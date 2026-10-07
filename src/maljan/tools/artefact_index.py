@@ -335,6 +335,11 @@ class _Reader:
         self.events: list[tuple[Any, ...]] = []
         self.holds_hash = False
         self.loaded: dict[int, int] = {}
+        # The hashed values live in registers, and (x86) pushed or stored as
+        # stack arguments, since the run began or the last call consumed them:
+        # each ``(names, place)``.
+        self.live: dict[int, tuple[tuple[str, ...], int]] = {}
+        self.stacked: list[tuple[tuple[str, ...], int]] = []
         self.graph = _Graph()
         self.queue: list[int] = []
         self.sorted_starts: list[int] = []
@@ -448,18 +453,18 @@ class _Reader:
                     function.unnamed_calls += 1
         if not self.attributing:
             return
-        through = (
-            _through_slot(code, at, self.image.is64, jump=True) if ins.kind == "stop" else None
-        )
-        if through is not None:
+        if ins.kind == "stop" and _indirect_jump(code, at, self.image.is64):
             slot = self._through(code, at, rva, ins, jump=True)
             if slot is not None:
                 function.slot_calls[slot] = function.slot_calls.get(slot, 0) + 1
-            elif through[0] == "memory" and self._slot_of(code, at, rva, ins) not in self.imports:
-                # A jump through a slot nothing fills that the run can read is a
-                # call that names nothing. A jump through a register no load
-                # names is left as it was: a switch table's jump reads the same.
+            elif self._slot_of(code, at, rva, ins) not in self.imports or not _through_slot(
+                code, at, self.image.is64, jump=True
+            ):
+                # Every indirect jump that goes through no named slot and no
+                # import's slot is a call that names nothing: through a
+                # register, a base and displacement, or an index.
                 function.unnamed_calls += 1
+        hashed: list[tuple[tuple[str, ...], int]] = []
         if self.wanted:
             for place in range(rva, rva + ins.length):
                 if place in self.wanted:
@@ -468,7 +473,8 @@ class _Reader:
                     if names is not None:
                         self.events.append(("hash", names, place))
                         self.holds_hash = True
-        self._read_events(code, at, rva, ins)
+                        hashed.append((names, place))
+        self._read_events(code, at, rva, ins, hashed)
         if ins.kind != "call":
             data_target = _data_address(self.image, code, at, ins, rva + ins.length)
             if data_target is not None:
@@ -503,14 +509,38 @@ class _Reader:
             return None
         return slot
 
-    def _read_events(self, code: bytes, at: int, rva: int, ins: Instruction) -> None:
-        """What one instruction adds to the straight-line run: a call, an address taken, a
-        store or an overwrite of the return register, and the slot a register is loaded from."""
+    def _read_events(
+        self,
+        code: bytes,
+        at: int,
+        rva: int,
+        ins: Instruction,
+        hashed: Sequence[tuple[tuple[str, ...], int]] = (),
+    ) -> None:
+        """What one instruction adds to the straight-line run.
+
+        A call, tied to the one function-name hash live in an argument (x64:
+        ``rcx``, ``rdx``, ``r8``, ``r9``; x86: a pushed or ``[esp+x]`` stack
+        argument) when exactly one is, and to nothing otherwise; an address
+        taken, unless the instruction holds a hashed value; a store or an
+        overwrite of the return register; the slot a register is loaded from;
+        and where each hashed value is live.
+        """
+        is64 = self.image.is64
         if ins.kind == "call":
-            self.events.append(("call",))
+            arguments = (
+                [self.live[r] for r in _ARGUMENT_REGISTERS if r in self.live] if is64 else []
+            )
+            if not is64:
+                arguments = list(self.stacked)
+            named = [held for held in arguments if held[0]]
+            tied = named[0] if len(named) == 1 else None
+            self.events.append(("call", tied))
             self.loaded.clear()
+            self.live.clear()
+            self.stacked.clear()
             return
-        shape = _slot_shape(code, at, self.image.is64, ins.length)
+        shape = _slot_shape(code, at, is64, ins.length)
         slot = None
         if shape is not None:
             absolute = shape[2]
@@ -519,15 +549,25 @@ class _Reader:
                 if absolute is not None
                 else self._slot_of(code, at, rva, ins)
             )
+        moved = _register_copy(code, at, is64)
+        carried = self.live.get(moved[1]) if moved is not None else None
         for register in ins.writes:
             self.loaded.pop(register, None)
+            self.live.pop(register, None)
+        if carried is not None and moved is not None:
+            self.live[moved[0]] = carried
+        for held in hashed:
+            if ins.kind == "push" or (not is64 and _stack_store(code, at)):
+                self.stacked.append(held)
+            elif len(ins.writes) == 1:
+                self.live[next(iter(ins.writes))] = held
         if shape is not None and slot is not None and 0 <= slot < self.image.size_of_image:
-            kind, named = shape[0], shape[1]
-            if kind == "store" and named == 0:
+            kind, named_register = shape[0], shape[1]
+            if kind == "store" and named_register == 0:
                 self.events.append(("store", slot, rva))
-            elif kind == "load" and named is not None:
-                self.loaded[named] = slot
-            elif kind == "address" and self._section(slot) is None:
+            elif kind == "load" and named_register is not None:
+                self.loaded[named_register] = slot
+            elif kind == "address" and not hashed and self._section(slot) is None:
                 self.events.append(("address", slot, rva))
         if 0 in ins.writes:
             self.events.append(("overwrite",))
@@ -539,6 +579,8 @@ class _Reader:
         self.events = []
         self.holds_hash = False
         self.loaded.clear()
+        self.live.clear()
+        self.stacked.clear()
 
     def _tail_call(self, function: _Function, target: int) -> bool:
         """An unconditional jump to another function's start, recorded as its callee."""
@@ -637,6 +679,49 @@ def _operand_bytes(code: bytes, at: int, is64: bool) -> tuple[int, int, int] | N
     return code[i], rex, i + 1
 
 
+# The registers the first four integer arguments travel in (x64): rcx, rdx, r8, r9.
+_ARGUMENT_REGISTERS = (1, 2, 8, 9)
+
+
+def _register_copy(code: bytes, at: int, is64: bool) -> tuple[int, int] | None:
+    """``(destination, source)`` of a register-to-register ``mov`` of 32 or 64 bits.
+
+    ``call_sites._register_move`` reads the 64-bit form only; a hashed value is
+    a 32-bit one and is moved as one (``mov edx, r12d``).
+    """
+    found = _operand_bytes(code, at, is64)
+    if found is None:
+        return None
+    op, rex, after = found
+    if op not in (0x89, 0x8B) or after >= len(code) or code[after] >> 6 != 3:
+        return None
+    modrm = code[after]
+    reg = ((modrm >> 3) & 7) | (((rex >> 2) & 1) << 3)
+    rm = (modrm & 7) | ((rex & 1) << 3)
+    return (rm, reg) if op == 0x89 else (reg, rm)
+
+
+def _stack_store(code: bytes, at: int) -> bool:
+    """Whether an x86 instruction stores an immediate to ``[esp+x]``."""
+    found = _operand_bytes(code, at, False)
+    if found is None:
+        return False
+    op, _rex, after = found
+    if op != 0xC7 or after + 1 >= len(code):
+        return False
+    modrm = code[after]
+    return modrm >> 6 in (0, 1, 2) and modrm & 7 == 4 and code[after + 1] & 7 == 4
+
+
+def _indirect_jump(code: bytes, at: int, is64: bool) -> bool:
+    """Whether the instruction at ``at`` is an indirect jump, through any operand."""
+    found = _operand_bytes(code, at, is64)
+    if found is None:
+        return False
+    op, _rex, after = found
+    return op == 0xFF and after < len(code) and (code[after] >> 3) & 7 in (4, 5)
+
+
 def _memory_operand(code: bytes, at: int, is64: bool) -> int | None:
     """The 32-bit displacement of a ModRM operand that is rip-relative (x64) or an absolute
     address (x86): mod 00, r/m 101."""
@@ -722,18 +807,20 @@ def _name_slots(
 
     Read in each straight-line run that holds a hashed value, two ways:
 
-    * **The call and its store.** After the hashed value, the first call;
-      after it, a store of the return register to a slot before the register
-      is overwritten, another call is made or the next hashed value comes:
-      that slot holds the name.
-    * **A table of records.** With no such store in the run, each hashed value
-      sits in a record with the address of the slot the resolution writes.
-      When the run takes no address before its first hashed value and one
-      after its last, each record runs from its hashed value to the next; when
-      it takes one before the first and none after the last, each runs from
-      the previous hashed value to its own; any other run names nothing. Of a
-      record's addresses, only one some code calls or jumps through is a slot:
-      a record holding exactly one names it, one holding two is ambiguous.
+    * **The call and its store.** A call is tied to a hashed value only when
+      exactly one function-name hash is live in an argument at it, placed
+      there in the same run (``_Reader._read_events``). After a tied call, a
+      store of the return register to a slot, before the register is
+      overwritten or another call is made, names that slot.
+    * **A table of records.** With no tied call stored in the run, each hashed
+      value sits in a record with addresses. When the run takes no address
+      before its first hashed value and one after its last, each record runs
+      from its hashed value to the next; in the mirror case, from the previous
+      hashed value to its own; any other run names nothing. Every record must
+      hold as many addresses as every other, one at least, or the run names
+      nothing: a record's addresses are its own. Of a record's addresses, the
+      one some code calls or jumps through is its slot; a record with none
+      names nothing, and one with two is ambiguous.
 
     A hashed value whose readings give two names, and a slot two names fill,
     are ambiguous and name nothing.
@@ -750,35 +837,27 @@ def _name_slots(
             ambiguous.setdefault(slot, set()).update(distinct.values())
 
     for run in runs:
-        hashes = [k for k, event in enumerate(run) if event[0] == "hash"]
         stored = False
-        for index, k in enumerate(hashes):
-            end = hashes[index + 1] if index + 1 < len(hashes) else len(run)
+        for k, event in enumerate(run):
+            if event[0] != "call" or event[1] is None:
+                continue
+            names = event[1][0]
             j = k + 1
-            while j < end and run[j][0] != "call":
-                j += 1
-            j += 1
-            while j < end:
-                kind = run[j][0]
-                if kind == "store":
-                    fill(int(run[j][1]), run[k][1], int(run[j][2]))
+            while j < len(run):
+                later = run[j]
+                if later[0] == "store":
+                    fill(int(later[1]), names, int(later[2]))
                     stored = True
                     break
-                if kind in ("overwrite", "call"):
+                if later[0] in ("overwrite", "call"):
                     break
                 j += 1
-        if stored or not hashes:
+        hashes = [k for k, event in enumerate(run) if event[0] == "hash"]
+        if stored or not hashes or any(e[0] == "call" and e[1] is not None for e in run):
             continue
-        slots = [
-            (k, int(e[1]), int(e[2]))
-            for k, e in enumerate(run)
-            if e[0] == "address" and int(e[1]) in called
-        ]
-        # Which way a record runs is read off every address the run takes,
-        # called or not: a record's addresses all sit on one side of its hash.
-        taken = [k for k, e in enumerate(run) if e[0] == "address"]
-        before = any(k < hashes[0] for k in taken)
-        after = any(k > hashes[-1] for k in taken)
+        taken = [(k, int(e[1]), int(e[2])) for k, e in enumerate(run) if e[0] == "address"]
+        before = any(k < hashes[0] for k, _s, _w in taken)
+        after = any(k > hashes[-1] for k, _s, _w in taken)
         if after and not before:
             bounds = [
                 (h, hashes[i + 1] if i + 1 < len(hashes) else len(run))
@@ -788,21 +867,26 @@ def _name_slots(
             bounds = [(hashes[i - 1] if i else -1, h) for i, h in enumerate(hashes)]
         else:
             continue
+        records: list[list[tuple[int, int, int]]] = []
         cursor = 0
-        for (low, high), k in zip(bounds, hashes, strict=True):
-            while cursor < len(slots) and slots[cursor][0] < low:
+        for low, high in bounds:
+            while cursor < len(taken) and taken[cursor][0] < low:
                 cursor += 1
             inside = []
-            scan = cursor
-            while scan < len(slots) and slots[scan][0] < high:
-                inside.append(slots[scan])
-                scan += 1
+            while cursor < len(taken) and taken[cursor][0] < high:
+                inside.append(taken[cursor])
+                cursor += 1
+            records.append(inside)
+        if not records[0] or any(len(inside) != len(records[0]) for inside in records):
+            continue
+        for inside, k in zip(records, hashes, strict=True):
             names = run[k][1]
-            distinct = {slot for _k, slot, _w in inside}
-            if len(distinct) == 1:
-                fill(inside[0][1], names, inside[0][2])
-            elif len(distinct) > 1 and names:
-                for slot in distinct:
+            slots = {slot for _k, slot, _w in inside if slot in called}
+            if len(slots) == 1:
+                (slot,) = slots
+                fill(slot, names, next(w for _k, s_, w in inside if s_ == slot))
+            elif len(slots) > 1 and names:
+                for slot in slots:
                     ambiguous.setdefault(slot, set()).update(names)
     named: dict[int, tuple[str, int]] = {}
     for slot, by_name in filled.items():
@@ -1136,8 +1220,19 @@ def index_image(
             place(where, "capa", str(capability["rule"]), capa_id, "capa")
 
     data = _answer(image, graph, rows, names, unplaced, entry_points)
-    data["resolved_slots"] = {hex(base + slot): name for slot, (name, _w) in sorted(filled.items())}
-    data["ambiguous_slots"] = {hex(base + slot): names for slot, names in sorted(ambiguous.items())}
+    # Only the slots some code calls or jumps through are stated.
+    data["resolved_slots"] = {
+        hex(base + slot): name for slot, (name, _w) in sorted(filled.items()) if slot in called
+    }
+    data["ambiguous_slots"] = {
+        hex(base + slot): names for slot, names in sorted(ambiguous.items()) if slot in called
+    }
+    # The callees of every function that is no row, so the call graph is whole.
+    data["other_callees"] = {
+        hex(base + start): [hex(base + c) for c in sorted(function.callees)]
+        for start, function in sorted(graph.functions.items())
+        if start not in rows.cells and function.callees
+    }
     data["function_lists"] = function_lists
     data["absent"] = dict(absent or {})
     if addresses:
