@@ -624,7 +624,10 @@ instruction count), two ways:
   layout of addresses, or when the stack or frame pointer moves between the stores by
   an amount the run cannot read (any other write of either, or an x86 call,
   whose callee may pop its arguments). A narrower store (a loop counter, a
-  flag) is no record's and does not count; on x86 a 32-bit counter is a
+  flag) is no record's and does not count, except where a record's called
+  pointer would sit one stride before the first record or after the last:
+  there a store of any width says the records may begin at the pointer, not
+  at the hash, and the table names nothing; on x86 a 32-bit counter is a
   pointer's width, so a counter stored beside an x86 table makes it name
   nothing. Stores that carry no frame offset (pushes, absolute slots) make no
   records.

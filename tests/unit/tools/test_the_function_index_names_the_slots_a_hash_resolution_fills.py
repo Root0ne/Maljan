@@ -818,6 +818,63 @@ class TestAPointerStoredByAnyEncodingOutsideTheRecordsCounts:
             assert answer["resolved_slots"] == {}, store.hex()
 
 
+class TestAStoreWhereARecordSPointerWouldSitOutsideTheTableCounts:
+    def test_a_dword_written_where_the_first_record_s_pointer_would_sit_names_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        code.raw(b"\x89\x1c\x24")  # mov [rsp], ebx: one stride before the second pointer
+        first = code.hash_in_record(0x08, FIRST)
+        code.lea_rax(SLOT_B)
+        code.rax_to_frame(0x10)
+        second = code.hash_in_record(0x18, SECOND)
+        code.lea_rax(SLOT_C)
+        code.rax_to_frame(0x20)
+        code.ret()
+        code.go(USER).call_slot(SLOT_B)
+        code.call_slot(SLOT_C)
+        code.ret()
+
+        answer = _index(image, tmp_path, _two(first, second))
+
+        assert answer["resolved_slots"] == {}
+
+    def test_a_dword_counter_at_another_place_below_a_table_leaves_it_named(
+        self, tmp_path: Path
+    ) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        first = _record(code, 0x30, FIRST, SLOT_A)
+        second = _record(code, 0x48, SECOND, SLOT_B)
+        # 0x20 is 8 past a stride below the first record; the called pointers sit 16 in.
+        code.raw(b"\xc7\x44\x24\x20" + struct.pack("<I", 0))
+        code.ret()
+        _user_calls(code)
+
+        answer = _index(image, tmp_path, _two(first, second))
+
+        assert answer["resolved_slots"] == {
+            hex(BASE + SLOT_A): "OpenThingW",
+            hex(BASE + SLOT_B): "CloseThing",
+        }
+
+    def test_a_dword_counter_where_a_called_pointer_would_sit_names_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        first = _record(code, 0x30, FIRST, SLOT_A)
+        second = _record(code, 0x48, SECOND, SLOT_B)
+        code.raw(b"\xc7\x44\x24\x28" + struct.pack("<I", 0))  # 0x30 - 0x18 + 0x10
+        code.ret()
+        _user_calls(code)
+
+        answer = _index(image, tmp_path, _two(first, second))
+
+        assert answer["resolved_slots"] == {}
+
+
 class TestAnAddressHeldAcrossACallIsNotKnown:
     def test_an_address_taken_before_a_call_and_stored_after_it_is_no_address(
         self, tmp_path: Path
