@@ -160,6 +160,40 @@ class TestTheDecoderReadsEachFunction:
         code.raw(b"\x62\x00\x00\x00")  # EVEX: not decoded
         answer = artefact_index.function_index(_load(image, tmp_path))
         assert answer["undecoded_functions"] == 1
+        assert answer["undecoded"] == [hex(BASE + SECOND)]
+
+    def test_every_function_is_decoded_and_none_is_listed(self, tmp_path: Path) -> None:
+        image, code, slots = _x64()
+        _first_two(code, slots)
+        answer = artefact_index.function_index(_load(image, tmp_path))
+        assert answer["undecoded"] == []
+        assert answer["calls_unnamed"] == {}
+
+    def test_calls_that_name_nothing_are_counted_per_function(self, tmp_path: Path) -> None:
+        image, code, slots = _x64()
+        code.go(FIRST)
+        code.call_slot(slots["CreateMutexW"])  # an import: named
+        code.call_slot(DATA_RVA + 0x200)  # a slot the import table does not fill
+        code.raw(b"\xff\xd0")  # call rax
+        code.call(SECOND)  # a function: named
+        code.ret()
+        code.go(SECOND)
+        code.call_slot(slots["GetLastError"])
+        code.ret()
+        answer = artefact_index.function_index(_load(image, tmp_path))
+        assert answer["calls_unnamed"] == {hex(BASE + FIRST): 2}
+        # The pack's line for a row says nothing of them.
+        line = artefact_index.row_line(_row(answer, FIRST), "ev_0001")
+        assert "unnamed" not in line and "2 calls" not in line
+
+    def test_a_row_s_parts_are_its_line_after_the_address(self, tmp_path: Path) -> None:
+        image, code, slots = _x64()
+        _first_two(code, slots)
+        answer = artefact_index.function_index(_load(image, tmp_path))
+        row = _row(answer, FIRST)
+        assert artefact_index.row_line(row, "ev_0001") == (
+            f"- {hex(BASE + FIRST)}: {artefact_index.row_parts(row, 'ev_0001')}"
+        )
 
     def test_a_file_that_is_not_a_pe_is_an_error(self, tmp_path: Path) -> None:
         target = tmp_path / "a.txt"

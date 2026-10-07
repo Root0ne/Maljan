@@ -281,6 +281,36 @@ def _many_sections(n: int) -> tuple[Image, dict[str, Any]]:
     return image, {"pe_info": ("ev_0004", {"entry_point": TEXT_RVA, "export_rows": []})}
 
 
+def _resolved(n: int) -> tuple[Image, dict[str, Any]]:
+    """One function resolves ``n`` hashed names, each a call and a store of its return
+    register to its own slot; each of ``n`` other functions calls through one slot."""
+    record = 17
+
+    def body(i: int, start: int, at: Callable[[int], int], data: int) -> bytes:
+        if i == 0:
+            out = bytearray()
+            for k in range(n):
+                here = start + len(out)
+                out += b"\xba" + struct.pack("<I", 0x10000000 + k)
+                out += _call(here + 5, at(1))
+                out += b"\x48\x89\x05" + struct.pack("<i", data + 8 * k - (here + 17))
+            return bytes(out) + b"\xc3"
+        if i == 1:
+            return b"\x31\xc0\xc3"
+        slot = data + 8 * (i - 2)
+        return b"\xff\x15" + struct.pack("<i", slot - (start + 6)) + b"\xc3"
+
+    image = _image([record * n + 1, 4] + [8] * n, body, [bytes(8 * n)])
+    hits = [
+        {
+            "readings": [{"set": "exports", "name": f"Routine{k:06d}"}],
+            "occurrences": [{"rva": hex(TEXT_RVA + record * k)}],
+        }
+        for k in range(n)
+    ]
+    return image, {"hashes": ("ev_0020", {"hits": hits})}
+
+
 # -- the tests ----------------------------------------------------------------
 
 
@@ -335,6 +365,12 @@ class TestEveryShapeFinishes:
         assert answer["functions_known"] == 20_000
         assert answer["total"] == 1
 
+    def test_every_resolved_call_site_names_its_slot_and_every_call_through_it(self) -> None:
+        _, answer = _timed(_resolved, 2_000)
+        assert len(answer["resolved_slots"]) == 2_000
+        assert answer["calls_unnamed"] == {}
+        assert sum(len(row["slot_calls"]) for row in answer["rows"]) == 2_000
+
     def test_one_place_repeated_many_times_is_one_cell(self) -> None:
         image, _ = _cycle(10)
         place = {"rva": hex(TEXT_RVA + 2), "function": hex(TEXT_RVA)}
@@ -363,6 +399,14 @@ class TestTheCostGrowsWithTheFunctionsAndTheCalls:
         seconds = {n: min(_timed(_dense, n)[0] for _ in range(2)) for n in (1_000, 10_000)}
         seconds[100_000] = _timed(_dense, 100_000)[0]
         print("dense fan-out, 8 calls a function:", {n: round(s, 3) for n, s in seconds.items()})
+        assert seconds[100_000] < seconds[10_000] * 20
+
+    def test_a_hundred_thousand_resolved_call_sites(self) -> None:
+        _timed(_resolved, 1_000)
+        seconds = {n: min(_timed(_resolved, n)[0] for _ in range(2)) for n in (1_000, 10_000)}
+        seconds[100_000], answer = _timed(_resolved, 100_000)
+        print("resolved call sites:", {n: round(s, 3) for n, s in seconds.items()})
+        assert len(answer["resolved_slots"]) == 100_000
         assert seconds[100_000] < seconds[10_000] * 20
 
     def test_many_callers_of_one_function_holding_many_artefacts(self) -> None:

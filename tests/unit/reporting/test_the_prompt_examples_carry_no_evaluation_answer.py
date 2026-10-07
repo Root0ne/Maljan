@@ -122,6 +122,8 @@ from maljan.pipeline.run_state import NO_LIMIT, budget_line
 from maljan.pipeline.validation import (
     _UNPARSED_ANSWER_MESSAGE,
     ANALYST_FEEDBACK_CLOSING,
+    FUNCTION_CHECK_HEAD,
+    FUNCTION_CHECK_NOT_ASKED_HEAD,
     MALWARE_TYPES,
     UNATTRIBUTED_INDICATOR_CODE,
     CapabilityGrounding,
@@ -410,6 +412,14 @@ def _function_index_text() -> str:
             "offset": hex(0x1000 + 0x100 * i),
             "direct": 5 - i,
             "imports": cells("name", ["OpenThing"], artefact_index.SELF),
+            "slot_calls": [
+                {
+                    "name": "ShutThing",
+                    "sources": ["ev_0002"],
+                    "slot": "0x405000",
+                    "named_at": "0x401010",
+                }
+            ],
             "resolved": cells("name", ["CloseThing"], "ev_0002"),
             "decoded_strings": cells("text", ["a", "b"], "ev_0003"),
             "plain_strings": cells("text", ["c"], artefact_index.SELF),
@@ -743,6 +753,93 @@ _FLOW_FACTS_REPORT = MalwareReport(
 def _message_of(violation: Violation | None) -> str:
     """A question's words, which the builder answers only when there is one to ask."""
     assert violation is not None
+    return violation.message
+
+
+def _function_claim_question(several: bool = False) -> str:
+    """The question a claim gets when its function's own facts hold none of what it names.
+
+    With ``several``, the claim cites two listings: one function whose row is
+    long enough to be counted, and one that holds no artefact of its own.
+    """
+    from maljan.agents.function_map import function_artefacts
+    from maljan.pipeline.function_claims import (
+        check_function_claims,
+        function_facts,
+        listed_functions,
+    )
+    from maljan.schemas.evidence import LedgerEntry
+
+    data = {
+        "tool": "function_index",
+        "image_base": "0x400000",
+        "functions_known": 1,
+        "undecoded_functions": 0,
+        "undecoded": [],
+        "calls_unnamed": {},
+        "rows": [
+            {
+                "function": "0x401000",
+                "offset": "0x1000",
+                "direct": 1,
+                "imports": [{"name": "GetTickCount", "sources": ["this entry"]}],
+                "resolved": [],
+                "decoded_strings": [],
+                "plain_strings": [],
+                "capa": [],
+                "callers": [],
+                "callees": [],
+                "indirect": {"artefacts": 0, "through": 0},
+            }
+        ],
+        "other_callees": {},
+    }
+    if several:
+        data["rows"][0]["resolved"] = [
+            {"name": f"RtlUserRoutine{n:02d}", "sources": ["ev_0003"]} for n in range(40)
+        ]
+        data["rows"][0]["slot_calls"] = [
+            {"name": "GetTickCount", "sources": ["ev_0003"], "slot": "0x405000", "named_at": "0x0"}
+        ]
+        data["other_callees"] = {"0x402000": []}
+        data["calls_unnamed"] = {}
+    index = LedgerEntry(
+        id="ev_0001", agent="pipeline", tool="function_index", output="{}", structured=data
+    )
+    listing = LedgerEntry(
+        id="ev_0002",
+        tool="decompile_function",
+        args={"address": "401000"},
+        output="void FUN_00401000(void) { }",
+    )
+    listings = [listing]
+    claim = "0x401000 draws text with WriteConsoleW."
+    if several:
+        listings.append(
+            LedgerEntry(
+                id="ev_0004",
+                tool="decompile_function",
+                args={"address": "402000"},
+                output="void FUN_00402000(void) { }",
+            )
+        )
+        claim = "0x401000 and 0x402000 draw text with WriteConsoleW."
+    facts = function_facts(
+        listings, function_artefacts([index]), pack_entries=[index], bases=(0x400000,)
+    )
+    isr = AgentISR(
+        agent_id="a",
+        domain="static",
+        claims=[
+            ClaimEvidence(
+                claim=claim,
+                evidence_ref="[ev_0002], [ev_0004]" if several else "[ev_0002]",
+                confidence=0.5,
+            )
+        ],
+    )
+    found = check_function_claims(isr, listed_functions(listings), facts, (0x400000,))
+    (violation,) = found.violations
     return violation.message
 
 
@@ -1547,6 +1644,12 @@ PROMPTS: dict[str, str] = {
             )
         )
     ),
+    "claim naming a call its function's facts do not hold": _function_claim_question(),
+    "claim naming a call two functions' facts do not hold, one row counted, one with none": (
+        _function_claim_question(several=True)
+    ),
+    "judge's note on the function claims never asked": FUNCTION_CHECK_NOT_ASKED_HEAD,
+    "judge's note on the function claims the analysts kept": FUNCTION_CHECK_HEAD,
     "judge technique question's describe-check finding and its kind's label": (
         technique_question_text(
             [

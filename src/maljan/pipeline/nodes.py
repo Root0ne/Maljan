@@ -1656,6 +1656,9 @@ def brief_agent(agent: Any, state: AnalysisState, container: ServiceContainer) -
     # What the analysis server tied to each function, read once from the pack:
     # the function map joins it to the functions the agent reads.
     agent.pack_function_artefacts = pack_function_artefacts(state)
+    # The pack's entries themselves: a claim citing one is checked against
+    # what it holds (``pipeline.function_claims``).
+    agent.pack_entries = pack_entries(state.get("evidence_ledger") or [])
     # The routed format, so the platform check compares the agent's
     # techniques against the sample it is looking at.
     agent.sample_format = (

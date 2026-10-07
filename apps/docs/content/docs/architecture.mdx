@@ -588,6 +588,64 @@ entry holds it, how many rows it has, and that the analysis server's
 from a readable answer: an entry whose output the evidence byte budget dropped,
 or with no readable rows, says `no:` and why instead.
 
+A sample that resolves its imports by hash calls each through a pointer it
+fills itself, so its import cells alone name almost nothing. The index reads
+which slot each hashed name fills, in the straight-line run of code that holds
+the hashed value (bounded by the next transfer of control, never by an
+instruction count), two ways:
+
+- *A call and its store.* A call is tied to a hashed name only when exactly one
+  function-name hash is live in an argument at it, placed there in the same run:
+  on x64 in `rcx`, `rdx`, `r8` or `r9` (or their 32-bit forms, a register copy
+  carrying it), on x86 pushed or stored to `[esp+x]`. A hash held only in
+  another register ties nothing, and two function-name hashes live at one call
+  tie nothing; a module's hash beside them does not count. After a tied call, a
+  store of the return register to a rip-relative or absolute slot, before the
+  register is overwritten or another call is made, names that slot. The tie
+  is read from what the code places, not from what the call does: a hash left
+  live in an argument register across an unrelated call ties that call.
+- *A table of records.* With no tied call stored in the run, the records are
+  read from frame offsets alone. Each store to `[rsp+x]` or `[rbp+x]` (x86
+  `esp`, `ebp`) carries its offset, an `[rsp+x]` offset read against the stack
+  pointer the run began with through the pushes and pops between. A record's
+  extent is the table's stride, the equal spacing between consecutive hashed
+  values stored to the frame, the last record included, and every address
+  stored to the frame falls in the record its offset lies in, whatever order
+  the stores were emitted in. An instruction that holds a hashed value is never
+  also an address, and a call forgets every address a register held. A
+  record's slot is its one address some code calls or jumps through; a record
+  with none names nothing and lends nothing (a name resolved and never
+  called). The table names nothing when a record holds two such addresses,
+  when records name addresses at different places within them, when fewer
+  than two hashed values give no stride, when their spacings differ, when a
+  store to the frame of a pointer's width or more (a hashed value, an address,
+  any other value that wide, a store whose width is not read, or a pop into
+  the frame) lies outside every record, when the records do not share one
+  layout of addresses, or when the stack or frame pointer moves between the stores by
+  an amount the run cannot read (any other write of either, or an x86 call,
+  whose callee may pop its arguments). A narrower store (a loop counter, a
+  flag) is no record's and does not count, except where a record's called
+  pointer would sit one stride before the first record or after the last:
+  there a store of any width says the records may begin at the pointer, not
+  at the hash, and the table names nothing; on x86 a 32-bit counter is a
+  pointer's width, so a counter stored beside an x86 table makes it name
+  nothing. Stores that carry no frame offset (pushes, absolute slots) make no
+  records.
+
+A slot two names fill, or filled by a hashed value that reads as two names, is
+ambiguous and names nothing. Every call or jump through a named slot, direct or
+through a register a straight-line load from the slot set, is then a cell of its
+row, "calls through slots the hash resolution fills", with the slot and the
+instruction that named it, sourced to the resolution's entry. The entry lists
+the named slots some code calls through (`resolved_slots`) and the ambiguous
+ones (`ambiguous_slots`), the functions the decoder stopped in (`undecoded`),
+the callees of the functions that are no row (`other_callees`, so the call
+graph is whole), and per function the calls that still name nothing
+(`calls_unnamed`): through a register no load names, through a base and
+displacement or an index, every indirect jump that goes through no named or
+import slot, and a call through a slot nothing names. The function claim check
+reads them to know where an absent call is no fact.
+
 The analysis server serves the same index as the tool `function_index`
 (`path`, optional `address`, `carved_path`), built by the same code from the
 file alone. It joins `pe_info`, `resolve_api_hashes` and `decode_string_blobs`
@@ -1777,7 +1835,7 @@ from the heading patterns, so its memory grows only with the distinct claims. A
 tool-call tag or a JSON fence still open is read as kept, as the check keeps it,
 and cut back to the reading before it only if it resolves as removed.
 
-Two more questions are asked of an analyst's answer in the same validation
+Three more questions are asked of an analyst's answer in the same validation
 turn, each once, and what the analyst answers stands.
 
 - **Decompiled but not described** (`isr.decompiled_not_described`).
@@ -1843,6 +1901,105 @@ turn, each once, and what the analyst answers stands.
     had. One that keeps the library-only claims is kept, with the finding
     recorded.
   - *Why.* One analyst's answer was mostly such claims.
+- **A function claim its function's facts do not hold**
+  (`isr.function_claim_unheld`, `pipeline/function_claims.py`).
+  - *Which claims.* A claim that cites the listing of a function the
+    analyst's own calls decompiled (read as the decompiled-not-described
+    question reads them) or disassembled whole. When the claim cites the
+    listings of several functions, the ones its sentence names are taken, and
+    with none named, all of them.
+  - *What a claim names.* The Windows function names its sentence writes: an
+    identifier the vendored export catalogue or this run's own facts know,
+    written with a capital after its first letter, or alone in a code span
+    (`send`, `send()`), so neither a word of running text nor a name inside a
+    span's expression is read as one. An item of a slash list is read exactly as
+    written: `NtCreateFile/WriteFile` names both, and in `InternetOpenW/ConnectA`
+    only the first is a name. And the strings it quotes, in quotes or
+    in a code span holding quotes, of three characters or more with a letter or
+    a digit in them, read as claimed strings only when a strings source holds
+    them as data: a strings tool's answer, FLOSS's, the blob decoder's, or the
+    index's rows; a quoted phrase none holds (a capa rule's name, a paraphrase)
+    is recorded as not checked. A name or a value inside a statement of absence
+    ("does not use X", read by the absence question's own reader) is no claimed
+    one. Each name is read once, at its first place, and the absence reader
+    reads only the sentence holding it. The model is asked to write nothing
+    new; the claim format is unchanged.
+  - *Whose a value is.* A value is the function's the claim names last before
+    it in its own sentence (an abbreviation's dot, or a dot inside a token or a
+    number, ends no sentence). When the claim names no function at all, every
+    value is the cited function's. When it names one anywhere, a value its
+    sentence gives no function is recorded as given to none, saying whether it
+    comes before every function its sentence names or its sentence names
+    none; a value given to a function the cited listings do not reach is
+    recorded as given elsewhere.
+  - *Where a value holds.* In this order: the listing's own text; the
+    function's row in the pack's function index (its imports, its calls
+    through slots the hash resolution fills, resolved names, decoded and plain
+    strings and capa rules); the row of every function reachable from it
+    through call edges, a breadth-first walk over the index's whole call graph
+    with no depth bound, read once per listed function, a claim naming several
+    holding a value when any one's reach holds it (routines passed as
+    arguments, a thread's start or a callback, are no call edges and are not
+    followed); and the places the run's hash-resolution and
+    decoded-string answers put inside any of them. Nothing else excuses a
+    value. API names are compared without regard to case, a module in front
+    read off, the ANSI and wide spellings read as one name as the API
+    catalogue compares them; strings by the citation check's whole-value
+    reading.
+  - *The question.* One per claim block, naming every value held nowhere:
+    "claim n names X for function F [ev_…]; neither its listing nor its index
+    row [ev_…] holds X, and no function reachable from F through its call
+    edges holds it (k functions reachable); routines passed as arguments (a
+    thread's start, a callback) are not followed, only calls; F's row holds
+    …", the row in the pack's
+    own words, counted instead when those run past a finding row's bound. It
+    asks to keep the claim and say where the code shows it, to correct the name
+    or the function, or to withdraw the claim, with a reason.
+  - *What stands.* A correction leaves no finding. A kept claim stays, with the
+    finding recorded; §13 folds identical findings as it folds any. A retry
+    with fewer claim blocks is kept by the count rule the library-only question
+    already used: its blocks, less those any question asked about (library-only
+    or function claims), are at least as many as the first answer's blocks less
+    its asked ones. The rule counts blocks; it does not match them one by one,
+    so a retry that withdraws an asked claim and rewrites another is judged by
+    the count, as the library path always was. Withdrawn asked claims are not
+    asked about again as dropped work. A question no time was left for is
+    recorded as not asked. No claim is edited or dropped by the platform.
+  - *When the fact is absent.* Nothing is stated, and the loop's record in the
+    run summary (`budget.<agent>.function_claims`) gives each such claim or
+    value with `no:` and why: the run holds no function index, or its answer
+    was not kept whole; the index does not know the function; the pack the
+    analyst was shown left the function's row out for room; the decoder stopped
+    in a function reachable from it; a quoted value no strings source holds;
+    the facts or the check failed (its exception's type). An API name is also
+    not checked where a reachable function makes calls the index cannot name:
+    a call through a slot the hash resolution fills is named, and only a call
+    through a register no load names, an indirect jump, or a slot nothing
+    names leaves the name unchecked, since such a call may be the one the claim
+    names; nor where the index lists no callees for the functions that are no
+    row. The record also counts the claims checked and asked about.
+  - *The judge.* A kept finding is shown to the judge in the note that already
+    carries the technique check's kept findings, under its own heading, as the
+    facts alone, without the sentence asking the analyst to keep or withdraw;
+    a finding never asked stands under a heading of its own that says so.
+  - *Cost.* Linear in the claims, the index rows and the listings' size, and
+    in the call graph once per listed function, whatever the number of claims:
+    the rows are keyed by offset once, each listing and each row is read once,
+    the names a sentence may name and the sample strings are gathered once per
+    answer, each listed function's reach is walked once, and only a question
+    counts the functions a claim's several functions reach together. A
+    sentence's own reading is bounded per value: a dot's word is read back
+    over the longest abbreviation at most, and a statement of absence over a
+    name within the name's own clause: each clause's cues are found in one
+    pass and the readings that reach back over the clause (a negated noun
+    list, the ", such as" list a noun negation names, a negated verb's object)
+    worked out once per cue, a name then read by its place against them and
+    within the negation window around it, and a clause holding no word a
+    statement of absence is read from read for no name in it. The total is
+    linear in the text however many names one clause holds.
+  - *Why.* A reverser's claims named calls and behaviours for functions whose
+    listings do not make them, and nothing put the function's own facts
+    beside them.
 
 The cap the check reads is the one the call was built with. The container
 records it on the model it builds (`context_window.record_built_cap`), and the

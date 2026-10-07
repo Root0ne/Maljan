@@ -26,10 +26,11 @@ What it states, and nothing else:
   An unconditional jump to another function's start is that function's tail
   call: a callee, not more of the function the jump is in. A byte the decoder
   does not read ends that path, and the answer counts the functions where
-  that happened. A call names the import its slot or its jump thunk goes
-  through (``imports``), or the function at its target (``callees``); a call
-  through a register, or through a slot the import table does not fill, names
-  nothing.
+  that happened, and lists them (``undecoded``). A call names the import its
+  slot or its jump thunk goes through (``imports``), or the function at its
+  target (``callees``); a call through a register, or through a slot the
+  import table does not fill, names nothing, and the answer counts those per
+  function (``calls_unnamed``).
 * **The strings it refers to.** An instruction that takes an address in a
   data section (x64: RIP-relative; x86: an absolute address as a memory
   operand or an immediate) refers to the text there when the bytes from that
@@ -43,6 +44,26 @@ What it states, and nothing else:
 * **The names its hashes resolve to** where the hash resolution states the
   place inside it, and **the capa rules** that matched at its start or at an
   address inside it.
+* **The calls it makes through slots the hash resolution fills.** In the
+  straight-line run of code holding a hashed value (up to a transfer of
+  control), the slot that value's name is stored to: after a call exactly one
+  function-name hash reaches as an argument, a store of its return register
+  before the register is overwritten; or, in a table of records laid out by
+  frame offsets, the one record address some code calls or jumps through
+  (``_name_slots``). The tie is read from what the code places, not from what
+  the call does: a hash left live in an argument register across an unrelated
+  call ties that call, and a store of its return value names the slot after
+  the hash; the run's stores alone cannot tell the two calls apart. A call or
+  jump through a named slot, direct or through a register a straight-line
+  load from it set, is a call of that name (``slot_calls``), and leaves the
+  count of calls that name nothing. A slot two names fill is ambiguous
+  (``ambiguous_slots``) and names nothing. A table names nothing when a store
+  of a pointer's width or more (or of a width not read, or a pop into the
+  frame) lies outside its records; a narrower store (a loop counter, a flag)
+  is no record's, except where a record's called pointer would sit one stride
+  outside the table, where a store of any width makes it name nothing. On x86
+  a 32-bit counter is a pointer's width, so a counter stored beside an x86
+  table makes it name nothing.
 * **Callers and callees**, and the **indirect artefacts**: how many of its
   direct callees hold artefacts of their own, and how many those are, each
   callee's own distinct count added. One call deep and added per callee, so
@@ -86,6 +107,8 @@ from maljan.tools.call_sites import (
     _ONE_BYTE_MODRM,
     _TWO_BYTE_PLAIN,
     Instruction,
+    _frame_ref,
+    _frame_store,
     decode,
 )
 from maljan.tools.pe_image import Image, Section
@@ -143,6 +166,14 @@ class _Function:
     imports: set[str] = field(default_factory=set)
     data_refs: set[int] = field(default_factory=set)
     undecoded: bool = False
+    # Calls the decoder read whose target names neither an import nor a
+    # function nor a slot the hash resolution fills: through a register no
+    # straight-line load names, or through a slot nothing names.
+    unnamed_calls: int = 0
+    # Calls and jumps through a slot the import table does not fill, by slot:
+    # directly, or through a register a load from the slot set in straight-line
+    # code. Named after the walk where the hash resolution fills the slot.
+    slot_calls: dict[int, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -152,6 +183,9 @@ class _Graph:
     covered: dict[int, set[int]] = field(default_factory=dict)
     # The section lookup the walk used, for the readers of the data sections.
     sections: Any = None
+    # Each straight-line run of code that holds a hashed name, as its events
+    # (``_SlotReading``), for the slots the resolution fills.
+    runs: list[list[tuple[Any, ...]]] = field(default_factory=list)
 
 
 # -- reading the code -------------------------------------------------------
@@ -297,11 +331,35 @@ class _Reader:
     address.
     """
 
-    def __init__(self, image: Image, wanted: set[int]) -> None:
+    def __init__(
+        self,
+        image: Image,
+        wanted: set[int],
+        hashed: Mapping[int, tuple[str, ...]] | None = None,
+    ) -> None:
         self.image = image
         self.sections = _Sections(image)
         self.imports = image.imports_by_slot()
         self.wanted = wanted
+        # The places of the hash resolution's values, with the names each reads.
+        self.hashed = dict(hashed or {})
+        # The straight-line run being read: its events, whether it holds a
+        # hashed value, and the registers a load from a slot set in it.
+        self.events: list[tuple[Any, ...]] = []
+        self.holds_hash = False
+        self.loaded: dict[int, int] = {}
+        # The hashed values live in registers, and (x86) pushed or stored as
+        # stack arguments, since the run began or the last call consumed them:
+        # each ``(names, place)``.
+        self.live: dict[int, tuple[tuple[str, ...], int]] = {}
+        self.stacked: list[tuple[tuple[str, ...], int]] = []
+        # The registers that hold an address taken in the run, for a store of
+        # one to a frame slot.
+        self.addressed: dict[int, int] = {}
+        # The bytes pushed (less those popped) since the run began: an
+        # ``[rsp+x]`` store's offset is read against the stack pointer the run
+        # began with.
+        self.pushed = 0
         self.graph = _Graph()
         self.queue: list[int] = []
         self.sorted_starts: list[int] = []
@@ -404,16 +462,255 @@ class _Reader:
                         self.add(target, _CALL_TARGETS)
             elif callee is not None and self.attributing:
                 function.imports.add(str(callee[1]))
+            if self.attributing and callee is None:
+                slot = self._through(code, at, rva, ins)
+                if slot is not None:
+                    function.slot_calls[slot] = function.slot_calls.get(slot, 0) + 1
+                else:
+                    function.unnamed_calls += 1
+            elif self.attributing and callee is not None and callee[0] == "function":
+                if self._section(int(callee[1])) is None:
+                    function.unnamed_calls += 1
         if not self.attributing:
             return
+        if ins.kind == "stop" and _indirect_jump(code, at, self.image.is64):
+            slot = self._through(code, at, rva, ins, jump=True)
+            if slot is not None:
+                function.slot_calls[slot] = function.slot_calls.get(slot, 0) + 1
+            elif self._slot_of(code, at, rva, ins) not in self.imports or not _through_slot(
+                code, at, self.image.is64, jump=True
+            ):
+                # Every indirect jump that goes through no named slot and no
+                # import's slot is a call that names nothing: through a
+                # register, a base and displacement, or an index.
+                function.unnamed_calls += 1
+        hashed: list[tuple[tuple[str, ...], int]] = []
         if self.wanted:
             for place in range(rva, rva + ins.length):
                 if place in self.wanted:
                     self.graph.covered.setdefault(place, set()).add(function.start)
+                    names = self.hashed.get(place)
+                    if names is not None:
+                        self.events.append(("hash", names, place))
+                        self.holds_hash = True
+                        hashed.append((names, place))
+        self._read_events(code, at, rva, ins, hashed)
         if ins.kind != "call":
             data_target = _data_address(self.image, code, at, ins, rva + ins.length)
             if data_target is not None:
                 function.data_refs.add(data_target)
+        if ins.kind == "stop":
+            self._end_run()
+
+    def _slot_of(self, code: bytes, at: int, rva: int, ins: Instruction) -> int | None:
+        """The slot an instruction's memory operand names, by offset, or ``None``."""
+        found = _memory_operand(code, at, self.image.is64)
+        if found is None:
+            return None
+        displacement = found
+        if self.image.is64:
+            return rva + ins.length + displacement
+        slot = (displacement & 0xFFFFFFFF) - self.image.image_base
+        return slot if slot >= 0 else None
+
+    def _through(
+        self, code: bytes, at: int, rva: int, ins: Instruction, *, jump: bool = False
+    ) -> int | None:
+        """The slot a call or jump goes through when the import table does not fill it:
+        its memory operand, or the register a straight-line load from a slot set."""
+        through = _through_slot(code, at, self.image.is64, jump=jump)
+        if through is None:
+            return None
+        kind, value = through
+        if kind == "register":
+            return self.loaded.get(value)
+        slot = self._slot_of(code, at, rva, ins)
+        if slot is None or slot in self.imports:
+            return None
+        return slot
+
+    def _read_events(
+        self,
+        code: bytes,
+        at: int,
+        rva: int,
+        ins: Instruction,
+        hashed: Sequence[tuple[tuple[str, ...], int]] = (),
+    ) -> None:
+        """What one instruction adds to the straight-line run.
+
+        A call, tied to the one function-name hash live in an argument (x64:
+        ``rcx``, ``rdx``, ``r8``, ``r9``; x86: a pushed or ``[esp+x]`` stack
+        argument) when exactly one is, and to nothing otherwise; an address
+        taken, unless the instruction holds a hashed value; a store or an
+        overwrite of the return register; the slot a register is loaded from;
+        and where each hashed value is live.
+        """
+        is64 = self.image.is64
+        if ins.kind == "call":
+            arguments = (
+                [self.live[r] for r in _ARGUMENT_REGISTERS if r in self.live] if is64 else []
+            )
+            if not is64:
+                arguments = list(self.stacked)
+            named = [held for held in arguments if held[0]]
+            tied = named[0] if len(named) == 1 else None
+            self.events.append(("call", tied))
+            if not is64:
+                # An x86 callee may pop its own arguments: the stack pointer
+                # after the call is not one the run can read.
+                self.events.append(("frame moved", 4))
+            self.loaded.clear()
+            self.live.clear()
+            self.stacked.clear()
+            # A call may overwrite every volatile register: an address one held
+            # is no longer known to be there.
+            self.addressed.clear()
+            return
+        shape = _slot_shape(code, at, is64, ins.length)
+        slot = None
+        if shape is not None:
+            absolute = shape[2]
+            slot = (
+                absolute - self.image.image_base
+                if absolute is not None
+                else self._slot_of(code, at, rva, ins)
+            )
+        moved = _register_copy(code, at, is64)
+        carried = self.live.get(moved[1]) if moved is not None else None
+        frame = self._frame_events(code, at, rva, ins, hashed)
+        for register in ins.writes:
+            self.loaded.pop(register, None)
+            self.live.pop(register, None)
+            self.addressed.pop(register, None)
+        if carried is not None and moved is not None:
+            self.live[moved[0]] = carried
+        for held in hashed:
+            if ins.kind == "push" or (not is64 and _stack_store(code, at)):
+                self.stacked.append(held)
+            elif len(ins.writes) == 1:
+                self.live[next(iter(ins.writes))] = held
+        if shape is not None and slot is not None and 0 <= slot < self.image.size_of_image:
+            kind, named_register = shape[0], shape[1]
+            if kind == "store" and named_register == 0:
+                self.events.append(("store", slot, rva))
+            elif kind == "load" and named_register is not None:
+                self.loaded[named_register] = slot
+            elif kind == "address" and named_register is not None and not hashed:
+                if self._section(slot) is None:
+                    self.addressed[named_register] = slot
+        self.events.extend(frame)
+        self._move_frame(code, at, ins)
+        if 0 in ins.writes:
+            self.events.append(("overwrite",))
+
+    def _move_frame(self, code: bytes, at: int, ins: Instruction) -> None:
+        """Follow what one instruction does to the frame's base registers.
+
+        A push or a pop of a whole word moves the stack pointer by that word,
+        and later ``[rsp+x]`` offsets are read against the pointer the run began
+        with. Any other write of the stack pointer, and any write of the frame
+        pointer, moves the frame by an amount the run cannot read: it is marked
+        (``frame moved``), and a table whose stores it falls between names
+        nothing.
+        """
+        word = 8 if self.image.is64 else 4
+        found = _operand_bytes(code, at, self.image.is64)
+        if ins.kind == "push":
+            if found is None:
+                self.events.append(("frame moved", 4))
+            else:
+                self.pushed += word
+        elif found is not None and 0x58 <= found[0] <= 0x5F:
+            self.pushed -= word
+            if (found[0] & 7) | ((found[1] & 1) << 3) == 5:
+                self.events.append(("frame moved", 5))
+        else:
+            for base in (4, 5):
+                if base in ins.writes or (base == 4 and ins.moves_stack):
+                    self.events.append(("frame moved", base))
+
+    def _frame_events(
+        self,
+        code: bytes,
+        at: int,
+        rva: int,
+        ins: Instruction,
+        hashed: Sequence[tuple[tuple[str, ...], int]],
+    ) -> list[tuple[Any, ...]]:
+        """A store to a frame slot (``[rsp+x]``, ``[rbp+x]``, x86 ``esp``/``ebp``): its
+        offset, and the hashed value or the address it stores there (an ``[rsp+x]``
+        offset read against the stack pointer the run began with).
+
+        Read with ``call_sites._frame_ref`` and ``call_sites._frame_store``; a
+        store that carries no frame offset (a push, an absolute slot) is none.
+        """
+        is64 = self.image.is64
+        if not is64 and at < len(code) and 0x40 <= code[at] <= 0x4F:
+            return []
+        stored = _frame_store(code, at)
+        found = _operand_bytes(code, at, is64)
+        if found is not None and found[0] == 0x8F:
+            # A pop into the frame writes a whole word there, whatever width
+            # ``_frame_store`` reads for it, at an address read after the pop
+            # has moved the stack pointer.
+            popped = _frame_ref(code, at)
+            if popped is None or popped[2] & 7:
+                return []
+            word = 8 if is64 else 4
+            base, displacement = popped[3], popped[4]
+            moved = self.pushed - word if base == 4 else 0
+            return [("frame store", base, displacement - moved)]
+        if stored is None:
+            return []
+        # A store of a pointer's width or more, or of a width not read (or a
+        # record's own hash or address), is where a table's records may lie:
+        # one outside them means they are not a table. A narrower store (a
+        # loop counter, a flag) is no record's.
+        word = 8 if is64 else 4
+        store = ("frame store", stored[0], stored[1] - (self.pushed if stored[0] == 4 else 0))
+        wide = stored[2] is None or stored[2] >= word
+        # A narrower store is still read where it lies: at a record's pointer's
+        # place one stride outside the table, it says the table's phase is
+        # not what its hashed values say (``_name_slots``).
+        out: list[tuple[Any, ...]] = [store] if wide else [("frame narrow", *store[1:])]
+        reference = _frame_ref(code, at)
+        if reference is None:
+            return out
+        _rex, op, register, base, displacement = reference
+        if base == 4:
+            displacement -= self.pushed
+        if op == 0x89:
+            if register in self.live:
+                names, place = self.live[register]
+                out.append(("frame hash", base, displacement, names, place))
+            elif register in self.addressed:
+                out.append(("frame address", base, displacement, self.addressed[register], rva))
+        elif op == 0xC7:
+            if hashed:
+                for names, place in hashed:
+                    out.append(("frame hash", base, displacement, names, place))
+            elif not is64 and ins.length >= 4:
+                value = int.from_bytes(code[at + ins.length - 4 : at + ins.length], "little")
+                slot = value - self.image.image_base
+                if 0 <= slot < self.image.size_of_image and self._section(slot) is None:
+                    out.append(("frame address", base, displacement, slot, rva))
+        if not wide and any(event[0] in ("frame hash", "frame address") for event in out):
+            # A record's own hash or address counts whatever its width.
+            out = [store, *out[1:]]
+        return out
+
+    def _end_run(self) -> None:
+        """End the straight-line run: kept when it holds a hashed value."""
+        if self.holds_hash:
+            self.graph.runs.append(self.events)
+        self.events = []
+        self.holds_hash = False
+        self.loaded.clear()
+        self.live.clear()
+        self.stacked.clear()
+        self.addressed.clear()
+        self.pushed = 0
 
     def _tail_call(self, function: _Function, target: int) -> bool:
         """An unconditional jump to another function's start, recorded as its callee."""
@@ -430,13 +727,16 @@ class _Reader:
         base, code = found
         read = self.read[base]
         at = begin - base
+        self._end_run()
         while base + at < end and at < len(code):
             if read[at]:
+                self._end_run()
                 return
             read[at] = 1
             ins = decode(code, at, self.image.is64)
             if ins is None:
                 function.undecoded |= self.attributing
+                self._end_run()
                 return
             self._note(function, base + at, ins, code, at)
             if ins.kind == "stop" and ins.target[0] == "jump":
@@ -444,6 +744,7 @@ class _Reader:
                 if not begin <= target < end:
                     self._tail_call(function, target)
             at += ins.length
+        self._end_run()
 
     def _descend(self, function: _Function) -> None:
         """Decode from the start along every branch, within the function's own bound."""
@@ -460,6 +761,7 @@ class _Reader:
         pending = [function.start]
         while pending:
             rva = pending.pop()
+            self._end_run()
             while base <= rva < base + len(code) and not read[rva - base]:
                 if rva != function.start and rva in self.known:
                     break
@@ -484,10 +786,328 @@ class _Reader:
                         continue
                     break
                 rva = after
+        self._end_run()
 
 
-def _read_code(image: Image, seeds: Mapping[str, Iterable[int]], wanted: set[int]) -> _Graph:
-    reader = _Reader(image, wanted)
+# -- the slots a hash resolution fills ----------------------------------------
+
+
+def _operand_bytes(code: bytes, at: int, is64: bool) -> tuple[int, int, int] | None:
+    """``(opcode, rex, index after the opcode)`` with legacy prefixes and REX read off; ``None``
+    for an operand-size or address-size prefix, which no pointer store or load carries."""
+    i = at
+    while i < len(code) and code[i] in _LEGACY_PREFIXES:
+        if code[i] in (0x66, 0x67):
+            return None
+        i += 1
+    rex = 0
+    if is64 and i < len(code) and 0x40 <= code[i] <= 0x4F:
+        rex = code[i]
+        i += 1
+    if i >= len(code):
+        return None
+    return code[i], rex, i + 1
+
+
+# The registers the first four integer arguments travel in (x64): rcx, rdx, r8, r9.
+_ARGUMENT_REGISTERS = (1, 2, 8, 9)
+
+
+def _register_copy(code: bytes, at: int, is64: bool) -> tuple[int, int] | None:
+    """``(destination, source)`` of a register-to-register ``mov`` of 32 or 64 bits.
+
+    ``call_sites._register_move`` reads the 64-bit form only; a hashed value is
+    a 32-bit one and is moved as one (``mov edx, r12d``).
+    """
+    found = _operand_bytes(code, at, is64)
+    if found is None:
+        return None
+    op, rex, after = found
+    if op not in (0x89, 0x8B) or after >= len(code) or code[after] >> 6 != 3:
+        return None
+    modrm = code[after]
+    reg = ((modrm >> 3) & 7) | (((rex >> 2) & 1) << 3)
+    rm = (modrm & 7) | ((rex & 1) << 3)
+    return (rm, reg) if op == 0x89 else (reg, rm)
+
+
+def _stack_store(code: bytes, at: int) -> bool:
+    """Whether an x86 instruction stores an immediate to ``[esp+x]``."""
+    found = _operand_bytes(code, at, False)
+    if found is None:
+        return False
+    op, _rex, after = found
+    if op != 0xC7 or after + 1 >= len(code):
+        return False
+    modrm = code[after]
+    return modrm >> 6 in (0, 1, 2) and modrm & 7 == 4 and code[after + 1] & 7 == 4
+
+
+def _indirect_jump(code: bytes, at: int, is64: bool) -> bool:
+    """Whether the instruction at ``at`` is an indirect jump, through any operand."""
+    found = _operand_bytes(code, at, is64)
+    if found is None:
+        return False
+    op, _rex, after = found
+    return op == 0xFF and after < len(code) and (code[after] >> 3) & 7 in (4, 5)
+
+
+def _memory_operand(code: bytes, at: int, is64: bool) -> int | None:
+    """The 32-bit displacement of a ModRM operand that is rip-relative (x64) or an absolute
+    address (x86): mod 00, r/m 101."""
+    found = _operand_bytes(code, at, is64)
+    if found is None:
+        return None
+    _op, _rex, after = found
+    if after + 5 > len(code):
+        return None
+    modrm = code[after]
+    if modrm >> 6 != 0 or modrm & 7 != 5:
+        return None
+    return int.from_bytes(code[after + 1 : after + 5], "little", signed=is64)
+
+
+def _through_slot(
+    code: bytes, at: int, is64: bool, *, jump: bool = False
+) -> tuple[str, int] | None:
+    """What an indirect call (or, with ``jump``, an indirect jump) goes through: ``("memory",
+    0)`` for a slot at a rip-relative or absolute address, ``("register", r)``; else ``None``."""
+    found = _operand_bytes(code, at, is64)
+    if found is None:
+        return None
+    op, rex, after = found
+    if op != 0xFF or after >= len(code):
+        return None
+    modrm = code[after]
+    if (modrm >> 3) & 7 != (4 if jump else 2):
+        return None
+    if modrm >> 6 == 3:
+        return ("register", (modrm & 7) | ((rex & 1) << 3))
+    if modrm >> 6 == 0 and modrm & 7 == 5:
+        return ("memory", 0)
+    return None
+
+
+def _slot_shape(
+    code: bytes, at: int, is64: bool, length: int
+) -> tuple[str, int | None, int | None] | None:
+    """``(kind, register, absolute address)`` of an instruction that stores a register to a
+    slot, loads one from a slot, or takes an address: ``store``, ``load`` or ``address``.
+
+    The slot is a rip-relative or absolute memory operand, or the absolute
+    address an x86 immediate or ``moffs`` carries (then given). Anything else
+    is ``None``.
+    """
+    found = _operand_bytes(code, at, is64)
+    if found is None:
+        return None
+    op, rex, after = found
+    if op in (0xA1, 0xA3):
+        width = 8 if is64 else 4
+        if after + width > len(code):
+            return None
+        value = int.from_bytes(code[after : after + width], "little")
+        return ("load" if op == 0xA1 else "store", 0, value)
+    if not is64 and (op == 0x68 or 0xB8 <= op <= 0xBF):
+        if after + 4 > len(code):
+            return None
+        target = (op & 7) if op != 0x68 else None
+        return ("address", target, int.from_bytes(code[after : after + 4], "little"))
+    if after >= len(code):
+        return None
+    modrm = code[after]
+    reg = ((modrm >> 3) & 7) | (((rex >> 2) & 1) << 3)
+    memory = modrm >> 6 == 0 and modrm & 7 == 5
+    if op == 0x89 and memory:
+        return ("store", reg, None)
+    if op == 0x8B and memory:
+        return ("load", reg, None)
+    if op == 0x8D and memory:
+        return ("address", reg, None)
+    return None
+
+
+def _name_slots(
+    runs: Sequence[Sequence[tuple[Any, ...]]], called: set[int]
+) -> tuple[dict[int, tuple[str, int]], dict[int, list[str]]]:
+    """The slots the hash resolution fills, ``{slot: (name, where it is named)}``, and the
+    ones two names fill, ``{slot: names}``.
+
+    Read in each straight-line run that holds a hashed value, two ways:
+
+    * **The call and its store.** A call is tied to a hashed value only when
+      exactly one function-name hash is live in an argument at it, placed
+      there in the same run (``_Reader._read_events``). After a tied call, a
+      store of the return register to a slot, before the register is
+      overwritten or another call is made, names that slot.
+    * **A table of records.** With no tied call stored in the run, the records
+      are read from frame offsets alone (``_frame_records``): each record's
+      extent is the table's stride, the equal spacing between consecutive
+      hashed values stored to the frame, and the addresses stored to the frame
+      fall in the record their offset lies in, whatever order the stores were
+      emitted in. A record names the one address in it some code calls or
+      jumps through; one with none names nothing and lends nothing. A record
+      holding two such addresses, records naming addresses at different
+      offsets within them, fewer than two hashed values, spacings that
+      differ, a store of a pointer's width (or a hashed value or an address)
+      outside every record, records of different layouts,
+      or a frame moved between the stores by an amount the run cannot read,
+      mean the offsets do not lay out a table, and it names nothing. Stores
+      with no frame offset (pushes, absolute slots) make no records.
+
+    A hashed value whose readings give two names, and a slot two names fill,
+    are ambiguous and name nothing.
+    """
+    filled: dict[int, dict[str, tuple[str, int]]] = {}
+    ambiguous: dict[int, set[str]] = {}
+
+    def fill(slot: int, names: Sequence[str], where: int) -> None:
+        distinct = {name.lower(): name for name in names}
+        if len(distinct) == 1:
+            ((key, name),) = distinct.items()
+            filled.setdefault(slot, {}).setdefault(key, (name, where))
+        elif distinct:
+            ambiguous.setdefault(slot, set()).update(distinct.values())
+
+    for run in runs:
+        stored = False
+        for k, event in enumerate(run):
+            if event[0] != "call" or event[1] is None:
+                continue
+            names = event[1][0]
+            j = k + 1
+            while j < len(run):
+                later = run[j]
+                if later[0] == "store":
+                    fill(int(later[1]), names, int(later[2]))
+                    stored = True
+                    break
+                if later[0] in ("overwrite", "call"):
+                    break
+                j += 1
+        if stored or any(e[0] == "call" and e[1] is not None for e in run):
+            continue
+        for records, phases in _frame_records(run).values():
+            # A record names the one address in it some code calls through. One
+            # with none names nothing (a name resolved and never called) and
+            # lends nothing: its bounds are the table's stride. One with two, or
+            # records whose called addresses sit at different offsets within
+            # them, mean the records are not what the offsets say, and the table
+            # names nothing.
+            chosen = [
+                {(slot, where, within) for slot, where, within in inside if slot in called}
+                for _names, inside in records
+            ]
+            if any(len({slot for slot, _w, _i in found}) > 1 for found in chosen):
+                continue
+            places = {within for found in chosen for _s, _w, within in found}
+            if len(places) > 1:
+                continue
+            # A store of any width where a record's called pointer would sit one
+            # stride before the first record or after the last: the records may
+            # begin at the pointer, not at the hash, and the table names nothing.
+            if places & phases:
+                continue
+            for (names, _inside), found in zip(records, chosen, strict=True):
+                if found:
+                    slot, where, _within = min(found)
+                    fill(slot, names, where)
+    named: dict[int, tuple[str, int]] = {}
+    for slot, by_name in filled.items():
+        if len(by_name) == 1 and slot not in ambiguous:
+            named[slot] = next(iter(by_name.values()))
+        else:
+            ambiguous.setdefault(slot, set()).update(n for n, _w in by_name.values())
+    return named, {slot: sorted(names) for slot, names in ambiguous.items()}
+
+
+def _frame_records(
+    run: Sequence[tuple[Any, ...]],
+) -> dict[int, tuple[list[tuple[tuple[str, ...], list[tuple[int, int, int]]]], frozenset[int]]]:
+    """Per frame base, each record of a run's table: its hashed value's names and the
+    addresses stored inside it, ``(slot, where, offset within the record)``; and the
+    offsets within a record, modulo the stride, at which a store narrower than a
+    pointer lies outside every record.
+
+    Read from frame offsets alone, in whatever order the stores were emitted.
+    A record's extent is the table's stride, read from the equal spacing
+    between consecutive hashed values, ``[h_k, h_k + stride)``, the last record
+    included. A base names nothing when its hashed values are fewer than two
+    (no stride to read), when their spacings differ, when any store to the
+    base's frame of a pointer's width (or of a hashed value or an address) lies
+    before the first record or past the last one's end, when an address lies on
+    a hashed value's own offset, when the records
+    do not all hold their addresses at the same offsets within them (a table's
+    records share one layout), or when the frame moved by an amount the run
+    cannot read between its stores (``_Reader._move_frame``).
+    """
+    hashes: dict[int, list[tuple[int, tuple[str, ...]]]] = {}
+    addresses: dict[int, list[tuple[int, int, int]]] = {}
+    stores: dict[int, list[int]] = {}
+    offsets_stored: dict[int, list[int]] = {}
+    narrow: dict[int, list[int]] = {}
+    moved: dict[int, list[int]] = {}
+    for k, event in enumerate(run):
+        if event[0] == "frame hash":
+            hashes.setdefault(event[1], []).append((int(event[2]), tuple(event[3])))
+        elif event[0] == "frame address":
+            addresses.setdefault(event[1], []).append((int(event[2]), int(event[3]), int(event[4])))
+        elif event[0] == "frame store":
+            offsets_stored.setdefault(event[1], []).append(int(event[2]))
+            stores.setdefault(event[1], []).append(k)
+        elif event[0] == "frame narrow":
+            narrow.setdefault(event[1], []).append(int(event[2]))
+        elif event[0] == "frame moved":
+            moved.setdefault(event[1], []).append(k)
+    out: dict[
+        int, tuple[list[tuple[tuple[str, ...], list[tuple[int, int, int]]]], frozenset[int]]
+    ] = {}
+    for base, held in hashes.items():
+        first_store, last_store = stores[base][0], stores[base][-1]
+        if any(first_store < k < last_store for k in moved.get(base, ())):
+            continue
+        held.sort()
+        offsets = [offset for offset, _names in held]
+        spacings = {later - earlier for earlier, later in zip(offsets, offsets[1:], strict=False)}
+        if len(spacings) != 1:
+            continue
+        (stride,) = spacings
+        if stride <= 0:
+            continue
+        end = offsets[-1] + stride
+        if any(not offsets[0] <= offset < end for offset in offsets_stored.get(base, ())):
+            continue
+        records: list[tuple[tuple[str, ...], list[tuple[int, int, int]]]] = [
+            (names, []) for _offset, names in held
+        ]
+        fits = True
+        for offset, slot, where in addresses.get(base, ()):
+            k, within = divmod(offset - offsets[0], stride)
+            if not 0 <= k < len(records) or within == 0:
+                fits = False
+                break
+            records[k][1].append((slot, where, within))
+        if not fits:
+            continue
+        layouts = {tuple(sorted(within for _s, _w, within in inside)) for _n, inside in records}
+        if len(layouts) != 1 or len(set(next(iter(layouts)))) != len(next(iter(layouts))):
+            continue
+        phases = frozenset(
+            (offset - offsets[0]) % stride
+            for offset in narrow.get(base, ())
+            if not offsets[0] <= offset < end
+        )
+        out[base] = (records, phases)
+    return out
+
+
+def _read_code(
+    image: Image,
+    seeds: Mapping[str, Iterable[int]],
+    wanted: set[int],
+    hashed: Mapping[int, tuple[str, ...]] | None = None,
+) -> _Graph:
+    reader = _Reader(image, wanted, hashed)
     for begin, end, owner in zip(
         image.function_starts, image.function_ends, image.function_owners, strict=False
     ):
@@ -545,9 +1165,13 @@ def _printable(byte: int) -> bool:
 class _Cell:
     """One artefact of one function, and the entries that state it."""
 
-    kind: str  # "import", "name", "decoded", "plain" or "capa"
+    kind: str  # "import", "slot", "name", "decoded", "plain" or "capa"
     value: str
     sources: list[str] = field(default_factory=list)
+    # For a call through a slot the hash resolution fills: the slot, and the
+    # instruction that names it (the store, or the record's address).
+    slot: int | None = None
+    named_at: int | None = None
 
 
 class _Rows:
@@ -556,12 +1180,21 @@ class _Rows:
     def __init__(self) -> None:
         self.cells: dict[int, dict[tuple[str, str], _Cell]] = {}
 
-    def add(self, start: int, kind: str, value: str, source: str) -> None:
+    def add(
+        self,
+        start: int,
+        kind: str,
+        value: str,
+        source: str,
+        slot: tuple[int, int] | None = None,
+    ) -> None:
         group = _GROUP[kind]
         cells = self.cells.setdefault(start, {})
         cell = cells.get((group, value))
         if cell is None:
-            cells[(group, value)] = _Cell(kind, value, [source])
+            cells[(group, value)] = _Cell(
+                kind, value, [source], *(slot if slot is not None else (None, None))
+            )
             return
         if kind == "decoded" and cell.kind == "plain":
             cell.kind = "decoded"
@@ -571,7 +1204,14 @@ class _Rows:
 
 # An import called and a name a hash resolves to are one artefact when they are
 # one name; a plain and a decoded string are one when they are one text.
-_GROUP = {"import": "api", "name": "api", "plain": "text", "decoded": "text", "capa": "capa"}
+_GROUP = {
+    "import": "api",
+    "name": "api",
+    "slot": "slot",
+    "plain": "text",
+    "decoded": "text",
+    "capa": "capa",
+}
 
 
 def _source(pair: tuple[str, Mapping[str, Any]] | None) -> tuple[str, Mapping[str, Any]]:
@@ -701,10 +1341,22 @@ def index_image(
 
     wanted = _places_wanted(capa_data, floss_data, hash_data, blob_data, base)
     wanted.update(offset for _, offset in addresses)
-    graph = _read_code(image, seeds, wanted)
+    graph = _read_code(image, seeds, wanted, _hashed_places(hash_data))
     placer = _Placer(image, graph)
     rows = _Rows()
     unplaced: dict[str, int] = {}
+    # The slots the hash resolution fills, and each call through one: an API
+    # call of that name, sourced to the resolution's entry. A call through a
+    # slot nothing names, or two names fill, stays a call that names nothing.
+    called = {slot for f in graph.functions.values() for slot in f.slot_calls}
+    filled, ambiguous = _name_slots(graph.runs, called) if hash_id else ({}, {})
+    for start, function in graph.functions.items():
+        for slot, count in sorted(function.slot_calls.items()):
+            if slot in filled:
+                name, named_at = filled[slot]
+                rows.add(start, "slot", name, hash_id, (slot, named_at))
+            else:
+                function.unnamed_calls += count
 
     def place(where: list[int], kind: str, value: str, source: str, what: str) -> None:
         if not where:
@@ -772,6 +1424,19 @@ def index_image(
             place(where, "capa", str(capability["rule"]), capa_id, "capa")
 
     data = _answer(image, graph, rows, names, unplaced, entry_points)
+    # Only the slots some code calls or jumps through are stated.
+    data["resolved_slots"] = {
+        hex(base + slot): name for slot, (name, _w) in sorted(filled.items()) if slot in called
+    }
+    data["ambiguous_slots"] = {
+        hex(base + slot): names for slot, names in sorted(ambiguous.items()) if slot in called
+    }
+    # The callees of every function that is no row, so the call graph is whole.
+    data["other_callees"] = {
+        hex(base + start): [hex(base + c) for c in sorted(function.callees)]
+        for start, function in sorted(graph.functions.items())
+        if start not in rows.cells and function.callees
+    }
     data["function_lists"] = function_lists
     data["absent"] = dict(absent or {})
     if addresses:
@@ -848,11 +1513,12 @@ def _answer(
             "function": va(start),
             "offset": hex(start),
             "direct": len(cells),
-            "imports": [_cell(c) for c in listed if c.kind == "import"],
-            "resolved": [_cell(c) for c in listed if c.kind == "name"],
-            "decoded_strings": [_cell(c) for c in listed if c.kind == "decoded"],
-            "plain_strings": [_cell(c) for c in listed if c.kind == "plain"],
-            "capa": [_cell(c) for c in listed if c.kind == "capa"],
+            "imports": [_cell(c, base) for c in listed if c.kind == "import"],
+            "slot_calls": [_cell(c, base) for c in listed if c.kind == "slot"],
+            "resolved": [_cell(c, base) for c in listed if c.kind == "name"],
+            "decoded_strings": [_cell(c, base) for c in listed if c.kind == "decoded"],
+            "plain_strings": [_cell(c, base) for c in listed if c.kind == "plain"],
+            "capa": [_cell(c, base) for c in listed if c.kind == "capa"],
             "callers": [va(c) for c in sorted(callers.get(start, ()))],
             "callees": [va(c) for c in sorted(held.callees if held else ())],
             "indirect": {"artefacts": reached, "through": through},
@@ -879,6 +1545,13 @@ def _answer(
         "function_sources": {s: sources[s] for s in _SOURCE_ORDER if s in sources},
         "function_lists": FUNCTION_LISTS_ABSENT,
         "undecoded_functions": sum(1 for f in graph.functions.values() if f.undecoded),
+        # Per function, by address: which the decoder stopped in, and how many
+        # calls each makes that name nothing. The pack's lines do not print
+        # them; they say where an absent call or string is not a fact.
+        "undecoded": [va(s) for s, f in sorted(graph.functions.items()) if f.undecoded],
+        "calls_unnamed": {
+            va(s): f.unnamed_calls for s, f in sorted(graph.functions.items()) if f.unnamed_calls
+        },
         "unplaced": dict(sorted(unplaced.items())),
         "total": len(out),
         "rows": out,
@@ -887,12 +1560,42 @@ def _answer(
 
 _SOURCE_ORDER = (_EXCEPTION_DIRECTORY, _EXPORTS, _ENTRY_POINT, _CAPA, _CALL_TARGETS)
 _SOURCES_SAID = "functions come from " + ", ".join(_SOURCE_ORDER)
-_KIND_ORDER = {"import": 0, "name": 1, "decoded": 2, "plain": 3, "capa": 4}
+_KIND_ORDER = {"import": 0, "slot": 1, "name": 2, "decoded": 3, "plain": 4, "capa": 5}
 
 
-def _cell(cell: _Cell) -> dict[str, Any]:
+def _cell(cell: _Cell, base: int = 0) -> dict[str, Any]:
     key = "rule" if cell.kind == "capa" else "text" if cell.kind in ("plain", "decoded") else "name"
-    return {key: cell.value, "sources": list(cell.sources)}
+    out: dict[str, Any] = {key: cell.value, "sources": list(cell.sources)}
+    if cell.slot is not None and cell.named_at is not None:
+        out["slot"] = hex(base + cell.slot)
+        out["named_at"] = hex(base + cell.named_at)
+    return out
+
+
+def _hashed_places(hashes: Mapping[str, Any]) -> dict[int, tuple[str, ...]]:
+    """Each place the hash resolution states a value at, with the function names it reads.
+
+    A module's name is no function name: a place reading only modules is kept
+    with no names, so a table's records stay counted as records.
+    """
+    places: dict[int, tuple[str, ...]] = {}
+    for hit in hashes.get("hits") or []:
+        if not isinstance(hit, Mapping):
+            continue
+        names = tuple(
+            dict.fromkeys(
+                str(reading.get("name") or "")
+                for reading in hit.get("readings") or []
+                if isinstance(reading, Mapping)
+                and reading.get("set") != "modules"
+                and reading.get("name")
+            )
+        )
+        for occurrence in hit.get("occurrences") or []:
+            rva = _hex(occurrence.get("rva")) if isinstance(occurrence, Mapping) else None
+            if rva is not None:
+                places[rva] = tuple(dict.fromkeys([*places.get(rva, ()), *names]))
+    return places
 
 
 def function_index(
@@ -929,6 +1632,9 @@ SERVED_BY = "the analysis server's function_index tool serves it whole or by add
 
 # How the callees' artefacts are counted, said beside the count.
 PER_CALLEE = "counted per callee"
+
+# How a row names the calls it makes through slots the hash resolution fills.
+SLOT_CALLS_SAID = "calls through slots the hash resolution fills"
 
 _ADDRESS = re.compile(r"0x[0-9a-f]{1,16}")
 
@@ -985,6 +1691,18 @@ def row_line(row: Mapping[str, Any], entry_id: str) -> str:
     the pack's escaping, as every recovered string is, so they read as data;
     the strings a function refers to are counted, never shown.
     """
+    said = [f"export {sample_text(n)}" for n in row.get("names") or []]
+    if row.get("entry_point"):
+        said.append("entry point")
+    stated = str(row.get("function") or "")
+    where = stated if _ADDRESS.fullmatch(stated) else sample_text(stated)
+    if said:
+        where += f" ({', '.join(said)})"
+    return f"- {where}: {row_parts(row, entry_id)}"
+
+
+def row_parts(row: Mapping[str, Any], entry_id: str) -> str:
+    """What :func:`row_line` says a function holds, after its address."""
     parts: list[str] = []
 
     def named(key: str, verb: str, field: str) -> None:
@@ -994,6 +1712,7 @@ def row_line(row: Mapping[str, Any], entry_id: str) -> str:
             parts.append(f"{verb} {names} ({', '.join(_ids(cells, entry_id))})")
 
     named("imports", "calls", "name")
+    named("slot_calls", SLOT_CALLS_SAID, "name")
     named("resolved", "resolves", "name")
     texts = []
     for key, one, many in (
@@ -1021,14 +1740,7 @@ def row_line(row: Mapping[str, Any], entry_id: str) -> str:
             f"{through} {'callee holds' if through == 1 else 'callees hold'} {reached} "
             f"{'artefact' if reached == 1 else 'artefacts'} of their own, {PER_CALLEE}"
         )
-    said = [f"export {sample_text(n)}" for n in row.get("names") or []]
-    if row.get("entry_point"):
-        said.append("entry point")
-    stated = str(row.get("function") or "")
-    where = stated if _ADDRESS.fullmatch(stated) else sample_text(stated)
-    if said:
-        where += f" ({', '.join(said)})"
-    return f"- {where}: {'; '.join(parts)}"
+    return "; ".join(parts)
 
 
 # -- the analysis server's tool --------------------------------------------------

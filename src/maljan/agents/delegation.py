@@ -587,6 +587,7 @@ def _brief_callee(caller: Any, callee: Any, *, stage: str, round_index: int) -> 
     callee.pack_ledger_ids = list(getattr(caller, "pack_ledger_ids", None) or [])
     callee.run_state_block = str(getattr(caller, "run_state_block", "") or "")
     callee.pack_function_artefacts = getattr(caller, "pack_function_artefacts", None)
+    callee.pack_entries = list(getattr(caller, "pack_entries", None) or [])
     callee.pack_image_bases = tuple(getattr(caller, "pack_image_bases", None) or ())
     callee.sample_format = tuple(getattr(caller, "sample_format", ("unknown", "unknown")))
     callee.call_chain = (*tuple(getattr(caller, "call_chain", ()) or ()), str(caller.name))
