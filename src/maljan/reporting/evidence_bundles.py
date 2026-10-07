@@ -17,7 +17,6 @@ than fabricate — see other/docs/report-reference/ ("state absence explicitly")
 from __future__ import annotations
 
 import ipaddress
-import re
 from typing import Any
 
 from maljan.reporting.models import MalwareReport
@@ -99,13 +98,6 @@ _SECTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "payloads": ("list_segments", "decompile_function", "extract_iocs_with_context"),
     "host_identifiers": ("list_strings", "extract_iocs_with_context"),
 }
-
-# The words that speak of a ransom note: in a claim, its own words as whole
-# words ("notes" but not "annotated"); in a tool's answer or a category, the
-# words a note or a ransomware family is written with, "note" alone being an
-# ordinary string.
-_RANSOM_CLAIM_RE = re.compile(r"\b(?:ransom\w*|readme\w*|extortion\w*|notes?)\b", re.IGNORECASE)
-_RANSOM_TEXT_RE = re.compile(r"\b(?:ransom\w*|readme\w*|extortion\w*)\b", re.IGNORECASE)
 
 # Keyword hints to pull the relevant ISR claims into a technical section.
 _SECTION_CLAIM_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -405,28 +397,6 @@ def bundle_for(
                 "urls": [u.url for u in (net.urls if net else [])],
                 "user_agents": (net.user_agents if net else []),
             },
-        }
-
-    if section == "ransom_note":
-        # Asked only when something in the run speaks of a ransom note: a
-        # claim naming one, a strings answer holding the words of one, or a
-        # judge's category of ransomware. The strings tools answer on every
-        # sample and the capability profile is measured on every PE, so with
-        # those alone every run asked for a note and printed none.
-        category = str(report.malware_category or "")
-        return {
-            "claims": [
-                c
-                for c in all_claims
-                if _RANSOM_CLAIM_RE.search(f"{c['claim']} {c['evidence_ref']}")
-            ],
-            "tool_outputs": [
-                o
-                for o in _filter_tool_outputs(tech_ev, _SECTION_TOOL_HINTS[section])
-                if _RANSOM_TEXT_RE.search(o["output"])
-            ],
-            "binary": base,
-            "facts": {"category": category} if _RANSOM_TEXT_RE.search(category) else {},
         }
 
     # Generic technical-spine section. These carried ``facts: {}`` until
