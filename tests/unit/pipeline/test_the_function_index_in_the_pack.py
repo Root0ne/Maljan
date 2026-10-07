@@ -152,6 +152,32 @@ class TestTheIndexTakesTheRoomLeft:
         text = render_pack([*_earlier(), failed], 0)
         assert text.split("\n")[-1] == "[ev_0006] function index: failed (ValueError: x)"
 
+    def test_a_row_too_long_for_the_room_is_counted_and_the_next_rows_still_shown(self) -> None:
+        index = _index()
+        data = dict(index.structured)
+        huge = dict(data["rows"][0])
+        huge["imports"] = [{"name": f"Import{i:04d}", "sources": [SELF]} for i in range(400)]
+        data["rows"] = [huge, *data["rows"][1:]]
+        entry = _entry(INDEX_TOOL, data, 6)
+        whole = render_pack([entry], 0).split("\n")
+        room = sum(len(line) + 1 for line in (whole[0], *whole[2:])) + 200
+        lines = render_pack([entry], room).split("\n")
+        assert lines[1:-1] == whole[2:]
+        assert lines[-1].startswith("1 more row not shown here (pack room)")
+
+    def test_a_source_the_index_could_not_join_is_said_with_its_reason(self) -> None:
+        index = _index()
+        data = {
+            **index.structured,
+            "absent": {
+                "capa": "no: [ev_0005] failed: capa produced no result",
+                "floss": "no: [ev_0003] floss is not installed",
+            },
+        }
+        head = render_pack([_entry(INDEX_TOOL, data, 6)], 0).split("\n")[0]
+        assert "; capa: no: [ev_0005] failed: capa produced no result" in head
+        assert "; floss: no: [ev_0003] floss is not installed" in head
+
     def test_an_index_with_no_rows_says_so_in_its_head(self) -> None:
         empty = _index(rows=0)
         line = render_pack([empty], 0)
@@ -174,6 +200,23 @@ class TestTheRunStateSaysWhereItIs:
         assert index_sentence(index.id, index.structured).endswith(
             "; the analysis server's function_index tool serves it whole or by address."
         )
+
+    def test_an_entry_whose_output_was_dropped_states_no_count(self) -> None:
+        index = _index()
+        index.output, index.structured, index.truncated = "", None, True
+        state = {"evidence_ledger": [e.model_dump(mode="json") for e in [*_earlier(), index]]}
+        (line,) = [x for x in render_run_state(state).split("\n") if "function index" in x]
+        assert line == (
+            "function index: [ev_0006] no: its output was dropped (evidence byte budget); "
+            "the analysis server's function_index tool serves it whole or by address."
+        )
+
+    def test_an_entry_with_no_readable_rows_states_no_count(self) -> None:
+        unreadable = _entry(INDEX_TOOL, "not an answer", 6)
+        state = {"evidence_ledger": [e.model_dump(mode="json") for e in [*_earlier(), unreadable]]}
+        (line,) = [x for x in render_run_state(state).split("\n") if "function index" in x]
+        assert line.startswith("function index: [ev_0006] no: it holds no readable rows;")
+        assert not any(ch.isdigit() for ch in line.split("]", 1)[1])
 
     def test_a_run_without_an_index_has_no_such_line(self) -> None:
         state = {"evidence_ledger": [e.model_dump(mode="json") for e in _earlier()]}

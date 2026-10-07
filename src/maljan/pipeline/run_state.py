@@ -255,7 +255,7 @@ def _lines(
         lines.append(f"ledger: {total} entries ({span}), {len(pack)} from the triage pack")
     index = by_tool.get(INDEX_TOOL)
     if index is not None:
-        lines.append(index_sentence(index.id, index.structured))
+        lines.append(index_sentence(index.id, index.structured, dropped=index.truncated))
     # A call that was never made — a skipped lookup, a step after the budget —
     # is not a failed tool; the pack line says "not done" for it, and so does
     # this one by leaving it out.
@@ -273,14 +273,26 @@ def _lines(
     return lines
 
 
-def index_sentence(entry_id: str, data: Any) -> str:
-    """The one line saying the function index exists, how many rows it has and where it is."""
-    rows = len(data.get("rows") or []) if isinstance(data, Mapping) else 0
-    noun = "function" if rows == 1 else "functions"
+def index_sentence(entry_id: str, data: Any, *, dropped: bool = False) -> str:
+    """The one line saying the function index exists, how many rows it has and where it is.
+
+    A count is stated only from a readable answer. An entry whose output the
+    evidence byte budget dropped, or whose answer holds no readable rows, says
+    ``no:`` and why, and still where the whole index is served.
+    """
+    rows = data.get("rows") if isinstance(data, Mapping) else None
+    if dropped and not isinstance(rows, list):
+        return (
+            f"function index: [{entry_id}] no: its output was dropped (evidence byte budget); "
+            f"{SERVED_BY}."
+        )
+    if not isinstance(rows, list):
+        return f"function index: [{entry_id}] no: it holds no readable rows; {SERVED_BY}."
+    noun = "function" if len(rows) == 1 else "functions"
     return (
-        f"function index: [{entry_id}] lists the {rows} {noun} holding artefacts of their own, "
-        "each with its imports called, resolved names, strings, capa rules, callers and callees; "
-        f"{SERVED_BY}."
+        f"function index: [{entry_id}] lists the {len(rows)} {noun} holding artefacts of their "
+        "own, each with its imports called, resolved names, strings, capa rules, callers and "
+        f"callees; {SERVED_BY}."
     )
 
 

@@ -1169,12 +1169,26 @@ class _Pack:
         if routed != "pe":
             return
         path = self.inputs.sample_path
+        latest: dict[str, LedgerEntry] = {}
+        for recorded in self.recorder.entries:
+            if recorded.agent == PIPELINE and recorded.tool in _INDEX_SOURCES:
+                latest[recorded.tool] = recorded
         joined: dict[str, tuple[str, dict[str, Any]]] = {}
-        for entry in self.recorder.entries:
-            if entry.agent != PIPELINE or not entry.ok:
-                continue
-            if entry.tool in _INDEX_SOURCES and isinstance(entry.structured, dict):
-                joined[entry.tool] = (entry.id, entry.structured)
+        absent: dict[str, str] = {}
+        for tool in _INDEX_SOURCES:
+            entry = latest.get(tool)
+            if entry is None:
+                absent[tool] = "no: the pack holds no entry of it"
+            elif entry.ok and isinstance(entry.structured, dict):
+                joined[tool] = (entry.id, entry.structured)
+            elif entry.ok:
+                absent[tool] = f"no: [{entry.id}] holds no readable answer"
+            elif _was_not_made(entry):
+                said = str(entry.error or entry.output or "")[len(NOT_RUN_PREFIX) :].strip()
+                absent[tool] = f"no: [{entry.id}] {_short(said, 200)}"
+            else:
+                failed = _short(entry.error or entry.output, 200)
+                absent[tool] = f"no: [{entry.id}] failed: {failed}"
         args: dict[str, Any] = {"path": path}
         if joined:
             args["joined"] = [f"{entry_id} {tool}" for tool, (entry_id, _) in joined.items()]
@@ -1188,14 +1202,13 @@ class _Pack:
                 floss=joined.get("floss"),
                 hashes=joined.get("resolve_api_hashes"),
                 blobs=joined.get("decode_string_blobs"),
+                absent=absent,
             ),
         )
 
 
 # The pack's answers the function index joins, by tool.
-_INDEX_SOURCES = frozenset(
-    {"pe_info", "capa", "floss", "resolve_api_hashes", "decode_string_blobs"}
-)
+_INDEX_SOURCES = ("pe_info", "capa", "floss", "resolve_api_hashes", "decode_string_blobs")
 
 # The formats the constant scan reads: the executable images.
 CONSTANT_FORMATS = frozenset({"pe", "elf", "macho"})
@@ -1524,22 +1537,25 @@ def _index_block(entry: LedgerEntry, room: int | None) -> str | None:
     head = f"[{entry.id}] {_GROUP_LABELS[INDEX_TOOL]}: {artefact_index.head_text(data, len(rows))}"
     if room is not None and len(head) > room:
         return None
+    every = [artefact_index.row_line(row, entry.id) for row in rows]
+    if room is None or _joined_len([head, *every]) <= room:
+        return "\n".join([head, *every])
+    # Not every row fits: room is kept for the last line at its longest, and
+    # each row in rank order that fits what is left is shown; a row that
+    # does not is counted as left out and the next is tried.
+    budget = room - len(_rows_left_out(len(rows), entry.id)) - 1
+    if len(head) > budget:
+        return None
     lines = [head]
     used = len(head)
-    for index, row in enumerate(rows):
-        line = artefact_index.row_line(row, entry.id)
-        left = len(rows) - index - 1
-        tail = len(_rows_left_out(left, entry.id)) + 1 if left else 0
-        if room is not None and used + 1 + len(line) + tail > room:
-            break
+    left = 0
+    for line in every:
+        if used + 1 + len(line) > budget:
+            left += 1
+            continue
         lines.append(line)
         used += 1 + len(line)
-    left = len(rows) - (len(lines) - 1)
-    if left:
-        last = _rows_left_out(left, entry.id)
-        if room is not None and used + 1 + len(last) > room:
-            return None
-        lines.append(last)
+    lines.append(_rows_left_out(left, entry.id))
     return "\n".join(lines)
 
 
