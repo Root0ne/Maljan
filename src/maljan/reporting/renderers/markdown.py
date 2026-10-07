@@ -50,7 +50,11 @@ from maljan.analysis.run_summary import (
 )
 from maljan.core.logger import logger
 from maljan.reporting.defang import ProseDefanger, defang
-from maljan.reporting.judge_reasons import judge_reasons_shown, word_cut
+from maljan.reporting.judge_reasons import (
+    JUDGE_REASON_WIDTH,
+    judge_reasons_shown,
+    status_shown,
+)
 from maljan.reporting.ledger_projection import cell_network_values, listing_kind
 from maljan.reporting.ledger_report import (
     ANALYST_SECTION_SOURCES,
@@ -1255,7 +1259,7 @@ class MarkdownRenderer:
             lines.append("_No ATT&CK techniques mapped._")
             return "\n".join(
                 lines
-                + _not_published_lines(report)
+                + _not_published_lines(report, ctx)
                 + _mbc_lines(report)
                 + _unmapped_behaviour_lines(report)
             )
@@ -1354,7 +1358,7 @@ class MarkdownRenderer:
             )
         return "\n".join(
             lines
-            + _not_published_lines(report)
+            + _not_published_lines(report, ctx)
             + _mbc_lines(report)
             + _unmapped_behaviour_lines(report)
         ).rstrip()
@@ -3756,15 +3760,10 @@ def _attack_row(
     if not cell.technique_id_valid:
         status = f"unverified id ({UNVERIFIED_TECHNIQUE_MARKER})"
     elif cell.not_published:
-        said, through = judge_reasons_shown(cell.not_published)
         # A judge's reason is shortened by its own rule and never cut into;
         # what follows it, and any other reason, keeps the cell's cut.
-        head, tail = said[:through], said[through:]
-        room = max(0, 200 - len(head))
-        status = (
-            "claimed, not published: "
-            + ctx.plain(head)
-            + (word_cut(ctx.plain(tail), room) if head else _truncate(ctx.plain(tail), room))
+        status = "claimed, not published: " + status_shown(
+            cell.not_published, JUDGE_REASON_WIDTH, ctx.plain
         )
     else:
         status = "published" + _corroborated_words(mapping, rules)
@@ -4248,7 +4247,7 @@ def _mbc_lines(report: MalwareReport) -> list[str]:
     return lines
 
 
-def _not_published_lines(report: MalwareReport) -> list[str]:
+def _not_published_lines(report: MalwareReport, ctx: _Context | None = None) -> list[str]:
     """The techniques a producer claimed and this report does not publish.
 
     They are in the table above, with the reason in the Status column. This
@@ -4264,11 +4263,21 @@ def _not_published_lines(report: MalwareReport) -> list[str]:
     if not rows:
         return []
     lines = ["", _plain_heading("Claims that were not published as techniques"), ""]
+    # The reason by the table's own rule, a judge's reason sentence by
+    # sentence, and every network value in it defanged.
+    plain = ctx.plain if ctx is not None else _defanged_text
     lines.extend(
-        _item(f"{cell.technique_id} {cell.technique_name}: {_truncate(cell.not_published, 300)}")
+        _item(
+            f"{cell.technique_id} {cell.technique_name}: "
+            f"{status_shown(cell.not_published, _NOT_PUBLISHED_WIDTH, plain)}"
+        )
         for cell in rows
     )
     return lines
+
+
+# How much of a reason the list of claims not published prints.
+_NOT_PUBLISHED_WIDTH = 300
 
 
 def _unmapped_behaviour_lines(report: MalwareReport) -> list[str]:

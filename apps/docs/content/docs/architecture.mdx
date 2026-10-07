@@ -2970,10 +2970,14 @@ is assembled from what the run gathered rather than recomputed beside it:
   (\<reason>)", a kept one is published — a finding's technique included — with
   "kept by the judge when asked (\<reason>)" on its row. The record keeps the
   reason whole; the report's ATT&CK table prints it by one rule for both
-  (`reporting.judge_reasons.judge_reason_shown`): whole sentences up to the
-  first that opens the model's own working ("Wait, …", "Let me …") and as many
-  as fit 200 characters, a first sentence longer than that cut at a word, and
-  the cut mark where anything is left out. With no answer — the
+  (`reporting.judge_reasons.judge_reason_shown`), in the table's Status
+  column and in the list of claims not published under it alike: the
+  sentences that are the model's own working ("Wait, …", "Let me …") are left
+  out wherever they stand, the others printed in order as many as fit the
+  cell (200 characters in the table, 300 in the list), a reason that is all
+  working prints its last sentence, a first sentence longer than the cell is
+  cut at a word, and the cut mark stands where anything is left out; every
+  network value in it is defanged. With no answer — the
   question timed out or failed, the verdict itself timed out, or no line of
   the answer is in the form asked — nothing is withheld: each technique is what
   it would have been without the question, and a published one is marked "not

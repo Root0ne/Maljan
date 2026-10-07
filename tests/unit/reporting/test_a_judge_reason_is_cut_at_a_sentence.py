@@ -2,16 +2,16 @@
 
 A dropped technique's reason was cut at a fixed width inside the status cell,
 mid-word, while a kept one printed whole, the judge's own working included
-("Wait, looking at …"). Both now print whole sentences up to the first that
-opens the model's working and as many as fit one width, marked where anything
-is left out. The record keeps the reason whole.
+("Wait, looking at …"). Both now leave out the sentences that are the model's
+working, wherever they stand, and print the others in order, as many as fit
+one width, marked where anything is left out; a reason that is all working
+prints its last sentence. The record keeps the reason whole.
 """
 
 from __future__ import annotations
 
 from maljan.reporting.judge_reasons import (
     JUDGE_REASON_WIDTH,
-    JUDGE_WORKING_ONLY,
     judge_reason_shown,
     judge_reasons_shown,
 )
@@ -25,14 +25,34 @@ def test_a_short_reason_prints_whole() -> None:
     assert judge_reason_shown(f"{FIRST} {SECOND}") == f"{FIRST} {SECOND}"
 
 
-def test_the_model_s_working_is_not_printed_as_a_reason() -> None:
+def test_the_model_s_working_is_left_out_and_its_conclusion_kept() -> None:
     reason = f"{FIRST} Wait, looking at the check list again, it is not there. So keep."
 
-    assert judge_reason_shown(reason) == f"{FIRST} {CUT_MARK}"
+    assert judge_reason_shown(reason) == f"{FIRST} So keep. {CUT_MARK}"
 
 
-def test_a_reason_that_is_all_working_says_so() -> None:
-    assert judge_reason_shown("Hmm, let me look again.") == JUDGE_WORKING_ONLY
+def test_a_conclusion_after_working_is_printed() -> None:
+    reason = (
+        "Let me check the claim. It names another sub-technique, not this one. "
+        "Therefore the id is wrong and the technique is dropped."
+    )
+
+    assert judge_reason_shown(reason) == (
+        "It names another sub-technique, not this one. "
+        f"Therefore the id is wrong and the technique is dropped. {CUT_MARK}"
+    )
+
+
+def test_a_reason_that_opens_with_actually_is_a_reason() -> None:
+    reason = "Actually observed by the sandbox: the sample wrote the Run key. Kept."
+
+    assert judge_reason_shown(reason) == reason
+
+
+def test_a_reason_that_is_all_working_prints_its_last_sentence() -> None:
+    assert judge_reason_shown("Hmm, let me look again. Wait, it is there.") == (
+        f"Wait, it is there. {CUT_MARK}"
+    )
 
 
 def test_a_long_reason_is_cut_at_a_sentence_and_marked() -> None:
@@ -112,3 +132,32 @@ def test_the_attck_table_prints_the_reason_by_the_rule() -> None:
     dropped = markdown.split("the judge dropped it (", 1)[1].split(")", 1)[0]
     assert dropped.endswith(f". {CUT_MARK}")
     assert len(dropped) <= JUDGE_REASON_WIDTH + len(CUT_MARK) + 1
+
+
+def test_the_list_of_claims_not_published_prints_by_the_same_rule_defanged() -> None:
+    from maljan.reporting.models import CapabilityCell, FileHashes, MalwareReport, SampleIdentity
+    from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+    report = MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+        verdict="Malware",
+        capability_matrix=[
+            CapabilityCell(
+                tactic="TA0011",
+                tactic_name="Command and Control",
+                technique_id="T1071.001",
+                technique_name="Web Protocols",
+                evidence=["The routine posts to its server."],
+                not_published=(
+                    "the judge dropped it (It beacons to https://relay.example.net/live/. "
+                    "Wait, more.)"
+                ),
+            )
+        ],
+    )
+    markdown = MarkdownRenderer().render(report)
+    listed = markdown.split("Claims that were not published as techniques", 1)[1]
+
+    assert "hxxps://relay[.]example[.]net/live/" in listed
+    assert "https://relay" not in listed
+    assert "Wait, more" not in listed

@@ -9,6 +9,7 @@ anything is left out.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 from maljan.utils.marked_cut import CUT_MARK
 
@@ -18,34 +19,34 @@ _JUDGE_REASON_OPENERS = ("the judge dropped it (", "kept by the judge when asked
 JUDGE_REASON_WIDTH = 200
 # Where one sentence ends and the next begins.
 _SENTENCE_BREAK_RE = re.compile(r"(?<=[.!?])[\"')\]]?\s+(?=[A-Z\"'(\[])")
-# A sentence that opens the model's own working rather than its reason.
+# A sentence that is the model's own working rather than its reason: one that
+# opens with words only working opens with. "Actually", "okay" and "oh" open
+# reasons as often, and are not among them.
 _SELF_TALK_RE = re.compile(
-    r"^\W*(?:wait|hmm+|hold on|let me|let's|actually|okay|ok|oh|but wait"
-    r"|on second thought|re-?reading)\b",
+    r"^\W*(?:wait\b|hmm+\b|hold on\b|let me\b|let's\b|but wait\b|on second thought\b"
+    r"|re-?reading\b|looking again\b)",
     re.IGNORECASE,
 )
-JUDGE_WORKING_ONLY = "its reason is its working, kept whole in the report record"
 
 
 def judge_reason_shown(reason: str, width: int = JUDGE_REASON_WIDTH) -> str:
     """A judge's reason as the ATT&CK table prints it, under one rule.
 
-    Whole sentences, in order, up to the first that opens the model's own
-    working ("Wait, …", "Let me …"), and as many as fit ``width``; a first
-    sentence longer than the width is cut at a word and marked. Anything left
-    out is marked with the cut mark. The record keeps the reason whole.
+    The sentences that are the model's own working ("Wait, …", "Let me …")
+    are left out wherever they stand; the others are printed in order, as
+    many as fit ``width``, so a conclusion written after the working is
+    printed. A reason that is all working prints its last sentence, its
+    conclusion. A first sentence longer than the width is cut at a word.
+    Anything left out is marked with the cut mark. The record keeps the
+    reason whole.
     """
     text = " ".join(str(reason or "").split())
     if not text:
         return ""
     sentences = _SENTENCE_BREAK_RE.split(text)
-    kept: list[str] = []
-    for sentence in sentences:
-        if _SELF_TALK_RE.match(sentence):
-            break
-        kept.append(sentence)
+    kept = [sentence for sentence in sentences if not _SELF_TALK_RE.match(sentence)]
     if not kept:
-        return JUDGE_WORKING_ONLY
+        kept = sentences[-1:]
     shown: list[str] = []
     for sentence in kept:
         if len(" ".join([*shown, sentence])) > width:
@@ -55,6 +56,22 @@ def judge_reason_shown(reason: str, width: int = JUDGE_REASON_WIDTH) -> str:
         return word_cut(kept[0], width)
     said = " ".join(shown)
     return said if len(shown) == len(sentences) else f"{said} {CUT_MARK}"
+
+
+def status_shown(text: str, width: int, plain: Callable[[str], str] = str) -> str:
+    """A status that may carry a judge's reason, as the report prints it in ``width``.
+
+    Each judge's reason is printed by :func:`judge_reason_shown` and never cut
+    into; what follows the last reason is cut at a word to what the width
+    leaves. A status with no judge's reason is cut to the width as before.
+    ``plain`` is the report's defanger, applied before anything is cut.
+    """
+    said, through = judge_reasons_shown(str(text or ""))
+    if not through:
+        whole = plain(said)
+        return whole if len(whole) <= width else whole[: width - 1] + CUT_MARK
+    head, tail = plain(said[:through]), plain(said[through:])
+    return head + word_cut(tail, max(0, width - len(head))) if tail else head
 
 
 def word_cut(text: str, width: int) -> str:
