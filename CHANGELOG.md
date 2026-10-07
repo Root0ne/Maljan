@@ -1057,6 +1057,7 @@ change landed on `main`.
 
 ### Changed
 
+- **Captures are read by Maljan's own pcap/pcapng reader (`maljan.analysis.capture_reader`) instead of the GPL-2.0 scapy**; `tests/unit/analysis/test_pcap_reader_parity.py` pins every answer against the old one and names each difference and its reason.
 - **The documentation site is built with Fumadocs.** The pages are MDX under
   `apps/docs/content/docs/` and the images under `apps/docs/public/assets/`;
   `mkdocs.yml`, the theme overrides and the `docs` dependency group are gone,

@@ -22,9 +22,9 @@ def test_a_missing_capture_is_an_error_and_not_an_exception() -> None:
 def test_a_file_that_is_not_a_capture_comes_back_empty_rather_than_raising(
     tmp_path: Path,
 ) -> None:
-    """scapy answers ``None`` for anything it cannot parse, and the tool passes
-    that on as "nothing in it" — the caller learns the capture is useless
-    without having to catch anything."""
+    """The capture facts are ``None`` for a file that is not a capture, and the
+    tool passes that on as "nothing in it" — the caller learns the capture is
+    useless without having to catch anything."""
     target = tmp_path / "not.pcap"
     target.write_bytes(b"this is not a capture at all")
 
