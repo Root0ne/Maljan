@@ -53,10 +53,10 @@ may call, or the sentence saying why there is none; a pass that cannot run is
 one entry saying ``no:`` and why, and is not a failure. A call directly to
 ``run_pack`` with no Ghidra handed over makes no Ghidra entry.
 
-When the pack does not fit its room, a pass fact no other line carries is
-fitted with the earlier lines, and what they already carry takes only the
-room they leave; a pass entry with no room is counted in the trailer, which
-takes only free room or room from capa's addresses. With neither, the pack
+When the pack does not fit its room, every pass line takes only the room the
+earlier lines leave, a pass with a fact no other line carries first; a pass
+entry with no room is counted in the trailer, which takes only free room or
+room from capa's addresses. With neither, the pack
 stays as it is and the triage node records the entry in its pack record,
 "no pack room" (``render_pack``, ``pack_unsaid``).
 """
@@ -1389,12 +1389,12 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
     how many and that their full output is a tool call away. ``max_chars`` at
     or below zero means no bound.
 
-    The deobfuscation passes' lines (``PASS_TOOLS``) are split by novelty
-    (``_novel_view``). A fact no other line carries (a constant set no capa
-    rule agrees with, an exact instruction or TEB read at a function no capa
-    anti-analysis rule matched) is fitted with the other lines. What the pack
-    already carries, and every ``no:`` line, gets only the room the fitted
-    lines leave, whole or shortened. A line that cannot show one item is left
+    The deobfuscation passes' lines (``PASS_TOOLS``) take only the room the
+    other lines leave, whole or shortened, so no other line gives way to a
+    pass. A pass with a fact no other line carries (``_novel_view``: a
+    constant set no capa rule agrees with, an exact instruction or TEB read at
+    a function no capa anti-analysis rule matched) is offered that room
+    first. A line that cannot show one item is left
     out, and every pass entry left out is counted in the trailer, which comes
     after the pass lines. The trailer takes only room the other lines leave,
     or room from capa's addresses; with neither, the pack stays as the other
@@ -1433,17 +1433,14 @@ def _render_with_passes(
 ) -> tuple[str, list[LedgerEntry]]:
     """The pack with its pass lines, and the pass entries it could neither show nor count."""
     earlier = [entry for entry in entries if entry.tool not in PASS_TOOLS]
-    novel: list[LedgerEntry] = []
-    leftover: list[LedgerEntry] = []
-    for entry in entries:
-        if entry.tool not in PASS_TOOLS:
-            continue
-        view = _novel_view(entry)
-        if view is None:
-            leftover.append(entry)
-        else:
-            novel.append(view)
-    fitted = earlier + novel
+    # Every pass line takes only the room the earlier lines leave, so no line
+    # dev prints gives way to a pass. A pass with a fact no other line carries
+    # is offered that room first.
+    passes = [entry for entry in entries if entry.tool in PASS_TOOLS]
+    leftover = [e for e in passes if _novel_view(e) is not None] + [
+        e for e in passes if _novel_view(e) is None
+    ]
+    fitted = earlier
     kept, left_out = _fitted_parts(fitted, max_chars)
     trailer = [_left_out(left_out)] if left_out else []
     room = max_chars - _joined_len(kept + trailer) - 1
@@ -1536,11 +1533,11 @@ def _place_lines(entries: list[LedgerEntry], room: int) -> tuple[list[str], list
 def _novel_view(entry: LedgerEntry) -> LedgerEntry | None:
     """A pass entry narrowed to the facts no other line of the pack carries, or ``None``.
 
-    A constant set capa names in the same function and a ``no:`` line take
-    only the room the other lines leave. A constant set no capa rule
-    agrees with, and an exact instruction or TEB read at a function no capa
-    anti-analysis rule matched, are new: the view keeps those and counts the
-    rest, and it is fitted with the other lines.
+    A constant set no capa rule agrees with, and an exact instruction or TEB
+    read at a function no capa anti-analysis rule matched, are new: the view
+    keeps those and counts the rest. An entry with a view is offered the
+    pack's leftover room before the other pass entries; it never takes room
+    from a line that is not a pass.
     """
     data = entry.structured if isinstance(entry.structured, dict) else None
     if not entry.ok or data is None:

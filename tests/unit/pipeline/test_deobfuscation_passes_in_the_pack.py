@@ -425,15 +425,25 @@ class TestThePassLinesTakeNoRoomFromEarlierLines:
         lines = text.splitlines()
         assert not any(_TRAILER.match(line) for line in lines[:-1])
 
-    def test_a_new_fact_is_fitted_with_the_earlier_lines(self) -> None:
-        entries = _synthetic_pack(novel=True)
-        for budget in (6_000, 18_432):
-            text = render_pack(entries, budget)
-            assert len(text) <= budget
-            assert any(
-                line.startswith("[ev_0006] crypto constants: 1 of 26") and "AES" in line
-                for line in text.splitlines()
-            ), budget
+    @pytest.mark.parametrize("budget", [6_000, 9_216, 18_432, 36_864])
+    def test_a_new_fact_and_decoded_blobs_compete_and_the_blobs_keep_dev_s_text(
+        self, budget: int
+    ) -> None:
+        entries = _synthetic_pack(novel=True, addresses=0)
+        earlier = [e for e in entries if e.tool not in NEW]
+        assert len(render_pack(entries, 0)) > budget, "the pack does not fit whole"
+        dev, _ = _split(render_pack(earlier, budget))
+        text = render_pack(entries, budget)
+        lines, _ = _split(text)
+        assert len(text) <= budget
+        assert lines[: len(dev)] == dev, "every line dev prints is kept exactly"
+        blobs = [line for line in dev if "decoded blobs" in line or line.startswith("[ev_0005]")]
+        assert blobs and all(line in lines for line in blobs)
+        # The new fact is shown in the room left, counted, or in the pack record.
+        shown = "ev_0006" in _ids(lines)
+        counted = _split(text)[1] > _split(render_pack(earlier, budget))[1]
+        recorded = "ev_0006" in [e.id for e in triage_pack.pack_unsaid(entries, budget)]
+        assert shown or counted or recorded
 
     def test_a_line_that_can_show_no_item_is_left_out(self) -> None:
         place = {"offset": "0x10", "rva": "0x1010", "function": "0x1000"}

@@ -506,12 +506,12 @@ Ghidra's emulation is not run by the pack: Ghidra's `emulate_function`
 ignores its step limit and cannot be stopped, and one emulation took 130 to
 560 ms in a stored run. It stays a tool the reverser may call.
 
-When the pack does not fit its room, the passes' lines are split by novelty.
-A fact no other line carries — a constant set no capa rule agrees with, an
-exact instruction or TEB read at a function no capa anti-analysis rule
-matched — is fitted with the other lines. What the pack already carries (a set
-capa agrees with, every `no:` line) gets only the room the
-fitted lines leave. A line that cannot show one item is left out, and every
+When the pack does not fit its room, the passes' lines take only the room the
+other lines leave. **Decision:** a pass fact never shortens a decoded string
+or any other line the pack printed before the passes existed. A pass with a
+fact no other line carries — a constant set no capa rule agrees with, an exact
+instruction or TEB read at a function no capa anti-analysis rule matched — is
+offered that room first. A line that cannot show one item is left out, and every
 pass entry left out is counted in the "N more pack entries not shown" line,
 which comes after the pass lines. That line may take only room the other
 lines leave free, or room from capa's addresses; never a decoded string or any
