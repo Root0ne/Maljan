@@ -218,3 +218,42 @@ def test_a_file_shaped_name_the_run_recorded_is_defanged() -> None:
 
     assert "evil.sh" not in prose.split("drops", 1)[0]
     assert "install.sh" in prose
+
+
+def _sandbox_report(text: str) -> MalwareReport:
+    """Every surface that prints a sandbox's or the model's value in a code span."""
+    from maljan.reporting.models import (
+        CliFlag,
+        DynamicBehavior,
+        PersistenceMechanism,
+        ProcessNode,
+        RegistryMod,
+    )
+
+    return MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+        verdict="Malware",
+        dynamic=DynamicBehavior(
+            process_tree=[
+                ProcessNode(
+                    pid=1,
+                    name="a.exe",
+                    children=[ProcessNode(pid=2, ppid=1, name="b.exe", command_line=text)],
+                )
+            ],
+            registry_mods=[RegistryMod(key=f"HKCU\\Software\\{text}", value_name=text)],
+            file_operations=[{"path": f"C:\\x\\{text}", "operation": "write"}],
+        ),
+        persistence=[PersistenceMechanism(kind="registry_run", target=text, payload=text)],
+        technical_analysis=TechnicalAnalysis(
+            cli_flags=[CliFlag(flag=text, description="x")],
+            shadow_copy_destruction=[text],
+        ),
+    )
+
+
+@pytest.mark.parametrize("payload", AUTOLINK_STARTS)
+def test_no_autolink_start_survives_on_any_sandbox_or_rule_surface(payload: str) -> None:
+    markdown = MarkdownRenderer().render(_sandbox_report(f"run {payload} now"))
+
+    assert _live(markdown) == []

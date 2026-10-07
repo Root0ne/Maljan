@@ -712,8 +712,10 @@ class MarkdownRenderer:
                 measured.append(
                     _row(
                         mech.kind,
-                        f"`{_truncate(mech.target, _CELL_LIMIT)}`",
-                        f"`{_truncate(mech.payload, _CELL_LIMIT)}`" if mech.payload else "-",
+                        _code_span(_truncate(ctx.plain(mech.target), _CELL_LIMIT)),
+                        _code_span(_truncate(ctx.plain(mech.payload), _CELL_LIMIT))
+                        if mech.payload
+                        else "-",
                         mech.technique_id or "-",
                         ctx.source_of(mech.evidence_ref),
                         mech.evidence_ref or "-",
@@ -741,8 +743,8 @@ class MarkdownRenderer:
                 measured.append(
                     _row(
                         listed_row["kind"] or "-",
-                        f"`{_truncate(listed_row['target'], _CELL_LIMIT)}`",
-                        f"`{_truncate(listed_row['payload'], _CELL_LIMIT)}`"
+                        _code_span(_truncate(ctx.plain(listed_row["target"]), _CELL_LIMIT)),
+                        _code_span(_truncate(ctx.plain(listed_row["payload"]), _CELL_LIMIT))
                         if listed_row["payload"]
                         else "-",
                         f"the {listed_row['listed_by']} analyst"
@@ -773,7 +775,9 @@ class MarkdownRenderer:
             measured.append(_row("PID", "Command line"))
             measured.append(_divider(2))
             for node in commands[:20]:
-                measured.append(_row(node.pid, f"`{_truncate(node.command_line, _CELL_LIMIT)}`"))
+                measured.append(
+                    _row(node.pid, _code_span(_truncate(ctx.plain(node.command_line), _CELL_LIMIT)))
+                )
             measured.extend(_left_out(len(commands), 20, "commands"))
         blocks.append(
             _subsection(
@@ -915,7 +919,7 @@ class MarkdownRenderer:
                 named = str(op.get("path") or op.get("name") or "not recorded")
                 measured.append(
                     _row(
-                        f"`{_truncate(named, _CELL_LIMIT)}`",
+                        _code_span(_truncate(ctx.plain(named), _CELL_LIMIT)),
                         f"{op['size']} bytes" if op.get("size") else "not recorded",
                         f"`{str(op.get('sha256')).lower()}`" if op.get("sha256") else "-",
                         op.get("type") or "-",
@@ -978,7 +982,11 @@ class MarkdownRenderer:
             lines.extend([f"_Not provided by this sandbox: {names}._", ""])
 
         if dyn.process_tree:
-            tree = [line for root in dyn.process_tree for line in _process_tree_lines(root, 0)]
+            tree = [
+                line
+                for root in dyn.process_tree
+                for line in _process_tree_lines(root, 0, ctx.plain)
+            ]
             lines.extend([_plain_heading("Process tree"), "", *_fenced("\n".join(tree)), ""])
 
         files = [op for op in dyn.file_operations if isinstance(op, dict) and op.get("path")]
@@ -994,7 +1002,7 @@ class MarkdownRenderer:
             for op in files[:40]:
                 lines.append(
                     _row(
-                        f"`{_truncate(str(op.get('path', '')), _CELL_LIMIT)}`",
+                        _code_span(_truncate(ctx.plain(str(op.get("path", ""))), _CELL_LIMIT)),
                         op.get("operation", "-"),
                         op.get("api", "-"),
                     )
@@ -1011,7 +1019,7 @@ class MarkdownRenderer:
                     _divider(4),
                 ]
             )
-            lines.extend(_registry_row(reg) for reg in dyn.registry_mods[:40])
+            lines.extend(_registry_row(reg, ctx.plain) for reg in dyn.registry_mods[:40])
             lines.extend(_left_out(len(dyn.registry_mods), 40, "registry modifications"))
             lines.append("")
 
@@ -3421,7 +3429,7 @@ def _ransomware_block(ta: Any, ctx: _Context) -> str:
         lines.append("")
     if ta.shadow_copy_destruction:
         lines.extend(["Shadow copy destruction:", ""])
-        lines.extend(_item(f"`{cmd}`") for cmd in ta.shadow_copy_destruction)
+        lines.extend(_item(_code_span(ctx.plain(cmd))) for cmd in ta.shadow_copy_destruction)
         lines.append("")
     enc = ta.encryption_scheme
     if enc is not None and _encrypts_files(enc):
@@ -4377,25 +4385,29 @@ def _truncate(value: Any, length: int) -> str:
     return s[: length - 1] + "…"
 
 
-def _process_tree_lines(node: ProcessNode, depth: int) -> list[str]:
+def _process_tree_lines(
+    node: ProcessNode, depth: int, plain: Callable[[str], str] = lambda text: text
+) -> list[str]:
+    """The process tree, one line per process, each name and command line defanged."""
     indent = "  " * depth
     prefix = "└─ " if depth > 0 else ""
-    label = _one_line(node.name) or f"pid={node.pid}"
-    extra = f"  ({_one_line(node.command_line)})" if node.command_line else ""
+    label = _one_line(plain(node.name)) or f"pid={node.pid}"
+    extra = f"  ({_one_line(plain(node.command_line))})" if node.command_line else ""
     line = f"{indent}{prefix}pid={node.pid} ppid={node.ppid} {label}{extra}"
     out = [line]
     if node.injected_into:
         out.append(f"{indent}    [injected_into={', '.join(str(p) for p in node.injected_into)}]")
     for child in node.children:
-        out.extend(_process_tree_lines(child, depth + 1))
+        out.extend(_process_tree_lines(child, depth + 1, plain))
     return out
 
 
-def _registry_row(reg: RegistryMod) -> str:
+def _registry_row(reg: RegistryMod, plain: Callable[[str], str] = lambda text: text) -> str:
+    """One registry modification, its key and value name defanged."""
     return _row(
         reg.hive,
-        f"`{_truncate(reg.key, _CELL_LIMIT)}`",
-        f"`{_truncate(reg.value_name or '-', 80)}`",
+        _code_span(_truncate(plain(reg.key), _CELL_LIMIT)),
+        _code_span(_truncate(plain(reg.value_name or "-"), 80)),
         reg.operation,
     )
 
