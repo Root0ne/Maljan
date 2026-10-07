@@ -900,6 +900,7 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
         model=(str(entry["model"])[:300] if entry.get("model") else None),
         output=str(entry.get("output", "") or ""),
         structured=entry.get("structured"),
+        function_ranges=entry.get("function_ranges") or None,
         # Why the output is empty, what the call was answered from, what it
         # was aimed at, and when it ran. ``LedgerEntry.started_at`` defaults to
         # 0.0 rather than to None, so an entry the recorder never stamped and
