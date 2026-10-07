@@ -223,6 +223,7 @@ class TestTheRowsThatQuoteAnAnalyst:
 # ``validation.py`` alone, and seven of the sites are in four other modules.
 WALKED: tuple[str, ...] = (
     "pipeline/validation.py",
+    "pipeline/function_claims.py",
     "pipeline/nodes.py",
     "agents/delegation.py",
     "agents/judge_agent.py",
@@ -252,6 +253,9 @@ CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
     # numbers and states, around values each wrapped in the helper where the
     # sentence is built.
     ("pipeline/validation.py", "stated_value_violations"): frozenset({"said"}),
+    # The claim's number is a count; the function and source phrases are built
+    # in the function from values each wrapped in the helper where written.
+    ("pipeline/function_claims.py", "_question"): frozenset({"number", "head", "sources"}),
     ("pipeline/validation.py", "unpublished_value_violations"): frozenset({"said"}),
     # A join of this module's own vocabulary of unsupported claims.
     ("pipeline/validation.py", "unsupported_benign_violations"): frozenset({"listed"}),

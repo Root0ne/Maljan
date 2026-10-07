@@ -52,6 +52,7 @@ __all__ = [
     "build_function_map",
     "keeps_for_the_map",
     "function_artefacts",
+    "merged_artefacts",
     "function_map_block",
 ]
 
@@ -74,6 +75,10 @@ _KIND_WORDS: dict[str, tuple[str, str]] = {
     "decoded": ("string FLOSS decoded", "strings FLOSS decoded"),
 }
 _KIND_ORDER = tuple(_KIND_WORDS)
+
+# Why the run holds no whole function index, when an index entry is there.
+INDEX_FAILED = "no: [{entry}] the function index failed"
+INDEX_NOT_KEPT = "no: [{entry}] the function index's answer is not kept whole"
 
 
 @dataclass(frozen=True)
@@ -101,6 +106,11 @@ class FunctionArtefacts:
     index_entry: str = ""
     # The rows as ``(offset, distinct artefacts of its own)``, in the pack's rank order.
     index_rows: list[tuple[int, int]] = field(default_factory=list)
+    # The whole index answer the rows come from, and the entry's own state:
+    # whether its answer was cut for the model, or why none could be read.
+    index_data: Mapping[str, Any] | None = None
+    index_cut: bool = False
+    index_unread: str = ""
 
     def add(self, address: int, artefact: Artefact, *, virtual: bool = False) -> None:
         self.by_function.setdefault(address, []).append(artefact)
@@ -207,8 +217,24 @@ def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
     when FLOSS gave one and otherwise as a virtual address, made an offset by
     the image base another answer stated.
     """
+    entries = list(entries)
     rows = [e for e in entries if getattr(e, "ok", True)]
     found = FunctionArtefacts()
+    for entry in entries:
+        if str(getattr(entry, "tool", "") or "") != _INDEX_TOOL:
+            continue
+        data = _parsed(entry) if getattr(entry, "ok", True) else None
+        if isinstance(data, dict) and isinstance(data.get("rows"), list):
+            continue
+        if isinstance(data, dict) and not getattr(entry, "truncated", False):
+            # An answer by address or an error: no whole index, and nothing unread.
+            continue
+        entry_id = str(getattr(entry, "id", "") or "")
+        found.index_unread = (
+            INDEX_FAILED.format(entry=entry_id)
+            if not getattr(entry, "ok", True)
+            else INDEX_NOT_KEPT.format(entry=entry_id)
+        )
     bases: list[int] = list(image_bases_in(rows))
     parsed: list[tuple[Any, str, Any]] = []
     for entry in rows:
@@ -219,7 +245,7 @@ def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
         if not isinstance(data, dict):
             continue
         if tool == _INDEX_TOOL:
-            _index_rows(found, data, str(getattr(entry, "id", "") or ""))
+            _index_rows(found, data, str(getattr(entry, "id", "") or ""), entry)
             base = _stated_base(data)
             if base and base not in bases:
                 bases.append(base)
@@ -240,7 +266,9 @@ def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
     return found
 
 
-def _index_rows(found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str) -> None:
+def _index_rows(
+    found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str, entry: Any = None
+) -> None:
     """The function index's rows, by offset and in its rank order; the last index read counts.
 
     The index's own ``image_base`` is one of the bases the map joins an
@@ -255,6 +283,10 @@ def _index_rows(found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str
     found.index_rows = ranked
     found.indexed = {offset for offset, _ in ranked}
     found.index_entry = entry_id
+    if isinstance(data.get("rows"), list):
+        found.index_data = data
+        found.index_cut = bool(getattr(entry, "truncated", False)) if entry is not None else False
+        found.index_unread = ""
 
 
 def _hash_artefacts(found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str) -> None:
@@ -388,10 +420,18 @@ def _merged(pack: FunctionArtefacts | None, own: FunctionArtefacts) -> FunctionA
         indexed=set(own.indexed or pack.indexed),
         index_entry=own.index_entry if own.indexed else pack.index_entry,
         index_rows=list(own.index_rows if own.indexed else pack.index_rows),
+        index_data=own.index_data if own.index_data is not None else pack.index_data,
+        index_cut=own.index_cut if own.index_data is not None else pack.index_cut,
+        index_unread=own.index_unread if own.index_data is not None else pack.index_unread,
     )
     for key, tied in own.by_function.items():
         merged.by_function.setdefault(key, []).extend(tied)
     return merged
+
+
+def merged_artefacts(pack: FunctionArtefacts | None, own: FunctionArtefacts) -> FunctionArtefacts:
+    """The pack's artefacts and an analyst's own, together (see ``_merged``)."""
+    return _merged(pack, own)
 
 
 def _same(a: int | None, b: int | None, bases: Sequence[int]) -> bool:

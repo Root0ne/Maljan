@@ -1594,20 +1594,36 @@ def technique_check_note(findings: Any) -> str:
     else:
         rows.extend(findings or [])
     lines: list[str] = []
+    functions: list[str] = []
     for row in rows:
         data = row if isinstance(row, dict) else getattr(row, "__dict__", {}) or {}
         code = str(data.get("code") or "")
+        message = " ".join(str(data.get("message") or "").split())
+        if code == FUNCTION_CLAIM_UNHELD:
+            functions.append(f"- {code}: {message}")
         if code not in (PLATFORM_MISMATCH_CODE, WEAK_ALIGNMENT_CODE):
             continue
-        message = " ".join(str(data.get("message") or "").split())
         lines.append(f"- {code}: {message}")
-    if not lines:
-        return ""
-    return (
-        "TECHNIQUE CHECK — claims the ATT&CK check questioned and the analyst kept. The ids "
-        "are the analysts' own; the check names what disagrees with them and nothing here "
-        "changed them.\n" + "\n".join(lines)
-    )
+    notes = []
+    if lines:
+        notes.append(
+            "TECHNIQUE CHECK — claims the ATT&CK check questioned and the analyst kept. The ids "
+            "are the analysts' own; the check names what disagrees with them and nothing here "
+            "changed them.\n" + "\n".join(lines)
+        )
+    if functions:
+        notes.append(FUNCTION_CHECK_HEAD + "\n" + "\n".join(functions))
+    return "\n\n".join(notes)
+
+
+# The function claim check's code (``pipeline.function_claims``), named here so
+# the judge's note reads its rows without importing the check.
+FUNCTION_CLAIM_UNHELD = "isr.function_claim_unheld"
+FUNCTION_CHECK_HEAD = (
+    "FUNCTION CHECK — claims naming a call or a string for a function whose own facts hold "
+    "none of it, which the analyst was asked about and kept. The claims are the analysts' "
+    "own; the check names what the function's facts hold and nothing here changed them."
+)
 
 
 # The id inside an ``isr.ungrounded_technique`` message, which is where the

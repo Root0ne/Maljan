@@ -1,0 +1,370 @@
+"""A claim about a function is checked against that function's own facts.
+
+The claim cites the listing of a function the analyst decompiled. The Windows
+function names and the quoted strings its sentence names are looked for in the
+listing, in the function's row of the pack's function index, in the rows of its
+direct callees, and where the run's hash resolution and blob decoder place a
+value inside it. A value none of them holds is stated to the analyst once; where
+a fact is not whole the check states nothing and the record says why.
+
+Every address, name, string and sentence here is made up for the test.
+"""
+
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+from typing import Any
+
+from maljan.agents.function_map import INDEX_NOT_KEPT, function_artefacts
+from maljan.pipeline import function_claims as fc
+from maljan.pipeline.function_claims import (
+    FUNCTION_CLAIM_UNHELD_CODE,
+    check_function_claims,
+    function_facts,
+    listed_functions,
+    named_values,
+)
+from maljan.schemas.evidence import LedgerEntry, not_shown_record
+from maljan.schemas.isr_models import ClaimEvidence
+from maljan.tools.artefact_index import SELF, row_line
+
+BASE = 0x140000000
+MAIN = 0x2340
+HELPER = 0x2A10
+FAR = 0x3B80
+OTHER = 0x4C00
+INDEX_ID = "ev_0002"
+LISTING_ID = "ev_0007"
+
+
+def _cells(key: str, values: Any) -> list[dict[str, Any]]:
+    return [{key: value, "sources": [SELF]} for value in values]
+
+
+def _row(
+    offset: int,
+    *,
+    imports: Any = (),
+    resolved: Any = (),
+    decoded: Any = (),
+    plain: Any = (),
+    capa: Any = (),
+    callers: Any = (),
+    callees: Any = (),
+) -> dict[str, Any]:
+    return {
+        "function": hex(BASE + offset),
+        "offset": hex(offset),
+        "direct": len(imports) + len(resolved) + len(decoded) + len(plain) + len(capa),
+        "imports": _cells("name", imports),
+        "resolved": _cells("name", resolved),
+        "decoded_strings": _cells("text", decoded),
+        "plain_strings": _cells("text", plain),
+        "capa": _cells("rule", capa),
+        "callers": [hex(BASE + c) for c in callers],
+        "callees": [hex(BASE + c) for c in callees],
+        "indirect": {"artefacts": 0, "through": 0},
+    }
+
+
+def _index(
+    rows: list[dict[str, Any]], *, unnamed: Any = None, undecoded: Any = None
+) -> LedgerEntry:
+    data: dict[str, Any] = {
+        "tool": "function_index",
+        "image_base": hex(BASE),
+        "functions_known": 8,
+        "undecoded_functions": len(undecoded or []),
+        "undecoded": [hex(BASE + o) for o in (undecoded or [])],
+        "calls_unnamed": {hex(BASE + o): n for o, n in (unnamed or {}).items()},
+        "rows": rows,
+    }
+    if unnamed is False:
+        del data["calls_unnamed"]
+    return LedgerEntry(
+        id=INDEX_ID,
+        agent="pipeline",
+        tool="function_index",
+        output=json.dumps(data),
+        structured=data,
+    )
+
+
+def _listing(body: str = "  FUN_140002a10();\n  return 0;", entry: str = LISTING_ID) -> LedgerEntry:
+    return LedgerEntry(
+        id=entry,
+        agent="reverser",
+        tool="decompile_function",
+        args={"address": f"{BASE + MAIN:x}"},
+        output=f"\nundefined8 FUN_{BASE + MAIN:x}(void)\n\n{{\n{body}\n}}\n",
+    )
+
+
+ROWS = [
+    _row(MAIN, imports=["CreateMutexW"], decoded=["update-channel"], callees=[HELPER]),
+    _row(HELPER, imports=["GetTickCount"], plain=["helper banner"], callers=[MAIN], callees=[FAR]),
+    _row(FAR, imports=["WriteFile"], callers=[HELPER]),
+    _row(OTHER, decoded=["settings.ini path"], callers=[]),
+]
+
+
+def _check(
+    sentence: str,
+    *,
+    index: LedgerEntry | None = None,
+    pack: list[LedgerEntry] | None = None,
+    own: list[LedgerEntry] | None = None,
+    evidence: str = f"[{LISTING_ID}]",
+    block: str = "",
+    extra: list[ClaimEvidence] | None = None,
+) -> fc.FunctionClaimCheck:
+    pack_entries = [*(pack or []), *([index] if index is not None else [_index(ROWS)])]
+    mine = own if own is not None else [_listing()]
+    facts = function_facts(
+        mine,
+        function_artefacts(pack_entries),
+        pack_entries=pack_entries,
+        facts_block=block,
+        bases=(BASE,),
+    )
+    claims = [ClaimEvidence(claim=sentence, evidence_ref=evidence, confidence=0.8), *(extra or [])]
+    return check_function_claims(
+        SimpleNamespace(claims=claims), listed_functions(mine), facts, (BASE,)
+    )
+
+
+MAIN_VA = f"0x{BASE + MAIN:x}"
+
+
+class TestTheQuestion:
+    def test_an_api_the_function_s_facts_hold_nowhere_is_asked_once(self) -> None:
+        found = _check(f"{MAIN_VA} sleeps with SleepEx before it writes the marker.")
+
+        (violation,) = found.violations
+        assert violation.code == FUNCTION_CLAIM_UNHELD_CODE
+        assert violation.path == "claims[0]"
+        assert found.flagged == [0] and found.asked == 1 and found.checked == 1
+        message = violation.message
+        assert message.startswith("claim 1 (")
+        assert f'names "SleepEx" for function {MAIN_VA} [{LISTING_ID}]' in message
+        assert (
+            f'the listing, its index row [{INDEX_ID}] and its 1 callees\' rows hold no "SleepEx"'
+            in message
+        )
+        assert f'{MAIN_VA}\'s row holds: calls "CreateMutexW" ({INDEX_ID})' in message
+        assert "refers to 1 decoded string" in message
+        assert "what you answer stands" in message
+
+    def test_every_unheld_value_of_a_claim_is_named_in_its_one_question(self) -> None:
+        found = _check(f'{MAIN_VA} calls SleepEx and VirtualAlloc and reads "settings.ini path".')
+
+        (violation,) = found.violations
+        assert '"SleepEx", "VirtualAlloc" and "settings.ini path"' in violation.message
+        assert 'hold no "SleepEx" or "VirtualAlloc" or "settings.ini path"' in violation.message
+
+    def test_one_claim_written_under_several_techniques_is_asked_once(self) -> None:
+        sentence = f"{MAIN_VA} sleeps with SleepEx."
+        claims = [
+            ClaimEvidence(
+                claim=sentence, evidence_ref=f"[{LISTING_ID}]", confidence=0.8, technique_id=tid
+            )
+            for tid in ("T1497", "T1027")
+        ]
+        for claim in claims:
+            claim.note_block(0)
+        own = [_listing()]
+        pack = [_index(ROWS)]
+        facts = function_facts(own, function_artefacts(pack), pack_entries=pack, bases=(BASE,))
+        found = check_function_claims(
+            SimpleNamespace(claims=claims), listed_functions(own), facts, (BASE,)
+        )
+        assert len(found.violations) == 1 and found.flagged == [0]
+
+    def test_a_long_row_is_counted_instead_of_listed(self) -> None:
+        names = [f"RtlUserRoutine{n:02d}" for n in range(40)]
+        index = _index([_row(MAIN, resolved=names), *ROWS[1:]])
+        (violation,) = _check(f"{MAIN_VA} sleeps with SleepEx.", index=index).violations
+        assert f"{MAIN_VA}'s row holds: 40 resolved names ({INDEX_ID}); called by 0" in (
+            violation.message
+        )
+        assert "RtlUserRoutine00" not in violation.message
+
+
+class TestWhereAValueHolds:
+    def test_the_function_s_own_import_holds_in_either_spelling_and_with_its_module(self) -> None:
+        assert not _check(f"{MAIN_VA} creates the guard with CreateMutexW.").violations
+        assert not _check(f"{MAIN_VA} creates the guard with CreateMutexA.").violations
+        assert not _check(f"{MAIN_VA} calls `kernel32.dll!CreateMutexW`.").violations
+
+    def test_the_listing_s_own_text_holds(self) -> None:
+        own = [_listing("  SleepEx(1000, 0);\n  return 0;")]
+        assert not _check(f"{MAIN_VA} calls SleepEx.", own=own).violations
+
+    def test_a_direct_callee_s_row_holds(self) -> None:
+        assert not _check(f"{MAIN_VA} reads the clock with GetTickCount.").violations
+        assert not _check(f'{MAIN_VA} prints "helper banner".').violations
+
+    def test_a_callee_two_calls_away_does_not(self) -> None:
+        found = _check(f"{MAIN_VA} writes the file with WriteFile.")
+        (violation,) = found.violations
+        assert '"WriteFile"' in violation.message
+
+    def test_a_name_the_hash_resolution_places_inside_the_function_holds(self) -> None:
+        hashes = LedgerEntry(
+            id="ev_0003",
+            agent="pipeline",
+            tool="resolve_api_hashes",
+            output="{}",
+            structured={
+                "image_base": hex(BASE),
+                "hits": [
+                    {
+                        "readings": [{"name": "VirtualAlloc", "set": "exports"}],
+                        "occurrences": [{"function": hex(MAIN), "rva": hex(MAIN + 0x10)}],
+                    }
+                ],
+            },
+        )
+        assert not _check(f"{MAIN_VA} allocates with VirtualAlloc.", pack=[hashes]).violations
+
+    def test_a_string_the_blob_decoder_places_inside_the_function_holds(self) -> None:
+        blobs = LedgerEntry(
+            id="ev_0004",
+            agent="pipeline",
+            tool="decode_string_blobs",
+            output="{}",
+            structured={
+                "results": [{"text": "settings.ini path", "references": [{"function": hex(MAIN)}]}]
+            },
+        )
+        assert not _check(f'{MAIN_VA} opens "settings.ini path".', pack=[blobs]).violations
+
+    def test_a_value_another_cited_entry_holds_is_not_asked(self) -> None:
+        listing = LedgerEntry(
+            id="ev_0005",
+            agent="pipeline",
+            tool="resolve_api_hashes",
+            output='{"hits": [{"readings": [{"name": "VirtualAlloc"}]}]}',
+        )
+        found = _check(
+            f"{MAIN_VA} is the routine; the sample resolves VirtualAlloc.",
+            pack=[listing],
+            evidence=f"[{LISTING_ID}], [ev_0005]",
+        )
+        assert not found.violations
+
+    def test_a_value_another_function_the_claim_names_holds_is_not_asked(self) -> None:
+        found = _check(
+            f'{MAIN_VA} hands over to 0x{BASE + OTHER:x}, which reads "settings.ini path".'
+        )
+        assert not found.violations
+
+    def test_a_string_the_run_holds_nowhere_is_not_asked(self) -> None:
+        assert not _check(f'{MAIN_VA} is "the update routine" of the loader.').violations
+
+    def test_a_string_the_run_holds_for_another_function_is_asked(self) -> None:
+        found = _check(f'{MAIN_VA} opens "settings.ini path".')
+        (violation,) = found.violations
+        assert '"settings.ini path"' in violation.message
+
+
+class TestWhatASentenceNames:
+    def test_a_word_of_running_text_is_no_api(self) -> None:
+        apis, _strings = named_values("The routine will connect and send the data.")
+        assert apis == []
+
+    def test_a_name_in_a_code_span_or_with_a_capital_inside_is(self) -> None:
+        apis, _strings = named_values("It calls `send` and then CreateMutexW and CreateProcess.")
+        assert apis == ["send", "CreateMutexW", "CreateProcess"]
+
+    def test_quoted_strings_and_code_spans_holding_quotes_are_strings(self) -> None:
+        _apis, strings = named_values(
+            'It splits on `"\\r\\n"`, compares "update-channel" and `"/files/"`, and `x+0x88`.'
+        )
+        assert strings == ["update-channel", "/files/"]
+
+
+class TestWhenTheFactIsAbsent:
+    def test_no_index_states_nothing_and_says_why(self) -> None:
+        pack = [LedgerEntry(id="ev_0003", agent="pipeline", tool="capa", output="{}")]
+        own = [_listing()]
+        facts = function_facts(own, function_artefacts(pack), pack_entries=pack, bases=(BASE,))
+        claims = [
+            ClaimEvidence(
+                claim=f"{MAIN_VA} calls SleepEx.", evidence_ref=f"[{LISTING_ID}]", confidence=0.8
+            )
+        ]
+        found = check_function_claims(
+            SimpleNamespace(claims=claims), listed_functions(own), facts, (BASE,)
+        )
+        assert found.violations == []
+        assert found.not_checked == [f"claim 1: {fc.NO_INDEX}"]
+
+    def test_an_index_the_byte_budget_blanked_is_absent(self) -> None:
+        blanked = LedgerEntry(
+            id=INDEX_ID, agent="pipeline", tool="function_index", output="", truncated=True
+        )
+        found = _check(f"{MAIN_VA} calls SleepEx.", index=blanked)
+        assert found.violations == []
+        assert found.not_checked == [f"claim 1: {INDEX_NOT_KEPT.format(entry=INDEX_ID)}"]
+
+    def test_a_function_the_index_does_not_know(self) -> None:
+        # Neither a row nor any row's caller or callee: the index never met it.
+        index = _index([_row(OTHER, decoded=["settings.ini path"])])
+        found = _check(f"{MAIN_VA} calls SleepEx.", index=index)
+        assert found.violations == []
+        assert found.not_checked == [f"claim 1: {fc.NOT_KNOWN.format(address=hex(BASE + MAIN))}"]
+
+    def test_a_row_the_pack_shown_to_the_analyst_left_out(self) -> None:
+        index = _index(ROWS)
+        shown = "\n".join(row_line(r, INDEX_ID) for r in ROWS if r["offset"] != hex(MAIN))
+        found = _check(f"{MAIN_VA} calls SleepEx.", index=index, block=shown)
+        assert found.violations == []
+        assert found.not_checked == [f"claim 1: {fc.ROW_NOT_SHOWN.format(address=MAIN_VA)}"]
+        everything = "\n".join(row_line(r, INDEX_ID) for r in ROWS)
+        assert _check(f"{MAIN_VA} calls SleepEx.", index=index, block=everything).violations
+
+    def test_a_function_the_decoder_stopped_in(self) -> None:
+        found = _check(f"{MAIN_VA} calls SleepEx.", index=_index(ROWS, undecoded=[HELPER]))
+        assert found.violations == []
+        assert found.not_checked == [f"claim 1: {fc.UNDECODED.format(address=MAIN_VA)}"]
+
+    def test_calls_that_name_nothing_leave_api_names_unasked_and_strings_asked(self) -> None:
+        index = _index(ROWS, unnamed={HELPER: 1})
+        found = _check(f'{MAIN_VA} calls SleepEx and opens "settings.ini path".', index=index)
+        (violation,) = found.violations
+        assert '"SleepEx"' not in violation.message
+        assert '"settings.ini path"' in violation.message
+        assert found.not_checked == [f"claim 1: {fc.UNNAMED_CALLS.format(address=MAIN_VA)}"]
+
+    def test_an_index_that_counts_no_unnamed_calls_leaves_api_names_unasked(self) -> None:
+        found = _check(f"{MAIN_VA} calls SleepEx.", index=_index(ROWS, unnamed=False))
+        assert found.violations == []
+        assert found.not_checked == [f"claim 1: {fc.UNNAMED_UNKNOWN.format(entry=INDEX_ID)}"]
+
+    def test_a_listing_the_model_never_read_makes_no_function_claim(self) -> None:
+        unread = LedgerEntry(
+            id=LISTING_ID,
+            agent="reverser",
+            tool="decompile_function",
+            args={"address": f"{BASE + MAIN:x}"},
+            output=not_shown_record(4096),
+            truncated=True,
+        )
+        found = _check(f"{MAIN_VA} calls SleepEx.", own=[unread])
+        assert found.violations == [] and found.checked == 0
+
+    def test_a_claim_citing_no_listing_is_not_a_function_claim(self) -> None:
+        found = _check("The sample calls SleepEx.", evidence="[ev_0003]")
+        assert found.violations == [] and found.checked == 0 and found.not_checked == []
+
+
+class TestTheRecord:
+    def test_the_record_counts_and_says_why(self) -> None:
+        found = _check(f"{MAIN_VA} calls SleepEx.", index=_index(ROWS, undecoded=[MAIN]))
+        assert found.record() == {
+            "checked": 0,
+            "asked": 0,
+            "not_checked": [f"claim 1: {fc.UNDECODED.format(address=MAIN_VA)}"],
+        }

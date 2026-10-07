@@ -26,10 +26,11 @@ What it states, and nothing else:
   An unconditional jump to another function's start is that function's tail
   call: a callee, not more of the function the jump is in. A byte the decoder
   does not read ends that path, and the answer counts the functions where
-  that happened. A call names the import its slot or its jump thunk goes
-  through (``imports``), or the function at its target (``callees``); a call
-  through a register, or through a slot the import table does not fill, names
-  nothing.
+  that happened, and lists them (``undecoded``). A call names the import its
+  slot or its jump thunk goes through (``imports``), or the function at its
+  target (``callees``); a call through a register, or through a slot the
+  import table does not fill, names nothing, and the answer counts those per
+  function (``calls_unnamed``).
 * **The strings it refers to.** An instruction that takes an address in a
   data section (x64: RIP-relative; x86: an absolute address as a memory
   operand or an immediate) refers to the text there when the bytes from that
@@ -143,6 +144,10 @@ class _Function:
     imports: set[str] = field(default_factory=set)
     data_refs: set[int] = field(default_factory=set)
     undecoded: bool = False
+    # Calls the decoder read whose target names neither an import nor a
+    # function: through a register, or through a slot the import table does
+    # not fill (a pointer the code fills itself, such as a resolved name's).
+    unnamed_calls: int = 0
 
 
 @dataclass
@@ -404,6 +409,11 @@ class _Reader:
                         self.add(target, _CALL_TARGETS)
             elif callee is not None and self.attributing:
                 function.imports.add(str(callee[1]))
+            if self.attributing and (
+                callee is None
+                or (callee[0] == "function" and self._section(int(callee[1])) is None)
+            ):
+                function.unnamed_calls += 1
         if not self.attributing:
             return
         if self.wanted:
@@ -879,6 +889,13 @@ def _answer(
         "function_sources": {s: sources[s] for s in _SOURCE_ORDER if s in sources},
         "function_lists": FUNCTION_LISTS_ABSENT,
         "undecoded_functions": sum(1 for f in graph.functions.values() if f.undecoded),
+        # Per function, by address: which the decoder stopped in, and how many
+        # calls each makes that name nothing. The pack's lines do not print
+        # them; they say where an absent call or string is not a fact.
+        "undecoded": [va(s) for s, f in sorted(graph.functions.items()) if f.undecoded],
+        "calls_unnamed": {
+            va(s): f.unnamed_calls for s, f in sorted(graph.functions.items()) if f.unnamed_calls
+        },
         "unplaced": dict(sorted(unplaced.items())),
         "total": len(out),
         "rows": out,
@@ -985,6 +1002,18 @@ def row_line(row: Mapping[str, Any], entry_id: str) -> str:
     the pack's escaping, as every recovered string is, so they read as data;
     the strings a function refers to are counted, never shown.
     """
+    said = [f"export {sample_text(n)}" for n in row.get("names") or []]
+    if row.get("entry_point"):
+        said.append("entry point")
+    stated = str(row.get("function") or "")
+    where = stated if _ADDRESS.fullmatch(stated) else sample_text(stated)
+    if said:
+        where += f" ({', '.join(said)})"
+    return f"- {where}: {row_parts(row, entry_id)}"
+
+
+def row_parts(row: Mapping[str, Any], entry_id: str) -> str:
+    """What :func:`row_line` says a function holds, after its address."""
     parts: list[str] = []
 
     def named(key: str, verb: str, field: str) -> None:
@@ -1021,14 +1050,7 @@ def row_line(row: Mapping[str, Any], entry_id: str) -> str:
             f"{through} {'callee holds' if through == 1 else 'callees hold'} {reached} "
             f"{'artefact' if reached == 1 else 'artefacts'} of their own, {PER_CALLEE}"
         )
-    said = [f"export {sample_text(n)}" for n in row.get("names") or []]
-    if row.get("entry_point"):
-        said.append("entry point")
-    stated = str(row.get("function") or "")
-    where = stated if _ADDRESS.fullmatch(stated) else sample_text(stated)
-    if said:
-        where += f" ({', '.join(said)})"
-    return f"- {where}: {'; '.join(parts)}"
+    return "; ".join(parts)
 
 
 # -- the analysis server's tool --------------------------------------------------

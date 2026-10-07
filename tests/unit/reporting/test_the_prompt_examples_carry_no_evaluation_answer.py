@@ -122,6 +122,7 @@ from maljan.pipeline.run_state import NO_LIMIT, budget_line
 from maljan.pipeline.validation import (
     _UNPARSED_ANSWER_MESSAGE,
     ANALYST_FEEDBACK_CLOSING,
+    FUNCTION_CHECK_HEAD,
     MALWARE_TYPES,
     UNATTRIBUTED_INDICATOR_CODE,
     CapabilityGrounding,
@@ -743,6 +744,67 @@ _FLOW_FACTS_REPORT = MalwareReport(
 def _message_of(violation: Violation | None) -> str:
     """A question's words, which the builder answers only when there is one to ask."""
     assert violation is not None
+    return violation.message
+
+
+def _function_claim_question() -> str:
+    """The question a claim gets when its function's own facts hold none of what it names."""
+    from maljan.agents.function_map import function_artefacts
+    from maljan.pipeline.function_claims import (
+        check_function_claims,
+        function_facts,
+        listed_functions,
+    )
+    from maljan.schemas.evidence import LedgerEntry
+
+    data = {
+        "tool": "function_index",
+        "image_base": "0x400000",
+        "functions_known": 1,
+        "undecoded_functions": 0,
+        "undecoded": [],
+        "calls_unnamed": {},
+        "rows": [
+            {
+                "function": "0x401000",
+                "offset": "0x1000",
+                "direct": 1,
+                "imports": [{"name": "GetTickCount", "sources": ["this entry"]}],
+                "resolved": [],
+                "decoded_strings": [],
+                "plain_strings": [],
+                "capa": [],
+                "callers": [],
+                "callees": [],
+                "indirect": {"artefacts": 0, "through": 0},
+            }
+        ],
+    }
+    index = LedgerEntry(
+        id="ev_0001", agent="pipeline", tool="function_index", output="{}", structured=data
+    )
+    listing = LedgerEntry(
+        id="ev_0002",
+        tool="decompile_function",
+        args={"address": "401000"},
+        output="void FUN_00401000(void) { }",
+    )
+    facts = function_facts(
+        [listing], function_artefacts([index]), pack_entries=[index], bases=(0x400000,)
+    )
+    isr = AgentISR(
+        agent_id="a",
+        domain="static",
+        claims=[
+            ClaimEvidence(
+                claim="0x401000 draws text with WriteConsoleW.",
+                evidence_ref="[ev_0002]",
+                confidence=0.5,
+            )
+        ],
+    )
+    found = check_function_claims(isr, listed_functions([listing]), facts, (0x400000,))
+    (violation,) = found.violations
     return violation.message
 
 
@@ -1547,6 +1609,8 @@ PROMPTS: dict[str, str] = {
             )
         )
     ),
+    "claim naming a call its function's facts do not hold": _function_claim_question(),
+    "judge's note on the function claims the analysts kept": FUNCTION_CHECK_HEAD,
     "judge technique question's describe-check finding and its kind's label": (
         technique_question_text(
             [

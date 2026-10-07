@@ -1533,6 +1533,13 @@ class RunSummaryBuilder:
             salvages = [
                 dict(row["salvage"]) for row in loops if isinstance(row.get("salvage"), dict)
             ]
+            # What the function claim check read of each loop's answer: the
+            # claims checked and asked about, and each with no fact, with why.
+            function_claims = [
+                dict(row["function_claims"])
+                for row in loops
+                if isinstance(row.get("function_claims"), dict)
+            ]
             out[str(agent)] = {
                 "loops": len(loops),
                 "steps_used": sum(int(row.get("steps_used") or 0) for row in loops),
@@ -1548,6 +1555,7 @@ class RunSummaryBuilder:
                 ),
                 "caps": caps,
                 **({"salvages": salvages} if salvages else {}),
+                **({"function_claims": function_claims} if function_claims else {}),
                 # A validation turn a loop's time could not hold, and why.
                 **(
                     {"validation_not_asked": skipped}
