@@ -56,6 +56,7 @@ from maljan.pipeline.function_claims import (
     FUNCTION_CLAIM_UNHELD_CODE,
     FunctionClaimCheck,
     check_function_claims,
+    facts_unread,
     function_facts,
     listed_functions,
 )
@@ -6770,6 +6771,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         own_entries = list(getattr(self, "_evidence_entries", None) or [])
         listed = listed_functions(own_entries)
         facts: Any = None
+        facts_failed = ""
         if listed:
             try:
                 kept = getattr(self, "_function_map_entries", None)
@@ -6782,20 +6784,25 @@ class BaseAnalyst(BudgetMeter, ABC):
                     bases=image_bases,
                 )
             except Exception as exc:  # noqa: BLE001 — no facts, no function question
-                self.logger.debug("%s: function facts not read (%s).", self.name, exc)
+                facts_failed = facts_unread(exc)
+                self.logger.warning("%s: function claims %s.", self.name, facts_failed)
                 facts = None
         function_checks: dict[int, FunctionClaimCheck] = {}
 
         def _function_check(candidate: AgentISR) -> FunctionClaimCheck:
             key = id(candidate)
             if key not in function_checks:
+                if facts_failed:
+                    function_checks[key] = FunctionClaimCheck(not_checked=[facts_failed])
+                    return function_checks[key]
                 try:
                     function_checks[key] = check_function_claims(
                         candidate, listed, facts, image_bases
                     )
                 except Exception as exc:  # noqa: BLE001 — a check that fails asks nothing
-                    self.logger.debug("%s: function claims not checked (%s).", self.name, exc)
-                    function_checks[key] = FunctionClaimCheck()
+                    failed = facts_unread(exc)
+                    self.logger.warning("%s: function claims %s.", self.name, failed)
+                    function_checks[key] = FunctionClaimCheck(not_checked=[failed])
             return function_checks[key]
 
         # The validity check answers from the vendored id universe; a box

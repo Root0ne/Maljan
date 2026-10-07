@@ -303,3 +303,60 @@ class TestOneRuleForEveryAskedClaim:
         result = _check(analyst, GUARD + WRONG + LIBRARY + SECOND_GUARD)
 
         assert len(result.claims) == 4
+
+
+class TestAFailureIsRecorded:
+    def test_facts_that_cannot_be_read_ask_nothing_and_say_why(self) -> None:
+        analyst = _Analyst([])
+        with patch(
+            "maljan.agents.base_agent.function_facts", side_effect=RuntimeError("unreadable")
+        ):
+            _check(analyst)
+
+        assert analyst.seen_turns == []
+        assert analyst._budget_records[-1]["function_claims"] == {
+            "checked": 0,
+            "asked": 0,
+            "not_checked": ["no: the function facts could not be read (RuntimeError)"],
+        }
+
+    def test_a_check_that_fails_asks_nothing_and_says_why(self) -> None:
+        analyst = _Analyst([])
+        with patch("maljan.agents.base_agent.check_function_claims", side_effect=KeyError("x")):
+            _check(analyst)
+
+        assert analyst.seen_turns == []
+        assert analyst._budget_records[-1]["function_claims"]["not_checked"] == [
+            "no: the function facts could not be read (KeyError)"
+        ]
+
+
+class TestTheJudgeSeesFactsOnly:
+    def test_a_kept_finding_carries_no_sentence_addressed_to_the_analyst(self) -> None:
+        from maljan.pipeline.validation import FUNCTION_QUESTION_ASK
+
+        analyst = _Analyst([GUARD + WRONG])
+        _check(analyst)
+        (left,) = _left(analyst)
+        assert FUNCTION_QUESTION_ASK in left.message
+
+        note = technique_check_note({"reverser": [left.to_dict()]})
+
+        assert FUNCTION_QUESTION_ASK not in note
+        assert '"SleepEx"' in note
+
+    def test_a_finding_never_asked_stands_under_its_own_heading(self) -> None:
+        from maljan.pipeline.validation import FUNCTION_CHECK_NOT_ASKED_HEAD
+
+        analyst = _Analyst([])
+        with (
+            patch.object(BaseAnalyst, "_seconds_the_last_loop_left", return_value=1.0),
+            patch.object(BaseAnalyst, "seconds_an_answer_needs", return_value=60.0),
+        ):
+            _check(analyst)
+        (left,) = _left(analyst)
+
+        note = technique_check_note({"reverser": [left.to_dict()]})
+
+        assert note.startswith(FUNCTION_CHECK_NOT_ASKED_HEAD)
+        assert FUNCTION_CHECK_HEAD not in note
