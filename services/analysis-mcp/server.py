@@ -40,6 +40,7 @@ from maljan.tools import (
     string_blobs,
 )
 from maljan.tools import binary as binary_tools
+from maljan.tools import function_index as function_index_tools
 from maljan.tools import identify as identify_tools
 from maljan.tools import rules as rule_tools
 from maljan.tools import strings as string_tools
@@ -109,6 +110,7 @@ TOOL_NEEDS: list[ToolNeeds] = [
     ToolNeeds("resolve_api_hashes"),
     ToolNeeds("decode_string_blobs"),
     ToolNeeds(crypto_constants.TOOL),
+    ToolNeeds("function_index"),
     ToolNeeds("put_sample"),
     ToolNeeds("put_sample_begin"),
     ToolNeeds("put_sample_chunk"),
@@ -1151,6 +1153,35 @@ def find_crypto_constants(path: str, carved_path: str = "") -> dict[str, Any]:
         crypto_constants.find_crypto_constants,
         path=path,
         carved_path=carved_path,
+    )
+
+
+@mcp.tool()
+@reads_a_carved_file
+def function_index(path: str, address: str = "", carved_path: str = "") -> dict[str, Any]:
+    """List every function of a PE with the artefacts it holds, ranked by how many.
+
+    The functions come from the file's exception directory, its exports, its
+    entry point and the direct call targets the platform's x86 decoder reaches.
+    Each row names a function at the image base plus its offset (the address
+    Ghidra and radare2 take) and states the imports it calls, the names its
+    hashes resolve to, how many plain and decoded strings it refers to, its
+    callers and callees, and how many artefacts its callees hold (counted per
+    callee). Each cell names the tool whose answer states it. Joined here:
+    ``pe_info``, ``resolve_api_hashes`` and ``decode_string_blobs`` over the
+    same file, and FLOSS's rows when FLOSS ran on it in this server; capa is
+    not run here, and the answer says so. With no ``address``, ``table`` holds
+    the whole index; with an ``address`` (a virtual address or an offset),
+    ``row`` holds that function's row and ``callers`` and ``callees`` its
+    neighbours. Nothing is run. The triage pack already built the index once
+    on a PE, capa joined, and its entry id is in the run-state block.
+    """
+    return _guard(
+        function_index_tools.TOOL,
+        function_index_tools.served_index,
+        path=path,
+        carved_path=carved_path,
+        address=address,
     )
 
 

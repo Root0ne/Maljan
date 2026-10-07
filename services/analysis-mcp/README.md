@@ -268,6 +268,35 @@ Every place of every value is listed: the file offset and, for a PE, the offset
 from the image base, the section and the function the file's own table puts
 around it. The triage pack runs it on every executable image (PE, ELF, Mach-O).
 
+### Function index
+
+| tool | arguments |
+| --- | --- |
+| `function_index` | `path`, `address=""`, `carved_path=""` |
+
+Every function of a PE the file lists or the platform's x86 decoder reaches,
+with the artefacts each holds (`tools.function_index`); nothing is run. The
+functions come from the exception directory, the exports, the entry point and
+the direct call targets the decoder reaches. Each row states the imports the
+function calls, the names its hashes resolve to, how many plain and decoded
+strings it refers to, its callers and callees, and how many artefacts its
+callees hold, counted per callee. Each cell names the tool whose answer states
+it. The answer joins `pe_info`, `resolve_api_hashes` and `decode_string_blobs`
+over the same file, run in-process, and FLOSS's rows when FLOSS ran on the
+file in this server. capa is not run here, and the answer says so under
+`capa`; the triage pack's own `function_index` entry joins capa's answer.
+
+With no `address`, `table` holds the whole index in the pack's row form, ranked
+by each function's own distinct artefacts, then by address. With an `address`
+(a virtual address or an offset from the image base), `row` holds that
+function's row and `callers` and `callees` its neighbours; a function the run
+does not know is a `no:` sentence. Names the sample wrote (imports, resolved
+names, exports) are quoted and escaped as the pack writes recovered strings;
+strings are counted, never shown. There is no row limit: the MCP tool-output
+guardrail bounds the answer and records any cut. Every walk is linear in the
+file: each code byte is decoded once, the callee count costs one step per call,
+and nothing recurses.
+
 ### Sample delivery
 
 | tool | arguments |
