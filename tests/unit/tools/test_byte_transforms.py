@@ -626,7 +626,7 @@ class TestGrowthIsBounded:
         assert out["length"] == CAP and out["sha256"] == hashlib.sha256(text).hexdigest()
         assert out["shown"]["end"] == transforms.SHOWN_BYTES
         assert "show_offset and show_length show another part" in out["shown"]["note"]
-        assert len(json.dumps(answer)) < 8 * transforms.SHOWN_BYTES
+        assert len(json.dumps(out)) <= transforms.SHOWN_ROOM
         assert all(row["offset"] < transforms.SHOWN_BYTES for row in out["indicators"])
         assert peak < 16 * CAP
 
@@ -652,16 +652,74 @@ class TestTheShownPart:
         assert url["offset"] == len(filler) + PLAIN.index(b"http")
         assert later["hex_head"] == PLAIN[: transforms.HEX_HEAD_BYTES].hex()
 
-    def test_a_window_outside_the_output_or_past_any_answer_is_an_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_window_outside_the_output_is_an_error(self, tmp_path: Path) -> None:
         path = _write(tmp_path, PLAIN)
         assert "outside the output" in _error(
             transform_bytes(path, offset=0, show_offset=len(PLAIN))
         )
-        assert "the most bytes one answer can show" in _error(
-            transform_bytes(path, offset=0, show_length=transforms.MAX_SHOWN_BYTES + 1)
+        assert "shows no bytes" in _error(transform_bytes(path, offset=0, show_length=0))
+
+    def test_a_request_past_the_largest_answer_is_cut_to_it_and_says_so(
+        self, tmp_path: Path
+    ) -> None:
+        path = _write(tmp_path, PLAIN)
+        asked = transforms.MAX_SHOWN_BYTES + 1
+        out = _out(transform_bytes(path, offset=0, show_length=asked))
+        assert out["shown"]["cut"].startswith(
+            f"show_length {asked} was cut to {transforms.MAX_SHOWN_BYTES}"
         )
+        assert out["shown"]["end"] == len(PLAIN)
+
+    def test_the_sizes_come_from_the_rooms_and_the_readings_most_characters(self) -> None:
+        from maljan.llm.context_window import (
+            CHARS_PER_TOKEN,
+            MAX_BELIEVABLE_WINDOW_TOKENS,
+            UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS,
+        )
+
+        assert transforms.SHOWN_BYTES == UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS * 2 // 17
+        assert transforms.MAX_SHOWN_BYTES == (
+            MAX_BELIEVABLE_WINDOW_TOKENS * CHARS_PER_TOKEN * 2 // 17
+        )
+
+    def test_no_byte_or_pair_reads_as_more_characters_than_the_figure(self) -> None:
+        import json
+
+        ascii_most = max(
+            len(json.dumps(transforms._ascii_reading(bytes([b, 0x41])))) - 3 for b in range(256)
+        )
+        pair_most = max(
+            len(json.dumps(transforms._utf16_reading(code.to_bytes(2, "little") + b"A\x00"))) - 3
+            for code in range(0x10000)
+        )
+        assert ascii_most == 5 and pair_most == 7
+        assert 2 * ascii_most + pair_most == transforms._CHARS_PER_TWO_BYTES
+
+    def test_indicator_rows_take_only_the_room_the_readings_leave(self, tmp_path: Path) -> None:
+        import json
+
+        hosts = b" ".join(b"h%05d.example.com" % i for i in range(200))
+        path = _write(tmp_path, hosts)
+        out = _out(transform_bytes(path, offset=0))
+        assert out["indicators"], "some rows fit"
+        assert "more indicators in the part shown are left out" in out["indicators_left_out"]
+        assert len(json.dumps(out)) <= transforms.SHOWN_ROOM
+
+    def test_indicator_offsets_are_the_reader_s_own_matches(self, tmp_path: Path) -> None:
+        cases = [
+            (b"admin@evil.com then evil.com", "domain", "evil.com", 20),
+            (b"bad example.org_x and example.org end", "domain", "example.org", 22),
+            (b"version=8.8.4.4 and then 8.8.4.4 here", "ip", "8.8.4.4", 25),
+        ]
+        for blob, kind, value, offset in cases:
+            path = _write(tmp_path, blob, "ind.bin")
+            rows = [
+                r for r in _out(transform_bytes(path, offset=0))["indicators"] if r["kind"] == kind
+            ]
+            assert [(r["value"], r["offset"]) for r in rows] == [(value, offset)], blob
+        wide = _write(tmp_path, b"\x01" + "x c2.ru".encode("utf-16-le"), "wide.bin")
+        rows = _out(transform_bytes(wide, offset=0))["indicators"]
+        assert {"kind": "domain", "value": "c2.ru", "offset": 5, "encoding": "utf-16le"} in rows
 
     def test_the_utf16le_reading_is_the_pack_s_escaping(self) -> None:
         import os
@@ -675,3 +733,50 @@ class TestTheShownPart:
         ):
             text = blob[: len(blob) // 2 * 2].decode("utf-16-le", errors="surrogatepass")
             assert transforms._utf16_reading(blob) == pack_escaped(text)
+
+
+class TestTheReviewRulings:
+    def test_a_repeating_key_takes_the_library_s_path_and_agrees(self) -> None:
+        for length, taken in ((1, 5), (2, 8), (3, 24), (4, 8), (6, 24), (12, 24)):
+            key = bytes(range(7, 7 + length))
+            assert len(transforms._arc4_key(key) or b"") == taken, length
+            assert transforms._arc4(key, PLAIN) == _rc4_reference(key, PLAIN), length
+        for length in (9, 11, 13, 33, 256):
+            key = bytes(range(length))
+            assert transforms._arc4_key(key) is None
+            assert transforms._rc4_stream(key, PLAIN) == _rc4_reference(key, PLAIN)
+
+    def test_skip_whitespace_with_an_alphabet_holding_whitespace(self, tmp_path: Path) -> None:
+        alphabet = " " + transforms._STANDARD_ALPHABET[1:]
+        path = _write(tmp_path, b"QUJD")
+        message = _error(
+            transform_bytes(
+                path,
+                offset=0,
+                steps=[{"op": "base64", "alphabet": alphabet, "skip_whitespace": True}],
+            )
+        )
+        assert "skip_whitespace would drop ' ', which the alphabet holds" in message
+
+    def test_numbers_take_ascii_digits_only(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, PLAIN)
+        for written in ("１６", "1_6", "0x1_0", "0x１", "٣"):
+            assert "give an integer" in _error(transform_bytes(path, offset=written)), written
+        assert transform_bytes(path, offset="0X10")["input"]["offset"] == "0x10"
+
+    def test_many_empty_gzip_members_stay_linear(self, tmp_path: Path) -> None:
+        import time
+
+        member = gzip.compress(b"", mtime=0)
+
+        def timed(size: int) -> tuple[float, dict[str, Any]]:
+            path = _write(tmp_path, member * (size // len(member)), f"{size}.gz")
+            started = time.perf_counter()
+            answer = transform_bytes(path, offset=0, steps=[{"op": "gzip"}])
+            return time.perf_counter() - started, answer
+
+        small, _answer = timed(1 << 19)
+        large, answer = timed(5 << 20)
+        assert answer["steps"][0]["members"] == (5 << 20) // len(member)
+        # Ten times the bytes, well above the largest piece fed at once.
+        assert large < small * 30 + 0.5

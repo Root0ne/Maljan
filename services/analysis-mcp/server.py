@@ -1238,13 +1238,15 @@ def transform_bytes(
     whole output; and, over the part ``shown``, the first 64 bytes in hex, the
     text it reads as in ASCII and in UTF-16LE, and the hosts, URLs, addresses,
     paths and registry keys the indicator reader finds in it with their offsets
-    in the output. The part shown is the first 6000 bytes unless
-    ``show_offset`` and ``show_length`` name another; the answer says when it
-    is not the whole output. An unknown operation, a key of the wrong length,
-    an input that is not whole blocks or padding that does not read is an
-    error naming the step and why; nothing is tried with other parameters.
-    Decompression stops at the platform's sample upload cap and says so, and
-    so does a chain whose steps have written that much in all. Nothing is run.
+    in the output, as many rows as the answer's room leaves. The part shown is
+    the first 705 bytes unless ``show_offset`` and ``show_length`` name
+    another; the answer says when it is not the whole output, and a
+    ``show_length`` past what the largest answer carries is cut to it and says
+    so. An unknown operation, a key of the wrong length, an input that is not
+    whole blocks or padding that does not read is an error naming the step and
+    why; nothing is tried with other parameters. Decompression stops at the
+    platform's fixed sample upload cap and says so, and so does a chain whose
+    steps have written that much in all. Nothing is run.
     """
     return _guard(
         transforms.TOOL,

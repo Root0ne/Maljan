@@ -708,16 +708,20 @@ or named as another range of the same file, so a model points at a key it found
 rather than copying it. The answer names the range with its section and every
 step with its parameters, so the ledger entry is a call anyone can repeat, and
 then states facts about the output: its length, SHA-256, printable share and
-entropy over all of it, and, over the part shown (the first 6000 bytes, the
-room one tool answer gets when the window is not measured, or the part the
-model names with `show_offset` and `show_length`), its hex head, its ASCII and
+entropy over all of it, and, over the part shown, its hex head, its ASCII and
 UTF-16LE readings escaped as the pack writes a string, and the indicators the
-platform's indicator reader finds in it, each with its offset in the output.
-It never says what the output is. An unknown operation,
+platform's indicator scan finds in it, each at the offset where the scan's own
+match stands, as many rows as the room leaves. The part shown is sized from
+what an answer carries: at most 17 characters per two shown bytes for the two
+readings as JSON writes them, so the 6,000-character room one tool answer gets
+when the window is not measured shows 705 bytes by default, and a
+`show_length` past what the largest answer any model gets carries is cut to it
+and says so. It never says what the output is. An unknown operation,
 a wrong key or IV length, an input that is not whole blocks or padding that does
 not read is an error naming the step; nothing is retried with other
-parameters. Decompression is fed a slice at a time and asked for no more than
-the room left under the sample upload cap, concatenated gzip members included,
+parameters. Decompression is fed a piece at a time and asked for no more than
+the room left under the platform's fixed sample upload cap (100 MiB, a number
+here and not the operator's upload setting), concatenated gzip members included,
 so a bomb is cut at the cap and the answer says so; a cut decompression ends
 the chain, and the bytes all steps write together are held to the same cap, so
 a long step list costs at most that much work. Every other step writes at most

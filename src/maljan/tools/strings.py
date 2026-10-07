@@ -16,7 +16,7 @@ same scan, plain dicts.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -98,7 +98,12 @@ def emails_in(data: bytes) -> list[bytes]:
     "@"s and the domains after them never overlap, so each byte is read a
     bounded number of times.
     """
-    found: list[bytes] = []
+    return [data[start:end] for start, end in _email_spans(data)]
+
+
+def _email_spans(data: bytes) -> list[tuple[int, int]]:
+    """Where each of ``emails_in``'s matches starts and ends in ``data``."""
+    found: list[tuple[int, int]] = []
     floor = 0
     at = data.find(b"@")
     while at != -1:
@@ -107,7 +112,7 @@ def emails_in(data: bytes) -> list[bytes]:
             start -= 1
         domain = _EMAIL_DOMAIN_RE.match(data, at + 1) if start < at else None
         if domain is not None:
-            found.append(data[start : domain.end()])
+            found.append((start, domain.end()))
             floor = domain.end()
             at = data.find(b"@", floor)
         else:
@@ -177,8 +182,8 @@ _ONION_RE = re.compile(r"\b[a-z2-7]{16,56}\.onion\b")
 # 120-row cap used to drop the rest here without a word.
 
 
-def _iter_strings(blob: bytes) -> Iterator[str]:
-    """Yield printable ASCII then UTF-16LE runs, in one pass each.
+def _iter_runs(blob: bytes, stopped: list[int] | None = None) -> Iterator[tuple[str, int, int]]:
+    """Each printable ASCII run, then each UTF-16LE run: its text, offset and width.
 
     This replaces seven independent full-blob regex passes. The old shape was
     workable at seven patterns; at the dozen below it would have meant scanning
@@ -191,20 +196,117 @@ def _iter_strings(blob: bytes) -> Iterator[str]:
     printable runs, so a scan that stops after the first couple of hundred sees
     only the beginning of the file. The C2 host is rarely in the first two
     hundred strings — the import thunks and the CRT banner are. The scan bound
-    exists to stop a pathological input, not to shape the output; the per-kind
-    quotas do that, and the caller stops early once they are all full.
+    exists to stop a pathological input, not to shape the output. Where it
+    stops, the end of the last run read is appended to ``stopped``.
     """
     scanned = 0
-    for match in _PRINTABLE_RE.finditer(blob):
-        yield match.group().decode("ascii", errors="ignore")
-        scanned += 1
-        if scanned >= _MAX_STRINGS_SCANNED:
-            return
-    for match in _WIDE_RE.finditer(blob):
-        yield match.group()[::2].decode("ascii", errors="ignore")
-        scanned += 1
-        if scanned >= _MAX_STRINGS_SCANNED:
-            return
+    for pattern, width in ((_PRINTABLE_RE, 1), (_WIDE_RE, 2)):
+        for match in pattern.finditer(blob):
+            yield match.group()[::width].decode("ascii", errors="ignore"), match.start(), width
+            scanned += 1
+            if scanned >= _MAX_STRINGS_SCANNED:
+                if stopped is not None:
+                    stopped.append(match.end())
+                return
+
+
+def _iter_strings(blob: bytes) -> Iterator[str]:
+    """Yield printable ASCII then UTF-16LE runs, in one pass each (``_iter_runs``)."""
+    for text, _start, _width in _iter_runs(blob):
+        yield text
+
+
+# One match of the indicator scan: its kind, its text as matched, its notes,
+# its length floor, and where it starts and ends in the scanned blob.
+_Hit = tuple[str, str, str | None, int, int, int]
+
+
+def _ioc_hits(blob: bytes, stopped: list[int] | None = None) -> Iterator[_Hit]:
+    """Every match the indicator scan makes, in the order it makes them, with its span.
+
+    A span is in bytes of ``blob``: a UTF-16LE run's characters stand two
+    bytes apart.
+    """
+    for text, base, width in _iter_runs(blob, stopped):
+        encoded = text.encode("ascii", errors="ignore")
+
+        def at(span: tuple[int, int], base: int = base, width: int = width) -> tuple[int, int]:
+            return base + span[0] * width, base + span[1] * width
+
+        for match in _URL_RE.finditer(encoded):
+            yield (
+                "url",
+                match.group().decode("ascii", errors="ignore"),
+                None,
+                0,
+                *at(match.span()),
+            )
+        for found in _IP_RE.finditer(encoded):
+            ip = found.group().decode("ascii", errors="ignore")
+            # 127.0.0.1 / 0.0.0.0 / RFC1918 filtered as noise, and a version
+            # number is not an address whatever its shape.
+            if _is_meaningful_ip(ip) and not _written_as_a_version(encoded, found.start()):
+                yield ("ip", ip, None, 0, *at(found.span()))
+        for match in _REG_RE.finditer(encoded):
+            value = match.group().decode("ascii", errors="ignore")
+            yield ("registry", value, None, 0, *at(match.span()))
+        for match in _PATH_RE.finditer(encoded):
+            candidate = match.group().decode("ascii", errors="ignore")
+            if _looks_like_path(candidate):
+                yield ("path", candidate, None, 0, *at(match.span()))
+        for span in _email_spans(encoded):
+            value = encoded[span[0] : span[1]].decode("ascii", errors="ignore")
+            yield ("email", value, None, 0, *at(span))
+        for match in _MUTEX_RE.finditer(encoded):
+            yield (
+                "mutex",
+                match.group().decode("ascii", errors="ignore"),
+                None,
+                0,
+                *at(match.span()),
+            )
+        for start, end, candidate in _domain_spans(text):
+            # `c2.ru` is five characters: a name of a two-character first label
+            # with a digit in it is held to the host reader's own floor.
+            short = two_character_label_with_a_digit(candidate.split(".", 1)[0])
+            floor = _SHORT_RUN_LENGTH if short else 0
+            yield ("domain", candidate, None, floor, *at((start, end)))
+        for label, pattern in _SECRET_PATTERNS:
+            for hit in pattern.finditer(text):
+                yield ("secret", hit.group(), label, 0, *at(hit.span()))
+        for label, pattern in _WALLET_PATTERNS:
+            for hit in pattern.finditer(text):
+                yield ("crypto_wallet", hit.group(), label, 0, *at(hit.span()))
+        for hit in _ONION_RE.finditer(text):
+            yield ("domain", hit.group(), "tor_hidden_service", 0, *at(hit.span()))
+
+    # After the sweep, so every row it gives keeps its place.
+    for host, start, end in _short_host_spans(blob):
+        yield ("domain", host, None, _SHORT_RUN_LENGTH, start, end)
+
+
+def _kept(hits: Iterator[_Hit]) -> Iterator[tuple[dict[str, Any], int, int, int]]:
+    """Each row the scan keeps, with the span and character width of its value as kept.
+
+    A value is kept with its NULs and then its whitespace stripped from both
+    ends, once per kind and spelling, when it is at least as long as its
+    floor; its span moves in by what was stripped from the front.
+    """
+    seen: set[tuple[str, str]] = set()
+    for kind, matched, notes, floor, start, end in hits:
+        decoded = matched.strip("\x00").strip()
+        if len(decoded) < (floor or _MIN_STRING_LENGTH):
+            continue
+        key = (kind, decoded.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        without_nul = matched.strip("\x00")
+        front = len(matched) - len(matched.lstrip("\x00"))
+        front += len(without_nul) - len(without_nul.lstrip())
+        width = (end - start) // len(matched)
+        row = {"kind": kind, "value": decoded, "notes": notes, "source": _IOC_SOURCE}
+        yield row, start + front * width, start + (front + len(decoded)) * width, width
 
 
 def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
@@ -217,71 +319,51 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
     lying in its byte image, which are not the same claim and were being
     published as though they were.
     """
-    iocs: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-
-    def _add(kind: str, decoded: str, notes: str | None = None, *, floor: int = 0) -> None:
-        decoded = decoded.strip("\x00").strip()
-        if len(decoded) < (floor or _MIN_STRING_LENGTH):
-            return
-        key = (kind, decoded.lower())
-        if key in seen:
-            return
-        seen.add(key)
-        iocs.append({"kind": kind, "value": decoded, "notes": notes, "source": _IOC_SOURCE})
-
-    for text in _iter_strings(blob):
-        for match in _URL_RE.findall(text.encode("ascii", errors="ignore")):
-            _add("url", match.decode("ascii", errors="ignore"))
-        encoded = text.encode("ascii", errors="ignore")
-        for found in _IP_RE.finditer(encoded):
-            ip = found.group().decode("ascii", errors="ignore")
-            # 127.0.0.1 / 0.0.0.0 / RFC1918 filtered as noise, and a version
-            # number is not an address whatever its shape.
-            if _is_meaningful_ip(ip) and not _written_as_a_version(encoded, found.start()):
-                _add("ip", ip)
-        for match in _REG_RE.findall(text.encode("ascii", errors="ignore")):
-            _add("registry", match.decode("ascii", errors="ignore"))
-        for match in _PATH_RE.findall(text.encode("ascii", errors="ignore")):
-            candidate = match.decode("ascii", errors="ignore")
-            if _looks_like_path(candidate):
-                _add("path", candidate)
-        for match in emails_in(text.encode("ascii", errors="ignore")):
-            _add("email", match.decode("ascii", errors="ignore"))
-        for match in _MUTEX_RE.findall(text.encode("ascii", errors="ignore")):
-            _add("mutex", match.decode("ascii", errors="ignore"))
-        for candidate in _domains_in(text):
-            # `c2.ru` is five characters: a name of a two-character first label
-            # with a digit in it is held to the host reader's own floor.
-            short = two_character_label_with_a_digit(candidate.split(".", 1)[0])
-            _add("domain", candidate, floor=_SHORT_RUN_LENGTH if short else 0)
-        for label, pattern in _SECRET_PATTERNS:
-            for hit in pattern.findall(text):
-                _add("secret", hit, notes=label)
-        for label, pattern in _WALLET_PATTERNS:
-            for hit in pattern.findall(text):
-                _add("crypto_wallet", hit, notes=label)
-        for hit in _ONION_RE.findall(text):
-            _add("domain", hit, notes="tor_hidden_service")
-
-    # After the sweep, so every row it gives keeps its place.
-    for host in _short_hosts(blob):
-        _add("domain", host, floor=_SHORT_RUN_LENGTH)
-
-    return iocs
+    return [row for row, _start, _end, _width in _kept(_ioc_hits(blob))]
 
 
-def _short_hosts(blob: bytes) -> Iterator[str]:
+def string_iocs_with_spans(
+    blob: bytes, kinds: Iterable[str] | None = None
+) -> tuple[list[dict[str, Any]], int | None]:
+    """``iter_string_iocs``'s rows, each with the place its value was matched.
+
+    The same scan and the same rows in the same order, narrowed to ``kinds``
+    when given; each row also carries ``start`` and ``end``, the offsets in
+    ``blob`` of the value as kept, from the scan's own match, and ``width``,
+    1 for a match in an ASCII run and 2 for one in a UTF-16LE run. The second
+    value is the offset at which the run bound stopped the scan, or ``None``
+    when it read every run.
+    """
+    keep = set(kinds) if kinds else None
+    stopped: list[int] = []
+    rows = [
+        {**row, "start": start, "end": end, "width": width}
+        for row, start, end, width in _kept(_ioc_hits(blob, stopped))
+        if keep is None or row["kind"] in keep
+    ]
+    return rows, (stopped[0] if stopped else None)
+
+
+def _short_host_spans(blob: bytes) -> Iterator[tuple[str, int, int]]:
     """The five-character runs that are each a host as a whole, ASCII then UTF-16LE.
 
     Each distinct run is asked of ``_short_host`` once, in the order it
-    first stands, however often it repeats.
+    first stands, however often it repeats; its span is where it first stands.
     """
     for pattern, width in ((_SHORT_HOST_RE, 1), (_SHORT_WIDE_HOST_RE, 2)):
-        for run in dict.fromkeys(pattern.findall(blob)):
+        first: dict[bytes, tuple[int, int]] = {}
+        for match in pattern.finditer(blob):
+            first.setdefault(match.group(1), match.span(1))
+        for run, (start, end) in first.items():
             host = _short_host(run[::width].decode("ascii"))
             if host:
-                yield host
+                yield host, start, end
+
+
+def _short_hosts(blob: bytes) -> Iterator[str]:
+    """The hosts ``_short_host_spans`` finds, without their spans."""
+    for host, _start, _end in _short_host_spans(blob):
+        yield host
 
 
 def _short_host(run: str) -> str:
@@ -311,6 +393,11 @@ def _domains_in(text: str) -> list[str]:
     `microsoft.com`. A parent at a label boundary is a name in its own right,
     so `sectigo.com` under `crl.sectigo.com` stays.
     """
+    return [value for _start, _end, value in _domain_spans(text)]
+
+
+def _domain_spans(text: str) -> list[tuple[int, int, str]]:
+    """``_domains_in``'s names, each with where it starts and ends in ``text``."""
     found: list[tuple[int, int, str]] = []
     for match in _DOMAIN_RE.finditer(text.encode("ascii", errors="ignore")):
         candidate = match.group().decode("ascii", errors="ignore")
@@ -319,8 +406,8 @@ def _domains_in(text: str) -> list[str]:
     # Spans that do not overlap, as ``finditer`` yields them, nest nowhere:
     # checked in one pass, so a run of many names is not compared pairwise.
     if all(found[index][1] <= found[index + 1][0] for index in range(len(found) - 1)):
-        return [value for _start, _end, value in found]
-    return [value for start, end, value in found if not _inside_a_longer_host(start, end, found)]
+        return found
+    return [(s, e, value) for s, e, value in found if not _inside_a_longer_host(s, e, found)]
 
 
 def _inside_a_longer_host(start: int, end: int, found: list[tuple[int, int, str]]) -> bool:

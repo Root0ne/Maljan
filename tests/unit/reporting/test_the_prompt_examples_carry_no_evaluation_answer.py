@@ -784,12 +784,14 @@ def _transform_sentences() -> str:
         ("image", {"offset": 0, "length": 2}),
         ("image", {"va": "0x10"}),
         ("big", {"offset": 0}),
+        ("hosts", {"offset": 0}),
         ("big", {"offset": 1, "show_offset": 3, "show_length": 5}),
         ("flat", {"offset": 0, "show_offset": 999}),
         ("flat", {"offset": 0, "show_length": transforms.MAX_SHOWN_BYTES + 1}),
     ]
     with tempfile.TemporaryDirectory() as folder:
         files = {
+            "hosts": b" ".join(b"h%05d.example.com" % i for i in range(200)),
             "big": b"\0" * (transforms.SHOWN_BYTES * 2),
             "flat": b"plain bytes, " * 5,
             "packed": zlib.compress(b"x" * 64) + b"tail",
@@ -806,6 +808,8 @@ def _transform_sentences() -> str:
             transforms.CAPABILITY_FACTS,
             transforms.REMEDIATION,
             transforms._cap_sentence(),
+            transforms._scan_stopped_sentence(9),
+            transforms._left_out_sentence(3, 6000),
             transforms._stopped(2, 4, "the output reached the platform's sample upload cap"),
             transforms._stopped(
                 2, 4, "the steps had written 9 bytes in all, the platform's sample upload cap"
@@ -814,7 +818,17 @@ def _transform_sentences() -> str:
             *(json.dumps({k: v for k, v in a.items() if k != "output"}) for a in answers),
             # The output's own sentences; its readings are the sample's bytes.
             *(
-                json.dumps({k: a["output"].get(k) for k in ("shown", "utf16le_note")})
+                json.dumps(
+                    {
+                        k: a["output"].get(k)
+                        for k in (
+                            "shown",
+                            "utf16le_note",
+                            "indicators_left_out",
+                            "indicator_scan_stopped",
+                        )
+                    }
+                )
                 for a in answers
                 if "output" in a
             ),

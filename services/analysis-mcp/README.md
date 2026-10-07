@@ -359,45 +359,67 @@ printable bytes (as ASCII and as UTF-16LE pairs) and its Shannon entropy in
 bits per byte. Over the part `shown`: the first 64 bytes in hex, its text read
 as ASCII (each byte past ASCII written as `\xNN`) and as UTF-16LE, each escaped
 as the pack writes a recovered string, and the domains, URLs, IP addresses,
-paths and registry keys the indicator reader (`iocs_from_text`) finds in it,
-each at its first offset in the output with the encoding it was read in. The
-part shown is the first 6000 bytes, the room the platform gives one tool answer
-when the model's window is not measured (a reading takes at least a character
-a byte), unless `show_offset` and `show_length` name another; `shown` says
-when it is not the whole output. `show_length` reaches at most the characters
-of the largest window the platform believes a model has (30,000,000). The
+paths and registry keys the platform's indicator scan (the reader behind
+`iocs_from_text` and `iocs_from_file`) finds in it. Each indicator's offset is
+where the scan's own match of that value stands in the output (a value the scan
+keeps once per spelling is at its first match), with the encoding of the run it
+was read in. The part shown is sized from what an answer carries. Per two
+shown bytes the answer spends at most 17 characters as JSON writes it: 5 for
+each byte of the ASCII reading (a backslash, `x` and two digits, the backslash
+escaped) and 7 for the pair in the UTF-16LE reading; the hex head is 64 bytes
+whatever is shown. By default the part shown is what the room the platform
+gives one tool answer when the model's window is not measured (6,000
+characters) carries at that rate: 705 bytes. `show_offset` and `show_length`
+name another part; `shown` says when it is not the whole output, and a
+`show_length` past what the largest tool answer any model gets (30,000,000
+characters, the largest window the platform believes in) carries, 3,529,411
+bytes, is cut to that and says so. The indicator rows take what the part's room
+leaves after everything else, and `indicators_left_out` counts the rest. The
 answer never says what the output is.
 
 An unknown operation, a key of a length the cipher does not take, a wrong IV
 or nonce length, an input that is not whole AES blocks, padding that is not
-PKCS#7, an alphabet with a repeated character, a stray character in the
-encoded text, a malformed LZNT1 chunk or a compressed stream that does not
-read is an error naming the step and why. Nothing is guessed and nothing is
-retried with other parameters.
+PKCS#7, an alphabet with a repeated character, `skip_whitespace` with an
+alphabet that holds a whitespace character, a stray character in the encoded
+text, a malformed LZNT1 chunk or a compressed stream that does not read is an
+error naming the step and why. Nothing is guessed and nothing is retried with
+other parameters. A number is written in ASCII digits.
 
 Every step but decompression writes at most as many bytes as it reads.
 Decompression (`zlib`, `gzip`, `deflate`, `lznt1`) is held to the platform's
-default sample upload cap (`core.delivery_limits.SAMPLE_UPLOAD_MAX_BYTES`): the
-stream is fed a slice at a time and each call is asked for no more than the room
-left, so the output never holds more than the cap, and a stream that reaches it
-is cut there with the cut stated. Concatenated gzip members are read in turn
-under that one bound and counted (`members`); an LZNT1 chunk that expands past
-its 4096 bytes is an error. A decompression cut by the cap ends the chain: the
-answer's `stopped` names the steps not run and states the cut step's output.
-The bytes all steps write together are held to the same cap, so a long list of
-steps costs at most that many bytes of work, and a chain that reaches it stops
-the same way. Each step's input is let go before the next runs, and each step
-is linear in its buffer. The measures over the whole output count a slice at a
-time. Measured on this project's host at the cap (100 MiB): a 1 GiB zlib bomb
-1.2 s and 200 MiB above the process; 128 gzip members of 1 MiB 1.1 s; an
-LZNT1 bomb 0.75 s, an all-literal LZNT1 stream 4.0 s and one of nothing but
-three-byte copies (the slowest shape) 29 s, each 200 MiB; the whole-output
-measures 0.5 s and 9 MiB; at the largest part a call may ask to be shown
-(30 MB) the ASCII reading 1.7 s, the UTF-16LE reading 3.4 s and the indicator
-scan 18 s over dense text. `rc4` runs through `cryptography`'s ARC4 for the key lengths it
-takes (5, 7, 8, 10, 16, 20, 24 or 32 bytes) and through the same algorithm
-written out for every other length; `aes` needs `cryptography`. The ledger
-entry's evidence root is the start of its input range.
+fixed sample upload cap (`core.delivery_limits.SAMPLE_UPLOAD_MAX_BYTES`,
+100 MiB; a number here, not the operator's upload setting): the stream is fed a
+piece at a time and each call is asked for no more than the room left, so the
+output never holds more than the cap, and a stream that reaches it is cut there
+with the cut stated. Concatenated gzip members are read in turn under that one
+bound and counted (`members`); each member is fed pieces that double from 256
+bytes to 64 KiB, so what is handed back at a member's end is about the member's
+own size and a stream of many empty members stays linear. An LZNT1 chunk that
+expands past its 4096 bytes is an error. A decompression cut by the cap ends
+the chain: the answer's `stopped` names the steps not run and states the cut
+step's output. The bytes all steps write together are held to the same cap,
+so a long list of steps costs at most that many bytes of work, and a chain
+that reaches it stops the same way, stated in `stopped`. Each step's input is
+let go before the next runs, and each step is linear in its buffer. The
+measures over the whole output count a slice at a time.
+
+Measured on this project's host at the cap: a 2 GiB zlib or raw deflate bomb
+1.1 s and 238 MiB above the process; 1,572,864 empty gzip members (30 MiB)
+5.4 s and 31 MiB; 100 gzip members of 1 MiB 1.0 s; LZNT1 at 100 MiB of output
+0.8 s for the most expanding stream, 21 s for one of seven literals and a copy
+per group and 29 s for one of nothing but three-byte copies (the slowest
+shape), each 200 to 300 MiB; 100 MiB of random output with the default part
+shown 0.6 s and a 5,622-character answer. At the largest part a call is shown
+(3,529,411 bytes) the slowest of nine 30 MB shapes (dense addresses) took
+4.6 s and 286 MiB, and every answer stayed within the 30,000,000 characters it
+was sized for.
+
+`rc4` runs through `cryptography`'s ARC4 for the key lengths it takes (5, 7,
+8, 10, 16, 20, 24 or 32 bytes) and for a key whose own length divides one of
+them, repeated to it, which schedules the same (a 1-byte key as 5 bytes, 2 and
+4 as 8, 3, 6 and 12 as 24); every other length runs through the same algorithm
+written out. `aes` needs `cryptography`. The ledger entry's evidence root is
+the start of its input range.
 
 ### Sample delivery
 

@@ -43,6 +43,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import json
 import re
 import string
 import zlib
@@ -62,25 +63,39 @@ from maljan.llm.context_window import (
 )
 from maljan.tools import pe_image
 from maljan.tools.errors import BAD_ARGUMENT, tool_error
-from maljan.tools.strings import iocs_from_text
+from maljan.tools.strings import string_iocs_with_spans
 from maljan.utils.written_forms import PACK_ESCAPES, pack_escaped
 
 TOOL = "transform_bytes"
 
-# The most bytes a decompression step writes: the platform's default cap on a
-# sample upload. A decompressed payload is a file of that kind, and a stream
+# The most bytes a decompression step writes, and the chain writes in all: the
+# platform's fixed sample upload cap, a number here and not the operator's
+# upload setting. A decompressed payload is a file of that kind, and a stream
 # that inflates past it is cut there, with the cut stated.
 DECOMPRESSED_CAP = SAMPLE_UPLOAD_MAX_BYTES
 
-# How many output bytes the hex head, the readings and the indicators cover
-# when the call does not say: the room the platform gives one tool answer when
-# the model's window is not measured. A reading takes at least a character a
-# byte, so more than that is not shown whole in that room; the measures cover
-# the whole output, and ``show_offset`` and ``show_length`` show any other part.
-SHOWN_BYTES = UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
-# The most a call may ask to be shown: the characters of the largest window
-# this platform believes a model has. No answer can show a reading longer.
-MAX_SHOWN_BYTES = MAX_BELIEVABLE_WINDOW_TOKENS * CHARS_PER_TOKEN
+# The most characters the answer spends per two shown bytes, as JSON writes it:
+# the ASCII reading writes a byte as at most a backslash, x and two digits, 5
+# characters once JSON escapes the backslash; the UTF-16LE reading writes a pair
+# as at most a backslash, x and four digits, 7. The hex head is 64 bytes
+# whatever is shown, and the indicator rows take what the room leaves
+# (``_within_room``).
+_CHARS_PER_TWO_BYTES = 2 * 5 + 7
+
+
+def _bytes_for(room: int) -> int:
+    """How many shown bytes the readings carry in ``room`` characters at their most."""
+    return room * 2 // _CHARS_PER_TWO_BYTES
+
+
+# The part shown when the call does not say: what the room the platform gives
+# one tool answer when the model's window is not measured carries.
+SHOWN_ROOM = UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
+SHOWN_BYTES = _bytes_for(SHOWN_ROOM)
+# The most a call is shown: what the largest tool answer any model gets
+# carries, the characters of the largest window this platform believes in.
+MAX_SHOWN_ROOM = MAX_BELIEVABLE_WINDOW_TOKENS * CHARS_PER_TOKEN
+MAX_SHOWN_BYTES = _bytes_for(MAX_SHOWN_ROOM)
 
 # How many leading bytes of the output are shown in hex. The whole output is
 # also stated as text in two readings; the head is the raw view of its start.
@@ -119,9 +134,9 @@ CAPABILITY_FACTS = (
     'or nonce is {"hex": ...}, {"text": ...} or a range of the same file {"offset": ..., '
     '"length": ...}. The answer states the output\'s length, SHA-256, printable share and '
     "entropy over the whole output, and the hex head, ASCII and UTF-16LE readings and the "
-    "indicators found with their offsets over the part shown: the first 6000 bytes, or the part "
+    "indicators found with their offsets over the part shown: the first 705 bytes, or the part "
     "show_offset and show_length name. Decompression, and the bytes a chain writes in all, stop "
-    "at the platform's sample upload cap and say so."
+    "at the platform's fixed sample upload cap and say so."
 )
 
 REMEDIATION = (
@@ -133,6 +148,7 @@ _STANDARD_ALPHABET = string.ascii_uppercase + string.ascii_lowercase + string.di
 _URLSAFE_ALPHABET = string.ascii_uppercase + string.ascii_lowercase + string.digits + "-_"
 _BASE64_PAD = "="
 _WHITESPACE = b" \t\r\n\v\f"
+_WHITESPACE_SET = frozenset(bytes([byte]) for byte in _WHITESPACE)
 _AES_BLOCK = 16
 _AES_KEY_SIZES = (16, 24, 32)
 # The key lengths cryptography's ARC4 takes; any other length is scheduled by
@@ -142,6 +158,13 @@ _LZNT1_CHUNK = 4096
 # How many bytes the xor step works through at once: a working set, not a
 # bound on anything the step reads or writes.
 _WORKING_SLICE = 1 << 20
+# How much compressed input a decompression step is fed at once, at most and
+# first. What follows the end of one gzip member is handed back as a copy of the
+# rest of the piece it stood in, so the pieces bound what is copied at each
+# member's end: a member's pieces double from the first, so the last is at most
+# about the member's own size, and never more than the largest.
+_INFLATE_PIECE = 1 << 16
+_FIRST_PIECE = 1 << 8
 _LZNT1_COMPRESSED = 0x8000
 _LZNT1_SIGNATURE = 0x3000
 _ZLIB_WINDOWS = {"zlib": 15, "gzip": 31, "deflate": -15}
@@ -160,10 +183,6 @@ _ASCII_FORMS = {
     or (chr(code) if code < 0x80 and chr(code).isprintable() else f"\\x{code:02x}")
     for code in range(0x100)
 }
-# The runs the indicator reader is handed, ASCII and UTF-16LE, from five
-# characters: the reader's own floor for a host standing alone.
-_ASCII_RUN = re.compile(rb"[\x20-\x7e]{5,}")
-_WIDE_RUN = re.compile(rb"(?:[\x20-\x7e]\x00){5,}")
 
 
 class TransformError(ValueError):
@@ -188,17 +207,20 @@ def _number(value: Any, name: str) -> int:
     if isinstance(value, float) and value.is_integer():
         return int(value)
     text = str(value).strip() if isinstance(value, str) else ""
-    try:
-        if text.lower().startswith("0x"):
-            return int(text[2:], 16)
-        if text.isdigit():
-            return int(text, 10)
-    except ValueError:
-        pass
+    # ASCII digits only: ``int`` also reads other scripts' digits and
+    # underscores, which no address or length is written with.
+    if text.lower().startswith("0x") and _HEX_DIGITS.fullmatch(text[2:]):
+        return int(text[2:], 16)
+    if _DECIMAL_DIGITS.fullmatch(text):
+        return int(text, 10)
     raise TransformError(
         f"{name} is {str(value)[:40]!r}; give an integer, or a string read as hexadecimal after "
         "0x and as decimal otherwise"
     )
+
+
+_HEX_DIGITS = re.compile(r"[0-9A-Fa-f]+")
+_DECIMAL_DIGITS = re.compile(r"[0-9]+")
 
 
 def _given(value: Any) -> bool:
@@ -399,15 +421,32 @@ def _rc4_stream(key: bytes, data: bytes) -> bytes:
         j = (j + box[i]) & 0xFF
         box[i], box[j] = box[j], box[i]
         out[n] = box[(box[i] + box[j]) & 0xFF]
-    return (
-        np.frombuffer(bytes(out), dtype=np.uint8) ^ np.frombuffer(data, dtype=np.uint8)
-    ).tobytes()
+    # The keystream is combined with the input in place, then copied out once.
+    stream = np.frombuffer(out, dtype=np.uint8)
+    stream ^= np.frombuffer(data, dtype=np.uint8)
+    return bytes(out)
+
+
+def _arc4_key(key: bytes) -> bytes | None:
+    """A key cryptography's ARC4 takes that schedules exactly as ``key`` does, or ``None``.
+
+    The schedule reads key byte i mod the key's length for i below 256, so a
+    key repeated to a length its own length divides schedules the same: the
+    shortest such length ARC4 takes is used (1 byte as 5; 2 and 4 as 8; 3, 6
+    and 12 as 24).
+    """
+    for length in sorted(_ARC4_KEY_BYTES):
+        if length % len(key) == 0:
+            return key * (length // len(key))
+    return None
 
 
 def _arc4(key: bytes, data: bytes) -> bytes | None:
     """``data`` through cryptography's ARC4, or ``None`` where it cannot run this key."""
-    if len(key) not in _ARC4_KEY_BYTES:
+    taken = _arc4_key(key)
+    if taken is None:
         return None
+    key = taken
     try:
         from cryptography.hazmat.primitives.ciphers import Cipher
 
@@ -520,6 +559,12 @@ def _base64(data: bytes, file: _File, step: Mapping[str, Any]) -> tuple[bytes, d
     alphabet, kind = _base64_alphabet(step.get("alphabet"))
     said: dict[str, Any] = {"alphabet": alphabet if kind == "custom" else kind}
     if step.get("skip_whitespace"):
+        clash = [ch for ch in alphabet if ch.encode("ascii") in _WHITESPACE_SET]
+        if clash:
+            raise TransformError(
+                f"skip_whitespace would drop {clash[0]!r}, which the alphabet holds as a "
+                "character; leave skip_whitespace out for this alphabet"
+            )
         data = data.translate(None, _WHITESPACE)
         said["skip_whitespace"] = True
     body = data.rstrip(_BASE64_PAD.encode())
@@ -674,13 +719,17 @@ def _inflate(
         while True:
             stream = zlib.decompressobj(_ZLIB_WINDOWS[kind])
             members += 1
+            # Each member is fed pieces that double from a small first one, so
+            # the bytes handed back at its end are at most about its own size.
+            size = _FIRST_PIECE
             try:
                 while not stream.eof:
                     if stream.unconsumed_tail:
                         piece: bytes | memoryview = stream.unconsumed_tail
                     elif at < len(data):
-                        piece = view[at : at + _WORKING_SLICE]
+                        piece = view[at : at + size]
                         at += len(piece)
+                        size = min(size * 2, _INFLATE_PIECE)
                     else:
                         break
                     out += stream.decompress(piece, DECOMPRESSED_CAP - len(out) + 1)
@@ -798,36 +847,24 @@ def _entropy(counts: Any, total: int) -> float:
     return round(float(-(shares * np.log2(shares)).sum()), 4)
 
 
-def _indicators(data: bytes) -> list[dict[str, Any]]:
-    """The indicator reader's finds, run by run, each at its first offset in the output."""
-    found: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-    for pattern, width, encoding in ((_ASCII_RUN, 1, "ascii"), (_WIDE_RUN, 2, "utf-16le")):
-        for run in pattern.finditer(data):
-            text = run.group()[::width].decode("ascii")
-            cursors: dict[tuple[str, Any], int] = {}
-            for row in iocs_from_text(text, list(INDICATOR_KINDS))["iocs"]:
-                value = str(row.get("value") or "")
-                key = (str(row["kind"]), value.lower())
-                if not value or key in seen:
-                    continue
-                stream = (key[0], row.get("notes"))
-                at = text.find(value, cursors.get(stream, 0))
-                if at < 0:
-                    at = text.find(value)
-                if at < 0:
-                    continue
-                cursors[stream] = at + len(value)
-                seen.add(key)
-                found.append(
-                    {
-                        "kind": key[0],
-                        "value": pack_escaped(value),
-                        "offset": run.start() + at * width,
-                        "encoding": encoding,
-                    }
-                )
-    return found
+def _indicators(shown: bytes, start: int) -> tuple[list[dict[str, Any]], int | None]:
+    """The indicator reader's rows over the part shown, each at the offset its match stands.
+
+    The offset is the reader's own match (``string_iocs_with_spans``), as an
+    offset in the whole output; the second value is the output offset at which
+    the reader's run bound stopped it, or ``None``.
+    """
+    rows, stopped = string_iocs_with_spans(shown, INDICATOR_KINDS)
+    found = [
+        {
+            "kind": row["kind"],
+            "value": pack_escaped(str(row["value"])),
+            "offset": start + int(row["start"]),
+            "encoding": "utf-16le" if row["width"] == 2 else "ascii",
+        }
+        for row in rows
+    ]
+    return found, (None if stopped is None else start + stopped)
 
 
 def _measures(data: bytes) -> tuple[Any, int, int]:
@@ -848,52 +885,98 @@ def _measures(data: bytes) -> tuple[Any, int, int]:
     return counts, wide, pairs
 
 
-def _shown_window(data: bytes, show_offset: Any, show_length: Any) -> tuple[int, int]:
+def _shown_window(
+    data: bytes, show_offset: Any, show_length: Any
+) -> tuple[int, int, int, str | None]:
+    """The part shown, the characters it was sized for, and a sentence when a request was cut."""
     start = _number(show_offset, "show_offset") if _given(show_offset) else 0
     if start < 0 or (data and start >= len(data)) or (not data and start):
         raise TransformError(f"show_offset {start} is outside the output of {len(data)} bytes")
+    cut = None
     if _given(show_length):
         length = _number(show_length, "show_length")
-        if not 1 <= length <= MAX_SHOWN_BYTES:
-            raise TransformError(
-                f"show_length {length} is outside 1 to {MAX_SHOWN_BYTES}, the most bytes one "
-                "answer can show: a reading takes at least a character a byte, and no window "
-                "this platform believes holds more characters than that"
+        if length < 1:
+            raise TransformError(f"show_length {length} shows no bytes; give 1 or more")
+        if length > MAX_SHOWN_BYTES:
+            cut = (
+                f"show_length {length} was cut to {MAX_SHOWN_BYTES}, the most bytes the largest "
+                f"tool answer any model gets ({MAX_SHOWN_ROOM} characters) carries at the "
+                "readings' most characters a byte"
             )
+            length = MAX_SHOWN_BYTES
+        # Never less than the room every answer gets, so a short part still
+        # has room for its fields and rows.
+        room = min(MAX_SHOWN_ROOM, max(SHOWN_ROOM, -(-length * _CHARS_PER_TWO_BYTES // 2)))
     else:
-        length = SHOWN_BYTES
-    return start, min(len(data), start + length)
+        length, room = SHOWN_BYTES, SHOWN_ROOM
+    return start, min(len(data), start + length), room, cut
+
+
+def _within_room(rows: list[dict[str, Any]], left: int) -> list[dict[str, Any]]:
+    """The leading rows whose JSON fits in ``left`` characters."""
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        left -= len(json.dumps(row)) + 2
+        if left < 0:
+            break
+        kept.append(row)
+    return kept
 
 
 def _output_facts(data: bytes, show_offset: Any = None, show_length: Any = None) -> dict[str, Any]:
-    start, end = _shown_window(data, show_offset, show_length)
+    start, end, room, cut = _shown_window(data, show_offset, show_length)
     counts, wide, pairs = _measures(data)
     printable = int(counts[_PRINTABLE].sum())
     shown = data[start:end]
+    said: dict[str, Any] = {"offset": start, "end": end}
+    if start or end < len(data):
+        said["note"] = (
+            f"the hex head, the readings and the indicators cover output bytes {start} to {end} "
+            f"of {len(data)}; the measures above cover all of them, and show_offset and "
+            "show_length show another part"
+        )
+    if cut:
+        said["cut"] = cut
+    readings = {"ascii": _ascii_reading(shown), "utf16le": _utf16_reading(shown)}
     facts: dict[str, Any] = {
         "length": len(data),
         "sha256": hashlib.sha256(data).hexdigest(),
         "printable_share": round(printable / len(data), 4) if data else 0.0,
         "printable_share_utf16le": round(wide / pairs, 4) if pairs else 0.0,
         "entropy_bits_per_byte": _entropy(counts, len(data)),
-        "shown": {"offset": start, "end": end},
+        "shown": said,
+        "hex_head": shown[:HEX_HEAD_BYTES].hex(),
     }
-    if start or end < len(data):
-        facts["shown"]["note"] = (
-            f"the hex head, the readings and the indicators cover output bytes {start} to {end} "
-            f"of {len(data)}; the measures above cover all of them, and show_offset and "
-            "show_length show another part"
-        )
-    facts["hex_head"] = shown[:HEX_HEAD_BYTES].hex()
-    indicators = _indicators(shown)
-    for row in indicators:
-        row["offset"] += start
-    facts["indicators"] = indicators
-    facts["ascii"] = _ascii_reading(shown)
-    facts["utf16le"] = _utf16_reading(shown)
     if len(shown) % 2:
         facts["utf16le_note"] = "the shown part's last byte is left out of the UTF-16LE reading"
+    rows, stopped = _indicators(shown, start)
+    if stopped is not None:
+        facts["indicator_scan_stopped"] = _scan_stopped_sentence(stopped)
+    # The rows take what the part's room leaves after everything else,
+    # the sentence saying some were left out included.
+    left_out = _left_out_sentence(len(rows), room)
+    left = room - len(json.dumps({**facts, **readings, "indicators": [], "left_out": left_out}))
+    kept = _within_room(rows, left)
+    facts["indicators"] = kept
+    if len(kept) < len(rows):
+        facts["indicators_left_out"] = _left_out_sentence(len(rows) - len(kept), room)
+    facts.update(readings)
     return facts
+
+
+def _scan_stopped_sentence(at: int) -> str:
+    return (
+        "the indicator reader's bound on the runs it reads stopped it at output byte "
+        f"{at}; indicators after it are not stated"
+    )
+
+
+def _left_out_sentence(count: int, room: int) -> str:
+    return (
+        f"{count} more indicators in the part shown are left out: their rows pass the {room} "
+        "characters the part was sized for; a smaller show_length or a later show_offset "
+        "states them"
+    )
 
 
 def _steps_of(steps: Any) -> list[Mapping[str, Any]]:
