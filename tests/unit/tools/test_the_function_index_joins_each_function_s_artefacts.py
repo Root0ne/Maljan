@@ -288,8 +288,8 @@ class TestTheRunsAnswersArePlaced:
             ],
         }
         return {
-            "floss": ("ev_0019", floss),
-            "blobs": ("ev_0021", blobs),
+            "floss": ("ev_0017", floss),
+            "blobs": ("ev_0016", blobs),
             "hashes": ("ev_0020", hashes),
             "capa": ("ev_0008", capa),
         }
@@ -300,7 +300,7 @@ class TestTheRunsAnswersArePlaced:
         answer = artefact_index.function_index(_load(image, tmp_path), **self._answers(places))
         first = _row(answer, FIRST)
         assert first["decoded_strings"] == [
-            {"text": "a shared text", "sources": ["ev_0021", "ev_0019"]}
+            {"text": "a shared text", "sources": ["ev_0016", "ev_0017"]}
         ]
 
     def test_a_stack_string_is_in_the_function_floss_names(self, tmp_path: Path) -> None:

@@ -47,7 +47,7 @@ def _hashes() -> LedgerEntry:
             },
             {
                 "readings": [{"set": "exports", "name": "CloseThing"}],
-                "occurrences": [{"rva": "0x2204", "function": "0x2200"}],
+                "occurrences": [{"rva": "0x2604", "function": "0x2600"}],
             },
         ],
     }
@@ -63,7 +63,7 @@ def _decompiled(entry_id: str, address: int) -> LedgerEntry:
     )
 
 
-INDEX_ROWS = [(0x3300, 7), (0x1100, 4), (0x2200, 4), (0x4400, 1)]
+INDEX_ROWS = [(0x3300, 7), (0x1100, 4), (0x2600, 4), (0x4400, 1)]
 
 
 class TestWithAnIndex:
@@ -81,7 +81,7 @@ class TestWithAnIndex:
         last = function_map_block(self._map()).splitlines()[-1]
         assert last == (
             "not visited, holding artefacts in the function index (ev_0009): "
-            f"{hex(BASE + 0x3300)} (7 artefacts); {hex(BASE + 0x2200)} (4 artefacts); "
+            f"{hex(BASE + 0x3300)} (7 artefacts); {hex(BASE + 0x2600)} (4 artefacts); "
             f"{hex(BASE + 0x4400)} (1 artefact)"
         )
 
@@ -102,5 +102,5 @@ class TestWithoutAnIndex:
             "analysis server tied to them, 1 of them visited"
         )
         assert lines[-1] == (
-            f"not visited, reaching artefacts: {hex(BASE + 0x2200)} (1 resolved name; ev_0005)"
+            f"not visited, reaching artefacts: {hex(BASE + 0x2600)} (1 resolved name; ev_0005)"
         )
