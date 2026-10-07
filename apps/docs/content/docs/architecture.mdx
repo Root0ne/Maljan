@@ -586,7 +586,12 @@ leave. The run-state block carries one line saying the index exists, which
 entry holds it, how many rows it has, and that the analysis server's
 `function_index` tool serves it whole or by address. A count is stated only
 from a readable answer: an entry whose output the evidence byte budget dropped,
-or with no readable rows, says `no:` and why instead.
+or with no readable rows, says `no:` and why instead. The pack's entry also
+lists the functions the decoder stopped in (`undecoded`) and counts, per
+function, the calls that name nothing (`calls_unnamed`): a call through a
+register, or through a slot the import table does not fill. The pack's lines
+do not print them; the function claim check reads them to know where an absent
+call is no fact.
 
 The analysis server serves the same index as the tool `function_index`
 (`path`, optional `address`, `carved_path`), built by the same code from the
@@ -1777,7 +1782,7 @@ from the heading patterns, so its memory grows only with the distinct claims. A
 tool-call tag or a JSON fence still open is read as kept, as the check keeps it,
 and cut back to the reading before it only if it resolves as removed.
 
-Two more questions are asked of an analyst's answer in the same validation
+Three more questions are asked of an analyst's answer in the same validation
 turn, each once, and what the analyst answers stands.
 
 - **Decompiled but not described** (`isr.decompiled_not_described`).
@@ -1843,6 +1848,66 @@ turn, each once, and what the analyst answers stands.
     had. One that keeps the library-only claims is kept, with the finding
     recorded.
   - *Why.* One analyst's answer was mostly such claims.
+- **A function claim its function's facts do not hold**
+  (`isr.function_claim_unheld`, `pipeline/function_claims.py`).
+  - *Which claims.* A claim that cites the listing of a function the
+    analyst's own calls decompiled (read as the decompiled-not-described
+    question reads them) or disassembled whole. When the claim cites the
+    listings of several functions, the ones its sentence names are taken, and
+    with none named, all of them.
+  - *What a claim names.* The Windows function names its sentence writes: an
+    identifier the vendored export catalogue or this run's own facts know,
+    written with a capital after its first letter or inside a code span, so a
+    word of running text is never read as one. And the strings it quotes, in
+    quotes or in a code span holding quotes, of three characters or more with a
+    letter or a digit in them, that some entry of the run holds: a quoted
+    phrase no tool recovered is a paraphrase, not one of the sample's strings.
+    The model is asked to write nothing new; the claim format is unchanged.
+  - *Where a value holds.* In this order: the listing's own text; the
+    function's row in the pack's function index (its imports, resolved names,
+    decoded and plain strings and capa rules); the rows of its direct callees,
+    one call deep; and the places the run's hash-resolution and decoded-string
+    answers put inside it. A value another function the claim names by its
+    start holds, or another entry the claim cites holds (in its text or in the
+    pack lines the analyst was shown for it), holds too: the claim may name it
+    for that subject, and nothing is asked on a guess. API names are compared
+    without regard to case, a module in front read off, the ANSI and wide
+    spellings read as one name as the API catalogue compares them; strings by
+    the citation check's whole-value reading.
+  - *The question.* One per claim block, naming every value held nowhere:
+    "claim n names X for function F [ev_…]; the listing, its index row [ev_…]
+    and its k callees' rows hold no X; F's row holds …", the row in the pack's
+    own words, counted instead when those run past a finding row's bound. It
+    asks to keep the claim and say where the code shows it, to correct the name
+    or the function, or to withdraw the claim, with a reason.
+  - *What stands.* A correction leaves no finding. A kept claim stays, with the
+    finding recorded; §13 folds identical findings as it folds any. A retry
+    that withdraws asked claims is kept although it has fewer claim blocks, as
+    long as it keeps every other block of the first answer, and the withdrawn
+    claims are not asked about again as dropped work. A question no time was
+    left for is recorded as not asked. No claim is edited or dropped by the
+    platform.
+  - *When the fact is absent.* Nothing is stated, and the loop's record in the
+    run summary (`budget.<agent>.function_claims`) gives each such claim with
+    `no:` and why: the run holds no function index, or its answer was not kept
+    whole; the index does not know the function; the pack the analyst was
+    shown left the function's row out for room; the decoder stopped in the
+    function or a callee. An API name is also not checked where the function
+    or a direct callee makes calls the index cannot name, through a register
+    or a pointer the code fills itself: a sample that resolves its imports by
+    hash calls them that way, and such a call may be the one the claim names.
+    A function with no artefacts of its own has no callee list in the index,
+    so an API name given to it is not checked either. The record also counts
+    the claims checked and asked about.
+  - *The judge.* A kept finding is shown to the judge in the note that already
+    carries the technique check's kept findings, under its own heading, in the
+    words the analyst was asked.
+  - *Cost.* Linear in the claims, the index rows and the listings' size: the
+    rows are keyed by offset once, each listing and each row is read once, and
+    a claim reads only its own functions' rows.
+  - *Why.* A reverser's claims named calls and behaviours for functions whose
+    listings do not make them, and nothing put the function's own facts
+    beside them.
 
 The cap the check reads is the one the call was built with. The container
 records it on the model it builds (`context_window.record_built_cap`), and the
