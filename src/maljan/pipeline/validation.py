@@ -1595,12 +1595,16 @@ def technique_check_note(findings: Any) -> str:
         rows.extend(findings or [])
     lines: list[str] = []
     functions: list[str] = []
+    unasked: list[str] = []
     for row in rows:
         data = row if isinstance(row, dict) else getattr(row, "__dict__", {}) or {}
         code = str(data.get("code") or "")
         message = " ".join(str(data.get("message") or "").split())
         if code == FUNCTION_CLAIM_UNHELD:
-            functions.append(f"- {code}: {message}")
+            # The facts alone: the sentence addressed to the analyst is not the judge's.
+            fact = " ".join(message.replace(FUNCTION_QUESTION_ASK, " ").split())
+            not_asked = str(data.get("asked") or "") == "false" or data.get("asked") is False
+            (unasked if not_asked else functions).append(f"- {code}: {fact}")
         if code not in (PLATFORM_MISMATCH_CODE, WEAK_ALIGNMENT_CODE):
             continue
         lines.append(f"- {code}: {message}")
@@ -1613,6 +1617,8 @@ def technique_check_note(findings: Any) -> str:
         )
     if functions:
         notes.append(FUNCTION_CHECK_HEAD + "\n" + "\n".join(functions))
+    if unasked:
+        notes.append(FUNCTION_CHECK_NOT_ASKED_HEAD + "\n" + "\n".join(unasked))
     return "\n\n".join(notes)
 
 
@@ -1623,6 +1629,18 @@ FUNCTION_CHECK_HEAD = (
     "FUNCTION CHECK — claims naming a call or a string for a function whose own facts hold "
     "none of it, which the analyst was asked about and kept. The claims are the analysts' "
     "own; the check names what the function's facts hold and nothing here changed them."
+)
+FUNCTION_CHECK_NOT_ASKED_HEAD = (
+    "FUNCTION CHECK, NOT ASKED — claims naming a call or a string for a function whose own "
+    "facts hold none of it, which the analyst was never asked about: no turn was left to ask "
+    "on, as each line says. Nothing here changed the claims."
+)
+# What the function claim question asks of the analyst, after the facts it states;
+# the judge's note leaves it out.
+FUNCTION_QUESTION_ASK = (
+    "A claim about a function is published as what that function's code does. Keep the claim "
+    "if its code shows it and say where, correct the name or the function it is given to, or "
+    "withdraw the claim, with a reason; what you answer stands."
 )
 
 

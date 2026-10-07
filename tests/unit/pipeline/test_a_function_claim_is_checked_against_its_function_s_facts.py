@@ -25,6 +25,7 @@ from maljan.pipeline.function_claims import (
     listed_functions,
     named_values,
 )
+from maljan.pipeline.validation import FUNCTION_QUESTION_ASK
 from maljan.schemas.evidence import LedgerEntry, not_shown_record
 from maljan.schemas.isr_models import ClaimEvidence
 from maljan.tools.artefact_index import SELF, row_line
@@ -69,7 +70,11 @@ def _row(
 
 
 def _index(
-    rows: list[dict[str, Any]], *, unnamed: Any = None, undecoded: Any = None
+    rows: list[dict[str, Any]],
+    *,
+    unnamed: Any = None,
+    undecoded: Any = None,
+    others: Any = (),
 ) -> LedgerEntry:
     data: dict[str, Any] = {
         "tool": "function_index",
@@ -82,6 +87,11 @@ def _index(
     }
     if unnamed is False:
         del data["calls_unnamed"]
+    if others is not None:
+        data["other_callees"] = {
+            hex(BASE + start): [hex(BASE + c) for c in callees]
+            for start, callees in dict(others).items()
+        }
     return LedgerEntry(
         id=INDEX_ID,
         agent="pipeline",
@@ -149,19 +159,21 @@ class TestTheQuestion:
         assert message.startswith("claim 1 (")
         assert f'names "SleepEx" for function {MAIN_VA} [{LISTING_ID}]' in message
         assert (
-            f'the listing, its index row [{INDEX_ID}] and its 1 callees\' rows hold no "SleepEx"'
-            in message
+            f'neither its listing nor its index row [{INDEX_ID}] holds "SleepEx", and no '
+            f"function reachable from {MAIN_VA} through its callees holds it (2 functions "
+            "reachable)" in message
         )
         assert f'{MAIN_VA}\'s row holds: calls "CreateMutexW" ({INDEX_ID})' in message
         assert "refers to 1 decoded string" in message
-        assert "what you answer stands" in message
+        assert message.endswith(FUNCTION_QUESTION_ASK)
 
     def test_every_unheld_value_of_a_claim_is_named_in_its_one_question(self) -> None:
         found = _check(f'{MAIN_VA} calls SleepEx and VirtualAlloc and reads "settings.ini path".')
 
         (violation,) = found.violations
         assert '"SleepEx", "VirtualAlloc" and "settings.ini path"' in violation.message
-        assert 'hold no "SleepEx" or "VirtualAlloc" or "settings.ini path"' in violation.message
+        assert 'holds "SleepEx" or "VirtualAlloc" or "settings.ini path"' in violation.message
+        assert "holds any of them (2 functions reachable)" in violation.message
 
     def test_one_claim_written_under_several_techniques_is_asked_once(self) -> None:
         sentence = f"{MAIN_VA} sleeps with SleepEx."
@@ -205,10 +217,36 @@ class TestWhereAValueHolds:
         assert not _check(f"{MAIN_VA} reads the clock with GetTickCount.").violations
         assert not _check(f'{MAIN_VA} prints "helper banner".').violations
 
-    def test_a_callee_two_calls_away_does_not(self) -> None:
+    def test_a_function_two_calls_away_holds_too(self) -> None:
+        # MAIN calls HELPER, which calls FAR: FAR's WriteFile is reachable.
         found = _check(f"{MAIN_VA} writes the file with WriteFile.")
-        (violation,) = found.violations
-        assert '"WriteFile"' in violation.message
+        assert found.violations == [] and found.checked == 1
+
+    def test_a_function_reachable_through_one_with_no_row_holds(self) -> None:
+        index = _index(
+            [
+                _row(MAIN, imports=["CreateMutexW"], callees=[HELPER]),
+                _row(FAR, imports=["WriteFile"], callers=[HELPER]),
+            ],
+            others={HELPER: [FAR]},
+        )
+        assert not _check(f"{MAIN_VA} writes the file with WriteFile.", index=index).violations
+
+    def test_with_no_callees_listed_for_functions_without_rows_api_names_are_not_checked(
+        self,
+    ) -> None:
+        index = _index(
+            [
+                _row(MAIN, imports=["CreateMutexW"], callees=[HELPER]),
+                _row(FAR, imports=["WriteFile"]),
+            ],
+            others=None,
+        )
+        found = _check(f"{MAIN_VA} sleeps with SleepEx.", index=index)
+        assert found.violations == []
+        assert found.not_checked == [
+            f"claim 1: {fc.CALLEES_UNKNOWN.format(entry=INDEX_ID, address=MAIN_VA)}"
+        ]
 
     def test_a_name_the_hash_resolution_places_inside_the_function_holds(self) -> None:
         hashes = LedgerEntry(
@@ -240,7 +278,7 @@ class TestWhereAValueHolds:
         )
         assert not _check(f'{MAIN_VA} opens "settings.ini path".', pack=[blobs]).violations
 
-    def test_a_value_another_cited_entry_holds_is_not_asked(self) -> None:
+    def test_a_value_another_cited_entry_holds_is_still_asked(self) -> None:
         listing = LedgerEntry(
             id="ev_0005",
             agent="pipeline",
@@ -248,17 +286,67 @@ class TestWhereAValueHolds:
             output='{"hits": [{"readings": [{"name": "VirtualAlloc"}]}]}',
         )
         found = _check(
-            f"{MAIN_VA} is the routine; the sample resolves VirtualAlloc.",
+            f"{MAIN_VA} allocates its buffer with VirtualAlloc.",
             pack=[listing],
             evidence=f"[{LISTING_ID}], [ev_0005]",
         )
-        assert not found.violations
+        (violation,) = found.violations
+        assert '"VirtualAlloc"' in violation.message
 
-    def test_a_value_another_function_the_claim_names_holds_is_not_asked(self) -> None:
+    def test_citing_the_index_itself_excuses_nothing(self) -> None:
+        found = _check(f"{MAIN_VA} injects with CreateRemoteThread [{INDEX_ID}].")
+        assert len(found.violations) == 1
+
+    def test_a_value_given_to_a_function_no_callee_edge_reaches_is_recorded(self) -> None:
         found = _check(
             f'{MAIN_VA} hands over to 0x{BASE + OTHER:x}, which reads "settings.ini path".'
         )
-        assert not found.violations
+        assert found.violations == []
+        assert found.not_checked == [
+            "claim 1: "
+            + fc.GIVEN_ELSEWHERE.format(value="settings.ini path", address=hex(BASE + OTHER))
+        ]
+
+    def test_a_value_given_to_a_function_the_cited_one_reaches_is_checked(self) -> None:
+        held = _check(f"{MAIN_VA} hands over to 0x{BASE + FAR:x}, which calls WriteFile.")
+        assert held.violations == [] and held.not_checked == []
+        asked = _check(f"{MAIN_VA} hands over to 0x{BASE + FAR:x}, which calls SleepEx.")
+        assert len(asked.violations) == 1
+
+    def test_a_value_in_a_sentence_that_names_no_cited_function_is_recorded(self) -> None:
+        found = _check(f"{MAIN_VA} creates the guard. The sample also resolves SleepEx.")
+        assert found.violations == []
+        assert found.not_checked == [f"claim 1: {fc.UNATTRIBUTED.format(value='SleepEx')}"]
+
+    def test_a_slash_list_s_shortened_item_is_read_as_the_name_it_shortens(self) -> None:
+        apis, _strings = named_values("It calls InternetOpenW/ConnectA/ReadFile in turn.")
+        assert apis == ["InternetOpenW", "InternetConnectA", "InternetReadFile"]
+        apis, _strings = named_values("It calls CreateFileW/ReadFile/WriteFile in turn.")
+        assert apis == ["CreateFileW", "ReadFile", "WriteFile"]
+
+    def test_a_name_inside_a_statement_of_absence_is_no_claimed_call(self) -> None:
+        held = _check(f"{MAIN_VA} does not use CreateRemoteThread; it guards with CreateMutexW.")
+        assert held.violations == []
+        asked = _check(f"{MAIN_VA} does not use CreateRemoteThread; it waits with SleepEx.")
+        (violation,) = asked.violations
+        assert (
+            '"SleepEx"' in violation.message
+            and "CreateRemoteThread" not in (violation.message.split("names", 1)[1])
+        )
+
+    def test_a_quoted_phrase_no_strings_source_holds_is_recorded_not_asked(self) -> None:
+        capa = LedgerEntry(id="ev_0006", agent="pipeline", tool="capa", output="PEB access")
+        found = _check(f'{MAIN_VA} matches "PEB access" at its start.', pack=[capa])
+        assert found.violations == []
+        assert found.not_checked == [
+            f"claim 1: {fc.NOT_A_SAMPLE_STRING.format(value='PEB access')}"
+        ]
+
+    def test_a_string_a_strings_tool_holds_is_read(self) -> None:
+        floss = LedgerEntry(id="ev_0006", agent="pipeline", tool="floss", output='"a stack text"')
+        found = _check(f'{MAIN_VA} builds "a stack text" on its stack.', pack=[floss])
+        (violation,) = found.violations
+        assert '"a stack text"' in violation.message
 
     def test_a_string_the_run_holds_nowhere_is_not_asked(self) -> None:
         assert not _check(f'{MAIN_VA} is "the update routine" of the loader.').violations
@@ -367,6 +455,11 @@ class TestWhenTheFactIsAbsent:
         assert '"SleepEx"' not in violation.message
         assert '"settings.ini path"' in violation.message
         assert found.not_checked == [f"claim 1: {fc.UNNAMED_CALLS.format(address=MAIN_VA)}"]
+
+    def test_a_name_the_facts_hold_is_held_whatever_else_is_called(self) -> None:
+        index = _index(ROWS, unnamed={HELPER: 1})
+        found = _check(f"{MAIN_VA} creates the guard with CreateMutexW.", index=index)
+        assert found.violations == [] and found.not_checked == []
 
     def test_an_index_that_counts_no_unnamed_calls_leaves_api_names_unasked(self) -> None:
         found = _check(f"{MAIN_VA} calls SleepEx.", index=_index(ROWS, unnamed=False))
