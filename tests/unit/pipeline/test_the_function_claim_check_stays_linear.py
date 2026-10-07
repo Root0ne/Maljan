@@ -284,6 +284,30 @@ class TestASentenceIsReadInWindows:
         assert len(apis) > 3_000
         assert seconds < 1.0
 
+    def test_thousands_of_names_in_one_clause_a_negation_opens_are_read_in_well_under_a_second(
+        self,
+    ) -> None:
+        names = sorted(n for n in _catalogue_names() if n.isalnum() and n[:1].isupper())
+        names = [n for n in names if any(ch.isupper() for ch in n[1:])]
+        known = _catalogue_lower()
+        for head, joint in (
+            ("no evidence of injection, such as ", ", "),
+            ("no evidence of injection, such as ", " or "),
+            ("it does not use ", ", "),
+            ("it shows ", ", no "),
+        ):
+            text = (head + joint.join(names * 4))[:200_000]
+            assert not any(mark in text for mark in ".;:!?\n")
+            began = time.perf_counter()
+            named_values(text, known)
+            seconds = time.perf_counter() - began
+            print("one 200 KB clause opened by", repr(head + joint), round(seconds, 3))
+            assert seconds < 1.0
+
+    def test_the_names_of_a_noun_negation_s_list_are_no_claimed_calls(self) -> None:
+        text = "it shows no evidence of injection, such as VirtualAllocEx or CreateRemoteThread"
+        assert named_values(text, _catalogue_lower())[0] == []
+
     def test_a_statement_of_absence_is_still_read_around_a_name_in_a_long_sentence(
         self,
     ) -> None:

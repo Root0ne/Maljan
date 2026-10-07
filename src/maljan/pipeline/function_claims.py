@@ -66,12 +66,22 @@ from maljan.pipeline.events import safe_finding_value
 from maljan.pipeline.validation import (
     _ADDRESS_ARGUMENTS,
     _BARE_ADDRESS,
+    _CLAUSE_BREAK_RE,
     _CODE_SPAN_RE,
+    _CUE_THAT_ASSERTS_RE,
     _GENERIC_FUNCTION_NAME,
     _HEX_ADDRESS,
+    _INSIDE_A_NEGATION_RE,
+    _LIST_END_RE,
+    _LIST_ITEM,
     _NAME_ARGUMENTS,
+    _NEGATED_NOUN_LIST_RE,
     _NEGATED_VERB_RE,
     _NEGATION_RE,
+    _NEGATION_REACH_END_RE,
+    _NEGATION_WINDOW,
+    _NOT_A_NEGATION,
+    _NOUN_NEGATION_RE,
     _QUOTED_SPAN_RE,
     _SUFFIXED_ADDRESS,
     FUNCTION_CLAIM_UNHELD,
@@ -79,6 +89,7 @@ from maljan.pipeline.validation import (
     DecompiledFunction,
     EntryTexts,
     _address_value,
+    _in_a_negated_object,
     _is_negated,
     _named_by,
     claim_block_indexes,
@@ -670,9 +681,6 @@ def _clause_starts(text: str) -> list[int]:
     return starts
 
 
-# What ends a clause for a statement of absence: a sentence's end (as
-# ``_clause_starts`` reads it), a semicolon, a colon or a line break.
-_CLAUSE_MARK = re.compile(r"[;:\n]")
 # Whatever ``_is_negated`` reads a statement of absence from: its cue words, a
 # negated verb, the absence predicate's words and a purpose's verbs. A clause
 # holding none of them states no absence, and no value in it is read for one.
@@ -681,30 +689,173 @@ _ABSENCE_WORDS = re.compile(
     r"|\b(?:absent|missing)\b|\bto\s+(?:prevent|avoid|stop|block)\b",
     re.IGNORECASE,
 )
+# ``_absent_by_its_own_statement``'s negated noun list and the cue that opens an
+# assertion, read at a cue's end rather than at the start of a copy.
+_NOUN_LIST_AT = re.compile(
+    _NEGATED_NOUN_LIST_RE.pattern.removeprefix("^"), _NEGATED_NOUN_LIST_RE.flags
+)
+# The items a negated noun list runs over from a cue, its head noun aside: the
+# farthest a later cue inside them can read a list.
+_ITEMS_AT = re.compile(
+    _NEGATED_NOUN_LIST_RE.pattern.removeprefix("^").split("(?P<items>")[0]
+    + rf"{_LIST_ITEM}(?:\s*,\s*{_LIST_ITEM})*",
+    _NEGATED_NOUN_LIST_RE.flags,
+)
+_ASSERTS_AT = re.compile(_CUE_THAT_ASSERTS_RE.pattern.removeprefix("^"), _CUE_THAT_ASSERTS_RE.flags)
+# ``_in_a_named_list``'s readings: the list a noun negation names, and a term
+# that opens a new subject after a final "and".
+_NAMED_LIST = re.compile(r",\s*such\s+as\b", re.IGNORECASE)
+_NEW_SUBJECT = re.compile(r"\w+(?:\s+\w+)?\s+(?:is|are|was|were|has|have|had)\b", re.IGNORECASE)
+_AND_AT_END = re.compile(r"\band\s*$", re.IGNORECASE)
+# The words a negated verb's object runs over before the mention, at most
+# (``_NEGATED_OBJECT_RE``: the verb, six words, a participle and a preposition,
+# a determiner).
+_OBJECT_WORDS = 10
+
+
+@dataclass
+class _NounCue:
+    """A noun negation's reach over the ", such as" list it names, read once."""
+
+    end: int
+    named: int | None
+    reach_ends: int
+    list_ends: int
+
+
+@dataclass
+class _Region:
+    """One stretch between ``_CLAUSE_BREAK_RE`` breaks, its cues read once."""
+
+    low: int
+    high: int
+    lists: list[tuple[int, int]] = field(default_factory=list)
+    nouns: list[_NounCue] = field(default_factory=list)
+    verbs: list[tuple[int, int]] = field(default_factory=list)
+    spaces: list[int] = field(default_factory=list)
 
 
 class _Clauses:
-    """The clauses of a text, each read once for whether it may state an absence."""
+    """Whether a statement of absence holds a value, read once per clause.
+
+    ``_is_negated`` reads a cue at most ``_NEGATION_WINDOW`` characters back,
+    and three readings reach farther, to the start of the value's clause (the
+    stretch between two of ``_CLAUSE_BREAK_RE``'s breaks): a negated noun list,
+    the ", such as" list a noun negation names, and a negated verb's object.
+    Each clause's cues are found in one pass and their far readings worked out
+    once; a value is then read by ``_is_negated`` within the window around it
+    and against those readings by its place, so the total is linear in the
+    text however many values one clause holds. A clause holding no word a
+    statement of absence is read from is read for none.
+    """
 
     def __init__(self, text: str) -> None:
         self.text = text
-        marks = {match.end() for match in _CLAUSE_MARK.finditer(text)}
-        self.starts = sorted({*_clause_starts(text), *marks})
-        self.may_negate: dict[int, bool] = {}
+        self.lowered = text.lower()
+        breaks = list(_CLAUSE_BREAK_RE.finditer(text))
+        self.lows = [0, *(match.end() for match in breaks)]
+        self.highs = [*(match.start() for match in breaks), len(text)]
+        self.regions: dict[int, _Region | None] = {}
 
-    def window(self, begin: int) -> tuple[str, int] | None:
-        """``(the clause holding begin, where it begins)``, or ``None`` when the clause
-        holds no word a statement of absence is read from."""
+    def negated(self, begin: int, end: int) -> bool:
         from bisect import bisect_right
 
-        k = bisect_right(self.starts, begin) - 1
-        low = self.starts[k]
-        high = self.starts[k + 1] if k + 1 < len(self.starts) else len(self.text)
-        found = self.may_negate.get(k)
-        if found is None:
-            found = _ABSENCE_WORDS.search(self.text, low, high) is not None
-            self.may_negate[k] = found
-        return (self.text[low:high], low) if found else None
+        k = bisect_right(self.lows, begin) - 1
+        if k not in self.regions:
+            self.regions[k] = self._read(self.lows[k], max(self.highs[k], self.lows[k]))
+        region = self.regions[k]
+        if region is None:
+            return False
+        low = max(region.low, begin - _NEGATION_WINDOW)
+        high = min(max(region.high, end), end + _NEGATION_WINDOW)
+        if _is_negated(self.text[low:high], begin - low, end - low):
+            return True
+        return (
+            any(a <= begin < b for a, b in region.lists)
+            or self._in_named_list(region, begin)
+            or self._in_negated_object(region, begin)
+        )
+
+    def _read(self, low: int, high: int) -> _Region | None:
+        from bisect import bisect_left
+
+        text = self.text
+        if _ABSENCE_WORDS.search(text, low, high) is None:
+            return None
+        region = _Region(low, high)
+        # A cue inside the items an earlier cue's list ran over, in a run of
+        # words that list took whole as one item (a comma after the cue, still
+        # inside them), reaches no list end the earlier one does not: its
+        # reading is the earlier one's, and it is not read again.
+        commas = [low + at for at, char in enumerate(text[low:high]) if char == ","]
+        ran = low
+        for cue in _NEGATION_RE.finditer(text, low, high):
+            if self.lowered.startswith(_NOT_A_NEGATION, cue.start()):
+                continue
+            if cue.start() < ran:
+                k = bisect_left(commas, cue.end())
+                if k < len(commas) and commas[k] < ran:
+                    continue
+            if _ASSERTS_AT.match(text, cue.end(), high):
+                continue
+            listed = _NOUN_LIST_AT.match(text, cue.end(), high)
+            if listed:
+                region.lists.append((listed.start("items"), listed.end("items")))
+            items = _ITEMS_AT.match(text, cue.end(), high)
+            ran = max(ran, items.end() if items else cue.end())
+        nouns = list(_NOUN_NEGATION_RE.finditer(text, low, high))
+        for k, cue in enumerate(nouns):
+            stop = nouns[k + 1].start() if k + 1 < len(nouns) else high
+            masked = _INSIDE_A_NEGATION_RE.sub(
+                lambda m: " " * len(m.group(0)), text[cue.end() : stop]
+            )
+            reach = _NEGATION_REACH_END_RE.search(masked)
+            named = _NAMED_LIST.search(text, cue.end(), stop)
+            ended = _LIST_END_RE.search(text, named.end(), stop) if named else None
+            region.nouns.append(
+                _NounCue(
+                    end=cue.end(),
+                    named=named.end() if named else None,
+                    reach_ends=cue.end() + reach.end() if reach else high + 1,
+                    list_ends=ended.end() if ended else high + 1,
+                )
+            )
+        region.verbs = [(m.start(), m.end()) for m in _NEGATED_VERB_RE.finditer(text, low, high)]
+        region.spaces = [m.start() for m in re.finditer(r"\s+", text[low:high])]
+        region.spaces = [low + at for at in region.spaces]
+        return region
+
+    def _in_named_list(self, region: _Region, begin: int) -> bool:
+        """``_in_a_named_list`` read by place against the last noun negation before begin."""
+        from bisect import bisect_right
+
+        k = bisect_right([cue.end for cue in region.nouns], begin) - 1
+        if k < 0:
+            return False
+        cue = region.nouns[k]
+        if cue.named is None or cue.named > begin:
+            return False
+        if cue.reach_ends <= begin or cue.list_ends <= begin:
+            return False
+        tail = begin
+        while tail > cue.named and self.text[tail - 1].isspace():
+            tail -= 1
+        ends_with_and = _AND_AT_END.search(self.text, max(cue.named, tail - 3), begin) is not None
+        return not (ends_with_and and _NEW_SUBJECT.match(self.text, begin))
+
+    def _in_negated_object(self, region: _Region, begin: int) -> bool:
+        """``_in_a_negated_object`` read within the last negated verb before begin, when the
+        object can still reach it."""
+        from bisect import bisect_left, bisect_right
+
+        k = bisect_right([end for _start, end in region.verbs], begin) - 1
+        if k < 0:
+            return False
+        start, verb_end = region.verbs[k]
+        words = bisect_left(region.spaces, begin) - bisect_left(region.spaces, verb_end)
+        if words > _OBJECT_WORDS or "," in self.text[verb_end:begin]:
+            return False
+        return _in_a_negated_object(self.text[start:begin], begin - start)
 
 
 def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, int, bool]]:
@@ -715,13 +866,7 @@ def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, in
     """
     spans = {m.group(0).strip("`").strip() for m in _CODE_SPAN_RE.finditer(text)}
     clauses = _Clauses(text)
-
-    def negated(begin: int, end: int) -> bool:
-        found = clauses.window(begin)
-        if found is None:
-            return False
-        window, offset = found
-        return _is_negated(window, begin - offset, end - offset)
+    negated = clauses.negated
 
     found: list[tuple[str, int, bool]] = []
     seen: set[str] = set()
