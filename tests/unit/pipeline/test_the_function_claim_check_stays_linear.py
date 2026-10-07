@@ -10,6 +10,7 @@ Every name, string and address here is made up for the test.
 
 from __future__ import annotations
 
+import gc
 import json
 import time
 from types import SimpleNamespace
@@ -236,9 +237,15 @@ def _paired(count: int) -> tuple[float, int]:
     facts = function_facts(
         listings, function_artefacts([index]), pack_entries=[index], bases=(BASE,)
     )
-    began = time.perf_counter()
-    found = check_function_claims(isr, listed_functions(listings), facts, (BASE,))
-    seconds = time.perf_counter() - began
+    # The collector's sweeps of the whole test session's heap are not the check's cost.
+    gc.collect()
+    gc.disable()
+    try:
+        began = time.perf_counter()
+        found = check_function_claims(isr, listed_functions(listings), facts, (BASE,))
+        seconds = time.perf_counter() - began
+    finally:
+        gc.enable()
     assert found.asked == 0 and found.checked == count
     return seconds, len(facts.reaches)
 
