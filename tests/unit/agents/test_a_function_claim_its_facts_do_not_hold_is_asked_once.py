@@ -241,3 +241,65 @@ class TestWhatTheRunShows:
 
         assert builder._budget is not None
         assert "function_claims" not in builder._budget["static"]
+
+
+IMPORTS = LedgerEntry(
+    id="ev_0001",
+    agent="pipeline",
+    tool="pe_imports",
+    output="ws2_32.dll: connect, send\nkernel32.dll: CreateMutexW",
+)
+
+
+def _cited(n: int, sentence: str, evidence: str) -> str:
+    return f"CLAIM {n}: {sentence}\nEVIDENCE: {evidence}\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
+
+
+LIBRARY = _cited(3, "The sample imports ws2_32.dll for networking.", "[ev_0001]")
+SECOND_GUARD = _cited(
+    4, f"{MAIN_VA} creates a guard named with CreateMutexW before anything else.", "[ev_0007]"
+)
+KEPT = GUARD + SECOND_GUARD.replace("CLAIM 4", "CLAIM 2")
+
+
+class TestOneRuleForEveryAskedClaim:
+    def _analyst(self, reply: str) -> _Analyst:
+        analyst = _Analyst([reply])
+        analyst.pack_entries = [*analyst.pack_entries, IMPORTS]
+        analyst._evidence_entries = [LISTING, IMPORTS]
+        return analyst
+
+    def test_a_retry_withdrawing_the_claims_both_questions_asked_about_is_kept(self) -> None:
+        analyst = self._analyst(KEPT)
+
+        result = _check(analyst, GUARD + WRONG + LIBRARY + SECOND_GUARD)
+
+        assert len(analyst.seen_turns) == 1
+        question = str(analyst.seen_turns[-1][-1].content)
+        assert FUNCTION_CLAIM_UNHELD_CODE in question and "isr.library_only_claims" in question
+        assert len(result.claims) == 2
+
+    def test_with_no_function_question_the_library_rule_is_as_it_was(self) -> None:
+        analyst = self._analyst(KEPT)
+
+        result = _check(
+            analyst,
+            GUARD
+            + LIBRARY.replace("CLAIM 3", "CLAIM 2")
+            + _cited(
+                3,
+                f"{MAIN_VA} creates a guard named with CreateMutexW before anything else.",
+                "[ev_0007]",
+            ),
+        )
+
+        question = str(analyst.seen_turns[-1][-1].content)
+        assert FUNCTION_CLAIM_UNHELD_CODE not in question
+        assert len(result.claims) == 2
+
+    def test_a_retry_dropping_a_claim_nobody_asked_about_keeps_the_first_answer(self) -> None:
+        analyst = self._analyst(GUARD)
+
+        result = _check(analyst, GUARD + WRONG + LIBRARY + SECOND_GUARD)
+
+        assert len(result.claims) == 4

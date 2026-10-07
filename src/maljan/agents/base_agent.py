@@ -1407,11 +1407,6 @@ async def retry_on_connection_error(
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-def _library_blocks(isr: AgentISR) -> int:
-    """How many claim blocks of ``isr`` are library-only claims, each block once."""
-    return _flagged_blocks(isr, library_only_claims(isr))
-
-
 def _flagged_blocks(isr: AgentISR, indexes: Sequence[int]) -> int:
     """How many claim blocks of ``isr`` the claims at ``indexes`` are in, each block once."""
     blocks = claim_block_indexes(isr.claims)
@@ -7285,47 +7280,45 @@ class BaseAnalyst(BudgetMeter, ABC):
             # Counted in the claim blocks the analyst wrote, not in claims: a
             # block listing several ids is one claim per id, and taking a
             # rejected id off its line is an answer, not lost work.
+            # Asked about claims whose function's facts hold none of what they
+            # name too: the claims either question asked about are set aside
+            # together, so a retry answering both is judged by the one rule.
             blocks_first = count_claim_blocks(first_answer.claims)
             blocks_retried = count_claim_blocks(retried.claims)
-            library_first = _library_blocks(first_answer)
-            library_retried = _library_blocks(retried)
+            function_asked = any(v.code == FUNCTION_CLAIM_UNHELD_CODE for v in initial)
+
+            def _asked_blocks(answer: AgentISR) -> int:
+                indexes = set(library_only_claims(answer))
+                if function_asked:
+                    indexes |= set(_function_check(answer).flagged)
+                return _flagged_blocks(answer, sorted(indexes))
+
+            aside_first = _asked_blocks(first_answer)
+            aside_retried = _asked_blocks(retried) if aside_first else 0
             if (
                 not only_cut
-                and library_first
+                and aside_first
                 and retried.claims
                 and blocks_retried < blocks_first
-                and blocks_retried - library_retried >= blocks_first - library_first
+                and blocks_retried - aside_retried >= blocks_first - aside_first
             ):
                 self.logger.info(
-                    "Validation: '%s' answered the library-claims question with %d claim "
-                    "block(s) against %d, %d of them library-only; its answer is kept.",
+                    (
+                        "Validation: '%s' answered the library-claims and function claim "
+                        "questions with %d claim block(s) against %d, %d of them asked about; "
+                        "its answer is kept."
+                    )
+                    if function_asked
+                    else (
+                        "Validation: '%s' answered the library-claims question with %d claim "
+                        "block(s) against %d, %d of them library-only; its answer is kept."
+                    ),
                     self.name,
                     blocks_retried,
                     blocks_first,
-                    library_first,
+                    aside_first,
                 )
                 return retried
-            # Asked about claims whose function's facts hold none of what they
-            # name: an answer that withdraws them stands, as long as it keeps
-            # every other claim block of the first answer.
-            if not only_cut and any(v.code == FUNCTION_CLAIM_UNHELD_CODE for v in initial):
-                aside_first = _flagged_blocks(first_answer, _function_check(first_answer).flagged)
-                aside_retried = _flagged_blocks(retried, _function_check(retried).flagged)
-                if (
-                    aside_first
-                    and retried.claims
-                    and blocks_retried < blocks_first
-                    and blocks_retried - aside_retried >= blocks_first - aside_first
-                ):
-                    self.logger.info(
-                        "Validation: '%s' answered the function claim question with %d claim "
-                        "block(s) against %d, %d of them asked about; its answer is kept.",
-                        self.name,
-                        blocks_retried,
-                        blocks_first,
-                        aside_first,
-                    )
-                    return retried
             if blocks_retried < blocks_first:
                 self.logger.warning(
                     "Validation: the retry for '%s' returned %d claim block(s) against %d; "
