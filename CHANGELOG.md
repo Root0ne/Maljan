@@ -2392,6 +2392,8 @@ change landed on `main`.
 
 ### Fixed
 
+- **A five-character string that is wholly such a host is read on its own** (`c2.ru` stored NUL-terminated, ASCII or UTF-16LE, or a table cell that is exactly `c2.ru`), by the string sweep, the host reader and the defanger; every other run under six characters stays below the sweep's floor.
+- **A cell's publish state, the composer's checks and the narrative's recommendation check read the IOC table §9 prints** (`builder.ioc_table`, rebuilt from the stored report), where they read the stored table first, so an old report's state notes word an answer as §9 does; a table that cannot be read at all still refuses every value for that reason.
 - **A bare two-label host with a two-character first label is read when the label holds a digit and a letter** (`c2.ru`, `x1.top`), by the string sweep and the report's host reader; one of two letters (`ab.ru`) is read only where the run's network evidence holds it, so prose such as `to.do` stays as written.
 - **An IPv6 address, bare or bracketed, and a `.onion` name of any labels are network values to every reader**: the publish checks, the run summary's sentences and a cell's state note read them by form: an IPv6 address whole, an embedded IPv4 tail included, in brackets or with at least three groups and a digit, so a scope name such as `dead::beef` is no address.
 - **`/iocs` and the report's §9 read the IOC table from one source** (`builder.ioc_table`, rebuilt from the stored report), so an old report's analyst rows and their notes read the same in both.

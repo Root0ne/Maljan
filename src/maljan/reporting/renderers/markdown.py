@@ -2171,7 +2171,9 @@ class _Context:
                 _ANALYSIS_TOOLS.index(tool) if tool in _ANALYSIS_TOOLS else len(_ANALYSIS_TOOLS)
             ),
         )
-        self.iocs = _indicator_rows(report)
+        read = _indicator_rows(report)
+        self._table_read = read is not None
+        self.iocs = read or []
         indicators = [
             (row.value, row.kind or "") for row in self.iocs if row.kind in _NETWORK_KINDS
         ]
@@ -2304,7 +2306,9 @@ class _Context:
                 try:
                     from maljan.reporting.narrative_agent import published_answers
 
-                    self._answers = published_answers(self.report)
+                    if not self._table_read:
+                        raise RuntimeError("the IOC table could not be read")
+                    self._answers = published_answers(self.report, rows=self.iocs)
                 except Exception as exc:  # noqa: BLE001 — every value is then refused
                     logger.debug("markdown: the IOC table was not read (%s).", exc)
                     self._answers = lambda kind, value: TABLE_NOT_READ
@@ -3059,19 +3063,28 @@ def _family_voice(report: MalwareReport) -> str:
     return ASSESSED
 
 
-def _indicator_rows(report: MalwareReport) -> list[ConsolidatedIOC]:
-    """The IOC table's rows, answered by the publish rule on this render.
+def _indicator_rows(report: MalwareReport) -> list[ConsolidatedIOC] | None:
+    """The IOC table's rows, answered by the publish rule on this render; ``None`` when unread.
 
     Built on request from the stored report by the reader
     ``/reports/{id}/iocs`` uses for its analyst rows (``builder.ioc_table``),
     so an enrichment that ran after the report was stored is reflected and a
     report stored before the table carried a kind prints in the new shape. A
-    cell's publish state reads the stored table first
-    (``narrative_agent.published_answers``).
+    cell's publish state reads these same rows
+    (``narrative_agent.published_answers``), so a render reads the table, and
+    logs a failed rebuild, once. ``None`` is a rebuild that failed with no
+    stored row to read: §9 prints no row and every cell's value is refused
+    for that reason.
     """
     from maljan.reporting.builder import ioc_table
 
-    return ioc_table(report)
+    try:
+        return ioc_table(report, raise_unread=True)
+    except Exception:  # noqa: BLE001 — the table is then unread
+        logger.exception(
+            "markdown: the IOC table could not be rebuilt and no stored row holds one."
+        )
+        return None
 
 
 def _reputations(report: MalwareReport) -> dict[str, str]:
