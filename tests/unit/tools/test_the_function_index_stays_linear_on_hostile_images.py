@@ -256,10 +256,40 @@ def _into_one_run(n: int, length: int = 200_000) -> tuple[Image, dict[str, Any]]
     return _image([8] * n, body, texts), {}
 
 
+def _many_sections(n: int) -> tuple[Image, dict[str, Any]]:
+    """``n`` empty sections in the header before the code; one function calls a leaf ``n`` times.
+
+    Every call's target is looked up among the sections, so a lookup that
+    scanned them would cost sections times calls.
+    """
+    code = bytearray()
+    leaf = TEXT_RVA + n * 5 + 1
+    for _ in range(n):
+        at = TEXT_RVA + len(code)
+        code += _call(at, leaf)
+    code += b"\xc3\xc3"
+    high = 0x10000000
+    sections = [Section(f".d{i}", high + i * 0x1000, 0x1000, 0, 0, 0x40000040) for i in range(n)]
+    sections.append(Section(".text", TEXT_RVA, len(code), TEXT_RAW, len(code), 0x60000020))
+    image = Image(
+        data=bytes(TEXT_RAW) + bytes(code),
+        image_base=BASE,
+        is64=True,
+        size_of_image=high + n * 0x1000 + 0x1000,
+        sections=sections,
+    )
+    return image, {"pe_info": ("ev_0004", {"entry_point": TEXT_RVA, "export_rows": []})}
+
+
 # -- the tests ----------------------------------------------------------------
 
 
 class TestEveryShapeFinishes:
+    def test_many_sections_answer_the_call_targets_among_them(self) -> None:
+        _, answer = _timed(_many_sections, 2_000)
+        assert answer["functions_known"] == 2
+        assert answer["function_sources"]["call targets the decoder reached"] == 1
+
     def test_references_into_one_long_text_read_it_once_from_its_start(self) -> None:
         _, answer = _timed(_into_one_run, 20_000)
         # Only the reference to where the text starts reads it; the others
@@ -298,7 +328,7 @@ class TestEveryShapeFinishes:
         assert answer["rows"][1]["indirect"] == {"artefacts": 2_000, "through": 1}
         assert answer["total"] == 20_000
 
-    def test_overlapping_table_ranges_read_each_byte_once(self) -> None:
+    def test_overlapping_table_ranges_decode_each_instruction_start_once(self) -> None:
         _, answer = _timed(_overlapping, 20_000)
         # The first range reads the whole code; every later one starts on a
         # byte already read, and holds what it read itself: nothing.
@@ -317,28 +347,40 @@ class TestEveryShapeFinishes:
         assert first["resolved"] == [{"name": "OpenThing", "sources": ["ev_0020"]}]
 
 
+def _ratio(make: Callable[[int], tuple[Image, dict[str, Any]]], small: int) -> tuple[float, float]:
+    """The seconds at ``small`` and at ten times it, each the least of two runs after a warm-up."""
+    _timed(make, small)
+    low = min(_timed(make, small)[0] for _ in range(2))
+    high = min(_timed(make, small * 10)[0] for _ in range(2))
+    return low, high
+
+
 class TestTheCostGrowsWithTheFunctionsAndTheCalls:
     """Ten times the functions take about ten times as long; a quadratic step would be a hundred."""
 
     def test_a_dense_fan_out_at_one_ten_and_a_hundred_thousand_functions(self) -> None:
-        seconds = {n: _timed(_dense, n)[0] for n in (1_000, 10_000, 100_000)}
+        _timed(_dense, 1_000)
+        seconds = {n: min(_timed(_dense, n)[0] for _ in range(2)) for n in (1_000, 10_000)}
+        seconds[100_000] = _timed(_dense, 100_000)[0]
         print("dense fan-out, 8 calls a function:", {n: round(s, 3) for n, s in seconds.items()})
-        assert seconds[100_000] < seconds[10_000] * 30
+        assert seconds[100_000] < seconds[10_000] * 20
 
     def test_many_callers_of_one_function_holding_many_artefacts(self) -> None:
-        small = min(_timed(_fan_in, 2_000)[0] for _ in range(2))
-        large = _timed(_fan_in, 20_000)[0]
-        print("fan-in to a function of 2,000 artefacts:", round(small, 3), round(large, 3))
-        assert large < small * 30
+        low, high = _ratio(_fan_in, 2_000)
+        print("fan-in to a function of 2,000 artefacts:", round(low, 3), round(high, 3))
+        assert high < low * 20
 
     def test_references_into_one_long_text(self) -> None:
-        small = min(_timed(_into_one_run, 2_000)[0] for _ in range(2))
-        large = _timed(_into_one_run, 20_000)[0]
-        print("references into one 200,000-byte text:", round(small, 3), round(large, 3))
-        assert large < small * 30
+        low, high = _ratio(_into_one_run, 2_000)
+        print("references into one 200,000-byte text:", round(low, 3), round(high, 3))
+        assert high < low * 20
 
     def test_overlapping_table_ranges(self) -> None:
-        small = min(_timed(_overlapping, 2_000)[0] for _ in range(2))
-        large = _timed(_overlapping, 20_000)[0]
-        print("overlapping table ranges:", round(small, 3), round(large, 3))
-        assert large < small * 30
+        low, high = _ratio(_overlapping, 2_000)
+        print("overlapping table ranges:", round(low, 3), round(high, 3))
+        assert high < low * 20
+
+    def test_many_sections_and_many_calls(self) -> None:
+        low, high = _ratio(_many_sections, 2_000)
+        print("as many sections as calls:", round(low, 3), round(high, 3))
+        assert high < low * 20

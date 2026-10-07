@@ -191,6 +191,62 @@ class TestAnX86ImageWithNoTable:
         assert answer["function_sources"] == {"entry point": 1}
 
 
+class TestEveryStartIsKnownBeforeAnyFunctionIsRead:
+    """A jump to another function's start is its tail call, whatever order the calls come in."""
+
+    ENTRY, JUMPER, TARGET, CALLER = TEXT_RVA, TEXT_RVA + 0x100, TEXT_RVA + 0x200, TEXT_RVA + 0x300
+
+    def _image(self, first: int, second: int) -> SyntheticPE:
+        image = SyntheticPE(is64=False, image_base=0x400000)
+        slots = image.imports_at(0x100, {"KERNEL32.dll": ["CreateMutexA"]})
+
+        def put(rva: int, blob: bytes) -> None:
+            image.put("text", rva - TEXT_RVA, blob)
+
+        def call(at: int, target: int) -> bytes:
+            return b"\xe8" + struct.pack("<i", target - (at + 5))
+
+        put(self.ENTRY, call(self.ENTRY, first) + call(self.ENTRY + 5, second) + b"\xc3")
+        put(self.JUMPER, b"\xe9" + struct.pack("<i", self.TARGET - (self.JUMPER + 5)))
+        slot = struct.pack("<I", 0x400000 + slots["CreateMutexA"])
+        put(self.TARGET, b"\xff\x15" + slot + b"\xc3")
+        put(self.CALLER, call(self.CALLER, self.TARGET) + b"\xc3")
+        return image
+
+    def test_the_jumped_to_function_has_its_own_row_in_either_order(self, tmp_path: Path) -> None:
+        answers = []
+        for order in ((self.JUMPER, self.CALLER), (self.CALLER, self.JUMPER)):
+            image = self._image(*order)
+            info = ("ev_0004", {"entry_point": self.ENTRY, "export_rows": []})
+            answers.append(artefact_index.function_index(_load(image, tmp_path), pe_info=info))
+        assert answers[0]["rows"] == answers[1]["rows"]
+        (row,) = answers[0]["rows"]
+        assert row["offset"] == hex(self.TARGET)
+        assert [c["name"] for c in row["imports"]] == ["CreateMutexA"]
+        assert row["callers"] == [hex(0x400000 + self.JUMPER), hex(0x400000 + self.CALLER)]
+
+
+class TestADataAddressIsReadFromTheOperandThatHoldsIt:
+    def test_an_x86_store_of_an_address_to_a_global_names_the_stored_text(
+        self, tmp_path: Path
+    ) -> None:
+        image = SyntheticPE(is64=False, image_base=0x400000)
+        image.put("data", 0x40, b"a stored text\0")
+        image.put("data", 0x80, b"a global slot\0")
+        code = _Code(image).go(FIRST)
+        # mov dword [abs32 slot], imm32 text: the immediate is the text, the slot a global.
+        code.raw(
+            b"\xc7\x05"
+            + struct.pack("<I", 0x400000 + DATA_RVA + 0x80)
+            + struct.pack("<I", 0x400000 + DATA_RVA + 0x40)
+        )
+        code.ret()
+        info = ("ev_0004", {"entry_point": FIRST, "export_rows": []})
+        answer = artefact_index.function_index(_load(image, tmp_path), pe_info=info)
+        (row,) = answer["rows"]
+        assert [c["text"] for c in row["plain_strings"]] == ["a stored text"]
+
+
 class TestTheRunsAnswersArePlaced:
     def _answers(self, places: dict[str, int]) -> dict[str, tuple[str, dict[str, Any]]]:
         floss = {

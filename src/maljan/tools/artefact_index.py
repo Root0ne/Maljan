@@ -66,6 +66,7 @@ The sample is only read; nothing in it is run.
 
 from __future__ import annotations
 
+import heapq
 import re
 from bisect import bisect_right
 from collections.abc import Iterable, Mapping, Sequence
@@ -79,10 +80,9 @@ from maljan.tools.call_sites import (
     _ONE_BYTE_MODRM,
     _TWO_BYTE_PLAIN,
     Instruction,
-    _callee,
     decode,
 )
-from maljan.tools.pe_image import Image
+from maljan.tools.pe_image import Image, Section
 
 __all__ = [
     "FUNCTION_LISTS_ABSENT",
@@ -144,17 +144,79 @@ class _Graph:
     functions: dict[int, _Function] = field(default_factory=dict)
     # For each place asked about, the functions whose decoded instructions cover it.
     covered: dict[int, set[int]] = field(default_factory=dict)
+    # The section lookup the walk used, for the readers of the data sections.
+    sections: Any = None
 
 
 # -- reading the code -------------------------------------------------------
+
+
+class _Sections:
+    """Which section holds an RVA, answered by bisection rather than by a scan of every section.
+
+    The same answer ``pe_image.Image.section_at_rva`` gives (the first section
+    in the header's order whose range, the larger of its virtual and raw size,
+    holds the RVA), computed once: the ranges are cut into the intervals
+    between their ends, each interval given the first section that covers it,
+    with a sweep over the sorted ends. Building it costs the sections times
+    their logarithm, and each lookup the logarithm of the intervals, so the
+    walk costs calls plus sections, not their product.
+    """
+
+    def __init__(self, image: Image) -> None:
+        self.image = image
+        spans = [
+            (s.rva, s.rva + max(s.virtual_size, s.raw_size), index)
+            for index, s in enumerate(image.sections)
+            if max(s.virtual_size, s.raw_size) > 0
+        ]
+        ends = sorted({point for lo, hi, _ in spans for point in (lo, hi)})
+        by_start = sorted(spans)
+        self.starts: list[int] = []
+        self.owners: list[int | None] = []
+        active: list[tuple[int, int]] = []  # (header index, end), a heap by index
+        position = 0
+        for point in ends:
+            while position < len(by_start) and by_start[position][0] == point:
+                lo, hi, index = by_start[position]
+                heapq.heappush(active, (index, hi))
+                position += 1
+            while active and active[0][1] <= point:
+                heapq.heappop(active)
+            # A section whose end is passed but is not on top stays in the heap;
+            # it is dropped when it reaches the top, before it can answer.
+            self.starts.append(point)
+            self.owners.append(active[0][0] if active else None)
+
+    def at(self, rva: int) -> Section | None:
+        position = bisect_right(self.starts, rva) - 1
+        if position < 0:
+            return None
+        index = self.owners[position]
+        if index is None:
+            return None
+        section = self.image.sections[index]
+        if section.rva <= rva < section.rva + max(section.virtual_size, section.raw_size):
+            return section
+        return None
+
+    def offset(self, rva: int) -> int | None:
+        """``pe_image.Image.offset_of_rva``, through the same lookup."""
+        section = self.at(rva)
+        if section is None or rva - section.rva >= section.mapped_size:
+            return None
+        return section.raw_offset + (rva - section.rva)
 
 
 def _data_address(image: Image, code: bytes, at: int, ins: Instruction, rva_end: int) -> int | None:
     """The RVA an instruction takes the address of, when it names one the bytes state.
 
     x64: a RIP-relative memory operand. x86: an absolute ``[disp32]`` memory
-    operand, a ``push imm32``, a ``mov r32, imm32`` or a ``mov r/m32, imm32``
-    whose value is a virtual address inside the image. Anything else: ``None``.
+    operand, a ``push imm32``, a ``mov r32, imm32``, or the immediate of a
+    ``mov r/m32, imm32`` (``C7``), whose value is a virtual address inside the
+    image; a ``C7`` store's destination is a global written, not a text
+    referred to, and an x64 ``C7`` immediate is sign-extended and names none.
+    Anything else: ``None``.
     """
     end = at + ins.length
     i = at
@@ -170,6 +232,10 @@ def _data_address(image: Image, code: bytes, at: int, ins: Instruction, rva_end:
         return None
     op = code[i]
     i += 1
+    if op == 0xC7:
+        if image.is64 or operand16 or end - i < 5:
+            return None
+        return _virtual(image, int.from_bytes(code[end - 4 : end], "little"))
     modrm_at: int | None = None
     if op == 0x0F:
         if i >= end:
@@ -191,7 +257,7 @@ def _data_address(image: Image, code: bytes, at: int, ins: Instruction, rva_end:
         return _virtual(image, int.from_bytes(code[i:end], "little"))
     else:
         return None
-    if modrm_at is None or modrm_at >= end:
+    if modrm_at >= end:
         return None
     modrm = code[modrm_at]
     mod, rm = modrm >> 6, modrm & 7
@@ -202,9 +268,6 @@ def _data_address(image: Image, code: bytes, at: int, ins: Instruction, rva_end:
         if image.is64:
             return rva_end + displacement
         return _virtual(image, displacement)
-    if not image.is64 and not operand16 and op == 0xC7 and end - at >= 4:
-        # ``mov r/m32, imm32``: the value is the instruction's last four bytes.
-        return _virtual(image, int.from_bytes(code[end - 4 : end], "little"))
     return None
 
 
@@ -214,21 +277,34 @@ def _virtual(image: Image, value: int) -> int | None:
 
 
 class _Reader:
-    """The decoder's walk over every function, adding call targets as it reaches them."""
+    """The decoder's walks over every function.
+
+    Two walks. The first finds every function start: the stated ones and every
+    direct call target the decoding reaches, whichever order the functions are
+    read in. The second, with every start known, reads each function from its
+    start and attributes what it reads: a path ends at another function's
+    start, and an unconditional jump to one is that function's tail call (a
+    callee), not more of the function the jump is in. Each walk decodes each
+    instruction start at most once (a shared mark per code byte), so code two
+    functions share is read for the first of them in the second walk's order:
+    the functions of the exception directory, then the others, each by
+    address.
+    """
 
     def __init__(self, image: Image, wanted: set[int]) -> None:
         self.image = image
+        self.sections = _Sections(image)
+        self.imports = image.imports_by_slot()
         self.wanted = wanted
         self.graph = _Graph()
         self.queue: list[int] = []
-        self.sorted_seeds: list[int] = []
+        self.sorted_starts: list[int] = []
         self.known: set[int] = set()
         self.ranges_of: dict[int, list[tuple[int, int]]] = {}
         self.code = {section.rva: image.section_bytes(section) for section in image.code_sections()}
-        # One mark per code byte: an instruction start any function's decoding
-        # already read. Each byte is decoded once in all, so the walk is linear
-        # in the code however the starts, ranges and branches overlap.
-        self.read = {rva: bytearray(len(code)) for rva, code in self.code.items()}
+        self.attributing = False
+        self.read: dict[int, bytearray] = {}
+        self.graph.sections = self.sections
 
     def add(self, start: int, source: str) -> None:
         function = self.graph.functions.get(start)
@@ -241,7 +317,23 @@ class _Reader:
             function.sources.append(source)
 
     def run(self) -> _Graph:
-        self.sorted_seeds = sorted(self.known)
+        # The first walk: every start, its call targets added as they are reached.
+        self._walk()
+        # The second walk: every start known before any function is read.
+        self.attributing = True
+        self.sorted_starts = sorted(self.known)
+        stated = sorted(self.ranges_of)
+        others = [start for start in self.sorted_starts if start not in self.ranges_of]
+        self.queue = [*stated, *others]
+        for function in self.graph.functions.values():
+            function.callees.clear()
+        self._walk()
+        return self.graph
+
+    def _walk(self) -> None:
+        self.read = {rva: bytearray(len(code)) for rva, code in self.code.items()}
+        if not self.attributing:
+            self.sorted_starts = sorted(self.known)
         index = 0
         while index < len(self.queue):
             start = self.queue[index]
@@ -253,34 +345,76 @@ class _Reader:
                     self._sweep(function, begin, end)
             else:
                 self._descend(function)
-        return self.graph
 
     def _section(self, rva: int) -> tuple[int, bytes] | None:
-        section = self.image.section_at_rva(rva)
+        section = self.sections.at(rva)
         if section is None or not section.executable or section.rva not in self.code:
             return None
         return section.rva, self.code[section.rva]
 
+    def _callee(self, rva: int, ins: Instruction) -> tuple[str, Any] | None:
+        """What a call names: ``("import", name)``, ``("function", rva)``, or ``None``.
+
+        As ``call_sites`` reads a callee (a slot the import table fills, or a
+        jump thunk through one; a direct target), with the sections looked up
+        by bisection.
+        """
+        kind, value = ins.target
+        after = rva + ins.length
+        if kind == "rel":
+            target = after + value
+            slot = self._thunk_slot(target)
+            if slot is not None and slot in self.imports:
+                return "import", self.imports[slot]
+            return "function", target
+        if kind == "mem":
+            slot = after + value if ins.rip_relative else value - self.image.image_base
+            if slot in self.imports:
+                return "import", self.imports[slot]
+        return None
+
+    def _thunk_slot(self, target: int) -> int | None:
+        offset = self.sections.offset(target)
+        data = self.image.data
+        if offset is None or offset + 6 > len(data) or data[offset : offset + 2] != b"\xff\x25":
+            return None
+        displacement = int.from_bytes(
+            data[offset + 2 : offset + 6], "little", signed=self.image.is64
+        )
+        return (
+            target + 6 + displacement if self.image.is64 else displacement - self.image.image_base
+        )
+
     def _note(self, function: _Function, rva: int, ins: Instruction, code: bytes, at: int) -> None:
-        """What one decoded instruction says: the places it covers, its call, its data."""
+        """What one decoded instruction says: its call, and in the second walk the rest."""
+        if ins.kind == "call":
+            callee = self._callee(rva, ins)
+            if callee is not None and callee[0] == "function":
+                target = int(callee[1])
+                if self._section(target) is not None:
+                    if self.attributing:
+                        function.callees.add(target)
+                    else:
+                        self.add(target, _CALL_TARGETS)
+            elif callee is not None and self.attributing:
+                function.imports.add(str(callee[1]))
+        if not self.attributing:
+            return
         if self.wanted:
             for place in range(rva, rva + ins.length):
                 if place in self.wanted:
                     self.graph.covered.setdefault(place, set()).add(function.start)
-        if ins.kind == "call":
-            callee = _callee(self.image, rva, ins)
-            if callee is not None:
-                if callee.get("import"):
-                    function.imports.add(str(callee["import"]))
-                elif callee.get("function"):
-                    target = int(callee["function"], 16)
-                    if self._section(target) is not None:
-                        function.callees.add(target)
-                        self.add(target, _CALL_TARGETS)
-            return
-        data_target = _data_address(self.image, code, at, ins, rva + ins.length)
-        if data_target is not None:
-            function.data_refs.add(data_target)
+        if ins.kind != "call":
+            data_target = _data_address(self.image, code, at, ins, rva + ins.length)
+            if data_target is not None:
+                function.data_refs.add(data_target)
+
+    def _tail_call(self, function: _Function, target: int) -> bool:
+        """An unconditional jump to another function's start, recorded as its callee."""
+        if not self.attributing or target == function.start or target not in self.known:
+            return False
+        function.callees.add(target)
+        return True
 
     def _sweep(self, function: _Function, begin: int, end: int) -> None:
         """Decode a stated range instruction after instruction, to its end or an unread byte."""
@@ -296,9 +430,13 @@ class _Reader:
             read[at] = 1
             ins = decode(code, at, self.image.is64)
             if ins is None:
-                function.undecoded = True
+                function.undecoded |= self.attributing
                 return
             self._note(function, base + at, ins, code, at)
+            if ins.kind == "stop" and ins.target[0] == "jump":
+                target = base + at + ins.length + ins.target[1]
+                if not begin <= target < end:
+                    self._tail_call(function, target)
             at += ins.length
 
     def _descend(self, function: _Function) -> None:
@@ -307,23 +445,25 @@ class _Reader:
         if found is None:
             return
         base, code = found
-        later = bisect_right(self.sorted_seeds, function.start)
+        later = bisect_right(self.sorted_starts, function.start)
         bound = min(
-            self.sorted_seeds[later] if later < len(self.sorted_seeds) else base + len(code),
+            self.sorted_starts[later] if later < len(self.sorted_starts) else base + len(code),
             base + len(code),
         )
         read = self.read[base]
         pending = [function.start]
         while pending:
             rva = pending.pop()
-            while function.start <= rva < bound and not read[rva - base]:
+            while base <= rva < base + len(code) and not read[rva - base]:
                 if rva != function.start and rva in self.known:
+                    break
+                if not function.start <= rva < bound:
                     break
                 at = rva - base
                 read[at] = 1
                 ins = decode(code, at, self.image.is64)
                 if ins is None:
-                    function.undecoded = True
+                    function.undecoded |= self.attributing
                     break
                 self._note(function, rva, ins, code, at)
                 after = rva + ins.length
@@ -332,6 +472,8 @@ class _Reader:
                     if kind == "branch":
                         pending.append(after + value)
                     elif kind == "jump":
+                        if self._tail_call(function, after + value):
+                            break
                         rva = after + value
                         continue
                     break
@@ -360,16 +502,16 @@ _ASCII_TEXT = re.compile(rb"[\x20-\x7e\t\r\n]*\x00")
 _WIDE_TEXT = re.compile(rb"(?:[\x20-\x7e\t\r\n]\x00)*\x00\x00")
 
 
-def _text_at(image: Image, rva: int) -> str | None:
+def _text_at(sections: _Sections, rva: int) -> str | None:
     """The text at ``rva`` in a data section: printable ASCII or UTF-16LE up to its terminator."""
-    section = image.section_at_rva(rva)
+    section = sections.at(rva)
     if section is None or section.executable:
         return None
-    offset = image.offset_of_rva(rva)
+    offset = sections.offset(rva)
     if offset is None:
         return None
     limit = section.raw_offset + section.mapped_size
-    data = image.data
+    data = sections.image.data
     first = section.raw_offset
     # Only a reference to where a text starts reads it: the byte (or, for
     # UTF-16LE, the character) before is not part of the same text. Texts
@@ -563,7 +705,7 @@ def index_image(
             rows.add(start, "import", _short_import(name), SELF)
         for target in sorted(function.data_refs):
             if target not in texts:
-                texts[target] = _text_at(image, target)
+                texts[target] = _text_at(graph.sections, target)
             text = texts[target]
             if text is not None:
                 rows.add(start, "plain", text, SELF)
