@@ -16,7 +16,6 @@ import json
 
 from maljan.agents.static_analyst import (
     _extract_analysis_path,
-    _extract_host_path,
     _extract_load_hint,
     _extract_sample_hash,
 )
@@ -162,7 +161,7 @@ class TestSynthesizedPlaceholderChunk:
         assert "LOAD THIS BINARY FIRST" in hint
         assert self._STATE["static_sample_path"] in hint
         assert _extract_analysis_path(data) == self._STATE["static_sample_path"]
-        assert _extract_host_path(data) is None
+        assert "host_sample_path" not in data
         assert _extract_sample_hash(data) == "f" * 64
 
 

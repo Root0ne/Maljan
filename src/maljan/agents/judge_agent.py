@@ -942,10 +942,15 @@ def question_evidence(ledger: Iterable[Any], corpus: Any = None) -> dict[str, Qu
 
     The output as stored, in its own case; where the byte budget blanked it,
     the run's search copy, which is lower-cased and says so. An entry the
-    ledger records as trimmed is marked incomplete. Never raises.
+    ledger records as trimmed is marked incomplete. A repeat is shown as the
+    entry that holds its answer (``repeated_of``, followed to its end), never
+    as the guard's note. Never raises.
     """
+    from maljan.schemas.evidence import repeat_holders
+
+    ledger = list(ledger or ())
     shown: dict[str, QuestionEvidence] = {}
-    for entry in ledger or ():
+    for entry in ledger:
         written = str(getattr(entry, "id", "") or "").strip()
         if not written:
             continue
@@ -963,6 +968,11 @@ def question_evidence(ledger: Iterable[Any], corpus: Any = None) -> dict[str, Qu
             partial=bool(getattr(entry, "truncated", False)),
             lowered=lowered,
         )
+    for repeat, holder in repeat_holders(ledger).items():
+        if holder in shown:
+            shown[repeat] = shown[holder]
+        else:
+            shown.pop(repeat, None)
     return shown
 
 

@@ -447,8 +447,10 @@ class R2StaticProvider(GenericMCPStaticProvider):
             return False
         if error_parts(reply) is not None or r2_error_reply(_R2_OPEN_TOOL, reply) is not None:
             logger.warning(
-                "r2: the job's sample was not opened at session start: %s", str(reply)[:300]
+                "r2: the job's sample was not opened at session start (a %d-character reply).",
+                len(str(reply)),
             )
+            logger.debug("r2: the reply to the session-start open: %s", reply)
             return False
         logger.info("r2: opened the job's sample at session start.")
         return True

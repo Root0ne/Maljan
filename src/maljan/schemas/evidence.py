@@ -148,6 +148,30 @@ def holds_its_answer(entry: Any) -> bool:
     return int(getattr(entry, "chars_dropped", 0) or 0) > 0 and not answer_not_shown(entry)
 
 
+def repeat_holders(entries: Any) -> dict[str, str]:
+    """Each repeat's id mapped to the id of the entry that holds its answer, lower-cased.
+
+    A repeat names the entry it was answered from (``repeated_of``); a chain is
+    followed to its end, so the id is always that of an entry that ran. An id
+    whose chain leads nowhere in ``entries``, or round in a loop, maps to the
+    last entry reached. Entries that ran are not in the map.
+    """
+    named: dict[str, str] = {}
+    for entry in entries or ():
+        entry_id = str(getattr(entry, "id", "") or "").strip().lower()
+        first = str(getattr(entry, "repeated_of", "") or "").strip().lower()
+        if entry_id and first:
+            named[entry_id] = first
+    holders: dict[str, str] = {}
+    for entry_id, first in named.items():
+        seen = {entry_id}
+        while first in named and first not in seen:
+            seen.add(first)
+            first = named[first]
+        holders[entry_id] = first
+    return holders
+
+
 def parse_structured(output: str) -> dict[str, Any] | list[Any] | None:
     """The tool's output as JSON when it is JSON, else ``None``.
 

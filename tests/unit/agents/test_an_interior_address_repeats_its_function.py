@@ -139,6 +139,78 @@ class TestAnInteriorAddress:
         assert [e.repeated_of for e in recorder.entries] == [None, None]
 
 
+class TestTheSameInteriorAddressAskedAgain:
+    """Every repeat names the entry that holds the listing, however often it is asked."""
+
+    def _asked(self, times: int) -> tuple[list[str], Any]:
+        tool, recorder, _calls = _loop({"0x402200": FIRST, "0x402616": FIRST})
+        answers = [tool.invoke({"address": "0x402200"})]
+        answers += [tool.invoke({"address": "0x402616"}) for _ in range(times)]
+        return answers, recorder
+
+    def test_the_model_is_never_shown_a_repeat_s_id(self) -> None:
+        answers, recorder = self._asked(4)
+
+        holder = recorder.entries[0].id
+        repeat_ids = [e.id for e in recorder.entries if e.repeated_of]
+        assert len(repeat_ids) == len(recorder.entries) - 1
+        for answer in answers:
+            assert not any(f"[{rid}]" in answer for rid in repeat_ids), answer
+        assert all(holder in answer for answer in answers[1:])
+
+    def test_no_repeat_names_a_repeat_and_the_listing_is_held_once(self) -> None:
+        _answers, recorder = self._asked(3)
+
+        holder = recorder.entries[0]
+        assert all(e.repeated_of == holder.id for e in recorder.entries[1:])
+        assert [e.id for e in recorder.entries if FIRST in e.output] == [holder.id]
+
+    def test_the_interior_address_is_never_a_function_of_its_own(self) -> None:
+        _answers, recorder = self._asked(3)
+
+        assert [f.address for f in decompiled_functions(recorder.entries)] == [0x402200]
+
+
+class TestACitedRepeatReadsAsItsHolder:
+    def _ledger(self) -> list[LedgerEntry]:
+        return [
+            LedgerEntry(id="ev_0001", tool="decompile_function", output="int y = 2;"),
+            LedgerEntry(
+                id="ev_0002", tool="decompile_function", output="a note", repeated_of="ev_0001"
+            ),
+            LedgerEntry(
+                id="ev_0003",
+                tool="decompile_function",
+                output="another note",
+                repeated_of="ev_0002",
+            ),
+        ]
+
+    def test_the_citation_checker_reads_the_holder_s_text(self) -> None:
+        from maljan.pipeline.validation import EntryTexts
+
+        texts = EntryTexts.from_ledger(self._ledger())
+
+        assert texts.texts["ev_0002"] == texts.texts["ev_0001"]
+        assert texts.texts["ev_0003"] == texts.texts["ev_0001"]
+        assert "note" not in texts.texts["ev_0003"]
+
+    def test_the_judge_is_shown_the_holder_s_text(self) -> None:
+        from maljan.agents.judge_agent import question_evidence
+
+        shown = question_evidence(self._ledger())
+
+        assert shown["ev_0002"].text == "int y = 2;"
+        assert shown["ev_0003"].text == "int y = 2;"
+
+    def test_a_repeat_whose_holder_is_absent_reads_as_nothing(self) -> None:
+        from maljan.pipeline.validation import EntryTexts
+
+        orphan = [LedgerEntry(id="ev_0009", tool="strings", output="a note", repeated_of="ev_0004")]
+
+        assert "ev_0009" not in EntryTexts.from_ledger(orphan).texts
+
+
 class TestTheSampleCannotForgeARepeat:
     """The printed name is text a sample can shape; only the listing itself decides."""
 

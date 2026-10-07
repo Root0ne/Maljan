@@ -263,6 +263,19 @@ class EvidenceRecorder:
             args_summary=summarize_args(args),
         )
 
+    def holder_of(self, entry_id: str) -> str:
+        """The entry that holds the answer ``entry_id`` names: itself, or its repeat chain's end.
+
+        So no repeat is ever filed as a repeat of a repeat, and no id a model
+        is told to cite is one whose entry holds only a note.
+        """
+        by_id = {entry.id: entry for entry in self.entries}
+        wanted, seen = str(entry_id or "").strip(), set()
+        while wanted in by_id and by_id[wanted].repeated_of and wanted not in seen:
+            seen.add(wanted)
+            wanted = str(by_id[wanted].repeated_of)
+        return wanted
+
     def entry_failed(self, entry_id: str) -> bool:
         """Whether the entry with this id recorded a failure.
 
@@ -303,6 +316,8 @@ class EvidenceRecorder:
         dropped from an answer it cut to fit: the entry keeps what the model
         read and is marked ``truncated`` with ``chars_dropped``.
         """
+        if repeated_of:
+            repeated_of = self.holder_of(repeated_of)
         entry_id, seq = self.counter.next_id()
         entry = build_entry(
             entry_id=entry_id,
@@ -1150,15 +1165,25 @@ def _record_tool(
         # The function a decompile answered with, and the entry that already
         # holds it: a call given an address inside a function an earlier call
         # read is answered with that same function, and is a repeat of it
-        # whatever address it was given. Not for a served repeat, which the
-        # guard already names, nor an answer the conversation had no room for.
+        # whatever address it was given; a served identical call whose listing
+        # the holder holds is one too. Content decides (``function_entry``).
+        # Not for an answer the conversation had no room for.
         function = (
             listed_function(text)
-            if repeats is not None and decompiles(name) and repeated is None and not_shown is None
+            if repeats is not None and decompiles(name) and not_shown is None
             else None
         )
         holder = repeats.function_entry(function, text) if repeats is not None else None
-        same = same_function_notice(_function_label(text, function), holder) if holder else ""
+        holder = recorder.holder_of(holder) if holder else None
+        same = ""
+        if holder:
+            same = (
+                served_repeat_notice(
+                    name, holder, narrowing, last_warning=repeats.warning_of_the_end()
+                )
+                if repeated is not None and repeats is not None
+                else same_function_notice(_function_label(text, function), holder)
+            )
         entry = recorder.record(
             tool=name,
             args=kwargs,
@@ -1174,7 +1199,9 @@ def _record_tool(
             not_shown=not_shown,
             cut=cut,
         )
-        _note(kwargs, entry.id)
+        # A repeat is noted under the entry that holds its answer, so a later
+        # served or refused identical call names that entry, never the repeat.
+        _note(kwargs, entry.repeated_of or entry.id)
         if same:
             # Still handed the answer: the earlier listing may be gone from
             # what the window keeps of this conversation. It is stamped with

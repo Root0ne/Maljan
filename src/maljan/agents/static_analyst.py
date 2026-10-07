@@ -657,7 +657,7 @@ class StaticAnalyst(BaseAnalyst):
         # samples where the exact-match function-hash prior is silent. Reads the
         # raw bytes on the HOST (pe_extractor), so it needs the host path, not the
         # container path Ghidra uses. Fail-safe and gated OFF by default.
-        host_path = getattr(self, "_host_sample_path", None) or _extract_host_path(data)
+        host_path = getattr(self, "_host_sample_path", None)
         if host_path:
             rag_hint = self._compute_family_rag_hint(host_path)
         prompt_messages = [
@@ -887,29 +887,6 @@ def _extract_analysis_path(data: str) -> str | None:
     if not isinstance(parsed, dict):
         return None
     path = parsed.get("analysis_file_path")
-    return path if isinstance(path, str) and path else None
-
-
-def _extract_host_path(data: str) -> str | None:
-    """Return the ``host_sample_path`` from a chunk JSON, or None.
-
-    The host-readable raw-binary path (spliced in by
-    ``nodes._augment_static_chunks_with_path``) — distinct from the
-    container-visible ``analysis_file_path`` Ghidra uses. Needed by the
-    static-feature family classifier, which reads the bytes on the host.
-    """
-    import json as _json
-
-    stripped = data.strip()
-    if not stripped or not stripped.startswith("{"):
-        return None
-    try:
-        parsed = _json.loads(stripped)
-    except (_json.JSONDecodeError, ValueError):
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    path = parsed.get("host_sample_path")
     return path if isinstance(path, str) and path else None
 
 

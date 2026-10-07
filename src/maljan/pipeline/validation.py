@@ -4600,11 +4600,19 @@ class EntryTexts:
 
     @classmethod
     def from_ledger(cls, ledger: Iterable[Any], corpus: Any = None) -> EntryTexts:
-        """One text per entry: the corpus's copy first, the stored output after it."""
+        """One text per entry: the corpus's copy first, the stored output after it.
+
+        A repeat reads as the entry that holds its answer (``repeated_of``,
+        followed to its end): citing it is citing that entry, whose text is the
+        answer the model read, where the repeat's own text is the guard's note.
+        """
+        from maljan.schemas.evidence import repeat_holders
+
+        ledger = list(ledger or ())
         texts: dict[str, str] = {}
         tools: dict[str, str] = {}
         partial: set[str] = set()
-        for entry in ledger or ():
+        for entry in ledger:
             written = str(getattr(entry, "id", "") or "").strip()
             entry_id = written.lower()
             if not entry_id:
@@ -4621,6 +4629,15 @@ class EntryTexts:
             if text:
                 texts[entry_id] = text
                 tools[entry_id] = str(getattr(entry, "tool", "") or "")
+        for repeat, holder in repeat_holders(ledger).items():
+            texts.pop(repeat, None)
+            tools.pop(repeat, None)
+            partial.discard(repeat)
+            if holder in texts:
+                texts[repeat] = texts[holder]
+                tools[repeat] = tools[holder]
+            if holder in partial:
+                partial.add(repeat)
         return cls(texts=texts, tools=tools, partial=frozenset(partial))
 
     def holds(self, entry_id: str, value: str) -> bool:
