@@ -606,15 +606,23 @@ instruction count), two ways:
   live in an argument register across an unrelated call ties that call.
 - *A table of records.* With no tied call stored in the run, the records are
   read from frame offsets alone. Each store to `[rsp+x]` or `[rbp+x]` (x86
-  `esp`, `ebp`) carries its offset; the hashed values stored to the frame,
-  sorted by offset, bound the records, the last ending where the farthest store
-  of the run ends, and every address stored to the frame falls in the record
-  its offset lies in, whatever order the stores were emitted in. An instruction
-  that holds a hashed value is never also an address. A record's slot is its one
-  address some code calls or jumps through; a record with none names nothing
-  and lends nothing (a name resolved and never called); a record with two
-  means the offsets lay out no records, and the run names nothing. Stores that
-  carry no frame offset (pushes, absolute slots) make no records.
+  `esp`, `ebp`) carries its offset, an `[rsp+x]` offset read against the stack
+  pointer the run began with through the pushes and pops between. A record's
+  extent is the table's stride, the equal spacing between consecutive hashed
+  values stored to the frame, the last record included, and every address
+  stored to the frame falls in the record its offset lies in, whatever order
+  the stores were emitted in. An instruction that holds a hashed value is never
+  also an address, and a call forgets every address a register held. A
+  record's slot is its one address some code calls or jumps through; a record
+  with none names nothing and lends nothing (a name resolved and never
+  called). The table names nothing when a record holds two such addresses,
+  when records name addresses at different places within them, when fewer
+  than two hashed values give no stride, when their spacings differ, when an
+  address lies outside every record, when the records do not share one layout
+  of addresses, or when the stack or frame pointer moves between the stores by
+  an amount the run cannot read (any other write of either, or an x86 call,
+  whose callee may pop its arguments). Stores that carry no frame offset
+  (pushes, absolute slots) make no records.
 
 A slot two names fill, or filled by a hashed value that reads as two names, is
 ambiguous and names nothing. Every call or jump through a named slot, direct or

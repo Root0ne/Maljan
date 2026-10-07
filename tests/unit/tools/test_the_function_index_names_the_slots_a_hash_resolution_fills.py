@@ -284,19 +284,33 @@ class TestATableOfRecords:
 
         assert answer["resolved_slots"] == {hex(BASE + SLOT_A): "OpenThingW"}
 
-    def test_an_address_stored_below_the_first_record_belongs_to_none(self, tmp_path: Path) -> None:
+    def test_an_address_stored_below_the_first_record_belongs_to_none_and_its_table_names_nothing(
+        self, tmp_path: Path
+    ) -> None:
         image, code = _image()
         code.go(BUILDER)
         code.lea_rax(SLOT_B)  # stored below the first hashed value's offset
         code.rax_to_frame(0x28)
+        first = _record(code, 0x30, 0x1111AAAA, SLOT_A)
+        second = _record(code, 0x48, 0x2222BBBB, MODULE)
+        code.ret()
+        _user_calls(code)
+
+        answer = _index(image, tmp_path, _hits((first, ("OpenThingW",)), (second, ("CloseThing",))))
+
+        assert answer["resolved_slots"] == {}
+        assert answer["calls_unnamed"] == {hex(BASE + USER): 2}
+
+    def test_a_lone_record_has_no_stride_and_names_nothing(self, tmp_path: Path) -> None:
+        image, code = _image()
+        code.go(BUILDER)
         first = _record(code, 0x30, 0x1111AAAA, SLOT_A)
         code.ret()
         _user_calls(code)
 
         answer = _index(image, tmp_path, _hits((first, ("OpenThingW",))))
 
-        assert answer["resolved_slots"] == {hex(BASE + SLOT_A): "OpenThingW"}
-        assert answer["calls_unnamed"] == {hex(BASE + USER): 1}
+        assert answer["resolved_slots"] == {}
 
     def test_a_record_holding_two_called_addresses_names_nothing_in_its_run(
         self, tmp_path: Path
@@ -591,3 +605,224 @@ class TestEveryIndirectJumpNamesNothing:
         target.write_bytes(image.build())
         answer = artefact_index.function_index(str(target))
         assert answer["other_callees"] == {hex(BASE + BUILDER): [hex(BASE + USER)]}
+
+
+SLOT_C = DATA_RVA + 0x310
+FIRST, SECOND = 0x1111AAAA, 0x2222BBBB
+
+
+def _two(first: int, second: int) -> dict[str, Any]:
+    return _hits((first, ("OpenThingW",)), (second, ("CloseThing",)))
+
+
+class TestARecordSExtentIsTheTableSStride:
+    def test_a_store_past_the_last_record_makes_the_table_name_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        first = code.hash_in_record(0x00, FIRST)
+        code.lea_rax(SLOT_A)
+        code.rax_to_frame(0x08)
+        second = code.hash_in_record(0x10, SECOND)
+        code.lea_rax(SLOT_B)
+        code.rax_to_frame(0x18)
+        code.lea_rax(SLOT_C)  # an unrelated frame field past the last record
+        code.rax_to_frame(0x40)
+        code.ret()
+        code.go(USER).call_slot(SLOT_A)
+        code.call_slot(SLOT_C)
+        code.ret()
+
+        answer = _index(image, tmp_path, _two(first, second))
+
+        assert hex(BASE + SLOT_C) not in answer["resolved_slots"]
+        assert answer["resolved_slots"] == {}
+
+    def test_records_of_different_layouts_name_nothing(self, tmp_path: Path) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        first = code.hash_in_record(0x00, FIRST)
+        code.lea_rax(SLOT_A)
+        code.rax_to_frame(0x08)
+        code.lea_rax(SLOT_C)  # a local between two tables, inside the first stride
+        code.rax_to_frame(0x30)
+        second = code.hash_in_record(0x60, SECOND)
+        code.lea_rax(SLOT_B)
+        code.rax_to_frame(0x68)
+        code.ret()
+        code.go(USER).call_slot(SLOT_C)
+        code.call_slot(SLOT_B)
+        code.ret()
+
+        answer = _index(image, tmp_path, _two(first, second))
+
+        assert answer["resolved_slots"] == {}
+
+    def test_hashes_spaced_unequally_name_nothing(self, tmp_path: Path) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        first = code.hash_in_record(0x00, FIRST)
+        code.lea_rax(SLOT_A)
+        code.rax_to_frame(0x08)
+        second = code.hash_in_record(0x10, SECOND)
+        code.lea_rax(MODULE)
+        code.rax_to_frame(0x18)
+        third = code.hash_in_record(0x28, 0x3333CCCC)
+        code.lea_rax(SLOT_B)
+        code.rax_to_frame(0x30)
+        code.ret()
+        code.go(USER).call_slot(SLOT_A)
+        code.call_slot(SLOT_B)
+        code.ret()
+
+        answer = _index(
+            image,
+            tmp_path,
+            _hits((first, ("OpenThingW",)), (second, ("CloseThing",)), (third, ("ReadThing",))),
+        )
+
+        assert answer["resolved_slots"] == {}
+
+    def test_a_last_record_longer_than_the_stride_names_only_what_the_stride_holds(
+        self, tmp_path: Path
+    ) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        first = code.hash_in_record(0x00, FIRST)
+        code.lea_rax(SLOT_A)
+        code.rax_to_frame(0x08)
+        second = code.hash_in_record(0x10, SECOND)
+        code.lea_rax(MODULE)
+        code.rax_to_frame(0x18)
+        code.lea_rax(SLOT_B)  # past the stride the two hashes give
+        code.rax_to_frame(0x20)
+        code.ret()
+        code.go(USER).call_slot(SLOT_A)
+        code.call_slot(SLOT_B)
+        code.ret()
+
+        answer = _index(image, tmp_path, _two(first, second))
+
+        assert hex(BASE + SLOT_B) not in answer["resolved_slots"]
+        assert all(name == "OpenThingW" for name in answer["resolved_slots"].values())
+
+    def test_one_register_reused_for_each_record_s_address_names_each_right(
+        self, tmp_path: Path
+    ) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        first = code.hash_in_record(0x00, FIRST)
+        second = code.hash_in_record(0x10, SECOND)
+        code.lea_rax(SLOT_A)
+        code.rax_to_frame(0x08)
+        code.lea_rax(SLOT_B)
+        code.rax_to_frame(0x18)
+        code.ret()
+        code.go(USER).call_slot(SLOT_A)
+        code.call_slot(SLOT_B)
+        code.ret()
+
+        answer = _index(image, tmp_path, _two(first, second))
+
+        assert answer["resolved_slots"] == {
+            hex(BASE + SLOT_A): "OpenThingW",
+            hex(BASE + SLOT_B): "CloseThing",
+        }
+
+
+class TestAnAddressHeldAcrossACallIsNotKnown:
+    def test_an_address_taken_before_a_call_and_stored_after_it_is_no_address(
+        self, tmp_path: Path
+    ) -> None:
+        image, code = _image()
+        image.functions.append((OTHER, OTHER + 0x10))
+        code.go(OTHER).clobber_rax()
+        code.ret()
+        code.go(BUILDER)
+        first = code.hash_in_record(0x00, FIRST)
+        code.lea_rax(SLOT_A)
+        code.call(OTHER)
+        code.rax_to_frame(0x08)  # what OTHER answered, not the slot's address
+        second = code.hash_in_record(0x10, SECOND)
+        code.lea_rax(SLOT_B)
+        code.call(OTHER)
+        code.rax_to_frame(0x18)
+        code.ret()
+        code.go(USER).call_slot(SLOT_A)
+        code.call_slot(SLOT_B)
+        code.ret()
+
+        answer = _index(image, tmp_path, _two(first, second))
+
+        assert answer["resolved_slots"] == {}
+
+
+def _x86_frame(tmp_path: Path, body: Any, called: list[int]) -> dict[str, Any]:
+    image = SyntheticPE(is64=False, image_base=X86_BASE)
+    code = _Code(image)
+    code.go(RESOLVER).raw(b"\x31\xc0\xc3")
+    code.go(BUILDER)
+    places = body(code)
+    code.call(USER)
+    code.ret()
+    code.go(USER)
+    for slot in called:
+        code.raw(b"\xff\x15" + struct.pack("<I", X86_BASE + slot))
+    code.ret()
+    target = tmp_path / "x.exe"
+    target.write_bytes(image.build())
+    return artefact_index.function_index(
+        str(target),
+        pe_info=("ev_0004", {"entry_point": BUILDER, "export_rows": []}),
+        hashes=(HASH_ID, _two(*places)),
+    )
+
+
+def _esp(offset: int, value: int) -> bytes:
+    return b"\xc7\x44\x24" + bytes([offset]) + struct.pack("<I", value)
+
+
+class TestAStackPointerThatMovesIsFollowed:
+    def test_a_push_between_the_stores_is_read_into_the_offsets(self, tmp_path: Path) -> None:
+        def body(code: _Code) -> list[int]:
+            first = code.raw(_esp(0x00, FIRST))
+            second = code.raw(_esp(0x08, SECOND))
+            code.raw(b"\x51")  # push ecx: [esp+8] is now the first record's [esp+4]
+            code.raw(_esp(0x08, X86_BASE + X86_SLOT_A))
+            code.raw(_esp(0x10, X86_BASE + X86_SLOT_B))
+            code.raw(b"\x59")
+            return [first, second]
+
+        answer = _x86_frame(tmp_path, body, [X86_SLOT_A])
+        assert answer["resolved_slots"] == {hex(X86_BASE + X86_SLOT_A): "OpenThingW"}
+
+    def test_a_stack_pointer_moved_by_an_unread_amount_between_the_stores_names_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        def body(code: _Code) -> list[int]:
+            first = code.raw(_esp(0x00, FIRST))
+            second = code.raw(_esp(0x08, SECOND))
+            code.raw(b"\x83\xec\x04")  # sub esp, 4
+            code.raw(_esp(0x08, X86_BASE + X86_SLOT_A))
+            code.raw(_esp(0x10, X86_BASE + X86_SLOT_B))
+            return [first, second]
+
+        answer = _x86_frame(tmp_path, body, [X86_SLOT_A])
+        assert answer["resolved_slots"] == {}
+
+    def test_records_below_the_frame_pointer_are_read_by_their_offsets(
+        self, tmp_path: Path
+    ) -> None:
+        def body(code: _Code) -> list[int]:
+            first = code.raw(b"\xc7\x45\xe0" + struct.pack("<I", FIRST))
+            code.raw(b"\xc7\x45\xe4" + struct.pack("<I", X86_BASE + X86_SLOT_A))
+            second = code.raw(b"\xc7\x45\xe8" + struct.pack("<I", SECOND))
+            code.raw(b"\xc7\x45\xec" + struct.pack("<I", X86_BASE + X86_SLOT_B))
+            return [first, second]
+
+        answer = _x86_frame(tmp_path, body, [X86_SLOT_A, X86_SLOT_B])
+        assert answer["resolved_slots"] == {
+            hex(X86_BASE + X86_SLOT_A): "OpenThingW",
+            hex(X86_BASE + X86_SLOT_B): "CloseThing",
+        }
