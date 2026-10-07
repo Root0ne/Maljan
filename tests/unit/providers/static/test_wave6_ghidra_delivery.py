@@ -16,7 +16,6 @@ import json
 
 from maljan.agents.static_analyst import (
     _extract_analysis_path,
-    _extract_host_path,
     _extract_load_hint,
     _extract_sample_hash,
 )
@@ -109,7 +108,9 @@ class TestSynthesizedPlaceholderChunk:
         assert len(out) == 1
         parsed = json.loads(out[0].content)
         assert parsed["analysis_file_path"] == self._STATE["static_sample_path"]
-        assert parsed["host_sample_path"] == self._STATE["sample_path"]
+        # The worker's own path is no path for the model: the agent carries it.
+        assert "host_sample_path" not in parsed
+        assert self._STATE["sample_path"] not in out[0].content
         assert parsed["sha256"] == "f" * 64
         assert parsed["file_type"] == "pe"
         assert parsed["platform"] == "windows"
@@ -131,7 +132,6 @@ class TestSynthesizedPlaceholderChunk:
             "note",
             "sha256",
             "analysis_file_path",
-            "host_sample_path",
             "file_type",
             "platform",
         }
@@ -161,7 +161,7 @@ class TestSynthesizedPlaceholderChunk:
         assert "LOAD THIS BINARY FIRST" in hint
         assert self._STATE["static_sample_path"] in hint
         assert _extract_analysis_path(data) == self._STATE["static_sample_path"]
-        assert _extract_host_path(data) == self._STATE["sample_path"]
+        assert "host_sample_path" not in data
         assert _extract_sample_hash(data) == "f" * 64
 
 

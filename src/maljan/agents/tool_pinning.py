@@ -118,7 +118,9 @@ def server_of(tool: Any) -> str:
     return str(metadata.get(SERVER_METADATA_KEY, "") or "")
 
 
-def _spellings(default_path: str | None, target: str) -> frozenset[str]:
+def _spellings(
+    default_path: str | None, target: str, staged_path: str | None = None
+) -> frozenset[str]:
     """The argument values that can only mean this sample, for one tool.
 
     Separating the values matched from the value substituted is the whole
@@ -126,6 +128,12 @@ def _spellings(default_path: str | None, target: str) -> frozenset[str]:
     watching for a name the model was never shown: a server handed the sample
     as ``<sha16>_evil.exe`` would only be corrected if the model volunteered
     that name, while the prompt header told it ``evil.exe``.
+
+    ``staged_path`` is the worker's own copy of the sample, in full: a real
+    file on this host, so the existence check never corrects it, and one a
+    server reading its own mirror may refuse. radare2 will not open a path
+    with a ``/.`` segment, and an r2 analyst sent the staging path beside the
+    mirror it had been given.
     """
     return frozenset(
         value
@@ -133,6 +141,7 @@ def _spellings(default_path: str | None, target: str) -> frozenset[str]:
             os.path.basename(default_path) if default_path else "",
             os.path.basename(target),
             default_path or "",
+            staged_path or "",
         )
         if value and value != target
     )
@@ -164,6 +173,7 @@ def pin_paths(
     path_by_server: dict[str, str] | None = None,
     agent_name: str = "",
     captures: tuple[str, ...] | list[str] = (),
+    staged_path: str | None = None,
 ) -> list[BaseTool]:
     """Every tool, each guarded against a path argument this sample's own name.
 
@@ -173,6 +183,9 @@ def pin_paths(
     eight of its twenty calls on capture names it had to invent, because
     nothing it was shown named the capture. With several the argument stays
     the model's to give, and a refusal lists them.
+
+    ``staged_path`` is the worker's copy of the sample, which can only mean
+    this sample and is replaced with the path each tool's server opens.
 
     With no pinned path, no per-server map and no single capture the tools are
     returned exactly as they are, unwrapped: the guard costs nothing when there
@@ -200,7 +213,7 @@ def pin_paths(
             _pin_tool(
                 tool,
                 target,
-                _spellings(default_path, target) if target else frozenset(),
+                _spellings(default_path, target, staged_path) if target else frozenset(),
                 _basenames(default_path, target) if target else frozenset(),
                 agent_name,
                 hidden,

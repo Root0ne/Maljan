@@ -1708,6 +1708,47 @@ once more, as any retry after a failure is. A replayed conversation keeps the
 seeds. A run's second chunk re-ran ten
 decompiles the first had done.
 
+Every call the repeat guard answers without running is filed in the ledger as
+a repeat of the entry that holds its answer (`EvidenceRecorder.record_repeat`):
+an earlier chunk's call answered from its entry, and a refused third identical
+call. The entry carries `repeated_of`, the note the model was handed in place
+of a result and a duration of 0 ms, and its `tool_call_started` and
+`tool_call_finished` events go out like any call's, the finish naming
+`repeated_of`. The model is never shown the repeat's own id: the answer it
+reads carries the earlier entry's, which is the one to cite. A repeat always
+names the entry that holds the answer, never another repeat
+(`EvidenceRecorder.holder_of`), and later identical calls are noted under that
+entry, so every served or refused answer names it too. The citation check
+(`EntryTexts.from_ledger`) and the judge's evidence (`question_evidence`) read a
+cited repeat as the entry that holds its answer. A repeat's note is not
+charged against the agent's byte budget (`report.evidence_budget_bytes`): it
+holds no new content, and charging it could blank a later answer. A repeat is
+counted apart in `run_summary.evidence.repeats` and in neither `ok` nor
+`failed`; the report header and §13's evidence bounds say how many calls were
+answered from an earlier entry, and Appendix A marks each such row "repeat of
+ev_…". No report section, decompiled-function list, function map, later
+chunk's block or seeded guard reads a repeat: each reads the entry it names. A
+reverser's second chunk once made nine calls, all answered this way, and left
+no entry and no event.
+
+A decompile is also a repeat when its answer is a function an earlier entry
+already holds, whatever address it was given: a call given an address inside
+a function is answered with the whole function. The function the answer prints
+(`validation.listed_function`: the start a decompiler's generic name carries,
+`FUN_00401000` or `fcn.00401000`, else the printed name) only finds the
+candidate entries; it is text the sample can shape, a forged or a shared name,
+so the call is a repeat only when its listing is a candidate's listing, or that
+listing cut shorter (the guardrail's cut marker aside). Any other listing under
+the same name is a new entry kept whole. The tool
+has run by then, so the model is still handed the answer, stamped with the
+entry that holds the function and one sentence saying so
+(`same_function_notice`); the entry is filed as a repeat of it and keeps the
+note, not a second copy. An answer that shows more of the function than the
+entry holding it is new evidence and holds the function from then on. An
+earlier chunk's listing holds its function for a later chunk the same way. One
+r2 analyst decompiled a function at its start and again at an address inside
+it, and the ledger held the same listing twice as two different calls.
+
 An analyst that has read a function sees its function map in the run-state
 block on every turn (`agents.function_map`). The platform keeps it from facts
 only, and the model does not write to it. It lists:
@@ -2680,6 +2721,18 @@ output too, so a reader inferring the trim from the emptiness explains a
 failure with a cause that did not happen. `truncated` is persisted alongside
 `repeated_of` (the earlier identical call a repeat was answered from), `symbol`
 and `started_at`, and the evidence endpoint returns all four.
+
+An answer the tool-output guardrail cut, shortened or summarised to fit is
+`truncated` too, and carries `chars_dropped`, the characters it lost: the
+guardrail tells the call it is answering (`context_window.note_answer_cut`),
+and the entry keeps exactly what the model read. A compact form, which loses no
+value, is not a cut. `run_summary.evidence` counts such entries apart from the
+budget's trims (`cut`, `chars_dropped`), and §13's evidence bounds say
+"N cut by the tool-output guardrail (X characters dropped)"; a summary written
+before the count reads the guardrail's own count from `run_summary.truncation`.
+A cut entry still holds its answer for a later chunk, which is answered from it
+as from any kept result. Two decompilations once cut by thousands of characters
+were stored as `truncated: false`, and the report said nothing was cut.
 
 The rows are written in one batch when the run ends, so `created_at` used to be
 the flush for every one of them — thirty entries of one run had one distinct

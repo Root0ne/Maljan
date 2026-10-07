@@ -169,13 +169,20 @@ class TestARepeatedCall:
         assert "You already called identify_file with these arguments" in answer
         assert "[ev_0001]" in answer
 
-        # The refusal is a message to the model and nothing else. It used to be
-        # written to the ledger as a successful call — ok=true, 0 ms — which
-        # inflated the ledger and the report's "tool call(s) recorded" line and
-        # handed the model a citable id for an entry holding no evidence.
-        assert len(recorder.entries) == 2, "no tool ran, so nothing was recorded"
-        assert all(entry.repeated_of is None for entry in recorder.entries)
+        # The refused calls are filed as repeats of the entry that answered
+        # them, never as nothing and never as calls that ran; the model is
+        # handed no id of their own to cite.
+        assert len(recorder.entries) == 4
+        assert [entry.repeated_of for entry in recorder.entries] == [
+            None,
+            None,
+            "ev_0001",
+            "ev_0001",
+        ]
+        assert all(entry.structured is None for entry in recorder.entries[2:])
+        assert recorder.entries[3].output == answer
         assert not answer.startswith("[ev_")
+        assert "ev_0004" not in answer
 
     def test_different_arguments_are_not_affected(self) -> None:
         calls: list[str] = []
@@ -230,7 +237,13 @@ class TestARepeatedCall:
         # failure: the live notice sent a model to [ev_0017] for "the result"
         # and ev_0017 had raised.
         assert "You already called identify_file with these arguments and it failed" in answer
-        assert [entry.ok for entry in recorder.entries] == [False, False]
+        # The two calls that ran failed, and every refused one is a repeat of
+        # the first failure, which it says.
+        ran = [entry for entry in recorder.entries if entry.repeated_of is None]
+        assert [entry.ok for entry in ran] == [False, False]
+        refused = [entry for entry in recorder.entries if entry.repeated_of is not None]
+        assert refused
+        assert all(entry.repeated_of == "ev_0001" and not entry.ok for entry in refused)
 
     def test_a_call_that_starts_failing_still_counts_from_the_first(self) -> None:
         outcomes = iter([RuntimeError("transient"), None])
@@ -249,8 +262,9 @@ class TestARepeatedCall:
             wrapped.invoke({"path": "/samples/evil.exe"})
 
         # The retry after the transient failure is the repeat the guard serves;
-        # the third call is refused and writes no entry.
-        assert [entry.ok for entry in recorder.entries] == [False, True]
+        # the third call is refused and filed as a repeat of the first entry.
+        assert [entry.ok for entry in recorder.entries][:2] == [False, True]
+        assert [entry.repeated_of for entry in recorder.entries] == [None, None, "ev_0001"]
 
     def test_without_a_guard_every_call_still_runs(self) -> None:
         calls: list[str] = []

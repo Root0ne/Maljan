@@ -1172,6 +1172,9 @@ class EvidenceIndexRow(BaseModel):
     ok: bool = True
     duration_ms: int = 0
     truncated: bool = False
+    # The earlier entry a call the repeat guard answered without running
+    # repeats; ``None`` for a call that ran.
+    repeated_of: str | None = None
 
 
 # ---------------------------------------------------------------------------

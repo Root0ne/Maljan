@@ -41,7 +41,7 @@ from maljan.agents.delegation import (
     WAITING_ON_EACH_OTHER_REFUSAL,
     _what_an_ask_gets_sentence,
 )
-from maljan.agents.evidence_recorder import earlier_chunk_answer
+from maljan.agents.evidence_recorder import earlier_chunk_answer, same_function_notice
 from maljan.agents.ghidra_http_client import no_program_as_error
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
@@ -156,6 +156,7 @@ from maljan.pipeline.validation import (
     validate_verdict_bundle,
 )
 from maljan.providers.base import STATIC_EVIDENCE_INSTRUCTIONS, absent_provider_fragment
+from maljan.providers.static import r2 as _r2
 from maljan.providers.static.ghidra import (
     GHIDRA_GUIDANCE,
     GHIDRA_WORKFLOW,
@@ -1132,6 +1133,16 @@ PROMPTS: dict[str, str] = {
     ),
     "a later chunk's answer from an earlier chunk's recorded result": earlier_chunk_answer(
         "a", "ev_0001", "a recorded result"
+    ),
+    "a decompile answered with a function an earlier entry holds": same_function_notice(
+        "FUN_00401000", "ev_0001"
+    ),
+    "an r2 open that failed, and an r2 call made before an open": " ".join(
+        [
+            _r2._open_failed("/srv/samples/.tmp/x.exe", "/srv/samples/r2-work/x.exe"),
+            _r2._open_failed("/srv/samples/r2-work/x.exe", "/srv/samples/r2-work/x.exe"),
+            _r2._open_first("/srv/samples/r2-work/x.exe"),
+        ]
     ),
     "the function map block": _function_map_text(),
     "a tool answer the conversation had no room for, as told and as recorded": " ".join(

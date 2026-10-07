@@ -70,6 +70,12 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # empty output, and a reader that infers the trim from the emptiness
     # states a cause that did not happen.
     truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # The characters the tool-output guardrail cut from the answer before the
+    # model read it; such an entry keeps what the model read and is
+    # ``truncated``. Zero for an answer stored whole and every older row.
+    chars_dropped: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     # The id of the earlier identical call this one was answered from, when
     # the repeat suppressor served it rather than running the tool again.
     repeated_of: Mapped[str | None] = mapped_column(String(32), nullable=True)

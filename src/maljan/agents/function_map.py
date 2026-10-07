@@ -281,6 +281,8 @@ def _floss_artefacts(found: FunctionArtefacts, data: Mapping[str, Any], entry_id
 def keeps_for_the_map(entry: Any) -> bool:
     """Whether the map reads this entry: a call that decompiles or disassembles, or
     one of the analysis server's tools that tie artefacts to functions."""
+    if getattr(entry, "repeated_of", None):
+        return False
     tool = str(getattr(entry, "tool", "") or "").lower()
     return "decompil" in tool or _lists_code(tool) or tool in (_HASH_TOOL, _BLOB_TOOL, _FLOSS_TOOL)
 
@@ -389,8 +391,15 @@ def build_function_map(
     offset and its virtual address are one visited function the same way; with
     no base known, both are kept as written.
     """
-    # A call whose answer the conversation had no room for was not read.
-    entries = [e for e in own if getattr(e, "ok", True) and not answer_not_shown(e)]
+    # A call whose answer the conversation had no room for was not read, and a
+    # repeat holds a note in place of the answer the earlier entry holds.
+    entries = [
+        e
+        for e in own
+        if getattr(e, "ok", True)
+        and not answer_not_shown(e)
+        and not getattr(e, "repeated_of", None)
+    ]
     found = _merged(artefacts, function_artefacts(entries))
     bases = tuple(dict.fromkeys([*image_bases, *found.image_bases, *image_bases_in(entries)]))
     visited: list[MapEntry] = _fold_spellings(

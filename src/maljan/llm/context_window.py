@@ -123,6 +123,7 @@ __all__ = [
     "learn_window",
     "model_family",
     "no_room_sentence",
+    "note_answer_cut",
     "note_answer_not_shown",
     "CallAnswer",
     "output_limit",
@@ -1785,9 +1786,13 @@ class CallAnswer:
     ``not_shown`` is the length of an answer none of which reached the
     conversation, because it had no room left (:func:`note_answer_not_shown`);
     ``None`` while the answer, or a shortened form of it, was handed over.
+    ``cut`` is how many characters the guardrail dropped from an answer it
+    cut, shortened or summarised to fit (:func:`note_answer_cut`); ``None``
+    for an answer handed over whole.
     """
 
     not_shown: int | None = None
+    cut: int | None = None
 
 
 _CALL_ANSWER: ContextVar[CallAnswer | None] = ContextVar("maljan_call_answer", default=None)
@@ -1816,6 +1821,13 @@ def note_answer_not_shown(chars: int) -> None:
     answer = _CALL_ANSWER.get()
     if answer is not None:
         answer.not_shown = max(0, int(chars))
+
+
+def note_answer_cut(chars: int) -> None:
+    """Say, for the call being answered, that the guardrail dropped ``chars`` of its answer."""
+    answer = _CALL_ANSWER.get()
+    if answer is not None and int(chars) > 0:
+        answer.cut = int(chars)
 
 
 def tool_definition_chars(tools: Iterable[Any]) -> int:
