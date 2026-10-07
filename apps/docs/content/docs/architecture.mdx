@@ -1959,7 +1959,11 @@ decompiler's generic `FUN_`, `sub_` or `fcn.` name are kept beside it, such as
 an export name.
 
 The block has no size limit, by the rule that no limit is set by default. It
-grows with the functions visited and the functions reaching artefacts. On a
+grows with the functions visited and, without a function index, the functions
+reaching artefacts; with an index, its not-visited line takes only the room
+the rest of the block leaves of what the loop derives for text arriving now
+(the window less the reply room and what the conversation holds, at the answer
+share), so it does not grow with the index. On a
 recorded run that decompiled 89 functions it was about 5 KB per turn.
 
 A coverage line counts the functions visited against the functions reaching
@@ -1971,8 +1975,11 @@ read, the decoder's own imports and plain strings included. A visited function
 counts when it is one of the rows by the map's own rule for an offset and its
 virtual address, the index's own image base among the bases. The not-visited
 line then reads the same source: the index's rows no visited function is, in
-the pack's rank order, each with its count of artefacts. Without an index both
-lines are as before. The visited lines do not change. The sources are the
+the pack's rank order, each with its count of artefacts, as many as fit that
+room, then how many more there are and that the index is its entry, served by
+the analysis server's `function_index` tool. With no window measured there is
+no derived room, and the line states the count, the entry and the tool, and
+no rows. Without an index both lines are as before. The visited lines do not change. The sources are the
 agent's entries of the job, copied before the byte budget trims them, and the
 pack's artefacts, briefed by the node and handed on to an ask.
 

@@ -77,12 +77,36 @@ class TestWithAnIndex:
             "index (ev_0009), 1 of them visited"
         )
 
-    def test_the_not_visited_line_lists_the_other_rows_in_the_pack_s_rank_order(self) -> None:
-        last = function_map_block(self._map()).splitlines()[-1]
+    def test_a_small_index_in_its_room_lists_every_other_row_in_rank_order(self) -> None:
+        last = function_map_block(self._map(), room=10_000).splitlines()[-1]
         assert last == (
             "not visited, holding artefacts in the function index (ev_0009): "
             f"{hex(BASE + 0x3300)} (7 artefacts); {hex(BASE + 0x2600)} (4 artefacts); "
             f"{hex(BASE + 0x4400)} (1 artefact)"
+        )
+
+    def test_a_large_index_takes_only_the_room_left_and_counts_the_rest(self) -> None:
+        rows = [(0x10000 + 0x10 * i, 5_000 - i) for i in range(5_000)]
+        pack = function_artefacts([_index(rows)])
+        found = build_function_map([_decompiled("ev_0011", BASE + 0x10000)], pack, [], (BASE,))
+        room = 1_500
+        block = function_map_block(found, room=room)
+        assert len(block) <= room
+        last = block.splitlines()[-1]
+        shown = last.count(" artefacts)")
+        assert 0 < shown < 4_999
+        assert last.endswith(
+            f"; and {4_999 - shown} more; the index is ev_0009, served by the analysis "
+            "server's function_index tool"
+        )
+        # The rows shown are the first in rank order (the visited one excluded).
+        assert f"{hex(BASE + 0x10010)} (4999 artefacts)" in last
+
+    def test_with_no_room_derived_the_line_names_the_index_without_rows(self) -> None:
+        last = function_map_block(self._map()).splitlines()[-1]
+        assert last == (
+            "not visited, holding artefacts in the function index (ev_0009): 3 rows; the "
+            "index is ev_0009, served by the analysis server's function_index tool"
         )
 
     def test_the_index_s_own_image_base_joins_a_visit_by_virtual_address(self) -> None:

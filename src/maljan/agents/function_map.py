@@ -667,12 +667,18 @@ def _unvisited_item(found: FunctionMap, address: int, artefacts: Sequence[Artefa
     return f"{where} ({counts}; {', '.join(ids)})" if ids else f"{where} ({counts})"
 
 
-def function_map_block(found: FunctionMap) -> str:
+def function_map_block(found: FunctionMap, room: int | None = None) -> str:
     """The map as the model reads it, or ``""`` when nothing is visited or tied.
 
     A head, the coverage line, one line per visited function that reaches an
     artefact or has a summary, one line of the other visited addresses, and one
     line of the functions reaching artefacts that were not visited.
+
+    With a function index, that last line lists the index's rows not visited
+    and takes only the room the other lines leave of ``room``, the characters
+    the caller derived for the whole block: the ranked rows that fit, then how
+    many more there are and where the index is. With no ``room`` it states the
+    count, the entry and the tool that serves the index, and no rows.
     """
     if found.empty():
         return ""
@@ -688,16 +694,48 @@ def function_map_block(found: FunctionMap) -> str:
         # With an index, the not-visited line reads the index's rows, as the
         # coverage line does, in the pack's rank order.
         if found.index_unvisited:
-            lines.append(
-                f"not visited, holding artefacts in the function index ({found.index_entry}): "
-                + "; ".join(_indexed_item(found, a, n) for a, n in found.index_unvisited)
-            )
+            left = None if room is None else room - sum(len(line) + 1 for line in lines)
+            lines.append(_index_line(found, left))
     elif found.unvisited:
         lines.append(
             "not visited, reaching artefacts: "
             + "; ".join(_unvisited_item(found, a, tied) for a, tied in found.unvisited)
         )
     return "\n".join(lines)
+
+
+# Where the whole index is, said after the rows the room left out.
+INDEX_ELSEWHERE = "the index is {entry}, served by the analysis server's function_index tool"
+
+
+def _index_line(found: FunctionMap, room: int | None) -> str:
+    """The index's rows not visited, in rank order, in ``room`` characters; ``None``: no rows.
+
+    Every row when they all fit; otherwise the rows that fit, room being kept
+    for the last clause at its longest, then "and N more" with where the index
+    is. With no room derived, the count, the entry and the tool only.
+    """
+    rows = found.index_unvisited
+    head = f"not visited, holding artefacts in the function index ({found.index_entry}): "
+    elsewhere = INDEX_ELSEWHERE.format(entry=found.index_entry)
+    if room is None:
+        return f"{head}{_count(len(rows), 'row', 'rows')}; {elsewhere}"
+    items = [_indexed_item(found, a, n) for a, n in rows]
+    whole = head + "; ".join(items)
+    if len(whole) <= room:
+        return whole
+    budget = room - len(f"; and {len(rows)} more; {elsewhere}")
+    shown: list[str] = []
+    used = len(head)
+    for item in items:
+        cost = len(item) + (2 if shown else 0)
+        if used + cost > budget:
+            break
+        shown.append(item)
+        used += cost
+    if not shown:
+        return f"{head}{_count(len(rows), 'row', 'rows')}; {elsewhere}"
+    return f"{head}{'; '.join(shown)}; and {len(rows) - len(shown)} more; {elsewhere}"
 
 
 def _indexed_item(found: FunctionMap, address: int, artefacts: int) -> str:
