@@ -64,6 +64,7 @@ READS_A_FILE = frozenset(
         "resolve_api_hashes",
         "decode_string_blobs",
         "find_crypto_constants",
+        "function_index",
     }
 )
 CARVED = "carved_path"

@@ -180,15 +180,16 @@ class TestTheStep:
     ) -> None:
         """After every other tool, so every id the pack issued before it is the id it
         always was; only the platform's own readings of the bytes and the
-        deobfuscation passes follow it."""
+        deobfuscation passes and the function index follow it."""
         _installed(monkeypatch, _answer(ROWS))
         result = _pack(tmp_path)
-        assert [entry.tool for entry in result.entries[-5:]] == [
+        assert [entry.tool for entry in result.entries[-6:]] == [
             "sandbox_status",
             "floss",
             "resolve_api_hashes",
             "decode_string_blobs",
             "find_crypto_constants",
+            "function_index",
         ]
         entry = _floss_entry(result)
         assert entry.ok is True

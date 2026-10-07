@@ -3968,8 +3968,27 @@ class BaseAnalyst(BudgetMeter, ABC):
             body = f"{body}\n{line}"
         if self._says_no_room():
             body = f"{body}\n{NO_ROOM_RUN_STATE}"
-        found = self._function_map_text()
+        found = self._function_map_text(self._map_room(len(body)))
         return f"{body}\n{found}" if found else body
+
+    def _map_room(self, used: int) -> int | None:
+        """The characters the function map block may take after ``used`` of the block, or ``None``.
+
+        The derivation a tool answer arriving now is given
+        (``ContextBudget.cap_without_recording``: the window less the reply
+        room and what this conversation holds, at the answer share), less
+        what the run-state lines already take. ``None`` where no window was
+        measured: the map's index line then names the index without rows.
+        """
+        from maljan.llm.context_window import ContextBudget
+
+        budget = self._context_budget()
+        try:
+            if not isinstance(budget, ContextBudget) or not budget.derives:
+                return None
+            return max(0, int(budget.cap_without_recording(self.name)) - used - 1)
+        except Exception:  # noqa: BLE001 — a budget is never worth a lost turn
+            return None
 
     def _function_map_sources(self) -> tuple[list[LedgerEntry], list[ClaimEvidence]]:
         """This job's kept entries and claims, emptied first when the job has changed."""
@@ -3986,7 +4005,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         live = getattr(self, "_live_map_entries", None) or []
         return [*rows, *live]
 
-    def _function_map_text(self) -> str:
+    def _function_map_text(self, room: int | None = None) -> str:
         """The function map block for this agent as of now, or ``""``; never raises."""
         from maljan.agents.function_map import build_function_map, function_map_block
 
@@ -4000,7 +4019,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             # Only an agent that has read a function is shown the map: the
             # pack's artefacts alone are already in the pack it reads.
-            return function_map_block(found) if found.visited else ""
+            return function_map_block(found, room) if found.visited else ""
         except Exception as exc:  # noqa: BLE001 — the map never costs a turn
             self.logger.debug("%s: function map left out (%s).", self.name, exc)
             return ""

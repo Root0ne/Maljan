@@ -388,6 +388,137 @@ def _function_map_text() -> str:
     return block
 
 
+def _function_index_text() -> str:
+    """The index as the pack shows it, whole and cut, its run-state line and the map's coverage."""
+    import tempfile
+
+    from maljan.agents.function_map import (
+        build_function_map,
+        function_artefacts,
+        function_map_block,
+    )
+    from maljan.pipeline.run_state import index_sentence
+    from maljan.tools import artefact_index
+    from tests.unit.tools.synthetic_pe import SyntheticPE
+
+    def cells(key: str, values: list[str], source: str) -> list[dict[str, Any]]:
+        return [{key: value, "sources": [source]} for value in values]
+
+    rows = [
+        {
+            "function": hex(0x401000 + 0x100 * i),
+            "offset": hex(0x1000 + 0x100 * i),
+            "direct": 5 - i,
+            "imports": cells("name", ["OpenThing"], artefact_index.SELF),
+            "resolved": cells("name", ["CloseThing"], "ev_0002"),
+            "decoded_strings": cells("text", ["a", "b"], "ev_0003"),
+            "plain_strings": cells("text", ["c"], artefact_index.SELF),
+            "capa": cells("rule", ["a rule"], "ev_0004"),
+            "callers": ["0x402000"],
+            "callees": ["0x403000", "0x404000"],
+            "indirect": {"artefacts": 3, "through": 2},
+            **({"names": ["anexport"], "entry_point": True} if i == 0 else {}),
+        }
+        for i in range(3)
+    ]
+    data = {
+        "tool": artefact_index.TOOL,
+        "image_base": "0x400000",
+        "functions_known": 9,
+        "function_sources": {"exception directory": 4, "call targets the decoder reached": 5},
+        "function_lists": artefact_index.FUNCTION_LISTS_ABSENT,
+        "undecoded_functions": 1,
+        "unplaced": {"floss": 2},
+        "total": len(rows),
+        "rows": rows,
+    }
+    data["absent"] = {
+        "capa": "no: [ev_0004] failed: capa produced no result",
+        "floss": artefact_index.FLOSS_NOT_REMEMBERED,
+    }
+    # Built as the pack holds it: the answer parsed into ``structured``.
+    entry = LedgerEntry(
+        id="ev_0005", tool=artefact_index.TOOL, output=json.dumps(data), structured=data, seq=5
+    )
+    whole = triage_pack.pack_block([entry], 0)
+    head_and_rows = whole.split("\n")[1:]
+    assert len(head_and_rows) == len(rows) + 1
+    assert head_and_rows[1].startswith("- 0x401000 (export ")
+    cut = triage_pack.render_pack([entry], len(head_and_rows[0]) + len(head_and_rows[1]) + 300)
+    assert cut.split("\n")[-1].startswith("2 more rows not shown here (pack room)")
+    empty = triage_pack.render_pack(
+        [entry.model_copy(update={"structured": {**data, "rows": [], "total": 0}})], 0
+    )
+    dropped = entry.model_copy(update={"output": "", "structured": None, "truncated": True})
+    found = build_function_map(
+        [LedgerEntry(id="ev_0006", tool="decompile_function", args={"address": "0x1000"})],
+        function_artefacts([entry]),
+        [],
+    )
+    block = function_map_block(found)
+    assert "not visited, holding artefacts in the function index (ev_0005)" in block
+    # The line in its three forms: every row, the rows that fit and "and N more", the count only.
+    many_rows = [
+        {**row, "function": hex(0x401000 + 0x100 * i), "offset": hex(0x1000 + 0x100 * i)}
+        for i, row in enumerate(rows * 4)
+    ]
+    many = entry.model_copy(update={"structured": {**data, "rows": many_rows, "total": 12}})
+    found_many = build_function_map(
+        [LedgerEntry(id="ev_0006", tool="decompile_function", args={"address": "0x1000"})],
+        function_artefacts([many]),
+        [],
+    )
+    every_row = function_map_block(found_many, room=10**6)
+    assert "; and " not in every_row and "(ev_0005): 0x401100 (4 artefacts); " in every_row
+    cut_rows = function_map_block(found_many, room=len(every_row) - 1)
+    assert "; and " in cut_rows and " more; the index is ev_0005" in cut_rows
+    with tempfile.TemporaryDirectory() as folder:
+        text = Path(folder) / "a.txt"
+        text.write_text("plain text\n", encoding="utf-8")
+        not_pe = artefact_index.served_index(text)["error"]
+        assert "reads Windows PE images only" in not_pe
+        image = Path(folder) / "s.exe"
+        image.write_bytes(SyntheticPE(functions=[(0x1000, 0x1010)]).build())
+        nowhere = artefact_index.served_index(image, "0x9999")["row"]
+        assert nowhere.startswith("no: no function the run knows starts at or holds")
+        served = artefact_index.served_index(image)["table"]
+        at_start = artefact_index.served_index(image, "0x140001000")["address_read"]
+        inside = artefact_index.served_index(image, "0x140001004")["address_read"]
+        assert " read as a virtual address: the start of the function at " in at_start
+        assert " read as a virtual address: inside the function at " in inside
+    not_an_address = artefact_index.address_readings("the main one", 0x400000)
+    assert isinstance(not_an_address, str) and "is not an address" in not_an_address
+    served_rows = [artefact_index.row_line(row, artefact_index.THIS_ANSWER) for row in rows]
+    return " ".join(
+        [
+            whole,
+            cut,
+            empty,
+            index_sentence("ev_0005", data),
+            index_sentence("ev_0005", None, dropped=True),
+            index_sentence("ev_0005", None),
+            triage_pack.render_pack([dropped], 0),
+            found.coverage(),
+            block,
+            served,
+            *served_rows,
+            not_pe,
+            nowhere,
+            not_an_address,
+            at_start,
+            inside,
+            artefact_index.FAILED_HERE.format("ValueError: x"),
+            artefact_index.ERROR_HERE.format("x"),
+            artefact_index.FLOSS_UNREADABLE.format("x"),
+            triage_pack.INDEX_SOURCE_NOT_IN_PACK,
+            triage_pack.INDEX_SOURCE_UNREADABLE.format(entry="ev_0002"),
+            function_map_block(found, room=200),
+            every_row,
+            cut_rows,
+        ]
+    )
+
+
 EXAMPLES: dict[str, str] = {"narrative": EXAMPLE_OBJECT, **_EXAMPLES}
 
 
@@ -1158,6 +1289,7 @@ PROMPTS: dict[str, str] = {
     "what a Ghidra pass that stopped says": _ghidra_pass_failures(),
     "the constant sets as the pack line names them": _constant_set_names(),
     "the constant scan's description": _analysis_tool_descriptions("find_crypto_constants"),
+    "the function index tool's description": _analysis_tool_descriptions("function_index"),
     "a term's example ids and how many more": _term_ids_said(["T1000", "T1001", "T1002"]),
     "run-state budget line of a loop with no limit": budget_line(NO_LIMIT, NO_LIMIT),
     "ask tool budget sentence with no limit": _what_an_ask_gets_sentence("lead", None, None),
@@ -1201,6 +1333,7 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "the function map block": _function_map_text(),
+    "the function index as the pack, the run state and the map say it": _function_index_text(),
     "a tool answer the conversation had no room for, as told and as recorded": " ".join(
         [no_room_sentence(12_345), not_shown_record(12_345), FUNCTION_NOT_SHOWN]
     ),

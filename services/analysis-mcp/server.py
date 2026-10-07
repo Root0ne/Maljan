@@ -39,6 +39,7 @@ from maljan.tools import (
     staging,
     string_blobs,
 )
+from maljan.tools import artefact_index as artefact_index_tools
 from maljan.tools import binary as binary_tools
 from maljan.tools import identify as identify_tools
 from maljan.tools import rules as rule_tools
@@ -109,6 +110,7 @@ TOOL_NEEDS: list[ToolNeeds] = [
     ToolNeeds("resolve_api_hashes"),
     ToolNeeds("decode_string_blobs"),
     ToolNeeds(crypto_constants.TOOL),
+    ToolNeeds("function_index"),
     ToolNeeds("put_sample"),
     ToolNeeds("put_sample_begin"),
     ToolNeeds("put_sample_chunk"),
@@ -1151,6 +1153,39 @@ def find_crypto_constants(path: str, carved_path: str = "") -> dict[str, Any]:
         crypto_constants.find_crypto_constants,
         path=path,
         carved_path=carved_path,
+    )
+
+
+@mcp.tool()
+@reads_a_carved_file
+def function_index(path: str, address: str = "", carved_path: str = "") -> dict[str, Any]:
+    """List every function of a PE with the artefacts it holds, ranked by how many.
+
+    The functions come from the file's exception directory, its exports, its
+    entry point and the direct call targets the platform's x86 decoder reaches.
+    Each row names a function at the image base plus its offset (the address
+    Ghidra and radare2 take) and states the imports it calls, the names its
+    hashes resolve to, how many plain and decoded strings it refers to, its
+    callers and callees, and how many artefacts its callees hold (counted per
+    callee). Each cell names the tool whose answer states it. Joined here:
+    ``pe_info``, ``resolve_api_hashes`` and ``decode_string_blobs`` over the
+    same file, and FLOSS's rows when FLOSS ran on it in this server; each
+    source not joined, capa always, is stated under ``absent`` with its reason.
+    With no ``address``, ``table`` holds the whole index. An ``address`` is
+    hexadecimal, with or without ``0x``; a value at or above the image base is
+    tried first as a virtual address, then as an offset. ``row`` then holds the
+    row of the function that starts at it or holds it, ``address_read`` which
+    reading answered and whether the address is the start or inside, and
+    ``callers`` and ``callees`` its neighbours; an address no function starts
+    at or holds is a ``no:`` sentence. Nothing is run. The triage pack's ledger
+    entry holds the index built with capa; its id is in the run-state block.
+    """
+    return _guard(
+        artefact_index_tools.TOOL,
+        artefact_index_tools.served_index,
+        path=path,
+        carved_path=carved_path,
+        address=address,
     )
 
 

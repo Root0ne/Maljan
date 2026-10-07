@@ -268,6 +268,46 @@ Every place of every value is listed: the file offset and, for a PE, the offset
 from the image base, the section and the function the file's own table puts
 around it. The triage pack runs it on every executable image (PE, ELF, Mach-O).
 
+### Function index
+
+| tool | arguments |
+| --- | --- |
+| `function_index` | `path`, `address=""`, `carved_path=""` |
+
+Every function of a PE the file lists or the platform's x86 decoder reaches,
+with the artefacts each holds (`tools.artefact_index`); nothing is run. The
+functions come from the exception directory, the exports, the entry point and
+the direct call targets the decoder reaches. Each row states the imports the
+function calls, the names its hashes resolve to, how many plain and decoded
+strings it refers to, its callers and callees, and how many artefacts its
+callees hold, counted per callee. Each cell names the tool whose answer states
+it. The answer joins `pe_info`, `resolve_api_hashes` and `decode_string_blobs`
+over the same file, run in-process, and FLOSS's rows when FLOSS ran on the
+file in this server. Each source not joined is stated under `absent` with its
+reason: capa always (it is not run here; the triage pack's own
+`function_index` entry joins capa's answer), FLOSS when it has not run on the
+file in this server, and any of the three that failed. The disassemblers'
+function lists are stated absent with this server's reason: it has no
+disassembler of its own. Every function start is collected before any function
+is read, and an unconditional jump to another function's start is that
+function's tail call, so attribution does not depend on call order.
+
+With no `address`, `table` holds the whole index in the pack's row form, ranked
+by each function's own distinct artefacts, then by address. An `address` is
+hexadecimal, with or without `0x`; a value at or above the image base is tried
+first as a virtual address, then as an offset. `row` then holds the row of the
+function that starts at the address or holds it, `address_read` which reading
+answered and whether the address is the start or inside, and `callers` and
+`callees` its neighbours; an address no function starts at or holds, or text
+that is not an address, is a `no:` sentence. Names the sample wrote (imports,
+resolved names, exports) are quoted and escaped as the pack writes recovered
+strings;
+strings are counted, never shown. There is no row limit: the MCP tool-output
+guardrail bounds the answer and records any cut. Every walk is linear in the
+file: in each of the index's two walks each instruction start is decoded once,
+a section is found by bisection, the callee count costs one step per call, and
+nothing recurses.
+
 ### Sample delivery
 
 | tool | arguments |
