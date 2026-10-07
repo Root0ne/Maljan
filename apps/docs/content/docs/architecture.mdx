@@ -506,6 +506,73 @@ saying why there is none, which is one entry `not run: <reason>` whose pack
 line is `no: <reason>`, not a failure. A scan Ghidra did not complete is a
 failed entry with Ghidra's own words (`no: the pass failed: …`).
 
+**The function index** is the pack's last entry, `function_index`
+(`tools.function_index`), for a PE. It lists every function the run knows and,
+for each, the artefacts the run's answers and the platform's decoder place in
+it. The functions come from the file's exception directory (a chained fragment
+counted for the function it belongs to), its exports, its entry point, capa's
+function starts, and every direct call target the decoder reaches in an
+executable section. Ghidra's and radare2's function lists are not read: the
+pack runs before any analyst opens them, and the entry says so as `no:` with
+that reason. A function in the exception directory is decoded instruction after
+instruction across its stated range; any other is decoded from its start along
+every branch, up to a return, a jump it cannot follow, the next function start
+it knows or its section's end. A byte the decoder does not read ends that path,
+and the entry counts the functions where that happened.
+
+Each row holds, with the entry id that states each cell:
+
+- the imports the function calls, through the slot or the jump thunk the
+  import table names (the decoder of `tools.call_sites`), and the names the
+  hash resolution places inside it;
+- the strings it refers to: a plain string where an instruction takes an
+  address in a data section (x64 RIP-relative; x86 an absolute address as an
+  operand or an immediate) and the bytes there read as printable ASCII or
+  UTF-16LE of at least six characters up to their terminator; a decoded string
+  the blob decoder states it refers to, or one FLOSS decoded at a call site
+  inside it (a stack or tight string: in the routine FLOSS names);
+- the capa rules that matched at its start or inside it;
+- its callers and callees, and how many of its direct callees hold artefacts
+  of their own and how many those are, each callee's own distinct count added.
+  An artefact two callees both hold is counted for each. A union across
+  callees would cost a callee's artefacts once per caller, which one function
+  holding many artefacts and called from many places makes quadratic; the sum
+  costs one step per call.
+
+A place is inside a function when an instruction the decoder read there
+covers it, or else when the exception directory's range holds it. A place no
+function holds is counted under `unplaced` by its source and given to none. An
+artefact counts once per function as a distinct value: an import or a resolved
+name by its name, a string by its text, a rule by its name. A function with no
+artefact of its own is not a row. A synthetic image of 60,000 functions indexes
+in a few seconds, and ten times the functions take about ten times as long.
+Every walk is bounded by the file: each code byte is decoded at most once in
+all, whichever starts, overlapping ranges or branches lead to it (a byte
+another function's decoding already read ends the path, so code two functions
+share is read for the first one), and nothing recurses.
+
+The pack shows the index as a compact table, after every other line and in the
+room they leave. The rest of the pack is rendered without it exactly as it
+would be, so no line gives way to it. The head says how many functions hold
+artefacts, where the functions come from and that each address is the image
+base plus the offset the other lines state, the form Ghidra and radare2 take.
+One row per function follows, ranked by the number of its own distinct
+artefacts, ties by address: `- 0x401000: calls "CreateFileW" (ev_0024); refers
+to 5 decoded strings (ev_0021); capa: … (ev_0008); called by 1, calls 3
+functions; 1 callee holds 2 artefacts of their own`. Every name a row takes
+from the sample (an import, a resolved name, an export) is quoted and escaped
+as the pack writes every recovered string, so it reads as data; a string a
+function refers to is counted, never shown. A row states what and
+where and names no behaviour. Rows that do not fit are counted in a last line
+that points to the entry, which holds every row. With no room for even the
+head, the index is not shown and the run summary's pack record names it with
+"no pack room"; it is not counted in the "N more pack entries" line, because no
+tool call answers it. The run-state block carries one line saying the index
+exists, which entry holds it and how many rows it has. On the two stored runs
+of the reference loader measured for it, the pack before the index left fewer
+than 400 characters of its room, so the index was recorded in the pack record
+and not shown.
+
 Ghidra's emulation is not run by the pack: Ghidra's `emulate_function`
 ignores its step limit and cannot be stopped, and one emulation took 130 to
 560 ms in a stored run. It stays a tool the reverser may call.
@@ -1863,7 +1930,13 @@ grows with the functions visited and the functions reaching artefacts. On a
 recorded run that decompiled 89 functions it was about 5 KB per turn.
 
 A coverage line counts the functions visited against the functions reaching
-artefacts, and one line names those not yet visited. The sources are the
+artefacts, and one line names those not yet visited. With a function index in
+the pack, the coverage line counts against the index's rows instead ("M
+functions hold artefacts in the function index (ev_…), K of them visited"),
+because the index places every artefact the run's answers and the decoder
+read, the decoder's own imports and plain strings included. A visited function
+counts when it is one of the rows by the map's own rule for an offset and its
+virtual address. Nothing else in the block changes. The sources are the
 agent's entries of the job, copied before the byte budget trims them, and the
 pack's artefacts, briefed by the node and handed on to an ask.
 
