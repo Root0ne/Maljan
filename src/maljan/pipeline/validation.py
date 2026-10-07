@@ -277,12 +277,16 @@ def feedback_text(
     """The retry turn's text for a set of violations, ending on ``closing``.
 
     ``cards=False`` leaves out the technique cards a does-not-describe question
-    carries (:func:`_card_after`).
+    carries (:func:`_card_after`); each technique's card is shown once per turn,
+    after the first question about it.
     """
     lines = [FEEDBACK_PREAMBLE]
+    carded: set[str] = set()
     for violation in violations:
         where = f" ({violation.path})" if violation.path else ""
-        card = _card_after(violation) if cards else ""
+        card = _card_after(violation) if cards and violation.subject not in carded else ""
+        if card:
+            carded.add(violation.subject)
         lines.append(f"- [{violation.code}]{where} {violation.message}{card}")
     lines.append(closing)
     return "\n".join(lines)

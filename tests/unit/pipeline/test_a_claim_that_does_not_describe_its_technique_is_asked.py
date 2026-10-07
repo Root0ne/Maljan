@@ -95,6 +95,20 @@ class TestTheNarrowCaseIsAsked:
         assert "card:" not in violation.message
         assert violation.message.endswith("write TECHNIQUE: NONE.")
 
+    def test_a_technique_s_card_is_shown_once_per_turn(self) -> None:
+        violations = [
+            claim_does_not_describe_violation(
+                _claim(text, "T1003"), "T1003", knowledge, path=f"claims[{n}]"
+            )
+            for n, text in enumerate(["The sample opens a window.", "The sample beeps."])
+        ]
+        assert all(v is not None for v in violations)
+
+        sent = feedback_text([v for v in violations if v is not None])
+
+        assert sent.count(technique_card_lines("T1003")[1]) == 1
+        assert sent.count("attck.claim_does_not_describe") == 2
+
     def test_a_technique_with_no_card_is_asked_as_before(self) -> None:
         violation = claim_does_not_describe_violation(
             _claim("The sample opens a window.", "T1112"), "T1112", knowledge

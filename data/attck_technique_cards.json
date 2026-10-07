@@ -774,8 +774,12 @@
         "criterion": "the deleted files are the victim's, to destroy data"
       },
       {
-        "id": "T1070",
-        "criterion": "what is removed is a log or history, not a file"
+        "id": "T1685.005",
+        "criterion": "Windows event logs are cleared, not files deleted"
+      },
+      {
+        "id": "T1070.003",
+        "criterion": "command history is cleared, not files deleted"
       }
     ]
   },
@@ -1051,7 +1055,7 @@
     ],
     "kind": "behaviour",
     "requires": [
-      "the screen or a window is captured to an image"
+      "the screen or a window is captured, as images or as a recording"
     ],
     "indicators": [
       "BitBlt from a screen device context",
@@ -1102,7 +1106,7 @@
     ],
     "kind": "behaviour",
     "requires": [
-      "a camera or a video of the screen is recorded"
+      "video is recorded from a camera or webcam, or through a video application such as a call service"
     ],
     "indicators": [
       "avicap32 or DirectShow capture calls",
@@ -1111,7 +1115,7 @@
     "siblings": [
       {
         "id": "T1113",
-        "criterion": "a still image of the screen is taken"
+        "criterion": "the victim's screen is captured, as images or as a recording, and no camera or video application is used"
       },
       {
         "id": "T1123",

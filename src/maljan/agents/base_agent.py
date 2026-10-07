@@ -6892,19 +6892,21 @@ class BaseAnalyst(BudgetMeter, ABC):
         if loop_repeat is not None:
             # A whole answer is asked for, and one may take the whole cap.
             widest = max(widest, int(self.output_cap_tokens() or 0))
+        # The technique cards are reference beside a question and never cost
+        # one: a turn that carries them is measured against the window with an
+        # answer of the output cap, on every path, and sent without them when
+        # it does not fit with them.
+        cards = True
+        if feedback_text(initial, closing=closing) != feedback_text(
+            initial, closing=closing, cards=False
+        ) and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
+            self, sent, max(widest, int(self.output_cap_tokens() or 0))
+        ):
+            cards = False
+            sent = with_question(messages, feedback_text(initial, closing=closing, cards=False))
         too_big = (loop_cuts or loop_repeat is not None) and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
             self, sent, widest
         )
-        # The technique cards are reference beside a question: a turn that
-        # fits without them is sent without them, never left unasked for them.
-        cards = True
-        if too_big:
-            without_cards = with_question(
-                messages, feedback_text(initial, closing=closing, cards=False)
-            )
-            if BaseAnalyst._fits_the_window(self, without_cards, widest):  # type: ignore[arg-type]
-                cards = False
-                too_big = False
         if too_big:
             detail = (
                 "not asked: the conversation the question is sent in and the "

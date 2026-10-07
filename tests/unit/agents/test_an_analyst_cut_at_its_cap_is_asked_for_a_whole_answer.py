@@ -211,6 +211,44 @@ class TestATechniqueCardNeverCostsAQuestion:
         assert ANALYST_CUT_CODE not in [v.code for v in analyst.validation_findings]
 
 
+class TestTheCardsAreMeasuredOnThePlainRetry:
+    """An answer neither cut nor repeated: dev sends its turn unmeasured."""
+
+    def _plain(self, fits: Any) -> tuple[str, list[bool]]:
+        answer = WHOLE.replace("TECHNIQUE: NONE", "TECHNIQUE: T1003")
+        analyst = _Analyst([(WHOLE, 300)])
+        measured: list[bool] = []
+
+        def _fits(_self: Any, messages: list[Any], _cap: int) -> bool:
+            carded = "card:" in str(messages[-1].content)
+            measured.append(carded)
+            return fits(carded)
+
+        isr = analyst._text_to_isr(answer, 0)
+        with (
+            patch("maljan.agents.base_agent.analyst_output_cap", return_value=CAP),
+            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch.object(BaseAnalyst, "_fits_the_window", _fits),
+        ):
+            analyst._record_usage(_message(answer, 300))
+            analyst._validate_isr(isr, "evidence")
+        (turns,) = analyst.seen_turns
+        return str(turns[-1].content), measured
+
+    def test_a_turn_dev_s_window_just_fits_is_sent_without_its_cards(self) -> None:
+        question, measured = self._plain(lambda carded: not carded)
+
+        assert measured == [True]
+        assert "attck.claim_does_not_describe" in question
+        assert "card:" not in question
+
+    def test_a_turn_that_fits_with_its_cards_carries_them(self) -> None:
+        question, measured = self._plain(lambda carded: True)
+
+        assert measured == [True]
+        assert "card:" in question
+
+
 class TestTheWindow:
     def test_a_conversation_and_the_cap_that_fit_are_asked(self) -> None:
         analyst = _Analyst([])

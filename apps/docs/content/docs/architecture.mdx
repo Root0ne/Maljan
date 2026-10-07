@@ -1232,9 +1232,11 @@ decides.
    none of the technique's words (Ingress Tool Transfer on "downloads and
    writes a file", Native API on "the raw syscall() entry point"). The
    question as sent ends with the named technique's card, where it has one;
-   the finding recorded is the check's message alone, and a retry turn whose
-   window is measured (an answer cut at its cap or repeated) and fits only
-   without its cards is sent without them, never left unasked for them.
+   the finding recorded is the check's message alone. Each technique's card
+   is shown once per turn. A retry turn that carries cards is measured
+   against the window with an answer of the output cap, on every path, and
+   is sent without them when it does not fit with them: a card never costs a
+   question.
    **One reasoning card per technique** (`memory.technique_cards`, data in
    `data/attck_technique_cards.json` beside the vendored table). A card holds
    its kind (behaviour-focused: the action alone is the technique;
@@ -1245,7 +1247,9 @@ decides.
    Tools, the current id of the retired T1562, not T1070 Indicator Removal).
    The cards are written from the ATT&CK definitions of the techniques the
    vendored table carries and cover every technique the capability terms
-   list and every technique the analysts named in the recorded runs. A card
+   list and every technique the analysts named in the recorded local3,
+   local4 and hosted run2 to run4 benchmark runs; techniques first named in
+   later runs may have none. A card
    is reference shown beside a technique a model already named: in this
    question and in the judge's technique question. Nothing is decided from
    it, no question is asked because of it, and the report does not print it.
@@ -1253,9 +1257,7 @@ decides.
    kind and requirements need not be its own. Tests hold every card's id,
    name and sibling ids to the vendored table, and the leak test reads every
    card's words with no allowance: a sibling whose label is a term the
-   evaluation key scores is left off its card (115 pairs, among them
-   Obfuscated Files or Information against Dynamic API Resolution and System
-   Checks against Debugger Evasion).
+   evaluation key scores is left off its card (115 pairs).
 2. **Domain and platform consistency** (`attck.platform_mismatch`, exact). The
    catalogue's domain and platforms for the id against the routed sample —
    a Windows PE is `enterprise`/Windows, an APK `mobile`/Android, an ELF
