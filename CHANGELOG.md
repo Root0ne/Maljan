@@ -8,30 +8,9 @@ change landed on `main`.
 
 ### Added
 
-- **One reasoning card per ATT&CK technique, beside the vendored table.**
-  `data/attck_technique_cards.json` holds 98 cards, each written from the
-  table's row and naming the fields it was written from. A card gives the
-  required components, the kind (behaviour-focused or intent-critical), the
-  indicators, and the confusable sibling techniques with the criterion that
-  tells each apart. The cards cover every technique the capability terms list
-  and every technique named in the recorded benchmark runs. A test holds every
-  card's ids to the vendored table, and the leak test scans every card's shown
-  words.
-- **The technique check and the judge's technique question show the named
-  technique's card.** The does-not-describe question to an analyst ends with
-  the card. The judge's question shows the card under each technique it asks
-  about.
-- **The card check states where the claims do not meet the card, and the judge
-  is asked once.** It names the required components no claim and no cited
-  entry shows, a stated purpose no claim gives, and a sibling that every claim
-  sentence fits while neither the sentences nor the cited entries use the
-  card's own words. The finding goes to the judge's existing technique
-  question, and a technique named only on a finding is read the same way. The
-  answer stands, and the report row prints the finding beside it.
-- **A technique no claim anchors to an entry holding the behaviour is marked
-  `unanchored` in the report.** A claim is anchored when an entry it cites
-  holds a word of the card or the catalogue entry, or an identifier the claim
-  names. The technique is not dropped and no one is asked about it.
+- **One reasoning card per ATT&CK technique, beside the vendored table** (`data/attck_technique_cards.json`, 98 cards): its kind (behaviour-focused or intent-critical), what the evidence has to show, the indicators and the confusable sibling techniques with the criterion that tells each apart, written from the ATT&CK definitions and held to the vendored table by tests; the leak test reads every card's words with no allowance, so a sibling whose label the evaluation key scores is left off.
+- **The analysts' does-not-describe question, as sent, ends with the named technique's card**; the finding recorded keeps the check's message alone, a sub-technique with no card of its own is shown none, and a retry turn that fits its window only without the cards is sent without them.
+- **The judge's technique question shows each asked technique's card under its claims, as reference**, only where the window has room left after the reports and the evidence; the techniques asked, the answer and the report row are unchanged.
 - **An analyst that has read a function sees a function map, kept by the
   platform.** It is built from the agent's ledger entries of the job, the
   pack's analysis-server artefacts and its parsed claims. It rides the
