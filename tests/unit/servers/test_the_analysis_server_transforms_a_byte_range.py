@@ -100,7 +100,10 @@ def test_the_capabilities_answer_states_the_operations(server: Any) -> None:
     for op in transforms.OPERATIONS:
         assert f"``{op}``" in (server.transform_bytes.__doc__ or "")
     # The shown part each text names is the module's own number.
-    shown = f"first {transforms.SHOWN_BYTES} bytes"
+    shown = (
+        f"the first bytes the {transforms.SHOWN_ROOM} characters of one answer carry beside "
+        f"its other fields (at most {transforms.SHOWN_BYTES})"
+    )
     assert shown in cell["facts"]
     assert shown in " ".join((server.transform_bytes.__doc__ or "").split())
 

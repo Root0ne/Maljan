@@ -713,8 +713,11 @@ UTF-16LE readings escaped as the pack writes a string, and the indicators the
 platform's indicator scan finds in it, each at the offset where the scan's own
 match stands, as many rows as the room leaves. The part shown is sized from
 what an answer carries: at most 17 characters per two shown bytes for the two
-readings as JSON writes them, so the 6,000-character room one tool answer gets
-when the window is not measured shows 705 bytes by default, and a
+readings as JSON writes them, after the rest of the answer (the input range,
+the steps and the output's own fields at their longest) is taken from the
+6,000-character room one tool answer gets when the window is not measured, so
+the default part is at most 705 bytes and the whole answer stays within that
+room; a
 `show_length` past what the largest answer any model gets carries is cut to it
 and says so. It never says what the output is. An unknown operation,
 a wrong key or IV length, an input that is not whole blocks or padding that does

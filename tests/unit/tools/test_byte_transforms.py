@@ -571,7 +571,8 @@ class TestGrowthIsBounded:
         assert time.perf_counter() - started < 30
         assert len(answer["steps"]) == 10_000
         assert answer["output"]["sha256"] == hashlib.sha256(PLAIN[:16]).hexdigest()
-        assert peak < 16 * CAP
+        # The answer names all 10,000 steps; its size grows with them, not with the cap.
+        assert peak < 32 * CAP
 
     def test_the_bytes_a_chain_writes_are_held_to_the_cap(self, tmp_path: Path) -> None:
         path = _write(tmp_path, bytes(CAP // 4))
@@ -624,9 +625,9 @@ class TestGrowthIsBounded:
         assert time.perf_counter() - started < 20
         out = answer["output"]
         assert out["length"] == CAP and out["sha256"] == hashlib.sha256(text).hexdigest()
-        assert out["shown"]["end"] == transforms.SHOWN_BYTES
+        assert 0 < out["shown"]["end"] <= transforms.SHOWN_BYTES
         assert "show_offset and show_length show another part" in out["shown"]["note"]
-        assert len(json.dumps(out)) <= transforms.SHOWN_ROOM
+        assert len(json.dumps(answer)) <= transforms.SHOWN_ROOM
         assert all(row["offset"] < transforms.SHOWN_BYTES for row in out["indicators"])
         assert peak < 16 * CAP
 
@@ -665,9 +666,7 @@ class TestTheShownPart:
         path = _write(tmp_path, PLAIN)
         asked = transforms.MAX_SHOWN_BYTES + 1
         out = _out(transform_bytes(path, offset=0, show_length=asked))
-        assert out["shown"]["cut"].startswith(
-            f"show_length {asked} was cut to {transforms.MAX_SHOWN_BYTES}"
-        )
+        assert out["shown"]["cut"].startswith(f"show_length {asked} was cut to ")
         assert out["shown"]["end"] == len(PLAIN)
 
     def test_the_sizes_come_from_the_rooms_and_the_readings_most_characters(self) -> None:
@@ -698,7 +697,10 @@ class TestTheShownPart:
     def test_indicator_rows_take_only_the_room_the_readings_leave(self, tmp_path: Path) -> None:
         import json
 
-        hosts = b" ".join(b"h%05d.example.com" % i for i in range(200))
+        labels = [a + d for a in "abcdefghij" for d in "0123456789"]
+        hosts = b"\x00".join(
+            f"{label}.{tld}".encode() for label in labels for tld in ("io", "ru", "de")
+        )
         path = _write(tmp_path, hosts)
         out = _out(transform_bytes(path, offset=0))
         assert out["indicators"], "some rows fit"
@@ -780,3 +782,71 @@ class TestTheReviewRulings:
         assert answer["steps"][0]["members"] == (5 << 20) // len(member)
         # Ten times the bytes, well above the largest piece fed at once.
         assert large < small * 30 + 0.5
+
+    def test_the_worst_default_answers_stay_within_the_room(self, tmp_path: Path) -> None:
+        import json
+
+        shapes = {
+            "high bytes": bytes(range(0x80, 0x100)) * 64,
+            "lone surrogate pairs": b"\x00\xd8" * 4096,
+            "dense hosts": b" ".join(b"h%05d.example.com" % i for i in range(2000)),
+        }
+        steps = [{"op": "xor", "key": {"hex": "00"}}, {"op": "reverse"}, {"op": "reverse"}]
+        for name, blob in shapes.items():
+            path = _write(tmp_path, blob, "shape.bin")
+            for chain in ([], steps):
+                answer = transform_bytes(path, offset=0, steps=chain)
+                assert answer["output"]["shown"]["end"] > 0, name
+                assert len(json.dumps(answer)) <= transforms.SHOWN_ROOM, (name, len(chain))
+
+
+class TestTheSpanPath:
+    """The span path's rows are ``iter_string_iocs``'s rows, and each span holds its value."""
+
+    def _corpus(self) -> list[bytes]:
+        import random
+
+        rng = random.Random(11)
+        words = [
+            b"http://a.example.com/x?y=1",
+            b"admin@evil.com",
+            b"evil.com",
+            b"c2.ru",
+            b"8.8.8.8",
+            b"version=8.8.4.4",
+            b"HKLM\\Software\\Run",
+            b"C:\\Users\\x\\a.exe",
+            b"/etc/passwd",
+            b"\\BaseNamedObjects\\mtx_1",
+            b"abcdefghijklmnop.onion",
+            b"bad example.org_x",
+            b"\x00",
+            b" ",
+            b"\n",
+            b"xx",
+            b"a1.io",
+            b"\x00 \x00",
+        ]
+        blobs = []
+        for _ in range(400):
+            parts = [rng.choice(words) for _ in range(rng.randrange(1, 30))]
+            blobs.append(
+                b"".join(
+                    p if rng.random() < 0.7 else p.decode("latin-1").encode("utf-16-le")
+                    for p in parts
+                )
+            )
+        return blobs
+
+    def test_the_rows_equal_the_scan_s(self) -> None:
+        from maljan.tools.ioc_spans import string_iocs_with_spans
+        from maljan.tools.strings import iter_string_iocs
+
+        for blob in self._corpus():
+            rows, stopped = string_iocs_with_spans(blob)
+            plain = [{k: r[k] for k in ("kind", "value", "notes", "source")} for r in rows]
+            assert plain == iter_string_iocs(blob)
+            assert stopped is None
+            for row in rows:
+                held = blob[row["start"] : row["end"]][:: row["width"]]
+                assert held.decode("latin-1") == row["value"], (blob, row)

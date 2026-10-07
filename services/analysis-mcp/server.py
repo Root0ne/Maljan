@@ -1239,7 +1239,8 @@ def transform_bytes(
     text it reads as in ASCII and in UTF-16LE, and the hosts, URLs, addresses,
     paths and registry keys the indicator reader finds in it with their offsets
     in the output, as many rows as the answer's room leaves. The part shown is
-    the first 705 bytes unless ``show_offset`` and ``show_length`` name
+    the first bytes the 6000 characters of one answer carry beside its other
+    fields (at most 705) unless ``show_offset`` and ``show_length`` name
     another; the answer says when it is not the whole output, and a
     ``show_length`` past what the largest answer carries is cut to it and says
     so. An unknown operation, a key of the wrong length, an input that is not

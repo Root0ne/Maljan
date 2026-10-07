@@ -363,17 +363,24 @@ paths and registry keys the platform's indicator scan (the reader behind
 `iocs_from_text` and `iocs_from_file`) finds in it. Each indicator's offset is
 where the scan's own match of that value stands in the output (a value the scan
 keeps once per spelling is at its first match), with the encoding of the run it
-was read in. The part shown is sized from what an answer carries. Per two
-shown bytes the answer spends at most 17 characters as JSON writes it: 5 for
-each byte of the ASCII reading (a backslash, `x` and two digits, the backslash
-escaped) and 7 for the pair in the UTF-16LE reading; the hex head is 64 bytes
-whatever is shown. By default the part shown is what the room the platform
-gives one tool answer when the model's window is not measured (6,000
-characters) carries at that rate: 705 bytes. `show_offset` and `show_length`
-name another part; `shown` says when it is not the whole output, and a
-`show_length` past what the largest tool answer any model gets (30,000,000
-characters, the largest window the platform believes in) carries, 3,529,411
-bytes, is cut to that and says so. The indicator rows take what the part's room
+was read in. The spans come from `tools.ioc_spans`, a path of its own that
+reads with the scan's patterns and tests and gives the same rows (a test holds
+them equal); the scan every other caller runs is unchanged. The part shown is
+sized from what an answer carries. Per two shown bytes the answer spends at
+most 17 characters as JSON writes it: 5 for each byte of the ASCII reading (a
+backslash, `x` and two digits, the backslash escaped) and 7 for the pair in the
+UTF-16LE reading. The rest of the answer is subtracted first: the input range
+and the steps as this call writes them, and the output's own fields at their
+longest (every number at ten digits, every sentence it can carry, the 64-byte
+hex head), 1,292 characters. By default the part shown is what is left of the
+room the platform gives one tool answer when the model's window is not
+measured (6,000 characters) at that rate, at most 705 bytes (524 for a call
+with no steps), so the whole answer stays within 6,000 characters whatever
+the bytes are. `show_offset` and `show_length` name another part; `shown` says
+when it is not the whole output, and a `show_length` past what the largest
+tool answer any model gets (30,000,000 characters, the largest window the
+platform believes in) carries beside the rest of the answer is cut to that and
+says so. The indicator rows take what the part's room
 leaves after everything else, and `indicators_left_out` counts the rest. The
 answer never says what the output is.
 

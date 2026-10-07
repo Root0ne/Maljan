@@ -63,7 +63,7 @@ from maljan.llm.context_window import (
 )
 from maljan.tools import pe_image
 from maljan.tools.errors import BAD_ARGUMENT, tool_error
-from maljan.tools.strings import string_iocs_with_spans
+from maljan.tools.ioc_spans import string_iocs_with_spans
 from maljan.utils.written_forms import PACK_ESCAPES, pack_escaped
 
 TOOL = "transform_bytes"
@@ -134,7 +134,8 @@ CAPABILITY_FACTS = (
     'or nonce is {"hex": ...}, {"text": ...} or a range of the same file {"offset": ..., '
     '"length": ...}. The answer states the output\'s length, SHA-256, printable share and '
     "entropy over the whole output, and the hex head, ASCII and UTF-16LE readings and the "
-    "indicators found with their offsets over the part shown: the first 705 bytes, or the part "
+    "indicators found with their offsets over the part shown: the first bytes the 6000 "
+    "characters of one answer carry beside its other fields (at most 705), or the part "
     "show_offset and show_length name. Decompression, and the bytes a chain writes in all, stop "
     "at the platform's fixed sample upload cap and say so."
 )
@@ -885,10 +886,47 @@ def _measures(data: bytes) -> tuple[Any, int, int]:
     return counts, wide, pairs
 
 
+def _fixed_output_chars() -> int:
+    """The most characters the output's own fields take besides the readings and the rows.
+
+    Every number at ten digits, every sentence the output can carry, the hex
+    head at its 64 bytes: the part of the answer that does not grow with the
+    part shown.
+    """
+    big = 10**10 - 1
+    most = {
+        "length": big,
+        "sha256": "0" * 64,
+        "printable_share": 0.1234,
+        "printable_share_utf16le": 0.1234,
+        "entropy_bits_per_byte": 7.1234,
+        "shown": {
+            "offset": big,
+            "end": big,
+            "note": _shown_note(big, big, big),
+            "cut": _cut_sentence(big),
+        },
+        "hex_head": "00" * HEX_HEAD_BYTES,
+        "utf16le_note": _UTF16_NOTE,
+        "indicator_scan_stopped": _scan_stopped_sentence(big),
+        "indicators": [],
+        "indicators_left_out": _left_out_sentence(big, big),
+        "ascii": "",
+        "utf16le": "",
+    }
+    return len(json.dumps(most))
+
+
 def _shown_window(
-    data: bytes, show_offset: Any, show_length: Any
+    data: bytes, show_offset: Any, show_length: Any, spent: int
 ) -> tuple[int, int, int, str | None]:
-    """The part shown, the characters it was sized for, and a sentence when a request was cut."""
+    """The part shown, the characters it was sized for, and a sentence when a request was cut.
+
+    ``spent`` is what the rest of the answer takes (the input range and the
+    steps). The room left after it and the output's own fields is what the
+    readings may fill, at their most characters per two bytes.
+    """
+    fixed = spent + _fixed_output_chars()
     start = _number(show_offset, "show_offset") if _given(show_offset) else 0
     if start < 0 or (data and start >= len(data)) or (not data and start):
         raise TransformError(f"show_offset {start} is outside the output of {len(data)} bytes")
@@ -897,19 +935,35 @@ def _shown_window(
         length = _number(show_length, "show_length")
         if length < 1:
             raise TransformError(f"show_length {length} shows no bytes; give 1 or more")
-        if length > MAX_SHOWN_BYTES:
-            cut = (
-                f"show_length {length} was cut to {MAX_SHOWN_BYTES}, the most bytes the largest "
-                f"tool answer any model gets ({MAX_SHOWN_ROOM} characters) carries at the "
-                "readings' most characters a byte"
-            )
-            length = MAX_SHOWN_BYTES
+        most = _bytes_for(max(0, MAX_SHOWN_ROOM - fixed))
+        if length > most:
+            cut = _cut_sentence(length, most)
+            length = most
         # Never less than the room every answer gets, so a short part still
         # has room for its fields and rows.
-        room = min(MAX_SHOWN_ROOM, max(SHOWN_ROOM, -(-length * _CHARS_PER_TWO_BYTES // 2)))
+        room = min(MAX_SHOWN_ROOM, max(SHOWN_ROOM, -(-length * _CHARS_PER_TWO_BYTES // 2) + fixed))
     else:
-        length, room = SHOWN_BYTES, SHOWN_ROOM
+        length, room = _bytes_for(max(0, SHOWN_ROOM - fixed)), SHOWN_ROOM
     return start, min(len(data), start + length), room, cut
+
+
+def _cut_sentence(asked: int, most: int = MAX_SHOWN_BYTES) -> str:
+    return (
+        f"show_length {asked} was cut to {most}, the most bytes the largest tool answer any "
+        f"model gets ({MAX_SHOWN_ROOM} characters) carries beside the rest of this answer, "
+        "at the readings' most characters a byte"
+    )
+
+
+def _shown_note(start: int, end: int, total: int) -> str:
+    return (
+        f"the hex head, the readings and the indicators cover output bytes {start} to {end} "
+        f"of {total}; the measures above cover all of them, and show_offset and "
+        "show_length show another part"
+    )
+
+
+_UTF16_NOTE = "the shown part's last byte is left out of the UTF-16LE reading"
 
 
 def _within_room(rows: list[dict[str, Any]], left: int) -> list[dict[str, Any]]:
@@ -923,18 +977,16 @@ def _within_room(rows: list[dict[str, Any]], left: int) -> list[dict[str, Any]]:
     return kept
 
 
-def _output_facts(data: bytes, show_offset: Any = None, show_length: Any = None) -> dict[str, Any]:
-    start, end, room, cut = _shown_window(data, show_offset, show_length)
+def _output_facts(
+    data: bytes, show_offset: Any = None, show_length: Any = None, spent: int = 0
+) -> dict[str, Any]:
+    start, end, room, cut = _shown_window(data, show_offset, show_length, spent)
     counts, wide, pairs = _measures(data)
     printable = int(counts[_PRINTABLE].sum())
     shown = data[start:end]
     said: dict[str, Any] = {"offset": start, "end": end}
     if start or end < len(data):
-        said["note"] = (
-            f"the hex head, the readings and the indicators cover output bytes {start} to {end} "
-            f"of {len(data)}; the measures above cover all of them, and show_offset and "
-            "show_length show another part"
-        )
+        said["note"] = _shown_note(start, end, len(data))
     if cut:
         said["cut"] = cut
     readings = {"ascii": _ascii_reading(shown), "utf16le": _utf16_reading(shown)}
@@ -948,14 +1000,18 @@ def _output_facts(data: bytes, show_offset: Any = None, show_length: Any = None)
         "hex_head": shown[:HEX_HEAD_BYTES].hex(),
     }
     if len(shown) % 2:
-        facts["utf16le_note"] = "the shown part's last byte is left out of the UTF-16LE reading"
+        facts["utf16le_note"] = _UTF16_NOTE
     rows, stopped = _indicators(shown, start)
     if stopped is not None:
         facts["indicator_scan_stopped"] = _scan_stopped_sentence(stopped)
     # The rows take what the part's room leaves after everything else,
     # the sentence saying some were left out included.
     left_out = _left_out_sentence(len(rows), room)
-    left = room - len(json.dumps({**facts, **readings, "indicators": [], "left_out": left_out}))
+    left = (
+        room
+        - spent
+        - len(json.dumps({**facts, **readings, "indicators": [], "left_out": left_out}))
+    )
     kept = _within_room(rows, left)
     facts["indicators"] = kept
     if len(kept) < len(rows):
@@ -1049,7 +1105,9 @@ def transform_bytes(
         data = out
         del out
     try:
-        answer["output"] = _output_facts(data, show_offset, show_length)
+        # What the input range and the steps take, with the key the output sits under.
+        spent = len(json.dumps(answer)) + len(', "output": ')
+        answer["output"] = _output_facts(data, show_offset, show_length, spent)
     except TransformError as exc:
         return tool_error(BAD_ARGUMENT, str(exc), tool=TOOL, remediation=REMEDIATION)
     return answer
