@@ -13,7 +13,10 @@ again. The map is kept for it by the platform, from facts only:
   FLOSS decoded in it (``floss``) — only where the answer puts the place
   *inside* the function, never after a function start;
 * the first sentence of the first of the analyst's own parsed claims that
-  names the function.
+  names the function;
+* whether the function is a row of the pack's function index
+  (``tools.function_index``): with an index, the coverage line counts the
+  visited functions among the index's rows.
 
 The model never writes to it. The block is rendered fresh on every turn beside
 the run-state lines and replaces nothing the model already sees.
@@ -60,6 +63,7 @@ FUNCTION_MAP_HEAD = (
 _HASH_TOOL = "resolve_api_hashes"
 _BLOB_TOOL = "decode_string_blobs"
 _FLOSS_TOOL = "floss"
+_INDEX_TOOL = "function_index"
 
 # How each kind of artefact is counted in the block, singular and plural.
 _KIND_WORDS: dict[str, tuple[str, str]] = {
@@ -91,6 +95,9 @@ class FunctionArtefacts:
     by_function: dict[int, list[Artefact]] = field(default_factory=dict)
     image_bases: tuple[int, ...] = ()
     virtual: set[int] = field(default_factory=set)
+    # The offsets of the function index's rows, and the entry that holds them.
+    indexed: set[int] = field(default_factory=set)
+    index_entry: str = ""
 
     def add(self, address: int, artefact: Artefact, *, virtual: bool = False) -> None:
         self.by_function.setdefault(address, []).append(artefact)
@@ -108,6 +115,7 @@ class MapEntry:
     listed: tuple[str, ...] = ()
     artefacts: list[Artefact] = field(default_factory=list)
     summary: str = ""
+    indexed: bool = False
 
 
 @dataclass
@@ -118,9 +126,17 @@ class FunctionMap:
     unvisited: list[tuple[int, list[Artefact]]] = field(default_factory=list)
     image_bases: tuple[int, ...] = ()
     virtual: frozenset[int] = frozenset()
+    # How many rows the function index has, and the entry that holds it.
+    indexed: int = 0
+    index_entry: str = ""
 
     def coverage(self) -> str:
-        """``N functions visited (…); M functions reach artefacts …, K of them visited``."""
+        """``N functions visited (…); M functions reach artefacts …, K of them visited``.
+
+        With a function index, ``M`` is its rows and ``K`` the visited
+        functions among them: the index counts every function the run's
+        answers place an artefact in, the pack's own decoding included.
+        """
         decompiled = sum(1 for e in self.visited if e.decompiled)
         listed = sum(1 for e in self.visited if e.listed and not e.decompiled)
         how = []
@@ -131,6 +147,13 @@ class FunctionMap:
         visited = _count(len(self.visited), "function", "functions") + " visited"
         if how:
             visited += f" ({', '.join(how)})"
+        if self.indexed:
+            held = sum(1 for e in self.visited if e.indexed)
+            verb = "holds" if self.indexed == 1 else "hold"
+            return (
+                f"{visited}; {_count(self.indexed, 'function', 'functions')} {verb} artefacts "
+                f"in the function index ({self.index_entry}), {held} of them visited"
+            )
         reached_visited = sum(1 for e in self.visited if e.artefacts)
         reaching = reached_visited + len(self.unvisited)
         verb = "reaches" if reaching == 1 else "reach"
@@ -184,10 +207,13 @@ def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
     parsed: list[tuple[Any, str, Any]] = []
     for entry in rows:
         tool = str(getattr(entry, "tool", "") or "")
-        if tool not in (_HASH_TOOL, _BLOB_TOOL, _FLOSS_TOOL):
+        if tool not in (_HASH_TOOL, _BLOB_TOOL, _FLOSS_TOOL, _INDEX_TOOL):
             continue
         data = _parsed(entry)
         if not isinstance(data, dict):
+            continue
+        if tool == _INDEX_TOOL:
+            _index_rows(found, data, str(getattr(entry, "id", "") or ""))
             continue
         base = _stated_base(data)
         if base and base not in bases:
@@ -203,6 +229,17 @@ def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
         else:
             _floss_artefacts(found, data, entry_id)
     return found
+
+
+def _index_rows(found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str) -> None:
+    """The function index's rows, by offset; the last index read is the one counted."""
+    rows: set[int] = set()
+    for row in data.get("rows") or []:
+        offset = _hex(row.get("offset")) if isinstance(row, dict) else None
+        if offset is not None:
+            rows.add(offset)
+    found.indexed = rows
+    found.index_entry = entry_id
 
 
 def _hash_artefacts(found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str) -> None:
@@ -284,7 +321,11 @@ def keeps_for_the_map(entry: Any) -> bool:
     if getattr(entry, "repeated_of", None):
         return False
     tool = str(getattr(entry, "tool", "") or "").lower()
-    return "decompil" in tool or _lists_code(tool) or tool in (_HASH_TOOL, _BLOB_TOOL, _FLOSS_TOOL)
+    return (
+        "decompil" in tool
+        or _lists_code(tool)
+        or tool in (_HASH_TOOL, _BLOB_TOOL, _FLOSS_TOOL, _INDEX_TOOL)
+    )
 
 
 # A tool whose name says it disassembles, and one of those whose name says the
@@ -323,12 +364,14 @@ def _merged(pack: FunctionArtefacts | None, own: FunctionArtefacts) -> FunctionA
     """
     if pack is None:
         return own
-    if not own.by_function:
+    if not own.by_function and not own.indexed:
         return pack
     merged = FunctionArtefacts(
         by_function={k: list(v) for k, v in pack.by_function.items()},
         image_bases=tuple(dict.fromkeys([*pack.image_bases, *own.image_bases])),
         virtual=set(pack.virtual) | set(own.virtual),
+        indexed=set(own.indexed or pack.indexed),
+        index_entry=own.index_entry if own.indexed else pack.index_entry,
     )
     for key, tied in own.by_function.items():
         merged.by_function.setdefault(key, []).extend(tied)
@@ -451,6 +494,9 @@ def build_function_map(
                 entry.summary = _first_sentence(sentence)
                 break
 
+    for entry in visited:
+        entry.indexed = any(_same(entry.address, key, bases) for key in found.indexed)
+
     unvisited = sorted(
         ((key, tied) for key, tied in found.by_function.items() if key not in reached),
         key=lambda pair: pair[0],
@@ -460,6 +506,8 @@ def build_function_map(
         unvisited=unvisited,
         image_bases=bases,
         virtual=frozenset(found.virtual),
+        indexed=len(found.indexed),
+        index_entry=found.index_entry,
     )
 
 
