@@ -413,6 +413,17 @@ class TestWhereAValueHolds:
             and "CreateRemoteThread" not in (violation.message.split("names", 1)[1])
         )
 
+    def test_a_name_a_noun_negation_s_list_names_far_back_in_its_clause_is_no_claimed_call(
+        self,
+    ) -> None:
+        found = _check(f"{MAIN_VA} shows no evidence of process injection, such as VirtualAllocEx.")
+        assert found.violations == [] and found.checked == 1
+
+    def test_a_negation_in_an_earlier_clause_does_not_reach_a_later_one(self) -> None:
+        found = _check(f"{MAIN_VA} shows no evidence of process injection: it calls SleepEx.")
+        (violation,) = found.violations
+        assert '"SleepEx"' in violation.message
+
     def test_a_quoted_phrase_no_strings_source_holds_is_recorded_not_asked(self) -> None:
         capa = LedgerEntry(id="ev_0006", agent="pipeline", tool="capa", output="PEB access")
         found = _check(f'{MAIN_VA} matches "PEB access" at its start.', pack=[capa])

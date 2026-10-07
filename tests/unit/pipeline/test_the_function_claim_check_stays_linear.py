@@ -149,10 +149,16 @@ def _grown(scale: int) -> float:
             for n in range(scale)
         ]
     )
-    began = time.perf_counter()
-    facts = function_facts([listing], function_artefacts([index]), pack_entries=[index])
-    found = check_function_claims(isr, listed_functions([listing]), facts, (BASE,))
-    seconds = time.perf_counter() - began
+    # The collector's sweeps of the whole test session's heap are not the check's cost.
+    gc.collect()
+    gc.disable()
+    try:
+        began = time.perf_counter()
+        facts = function_facts([listing], function_artefacts([index]), pack_entries=[index])
+        found = check_function_claims(isr, listed_functions([listing]), facts, (BASE,))
+        seconds = time.perf_counter() - began
+    finally:
+        gc.enable()
     assert found.asked == 0 and found.checked == scale
     return seconds
 

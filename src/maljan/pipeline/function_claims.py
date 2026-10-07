@@ -70,7 +70,8 @@ from maljan.pipeline.validation import (
     _GENERIC_FUNCTION_NAME,
     _HEX_ADDRESS,
     _NAME_ARGUMENTS,
-    _NEGATION_WINDOW,
+    _NEGATED_VERB_RE,
+    _NEGATION_RE,
     _QUOTED_SPAN_RE,
     _SUFFIXED_ADDRESS,
     FUNCTION_CLAIM_UNHELD,
@@ -669,36 +670,57 @@ def _clause_starts(text: str) -> list[int]:
     return starts
 
 
-def _negation_window(text: str, starts: Sequence[int], begin: int, end: int) -> tuple[str, int]:
-    """``(the text a statement of absence over text[begin:end] is read in, where it begins)``.
+# What ends a clause for a statement of absence: a sentence's end (as
+# ``_clause_starts`` reads it), a semicolon, a colon or a line break.
+_CLAUSE_MARK = re.compile(r"[;:\n]")
+# Whatever ``_is_negated`` reads a statement of absence from: its cue words, a
+# negated verb, the absence predicate's words and a purpose's verbs. A clause
+# holding none of them states no absence, and no value in it is read for one.
+_ABSENCE_WORDS = re.compile(
+    rf"(?:{_NEGATION_RE.pattern})|(?:{_NEGATED_VERB_RE.pattern})"
+    r"|\b(?:absent|missing)\b|\bto\s+(?:prevent|avoid|stop|block)\b",
+    re.IGNORECASE,
+)
 
-    The value's own sentence, cut to ``_NEGATION_WINDOW`` characters before
-    the value (as far back as ``_is_negated`` reads a cue) and as many after
-    it (the absence predicate its helpers read after a value, "functionality
-    remains not established" at its longest, fits in them), so each value
-    costs a window, not its whole sentence.
-    """
-    from bisect import bisect_right
 
-    k = bisect_right(starts, begin) - 1
-    stop = starts[k + 1] if k + 1 < len(starts) else len(text)
-    low = max(starts[k], begin - _NEGATION_WINDOW)
-    high = min(stop, end + _NEGATION_WINDOW)
-    return text[low:high], low
+class _Clauses:
+    """The clauses of a text, each read once for whether it may state an absence."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        marks = {match.end() for match in _CLAUSE_MARK.finditer(text)}
+        self.starts = sorted({*_clause_starts(text), *marks})
+        self.may_negate: dict[int, bool] = {}
+
+    def window(self, begin: int) -> tuple[str, int] | None:
+        """``(the clause holding begin, where it begins)``, or ``None`` when the clause
+        holds no word a statement of absence is read from."""
+        from bisect import bisect_right
+
+        k = bisect_right(self.starts, begin) - 1
+        low = self.starts[k]
+        high = self.starts[k + 1] if k + 1 < len(self.starts) else len(self.text)
+        found = self.may_negate.get(k)
+        if found is None:
+            found = _ABSENCE_WORDS.search(self.text, low, high) is not None
+            self.may_negate[k] = found
+        return (self.text[low:high], low) if found else None
 
 
 def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, int, bool]]:
     """``(value, where, is an API name)`` of every name and string a sentence claims.
 
     Each name is read once, at its first place: whether a statement of absence
-    holds it is asked there, within a window of the sentence that holds it
-    (``_negation_window``).
+    holds it is asked there, within the clause that holds it (``_Clauses``).
     """
     spans = {m.group(0).strip("`").strip() for m in _CODE_SPAN_RE.finditer(text)}
-    starts = _clause_starts(text)
+    clauses = _Clauses(text)
 
     def negated(begin: int, end: int) -> bool:
-        window, offset = _negation_window(text, starts, begin, end)
+        found = clauses.window(begin)
+        if found is None:
+            return False
+        window, offset = found
         return _is_negated(window, begin - offset, end - offset)
 
     found: list[tuple[str, int, bool]] = []
