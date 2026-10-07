@@ -25,6 +25,7 @@ Design:
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -629,13 +630,16 @@ def stage_duration_lines(stages: Any) -> list[str]:
     return [f"**Per stage**: {spent}  "] if spent else []
 
 
-def generation_lines(generation: Any) -> list[str]:
+def generation_lines(generation: Any, model_name: Callable[[str], str] | None = None) -> list[str]:
     """Each model's measured generation rate and each call timeout it produced.
 
     One line per model and one per sized call, so a reader can check the
     arithmetic: the budget, the rate, the margin, and what the
     call was finally given. Nothing measured contributes nothing.
+    ``model_name`` writes a model's name into its line (the report sets its
+    configured endpoint aside there); by default the name prints as recorded.
     """
+    name = model_name or str
     if not isinstance(generation, dict):
         return []
     lines: list[str] = []
@@ -645,7 +649,8 @@ def generation_lines(generation: Any) -> list[str]:
         if row.get("tokens_per_second") is not None:
             sources = "; ".join(str(x) for x in row.get("sources") or []) or "unknown"
             lines.append(
-                f"Generation rate of `{model}`: {float(row['tokens_per_second']):.2f} tokens/s "
+                f"Generation rate of `{name(model)}`: "
+                f"{float(row['tokens_per_second']):.2f} tokens/s "
                 f"({int(row.get('tokens') or 0)} tokens over "
                 f"{float(row.get('seconds') or 0.0):.1f}s "
                 f"in {int(row.get('calls') or 0)} call(s); from {sources})"
@@ -653,7 +658,7 @@ def generation_lines(generation: Any) -> list[str]:
         if row.get("prompt_tokens_per_second") is not None:
             read_from = "; ".join(str(x) for x in row.get("prompt_sources") or []) or "unknown"
             lines.append(
-                f"Prompt reading rate of `{model}`: "
+                f"Prompt reading rate of `{name(model)}`: "
                 f"{float(row['prompt_tokens_per_second']):.2f} tokens/s "
                 f"({int(row.get('prompt_tokens') or 0)} tokens over "
                 f"{float(row.get('prompt_seconds') or 0.0):.1f}s; from {read_from})"

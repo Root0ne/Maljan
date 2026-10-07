@@ -3218,8 +3218,11 @@ is assembled from what the run gathered rather than recomputed beside it:
   through it prints defanged too. It leaves only what the renderer itself set
   aside when it wrote it, under a token drawn for that render: each draft
   rule's body, which prints as it compiles, and in the run summary's appendix
-  the configured model endpoints, the exact strings the settings configure
-  (`model_assignments.configured_endpoint_labels`). No heading or fence in a
+  a model's endpoint where a generation or prompt-rate line names the model
+  (`<model> @ <endpoint>`) and the endpoint is one the settings configure
+  (`model_assignments.configured_endpoint_labels`). The same endpoint
+  anywhere else, or a URL that begins with it (`http://127.0.0.1:8080/gate`
+  beside a configured `http://127.0.0.1:8080`), prints defanged. No heading or fence in a
   sample's or a model's text makes a region the pass leaves. The host reader the publish checks, the run summary's sentences and
   a cell's state note use (`validation.network_values_in`) reads a `.onion`
   name of any labels by the same form reader, and an IPv6 address whole (an

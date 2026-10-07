@@ -233,11 +233,7 @@ class MarkdownRenderer:
             self._safe_section("attribution", lambda: self._section_attribution(report, ctx)),
             self._safe_section("limitations", lambda: self._section_limitations(report, ctx)),
             self._safe_section("appendix_evidence", lambda: self._appendix_evidence(report, ctx)),
-            # The configured model endpoints print as configured: only those
-            # exact strings are kept from the closing pass.
-            ctx.keep_endpoints(
-                self._safe_section("appendix_run_summary", lambda: self._appendix_run(report))
-            ),
+            self._safe_section("appendix_run_summary", lambda: self._appendix_run(report, ctx)),
             self._safe_section("appendix_references", lambda: self._appendix_references(report)),
             self._safe_section("appendix_methodology", lambda: self._appendix_method(report, ctx)),
         ]
@@ -246,8 +242,9 @@ class MarkdownRenderer:
         # sandbox, the sample's bytes or a model filled prints defanged even
         # where its section did not pass it through the context. What this
         # renderer itself wrote to print as written — each draft rule's body,
-        # the configured model endpoints — was set aside under a token no text
-        # can name, and only that comes back unread.
+        # a configured model endpoint where a rate line names its model — was
+        # set aside under a token no text can name, and only that comes back
+        # unread.
         read = [ctx.restore(_defanged_text(text)) for text in sections]
         return "\n\n".join(text.rstrip() for text in read if text).rstrip() + "\n"
 
@@ -1916,7 +1913,7 @@ class MarkdownRenderer:
             lines.append("")
         return "\n".join(lines).rstrip()
 
-    def _appendix_run(self, report: MalwareReport) -> str:
+    def _appendix_run(self, report: MalwareReport, ctx: _Context | None = None) -> str:
         run_summary = report.run_summary or {}
         lines = [_appendix_heading("B", "Run summary", MEASURED), ""]
         if not run_summary:
@@ -1980,7 +1977,10 @@ class MarkdownRenderer:
                 lines.append(_item(f"A mark that was not read; the line blocked: {sentence}"))
             for sentence in negotiation.get("ledger_facts") or []:
                 lines.append(_item(str(sentence)))
-        for line in generation_lines(run_summary.get("generation")):
+        # A model's configured endpoint prints as configured, set aside where
+        # this line writes it and nowhere else.
+        model_name = ctx.endpoint_kept if ctx is not None else None
+        for line in generation_lines(run_summary.get("generation"), model_name):
             lines.append(_item(line))
         ungrounded = run_summary.get("sections_without_evidence")
         if ungrounded:
@@ -2128,6 +2128,7 @@ class _Context:
         # sample, a sandbox or a model wrote can name one.
         self._kept: dict[str, str] = {}
         self._nonce = secrets.token_hex(8)
+        self._labels: set[str] | None = None
         summary = report.run_summary or {}
         validation = summary.get("validation") or {}
         self.unresolved = [
@@ -2405,25 +2406,31 @@ class _Context:
             return text
         return _KEPT_TOKEN_RE.sub(lambda m: self._kept.get(m.group(0), m.group(0)), text)
 
-    def keep_endpoints(self, text: str) -> str:
-        """The run summary's appendix, each configured model endpoint in it set aside.
+    def endpoint_kept(self, model: str) -> str:
+        """A model's recorded name, its endpoint set aside where it is a configured one.
 
-        Only the exact strings the settings configure, as a run records them
-        (``model_assignments.configured_endpoint_labels``); everything else in
-        the appendix goes through the closing pass like every other section.
+        A run records a model as ``<model> @ <label>``. Only a label equal to
+        one the settings configure (``model_assignments.configured_endpoint_labels``),
+        as the whole of what follows the last `` @ ``, is kept from the closing
+        pass; the same text anywhere else in the report is defanged.
         """
-        try:
-            from maljan.core.config import get_settings
-            from maljan.core.model_assignments import configured_endpoint_labels
+        name, sep, label = model.rpartition(" @ ")
+        if sep and label in self._endpoint_labels():
+            return f"{name} @ {self.keep(label)}"
+        return model
 
-            labels = configured_endpoint_labels(get_settings())
-        except Exception as exc:  # noqa: BLE001 — with none read, every value is defanged
-            logger.debug("markdown: the configured model endpoints were not read (%s).", exc)
-            return text
-        for label in sorted(labels, key=len, reverse=True):
-            if label and label in text:
-                text = text.replace(label, self.keep(label))
-        return text
+    def _endpoint_labels(self) -> set[str]:
+        """The configured model endpoints' labels, read once per render."""
+        if self._labels is None:
+            try:
+                from maljan.core.config import get_settings
+                from maljan.core.model_assignments import configured_endpoint_labels
+
+                self._labels = set(configured_endpoint_labels(get_settings()))
+            except Exception as exc:  # noqa: BLE001 — with none read, every value is defanged
+                logger.debug("markdown: the configured model endpoints were not read (%s).", exc)
+                self._labels = set()
+        return self._labels
 
     def cell(self, text: Any) -> str:
         """A model-written table cell: defanged like prose, cut like every cell."""
