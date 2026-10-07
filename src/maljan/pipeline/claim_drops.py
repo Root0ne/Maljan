@@ -157,6 +157,46 @@ class DroppedValues:
     missing: tuple[str, ...]
 
 
+def values_as_written(text: str, technique_id: str | None = "") -> dict[str, str]:
+    """``{value: as the claim wrote it}`` for each value :func:`claim_values` reads.
+
+    A quoted value is compared without case, and the record writes it as the
+    claim did: a value folded to lower case is a different string to every
+    mask that matches a configured value exactly.
+    """
+    written: dict[str, str] = {value: value for value in claim_values(text, technique_id)}
+    for match in _QUOTED.finditer(_refanged(text)):
+        quoted = (match.group(1) or match.group(2) or "").strip()
+        if quoted.casefold() in written:
+            written[quoted.casefold()] = quoted
+    return written
+
+
+def dropped_claims(
+    in_force: Any, revision: Any, answer: str = "", revision_round: int | None = None
+) -> list[tuple[Any, tuple[str, ...]]]:
+    """Each claim of ``in_force``, by itself, with the values ``revision`` states nowhere.
+
+    The claim object, never its sentence alone: a technique list split on
+    commas gives several claims one sentence, and each is its own claim with
+    its own id. The values are as the claim wrote them (:func:`values_as_written`).
+    """
+    if in_force is None or revision is None:
+        return []
+    searched = _searched(_whole_text(revision, answer))
+    out: list[tuple[Any, tuple[str, ...]]] = []
+    for claim in getattr(in_force, "claims", None) or []:
+        written = values_as_written(
+            str(getattr(claim, "claim", "") or ""), getattr(claim, "technique_id", None) or ""
+        )
+        if revision_round is not None:
+            written.pop(str(int(revision_round)), None)
+        missing = tuple(written[v] for v in sorted(written) if not _is_stated(v, searched))
+        if missing:
+            out.append((claim, missing))
+    return out
+
+
 def dropped_values(
     in_force: Any, revision: Any, answer: str = "", revision_round: int | None = None
 ) -> list[DroppedValues]:

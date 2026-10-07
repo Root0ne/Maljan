@@ -63,6 +63,10 @@ from maljan.pipeline.validation import (
     CLAIMS_UNDER_DISPUTES_CODE,
     DECOMPILED_NOT_DESCRIBED_CODE,
     LIBRARY_ONLY_CLAIMS_CODE,
+    RETRY_DROP_KEPT,
+    RETRY_DROP_NOT_ANSWERED,
+    RETRY_DROP_WITHDRAWN,
+    RETRY_DROPPED_CODE,
     VALIDITY_CODE,
     ClaimsRepeated,
     ValidationTally,
@@ -76,11 +80,16 @@ from maljan.pipeline.validation import (
     count_claim_blocks,
     decompiled_functions,
     decompiled_not_described_violation,
+    discarded_retry_row,
     image_bases_in,
     library_only_claims,
     library_only_claims_violation,
     mark_invalid_technique_ids,
     parse_violations,
+    read_retry_drop_answers,
+    retry_drop_question,
+    retry_drop_row,
+    retry_drops,
     retry_with_feedback_sync,
     undescribed_decompiles,
     unparsed_answer_rows,
@@ -1536,6 +1545,69 @@ def _bare_technique(text: str) -> str:
     return text.strip().strip("*`_ ").rstrip(".").strip().strip("*`_ ")
 
 
+# An id followed by words in brackets: "T1027 (Obfuscated Files or Information)".
+_ID_WITH_BRACKETED_WORDS_RE = re.compile(
+    r"(?<![\w.])(?P<id>T\d{4}(?:\.\d{3})?)\s*\((?P<words>[^()]*)\)", re.IGNORECASE
+)
+
+
+def _catalogue_names_for(technique_id: str) -> set[str]:
+    """The vendored catalogue's own names for an id, folded for comparing; empty when unknown.
+
+    A sub-technique is named by its own name or by its parent's name and its
+    own joined by a colon or a dash, as the catalogue's pages write it.
+    """
+    from maljan.memory.attck_loader import _folded_name, technique_entry
+
+    entry = technique_entry(technique_id)
+    if entry is None or not entry.name:
+        return set()
+    names = {_folded_name(entry.name)}
+    if "." in technique_id:
+        parent = technique_entry(technique_id.split(".")[0])
+        if parent is not None and parent.name:
+            names.add(_folded_name(f"{parent.name} {entry.name}"))
+    return {name for name in names if name}
+
+
+def _without_catalogue_names(text: str) -> str:
+    """``text`` with each bracketed catalogue name after its own id taken off.
+
+    Only words that are the vendored catalogue's own name for the id they
+    follow are taken off; any other bracketed words stay where they are, and
+    the line is read as it always was.
+    """
+    from maljan.memory.attck_loader import _folded_name
+
+    def _plain(match: re.Match[str]) -> str:
+        words = _folded_name(match.group("words"))
+        if words and words in _catalogue_names_for(match.group("id").upper()):
+            return match.group("id")
+        return match.group(0)
+
+    return _ID_WITH_BRACKETED_WORDS_RE.sub(_plain, text)
+
+
+def _numbered_in_order(chunks: list[Any]) -> list[Any]:
+    """``chunks`` with each one's index and total its place in this list.
+
+    A chunk that already says so is kept as it is; one that cannot be copied
+    with new numbers (not a dataclass) is kept as it is too.
+    """
+    import dataclasses
+
+    total = len(chunks)
+    out: list[Any] = []
+    for position, chunk in enumerate(chunks):
+        if (getattr(chunk, "index", None), getattr(chunk, "total", None)) == (position, total):
+            out.append(chunk)
+        elif dataclasses.is_dataclass(chunk) and not isinstance(chunk, type):
+            out.append(dataclasses.replace(chunk, index=position, total=total))
+        else:
+            out.append(chunk)
+    return out
+
+
 def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     """``(technique ids, unread line)`` for one claim's TECHNIQUE line as written.
 
@@ -1547,10 +1619,12 @@ def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     joined by another word ("T1027 or T1140") — claims no technique the
     reader could name without deciding what the words mean, so no id is read
     and the line is returned as written, for the validation turn to ask about
-    (``isr.technique_line_unread``).
+    (``isr.technique_line_unread``). An id followed by the vendored
+    catalogue's own name for it in brackets ("T1027 (Obfuscated Files or
+    Information)") is that id: the bracket names the id and decides nothing.
     """
     text = str(line or "").strip()
-    bare = _bare_technique(_TRAILING_BLOCK_SEPARATOR_RE.sub("", text))
+    bare = _bare_technique(_without_catalogue_names(_TRAILING_BLOCK_SEPARATOR_RE.sub("", text)))
     if bare.upper() in _NO_TECHNIQUE:
         return (), None
     parts = [_bare_technique(part) for part in _TECHNIQUE_LIST_SEPARATOR_RE.split(bare)]
@@ -6294,6 +6368,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             return self.safe_analyze_isr(chunks[0].content)
 
         self.logger.info("Chunked analysis: %d chunks for agent='%s'.", len(chunks), self.name)
+        # Each chunk is named by its place in the list this analyst is handed:
+        # chunks from several data sources each count within their own source
+        # ("1 of 1" twice), and a question naming the chunk it was asked in
+        # named the wrong one.
+        chunks = _numbered_in_order(chunks)
 
         chunk_isrs: list[AgentISR] = []
         errors: list[str] = []
@@ -6940,6 +7019,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             shown_repeat = None
             first[:] = [_PriorAnswer(isr)]
 
+        # Each retry answer's own text, by the ISR it parsed to: a retry the
+        # first answer is kept over is kept in the run record whole.
+        raw_answers: dict[int, str] = {}
+
         def _run(turns: list[Any]) -> Any:
             if first:
                 return first.pop()
@@ -6981,6 +7064,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             self._last_answer_cut = None
             ended_by[id(parsed)] = bool(getattr(self, "_last_answer_ended", False))
             self._last_answer_ended = False
+            raw_answers[id(parsed)] = text
             return parsed
 
         def _keep(first_answer: AgentISR, retried: AgentISR) -> AgentISR:
@@ -7007,14 +7091,43 @@ class BaseAnalyst(BudgetMeter, ABC):
                     "kept": "retry" if kept is retried else "first",
                 },
             )
-            if kept is retried and first_answer.findings and not retried.findings:
-                # Findings follow the answer that is kept, and this one wrote
-                # none: the first answer's go with it, and the record says so.
-                self.logger.warning(
-                    "Validation: the kept retry for '%s' carries no findings; the first "
-                    "answer's %d finding(s) are not published.",
-                    self.name,
-                    len(first_answer.findings),
+            if kept is first_answer and retried is not first_answer:
+                # The retry the first answer is kept over is the analyst's
+                # work too: its text goes to the run record whole, with why.
+                BaseAnalyst._keep_discarded_retry(  # type: ignore[arg-type]
+                    self,
+                    raw_answers.get(id(retried), ""),
+                    int(isr.revision_round or 0),
+                    f"the retry answered {len(retried.claims)} claim(s) in "
+                    f"{count_claim_blocks(retried.claims)} claim block(s) and "
+                    f"{len(retried.findings or [])} finding(s), the first answer "
+                    f"{len(first_answer.claims)} claim(s) in "
+                    f"{count_claim_blocks(first_answer.claims)} claim block(s) and "
+                    f"{len(first_answer.findings or [])} finding(s); the first answer is kept",
+                )
+            if (
+                kept is retried
+                and retried is not first_answer
+                and not any(v.code in (ANALYST_CUT_CODE, ANALYST_REPEATED_CODE) for v in initial)
+            ):
+                # What the kept retry no longer states of the first answer is
+                # stated to the analyst, which is asked once to keep or
+                # withdraw each item; its answer stands. An answer asked for
+                # whole, because the first was cut or repeated, is the
+                # analyst's whole answer and is not asked about again.
+                kept = BaseAnalyst._settle_retry_drops(  # type: ignore[arg-type]
+                    self,
+                    first_answer,
+                    retried,
+                    raw_answers.get(id(retried), ""),
+                    [v.subject for v in initial if v.subject],
+                    messages,
+                    left,
+                    set_aside=(
+                        [first_answer.claims[i] for i in library_only_claims(first_answer)]
+                        if any(v.code == LIBRARY_ONLY_CLAIMS_CODE for v in initial)
+                        else []
+                    ),
                 )
             return kept
 
@@ -7225,6 +7338,145 @@ class BaseAnalyst(BudgetMeter, ABC):
         for row in unparsed_answer_rows(str(self.name), int(revision_round or 0), violations):
             if row not in kept:
                 kept.append(row)
+
+    def _settle_retry_drops(
+        self,
+        first_answer: AgentISR,
+        retried: AgentISR,
+        answer: str,
+        asked_about: list[str],
+        messages: list[Any],
+        left: float | None,
+        set_aside: Sequence[Any] = (),
+    ) -> AgentISR:
+        """The kept retry, with what it left out of the first answer settled by the analyst.
+
+        The claims and findings of the first answer the retry states nowhere
+        (``validation.retry_drops``) are named to the analyst in one question;
+        each it keeps, and each it does not answer for, is put back into the
+        answer as the first answer wrote it, and each it withdraws stays out.
+        Every item is recorded with its state and the analyst's reason.
+        """
+        drops = retry_drops(first_answer, retried, answer, asked_about, set_aside)
+        if not drops:
+            return retried
+        labelled = drops.labelled()
+        self.logger.warning(
+            "Validation: the kept retry for '%s' no longer states %d claim(s) and %d "
+            "finding(s) of the first answer; asking once whether to keep each.",
+            self.name,
+            len(drops.claims),
+            len(drops.findings),
+        )
+        from maljan.pipeline.events import (
+            VALIDATION_RESOLVED,
+            VALIDATION_RETRIED,
+            VALIDATION_SURVIVED,
+            emit_validation_feedback,
+        )
+
+        stage = str(getattr(self, "pipeline_stage", "") or "analysis")
+        said = (
+            f"The kept retry no longer states {len(drops.claims)} claim(s) and "
+            f"{len(drops.findings)} finding(s) of the first answer; each is named to the "
+            "analyst once, to keep or withdraw with a reason."
+        )
+        emit_validation_feedback(
+            self._event_sink(),
+            stage=stage,
+            agent=str(self.name),
+            code=RETRY_DROPPED_CODE,
+            message=said,
+            retry_index=1,
+            state=VALIDATION_RETRIED,
+        )
+        decided: dict[str, tuple[str, str]] = {}
+        try:
+            from langchain_core.messages import AIMessage, HumanMessage
+
+            turns = [
+                *messages,
+                AIMessage(content=str(answer or "")),
+                HumanMessage(content=retry_drop_question(drops)),
+            ]
+            reply = self._invoke_llm_with_timeout(
+                frame_messages(turns, run_state=str(getattr(self, "run_state_block", "") or "")),
+                left,
+                what="kept-retry drops question",
+            )
+            decided = read_retry_drop_answers(
+                str(getattr(reply, "content", reply) or ""), [row[0] for row in labelled]
+            )
+        except Exception as exc:  # noqa: BLE001 — unanswered, the first answer's items stay
+            self.logger.warning(
+                "Validation: the kept-retry drops question for '%s' was not answered (%s).",
+                self.name,
+                describe_exception_for_log(exc),
+            )
+        emit_validation_feedback(
+            self._event_sink(),
+            stage=stage,
+            agent=str(self.name),
+            code=RETRY_DROPPED_CODE,
+            message=said,
+            retry_index=1,
+            state=(
+                VALIDATION_RESOLVED
+                if all(row[0] in decided for row in labelled)
+                else VALIDATION_SURVIVED
+            ),
+        )
+        self.validation_retries += 1
+        self.validation_fed_back[RETRY_DROPPED_CODE] = (
+            self.validation_fed_back.get(RETRY_DROPPED_CODE, 0) + 1
+        )
+        restored_claims: list[ClaimEvidence] = []
+        restored_findings: list[Finding] = []
+        for label, kind, item, missing in labelled:
+            decision, reason = decided.get(label, ("", ""))
+            if decision == "WITHDRAW":
+                state = RETRY_DROP_WITHDRAWN
+            else:
+                state = RETRY_DROP_KEPT if decision == "KEEP" else RETRY_DROP_NOT_ANSWERED
+                if kind == "claim":
+                    restored_claims.append(item)
+                else:
+                    restored_findings.append(item)
+            text = str(item.claim if kind == "claim" else item.title)
+            row = retry_drop_row(
+                str(self.name), int(retried.revision_round or 0), kind, text, missing, state, reason
+            )
+            self.logger.info("%s", row["sentence"])
+            kept_rows = getattr(self, "validation_unparsed_answers", None)
+            if not isinstance(kept_rows, list):
+                kept_rows = []
+                self.validation_unparsed_answers = kept_rows
+            kept_rows.append(row)
+        if not restored_claims and not restored_findings:
+            return retried
+        return retried.model_copy(
+            update={
+                "claims": [*retried.claims, *restored_claims],
+                "findings": [*(retried.findings or []), *restored_findings],
+            }
+        )
+
+    def _keep_discarded_retry(self, answer: str, revision_round: int, why: str) -> None:
+        """Keep a retry answer the first answer was kept over, for the run record, once."""
+        if not str(answer or "").strip():
+            return
+        kept = getattr(self, "validation_unparsed_answers", None)
+        if not isinstance(kept, list):
+            kept = []
+            self.validation_unparsed_answers = kept
+        row = discarded_retry_row(str(self.name), int(revision_round or 0), answer, why)
+        # An answer already kept as one no claim could be read from is kept once.
+        if all(
+            (other.get("agent"), other.get("round"), other.get("answer"))
+            != (row["agent"], row["round"], row["answer"])
+            for other in kept
+        ):
+            kept.append(row)
 
     def drain_unparsed_answers(self) -> list[dict[str, str]]:
         """The answers no claim could be read from, handed over once."""

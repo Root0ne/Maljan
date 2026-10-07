@@ -304,3 +304,42 @@ def test_a_chunk_whose_answer_repeats_is_asked_inside_its_chunk() -> None:
     analyst.safe_analyze_isr_chunked(chunks)
 
     assert asked == [("chunk 1 of 2", True), ("", False)]
+
+
+def test_a_chunk_is_named_by_its_place_in_the_list_the_analyst_is_handed() -> None:
+    from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
+
+    analyst = _Analyst([])
+    answers = [DISTINCT, RUNAWAY]
+    asked: list[str] = []
+    headers: list[str] = []
+
+    def _analyze(data: str) -> AgentISR:
+        headers.append(data.splitlines()[0])
+        return analyst._text_to_isr(answers.pop(0), 0)
+
+    def _validate(isr: AgentISR, evidence: str, **kw: Any) -> AgentISR:
+        asked.append(str(kw.get("chunk", "")))
+        return isr
+
+    analyst.analyze_isr = _analyze  # type: ignore[method-assign]
+    analyst._validate_isr = _validate  # type: ignore[method-assign]
+    # Two data sources, each counting its own chunks: both say "1 of 1".
+    chunks = [
+        TextChunk(
+            index=0,
+            total=1,
+            strategy=ChunkStrategy.SLIDING_WINDOW,
+            content=f"source {n}",
+            char_count=8,
+            token_estimate=2,
+            domain="triage",
+        )
+        for n in range(2)
+    ]
+
+    analyst.safe_analyze_isr_chunked(chunks)
+
+    # The second chunk's answer repeated, and the question names that chunk.
+    assert asked[0] == "chunk 2 of 2"
+    assert [h.split(" |")[0] for h in headers] == ["[CHUNK 1/2", "[CHUNK 2/2"]

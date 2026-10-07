@@ -25,6 +25,7 @@ Design:
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -148,6 +149,22 @@ class ISRAgentStats:
     status: str = ""
 
 
+# The keys of ``run_summary.validation`` that keep analyst answers whole
+# (``pipeline.validation.validation_metrics``).
+VALIDATION_ANSWER_KEYS: tuple[str, ...] = (
+    "unparsed_answers",
+    "discarded_retry_answers",
+    "retry_drops",
+)
+
+
+def unresolved_total(rows: list[dict[str, str]]) -> int:
+    """How many findings the rows stand for, a folded row by its ``count``."""
+    from maljan.pipeline.validation import unresolved_total as total
+
+    return total(rows)
+
+
 @dataclass
 class ValidationMetrics:
     """What the validation loop found, and what it could not get fixed.
@@ -163,6 +180,11 @@ class ValidationMetrics:
     # The checks that could not run at all, by code. A check that ran and
     # found nothing and a check that never ran are different facts.
     not_run: list[str] = field(default_factory=list)
+    # The analyst answers the record keeps whole, by what they are: answers no
+    # claim could be read from (``unparsed_answers``) and retry answers a first
+    # answer was kept over (``discarded_retry_answers``). A key with no rows is
+    # left out of the summary.
+    answers: dict[str, list[dict[str, str]]] = field(default_factory=dict)
 
 
 @dataclass
@@ -608,13 +630,16 @@ def stage_duration_lines(stages: Any) -> list[str]:
     return [f"**Per stage**: {spent}  "] if spent else []
 
 
-def generation_lines(generation: Any) -> list[str]:
+def generation_lines(generation: Any, model_name: Callable[[str], str] | None = None) -> list[str]:
     """Each model's measured generation rate and each call timeout it produced.
 
     One line per model and one per sized call, so a reader can check the
     arithmetic: the budget, the rate, the margin, and what the
     call was finally given. Nothing measured contributes nothing.
+    ``model_name`` writes a model's name into its line (the report sets its
+    configured endpoint aside there); by default the name prints as recorded.
     """
+    name = model_name or str
     if not isinstance(generation, dict):
         return []
     lines: list[str] = []
@@ -624,7 +649,8 @@ def generation_lines(generation: Any) -> list[str]:
         if row.get("tokens_per_second") is not None:
             sources = "; ".join(str(x) for x in row.get("sources") or []) or "unknown"
             lines.append(
-                f"Generation rate of `{model}`: {float(row['tokens_per_second']):.2f} tokens/s "
+                f"Generation rate of `{name(model)}`: "
+                f"{float(row['tokens_per_second']):.2f} tokens/s "
                 f"({int(row.get('tokens') or 0)} tokens over "
                 f"{float(row.get('seconds') or 0.0):.1f}s "
                 f"in {int(row.get('calls') or 0)} call(s); from {sources})"
@@ -632,7 +658,7 @@ def generation_lines(generation: Any) -> list[str]:
         if row.get("prompt_tokens_per_second") is not None:
             read_from = "; ".join(str(x) for x in row.get("prompt_sources") or []) or "unknown"
             lines.append(
-                f"Prompt reading rate of `{model}`: "
+                f"Prompt reading rate of `{name(model)}`: "
                 f"{float(row['prompt_tokens_per_second']):.2f} tokens/s "
                 f"({int(row.get('prompt_tokens') or 0)} tokens over "
                 f"{float(row.get('prompt_seconds') or 0.0):.1f}s; from {read_from})"
@@ -1092,19 +1118,25 @@ class RunSummary:
                 "| Metric | Value |",
                 "|---|---|",
                 f"| Feedback retries | {v.retries} |",
-                f"| Unresolved findings | {len(v.unresolved)} |",
+                f"| Unresolved findings | {unresolved_total(v.unresolved)} |",
                 "",
             ]
             if v.by_code:
                 lines += ["| Code | Count |", "|---|---|"]
                 lines += [f"| {code} | {count} |" for code, count in sorted(v.by_code.items())]
                 lines.append("")
+            drops = v.answers.get("retry_drops") or []
+            if drops:
+                lines += ["**Items a kept validation retry left out:**", ""]
+                lines += [f"- {row.get('sentence', '')}" for row in drops]
+                lines.append("")
             if v.unresolved:
                 lines.append("**Still wrong after the retry:**")
                 lines.append("")
                 for row in v.unresolved:
+                    times = f" (left {row['count']} times)" if row.get("count") else ""
                     lines.append(
-                        f"- `{row.get('agent', '?')}` / `{row.get('code', '?')}`: "
+                        f"- `{row.get('agent', '?')}` / `{row.get('code', '?')}`{times}: "
                         f"{row.get('message', '')}"
                     )
                 lines.append("")
@@ -1338,6 +1370,11 @@ class RunSummary:
                 "by_code": dict(sorted(self.validation.by_code.items())),
                 "unresolved": [dict(row) for row in self.validation.unresolved],
                 "not_run": list(self.validation.not_run),
+                **{
+                    key: [dict(row) for row in rows]
+                    for key, rows in self.validation.answers.items()
+                    if rows
+                },
             }
 
         if self.tokens:
@@ -1971,6 +2008,11 @@ class RunSummaryBuilder:
             by_code=dict(metrics.get("by_code") or {}),
             unresolved=[dict(row) for row in metrics.get("unresolved") or []],
             not_run=[str(code) for code in metrics.get("not_run") or []],
+            answers={
+                key: [dict(row) for row in metrics.get(key) or [] if isinstance(row, dict)]
+                for key in VALIDATION_ANSWER_KEYS
+                if metrics.get(key)
+            },
         )
         return self
 
