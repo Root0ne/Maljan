@@ -259,6 +259,12 @@ _ROOT_SENTENCES = [
         "REPEAT_LOOP",
         "SIGNATURE_UNPLACED",
         "MATCH_UNPLACED",
+        "SHARED_COMMAND",
+        "NAMES_NO_ROW",
+        "NO_ROW_NAMES_TECHNIQUE",
+        "FILE_UNTOLD",
+        "OFFSET_UNPLACED",
+        "BLOB_UNMATCHED",
         "WHOLE_FILE",
         "PE_HEADER",
         "IMPORT_TABLE",
@@ -1441,7 +1447,7 @@ PROMPTS: dict[str, str] = {
     ).message,
     "a later chunk's list of the earlier chunks' calls": earlier_chunks_block(
         [
-            LedgerEntry(id="ev_0001", tool="a", args={"x": "1"}),
+            LedgerEntry(id="ev_0001", tool="a", args={"x": "1"}, output="a recorded result"),
             LedgerEntry(id="ev_0002", tool="b", args={}, ok=False),
         ]
     ),
@@ -1783,7 +1789,18 @@ PROMPTS: dict[str, str] = {
             _layers_and_roots(2, ["0x4f58 in .text"], []),
             _layers_and_roots(3, ["0x4f58 in .text", "the import table"], ["ev_0001: no: x"]),
             _roots_phrase([], ["ev_0001: no: x"]),
-            _roots.unnamed_row("ev_0001"),
+            # Every root label, as each template writes one.
+            _roots.PLACE_IN_SECTION.format(address="0x4f58", section=".text"),
+            _roots.PLACE_OUTSIDE.format(address="0x4f58"),
+            _roots.FUNCTION_ROOT.format(
+                place=_roots.PLACE_IN_SECTION.format(address="0x4f58", section=".text")
+            ),
+            _roots.SECTION_ROOT.format(name=".rdata"),
+            _roots.PROCESS_ROOT.format(pid=84),
+            _roots.FLOW_ROOT.format(proto="tcp", host="192.0.2.1", port=443),
+            _roots.DNS_ROOT.format(name="example.com"),
+            _roots.FILE_OFFSET_ROOT.format(offset="0x500"),
+            _roots.CARVED_FILE_ROOT.format(root=_roots.WHOLE_FILE, file='"payload.bin"'),
             *(
                 sentence.format(tool="a_tool", entry="ev_0001", count=2)
                 for sentence in _ROOT_SENTENCES

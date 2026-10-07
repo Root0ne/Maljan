@@ -566,12 +566,9 @@ def _collect_techniques(
                 quote = getattr(claim, "claim", None) or getattr(claim, "evidence_ref", None) or ""
                 if quote and quote not in row["evidence"]:
                     row["evidence"].append(str(quote))
-                row.setdefault("statements", []).append((str(layer), str(quote)))
-                # What the statement cites, for its evidence roots: the ids its
-                # evidence line and its text write, read with both.
-                ref = getattr(claim, "evidence_ref", "") or ""
-                said = f"{getattr(claim, 'claim', '') or ''} {ref}"
-                row.setdefault("cited", []).append((said, sorted(entry_ids_in(said))))
+                statement, cited = _claim_statement(str(layer), claim)
+                row.setdefault("statements", []).append(statement)
+                row.setdefault("cited", []).append(cited)
             # 3. The findings' own technique ids. An ISR carries ids in two
             # places, and this was the one no check ever saw: the report's
             # Findings table and the corroboration metric are both built from
@@ -607,13 +604,12 @@ def _collect_techniques(
                     # statement under five techniques. What the finding says
                     # is its detail.
                     detail = str(getattr(finding, "detail", "") or "").strip()
-                    if detail:
+                    said, cited = _finding_statement(str(layer), finding)
+                    if said is not None:
                         if detail not in row["evidence"]:
                             row["evidence"].append(detail)
-                        row.setdefault("statements", []).append((str(layer), detail))
-                    cited = [str(i) for i in getattr(finding, "evidence_ids", None) or [] if i]
-                    title = str(getattr(finding, "title", "") or "")
-                    row.setdefault("cited", []).append((f"{title} {detail}", cited))
+                        row.setdefault("statements", []).append(said)
+                    row.setdefault("cited", []).append(cited)
 
     # The catalogue question, asked of every id still standing. A claim was
     # asked it in the analyst's own loop and carries the answer; an id that
@@ -624,6 +620,61 @@ def _collect_techniques(
         techniques[tid]["valid"] = False
 
     return techniques
+
+
+def _claim_statement(layer: str, claim: Any) -> tuple[tuple[str, str], tuple[str, list[str]]]:
+    """A claim's statement ``(layer, text)`` and what it cites ``(text read, entry ids)``.
+
+    The text read for its evidence roots is the claim's statement and its
+    evidence line together, and the ids are the ones either writes.
+    """
+    quote = getattr(claim, "claim", None) or getattr(claim, "evidence_ref", None) or ""
+    ref = getattr(claim, "evidence_ref", "") or ""
+    said = f"{getattr(claim, 'claim', '') or ''} {ref}"
+    return (layer, str(quote)), (said, sorted(entry_ids_in(said)))
+
+
+def _finding_statement(
+    layer: str, finding: Any
+) -> tuple[tuple[str, str] | None, tuple[str, list[str]]]:
+    """A finding's statement (its detail, ``None`` without one) and what it cites."""
+    detail = str(getattr(finding, "detail", "") or "").strip()
+    cited = [str(i) for i in getattr(finding, "evidence_ids", None) or [] if i]
+    title = str(getattr(finding, "title", "") or "")
+    return ((layer, detail) if detail else None), (f"{title} {detail}", cited)
+
+
+def technique_statements(
+    isr_reports: dict[str, Any] | None,
+) -> dict[str, tuple[list[tuple[str, str]], list[tuple[str, list[str]]]]]:
+    """Per technique id, its statements and what they cite, as the matrix reads them.
+
+    ``{tid: (statements, cited)}``: the same lists, in the same order, the
+    matrix row of the id counts its independent layers (``independent_statements``)
+    and its evidence roots over, so a surface stating either states the row's.
+    """
+    out: dict[str, tuple[list[tuple[str, str]], list[tuple[str, list[str]]]]] = {}
+    for agent_name, isr in (isr_reports or {}).items():
+        layer = str(getattr(isr, "domain", None) or agent_name or "agent")
+        for claim in getattr(isr, "claims", None) or []:
+            claim_tid = getattr(claim, "technique_id", None)
+            if not claim_tid or says_no_technique(claim_tid):
+                continue
+            statement, cited = _claim_statement(layer, claim)
+            held = out.setdefault(str(claim_tid), ([], []))
+            held[0].append(statement)
+            held[1].append(cited)
+        for finding in getattr(isr, "findings", None) or []:
+            for raw in getattr(finding, "technique_ids", None) or []:
+                tid = str(raw or "").strip().upper()
+                if not tid or says_no_technique(tid):
+                    continue
+                said, cited = _finding_statement(layer, finding)
+                held = out.setdefault(tid, ([], []))
+                if said is not None:
+                    held[0].append(said)
+                held[1].append(cited)
+    return out
 
 
 def _judge_objects(stix_output: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -921,13 +972,22 @@ def judge_questions(
         elif out_of_scope.get(tid):
             not_asked[tid] = f"not asked: {out_of_scope[tid]}"
     asked = [q for tid, q in questions.items() if tid not in not_asked]
-    if ledger:
+    if ledger and asked:
+        # The report row's own fact: the layers ``independent_statements``
+        # credits and the roots of every statement naming the id, each read
+        # from its text and its evidence line, as the matrix reads them.
         roots_of = run_roots(ledger)
+        statements = technique_statements(isr_reports)
+        by_id: dict[str, str] = {}
+        for raw in statements:
+            by_id.setdefault(raw.strip().upper(), raw)
         for question in asked:
+            key = question.technique_id
+            said, cited = statements.get(key) or statements.get(by_id.get(key, ""), ([], []))
             counted = RootCount()
-            for _agent, text, ids in question.mentions:
+            for text, ids in cited:
                 counted.add(*roots_of.of_statement(text, ids))
-            layers = len({agent for agent, _text, _ids in question.mentions})
+            layers = len(independent_statements(said)[0])
             question.roots = layers_and_roots(layers, counted.roots, counted.not_read)
     return asked, not_asked
 

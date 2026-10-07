@@ -12,9 +12,14 @@ from typing import Any
 
 from maljan.analysis.corroboration import corroboration_row
 from maljan.analysis.evidence_roots import (
+    BLOB_UNMATCHED,
     EXPORT_TABLE,
+    FILE_UNTOLD,
     IMPORT_TABLE,
+    NAMES_NO_ROW,
     NO_CITATION,
+    OFFSET_UNPLACED,
+    SHARED_COMMAND,
     WHOLE_FILE,
     RootCount,
     layers_and_roots,
@@ -169,16 +174,18 @@ class TestAStatementsRoots:
         imports, _ = roots.of_statement("it imports VirtualAlloc", ["ev_0002"])
         assert imports == [IMPORT_TABLE]
 
-    def test_naming_none_of_them_is_one_unnamed_row(self) -> None:
+    def test_naming_none_of_them_gives_no_root_and_says_so(self) -> None:
         roots = run_roots(_ledger())
         named, unread = roots.of_statement("it decodes strings", ["ev_0003"])
-        assert (named, unread) == (["an unnamed row of ev_0003"], [])
-        # Two layers citing the entry so are one root; a named row is its own.
+        assert named == []
+        assert unread == ["ev_0003: " + NAMES_NO_ROW.format(entry="ev_0003")]
+        # Citations naming no row add no root; a named row is its own.
         counted = RootCount()
         counted.add(*roots.of_statement("strings are decoded", ["ev_0003"]))
         counted.add(*roots.of_statement("so says the decoder", ["EV_0003"]))
         counted.add(*roots.of_statement("the blob at 0x5080", ["ev_0003"]))
-        assert counted.roots == ["an unnamed row of ev_0003", "0x5080 in .data"]
+        assert counted.roots == ["0x5080 in .data"]
+        assert len(counted.not_read) == 1
 
     def test_a_passing_mention_of_a_table_narrows_nothing(self) -> None:
         roots = run_roots(_ledger())
@@ -187,8 +194,52 @@ class TestAStatementsRoots:
             "the header says it is a DLL",
             "a resource or an overlay is absent",
         ):
-            assert roots.of_statement(said, ["ev_0002"]) == (["an unnamed row of ev_0002"], [])
+            assert roots.of_statement(said, ["ev_0002"]) == (
+                [],
+                ["ev_0002: " + NAMES_NO_ROW.format(entry="ev_0002")],
+            )
         assert roots.of_statement("exports `run`", ["ev_0002"])[0] == [EXPORT_TABLE]
+
+    def test_a_name_several_rows_hold_narrows_nothing(self) -> None:
+        rows = [
+            {"offset": hex(0x1000 + 0x40 * k), "imports": [{"name": "CreateFileW"}]}
+            for k in range(50)
+        ]
+        led = [
+            _entry("ev_0001", "pe_info", {"sections": SECTIONS}),
+            _entry("ev_0002", "function_index", {"rows": rows}),
+        ]
+        roots = run_roots(led)
+        named, unread = roots.of_statement("calls CreateFileW to drop a file", ["ev_0002"])
+        assert named == [] and unread == ["ev_0002: " + NAMES_NO_ROW.format(entry="ev_0002")]
+        assert roots.of_statement("at 0x1040 it calls CreateFileW", ["ev_0002"])[0] == [
+            "0x1040 in .text"
+        ]
+
+    def test_an_unquoted_mention_beside_a_quoted_one_counts_only_the_quoted(self) -> None:
+        led = [
+            _entry("ev_0001", "pe_info", {"sections": SECTIONS}),
+            _entry(
+                "ev_0002",
+                "strings",
+                {
+                    "strings": [
+                        {"offset": 0x4500, "text": "http://c2.example/gate"},
+                        {"offset": 0x4600, "text": "other"},
+                    ]
+                },
+            ),
+            _entry(
+                "ev_0003",
+                "floss",
+                {"strings": [{"string": "http://c2.example/gate", "called_at_rva": "0x5100"}]},
+            ),
+        ]
+        roots = run_roots(led)
+        counted = RootCount()
+        counted.add(*roots.of_statement("The sample holds a C2 URL [ev_0002]", ["ev_0002"]))
+        counted.add(*roots.of_statement('FLOSS shows "http://c2.example/gate"', ["ev_0003"]))
+        assert counted.roots == ["0x5100 in .data"]
 
     def test_a_statement_citing_nothing_says_so(self) -> None:
         assert run_roots(_ledger()).of_statement("no citation", []) == ([], [NO_CITATION])
@@ -362,6 +413,29 @@ class TestTheJudgeQuestion:
         text = technique_question_text(questions, {}, cards=False)
         assert f"   {QUESTION_ROOTS_LABEL} 2 layers, one evidence root (0x5010 in .data)" in text
 
+    def test_the_line_is_the_report_row_s_fact(self) -> None:
+        # Two analysts writing one statement are one independent layer, and an
+        # evidence line's quoted value narrows as it does for the matrix.
+        same = "It runs whoami through a shell."
+        isrs = {
+            "static": AgentISR(
+                agent_id="static",
+                domain="static",
+                claims=[_claim(same, '[ev_0003] "cmd.exe /c whoami"')],
+            ),
+            "reverser": AgentISR(
+                agent_id="reverser", domain="reverser", claims=[_claim(same, "[ev_0003]")]
+            ),
+        }
+        questions, _ = judge_questions({"objects": []}, isrs, ledger=_ledger())
+        (question,) = questions
+        _, mappings = build_capability_matrix(stix_output=None, isr_reports=isrs, ledger=_ledger())
+        (mapping,) = mappings
+        assert question.roots == layers_and_roots(
+            len(mapping.independent_layers), mapping.evidence_roots, mapping.roots_not_read
+        )
+        assert question.roots.startswith("1 layer, one evidence root (0x5010 in .data)")
+
     def test_without_the_ledger_no_line_is_added(self) -> None:
         questions, _ = judge_questions({"objects": []}, _isrs())
         assert questions[0].roots == ""
@@ -370,19 +444,14 @@ class TestTheJudgeQuestion:
 class TestAFunctionHoldsTheAddressesInsideIt:
     """A place inside a function whose range a reader states is that function."""
 
-    @staticmethod
-    def _ledger(*extra: LedgerEntry) -> list[LedgerEntry]:
-        index = {
-            "image_base": hex(BASE),
-            "rows": [],
-            "function_ranges": {
-                hex(BASE + 0x1100): [[hex(BASE + 0x1100), hex(BASE + 0x1400)]],
-                hex(BASE + 0x2000): [[hex(BASE + 0x2000), hex(BASE + 0x2200)]],
-            },
-        }
+    RANGES = {"0x1100": [["0x1100", "0x1400"]], "0x2000": [["0x2000", "0x2200"]]}
+
+    @classmethod
+    def _ledger(cls, *extra: LedgerEntry, rows: Any = ()) -> list[LedgerEntry]:
+        index = {"image_base": hex(BASE), "rows": list(rows)}
         return [
             _entry("ev_0001", "pe_info", {"sections": SECTIONS}),
-            _entry("ev_0002", "function_index", index),
+            _entry("ev_0002", "function_index", index, function_ranges=cls.RANGES),
             *extra,
         ]
 
@@ -429,7 +498,7 @@ class TestAFunctionHoldsTheAddressesInsideIt:
         ]
         assert run_roots(led).of_entry("ev_0002").roots == ["0x1300 in .text", "0x1310 in .text"]
 
-    def test_a_disassembler_s_stated_size_is_a_range(self) -> None:
+    def test_a_disassembler_s_size_and_a_hash_s_size_are_no_ranges(self) -> None:
         listing = "; CALL XREF\n357: fcn.180001100 (int64_t arg1);\n"
         led = [
             _entry("ev_0001", "pe_info", {"sections": SECTIONS}),
@@ -440,13 +509,52 @@ class TestAFunctionHoldsTheAddressesInsideIt:
                 args={"address": hex(BASE + 0x1100)},
                 output=listing,
             ),
+            _entry(
+                "ev_0005",
+                "get_function_hash",
+                {"address": hex(BASE + 0x1100), "size_bytes": 0x300},
+            ),
             _entry("ev_0004", "read_memory", args={"address": hex(BASE + 0x1200)}),
         ]
-        assert run_roots(led).of_entry("ev_0004").roots == ["function 0x1100 in .text"]
+        assert run_roots(led).of_entry("ev_0004").roots == ["0x1200 in .text"]
+
+    def test_ranges_in_the_answer_itself_are_not_read(self) -> None:
+        index = {"image_base": hex(BASE), "rows": [], "function_ranges": self.RANGES}
+        led = [
+            _entry("ev_0001", "pe_info", {"sections": SECTIONS}),
+            _entry("ev_0002", "function_index", index),
+            _entry("ev_0003", "read_memory", args={"address": hex(BASE + 0x1200)}),
+        ]
+        assert run_roots(led).of_entry("ev_0003").roots == ["0x1200 in .text"]
+
+    def test_a_range_holding_another_known_function_start_is_not_used(self) -> None:
+        capa = _entry(
+            "ev_0003",
+            "capa",
+            {"capabilities": [{"rule": "r", "addresses": ["0x1150", "0x1300"]}]},
+        )
+        # A row of the index starts a function at 0x1200, inside 0x1100's range.
+        led = self._ledger(capa, rows=[{"offset": "0x1200"}])
+        assert run_roots(led).of_entry("ev_0003").roots == ["0x1150 in .text", "0x1300 in .text"]
+        # So does a call target the index lists, written as a virtual address.
+        index = {
+            "image_base": hex(BASE),
+            "rows": [],
+            "other_callees": {hex(BASE + 0x2000): [hex(BASE + 0x1200)]},
+        }
+        led = [
+            _entry("ev_0001", "pe_info", {"sections": SECTIONS}),
+            _entry("ev_0002", "function_index", index, function_ranges=self.RANGES),
+            capa,
+        ]
+        assert run_roots(led).of_entry("ev_0003").roots == ["0x1150 in .text", "0x1300 in .text"]
+        # An unrelated start elsewhere changes nothing.
+        led = self._ledger(capa, rows=[{"offset": "0x3000"}])
+        assert run_roots(led).of_entry("ev_0003").roots == ["function 0x1100 in .text"]
 
 
 class TestAnAssertionWithNoPlace:
-    def test_a_capa_rule_with_no_address_is_one_unnamed_row(self) -> None:
+    def test_a_capa_rule_with_no_address_gives_no_root_and_says_why(self) -> None:
         led = [
             _entry("ev_0001", "pe_info", {"sections": SECTIONS}),
             _entry(
@@ -461,7 +569,13 @@ class TestAnAssertionWithNoPlace:
             ),
         ]
         roots = run_roots(led)
-        assert roots.of_assertion("ev_0002", "T1027") == (["an unnamed row of ev_0002"], [])
+        assert roots.of_assertion("ev_0002", "T1027") == (
+            [],
+            [
+                "ev_0002: no: capa's answer carries no offset, address, section, event or flow to "
+                "place"
+            ],
+        )
         assert roots.of_assertion("ev_0002", "T1055")[0] == ["0x1300 in .text", "0x1400 in .text"]
 
 
@@ -493,14 +607,22 @@ class TestAStatedRangeIsCheckedAgainstTheImage:
         layout = self._with((0x4F00, 0x5100, 0x4F00))
         assert layout.function_at(0x4F80) is None
 
+    def test_a_range_holding_another_range_s_function_start_is_not_used(self) -> None:
+        layout = self._with((0x1100, 0x1400, 0x1100), (0x1300, 0x1600, 0x1300))
+        assert layout.function_at(0x1200) is None
+        assert layout.function_at(0x1350) == 0x1300
+        assert layout.function_at(0x1500) == 0x1300
+        assert layout.function_at(0x1700) is None
+
     def test_overlapping_ranges_of_two_functions_own_the_overlap_jointly_with_neither(
         self,
     ) -> None:
-        layout = self._with((0x1100, 0x1400, 0x1100), (0x1300, 0x1600, 0x1300))
+        # A chained fragment of 0x2000 overlapping 0x1100's range; neither holds
+        # the other's start.
+        layout = self._with((0x1100, 0x1400, 0x1100), (0x1300, 0x1500, 0x2000))
         assert layout.function_at(0x1200) == 0x1100
         assert layout.function_at(0x1350) is None
-        assert layout.function_at(0x1500) == 0x1300
-        assert layout.function_at(0x1700) is None
+        assert layout.function_at(0x1450) == 0x2000
 
     def test_lookups_do_not_depend_on_how_many_or_how_long_the_ranges_are(self) -> None:
         def timed(n: int) -> float:
@@ -562,3 +684,268 @@ class TestHostileScaling:
 
         small, large = timed(1_000), timed(10_000)
         assert large < small * 10 * 3 + 0.5
+
+
+SAMPLE_PE = {
+    "image_base": "0x400000",
+    "sections": [
+        {
+            "name": ".text",
+            "virtual_address": "0x1000",
+            "virtual_size": 0x8000,
+            "raw_offset": 0x400,
+            "raw_size": 0x8000,
+        },
+        {
+            "name": ".rdata",
+            "virtual_address": "0x9000",
+            "virtual_size": 0x2000,
+            "raw_offset": 0x8400,
+            "raw_size": 0x2000,
+        },
+    ],
+}
+
+
+class TestEachFileHasItsOwnLayout:
+    def _carved_pe(self, **args: Any) -> LedgerEntry:
+        sections = [
+            {
+                "name": "UPX0",
+                "virtual_address": "0xa000",
+                "virtual_size": 0x4000,
+                "raw_offset": 0x400,
+                "raw_size": 0x4000,
+            }
+        ]
+        return _entry(
+            "ev_0002", "pe_info", {"image_base": "0x10000000", "sections": sections}, args=args
+        )
+
+    def test_a_carved_file_is_placed_against_its_own_table_and_named(self) -> None:
+        led = [
+            _entry("ev_0001", "pe_info", SAMPLE_PE, args={"path": "s.exe"}),
+            self._carved_pe(carved_path="payload.bin"),
+            _entry(
+                "ev_0003",
+                "strings",
+                {"strings": [{"offset": 0x500, "text": "payload-only"}]},
+                args={"carved_path": "payload.bin"},
+            ),
+            _entry(
+                "ev_0004",
+                "strings",
+                {"strings": [{"offset": 0x500, "text": "main-only"}]},
+                args={"path": "s.exe"},
+            ),
+        ]
+        roots = run_roots(led)
+        assert [s.name for s in roots.layout.sections] == [".text", ".rdata"]
+        assert roots.layout.bases == (0x400000,)
+        assert roots.of_entry("ev_0003").roots == ['0xa100 in UPX0 of carved file "payload.bin"']
+        assert roots.of_entry("ev_0004").roots == ["0x1100 in .text"]
+
+    def test_a_carved_file_the_carving_states_is_named_by_its_digest(self) -> None:
+        digest = "ab" * 32
+        carve = _entry(
+            "ev_0005",
+            "carve_payloads",
+            {"payloads": [{"carved_path": "/staged/payload.bin", "sha256": digest}]},
+        )
+        led = [carve, _entry("ev_0006", "hashes", {}, args={"carved_path": "/staged/payload.bin"})]
+        assert run_roots(led).of_entry("ev_0006").roots == [
+            f"{WHOLE_FILE} of carved file sha256 {digest[:12]}"
+        ]
+
+    def test_a_file_that_cannot_be_told_gives_no_root(self) -> None:
+        led = [_entry("ev_0001", "strings", {"strings": []}, args={"carved_path": ["a", "b"]})]
+        found = run_roots(led).of_entry("ev_0001")
+        assert found.roots == [] and found.reason == FILE_UNTOLD
+
+
+class TestFlossJoinsABlobByCallSiteAndText:
+    def _led(self, floss_rows: list[dict[str, Any]]) -> list[LedgerEntry]:
+        results = [
+            {"rva": hex(0x9100 + 0x100 * k), "text": t, "floss": {"called_at_rva": "0x1200"}}
+            for k, t in enumerate(("alpha.example", "bravo.example", "charlie.example"))
+        ]
+        return [
+            _entry("ev_0001", "pe_info", SAMPLE_PE),
+            _entry("ev_0010", "decode_string_blobs", {"results": results}),
+            _entry("ev_0011", "floss", {"strings": floss_rows}),
+        ]
+
+    def test_each_row_joins_the_blob_holding_its_text(self) -> None:
+        rows = [
+            {"string": t, "called_at_rva": "0x1200"}
+            for t in ("alpha.example", "bravo.example", "charlie.example")
+        ]
+        roots = run_roots(self._led(rows))
+        assert roots.of_entry("ev_0011").roots == [
+            "0x9100 in .rdata",
+            "0x9200 in .rdata",
+            "0x9300 in .rdata",
+        ]
+        both, _ = roots.of_statement('decodes "charlie.example"', ["ev_0011", "ev_0010"])
+        assert both == ["0x9300 in .rdata"]
+        assert roots.of_statement('"bravo.example"', ["ev_0011"])[0] == ["0x9200 in .rdata"]
+
+    def test_a_call_site_whose_blobs_hold_no_matching_text_gives_no_root(self) -> None:
+        rows = [{"string": "delta.example", "called_at_rva": "0x1200"}]
+        found = run_roots(self._led(rows)).of_entry("ev_0011")
+        assert found.roots == [] and found.reason == BLOB_UNMATCHED
+
+
+class TestACommandLineBelongsToOneProcess:
+    def test_two_processes_sharing_it_give_no_root(self) -> None:
+        command = "cmd.exe /c ping 127.0.0.1"
+        led = [
+            _entry(
+                "ev_0030",
+                "sandbox_processes",
+                {
+                    "processes": [
+                        {"pid": 100, "command_line": command},
+                        {"pid": 200, "command_line": command},
+                    ]
+                },
+            ),
+            _entry(
+                "ev_0031",
+                "sigma_match_sandbox",
+                {
+                    "matches": [
+                        {
+                            "matched_fields": {"CommandLine": command},
+                            "technique_ids": ["T1059.003"],
+                        }
+                    ]
+                },
+            ),
+            _entry(
+                "ev_0032",
+                "lolbin_lookup",
+                {"technique_ids": ["T1059.003"]},
+                args={"command_lines": [command]},
+            ),
+        ]
+        roots = run_roots(led)
+        for eid in ("ev_0031", "ev_0032"):
+            assert roots.of_entry(eid).roots == []
+            assert roots.of_entry(eid).reason == SHARED_COMMAND
+        assert roots.of_assertion("ev_0031", "T1059.003") == ([], [f"ev_0031: {SHARED_COMMAND}"])
+
+
+class TestACaptureStatesOneFlowForBothDirections:
+    def test_the_response_packet_is_the_request_s_flow(self) -> None:
+        output = (
+            "Packet 1: 10.0.0.5 -> 192.0.2.7 (TCP 49162->443)\n"
+            "Packet 2: 192.0.2.7 -> 10.0.0.5 (TCP 443->49162)"
+        )
+        led = [
+            _entry("ev_0050", "read_pcap_summary", output=output),
+            _entry(
+                "ev_0051",
+                "sandbox_network",
+                {"tcp": [{"src": "10.0.0.5", "sport": 49162, "dst": "c2.example", "dport": 443}]},
+            ),
+        ]
+        roots = run_roots(led)
+        assert roots.of_entry("ev_0050").roots == ["network flow tcp to 192.0.2.7:443"]
+        # A host name the sandbox states no resolution for joins no capture address.
+        assert roots.of_entry("ev_0051").roots == ["network flow tcp to c2.example:443"]
+
+    def test_a_response_seen_first_elsewhere_keeps_the_label_of_its_connection(self) -> None:
+        led = [
+            _entry(
+                "ev_0001",
+                "pcap_summary",
+                {"tcp": [{"src": "10.0.0.5", "sport": 49162, "dst": "192.0.2.7", "dport": 443}]},
+            ),
+            _entry(
+                "ev_0002",
+                "read_pcap_summary",
+                output="Packet 9: 192.0.2.7 -> 10.0.0.5 (TCP 443->49162)",
+            ),
+        ]
+        assert run_roots(led).of_entry("ev_0002").roots == ["network flow tcp to 192.0.2.7:443"]
+
+
+class TestAFileOffsetWithNoSectionTable:
+    def test_it_gives_no_root_where_the_file_states_a_base(self) -> None:
+        led = [
+            _entry("ev_0043", "function_index", {"image_base": "0x400000", "rows": []}),
+            _entry("ev_0040", "strings", {"strings": [{"offset": 0x500, "text": "abc"}]}),
+            _entry("ev_0041", "capa", {"capabilities": [{"rule": "r", "addresses": ["0x401100"]}]}),
+            _entry("ev_0042", "decompile_function", args={"address": "0x1100"}),
+        ]
+        roots = run_roots(led)
+        assert roots.of_entry("ev_0040").roots == []
+        assert roots.of_entry("ev_0040").reason == OFFSET_UNPLACED
+        assert roots.of_entry("ev_0041").roots == roots.of_entry("ev_0042").roots == ["0x1100"]
+
+    def test_a_file_with_no_base_and_no_table_keeps_its_offsets(self) -> None:
+        led = [_entry("ev_0040", "strings", {"strings": [{"offset": 0x500, "text": "abc"}]})]
+        assert run_roots(led).of_entry("ev_0040").roots == ["file offset 0x500"]
+
+
+class TestTheServedFunctionIndexGivesRoots:
+    def test_each_row_line_is_a_root_named_by_address_or_by_a_name_it_alone_quotes(self) -> None:
+        table = "\n".join(
+            [
+                "2 of the 9 functions the run knows hold artefacts of their own (...)",
+                '- 0x401100: calls "CreateFileW", "WriteFile" (this answer); called by 1',
+                '- 0x401200: calls "WriteFile" (this answer); called by 0',
+            ]
+        )
+        led = [
+            _entry("ev_0001", "pe_info", SAMPLE_PE),
+            _entry("ev_0002", "function_index", {"image_base": "0x400000", "table": table}),
+        ]
+        roots = run_roots(led)
+        assert roots.of_entry("ev_0002").roots == ["0x1100 in .text", "0x1200 in .text"]
+        assert roots.of_statement('it calls "CreateFileW"', ["ev_0002"])[0] == ["0x1100 in .text"]
+        assert roots.of_statement("it calls WriteFile", ["ev_0002"])[0] == []
+        assert roots.of_statement("the function at 0x401200", ["ev_0002"])[0] == ["0x1200 in .text"]
+
+    def test_an_answer_for_one_address_is_that_function(self) -> None:
+        answer = {"image_base": "0x400000", "row": '- 0x401100: calls "CreateFileW" (this answer)'}
+        led = [_entry("ev_0001", "pe_info", SAMPLE_PE), _entry("ev_0002", "function_index", answer)]
+        assert run_roots(led).of_entry("ev_0002").roots == ["0x1100 in .text"]
+        answer = {"image_base": "0x400000", "row": "no: 'zz' is not an address"}
+        led = [_entry("ev_0001", "pe_info", SAMPLE_PE), _entry("ev_0002", "function_index", answer)]
+        assert run_roots(led).of_entry("ev_0002").reason.startswith("no: ")
+
+
+class TestManyImageBases:
+    def test_reading_scales_linearly_in_the_bases(self) -> None:
+        def timed(n: int) -> float:
+            led = [
+                _entry(
+                    f"ev_{k:05d}",
+                    "capa",
+                    {
+                        "image_base": hex(0x10000 * (k + 1)),
+                        "capabilities": [
+                            {"rule": "r", "addresses": [hex(0x10000 * (k + 1) + 0x1000 + k)]}
+                        ],
+                    },
+                )
+                for k in range(n)
+            ]
+            start = time.perf_counter()
+            roots = run_roots(led)
+            for k in range(0, n, 10):
+                roots.of_statement(f"at {hex(0x10000 * (k + 1) + 0x1000 + k)}", [f"ev_{k:05d}"])
+            return time.perf_counter() - start
+
+        small, large = timed(2_000), timed(16_000)
+        assert large < small * 8 * 4 + 0.5
+
+    def test_an_address_reads_against_the_nearest_base_below_it(self) -> None:
+        from maljan.analysis.evidence_roots import Layout
+
+        layout = Layout(bases=(0x400000, 0x10000000))
+        assert layout.rvas_of(0x10001000) == [0x1000, 0x10001000]
+        assert layout.rvas_of(0x401000) == [0x1000, 0x401000]
+        assert layout.rvas_of(0x1000) == [0x1000]
