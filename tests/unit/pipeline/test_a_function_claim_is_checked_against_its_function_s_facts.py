@@ -111,6 +111,20 @@ def _listing(body: str = "  FUN_140002a10();\n  return 0;", entry: str = LISTING
     )
 
 
+HELPER_LISTING_ID = "ev_0008"
+HELPER_VA = f"0x{BASE + HELPER:x}"
+
+
+def _helper_listing() -> LedgerEntry:
+    return LedgerEntry(
+        id=HELPER_LISTING_ID,
+        agent="reverser",
+        tool="decompile_function",
+        args={"address": f"{BASE + HELPER:x}"},
+        output=f"\nundefined8 FUN_{BASE + HELPER:x}(void)\n\n{{\n  return 0;\n}}\n",
+    )
+
+
 ROWS = [
     _row(MAIN, imports=["CreateMutexW"], decoded=["update-channel"], callees=[HELPER]),
     _row(HELPER, imports=["GetTickCount"], plain=["helper banner"], callers=[MAIN], callees=[FAR]),
@@ -221,6 +235,25 @@ class TestWhereAValueHolds:
         # MAIN calls HELPER, which calls FAR: FAR's WriteFile is reachable.
         found = _check(f"{MAIN_VA} writes the file with WriteFile.")
         assert found.violations == [] and found.checked == 1
+
+    def test_a_listed_callee_s_reach_read_first_is_part_of_its_caller_s(self) -> None:
+        own = [_listing(), _helper_listing()]
+        found = _check(f"{MAIN_VA} writes the file with WriteFile.", own=own)
+        assert found.violations == [] and found.checked == 1
+
+    def test_a_claim_naming_two_listed_functions_holds_what_either_reaches(self) -> None:
+        own = [_listing(), _helper_listing()]
+        evidence = f"[{LISTING_ID}] [{HELPER_LISTING_ID}]"
+        held = _check(
+            f"{MAIN_VA} and {HELPER_VA} guard with CreateMutexW and write with WriteFile.",
+            own=own,
+            evidence=evidence,
+        )
+        assert held.violations == [] and held.checked == 1
+        asked = _check(f"{MAIN_VA} and {HELPER_VA} sleep with SleepEx.", own=own, evidence=evidence)
+        (violation,) = asked.violations
+        # MAIN reaches HELPER and FAR, HELPER reaches FAR: one function beside the two.
+        assert "(1 function reachable)" in violation.message
 
     def test_a_function_reachable_through_one_with_no_row_holds(self) -> None:
         index = _index(

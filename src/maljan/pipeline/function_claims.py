@@ -14,8 +14,9 @@ statement of absence ("does not use X"), and looks for each, in this order:
    and plain strings it refers to and the capa rules matched in it;
 3. the rows of every function reachable from it through call edges, a
    breadth-first walk over the index's whole call graph with no depth bound,
-   read once per set of starting functions; a routine passed as an argument (a
-   thread's start, a callback) is no call edge and is not followed;
+   read once per listed function (a claim naming several holds a value when
+   any one's reach holds it); a routine passed as an argument (a thread's
+   start, a callback) is no call edge and is not followed;
 4. the places the run's hash-resolution and decoded-string answers put inside
    any of those functions (``agents.function_map.function_artefacts``).
 
@@ -274,7 +275,7 @@ class _Held:
 
 @dataclass(frozen=True)
 class _Reach:
-    """What the functions reachable from one set of starts hold, read once per set."""
+    """What the functions reachable from one listed function hold, read once per function."""
 
     functions: frozenset[int]
     whole: bool
@@ -282,6 +283,42 @@ class _Reach:
     unnamed: bool
     names: frozenset[str]
     texts: frozenset[str]
+
+
+@dataclass(frozen=True)
+class _Reached:
+    """A claim's functions' reaches, read through each one's own: a value is held when
+    any of them holds it, so no claim builds a union of them."""
+
+    parts: tuple[_Reach, ...]
+
+    @property
+    def whole(self) -> bool:
+        return all(part.whole for part in self.parts)
+
+    @property
+    def stopped(self) -> bool:
+        return any(part.stopped for part in self.parts)
+
+    @property
+    def unnamed(self) -> bool:
+        return any(part.unnamed for part in self.parts)
+
+    def holds(self, start: int) -> bool:
+        """Whether ``start`` is reachable from any of the claim's functions."""
+        return any(start in part.functions for part in self.parts)
+
+    def holds_name(self, key: str) -> bool:
+        return any(key in part.names for part in self.parts)
+
+    def holds_text(self, text: str) -> bool:
+        return any(text in part.texts for part in self.parts)
+
+    def count(self) -> int:
+        """How many distinct functions the claim's functions reach, read only for a question."""
+        if len(self.parts) == 1:
+            return len(self.parts[0].functions)
+        return len(frozenset().union(*(part.functions for part in self.parts)))
 
 
 @dataclass
@@ -314,32 +351,97 @@ class FunctionFacts:
     strings: EntryTexts = field(default_factory=EntryTexts)
     # The index rows' strings, each whole, lower-cased.
     index_strings: frozenset[str] = frozenset()
-    # Each distinct set of starts' reach, read once.
-    reaches: dict[frozenset[int], _Reach] = field(default_factory=dict)
+    # Each listed function's reach, read once: the cost is the analyst's
+    # listings times the graph, whatever the number of claims.
+    reaches: dict[int, _Reach] = field(default_factory=dict)
+    # The offsets of the analyst's listed functions, whose reaches are read
+    # together, callees first, when a claim first asks for one.
+    listed_starts: tuple[int, ...] = ()
 
-    def reach(self, starts: Sequence[int]) -> _Reach:
-        """The reach of ``starts`` and what its functions hold, memoised per set."""
-        key = frozenset(starts)
-        found = self.reaches.get(key)
-        if found is None:
-            functions, whole = self.reachable(starts)
-            names: set[str] = set()
-            texts: set[str] = set()
-            for at in functions:
-                for held in (self.held_by_row.get(at), self.placed.get(at)):
-                    if held is not None:
-                        names |= held.names
-                        texts.update(held.texts)
-            found = _Reach(
-                functions=frozenset(functions),
-                whole=whole,
-                stopped=any(at in (self.undecoded or ()) for at in functions),
-                unnamed=any((self.unnamed or {}).get(at) for at in functions),
-                names=frozenset(names),
-                texts=frozenset(texts),
-            )
-            self.reaches[key] = found
-        return found
+    def reach(self, starts: Sequence[int]) -> _Reached:
+        """The reach of ``starts`` and what its functions hold, memoised per function."""
+        wanted = list(dict.fromkeys(starts))
+        if any(start not in self.reaches for start in wanted):
+            self._read_reaches([*self.listed_starts, *wanted])
+        return _Reached(tuple(self.reaches[start] for start in wanted))
+
+    def _read_reaches(self, starts: Sequence[int]) -> None:
+        """Read the reach of each of ``starts`` not yet read, callees first.
+
+        One depth-first walk orders them so that a function's listed callees
+        finish before it; each walk from a start then takes the reach of a
+        listed function it meets, already read, whole instead of walking it
+        again.
+        """
+        wanted = set(starts)
+        for start in self._finishing_order(starts):
+            if start in wanted and start not in self.reaches:
+                self.reaches[start] = self._walk_from(start)
+
+    def _finishing_order(self, starts: Sequence[int]) -> list[int]:
+        """The functions reachable from ``starts``, each after its callees (cycles aside)."""
+        seen: set[int] = set()
+        order: list[int] = []
+        for root in starts:
+            if root in seen:
+                continue
+            seen.add(root)
+            stack = [(root, iter(self.edges.get(root, ())))]
+            while stack:
+                node, callees = stack[-1]
+                for callee in callees:
+                    if callee not in seen:
+                        seen.add(callee)
+                        stack.append((callee, iter(self.edges.get(callee, ()))))
+                        break
+                else:
+                    stack.pop()
+                    order.append(node)
+        return order
+
+    def _walk_from(self, start: int) -> _Reach:
+        """``start``'s reach, breadth first, a read reach met on the way taken whole."""
+        seen = {start: None}
+        queue = deque(seen)
+        whole = True
+        taken: list[_Reach] = []
+        covered: set[int] = set()
+        while queue:
+            at = queue.popleft()
+            if at not in self.rows and not self.graph_whole:
+                whole = False
+            for callee in self.edges.get(at, ()):
+                if callee in seen or callee in covered:
+                    continue
+                read = self.reaches.get(callee)
+                if read is not None:
+                    taken.append(read)
+                    covered.update(read.functions)
+                    continue
+                seen[callee] = None
+                queue.append(callee)
+        names: set[str] = set()
+        texts: set[str] = set()
+        for source in (self.held_by_row, self.placed):
+            for at in seen:
+                held = source.get(at)
+                if held is not None:
+                    names.update(held.names)
+                    texts.update(held.texts)
+        for read in taken:
+            names.update(read.names)
+            texts.update(read.texts)
+        undecoded = self.undecoded or set()
+        unnamed = self.unnamed or {}
+        return _Reach(
+            functions=frozenset(seen).union(covered),
+            whole=whole and all(read.whole for read in taken),
+            stopped=not undecoded.isdisjoint(seen) or any(read.stopped for read in taken),
+            unnamed=(bool(unnamed) and any(unnamed.get(at) for at in seen))
+            or any(read.unnamed for read in taken),
+            names=frozenset(names),
+            texts=frozenset(texts),
+        )
 
     def offset(self, address: int | None) -> int | None:
         """The index offset of a function an answer gave by address, or ``None``."""
@@ -354,22 +456,6 @@ class FunctionFacts:
 
     def va(self, offset: int) -> str:
         return hex(self.base + offset)
-
-    def reachable(self, starts: Iterable[int]) -> tuple[list[int], bool]:
-        """Every function reachable from ``starts`` through callee edges, breadth first,
-        and whether every one reached has its callees known."""
-        seen = dict.fromkeys(starts)
-        queue = deque(seen)
-        whole = True
-        while queue:
-            at = queue.popleft()
-            if at not in self.rows and not self.graph_whole:
-                whole = False
-            for callee in self.edges.get(at, ()):
-                if callee not in seen:
-                    seen[callee] = None
-                    queue.append(callee)
-        return list(seen), whole
 
 
 def _row_held(row: Mapping[str, Any]) -> _Held:
@@ -713,7 +799,7 @@ class FunctionClaimCheck:
         }
 
 
-def _held(value: str, api: bool, listings: Sequence[_Held], reached: _Reach) -> bool:
+def _held(value: str, api: bool, listings: Sequence[_Held], reached: _Reached) -> bool:
     """Whether the listings or the reachable functions' facts hold ``value``.
 
     The facts are looked up by membership: an API key in their names, a string
@@ -725,9 +811,9 @@ def _held(value: str, api: bool, listings: Sequence[_Held], reached: _Reach) -> 
 
     if api:
         key = _api_key(value)
-        return key in reached.names or any(key in listing.names for listing in listings)
+        return reached.holds_name(key) or any(key in listing.names for listing in listings)
     forms = written_forms(value.lower())
-    if any(form in reached.texts for form in forms):
+    if any(reached.holds_text(form) for form in forms):
         return True
     return any(
         whole_value_in(form, text)
@@ -806,6 +892,13 @@ def check_function_claims(
     if not claims or not functions or facts is None:
         return out
     bases = tuple(dict.fromkeys([*image_bases, *facts.bases]))
+    facts.listed_starts = tuple(
+        dict.fromkeys(
+            start
+            for start in (facts.offset(function.address) for function in functions)
+            if start is not None
+        )
+    )
     by_entry: dict[str, list[DecompiledFunction]] = {}
     for function in functions:
         for entry_id in function.entries:
@@ -850,7 +943,7 @@ def check_function_claims(
             starts.append(start)
         if not reason and facts.undecoded is None:
             reason = UNDECODED_UNKNOWN.format(entry=facts.index_entry)
-        reached: _Reach | None = None
+        reached: _Reached | None = None
         if not reason:
             reached = facts.reach(starts)
             if reached.stopped:
@@ -871,7 +964,7 @@ def check_function_claims(
         # function it last names before the value, in the value's own clause.
         apis: list[str] = []
         strings: list[str] = []
-        given = _attribution(sentence, about, reached.functions, facts)
+        given = _attribution(sentence, about, reached, facts)
         for value, at, api in named_here:
             owner, stands = given(at)
             if owner is None:
@@ -915,7 +1008,7 @@ def check_function_claims(
                 sentence,
                 about,
                 starts,
-                len(reached.functions) - len(starts),
+                reached.count() - len(starts),
                 unheld,
                 facts,
                 row_parts,
@@ -927,7 +1020,7 @@ def check_function_claims(
 def _attribution(
     sentence: str,
     about: Sequence[DecompiledFunction],
-    reached: frozenset[int],
+    reached: _Reached,
     facts: FunctionFacts,
 ) -> Any:
     """Who a value at a place of ``sentence`` is given to: ``""`` the cited functions (or a
@@ -948,7 +1041,7 @@ def _attribution(
             start = facts.offset(int(match.group(1), 16))
             if start is None:
                 continue
-            if start in reached:
+            if reached.holds(start):
                 mentions.append((match.start(), ""))
             elif start in facts.rows or start in facts.edges:
                 mentions.append((match.start(), facts.va(start)))

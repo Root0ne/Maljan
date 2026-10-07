@@ -166,6 +166,82 @@ class TestTheCheckGrowsWithClaimsAndGraphTogether:
         print("claims over a graph, 100 over 2,000 and 1,000 over 20,000:", low, high)
         assert high < low * 20
 
+    def test_claims_naming_several_functions_cost_the_listings_times_the_graph_alone(
+        self,
+    ) -> None:
+        low, kept_low = _paired(19)
+        high, kept_high = _paired(190)
+        print("claims naming two of 20 listed functions, 19 and 190:", low, high)
+        assert kept_low == kept_high == LISTINGS
+        assert high < low * 3
+
+
+LISTINGS = 20
+
+
+def _paired(count: int) -> tuple[float, int]:
+    """``count`` claims, each naming two of 20 listed functions at the head of a chain of
+    20,000 functions: each listed function reaches nearly the whole chain."""
+    functions = 20_000
+    offsets = [0x100000 + 0x10 * i for i in range(functions)]
+    rows = [
+        {
+            "function": hex(BASE + offset),
+            "offset": hex(offset),
+            "direct": 2,
+            "imports": [{"name": "CreateMutexW", "sources": ["this entry"]}],
+            "plain_strings": [
+                {"text": f"text {i} {j}", "sources": ["this entry"]} for j in range(2)
+            ],
+            "callers": [hex(BASE + offsets[i - 1])] if i else [],
+            "callees": [hex(BASE + offsets[i + 1])] if i + 1 < functions else [],
+        }
+        for i, offset in enumerate(offsets)
+    ]
+    data = {
+        "tool": "function_index",
+        "image_base": hex(BASE),
+        "undecoded_functions": 0,
+        "undecoded": [],
+        "calls_unnamed": {},
+        "other_callees": {},
+        "rows": rows,
+    }
+    index = LedgerEntry(
+        id="ev_0002", agent="pipeline", tool="function_index", output="{}", structured=data
+    )
+    listings = [
+        LedgerEntry(
+            id=f"ev_{100 + k:04d}",
+            agent="reverser",
+            tool="decompile_function",
+            args={"address": hex(BASE + offsets[k])},
+            output="void f(void) { }",
+        )
+        for k in range(LISTINGS)
+    ]
+    pairs = [(a, b) for a in range(LISTINGS) for b in range(a + 1, LISTINGS)][:count]
+    isr = SimpleNamespace(
+        claims=[
+            ClaimEvidence(
+                claim=(
+                    f"0x{BASE + offsets[a]:x} and 0x{BASE + offsets[b]:x} guard with CreateMutexW."
+                ),
+                evidence_ref=f"[ev_{100 + a:04d}] [ev_{100 + b:04d}]",
+                confidence=0.5,
+            )
+            for a, b in pairs
+        ]
+    )
+    facts = function_facts(
+        listings, function_artefacts([index]), pack_entries=[index], bases=(BASE,)
+    )
+    began = time.perf_counter()
+    found = check_function_claims(isr, listed_functions(listings), facts, (BASE,))
+    seconds = time.perf_counter() - began
+    assert found.asked == 0 and found.checked == count
+    return seconds, len(facts.reaches)
+
 
 class TestASentenceIsReadInWindows:
     def test_a_text_of_dots_finds_its_sentences_in_well_under_a_second(self) -> None:

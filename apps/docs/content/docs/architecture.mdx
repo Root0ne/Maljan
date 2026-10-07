@@ -1929,9 +1929,10 @@ turn, each once, and what the analyst answers stands.
     through slots the hash resolution fills, resolved names, decoded and plain
     strings and capa rules); the row of every function reachable from it
     through call edges, a breadth-first walk over the index's whole call graph
-    with no depth bound, read once per set of starting functions (routines
-    passed as arguments, a thread's start or a callback, are no call edges and
-    are not followed); and the places the run's hash-resolution and
+    with no depth bound, read once per listed function, a claim naming several
+    holding a value when any one's reach holds it (routines passed as
+    arguments, a thread's start or a callback, are no call edges and are not
+    followed); and the places the run's hash-resolution and
     decoded-string answers put inside any of them. Nothing else excuses a
     value. API names are compared without regard to case, a module in front
     read off, the ANSI and wide spellings read as one name as the API
@@ -1974,10 +1975,14 @@ turn, each once, and what the analyst answers stands.
     facts alone, without the sentence asking the analyst to keep or withdraw;
     a finding never asked stands under a heading of its own that says so.
   - *Cost.* Linear in the claims, the index rows and the listings' size, and
-    per claim in the call graph: the rows are keyed by offset once, each
-    listing and each row is read once, the names a sentence may name and the
-    sample strings are gathered once per answer, and each claim walks the
-    graph once.
+    in the call graph once per listed function, whatever the number of claims:
+    the rows are keyed by offset once, each listing and each row is read once,
+    the names a sentence may name and the sample strings are gathered once per
+    answer, each listed function's reach is walked once, and only a question
+    counts the functions a claim's several functions reach together. A
+    sentence's own reading is bounded per value: a dot's word is read back
+    over the longest abbreviation at most, and a statement of absence over a
+    name within the negation window around it.
   - *Why.* A reverser's claims named calls and behaviours for functions whose
     listings do not make them, and nothing put the function's own facts
     beside them.
