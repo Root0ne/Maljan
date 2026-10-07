@@ -27,7 +27,13 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from maljan.pipeline.triage_pack import NOT_RUN_PREFIX, PIPELINE, pack_entries, render_pack
+from maljan.pipeline.triage_pack import (
+    INDEX_TOOL,
+    NOT_RUN_PREFIX,
+    PIPELINE,
+    pack_entries,
+    render_pack,
+)
 
 __all__ = [
     "NO_LIMIT",
@@ -35,6 +41,7 @@ __all__ = [
     "RUN_STATE_END",
     "NoLimit",
     "budget_line",
+    "index_sentence",
     "is_run_state_block",
     "render_run_state",
     "run_state_block",
@@ -245,6 +252,9 @@ def _lines(
         first, last = ids[0], ids[-1]
         span = f"{first}–{last}" if first != last else first
         lines.append(f"ledger: {total} entries ({span}), {len(pack)} from the triage pack")
+    index = by_tool.get(INDEX_TOOL)
+    if index is not None:
+        lines.append(index_sentence(index.id, index.structured))
     # A call that was never made — a skipped lookup, a step after the budget —
     # is not a failed tool; the pack line says "not done" for it, and so does
     # this one by leaving it out.
@@ -260,6 +270,16 @@ def _lines(
     if line:
         lines.append(line)
     return lines
+
+
+def index_sentence(entry_id: str, data: Any) -> str:
+    """The one line saying the function index exists, how many rows it has and where it is."""
+    rows = len(data.get("rows") or []) if isinstance(data, Mapping) else 0
+    noun = "function" if rows == 1 else "functions"
+    return (
+        f"function index: [{entry_id}] lists the {rows} {noun} holding artefacts of their own, "
+        "each with its imports called, resolved names, strings, capa rules, callers and callees."
+    )
 
 
 def _cut(line: str) -> str:

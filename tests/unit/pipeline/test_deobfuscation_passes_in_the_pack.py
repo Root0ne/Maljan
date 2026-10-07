@@ -37,7 +37,7 @@ from maljan.tools import crypto_constants, rules
 from ..fake_ghidra import X64_BASE, FakeGhidra
 from ..tools.synthetic_pe import TEXT_RVA, SyntheticPE
 
-NEW = ("find_crypto_constants", ANTI_ANALYSIS_TOOL)
+NEW = ("find_crypto_constants", ANTI_ANALYSIS_TOOL, "function_index")
 ROUTINE = TEXT_RVA + 0x200
 
 
@@ -112,8 +112,9 @@ def _line(result: Any, tool: str) -> str:
 class TestThePassesComeLast:
     def test_the_constant_scan_follows_every_earlier_step(self, tmp_path: Path) -> None:
         tools = [e.tool for e in _pack(_sample(tmp_path)).entries]
-        assert tools[-1] == "find_crypto_constants"
-        assert tools[-3:-1] == ["resolve_api_hashes", "decode_string_blobs"]
+        # Only the function index comes after the passes.
+        assert tools[-2:] == ["find_crypto_constants", "function_index"]
+        assert tools[-4:-2] == ["resolve_api_hashes", "decode_string_blobs"]
 
     def test_the_ids_before_the_passes_are_unchanged(self, tmp_path: Path) -> None:
         path = _sample(tmp_path)
@@ -575,7 +576,9 @@ class TestTheNodeRecordsWhatThePackLacks:
         monkeypatch.setattr(
             triage_pack,
             "pack_unsaid",
-            lambda entries, max_chars: [e for e in entries if e.tool in NEW],
+            lambda entries, max_chars: [
+                e for e in entries if e.tool in ("find_crypto_constants", ANTI_ANALYSIS_TOOL)
+            ],
         )
         settings = Settings(_env_file=None)
         settings.mcp.servers["threatintel"].enabled = False
