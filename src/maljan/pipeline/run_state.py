@@ -35,6 +35,7 @@ from maljan.pipeline.triage_pack import (
     render_pack,
 )
 from maljan.tools.artefact_index import SERVED_BY
+from maljan.utils.written_forms import pack_escaped
 
 __all__ = [
     "NO_LIMIT",
@@ -215,7 +216,10 @@ def _lines(
         if p and p != "unknown"
     )
     name = str(state.get("file_name") or "")
-    sample = ", ".join(p for p in (sha256, identity, f"submitted as {name}" if name else "") if p)
+    # The submitted name is the submitter's text: quoted as the pack quotes a
+    # sample's own strings, so it reads as one value on one line.
+    submitted = f'submitted as "{pack_escaped(name)}"' if name else ""
+    sample = ", ".join(p for p in (sha256, identity, submitted) if p)
     if sample:
         lines.append(f"sample: {sample}")
 

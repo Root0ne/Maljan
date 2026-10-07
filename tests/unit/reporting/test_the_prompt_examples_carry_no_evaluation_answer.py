@@ -65,6 +65,7 @@ from maljan.agents.judge_agent import (
     technique_question_text,
     verdict_cut_violation,
 )
+from maljan.agents.judge_agent import QUESTION_ROOTS_LABEL as _ROOTS_LABEL
 from maljan.agents.network_analyst import NO_PACKET_TOOL_LINE, OTHER_TOOLS_THEN_ANALYZE
 from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
@@ -85,12 +86,17 @@ from maljan.agents.static_analyst import (
     _reframe_static_raw_data,
     _tool_use_line,
 )
+from maljan.agents.tool_fence import FENCE_STATEMENT as _FENCE_STATEMENT
+from maljan.agents.tool_fence import fenced as _fenced
 from maljan.agents.tool_pinning import (
     UNREADABLE_FILLED_CAPTURE,
     UNREADABLE_FILLED_CAPTURE_REMEDIATION,
 )
+from maljan.analysis import evidence_roots as _roots
+from maljan.analysis.evidence_roots import layers_and_roots as _layers_and_roots
+from maljan.analysis.evidence_roots import roots_phrase as _roots_phrase
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
-from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE
+from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE, SUMMARY_FENCE_STATEMENT
 from maljan.analysis.pcap_summary import CaptureRead
 from maljan.extractors.capability_matrix import (
     NOT_ASKED_UNKNOWN_ID,
@@ -239,6 +245,36 @@ from maljan.schemas.isr_models import (
 from maljan.schemas.stix_models import Bundle
 from maljan.tools import api_hashes, binary, knowledge, string_blobs
 from maljan.tools.errors import CAPTURES_REMEDIATION, NO_CAPTURE_REMEDIATION
+
+# Every no: sentence a root reading writes, and the names of the roots.
+_ROOT_SENTENCES = [
+    getattr(_roots, name)
+    for name in (
+        "NO_ENTRY",
+        "NO_CITATION",
+        "FAILED",
+        "REFERENCE",
+        "NOTHING_TO_PLACE",
+        "BY_NAME_ONLY",
+        "REPEAT_LOOP",
+        "SIGNATURE_UNPLACED",
+        "MATCH_UNPLACED",
+        "SHARED_COMMAND",
+        "NAMES_NO_ROW",
+        "NO_ROW_NAMES_TECHNIQUE",
+        "FILE_UNTOLD",
+        "OUTSIDE_PROGRAM",
+        "OFFSET_UNPLACED",
+        "BLOB_UNMATCHED",
+        "WHOLE_FILE",
+        "PE_HEADER",
+        "IMPORT_TABLE",
+        "EXPORT_TABLE",
+        "RESOURCE_TABLE",
+        "DEBUG_DIRECTORY",
+        "OVERLAY",
+    )
+]
 
 # The distinctive terms of the evaluation key: how the scored sample resolves its
 # APIs, checks its host, persists, configures itself, talks to its server and
@@ -1202,6 +1238,7 @@ PROMPTS: dict[str, str] = {
     "an analyst input shortened to its window": INPUT_SHORTENED_NOTICE.format(
         detail="the first 1,000 of 9,000 characters are shown, ending in …"
     ),
+    "the summariser's fence statement": SUMMARY_FENCE_STATEMENT,
     "a summariser prompt shortened to its window": SUMMARISER_SHORTENED_NOTE.format(
         shown=1000, total=9000
     ),
@@ -1412,7 +1449,7 @@ PROMPTS: dict[str, str] = {
     ).message,
     "a later chunk's list of the earlier chunks' calls": earlier_chunks_block(
         [
-            LedgerEntry(id="ev_0001", tool="a", args={"x": "1"}),
+            LedgerEntry(id="ev_0001", tool="a", args={"x": "1"}, output="a recorded result"),
             LedgerEntry(id="ev_0002", tool="b", args={}, ok=False),
         ]
     ),
@@ -1741,6 +1778,37 @@ PROMPTS: dict[str, str] = {
             {"host one.example and two.example seen"},
         )
         if v.code in ("stix.shape_names_a_value", "stix.pattern_refused")
+    ),
+    "the fence a text tool answer is shown in": " ".join(
+        [
+            _FENCE_STATEMENT,
+            _fenced("ev_0001", "line one\n<<a line of the answer"),
+        ]
+    ),
+    "evidence roots beside the layers, and why a cited entry gives none": " ".join(
+        [
+            _ROOTS_LABEL,
+            _layers_and_roots(2, ["0x1a40 in .text"], []),
+            _layers_and_roots(3, ["0x1a40 in .text", "the import table"], ["ev_0001: no: x"]),
+            _roots_phrase([], ["ev_0001: no: x"]),
+            # Every root label, as each template writes one.
+            _roots.PLACE_IN_SECTION.format(address="0x1a40", section=".text"),
+            _roots.PLACE_OUTSIDE.format(address="0x1a40"),
+            _roots.FUNCTION_ROOT.format(
+                place=_roots.PLACE_IN_SECTION.format(address="0x1a40", section=".text")
+            ),
+            _roots.SECTION_ROOT.format(name=".rdata"),
+            _roots.PROCESS_ROOT.format(pid=84),
+            _roots.FLOW_ROOT.format(proto="tcp", host="192.0.2.1", port=443),
+            _roots.DNS_ROOT.format(name="example.com"),
+            _roots.FILE_OFFSET_ROOT.format(offset="0x500"),
+            _roots.FILE_ROOT.format(root=_roots.PE_HEADER, file='"payload.bin"'),
+            _roots.WHOLE_OTHER_FILE.format(file="sha256 abcdefabcdef"),
+            *(
+                sentence.format(tool="a_tool", entry="ev_0001", count=2)
+                for sentence in _ROOT_SENTENCES
+            ),
+        ]
     ),
 }
 

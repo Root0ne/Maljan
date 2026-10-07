@@ -1192,6 +1192,12 @@ class _Pack:
         args: dict[str, Any] = {"path": path}
         if joined:
             args["joined"] = [f"{entry_id} {tool}" for tool, (entry_id, _) in joined.items()]
+        # The exception directory's ranges are kept beside the answer, never in
+        # it (``LedgerEntry.function_ranges``): the answer is what it was, and
+        # the evidence byte budget charges the answer alone, so the ranges
+        # displace nothing in the pack.
+        ranges: dict[str, list[list[str]]] = {}
+        held = len(self.recorder.entries)
         self.record(
             artefact_index.TOOL,
             args,
@@ -1203,8 +1209,12 @@ class _Pack:
                 hashes=joined.get("resolve_api_hashes"),
                 blobs=joined.get("decode_string_blobs"),
                 absent=absent,
+                ranges_into=ranges,
             ),
         )
+        made = self.recorder.entries[held:]
+        if ranges and made and made[-1].tool == artefact_index.TOOL and made[-1].ok:
+            made[-1].function_ranges = ranges
 
 
 # The pack's answers the function index joins, by tool.

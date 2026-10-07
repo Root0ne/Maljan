@@ -4636,6 +4636,8 @@ def make_judge_node(
                             facts_block=pack_text(state, container),
                             run_state=render_run_state(state),
                             verdict_timed_out=VERDICT_TIMEOUT_CODE in _verdict_codes,
+                            # The run's calls, for each technique's evidence roots.
+                            ledger=_ledger,
                         )
                     except Exception as _exc:  # noqa: BLE001 — an unasked question withholds nothing
                         logger.warning(

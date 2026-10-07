@@ -95,7 +95,7 @@ from __future__ import annotations
 
 import heapq
 import re
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1300,8 +1300,12 @@ def index_image(
     absent: Mapping[str, str] | None = None,
     addresses: Sequence[tuple[str, int]] = (),
     function_lists: str = FUNCTION_LISTS_ABSENT,
+    ranges_into: dict[str, list[list[str]]] | None = None,
 ) -> dict[str, Any]:
     """The index of ``image`` joined with the run's answers, each given as ``(entry id, data)``.
+
+    ``ranges_into``, when given, is filled with :func:`function_ranges`: a
+    fact the caller keeps beside the answer, never in it.
 
     ``absent`` is the ``no: <reason>`` of each source the caller could not
     join, by source; the answer and its head state each. ``addresses`` are
@@ -1437,11 +1441,39 @@ def index_image(
         for start, function in sorted(graph.functions.items())
         if start not in rows.cells and function.callees
     }
+    if ranges_into is not None:
+        ranges_into.update(function_ranges(image, graph.functions))
     data["function_lists"] = function_lists
     data["absent"] = dict(absent or {})
     if addresses:
         data.update(_asked(image, graph, placer, rows, names, entry_points, addresses))
     return data
+
+
+def function_ranges(image: Image, starts: Iterable[int]) -> dict[str, list[list[str]]]:
+    """The exception directory's ranges that hold no other known function start.
+
+    By the function each belongs to (a chained fragment under its owner), as
+    offsets from the image base, end exclusive: where a place inside a
+    function is that function (``analysis.evidence_roots``). ``starts`` are
+    every function start the index knows (the exception directory, exports,
+    the entry point, capa, call targets); a range holding one other than its
+    own function's is left out, since the table that states it does not
+    agree with the code.
+    """
+    held = set(starts)
+    known = sorted(held)
+    out: dict[str, list[list[str]]] = {}
+    for begin, end, owner in zip(
+        image.function_starts, image.function_ends, image.function_owners, strict=False
+    ):
+        start = owner if owner is not None else begin
+        inside = bisect_left(known, end) - bisect_left(known, begin)
+        if begin <= start < end and start in held:
+            inside -= 1
+        if end > begin and inside <= 0:
+            out.setdefault(hex(start), []).append([hex(begin), hex(end)])
+    return out
 
 
 def _asked(
@@ -1607,8 +1639,12 @@ def function_index(
     hashes: tuple[str, Mapping[str, Any]] | None = None,
     blobs: tuple[str, Mapping[str, Any]] | None = None,
     absent: Mapping[str, str] | None = None,
+    ranges_into: dict[str, list[list[str]]] | None = None,
 ) -> dict[str, Any]:
-    """The function index of the PE at ``path`` (see the module docstring)."""
+    """The function index of the PE at ``path`` (see the module docstring).
+
+    ``ranges_into`` is filled as :func:`index_image` says.
+    """
     try:
         image = pe_image.load(path)
     except FileNotFoundError:
@@ -1616,7 +1652,14 @@ def function_index(
     except pe_image.NotAPortableExecutable as exc:
         return {"error": f"this tool reads Windows PE images only; {exc}", "tool": TOOL}
     return index_image(
-        image, pe_info=pe_info, capa=capa, floss=floss, hashes=hashes, blobs=blobs, absent=absent
+        image,
+        pe_info=pe_info,
+        capa=capa,
+        floss=floss,
+        hashes=hashes,
+        blobs=blobs,
+        absent=absent,
+        ranges_into=ranges_into,
     )
 
 

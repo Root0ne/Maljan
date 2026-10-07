@@ -70,6 +70,7 @@ from maljan.reporting.models import (
     confidence_text,
 )
 from maljan.utils.json_cleaner import safe_parse_json
+from maljan.utils.written_forms import pack_escaped
 
 # ---------------------------------------------------------------------------
 # Structured output schema
@@ -434,9 +435,11 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
         domains = [d for d in report.network.domains if d.is_suspicious] + [
             d for d in report.network.domains if not d.is_suspicious
         ]
+        # A domain and a persistence target are the sample's own text: each
+        # is shown quoted and escaped, one value on one line.
         for dom in domains:
             reason = dom.reason or "observed"
-            lines.append(f"  - domain: {dom.fqdn} ({reason})")
+            lines.append(f'  - domain: "{pack_escaped(str(dom.fqdn))}" ({reason})')
         for ip in report.network.ips:
             note = ip.reputation.get("_heuristic_reason") if ip.reputation else None
             tag = note or ("suspicious" if ip.is_suspicious else "observed")
@@ -450,7 +453,8 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
     if report.persistence:
         for mech in report.persistence:
             lines.append(
-                f"  - {mech.kind}: {mech.target or ''} ({mech.technique_id or 'no-ATT&CK-id'})"
+                f'  - {mech.kind}: "{pack_escaped(str(mech.target or ""))}" '
+                f"({mech.technique_id or 'no-ATT&CK-id'})"
             )
     else:
         lines.append("  (none detected)")

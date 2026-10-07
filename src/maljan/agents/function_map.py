@@ -42,6 +42,7 @@ from maljan.pipeline.validation import (
     image_bases_in,
 )
 from maljan.schemas.evidence import answer_not_shown
+from maljan.utils.written_forms import pack_escaped
 
 __all__ = [
     "FUNCTION_MAP_HEAD",
@@ -660,10 +661,21 @@ def _kinds(artefacts: Sequence[Artefact]) -> list[tuple[str, int, list[str]]]:
     return out
 
 
+def _name(name: str) -> str:
+    """A function's name as the block shows it: quoted, as the pack quotes a sample's text.
+
+    A decompiler builds a name from the sample's own export and symbol names,
+    so a name is shown as one quoted, escaped value on one line.
+    """
+    return f'"{pack_escaped(str(name))}"'
+
+
 def _where(address: int | None, names: Sequence[str]) -> str:
-    head = hex(address) if address is not None else (names[0] if names else "unnamed")
-    shown = [n for n in names if n != head] if address is not None else list(names[1:])
-    return f"{head} ({', '.join(shown)})" if shown else head
+    head = hex(address) if address is not None else (_name(names[0]) if names else "unnamed")
+    shown = list(names) if address is not None else list(names[1:])
+    shown = [n for n in shown if address is None or n != head]
+    quoted = ", ".join(_name(n) for n in shown)
+    return f"{head} ({quoted})" if shown else head
 
 
 def _folded(entry: MapEntry) -> str:
@@ -672,7 +684,7 @@ def _folded(entry: MapEntry) -> str:
     kept = [n for n in entry.names if not _GENERIC_FUNCTION_NAME.fullmatch(n)]
     if entry.address is None:
         return _where(None, kept or list(entry.names))
-    return f"{hex(entry.address)} ({', '.join(kept)})" if kept else hex(entry.address)
+    return _where(entry.address, kept)
 
 
 def _visited_line(entry: MapEntry) -> str:

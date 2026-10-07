@@ -573,7 +573,38 @@ number of its own distinct artefacts, ties by address: `- 0x401000: calls
 (ev_0011); called by 1, calls 3 functions; 1 callee holds 2 artefacts of their
 own, counted per callee`. Every name a row takes from the sample (an import, a
 resolved name, an export) is quoted and escaped as the pack writes every
-recovered string, so it reads as data; a string a function refers to is
+recovered string, so it reads as data. The same holds wherever a value the
+sample or its submitter wrote reaches a model as free text: the submitted name
+in the run-state block and in the judge's identity block, a function's name in
+the function map, a domain and a persistence target in the composer's prompt.
+One function, `fenced` in `agents/tool_fence.py`, is what a model sees of any
+tool answer on every surface: the recorder's stamp, the answer to a decompile
+of a function an earlier entry holds, the replay of an earlier chunk's result,
+and the judge's evidence excerpts. Every character `str.splitlines` breaks on
+is shown as a plain line feed. A JSON answer stays unfenced, with every raw
+break character inside it (the line and paragraph separators, the next-line
+character, the other control breaks) written as its `\uXXXX` escape, so it is
+still valid JSON, means the same and keeps each value on one line; the JSON a
+guardrail compacts or shortens is written the same way. Every other answer (a
+disassembler's listing, a decompile, a string or export list, any generic MCP
+text answer) is shown between a line `<<tool output [ev_0007] 3f2a9c1b7d0e>>`
+and a line `<<end of tool output [ev_0007] 3f2a9c1b7d0e>>`, both carrying the
+first twelve hexadecimal digits of the SHA-256 of what lies between them, so
+no line inside can be the closing line. Every `<` of a run of two or more
+inside the fence is shown with a backslash before it, wherever it stands, so
+no `<<` appears inside a fence at all, and so is every character that reads
+as `<` wherever it stands (the ones NFKC folds to `<`, the angle quotes and
+angle brackets, the syllabic and arrowhead lookalikes); the escape is
+idempotent. The earlier chunks' list of calls shows each call's headline as
+one quoted value, and the guardrail summariser reads the text it shortens
+inside the same fence, its system text saying once what the fence is. The
+sentence about a prompt's tools says once what the fence is. The guardrails
+count what the view adds inside each answer's limit: a character cut keeps
+the longest prefix that fits with the fence lines and the escapes inside that
+prefix, never reserving the escapes of the part it drops, and the judge's
+evidence room keeps back the escapes a JSON excerpt cut to text then holds.
+The ledger keeps every answer byte for byte, and only what the prompt
+shows is quoted or fenced. A string a function refers to is
 counted, never shown. A row states what and where and names no behaviour.
 When not every row fits, each row in rank order that fits what is left is
 shown, a row that does not is counted and the next is tried, and a last line
@@ -3327,7 +3358,87 @@ is assembled from what the run gathered rather than recomputed beside it:
   runtime from hashes only, no import; not counted as corroboration", and
   under the table each analyst statement naming its technique is printed
   verbatim, by analyst (`CapabilityCell.statements`); the platform classifies
-  none of them. The ELF run
+  none of them. **Corroboration also counts evidence roots**
+  (`analysis/evidence_roots.py`), beside the layers and never instead of them.
+  Every ledger entry states the places in the sample its facts were read from,
+  derived from what the entry holds: a place written as its offset from the
+  image base and the section that holds it (`0x1a40 in .text`) for a strings
+  row's file offset, a FLOSS row's call site, a decoded blob, a hash
+  occurrence, a capa match address, a function index row, or the address a
+  decompile, disassembly or memory read was given; a table of the file (the PE
+  header, the import table, the export table, the resource table, the debug
+  directory, the overlay, a section by name); a sandbox process, which a Sigma
+  match's or a LOLBin hit's command line is joined to; a network flow, named
+  the same whether the sandbox or the capture states it, and a DNS query by
+  name; or the whole file, for hashes, identification, signing and a file
+  reputation answer. A FLOSS row the blob decoder ties to a blob at the same
+  call site with the same decoded text has that blob as its root, so the two tools reading one encoded string are
+  one root; a call site holding blobs none of which decodes to the row's text
+  gives the row no root. A Sigma match or a LOLBin hit is joined to a process
+  only when one process the sandbox recorded has its command line. The two
+  directions of one connection a capture lists are one flow, named by the end
+  it was first seen going to; a host name the sandbox states joins no capture
+  address it does not itself state as that name's resolution. Each file has
+  its own layout. An entry is about the sample only when the path it names is
+  the sample's (the path the triage pack states, a path with the sample's
+  file name, or one whose stem is the sample's SHA-256), or when it names no
+  path and its server's program is the sample: a server holds the program
+  its latest program statement or open names, the sample until one names
+  another file. Any other entry (a file the run carved, a dropped file named
+  by its path, a disassembler's program of another file) is placed against
+  that file's own section table and image base, and its roots name the file
+  by the digest the run states for it or by its path (`0xa100 in UPX0 of
+  file sha256 1a2b3c4d5e6f`); an entry whose file cannot be told gives no
+  root. An address is read against the nearest image base below it, found by
+  bisection. A file that states an image base and no section table gives a
+  file offset no root, since it cannot be placed against the file's addresses.
+  A place inside a function is that function's root, `function 0x2c10 in
+  .text`, so a capa match inside a function and a decompile of it are one
+  root, only by the ranges the file's own exception directory states. The
+  pack's function index carries them beside its answer, never in it
+  (`LedgerEntry.function_ranges`), so the answer is what it was and the
+  evidence byte budget, which charges the answer alone, displaces nothing for
+  them. A range is used only when it lies inside one section and holds no
+  other function start the run knows (the index's starts, exports, the entry
+  point, call targets); a disassembler's stated size and Ghidra's
+  `size_bytes` are not ranges. A place that kept ranges of two different
+  functions both hold belongs to neither; two places in one function with no
+  kept range stay two. The analysis server's served function index gives a
+  root per row its lines state, by the row's address. An entry whose root
+  cannot be read has none and says why in a `no:` sentence: a reference
+  lookup reads nothing of the sample, a failed call read nothing, a call
+  naming its function by name gives no address, an answer with no offset,
+  address, section, event or flow has nothing to place. A statement's roots
+  are those of the entries it cites; an entry holding several gives the ones
+  the statement picks out by a number, or by a quoted or backticked value or
+  name, or a name written as an identifier in its own case, that only one of
+  the entry's roots holds (an import, an export, a section, a resolved name).
+  A number is read in the coordinate the entry's rows state: a file offset
+  for a strings or YARA row, an address otherwise; a number that names one
+  row so and another in the other coordinate names neither. A name several
+  rows hold, a prose word, or a passing mention of a table ("the imports",
+  "the header") picks out nothing. A statement picking out
+  none of a many-row entry's rows gives no root for it and says so ("no: the
+  statement names none of ev_0007's rows"): which row it read is not a fact.
+  An asserting row that names the technique and gives no place (a capa rule
+  with no address, a Sigma match with no one process joined) gives none
+  either, with its reason. The capability row and the published technique carry the distinct
+  roots (`evidence_roots`) and one `<entry>: no: <reason>` per cited entry
+  that gave none (`roots_not_read`); the corroboration record carries the same
+  two lists, adding the rows of each asserting tool's entry that name the
+  technique; the judge's technique question states "2 layers, one evidence
+  root (0x1a40 in .text)" under each technique's mentions, the same layer
+  count (`independent_statements`) and the same roots, read from each claim's
+  text and evidence line, as the report row. The report's
+  corroboration words carry the count of roots inside their parentheses, and
+  name the root only when there is exactly one ("one evidence root (0x1a40 in
+  .text)"); the full list is in `evidence_roots` in report.json and in the run
+  record; a single-layer
+  row states its layer and roots on their own. No publish rule reads the
+  count. The roots are read from one job's ledger in the step that needs
+  them, with no cache shared between jobs, in time linear in the entries and
+  their rows. A stored report built before roots were read renders as it did.
+  The ELF run
   credited `STATIC ANALYST` with T1490 and T1048.001, which no source named. A
   bundle the pipeline built from the analysts' claims because the judge's
   answer was not one credits those analysts, not the judge. A technique id is

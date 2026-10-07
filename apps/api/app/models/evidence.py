@@ -64,6 +64,10 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # the producer already caps it (schemas.evidence).
     output: Mapped[str] = mapped_column(Text, nullable=False, default="")
     structured: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    # The function index's exception-directory ranges, by function start,
+    # kept beside its answer for evidence roots (``maljan.analysis.evidence_roots``);
+    # never part of the answer. NULL on every other entry and every older row.
+    function_ranges: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
 
     # Whether the output was dropped because the agent's byte budget was
     # spent. It is the only thing that says so: a failed call also has an

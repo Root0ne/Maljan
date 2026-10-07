@@ -251,7 +251,7 @@ class TestTheBlockTheModelReads:
         assert lines[0] == FUNCTION_MAP_HEAD
         assert lines[1].startswith("coverage: 2 functions visited")
         assert lines[2] == (
-            "- 0x1360bc0904c (FUN_1360bc0904c): decompiled in ev_0031; reaches 2 resolved "
+            '- 0x1360bc0904c ("FUN_1360bc0904c"): decompiled in ev_0031; reaches 2 resolved '
             "names (ev_0020); summary: FUN_1360bc0904c opens the thing."
         )
         assert lines[3] == "also visited: 0x1360bc0b344"
@@ -518,7 +518,7 @@ class TestTheFoldAndTheFacts:
 
         lines = function_map_block(build_function_map(own, None, [], (BASE,))).splitlines()
 
-        assert lines[2:] == ["also visited: 0x1360bc03c7c (entry), 0x1360bc03cb4"]
+        assert lines[2:] == ['also visited: 0x1360bc03c7c ("entry"), 0x1360bc03cb4']
 
     def test_one_text_passed_to_two_calls_is_two_call_site_facts(self) -> None:
         def _place(call_at: str) -> dict[str, Any]:

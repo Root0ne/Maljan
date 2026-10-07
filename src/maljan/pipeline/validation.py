@@ -8413,6 +8413,12 @@ def corroboration(
 
     The same collection feeds the judge's evidence-summary block, so the metric
     the report carries and the block the judge read cannot disagree.
+
+    Each row also states the distinct evidence roots its sources read
+    (``evidence_roots``, ``analysis.evidence_roots``): the places the claims
+    and findings naming it cite, and the rows of each asserting tool's entry
+    that name it; ``roots_not_read`` says why a cited entry gave none. Two
+    sources reading one place are one root. Nothing decides on it.
     """
     from maljan.pipeline.evidence_summary import (
         ASSERTING_SOURCES,
@@ -8422,6 +8428,7 @@ def corroboration(
 
     agents = {str(getattr(isr, "agent_id", "") or name) for name, isr in (isrs or {}).items()}
     associations = catalogue_associations(ledger)
+    roots = technique_roots(isrs, ledger)
     out: dict[str, dict[str, list[str]]] = {}
     collected = collect(isrs, ledger)
     for tid in associations:
@@ -8449,7 +8456,63 @@ def corroboration(
         reason = _retired_reason(tid)
         if reason:
             row["retired_reason"] = reason
+        counted = roots.get(tid)
+        if counted is not None and counted.roots:
+            row["evidence_roots"] = list(counted.roots)
+        if counted is not None and counted.not_read:
+            row["roots_not_read"] = list(counted.not_read)
         out[tid] = row
+    return out
+
+
+def technique_roots(isrs: dict[str, Any] | None, ledger: Sequence[Any] | None) -> dict[str, Any]:
+    """Per technique id, the evidence roots its claims, findings and asserting rows read.
+
+    ``{tid: RootCount}``, read over the sources ``evidence_summary.collect``
+    counts: a valid claim's statement and evidence line, a finding's text and
+    ``evidence_ids``, and each asserting tool's rows that name the id. Empty
+    without a ledger.
+    """
+    from maljan.analysis.evidence_roots import RootCount, run_roots
+    from maljan.pipeline.evidence_summary import (
+        ASSERTING_SOURCES,
+        _base_tool_name,
+        _technique_ids,
+        invalid_technique_ids,
+    )
+
+    entries = list(ledger or ())
+    if not entries:
+        return {}
+    found = run_roots(entries)
+    out: dict[str, RootCount] = {}
+    for isr in (isrs or {}).values():
+        for claim in getattr(isr, "claims", None) or []:
+            if not getattr(claim, "technique_id_valid", True):
+                continue
+            tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
+            if not tid:
+                continue
+            said = f"{getattr(claim, 'claim', '') or ''} {getattr(claim, 'evidence_ref', '') or ''}"
+            out.setdefault(tid, RootCount()).add(*found.of_statement(said, entry_ids_in(said)))
+        for finding in getattr(isr, "findings", None) or []:
+            said = f"{getattr(finding, 'title', '') or ''} {getattr(finding, 'detail', '') or ''}"
+            cited = [str(i) for i in getattr(finding, "evidence_ids", None) or [] if i]
+            for raw in getattr(finding, "technique_ids", None) or []:
+                tid = str(raw or "").strip().upper()
+                if tid:
+                    out.setdefault(tid, RootCount()).add(*found.of_statement(said, cited))
+    invalid = invalid_technique_ids(entries)
+    for entry in entries:
+        if _base_tool_name(getattr(entry, "tool", "")) not in ASSERTING_SOURCES:
+            continue
+        if getattr(entry, "repeated_of", None):
+            continue
+        for tid in _technique_ids(getattr(entry, "structured", None)):
+            if tid not in invalid:
+                out.setdefault(tid, RootCount()).add(
+                    *found.of_assertion(str(getattr(entry, "id", "") or ""), tid)
+                )
     return out
 
 

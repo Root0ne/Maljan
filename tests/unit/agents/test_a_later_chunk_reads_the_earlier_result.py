@@ -30,6 +30,7 @@ from maljan.agents.evidence_recorder import (
     record_tools,
     seeded_repeat_guard,
 )
+from maljan.agents.tool_fence import fenced
 from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
 from maljan.schemas.evidence import EvidenceCounter, LedgerEntry
 
@@ -79,7 +80,7 @@ class TestTheEarlierResultAnswersTheCall:
 
         assert calls == []
         assert answer == earlier_chunk_answer("decompile_function", "ev_0003", RESULT)
-        assert answer.startswith(f"[ev_0003]\n{RESULT}")
+        assert answer.startswith(f"[ev_0003]\n{fenced('ev_0003', RESULT)}")
         assert guard.served_repeats == 0
 
     def test_the_answer_says_where_the_result_came_from(self) -> None:
@@ -115,7 +116,8 @@ class TestTheEarlierResultAnswersTheCall:
         answers = [tool.invoke({"path": f"0x{n:x}"}) for n in range(1, 25)]
 
         assert calls == []
-        assert [a.split("\n", 2)[1] for a in answers] == [f"body {n}" for n in range(1, 25)]
+        # Each answer is the recorded text, inside the fence a text answer is shown in.
+        assert [a.split("\n", 3)[2] for a in answers] == [f"body {n}" for n in range(1, 25)]
         assert guard.served_repeats == 0
         assert guard.ending_the_loop() is False
 
@@ -152,7 +154,8 @@ class TestTheEarlierResultAnswersTheCall:
 
         guard.reset()
 
-        assert tool.invoke({"path": "0x3c7c"}).startswith(f"[ev_0003]\n{RESULT}")
+        shown = tool.invoke({"path": "0x3c7c"})
+        assert shown.startswith(f"[ev_0003]\n{fenced('ev_0003', RESULT)}")
         assert calls == []
         assert guard.served_repeats == 0
 
@@ -241,7 +244,7 @@ def test_the_second_chunk_s_model_reads_the_earlier_calls_and_their_result() -> 
     assert EARLIER_CHUNKS_HEAD in str(human.content)
     assert 'decompile_function({"path": "0x3c7c"}) → ev_0001' in str(human.content)
     answered = [m for m in second[-1] if isinstance(m, ToolMessage)]
-    assert answered and str(answered[-1].content).startswith("[ev_0001]\nfresh answer for 0x3c7c")
+    assert answered and str(answered[-1].content).startswith("[ev_0001]\n<<tool output [ev_0001] ")
     assert "earlier chunk" in str(answered[-1].content)
 
 

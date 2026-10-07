@@ -3089,7 +3089,11 @@ def earlier_chunks_block(entries: Sequence[Any]) -> str:
                 remediation=str(getattr(entry, "remediation", "") or ""),
             ).split()
         )
-        said = f": {headline}" if headline else ""
+        # Shown through the one view of a tool answer (``agents.tool_fence``):
+        # an excerpt inside the platform's own line is one quoted value.
+        from maljan.agents.tool_fence import excerpt_view
+
+        said = f": {excerpt_view(headline)}" if headline else ""
         lines.append(f"- {tool}({shown}) \u2192 {entry_id}{failed}{said}")
     if not lines:
         return ""

@@ -45,10 +45,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from maljan.analysis.evidence_roots import RootCount, layers_and_roots, run_roots
 from maljan.analysis.technique_ids import attack_reference_id, says_no_technique
 from maljan.core.logger import logger
 from maljan.reporting.models import CapabilityCell, TTPMapping
-from maljan.schemas.evidence import ENTRY_ID_RE
+from maljan.schemas.evidence import ENTRY_ID_RE, entry_ids_in
 from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
@@ -99,6 +100,7 @@ def build_capability_matrix(
     stix_output: dict[str, Any] | None,
     isr_reports: dict[str, Any] | None,
     sample: dict[str, Any] | None = None,
+    ledger: Sequence[Any] | None = None,
 ) -> tuple[list[CapabilityCell], list[TTPMapping]]:
     """Return ``(capability_cells, ttp_mappings)`` for the report.
 
@@ -111,10 +113,16 @@ def build_capability_matrix(
     unresolvable id already follows: kept in the matrix with the reason
     written beside it, and out of the published list. Without it the question
     is not asked, which is the same fall-open answer the validator gives.
+
+    ``ledger`` is the run's tool calls. With any, each row states the distinct
+    evidence roots its analysts' statements cite (``analysis.evidence_roots``)
+    beside the layers that named it; nothing reads the count to decide.
+    Without it the row states none.
     """
     techniques = _collect_techniques(stix_output, isr_reports)
     if not techniques:
         return [], []
+    roots_of = run_roots(ledger) if ledger else None
 
     out_of_scope = _out_of_scope(list(techniques), sample)
     review = technique_review(stix_output)
@@ -146,6 +154,10 @@ def build_capability_matrix(
         layers = info.get("layers") or []
         valid = bool(info.get("valid", True))
         independent, identical = independent_statements(info.get("statements") or [])
+        counted = RootCount()
+        if roots_of is not None:
+            for text, ids in info.get("cited") or []:
+                counted.add(*roots_of.of_statement(text, ids))
 
         # Never emit a zero-confidence cell with no evidence and no contributing
         # source — it is an empty claim the UI would render as a "verified"
@@ -229,6 +241,8 @@ def build_capability_matrix(
                 statements=[f"{who}: {text}" for who, text in info.get("statements") or [] if text],
                 independent_layers=independent,
                 identical_statements=identical,
+                evidence_roots=list(counted.roots),
+                roots_not_read=list(counted.not_read),
             )
         )
         if not_published:
@@ -252,6 +266,8 @@ def build_capability_matrix(
                 technique_id_valid=valid,
                 independent_layers=independent,
                 identical_statements=identical,
+                evidence_roots=list(counted.roots),
+                roots_not_read=list(counted.not_read),
             )
         )
 
@@ -550,7 +566,9 @@ def _collect_techniques(
                 quote = getattr(claim, "claim", None) or getattr(claim, "evidence_ref", None) or ""
                 if quote and quote not in row["evidence"]:
                     row["evidence"].append(str(quote))
-                row.setdefault("statements", []).append((str(layer), str(quote)))
+                statement, cited = _claim_statement(str(layer), claim)
+                row.setdefault("statements", []).append(statement)
+                row.setdefault("cited", []).append(cited)
             # 3. The findings' own technique ids. An ISR carries ids in two
             # places, and this was the one no check ever saw: the report's
             # Findings table and the corroboration metric are both built from
@@ -586,10 +604,12 @@ def _collect_techniques(
                     # statement under five techniques. What the finding says
                     # is its detail.
                     detail = str(getattr(finding, "detail", "") or "").strip()
-                    if detail:
+                    said, cited = _finding_statement(str(layer), finding)
+                    if said is not None:
                         if detail not in row["evidence"]:
                             row["evidence"].append(detail)
-                        row.setdefault("statements", []).append((str(layer), detail))
+                        row.setdefault("statements", []).append(said)
+                    row.setdefault("cited", []).append(cited)
 
     # The catalogue question, asked of every id still standing. A claim was
     # asked it in the analyst's own loop and carries the answer; an id that
@@ -600,6 +620,61 @@ def _collect_techniques(
         techniques[tid]["valid"] = False
 
     return techniques
+
+
+def _claim_statement(layer: str, claim: Any) -> tuple[tuple[str, str], tuple[str, list[str]]]:
+    """A claim's statement ``(layer, text)`` and what it cites ``(text read, entry ids)``.
+
+    The text read for its evidence roots is the claim's statement and its
+    evidence line together, and the ids are the ones either writes.
+    """
+    quote = getattr(claim, "claim", None) or getattr(claim, "evidence_ref", None) or ""
+    ref = getattr(claim, "evidence_ref", "") or ""
+    said = f"{getattr(claim, 'claim', '') or ''} {ref}"
+    return (layer, str(quote)), (said, sorted(entry_ids_in(said)))
+
+
+def _finding_statement(
+    layer: str, finding: Any
+) -> tuple[tuple[str, str] | None, tuple[str, list[str]]]:
+    """A finding's statement (its detail, ``None`` without one) and what it cites."""
+    detail = str(getattr(finding, "detail", "") or "").strip()
+    cited = [str(i) for i in getattr(finding, "evidence_ids", None) or [] if i]
+    title = str(getattr(finding, "title", "") or "")
+    return ((layer, detail) if detail else None), (f"{title} {detail}", cited)
+
+
+def technique_statements(
+    isr_reports: dict[str, Any] | None,
+) -> dict[str, tuple[list[tuple[str, str]], list[tuple[str, list[str]]]]]:
+    """Per technique id, its statements and what they cite, as the matrix reads them.
+
+    ``{tid: (statements, cited)}``: the same lists, in the same order, the
+    matrix row of the id counts its independent layers (``independent_statements``)
+    and its evidence roots over, so a surface stating either states the row's.
+    """
+    out: dict[str, tuple[list[tuple[str, str]], list[tuple[str, list[str]]]]] = {}
+    for agent_name, isr in (isr_reports or {}).items():
+        layer = str(getattr(isr, "domain", None) or agent_name or "agent")
+        for claim in getattr(isr, "claims", None) or []:
+            claim_tid = getattr(claim, "technique_id", None)
+            if not claim_tid or says_no_technique(claim_tid):
+                continue
+            statement, cited = _claim_statement(layer, claim)
+            held = out.setdefault(str(claim_tid), ([], []))
+            held[0].append(statement)
+            held[1].append(cited)
+        for finding in getattr(isr, "findings", None) or []:
+            for raw in getattr(finding, "technique_ids", None) or []:
+                tid = str(raw or "").strip().upper()
+                if not tid or says_no_technique(tid):
+                    continue
+                said, cited = _finding_statement(layer, finding)
+                held = out.setdefault(tid, ([], []))
+                if said is not None:
+                    held[0].append(said)
+                held[1].append(cited)
+    return out
 
 
 def _judge_objects(stix_output: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -746,13 +821,16 @@ class TechniqueQuestion:
     evidence ids)``, the text as the analyst wrote it. ``check`` is the ATT&CK
     check's finding when no claim naming the technique describes it
     (``validation.undescribed_technique_finding``), shown with the question,
-    and ``""`` otherwise.
+    and ``""`` otherwise. ``roots`` is the layers that name it beside the
+    distinct evidence roots their mentions cite (``analysis.evidence_roots``),
+    when the question was built with the ledger, and ``""`` otherwise.
     """
 
     technique_id: str
     kind: str
     mentions: list[tuple[str, str, list[str]]] = field(default_factory=list)
     check: str = ""
+    roots: str = ""
 
 
 def technique_review(stix_output: dict[str, Any] | None) -> TechniqueReview | None:
@@ -812,6 +890,7 @@ def judge_questions(
     sample: dict[str, Any] | None = None,
     *,
     attck: Any = None,
+    ledger: Sequence[Any] | None = None,
 ) -> tuple[list[TechniqueQuestion], dict[str, str]]:
     """The techniques to put to the judge after its verdict, and the ones left out, with why.
 
@@ -828,6 +907,9 @@ def judge_questions(
     here, as the matrix asks it — or one the routed sample cannot host is not
     asked: the matrix keeps it out of the published list before any answer is
     read. Those come back as ``{id: "not asked: <reason>"}``.
+
+    With ``ledger``, each question states its layers beside the distinct
+    evidence roots its mentions cite, where the mentions are listed.
     """
     in_bundle = bundle_technique_ids(stix_output)
     questions: dict[str, TechniqueQuestion] = {}
@@ -889,7 +971,25 @@ def judge_questions(
             not_asked[tid] = not_asked_unknown_id(tid)
         elif out_of_scope.get(tid):
             not_asked[tid] = f"not asked: {out_of_scope[tid]}"
-    return [q for tid, q in questions.items() if tid not in not_asked], not_asked
+    asked = [q for tid, q in questions.items() if tid not in not_asked]
+    if ledger and asked:
+        # The report row's own fact: the layers ``independent_statements``
+        # credits and the roots of every statement naming the id, each read
+        # from its text and its evidence line, as the matrix reads them.
+        roots_of = run_roots(ledger)
+        statements = technique_statements(isr_reports)
+        by_id: dict[str, str] = {}
+        for raw in statements:
+            by_id.setdefault(raw.strip().upper(), raw)
+        for question in asked:
+            key = question.technique_id
+            said, cited = statements.get(key) or statements.get(by_id.get(key, ""), ([], []))
+            counted = RootCount()
+            for text, ids in cited:
+                counted.add(*roots_of.of_statement(text, ids))
+            layers = len(independent_statements(said)[0])
+            question.roots = layers_and_roots(layers, counted.roots, counted.not_read)
+    return asked, not_asked
 
 
 def _undescribed(

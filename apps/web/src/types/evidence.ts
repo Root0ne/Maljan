@@ -43,6 +43,8 @@ export interface EvidenceEntry {
    *  read; such an entry is also truncated. 0 or absent for an answer stored
    *  whole. */
   chars_dropped?: number;
+  /** The function index's exception-directory ranges, by function start; absent elsewhere. */
+  function_ranges?: Record<string, string[][]> | null;
   /** The earlier identical call this one was answered from, the label the
    *  recorder parsed out of the arguments, and the run-clock time the call
    *  started at. Absent on rows written before the columns existed. */
