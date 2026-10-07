@@ -617,12 +617,17 @@ instruction count), two ways:
   with none names nothing and lends nothing (a name resolved and never
   called). The table names nothing when a record holds two such addresses,
   when records name addresses at different places within them, when fewer
-  than two hashed values give no stride, when their spacings differ, when an
-  address lies outside every record, when the records do not share one layout
+  than two hashed values give no stride, when their spacings differ, when a
+  store to the frame of a pointer's width (a hashed value, an address, or any
+  other value that wide) lies outside every record, when the records do not
+  share one layout
   of addresses, or when the stack or frame pointer moves between the stores by
   an amount the run cannot read (any other write of either, or an x86 call,
-  whose callee may pop its arguments). Stores that carry no frame offset
-  (pushes, absolute slots) make no records.
+  whose callee may pop its arguments). A narrower store (a loop counter, a
+  flag) is no record's and does not count; on x86 a 32-bit counter is a
+  pointer's width, so a counter stored beside an x86 table makes it name
+  nothing. Stores that carry no frame offset (pushes, absolute slots) make no
+  records.
 
 A slot two names fill, or filled by a hashed value that reads as two names, is
 ambiguous and names nothing. Every call or jump through a named slot, direct or

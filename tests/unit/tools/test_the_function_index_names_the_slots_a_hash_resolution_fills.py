@@ -731,6 +731,59 @@ class TestARecordSExtentIsTheTableSStride:
         }
 
 
+class TestAStoreOfAPointerSWidthOutsideTheRecordsCounts:
+    def test_a_dword_counter_below_a_table_is_no_record_s(self, tmp_path: Path) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        first = _record(code, 0x30, FIRST, SLOT_A)
+        second = _record(code, 0x48, SECOND, SLOT_B)
+        code.raw(b"\xc7\x44\x24\x20" + struct.pack("<I", 0))  # mov dword [rsp+0x20], 0
+        code.ret()
+        _user_calls(code)
+
+        answer = _index(image, tmp_path, _two(first, second))
+
+        assert answer["resolved_slots"] == {
+            hex(BASE + SLOT_A): "OpenThingW",
+            hex(BASE + SLOT_B): "CloseThing",
+        }
+
+    def test_a_qword_stray_store_below_a_table_makes_it_name_nothing(self, tmp_path: Path) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        first = _record(code, 0x30, FIRST, SLOT_A)
+        second = _record(code, 0x48, SECOND, SLOT_B)
+        code.raw(b"\x48\x89\x5c\x24\x20")  # mov [rsp+0x20], rbx
+        code.ret()
+        _user_calls(code)
+
+        answer = _index(image, tmp_path, _two(first, second))
+
+        assert answer["resolved_slots"] == {}
+
+    def test_a_loaded_pointer_before_the_first_hash_makes_the_table_name_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        code.raw(b"\x48\x8b\x1d" + struct.pack("<i", 0))  # mov rbx, [rip+0]
+        code.raw(b"\x48\x89\x1c\x24")  # mov [rsp], rbx: the first record's pointer
+        first = code.hash_in_record(0x08, FIRST)
+        code.lea_rax(SLOT_B)
+        code.rax_to_frame(0x10)
+        second = code.hash_in_record(0x18, SECOND)
+        code.lea_rax(SLOT_C)  # an unrelated local after the table
+        code.rax_to_frame(0x20)
+        code.ret()
+        code.go(USER).call_slot(SLOT_B)
+        code.call_slot(SLOT_C)
+        code.ret()
+
+        answer = _index(image, tmp_path, _two(first, second))
+
+        assert answer["resolved_slots"] == {}
+
+
 class TestAnAddressHeldAcrossACallIsNotKnown:
     def test_an_address_taken_before_a_call_and_stored_after_it_is_no_address(
         self, tmp_path: Path

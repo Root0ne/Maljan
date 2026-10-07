@@ -57,7 +57,10 @@ What it states, and nothing else:
   jump through a named slot, direct or through a register a straight-line
   load from it set, is a call of that name (``slot_calls``), and leaves the
   count of calls that name nothing. A slot two names fill is ambiguous
-  (``ambiguous_slots``) and names nothing.
+  (``ambiguous_slots``) and names nothing. A table names nothing when a store
+  of a pointer's width lies outside its records; a narrower store (a loop
+  counter, a flag) is no record's. On x86 a 32-bit counter is a pointer's
+  width, so a counter stored beside an x86 table makes it name nothing.
 * **Callers and callees**, and the **indirect artefacts**: how many of its
   direct callees hold artefacts of their own, and how many those are, each
   callee's own distinct count added. One call deep and added per callee, so
@@ -632,8 +635,8 @@ class _Reader:
         ins: Instruction,
         hashed: Sequence[tuple[tuple[str, ...], int]],
     ) -> list[tuple[Any, ...]]:
-        """A store to a frame slot (``[rsp+x]``, ``[rbp+x]``, x86 ``esp``/``ebp``): the
-        hashed value or the address it stores there, at its offset (an ``[rsp+x]``
+        """A store to a frame slot (``[rsp+x]``, ``[rbp+x]``, x86 ``esp``/``ebp``): its
+        offset, and the hashed value or the address it stores there (an ``[rsp+x]``
         offset read against the stack pointer the run began with).
 
         Read with ``call_sites._frame_ref`` and ``call_sites._frame_store``; a
@@ -642,14 +645,21 @@ class _Reader:
         is64 = self.image.is64
         if not is64 and at < len(code) and 0x40 <= code[at] <= 0x4F:
             return []
-        reference = _frame_ref(code, at)
         stored = _frame_store(code, at)
-        if reference is None or stored is None:
+        if stored is None:
             return []
+        # A store of a pointer's width (or a record's own hash or address) is
+        # where a table's records may lie: one outside them means they are not
+        # a table. A narrower store (a loop counter, a flag) is no record's.
+        word = 8 if is64 else 4
+        store = ("frame store", stored[0], stored[1] - (self.pushed if stored[0] == 4 else 0))
+        out: list[tuple[Any, ...]] = [store] if stored[2] == word else []
+        reference = _frame_ref(code, at)
+        if reference is None:
+            return out
         _rex, op, register, base, displacement = reference
         if base == 4:
             displacement -= self.pushed
-        out: list[tuple[Any, ...]] = []
         if op == 0x89:
             if register in self.live:
                 names, place = self.live[register]
@@ -665,6 +675,8 @@ class _Reader:
                 slot = value - self.image.image_base
                 if 0 <= slot < self.image.size_of_image and self._section(slot) is None:
                     out.append(("frame address", base, displacement, slot, rva))
+        if out and out[0] is not store:
+            out.insert(0, store)
         return out
 
     def _end_run(self) -> None:
@@ -916,7 +928,8 @@ def _name_slots(
       jumps through; one with none names nothing and lends nothing. A record
       holding two such addresses, records naming addresses at different
       offsets within them, fewer than two hashed values, spacings that
-      differ, an address outside every record, records of different layouts,
+      differ, a store of a pointer's width (or a hashed value or an address)
+      outside every record, records of different layouts,
       or a frame moved between the stores by an amount the run cannot read,
       mean the offsets do not lay out a table, and it names nothing. Stores
       with no frame offset (pushes, absolute slots) make no records.
@@ -991,8 +1004,10 @@ def _frame_records(
     A record's extent is the table's stride, read from the equal spacing
     between consecutive hashed values, ``[h_k, h_k + stride)``, the last record
     included. A base names nothing when its hashed values are fewer than two
-    (no stride to read), when their spacings differ, when an address lies
-    outside every record or on a hashed value's own offset, when the records
+    (no stride to read), when their spacings differ, when any store to the
+    base's frame of a pointer's width (or of a hashed value or an address) lies
+    before the first record or past the last one's end, when an address lies on
+    a hashed value's own offset, when the records
     do not all hold their addresses at the same offsets within them (a table's
     records share one layout), or when the frame moved by an amount the run
     cannot read between its stores (``_Reader._move_frame``).
@@ -1000,13 +1015,15 @@ def _frame_records(
     hashes: dict[int, list[tuple[int, tuple[str, ...]]]] = {}
     addresses: dict[int, list[tuple[int, int, int]]] = {}
     stores: dict[int, list[int]] = {}
+    offsets_stored: dict[int, list[int]] = {}
     moved: dict[int, list[int]] = {}
     for k, event in enumerate(run):
         if event[0] == "frame hash":
             hashes.setdefault(event[1], []).append((int(event[2]), tuple(event[3])))
-            stores.setdefault(event[1], []).append(k)
         elif event[0] == "frame address":
             addresses.setdefault(event[1], []).append((int(event[2]), int(event[3]), int(event[4])))
+        elif event[0] == "frame store":
+            offsets_stored.setdefault(event[1], []).append(int(event[2]))
             stores.setdefault(event[1], []).append(k)
         elif event[0] == "frame moved":
             moved.setdefault(event[1], []).append(k)
@@ -1022,6 +1039,9 @@ def _frame_records(
             continue
         (stride,) = spacings
         if stride <= 0:
+            continue
+        end = offsets[-1] + stride
+        if any(not offsets[0] <= offset < end for offset in offsets_stored.get(base, ())):
             continue
         records: list[tuple[tuple[str, ...], list[tuple[int, int, int]]]] = [
             (names, []) for _offset, names in held
