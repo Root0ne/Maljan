@@ -549,7 +549,7 @@ class MCPLangChainToolkit:
             Potentially shortened output.
         """
         from maljan.agents.output_shortening import shorten_json_document, shorten_target
-        from maljan.agents.tool_fence import cut_fence_room, fence_room
+        from maljan.agents.tool_fence import cut_length, view_room
         from maljan.llm.context_window import note_answer_not_shown, output_limit
 
         chars_in = len(output)
@@ -561,9 +561,10 @@ class MCPLangChainToolkit:
             self._record_guardrail(chars_in, len(said), over_limit=True, no_room=True, limit=limit)
             return said
 
-        # A text answer is shown fenced (``agents.tool_fence``): the answer and
-        # its fence together are what has to fit.
-        fence = fence_room(output)
+        # An answer is shown through one view (``agents.tool_fence``): a text
+        # answer fenced, a JSON one with its raw breaks escaped. The answer and
+        # what the view adds together are what has to fit.
+        fence = view_room(output)
         if chars_in + fence <= limit:
             self._record_guardrail(chars_in, chars_in, over_limit=False, limit=limit)
             return output
@@ -593,15 +594,17 @@ class MCPLangChainToolkit:
             except Exception as exc:
                 logger.warning("Output guardrail failed: %s — falling back to truncation.", exc)
             else:
-                self._charge_overage(len(summarised) + fence_room(summarised), limit)
+                self._charge_overage(len(summarised) + view_room(summarised), limit)
                 self._record_guardrail(
                     chars_in, len(summarised), over_limit=True, summarised=True, limit=limit
                 )
                 return summarised
 
         # Fallback: simple truncation with a marker
-        result = output[: truncation_target(limit - cut_fence_room(output))] + TRUNCATION_MARKER
-        self._charge_overage(len(result) + fence_room(result), limit)
+        # The kept part is text and fenced: the fence and the escapes inside
+        # the kept part, never the whole answer's, are kept back.
+        result = output[: cut_length(output, truncation_target(limit))] + TRUNCATION_MARKER
+        self._charge_overage(len(result) + view_room(result), limit)
         self._record_guardrail(
             chars_in,
             len(result),

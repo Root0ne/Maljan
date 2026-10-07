@@ -65,7 +65,15 @@ from maljan.agents.judge_postprocess import (
     PROPERTY_NOT_CARRIED_CODE,
 )
 from maljan.agents.prompt_fragments import tools_statement
-from maljan.agents.tool_fence import FENCE_STATEMENT, escaped, fence_lines_room, fenced, needs_fence
+from maljan.agents.tool_fence import (
+    FENCE_STATEMENT,
+    escaped,
+    escapes,
+    fence_lines_room,
+    fenced,
+    json_view,
+    needs_fence,
+)
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop, call_deadline_of
@@ -1252,6 +1260,30 @@ def _tool_call_arguments(raw: Any) -> Any:
         if isinstance(args, dict):
             return args
     return None
+
+
+def fit_shown_evidence(
+    texts: dict[str, str], room: int | None
+) -> tuple[dict[str, str], str, int | None]:
+    """``texts`` as the one view of a tool answer shows them, fitted to ``room``.
+
+    Each text is put through the view first (``agents.tool_fence``): a text
+    answer escaped as its fence holds it, a JSON one with its raw breaks
+    escaped. A JSON excerpt the fit cuts is text, and fenced, so the escapes
+    the cut texts then hold are kept back from the room and the texts fitted
+    again until what is kept back covers them. Returns the fitted texts, the
+    notice saying what was shortened, and the room left for them (``room``
+    less what was kept back). The fence lines are the caller's to keep back.
+    """
+    viewed = {i: escaped(t) if needs_fence(t) else json_view(t) for i, t in texts.items()}
+    reserved = 0
+    while True:
+        room_now = None if room is None else max(0, room - reserved)
+        fitted, notice = _fit_evidence(viewed, room_now)
+        grown = sum(escapes(t) for t in fitted.values() if needs_fence(t))
+        if room is None or grown <= reserved:
+            return fitted, notice, room_now
+        reserved = grown
 
 
 def _fit_evidence(texts: dict[str, str], room: int | None) -> tuple[dict[str, str], str]:
@@ -3232,16 +3264,17 @@ class JudgeAgent(BudgetMeter):
         fitted_reports, reports_notice = fit_prompt_parts(report_parts, report_room)
         head = lead + technique_question_head(join_prompt_parts(fitted_reports), decided, carried)
         evidence_room = None if room is None else max(0, room - (len(head) - len(empty_head)))
-        # A text answer is shown fenced (``agents.tool_fence``): its lines are
-        # escaped before it is fitted, and the fence lines and the one sentence
-        # saying what a fence is are kept back from the room, for every entry
-        # with text, since a JSON answer cut to fit is text too.
+        # Each excerpt is shown through the one view of a tool answer
+        # (``agents.tool_fence``), applied before it is fitted. The fence lines
+        # and the one sentence saying what a fence is are kept back from the
+        # room for every entry with text, since a JSON answer cut to fit is
+        # text too; so are the escapes a JSON excerpt cut to text then holds,
+        # fitted again until what is kept back covers them.
         if evidence_room is not None:
             fences = sum(1 for e in entries.values() if e.text) * fence_lines_room()
             evidence_room = max(0, evidence_room - fences - len(FENCE_STATEMENT) - 1)
-        texts, evidence_notice = _fit_evidence(
-            {i: escaped(e.text) if needs_fence(e.text) else e.text for i, e in entries.items()},
-            evidence_room,
+        texts, evidence_notice, evidence_room = fit_shown_evidence(
+            {i: e.text for i, e in entries.items()}, evidence_room
         )
         # One notice for both, said in the question and recorded on the answer.
         notice = " ".join(n for n in (reports_notice, evidence_notice) if n)

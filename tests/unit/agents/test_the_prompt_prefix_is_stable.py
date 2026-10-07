@@ -48,6 +48,7 @@ from maljan.agents.base_agent import (
     without_run_state,
 )
 from maljan.agents.judge_agent import JudgeAgent
+from maljan.agents.tool_fence import fenced
 from maljan.pipeline.run_state import (
     RUN_STATE_BEGIN,
     RUN_STATE_END,
@@ -219,7 +220,7 @@ class TestAnAnalystsToolLoop:
         later = _loop()[1]
         assert isinstance(later[-1], ToolMessage)
         # The text answer is shown fenced; the block rides after the fence.
-        assert "answer for w0\n<<end of tool output [ev_0001]>>\n\n" + RUN_STATE_BEGIN in str(
+        assert fenced("ev_0001", "answer for w0") + "\n\n" + RUN_STATE_BEGIN in str(
             later[-1].content
         )
         # The task it rode on before is sent as it was written.

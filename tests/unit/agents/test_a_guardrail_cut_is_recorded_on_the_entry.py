@@ -66,9 +66,9 @@ class TestTheEntry:
 
     def test_an_answer_that_fits_is_whole(self) -> None:
         # The answer and the fence a text answer is shown in (``agents.tool_fence``).
-        from maljan.agents.tool_fence import fence_room
+        from maljan.agents.tool_fence import view_room
 
-        client = _client(len(LISTING) + fence_room(LISTING))
+        client = _client(len(LISTING) + view_room(LISTING))
 
         _handed, entry = _recorded(lambda: client._apply_output_guardrail(LISTING))
 

@@ -1220,8 +1220,9 @@ def _record_tool(
         # Read off the answer itself, before any notice is appended to it: a
         # notice is prose and prose does not parse.
         shortened = shortened_notice(text, narrowing=narrowing)
-        # A text answer is shown inside a fence its content cannot close
-        # (``agents.tool_fence``); the platform's own notices stand outside it.
+        # The answer as the one view shows it (``agents.tool_fence``): a text
+        # answer inside a fence its content cannot close, a JSON one with its
+        # raw breaks escaped; the platform's own notices stand outside it.
         text = fenced(entry.id, text)
         if raw is not None:
             text = f"{text}{REPAIRED_NOTICE}"
