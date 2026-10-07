@@ -422,6 +422,11 @@ def apply_budget(
     spent = max(0, already_spent)
     trimmed = 0
     for entry in entries:
+        # A repeat holds the guard's note and no new content: the answer is
+        # the entry it names, already charged. Charging the note could blank
+        # a later answer that is new.
+        if getattr(entry, "repeated_of", None):
+            continue
         size = stored_bytes(entry)
         if spent + size <= budget_bytes:
             spent += size

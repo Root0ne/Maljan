@@ -174,6 +174,24 @@ class TestARepeatIsReadAsARepeat:
         assert "repeats" not in evidence_summary([_earlier("ev_0001")])
 
 
+class TestARepeatCostsNoBudget:
+    def test_a_later_answer_fits_however_many_repeats_came_before(self) -> None:
+        from maljan.schemas.evidence import apply_budget
+
+        first = LedgerEntry(id="ev_0001", tool="strings", output="a" * 40)
+        repeats = [
+            LedgerEntry(id=f"ev_{n:04d}", tool="strings", output="n" * 30, repeated_of="ev_0001")
+            for n in range(2, 8)
+        ]
+        later = LedgerEntry(id="ev_0008", tool="pe_info", output="b" * 50)
+
+        trimmed, spent = apply_budget([first, *repeats, later], budget_bytes=100)
+
+        assert (trimmed, spent) == (0, 90)
+        assert later.output == "b" * 50 and not later.truncated
+        assert all(r.output and not r.truncated for r in repeats)
+
+
 class TestTheReportSaysWhatWasRepeated:
     def _report(self, evidence: dict[str, Any], rows: list[EvidenceIndexRow]) -> str:
         report = MalwareReport(

@@ -1655,7 +1655,9 @@ names the entry that holds the answer, never another repeat
 (`EvidenceRecorder.holder_of`), and later identical calls are noted under that
 entry, so every served or refused answer names it too. The citation check
 (`EntryTexts.from_ledger`) and the judge's evidence (`question_evidence`) read a
-cited repeat as the entry that holds its answer. A repeat is
+cited repeat as the entry that holds its answer. A repeat's note is not
+charged against the agent's byte budget (`report.evidence_budget_bytes`): it
+holds no new content, and charging it could blank a later answer. A repeat is
 counted apart in `run_summary.evidence.repeats` and in neither `ok` nor
 `failed`; the report header and §13's evidence bounds say how many calls were
 answered from an earlier entry, and Appendix A marks each such row "repeat of
