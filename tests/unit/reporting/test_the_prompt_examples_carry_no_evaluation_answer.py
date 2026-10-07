@@ -467,6 +467,10 @@ def _function_index_text() -> str:
         nowhere = artefact_index.served_index(image, "0x9999")["row"]
         assert nowhere.startswith("no: no function the run knows starts at or holds")
         served = artefact_index.served_index(image)["table"]
+        at_start = artefact_index.served_index(image, "0x140001000")["address_read"]
+        inside = artefact_index.served_index(image, "0x140001004")["address_read"]
+        assert " read as a virtual address: the start of the function at " in at_start
+        assert " read as a virtual address: inside the function at " in inside
     not_an_address = artefact_index.address_readings("the main one", 0x400000)
     assert isinstance(not_an_address, str) and "is not an address" in not_an_address
     served_rows = [artefact_index.row_line(row, artefact_index.THIS_ANSWER) for row in rows]
@@ -486,6 +490,14 @@ def _function_index_text() -> str:
             not_pe,
             nowhere,
             not_an_address,
+            at_start,
+            inside,
+            artefact_index.FAILED_HERE.format("ValueError: x"),
+            artefact_index.ERROR_HERE.format("x"),
+            artefact_index.FLOSS_UNREADABLE.format("x"),
+            triage_pack.INDEX_SOURCE_NOT_IN_PACK,
+            triage_pack.INDEX_SOURCE_UNREADABLE.format(entry="ev_0002"),
+            function_map_block(found, room=200),
         ]
     )
 
