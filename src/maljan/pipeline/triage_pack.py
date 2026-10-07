@@ -546,9 +546,6 @@ class _Pack:
         # capa's rules as it answered them, which the constant scan's answer
         # is compared with; empty when capa gave no answer.
         self.capa_rows: list[dict[str, Any]] = []
-        # The file's imported function names, which the anti-analysis pass
-        # states a call by.
-        self.imported: list[str] = []
         self.reputation_malicious: int | None = None
         # FLOSS, started beside the rest of the pack when it can be. Recorded
         # in its own place at the end, so every id keeps its value.
@@ -686,7 +683,6 @@ class _Pack:
         self._start_decoded_strings(routed)
         try:
             format_facts = self._format_facts(routed)
-            self.imported = _imported_names(format_facts)
             self._strings_and_iocs()
             self._rules()
             self._catalogue_lookups(format_facts, routed)
@@ -1133,7 +1129,6 @@ class _Pack:
         if passes.unavailable:
             self._record_absent(ANTI_ANALYSIS_TOOL, args, passes.unavailable)
             return
-        imported = list(self.imported)
         path = self.inputs.sample_path
         starts = list(self.capa_function_starts)
         rows = self.capa_rows
@@ -1141,7 +1136,7 @@ class _Pack:
             ANTI_ANALYSIS_TOOL,
             args,
             lambda: _anti_analysis_with_capa(
-                run_pass(lambda: passes.anti_analysis(imported, path, starts), ANTI_ANALYSIS_TOOL),
+                run_pass(lambda: passes.anti_analysis(path, starts), ANTI_ANALYSIS_TOOL),
                 rows,
                 starts,
             ),
@@ -1541,9 +1536,8 @@ def _place_lines(entries: list[LedgerEntry], room: int) -> tuple[list[str], list
 def _novel_view(entry: LedgerEntry) -> LedgerEntry | None:
     """A pass entry narrowed to the facts no other line of the pack carries, or ``None``.
 
-    A constant set capa names in the same function, an API call (capa's rules
-    and the catalogue line already read the imports), a ``no:`` line: these
-    take only the room the other lines leave. A constant set no capa rule
+    A constant set capa names in the same function and a ``no:`` line take
+    only the room the other lines leave. A constant set no capa rule
     agrees with, and an exact instruction or TEB read at a function no capa
     anti-analysis rule matched, are new: the view keeps those and counts the
     rest, and it is fitted with the other lines.
@@ -1559,7 +1553,7 @@ def _novel_view(entry: LedgerEntry) -> LedgerEntry | None:
         view = {**data, "found": new, "agreeing": len(rows) - len(new)}
     elif entry.tool == ANTI_ANALYSIS_TOOL:
         rows = [r for r in data.get("stated") or [] if isinstance(r, dict)]
-        new = [r for r in rows if r.get("category") in _READ_IN_CODE and not r.get("capa")]
+        new = [r for r in rows if not r.get("capa")]
         if not new:
             return None
         view = {**data, "stated": new, "also_stated": len(rows) - len(new)}
@@ -2588,10 +2582,6 @@ def _with_capa(answer: dict[str, Any], capa_rows: list[dict[str, Any]]) -> dict[
     return marked
 
 
-# The matches the anti-analysis pass reads in code rather than in the imports.
-_READ_IN_CODE = frozenset({"suspicious_instruction", "peb_teb_access"})
-
-
 def _anti_analysis_with_capa(
     answer: dict[str, Any], capa_rows: list[dict[str, Any]], starts: list[str]
 ) -> dict[str, Any]:
@@ -2733,8 +2723,8 @@ def _anti_analysis(data: dict[str, Any], max_chars: int | None = None) -> str:
     returned = int(data.get("returned") or total)
     checks = f"Ghidra's scan ({SCAN_CHECKS_SHORT})"
     rest = (
-        f"; {_n(not_stated)} more of its matches are not stated (an API the platform's catalogue "
-        "does not list for this, or not the listed instruction or operand)"
+        f"; {_n(not_stated)} more of its matches are not stated (an API call, which the capa and "
+        "catalogue lines read, or not the listed instruction or operand)"
         if not_stated
         else ""
     )
@@ -2753,8 +2743,7 @@ def _anti_analysis(data: dict[str, Any], max_chars: int | None = None) -> str:
     groups = list(grouped.items())
     also = int(data.get("also_stated") or 0)
     also_said = (
-        f"; {_n(also)} more stated in this entry (calls, and matches at a function a capa rule "
-        "names too)"
+        f"; {_n(also)} more stated in this entry (matches at a function a capa rule names too)"
         if also
         else ""
     )

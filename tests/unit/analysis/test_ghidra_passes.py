@@ -3,8 +3,7 @@
 The scan's answer is kept whole, as Ghidra gave it. What the pack states as a
 fact is only the part that is exact: an instruction that is the one Ghidra's
 list names (``INT3`` is not ``INT 0x2d``), a TEB/PEB read through the exact
-``FS:[0x30]`` or ``FS:[0x18]`` operand, and a call to an API the platform's own
-catalogue lists for the technique and the file imports. Every other match is
+``FS:[0x30]`` or ``FS:[0x18]`` operand. An API call, and every other match, is
 counted, not stated.
 """
 
@@ -21,7 +20,6 @@ from maljan.analysis.ghidra_passes import (
     SCAN_CHECKS,
     GhidraPasses,
     GhidraPassFailed,
-    anti_analysis_apis,
     read_findings,
 )
 
@@ -56,26 +54,6 @@ def _call(category: str, technique: str, address: str = "140001020") -> dict[str
     }
 
 
-class TestTheCatalogueList:
-    def test_it_is_the_catalogue_s_specific_anti_analysis_apis(self) -> None:
-        apis = anti_analysis_apis()
-        assert {"CheckRemoteDebuggerPresent", "NtQueryInformationProcess"} <= apis
-        assert {"IsDebuggerPresent", "OutputDebugStringW"} <= apis
-        assert "GetSystemFirmwareTable" in apis
-        assert not {"CloseHandle", "GetTickCount", "OpenProcess", "VirtualQuery"} & apis
-
-    def test_every_api_the_data_adds_names_its_attck_source(self) -> None:
-        import json
-
-        from maljan.core.paths import resolve_data
-
-        document = json.loads(resolve_data("data/anti_analysis_apis_v1.json").read_text())
-        for technique in document["techniques"]:
-            assert technique["technique_id"] and technique["source"]
-            for api in technique["apis"]:
-                assert api.rstrip("W") in technique["source"]
-
-
 def _image(code: dict[int, bytes], functions: list[tuple[int, int]] | None = None) -> Any:
     """A synthetic x64 image with ``code`` written at offsets into ``.text``."""
     from tests.unit.tools.synthetic_pe import TEXT_RVA, SyntheticPE
@@ -99,7 +77,6 @@ class TestWhatIsStated:
                 _instruction("STR", "STRD R0", "140001040"),
                 _instruction("RDTSC", "RDTSC", "140001050"),
             ],
-            imported=[],
             image=image,
         )
         assert [(f["what"], f["offset"]) for f in read["stated"]] == [
@@ -121,13 +98,12 @@ class TestWhatIsStated:
                 _instruction("INT 3", "INT3", "140001011"),
                 _instruction("INT 3", "INT3", "14000103f"),
             ],
-            imported=[],
             image=image,
         )
         assert read["stated"] == [] and read["not_stated"] == 2
 
     def test_an_int3_with_no_bytes_to_read_is_not_stated(self) -> None:
-        read = read_findings([_instruction("INT 3", "INT3")], imported=[])
+        read = read_findings([_instruction("INT 3", "INT3")])
         assert read["stated"] == [] and read["not_stated"] == 1
 
     def test_cpuid_is_stated_only_for_the_hypervisor_leaf_or_the_bit_it_tests(self) -> None:
@@ -146,7 +122,6 @@ class TestWhatIsStated:
                 _instruction("CPUID", "CPUID", "140001055"),
                 _instruction("CPUID", "CPUID", "140001075"),
             ],
-            imported=[],
             image=image,
         )
         assert [(f["what"], f["offset"]) for f in read["stated"]] == [
@@ -162,42 +137,95 @@ class TestWhatIsStated:
                 {**peb, "address": "140001060", "instruction": "MOV EAX,dword ptr FS:[0x30]"},
                 {**peb, "address": "140001070", "instruction": "MOV EAX,dword ptr FS:[EAX + 0x30]"},
             ],
-            imported=[],
         )
         assert [f["what"] for f in read["stated"]] == ["MOV EAX,dword ptr FS:[0x30]"]
         assert read["not_stated"] == 1
 
-    def test_a_call_is_stated_only_for_a_catalogue_api_the_file_imports(self) -> None:
-        read = read_findings(
-            [
-                _call("debugger_detection", "CheckRemoteDebuggerPresent"),
-                _call("debugger_detection", "CloseHandle", "140001080"),
-                _call("vm_detection", "GetSystemFirmwareTable", "140001090"),
-            ],
-            imported=["CheckRemoteDebuggerPresent", "CloseHandle"],
-        )
-        assert [f["what"] for f in read["stated"]] == ["call to CheckRemoteDebuggerPresent"]
-        assert read["not_stated"] == 2
-
-    def test_the_debugger_evasion_apis_come_from_the_data(self) -> None:
+    def test_an_api_call_is_counted_and_never_stated(self) -> None:
         read = read_findings(
             [
                 _call("debugger_detection", "IsDebuggerPresent"),
-                _call("debugger_detection", "OutputDebugString", "140001080"),
-            ],
-            imported=["IsDebuggerPresent", "OutputDebugStringA"],
+                _call("debugger_detection", "CheckRemoteDebuggerPresent", "140001030"),
+                _call("debugger_detection", "OutputDebugString", "140001040"),
+                _call("debugger_detection", "CloseHandle", "140001080"),
+                _call("vm_detection", "GetSystemFirmwareTable", "140001090"),
+            ]
         )
-        assert [f["what"] for f in read["stated"]] == [
-            "call to IsDebuggerPresent",
-            "call to OutputDebugStringA",
-        ]
+        assert read["stated"] == []
+        assert read["not_stated"] == 5
 
-    def test_ghidra_s_substring_match_is_stated_by_the_imported_name(self) -> None:
-        read = read_findings(
-            [_call("vm_detection", "EnumSystemFirmwareTable")],
-            imported=["EnumSystemFirmwareTables"],
+    def test_an_int3_right_after_a_call_jump_or_return_is_not_stated(self) -> None:
+        """MSVC puts one ``int 3`` after a call that never returns, and pads after a return."""
+        image = _image(
+            {
+                # mov ecx, 1; call [rip+disp32] (exit); int3; ret
+                0x10: bytes.fromhex("b901000000ff1590ef0000cc c3cccc".replace(" ", "")),
+                # mov ecx, eax; call rel32; int3; call rel32
+                0x40: bytes.fromhex("8bc8e8e1290000cce8f7290000"),
+                # call rax; int3
+                0x60: bytes.fromhex("90ffd0cc90"),
+                # call r8; int3
+                0x70: bytes.fromhex("9041ffd0cc90"),
+                # call [rsp]; int3
+                0x80: bytes.fromhex("90ff1424cc90"),
+                # call [rax+8]; int3
+                0x90: bytes.fromhex("90ff5008cc90"),
+                # nop; int3; nop: a lone trap, stated
+                0xA0: bytes.fromhex("9090cc9090"),
+                # ret; int3: one byte of padding after a function's return
+                0xB0: bytes.fromhex("90c3cc4883"),
+                # jmp rel32; int3: nothing falls through to it
+                0xC0: bytes.fromhex("e978000000cc55"),
+                # jmp rel8; int3
+                0xD0: bytes.fromhex("90eb10cc55"),
+                # ret 8; int3
+                0xE0: bytes.fromhex("90c20800cc55"),
+            }
         )
-        assert [f["what"] for f in read["stated"]] == ["call to EnumSystemFirmwareTables"]
+        read = read_findings(
+            [
+                _instruction("INT 3", "INT3", "14000101b"),
+                _instruction("INT 3", "INT3", "140001047"),
+                _instruction("INT 3", "INT3", "140001063"),
+                _instruction("INT 3", "INT3", "140001074"),
+                _instruction("INT 3", "INT3", "140001084"),
+                _instruction("INT 3", "INT3", "140001094"),
+                _instruction("INT 3", "INT3", "1400010a2"),
+                _instruction("INT 3", "INT3", "1400010b2"),
+                _instruction("INT 3", "INT3", "1400010c5"),
+                _instruction("INT 3", "INT3", "1400010d3"),
+                _instruction("INT 3", "INT3", "1400010e4"),
+            ],
+            image=image,
+        )
+        assert [(f["what"], f["offset"]) for f in read["stated"]] == [("INT3", "0x10a2")]
+        assert read["not_stated"] == 10
+
+    def test_a_cpuid_leaf_moved_into_r8d_or_an_ecx_written_before_the_test_is_not_stated(
+        self,
+    ) -> None:
+        image = _image(
+            {
+                # mov r8d, 1; cpuid; bt ecx, 31
+                0x10: bytes.fromhex("41b8010000000fa20fbae11f"),
+                # mov eax, 1; cpuid; mov ecx, edx; bt ecx, 31
+                0x30: bytes.fromhex("b8010000000fa289d10fbae11f"),
+                # mov eax, 1; cpuid; bt ecx, 31; mov ecx, edx: the test reads CPUID's ECX
+                0x50: bytes.fromhex("b8010000000fa20fbae11f89d1"),
+            }
+        )
+        read = read_findings(
+            [
+                _instruction("CPUID", "CPUID", "140001016"),
+                _instruction("CPUID", "CPUID", "140001035"),
+                _instruction("CPUID", "CPUID", "140001055"),
+            ],
+            image=image,
+        )
+        assert [(f["what"], f["offset"]) for f in read["stated"]] == [
+            ("CPUID (leaf 1, then ECX bit 31 tested)", "0x1055"),
+        ]
+        assert read["not_stated"] == 2
 
     def test_duplicate_rows_are_stated_and_counted_once(self) -> None:
         image = _image({0x10: b"\x0f\x31"})
@@ -208,7 +236,6 @@ class TestWhatIsStated:
                 _call("debugger_detection", "CloseHandle"),
                 _call("debugger_detection", "CloseHandle"),
             ],
-            imported=["CloseHandle"],
             image=image,
         )
         assert len(read["stated"]) == 1
@@ -233,7 +260,7 @@ class TestTheScan:
             },
             {"note": "3 additional findings truncated"},
         ]
-        answer = _passes(FakeGhidra(findings=findings)).anti_analysis(imported=["CloseHandle"])
+        answer = _passes(FakeGhidra(findings=findings)).anti_analysis()
         assert answer["tool"] == ANTI_ANALYSIS_TOOL
         assert answer["checks"] == SCAN_CHECKS
         assert [f["offset"] for f in answer["findings"]] == ["0x1234", "0x1240"]
@@ -245,15 +272,15 @@ class TestTheScan:
         fake = FakeGhidra(load={"error": "File not found: /data/samples/.work/s.exe"})
         passes = _passes(fake)
         with pytest.raises(GhidraPassFailed, match="File not found"):
-            passes.anti_analysis(imported=[])
+            passes.anti_analysis()
         asked = len(fake.requests)
         with pytest.raises(GhidraPassFailed, match="File not found"):
-            passes.anti_analysis(imported=[])
+            passes.anti_analysis()
         assert len(fake.requests) == asked
 
     def test_every_request_carries_the_key_and_the_key_is_not_in_the_repr(self) -> None:
         fake = FakeGhidra()
         passes = _passes(fake)
-        passes.anti_analysis(imported=[])
+        passes.anti_analysis()
         assert all(r.headers.get("authorization") == "Bearer t" for r in fake.requests)
         assert "'t'" not in repr(passes) and "token" not in repr(passes)

@@ -14,21 +14,22 @@ only the part of it that is exact (``read_findings``):
   list names: the same mnemonic and, where the list gives one, the same
   operand. Ghidra matches mnemonics by prefix, so it files ``INT3`` under
   ``INT 0x2d`` as well. Two instructions ordinary builds carry are read in the
-  file's bytes first: an ``INT3`` counts only alone, not in a run of them and
-  not as the byte before a function (compilers pad and align with them), and
+  file's bytes first: an ``INT3`` counts only alone, not in a run of them, not
+  as the byte before a function (compilers pad and align with them) and not
+  right after a call, jump or return (compilers put one after a call that
+  never returns, and pad with one where nothing falls through), and
   a ``CPUID`` only where the code sets the hypervisor leaf (0x40000000 to
   0x400000ff) in ``eax`` just before it, or sets leaf 1 and tests ECX's bit 31
-  within 32 bytes after it (a runtime's feature probe asks other leaves);
+  within 32 bytes after it with nothing writing ECX in between (a runtime's
+  feature probe asks other leaves);
 * a TEB/PEB read, when the instruction reads through ``FS:[0x30]`` or
-  ``FS:[0x18]`` exactly;
-* an API call, when the API is on the platform's short list of APIs whose
-  documented purpose is the technique (``anti_analysis_apis``, all data: the
-  anti-debug APIs the vendored behaviour catalogue treats as corroborating,
-  the APIs its T1497 rule names, and the APIs ATT&CK's T1622 description
-  names, held with its words in ``data/anti_analysis_apis_v1.json``) and the
-  file imports it. Ghidra matches symbol names by substring over a broad
-  list, so it files ``CloseHandle`` under debugger detection; the call is
-  stated by the imported name.
+  ``FS:[0x18]`` exactly.
+
+An API call is never stated, only counted. Ghidra matches symbol names by
+substring over a broad list and lists every call site, a language runtime's
+own included (the MSVC runtime calls ``IsDebuggerPresent`` on its failure
+path), while capa leaves the library functions it recognises out and the
+catalogue line already reads the imports.
 
 Every other match is counted, once per place and match, not stated. The scan
 checks what ``SCAN_CHECKS`` says and nothing else, so an empty result is said
@@ -46,7 +47,6 @@ import json
 import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from functools import lru_cache
 from typing import Any
 
 from maljan.core.logger import logger
@@ -65,10 +65,10 @@ SCAN_CHECKS = (
 # How the stated part is chosen, said in every answer.
 STATED_RULE = (
     "stated: an instruction that is the listed one (the same mnemonic and operand), an INT3 only "
-    "alone and not as padding before a function, a CPUID only where the code sets the "
-    "hypervisor leaf or sets leaf 1 and tests ECX bit 31, a read through FS:[0x30] or FS:[0x18] "
-    "exactly, and a call to an API the platform's data lists for the technique that the file "
-    "imports; every other distinct match is counted, not stated"
+    "alone, not as padding before a function and not right after a call, jump or return, a "
+    "CPUID only where the code sets the hypervisor leaf or sets leaf 1 and tests ECX bit 31 "
+    "before ECX is written again, and a read through FS:[0x30] or FS:[0x18] exactly; API "
+    "calls, and every other distinct match, are counted, not stated"
 )
 
 GHIDRA_SWITCHED_OFF = "Ghidra is switched off (core.static.ghidra.enabled)"
@@ -81,48 +81,9 @@ GHIDRA_HAS_NO_COPY = (
     "where Ghidra reads"
 )
 
-_BEHAVIOUR_MAP = "data/api_behaviour_map_v1.json"
-_ATTCK_MAP = "data/api_attck_map_v1.json"
-_DESCRIBED_APIS = "data/anti_analysis_apis_v1.json"
-
 
 class GhidraPassFailed(RuntimeError):
     """A pass that was made and did not complete, with what happened."""
-
-
-@lru_cache(maxsize=1)
-def anti_analysis_apis() -> frozenset[str]:
-    """The APIs whose documented purpose is an anti-analysis technique, from the vendored data.
-
-    Three sources, all data: the behaviour catalogue's anti-debug block lists,
-    beside its broad set, the few APIs it treats as corroborating (the ones
-    ordinary software rarely calls); its ATT&CK map's T1497 rule names the
-    firmware, device and idle-user APIs of sandbox evasion; and
-    ``data/anti_analysis_apis_v1.json`` holds the APIs ATT&CK's own technique
-    descriptions name (T1622), each with the words it is taken from. The union,
-    nothing added in code.
-    """
-    from maljan.core.paths import resolve_data
-
-    names: set[str] = set()
-    behaviour = json.loads(resolve_data(_BEHAVIOUR_MAP).read_text(encoding="utf-8"))
-    block = ((behaviour.get("platforms") or {}).get("windows") or {}).get("anti_debug") or {}
-    names.update(str(n) for n in block.get("corroborated_by") or [])
-    attck = json.loads(resolve_data(_ATTCK_MAP).read_text(encoding="utf-8"))
-    for technique in attck.get("techniques") or []:
-        if str(technique.get("technique_id") or "").startswith("T1497"):
-            names.update(str(n) for n in technique.get("apis") or [])
-    described = json.loads(resolve_data(_DESCRIBED_APIS).read_text(encoding="utf-8"))
-    for technique in described.get("techniques") or []:
-        names.update(str(n) for n in technique.get("apis") or [])
-    return frozenset(names)
-
-
-def _folded(name: str) -> str:
-    """An API name with its ANSI or wide suffix folded, as the catalogue compares them."""
-    from maljan.analysis.api_capability_db import canonical_name
-
-    return canonical_name(name)
 
 
 _INSTRUCTION_CATEGORY = "suspicious_instruction"
@@ -142,6 +103,26 @@ _ECX_BIT_31 = (
 )
 # How far past a CPUID the test of ECX's bit 31 is looked for.
 _BIT_TEST_WINDOW = 32
+# The first bytes of an instruction that writes ECX: mov ecx, imm32; mov or
+# xor or sub ecx with a register; pop rcx. A test after one reads another value.
+_WRITES_ECX = (
+    b"\xb9",
+    b"\x89\xc1",
+    b"\x89\xd1",
+    b"\x89\xd9",
+    b"\x89\xf1",
+    b"\x89\xf9",
+    b"\x31\xc9",
+    b"\x33\xc9",
+    b"\x29\xc9",
+    b"\x2b\xc9",
+    b"\x8b\xc8",
+    b"\x8b\xca",
+    b"\x8b\xcb",
+    b"\x8b\xce",
+    b"\x8b\xcf",
+    b"\x59",
+)
 
 
 def _operand_value(text: str) -> int | None:
@@ -194,12 +175,68 @@ class _Code:
         return data[at] if 0 <= at < len(data) else None
 
 
+def _modrm_length(modrm: int, sib: int | None) -> int:
+    """The length of an ``FF /r`` instruction from its ModRM (and SIB) byte, opcode included."""
+    mod, rm = modrm >> 6, modrm & 7
+    if mod == 3:
+        return 2
+    length = 2
+    if rm == 4:
+        length += 1
+        if mod == 0 and sib is not None and sib & 7 == 5:
+            length += 4
+    elif mod == 0 and rm == 5:
+        length += 4
+    return length + {0: 0, 1: 1, 2: 4}[mod]
+
+
+# The ``FF /r`` forms that transfer control: /2 is a near call, /4 a near jump.
+_FF_TRANSFERS = frozenset({2, 4})
+
+
+def _ends_a_transfer(data: bytes, at: int) -> bool:
+    """Whether the bytes just before ``at`` are a whole near call, jump or return.
+
+    The encodings: ``E8 rel32`` (call), ``E9 rel32`` and ``EB rel8`` (jump),
+    ``C3`` and ``C2 imm16`` (return), and ``FF /2`` or ``FF /4`` in every
+    ModRM form (through a register, ``FF D0`` and with a REX prefix
+    ``41 FF D0``; through memory, ``FF 15 disp32`` and the rest), the length
+    read from the ModRM. A byte sequence that only looks like one makes the
+    check say yes, which leaves an ``INT3`` unstated rather than stated wrongly.
+    """
+    if at >= 5 and data[at - 5] in (0xE8, 0xE9):
+        return True
+    if at >= 2 and data[at - 2] == 0xEB:
+        return True
+    if at >= 1 and data[at - 1] == 0xC3:
+        return True
+    if at >= 3 and data[at - 3] == 0xC2:
+        return True
+    for length in range(2, 8):
+        begin = at - length
+        if begin < 0 or data[begin] != 0xFF:
+            continue
+        modrm = data[begin + 1]
+        if (modrm >> 3) & 7 not in _FF_TRANSFERS:
+            continue
+        sib = data[begin + 2] if begin + 2 < at else None
+        if _modrm_length(modrm, sib) == length:
+            return True
+    return False
+
+
 def _int3_is_a_trap(code: _Code, offset: str) -> bool:
-    """A one-byte ``INT3`` that is neither in a run of them nor the byte before a function."""
+    """A one-byte ``INT3`` not in a run, not before a function, not right after a transfer.
+
+    Compilers put one ``int 3`` after a call that never returns, and pad with
+    one after a function's last return or jump, where nothing falls through.
+    """
     at = code.at(offset)
     if at is None or code.byte(at) != 0xCC:
         return False
     if code.byte(at - 1) == 0xCC or code.byte(at + 1) == 0xCC:
+        return False
+    if _ends_a_transfer(code.image.data, at):
         return False
     return int(offset, 16) + 1 not in code.starts
 
@@ -217,18 +254,33 @@ def _cpuid_leaf_said(code: _Code, offset: str) -> str:
         before -= 2
     if before < 5 or data[before - 5] != 0xB8:
         return ""
+    # A REX prefix makes ``B8`` a move into r8d, not eax.
+    if before >= 6 and 0x40 <= data[before - 6] <= 0x4F:
+        return ""
     leaf = int.from_bytes(data[before - 4 : before], "little")
     if leaf in _HYPERVISOR_LEAVES:
         return f"CPUID (leaf {leaf:#x})"
-    after = data[at + 2 : at + 2 + _BIT_TEST_WINDOW]
-    if leaf == 1 and any(pattern in after for pattern in _ECX_BIT_31):
+    if leaf == 1 and _tests_ecx_bit_31(data[at + 2 : at + 2 + _BIT_TEST_WINDOW]):
         return "CPUID (leaf 1, then ECX bit 31 tested)"
     return ""
 
 
+def _tests_ecx_bit_31(after: bytes) -> bool:
+    """Whether ``after`` tests ECX's bit 31 before anything listed writes ECX.
+
+    The window is cut at the first place an ECX write's bytes begin, so a test
+    that may read another value is not taken. The cut is by byte pattern, and
+    errs toward stating nothing.
+    """
+    tests = [i for p in _ECX_BIT_31 if (i := after.find(p)) >= 0]
+    if not tests:
+        return False
+    writes = [i for p in _WRITES_ECX if (i := after.find(p)) >= 0]
+    return min(tests) < min(writes, default=len(after))
+
+
 def read_findings(
     findings: Iterable[dict[str, Any]],
-    imported: Sequence[str],
     image: Any = None,
     function_starts: Iterable[int] = (),
 ) -> dict[str, Any]:
@@ -242,8 +294,6 @@ def read_findings(
     stated. ``function_starts`` (offsets from the image base) add to the
     image's own table. Ghidra's rows are read once per place and match.
     """
-    apis = {_folded(name): name for name in anti_analysis_apis()}
-    held = [str(name) for name in imported if str(name)]
     code = _Code(image, function_starts)
     stated: list[dict[str, Any]] = []
     stated_keys: set[tuple[str, str]] = set()
@@ -269,12 +319,6 @@ def read_findings(
         elif category == _TEB_CATEGORY:
             if _TEB_OPERAND.search(instruction):
                 what = instruction
-        else:
-            named = [
-                name for name in held if technique and technique in name and _folded(name) in apis
-            ]
-            if len(named) == 1:
-                what = f"call to {named[0]}"
         if not what:
             unstated_keys.add(key)
             continue
@@ -408,7 +452,6 @@ class GhidraPasses:
 
     def anti_analysis(
         self,
-        imported: Sequence[str] = (),
         host_path: str = "",
         function_starts: Sequence[Any] = (),
     ) -> dict[str, Any]:
@@ -450,7 +493,7 @@ class GhidraPasses:
             "total_findings": int(answer.get("total_findings") or len(findings)),
             "returned": len(findings),
             "notes": notes,
-            **read_findings(findings, imported, _image_of(host_path), _starts(function_starts)),
+            **read_findings(findings, _image_of(host_path), _starts(function_starts)),
             "findings": findings,
         }
 

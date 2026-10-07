@@ -213,6 +213,32 @@ class TestGhidraAnswers:
         assert "0x1020" not in line and "CloseHandle" not in line
         assert "2 more of its matches are not stated" in line
 
+    def test_a_runtime_s_debugger_check_call_is_counted_not_stated(self, tmp_path: Path) -> None:
+        """The MSVC runtime calls IsDebuggerPresent on its failure path, in every such build."""
+        fake = FakeGhidra(
+            findings=[
+                {
+                    "category": "debugger_detection",
+                    "technique": "IsDebuggerPresent",
+                    "address": "140001030",
+                    "function": "F",
+                },
+                {
+                    "category": "debugger_detection",
+                    "technique": "OutputDebugString",
+                    "address": "140001040",
+                    "function": "F",
+                },
+            ]
+        )
+        result = _pack(_sample(tmp_path), ghidra=_fake_passes(fake))
+        entry = next(e for e in result.entries if e.tool == ANTI_ANALYSIS_TOOL)
+        assert entry.structured["stated"] == []
+        line = _line(result, ANTI_ANALYSIS_TOOL)
+        assert "IsDebuggerPresent" not in line and "OutputDebugString" not in line
+        assert "no: nothing Ghidra's scan" in line
+        assert "2 more of its matches are not stated (an API call" in line
+
     def test_a_match_in_a_function_capa_names_for_anti_analysis_is_marked(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

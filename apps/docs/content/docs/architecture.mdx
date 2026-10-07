@@ -484,14 +484,17 @@ sample opened the way the sink pre-pass opens it (load, switch,
 auto-analysis). Ghidra's answer is kept whole, each address also as an offset
 from the image base Ghidra reports, and only its exact part is stated: an
 instruction that is the listed one (Ghidra matches mnemonics by prefix, so it
-files `INT3` under `INT 0x2d`), a read through `FS:[0x30]` or `FS:[0x18]`
-exactly, and a call to an API the platform's data lists for the technique
-(the anti-debug APIs the behaviour catalogue treats as corroborating, its
-T1497 rule's APIs, and the APIs ATT&CK's T1622 description names, kept with
-its words in `data/anti_analysis_apis_v1.json`) that the file imports. An
-`INT3` counts only alone and not as the byte before a function, and a `CPUID`
-only where the code sets the hypervisor leaf or sets leaf 1 and tests ECX
-bit 31, read in the file's bytes. The rest are counted once per place. A scan that
+files `INT3` under `INT 0x2d`), and a read through `FS:[0x30]` or
+`FS:[0x18]` exactly. An `INT3` counts only alone, not as the byte before a
+function and not right after a call, jump or return (compilers put one after a
+call that never returns and pad with one where nothing falls through); a
+`CPUID` counts only where the code sets the hypervisor leaf in `eax`, or sets
+leaf 1 and tests ECX bit 31 before ECX is written again, all read in the file's
+bytes. An API call is counted and never stated: Ghidra lists every call site of
+a broad list, a language runtime's own included (the MSVC runtime calls
+`IsDebuggerPresent` on its failure path), while capa leaves the library
+functions it recognises out and the catalogue line already reads the imports.
+The rest are counted once per place. A scan that
 matched nothing says what it checks, never that the sample has no
 anti-analysis code. The node hands the pack the Ghidra it may call — switched
 on, over `http`, with the mirror the worker made for Ghidra — or the sentence
@@ -507,7 +510,7 @@ When the pack does not fit its room, the passes' lines are split by novelty.
 A fact no other line carries — a constant set no capa rule agrees with, an
 exact instruction or TEB read at a function no capa anti-analysis rule
 matched — is fitted with the other lines. What the pack already carries (a set
-capa agrees with, an API call, every `no:` line) gets only the room the
+capa agrees with, every `no:` line) gets only the room the
 fitted lines leave. A line that cannot show one item is left out, and every
 pass entry left out is counted in the "N more pack entries not shown" line,
 which comes after the pass lines. That line may take only room the other
