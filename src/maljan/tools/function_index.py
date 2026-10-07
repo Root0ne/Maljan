@@ -509,8 +509,15 @@ def index_image(
     floss: tuple[str, Mapping[str, Any]] | None = None,
     hashes: tuple[str, Mapping[str, Any]] | None = None,
     blobs: tuple[str, Mapping[str, Any]] | None = None,
+    address: int | None = None,
 ) -> dict[str, Any]:
-    """The index of ``image`` joined with the run's answers, each given as ``(entry id, data)``."""
+    """The index of ``image`` joined with the run's answers, each given as ``(entry id, data)``.
+
+    With ``address`` (an offset from the image base), the answer also holds
+    that function's row under ``function``, its callers and callees included,
+    a row with no artefacts when it holds none, or a ``no:`` sentence when the
+    run knows no function starting there.
+    """
     _, info = _source(pe_info)
     capa_id, capa_data = _source(capa)
     floss_id, floss_data = _source(floss)
@@ -608,7 +615,7 @@ def index_image(
             where = placer.stated(hex(address)) or placer.holders(address)
             place(where, "capa", str(capability["rule"]), capa_id, "capa")
 
-    return _answer(image, graph, rows, names, unplaced, entry_points)
+    return _answer(image, graph, rows, names, unplaced, entry_points, address)
 
 
 def _answer(
@@ -618,6 +625,7 @@ def _answer(
     names: Mapping[int, list[str]],
     unplaced: Mapping[str, int],
     entry_points: Iterable[int] = (),
+    address: int | None = None,
 ) -> dict[str, Any]:
     base = image.image_base
     entries = set(entry_points)
@@ -630,8 +638,7 @@ def _answer(
     def va(rva: int) -> str:
         return hex(base + rva)
 
-    out: list[dict[str, Any]] = []
-    for start, cells in rows.cells.items():
+    def row_of(start: int, cells: Mapping[tuple[str, str], _Cell]) -> dict[str, Any]:
         held = graph.functions.get(start)
         reached = 0
         through = 0
@@ -658,14 +665,24 @@ def _answer(
             row["names"] = list(dict.fromkeys(names[start]))
         if start in entries:
             row["entry_point"] = True
-        out.append(row)
+        return row
+
+    out = [row_of(start, cells) for start, cells in rows.cells.items()]
     out.sort(key=lambda r: (-int(r["direct"]), int(r["offset"], 16)))
 
     sources: dict[str, int] = {}
     for function in graph.functions.values():
         for source in function.sources:
             sources[source] = sources.get(source, 0) + 1
+    asked: dict[str, Any] = {}
+    if address is not None:
+        asked["function"] = (
+            row_of(address, rows.cells.get(address, {}))
+            if address in graph.functions
+            else f"no: the run knows no function starting at {va(address)} ({_SOURCES_SAID})"
+        )
     return {
+        **asked,
         "tool": TOOL,
         "image_base": hex(base),
         "functions_known": len(graph.functions),
@@ -679,6 +696,7 @@ def _answer(
 
 
 _SOURCE_ORDER = (_EXCEPTION_DIRECTORY, _EXPORTS, _ENTRY_POINT, _CAPA, _CALL_TARGETS)
+_SOURCES_SAID = "functions come from " + ", ".join(_SOURCE_ORDER)
 _KIND_ORDER = {"import": 0, "name": 1, "decoded": 2, "plain": 3, "capa": 4}
 
 
@@ -709,3 +727,223 @@ def function_index(
 def rows_of(data: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
     """The rows of an index answer, the readable ones only."""
     return [row for row in data.get("rows") or [] if isinstance(row, Mapping)]
+
+
+# -- the table, as the pack and the analysis server write it ----------------------
+
+# Said wherever the index is named to a model: where the whole of it is.
+SERVED_BY = "the analysis server's function_index tool serves it whole or by address"
+
+# How the callees' artefacts are counted, said beside the count.
+PER_CALLEE = "counted per callee"
+
+_ADDRESS = re.compile(r"0x[0-9a-f]{1,16}")
+
+
+def sample_text(value: Any) -> str:
+    """A value the sample wrote (a name from its tables), quoted with the pack's escaping."""
+    from maljan.utils.written_forms import pack_escaped
+
+    return f'"{pack_escaped(str(value or ""))}"'
+
+
+def head_text(data: Mapping[str, Any], rows: int) -> str:
+    """What the index is: how many functions hold artefacts, where the functions come from."""
+    known = int(data.get("functions_known") or 0)
+    sources = data.get("function_sources") or {}
+    listed = ", ".join(f"{name} {count}" for name, count in sources.items())
+    said = f"{rows} of the {known} functions the run knows hold artefacts of their own"
+    said += f" (functions from {listed}; " if listed else " ("
+    said += f"{data.get('function_lists') or FUNCTION_LISTS_ABSENT})"
+    if data.get("capa"):
+        said += f"; {data['capa']}"
+    undecoded = int(data.get("undecoded_functions") or 0)
+    if undecoded:
+        said += (
+            f"; in {undecoded} functions the decoder stopped at a byte it does not read, so "
+            "their calls and strings past it are absent"
+        )
+    unplaced = data.get("unplaced") or {}
+    if unplaced:
+        counted = ", ".join(f"{tool} {n}" for tool, n in unplaced.items())
+        said += f"; places no function holds, not counted: {counted}"
+    if not rows:
+        return said
+    return (
+        f"{said}; address = image base {data.get('image_base')} + offset, as Ghidra and radare2 "
+        "take it; ranked by distinct artefacts of their own, then by address:"
+    )
+
+
+def _ids(cells: Any, entry_id: str) -> list[str]:
+    ids: list[str] = []
+    for cell in cells or []:
+        for source in cell.get("sources") or [] if isinstance(cell, Mapping) else []:
+            said = entry_id if source == SELF else str(source)
+            if said and said not in ids:
+                ids.append(said)
+    return ids
+
+
+def row_line(row: Mapping[str, Any], entry_id: str) -> str:
+    """``- 0x…: calls "A" (ev_…); refers to 2 decoded strings (ev_…); capa: r (ev_…); …``.
+
+    Names the sample wrote (imports, resolved names, exports) are quoted with
+    the pack's escaping, as every recovered string is, so they read as data;
+    the strings a function refers to are counted, never shown.
+    """
+    parts: list[str] = []
+
+    def named(key: str, verb: str, field: str) -> None:
+        cells = [c for c in row.get(key) or [] if isinstance(c, Mapping)]
+        if cells:
+            names = ", ".join(sample_text(c.get(field)) for c in cells)
+            parts.append(f"{verb} {names} ({', '.join(_ids(cells, entry_id))})")
+
+    named("imports", "calls", "name")
+    named("resolved", "resolves", "name")
+    texts = []
+    for key, one, many in (
+        ("decoded_strings", "decoded string", "decoded strings"),
+        ("plain_strings", "plain string", "plain strings"),
+    ):
+        cells = [c for c in row.get(key) or [] if isinstance(c, Mapping)]
+        if cells:
+            noun = one if len(cells) == 1 else many
+            texts.append(f"{len(cells)} {noun} ({', '.join(_ids(cells, entry_id))})")
+    if texts:
+        parts.append("refers to " + ", ".join(texts))
+    capa = [c for c in row.get("capa") or [] if isinstance(c, Mapping)]
+    if capa:
+        rules = ", ".join(str(c.get("rule") or "") for c in capa)
+        parts.append(f"capa: {rules} ({', '.join(_ids(capa, entry_id))})")
+    callers, callees = len(row.get("callers") or []), len(row.get("callees") or [])
+    parts.append(
+        f"called by {callers}, calls {callees} {'function' if callees == 1 else 'functions'}"
+    )
+    indirect = row.get("indirect") or {}
+    reached, through = int(indirect.get("artefacts") or 0), int(indirect.get("through") or 0)
+    if reached:
+        parts.append(
+            f"{through} {'callee holds' if through == 1 else 'callees hold'} {reached} "
+            f"{'artefact' if reached == 1 else 'artefacts'} of their own, {PER_CALLEE}"
+        )
+    said = [f"export {sample_text(n)}" for n in row.get("names") or []]
+    if row.get("entry_point"):
+        said.append("entry point")
+    stated = str(row.get("function") or "")
+    where = stated if _ADDRESS.fullmatch(stated) else sample_text(stated)
+    if said:
+        where += f" ({', '.join(said)})"
+    return f"- {where}: {'; '.join(parts)}"
+
+
+# -- the analysis server's tool --------------------------------------------------
+
+# What the served index says of capa, which it never runs.
+CAPA_NOT_JOINED = (
+    "capa: no: this tool does not run capa, which takes minutes; the triage pack's "
+    "function_index entry joins capa's answer"
+)
+
+# The name a cell of the served answer gives its own decoding.
+THIS_ANSWER = "this answer"
+
+
+def _address_offset(address: Any, base: int) -> int | None:
+    """An address as an offset from the image base: a virtual address or an offset already."""
+    if isinstance(address, int) and not isinstance(address, bool):
+        value: int | None = address
+    else:
+        text = str(address or "").strip().lower()
+        value = _hex(text) if text.startswith("0x") else (int(text) if text.isdigit() else None)
+    if value is None:
+        return None
+    return value - base if value >= base > 0 else value
+
+
+def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
+    """The index of the PE at ``path`` from the file alone, as the analysis server serves it.
+
+    Joined with the server's own answers for the file: ``pe_info`` for the
+    exports and the entry point, ``resolve_api_hashes`` and
+    ``decode_string_blobs`` run here in-process (they read only the bytes),
+    and the rows FLOSS answered for the file in this server when it ran on
+    it. capa is never run here (``CAPA_NOT_JOINED``). With no address, the
+    whole table in the pack's row form; with one (a virtual address or an
+    offset), that function's row with its callers and callees.
+    """
+    from maljan.tools import api_hashes, binary, emulated_strings, string_blobs
+
+    try:
+        image = pe_image.load(path)
+    except FileNotFoundError:
+        return {"error": f"no such file: {path}", "tool": TOOL}
+    except pe_image.NotAPortableExecutable as exc:
+        return {"error": f"this tool reads Windows PE images only; {exc}", "tool": TOOL}
+    wanted: int | None = None
+    if address not in (None, ""):
+        wanted = _address_offset(address, image.image_base)
+        if wanted is None:
+            return {"error": f"address {address!r} is not a number", "tool": TOOL}
+    answers: dict[str, Any] = {}
+    for name, call in (
+        (
+            "pe_info",
+            lambda: binary.pe_info(
+                str(path), sections=False, imports=False, resources=False, overlay=False, pdb=False
+            ),
+        ),
+        ("resolve_api_hashes", lambda: api_hashes.resolve_api_hashes(str(path))),
+        ("decode_string_blobs", lambda: string_blobs.decode_string_blobs(str(path))),
+    ):
+        try:
+            value = call()
+        except Exception:  # noqa: BLE001 - an answer that cannot be joined is left out
+            continue
+        if isinstance(value, dict) and not value.get("error"):
+            answers[name] = (name, value)
+    try:
+        floss_rows = emulated_strings.remembered_rows(str(path))
+    except Exception:  # noqa: BLE001 - FLOSS's absence is not this tool's failure
+        floss_rows = []
+    if floss_rows:
+        answers["floss"] = ("floss", {"strings": floss_rows})
+    data = index_image(
+        image,
+        pe_info=answers.get("pe_info"),
+        floss=answers.get("floss"),
+        hashes=answers.get("resolve_api_hashes"),
+        blobs=answers.get("decode_string_blobs"),
+        address=wanted,
+    )
+    data["capa"] = CAPA_NOT_JOINED
+    data["joined"] = sorted(answers)
+    rows = rows_of(data)
+    head = head_text(data, len(rows))
+    if wanted is None:
+        table = [head, *(row_line(row, THIS_ANSWER) for row in rows)]
+        return {key: data[key] for key in _SERVED_KEYS} | {"table": "\n".join(table)}
+    asked = data.get("function")
+    out = {key: data[key] for key in _SERVED_KEYS}
+    if isinstance(asked, Mapping):
+        out["row"] = row_line(asked, THIS_ANSWER)
+        out["callers"] = list(asked.get("callers") or [])
+        out["callees"] = list(asked.get("callees") or [])
+    else:
+        out["row"] = str(asked)
+    return out
+
+
+_SERVED_KEYS = (
+    "tool",
+    "image_base",
+    "functions_known",
+    "function_sources",
+    "function_lists",
+    "capa",
+    "joined",
+    "undecoded_functions",
+    "unplaced",
+    "total",
+)

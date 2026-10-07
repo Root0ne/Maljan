@@ -69,7 +69,8 @@ stays as it is and the triage node records the entry in its pack record,
 "no pack room" (``render_pack``, ``pack_unsaid``). The function index takes
 only the room the whole rendered pack leaves after that, its rows in rank
 order with a line counting those left out; with no room for its head it is in
-the pack record, never in the trailer, since no tool call answers it.
+the pack record, and the run-state block names it and the analysis server's
+``function_index`` tool, which serves it whole or by address.
 """
 
 from __future__ import annotations
@@ -1476,7 +1477,8 @@ INDEX_TOOL = function_index.TOOL
 
 # The index's last line when the room cut its rows.
 INDEX_ROWS_LEFT_OUT = (
-    "{n} more {noun} not shown here (pack room); every row is in [{entry}]'s full output"
+    "{n} more {noun} not shown here (pack room); every row is in [{entry}]'s full output, "
+    "and " + function_index.SERVED_BY
 )
 
 
@@ -1486,10 +1488,11 @@ def _with_index(entries: list[LedgerEntry], max_chars: int) -> tuple[str, list[L
     The other entries are rendered exactly as ``render_pack`` renders them
     without the index, and nothing of theirs gives way to it. The index goes
     after them and before their trailer, with as many rows as fit, in rank
-    order, and a last line counting the rows left out. With no room for even
-    its head it is left to the pack record (``pack_unsaid``), never counted in
-    the trailer: the trailer says the rest is a tool call away, and no tool
-    serves the index.
+    order, and a last line counting the rows left out and saying where the
+    whole index is. With no room for even its head it is left to the pack
+    record (``pack_unsaid``) and not counted in the trailer, whose growth
+    would be room the other lines did not leave; the run-state block names
+    the entry and the tool that serves it.
     """
     others = [entry for entry in entries if entry.tool != INDEX_TOOL]
     text = render_pack(others, max_chars) if others else ""
@@ -1502,8 +1505,7 @@ def _with_index(entries: list[LedgerEntry], max_chars: int) -> tuple[str, list[L
         room = max_chars - used - (1 if used else 0) if max_chars > 0 else None
         block = _index_block(entry, room)
         if block is None:
-            # Not counted in the trailer: no tool call answers the index, so
-            # the trailer's words would not hold for it.
+            # The run-state line names the entry and the tool that serves it.
             unsaid.append(entry)
             continue
         lines.append(block)
@@ -1519,13 +1521,13 @@ def _index_block(entry: LedgerEntry, room: int | None) -> str | None:
         return line if room is None or len(line) <= room else None
     data = entry.structured
     rows = list(function_index.rows_of(data))
-    head = f"[{entry.id}] {_GROUP_LABELS[INDEX_TOOL]}: {_index_head(data, len(rows))}"
+    head = f"[{entry.id}] {_GROUP_LABELS[INDEX_TOOL]}: {function_index.head_text(data, len(rows))}"
     if room is not None and len(head) > room:
         return None
     lines = [head]
     used = len(head)
     for index, row in enumerate(rows):
-        line = _index_row(row, entry.id)
+        line = function_index.row_line(row, entry.id)
         left = len(rows) - index - 1
         tail = len(_rows_left_out(left, entry.id)) + 1 if left else 0
         if room is not None and used + 1 + len(line) + tail > room:
@@ -1541,105 +1543,8 @@ def _index_block(entry: LedgerEntry, room: int | None) -> str | None:
     return "\n".join(lines)
 
 
-_ADDRESS = re.compile(r"0x[0-9a-f]{1,16}")
-
-
-def _sample_text(value: Any) -> str:
-    """A value the sample wrote (a name from its tables), quoted with the pack's escaping."""
-    return f'"{pack_escaped(str(value or ""))}"'
-
-
 def _rows_left_out(n: int, entry_id: str) -> str:
     return INDEX_ROWS_LEFT_OUT.format(n=n, noun="row" if n == 1 else "rows", entry=entry_id)
-
-
-def _index_head(data: dict[str, Any], rows: int) -> str:
-    """What the index is: how many functions hold artefacts, where the functions come from."""
-    known = int(data.get("functions_known") or 0)
-    sources = data.get("function_sources") or {}
-    listed = ", ".join(f"{name} {count}" for name, count in sources.items())
-    said = f"{rows} of the {known} functions the run knows hold artefacts of their own"
-    said += f" (functions from {listed}; " if listed else " ("
-    said += f"{data.get('function_lists') or function_index.FUNCTION_LISTS_ABSENT})"
-    undecoded = int(data.get("undecoded_functions") or 0)
-    if undecoded:
-        said += (
-            f"; in {undecoded} functions the decoder stopped at a byte it does not read, so "
-            "their calls and strings past it are absent"
-        )
-    unplaced = data.get("unplaced") or {}
-    if unplaced:
-        counted = ", ".join(f"{tool} {n}" for tool, n in unplaced.items())
-        said += f"; places no function holds, not counted: {counted}"
-    if not rows:
-        return said
-    return (
-        f"{said}; address = image base {data.get('image_base')} + offset, as Ghidra and radare2 "
-        "take it; ranked by distinct artefacts of their own, then by address:"
-    )
-
-
-def _index_ids(cells: Any, entry_id: str) -> list[str]:
-    ids: list[str] = []
-    for cell in cells or []:
-        for source in cell.get("sources") or [] if isinstance(cell, dict) else []:
-            said = entry_id if source == function_index.SELF else str(source)
-            if said and said not in ids:
-                ids.append(said)
-    return ids
-
-
-def _index_row(row: Any, entry_id: str) -> str:
-    """``- 0x…: calls A, B (ev_…); refers to 2 decoded strings (ev_…); capa: r (ev_…); …``."""
-    parts: list[str] = []
-
-    def named(key: str, verb: str, field: str) -> None:
-        cells = [c for c in row.get(key) or [] if isinstance(c, dict)]
-        if cells:
-            names = ", ".join(_sample_text(c.get(field)) for c in cells)
-            parts.append(f"{verb} {names} ({', '.join(_index_ids(cells, entry_id))})")
-
-    named("imports", "calls", "name")
-    named("resolved", "resolves", "name")
-    texts = []
-    for key, one, many in (
-        ("decoded_strings", "decoded string", "decoded strings"),
-        ("plain_strings", "plain string", "plain strings"),
-    ):
-        cells = [c for c in row.get(key) or [] if isinstance(c, dict)]
-        if cells:
-            noun = one if len(cells) == 1 else many
-            texts.append(f"{len(cells)} {noun} ({', '.join(_index_ids(cells, entry_id))})")
-    if texts:
-        parts.append("refers to " + ", ".join(texts))
-    capa = [c for c in row.get("capa") or [] if isinstance(c, dict)]
-    if capa:
-        rules = ", ".join(str(c.get("rule") or "") for c in capa)
-        parts.append(f"capa: {rules} ({', '.join(_index_ids(capa, entry_id))})")
-    callers, callees = len(row.get("callers") or []), len(row.get("callees") or [])
-    parts.append(
-        f"called by {callers}, calls {callees} {'function' if callees == 1 else 'functions'}"
-    )
-    indirect = row.get("indirect") or {}
-    reached, through = int(indirect.get("artefacts") or 0), int(indirect.get("through") or 0)
-    if reached:
-        parts.append(
-            f"{through} {'callee holds' if through == 1 else 'callees hold'} {reached} "
-            f"{'artefact' if reached == 1 else 'artefacts'} of their own"
-        )
-    # Export names and import names are the sample's own text: quoted and
-    # escaped as the pack writes every recovered string, never prose.
-    said = [f"export {_sample_text(n)}" for n in row.get("names") or []]
-    if row.get("entry_point"):
-        said.append("entry point")
-    where = (
-        _sample_text(row.get("function"))
-        if not _ADDRESS.fullmatch(str(row.get("function") or ""))
-        else str(row.get("function"))
-    )
-    if said:
-        where += f" ({', '.join(said)})"
-    return f"- {where}: {'; '.join(parts)}"
 
 
 def pack_unsaid(entries: list[LedgerEntry], max_chars: int) -> list[LedgerEntry]:

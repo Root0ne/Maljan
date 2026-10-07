@@ -119,18 +119,19 @@ class TestTheIndexTakesTheRoomLeft:
         assert first == (
             '- 0x401000: calls "CreateFileW" (ev_0006); refers to 5 decoded strings (ev_0005); '
             "capa: a rule (ev_0005); called by 1, calls 0 functions; 1 callee holds 2 "
-            "artefacts of their own"
+            "artefacts of their own, counted per callee"
         )
 
     def test_rows_are_in_rank_order_and_a_cut_counts_the_rows_left_out(self) -> None:
         earlier = _earlier()
         whole = render_pack([*earlier, _index()], 0).split("\n")
         rest = render_pack(earlier, 0)
-        room = len(rest) + 1 + len(whole[5]) + 1 + len(whole[6]) + 1 + 120
+        room = len(rest) + 1 + len(whole[5]) + 1 + len(whole[6]) + 1 + 200
         lines = render_pack([*earlier, _index()], room).split("\n")
         assert lines[6] == whole[6]
         assert lines[-1] == (
-            "4 more rows not shown here (pack room); every row is in [ev_0006]'s full output"
+            "4 more rows not shown here (pack room); every row is in [ev_0006]'s full output, "
+            "and the analysis server's function_index tool serves it whole or by address"
         )
 
     def test_no_room_for_the_head_leaves_the_pack_as_it_was_and_the_record_names_it(
@@ -166,6 +167,12 @@ class TestTheRunStateSaysWhereItIs:
         assert index_sentence(index.id, index.structured) in block.split("\n")
         assert index_sentence(index.id, index.structured).startswith(
             "function index: [ev_0006] lists the 5 functions holding artefacts of their own"
+        )
+
+    def test_the_line_says_the_analysis_server_serves_the_index(self) -> None:
+        index = _index()
+        assert index_sentence(index.id, index.structured).endswith(
+            "; the analysis server's function_index tool serves it whole or by address."
         )
 
     def test_a_run_without_an_index_has_no_such_line(self) -> None:

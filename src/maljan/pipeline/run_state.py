@@ -34,6 +34,7 @@ from maljan.pipeline.triage_pack import (
     pack_entries,
     render_pack,
 )
+from maljan.tools.function_index import SERVED_BY
 
 __all__ = [
     "NO_LIMIT",
@@ -278,7 +279,8 @@ def index_sentence(entry_id: str, data: Any) -> str:
     noun = "function" if rows == 1 else "functions"
     return (
         f"function index: [{entry_id}] lists the {rows} {noun} holding artefacts of their own, "
-        "each with its imports called, resolved names, strings, capa rules, callers and callees."
+        "each with its imports called, resolved names, strings, capa rules, callers and callees; "
+        f"{SERVED_BY}."
     )
 
 

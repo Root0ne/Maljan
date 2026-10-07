@@ -89,6 +89,63 @@ def _image(
     )
 
 
+def pe_bytes(image: Image) -> bytes:
+    """``image`` written out as a PE file: its sections, then its function table as ``.pdata``.
+
+    For the tests that hand a hostile image to a tool through a path. The
+    headers are the minimum ``pe_image.parse`` reads; nothing here is a real
+    program.
+    """
+    sections = [(s, image.data[s.raw_offset : s.raw_offset + s.raw_size]) for s in image.sections]
+    table = b"".join(
+        struct.pack("<III", begin, end, 0)
+        for begin, end in zip(image.function_starts, image.function_ends, strict=True)
+    )
+    last = max(s.rva + max(s.virtual_size, s.raw_size) for s, _ in sections)
+    pdata_rva = (last + 0xFFF) // 0x1000 * 0x1000
+    named = [(s.name, s.rva, body, s.characteristics) for s, body in sections]
+    if table:
+        named.append((".pdata", pdata_rva, table, 0x40000040))
+    headers = 0x400
+    header = bytearray(headers)
+    header[0:2] = b"MZ"
+    struct.pack_into("<I", header, 0x3C, 0x80)
+    struct.pack_into("<4sHHIIIHH", header, 0x80, b"PE\0\0", 0x8664, len(named), 0, 0, 0, 0xF0, 0x22)
+    optional = 0x80 + 24
+    struct.pack_into("<H", header, optional, 0x20B)
+    struct.pack_into("<I", header, optional + 16, image.sections[0].rva)  # entry point
+    struct.pack_into("<Q", header, optional + 24, image.image_base)
+    struct.pack_into("<II", header, optional + 32, 0x1000, 0x200)
+    size = pdata_rva + ((len(table) + 0xFFF) // 0x1000) * 0x1000 + 0x1000
+    struct.pack_into("<I", header, optional + 56, size)
+    struct.pack_into("<I", header, optional + 60, headers)
+    struct.pack_into("<I", header, optional + 108, 16)
+    if table:
+        struct.pack_into("<II", header, optional + 112 + 3 * 8, pdata_rva, len(table))
+    bodies = bytearray()
+    raw = headers
+    for index, (name, rva, body, flags) in enumerate(named):
+        padded = len(body) + (-len(body)) % 0x200
+        struct.pack_into(
+            "<8sIIIIIIHHI",
+            header,
+            optional + 0xF0 + 40 * index,
+            name.encode(),
+            len(body),
+            rva,
+            padded,
+            raw,
+            0,
+            0,
+            0,
+            0,
+            flags,
+        )
+        bodies += body + bytes(padded - len(body))
+        raw += padded
+    return bytes(header) + bytes(bodies)
+
+
 def _timed(make: Callable[[int], tuple[Image, dict[str, Any]]], n: int) -> tuple[float, Any]:
     image, joined = make(n)
     began = time.perf_counter()
