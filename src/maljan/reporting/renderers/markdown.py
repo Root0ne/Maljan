@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import secrets
 from collections.abc import Callable, Iterable
 from types import SimpleNamespace
 from typing import Any
@@ -232,24 +233,22 @@ class MarkdownRenderer:
             self._safe_section("attribution", lambda: self._section_attribution(report, ctx)),
             self._safe_section("limitations", lambda: self._section_limitations(report, ctx)),
             self._safe_section("appendix_evidence", lambda: self._appendix_evidence(report, ctx)),
-            # The run's own configuration, the model endpoint among it, prints
-            # as configured; it is the one section the closing pass leaves.
-            _RUN_SUMMARY_MARK
-            + self._safe_section("appendix_run_summary", lambda: self._appendix_run(report)),
+            # The configured model endpoints print as configured: only those
+            # exact strings are kept from the closing pass.
+            ctx.keep_endpoints(
+                self._safe_section("appendix_run_summary", lambda: self._appendix_run(report))
+            ),
             self._safe_section("appendix_references", lambda: self._appendix_references(report)),
             self._safe_section("appendix_methodology", lambda: self._appendix_method(report, ctx)),
         ]
         # Every value a viewer could follow, wherever a section printed it, is
         # read once more by the report's defanger: a cell or a code span a
         # sandbox, the sample's bytes or a model filled prints defanged even
-        # where its section did not pass it through the context. A draft
-        # rule's fenced body is the rule to deploy and prints as it compiles.
-        read = [
-            text[len(_RUN_SUMMARY_MARK) :]
-            if text.startswith(_RUN_SUMMARY_MARK)
-            else _defanged_outside_rule_bodies(text)
-            for text in sections
-        ]
+        # where its section did not pass it through the context. What this
+        # renderer itself wrote to print as written — each draft rule's body,
+        # the configured model endpoints — was set aside under a token no text
+        # can name, and only that comes back unread.
+        read = [ctx.restore(_defanged_text(text)) for text in sections]
         return "\n\n".join(text.rstrip() for text in read if text).rstrip() + "\n"
 
     @staticmethod
@@ -1533,7 +1532,11 @@ class MarkdownRenderer:
                 body.append(f"**{kind}** `{_one_line(rule.name)}` — {status}{source}")
                 body.append("")
                 fence = rule.kind if rule.kind in {"yara", "sigma"} else ""
-                body.extend([*_fenced(rule.body.rstrip(), fence), ""])
+                # The rule's body is the rule to deploy: it prints as it
+                # compiles, set aside from the closing pass by its own token.
+                fenced = _fenced(rule.body.rstrip(), fence)
+                fenced[1] = ctx.keep(fenced[1])
+                body.extend([*fenced, ""])
             blocks.append("\n".join(body).rstrip())
         else:
             blocks.append(
@@ -2120,6 +2123,11 @@ class _Context:
 
     def __init__(self, report: MalwareReport) -> None:
         self.report = report
+        # What the renderer set aside from the closing defang pass, by token.
+        # The token carries a value drawn for this render, so no text a
+        # sample, a sandbox or a model wrote can name one.
+        self._kept: dict[str, str] = {}
+        self._nonce = secrets.token_hex(8)
         summary = report.run_summary or {}
         validation = summary.get("validation") or {}
         self.unresolved = [
@@ -2384,6 +2392,38 @@ class _Context:
     def line(self, text: Any) -> str:
         """Model prose that has to stay on one line: a list item, a step."""
         return _one_line(self._defang(self.marked(str(text or ""))))
+
+    def keep(self, text: str) -> str:
+        """``text`` set aside from the closing pass: a token now, ``text`` again after it."""
+        token = f"\x00{self._nonce}k{len(self._kept)}\x00"
+        self._kept[token] = text
+        return token
+
+    def restore(self, text: str) -> str:
+        """``text`` with every token :meth:`keep` handed out replaced by what it stands for."""
+        if not self._kept or "\x00" not in text:
+            return text
+        return _KEPT_TOKEN_RE.sub(lambda m: self._kept.get(m.group(0), m.group(0)), text)
+
+    def keep_endpoints(self, text: str) -> str:
+        """The run summary's appendix, each configured model endpoint in it set aside.
+
+        Only the exact strings the settings configure, as a run records them
+        (``model_assignments.configured_endpoint_labels``); everything else in
+        the appendix goes through the closing pass like every other section.
+        """
+        try:
+            from maljan.core.config import get_settings
+            from maljan.core.model_assignments import configured_endpoint_labels
+
+            labels = configured_endpoint_labels(get_settings())
+        except Exception as exc:  # noqa: BLE001 — with none read, every value is defanged
+            logger.debug("markdown: the configured model endpoints were not read (%s).", exc)
+            return text
+        for label in sorted(labels, key=len, reverse=True):
+            if label and label in text:
+                text = text.replace(label, self.keep(label))
+        return text
 
     def cell(self, text: Any) -> str:
         """A model-written table cell: defanged like prose, cut like every cell."""
@@ -3311,55 +3351,8 @@ def _is_delimiter_row(line: str) -> bool:
     )
 
 
-# Marks the run summary's appendix for the closing defang pass, which leaves it.
-_RUN_SUMMARY_MARK = "\x00run-summary\x00"
-# A fenced block's opening line, its fence and its info string.
-_FENCE_OPEN_RE = re.compile(r"^(`{3,})(\S*)[ \t]*$", re.MULTILINE)
-# The heading the draft rules print under.
-_RULE_SUBSECTION_RE = re.compile(r"^### 10\.2 ", re.MULTILINE)
-# Any heading line, and one below the draft rules' own level.
-_ANY_HEADING_RE = re.compile(r"^#{1,6} ")
-_DEEPER_HEADING_RE = re.compile(r"^#{4,6} ")
-
-
-def _defanged_outside_rule_bodies(markdown: str) -> str:
-    """``markdown`` defanged everywhere but inside the draft rules' fenced bodies.
-
-    The rule bodies are the fenced blocks under the "10.2" heading, up to the
-    next heading of its level or above; every other line, fenced or not, is
-    read by :func:`_defanged_text`, which leaves a value already defanged as
-    it is and a reference service's lookup a link. One pass over the lines.
-    """
-    lines = markdown.split("\n")
-    out: list[str] = []
-    plain: list[str] = []
-    in_rules = False
-    index = 0
-
-    def _flush() -> None:
-        if plain:
-            out.append(_defanged_text("\n".join(plain)))
-            plain.clear()
-
-    while index < len(lines):
-        line = lines[index]
-        if _ANY_HEADING_RE.match(line):
-            in_rules = bool(_RULE_SUBSECTION_RE.match(line)) or (
-                in_rules and bool(_DEEPER_HEADING_RE.match(line))
-            )
-        opened = _FENCE_OPEN_RE.match(line) if in_rules else None
-        if opened is None:
-            plain.append(line)
-            index += 1
-            continue
-        close = index + 1
-        while close < len(lines) and lines[close].strip() != opened.group(1):
-            close += 1
-        _flush()
-        out.append("\n".join(lines[index : close + 1]))
-        index = close + 1
-    _flush()
-    return "\n".join(out)
+# A token :meth:`_Context.keep` hands out.
+_KEPT_TOKEN_RE = re.compile(r"\x00[0-9a-f]{16}k\d+\x00")
 
 
 def _fenced(text: str, info: str = "") -> list[str]:

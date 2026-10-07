@@ -3210,9 +3210,12 @@ is assembled from what the run gathered rather than recomputed beside it:
   any number of labels, in capitals, `.onion`): everything a viewer could
   link. A closing pass reads every section of the rendered Markdown once more
   with the same defanger, so a cell or code span a section did not pass
-  through it prints defanged too; it leaves the draft rules' fenced bodies,
-  which print as they compile, and the run summary's appendix, whose model
-  endpoint prints as configured. The host reader the publish checks, the run summary's sentences and
+  through it prints defanged too. It leaves only what the renderer itself set
+  aside when it wrote it, under a token drawn for that render: each draft
+  rule's body, which prints as it compiles, and in the run summary's appendix
+  the configured model endpoints, the exact strings the settings configure
+  (`model_assignments.configured_endpoint_labels`). No heading or fence in a
+  sample's or a model's text makes a region the pass leaves. The host reader the publish checks, the run summary's sentences and
   a cell's state note use (`validation.network_values_in`) reads a `.onion`
   name of any labels by the same form reader, and an IPv6 address whole (an
   IPv4 tail included) when it is bracketed or has at least three groups and a
