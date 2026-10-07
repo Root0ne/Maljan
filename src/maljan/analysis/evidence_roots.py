@@ -35,7 +35,9 @@ A statement's roots are those of the entries it cites. An entry holding one
 root gives it. An entry holding several gives the ones the statement names:
 by an address it writes, by a quoted value equal to a row's text, or by a
 name a row carries (an import, an export, a section, a resolved Windows
-name). One that names none of them gives the entry's whole set of roots.
+name). One that names none of them has shown one row of the entry, which
+one unknown: its root is ``an unnamed row of ev_0007``, the same for every
+statement citing the entry so, and never the entry's whole set of rows.
 
 Every pass is linear in the entries and their rows: roots are kept in dicts
 keyed by address, value and name, never compared pairwise, and the whole
@@ -150,33 +152,73 @@ class Layout:
     # ``(begin, end, function start)`` per range a reader states, offsets from
     # the image base, end exclusive: the function index's exception-directory
     # ranges, a disassembler's stated function size, Ghidra's function hash.
+    # A sample can shape what a reader states, so a range is used only when
+    # it lies inside one section of the section table (``_inside_a_section``).
     functions: tuple[tuple[int, int, int], ...] = ()
     _starts: list[int] = field(default_factory=list)
-    _begins: list[int] = field(default_factory=list)
+    _raw_starts: list[int] = field(default_factory=list)
+    _by_raw: list[_Section] = field(default_factory=list)
+    # The ranges cut into disjoint segments, each with the one function every
+    # range holding it names, or ``None`` where ranges of two functions
+    # overlap: ``_cuts[i]`` begins segment ``i``, ``_owners[i]`` owns it.
+    _cuts: list[int] = field(default_factory=list)
+    _owners: list[int | None] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.sections = tuple(sorted(self.sections, key=lambda s: s.rva))
         self._starts = [s.rva for s in self.sections]
-        self.functions = tuple(sorted(set(self.functions)))
-        self._begins = [begin for begin, _end, _start in self.functions]
-        self._longest = max((end - begin for begin, end, _s in self.functions), default=0)
+        self._by_raw = sorted((s for s in self.sections if s.raw_size > 0), key=lambda s: s.raw)
+        self._raw_starts = [s.raw for s in self._by_raw]
+        self.functions = tuple(
+            sorted({r for r in self.functions if self._inside_a_section(r[0], r[1])})
+        )
+        self._cut_segments()
+
+    def _inside_a_section(self, begin: int, end: int) -> bool:
+        """Whether ``[begin, end)`` lies inside one section, no larger than it."""
+        if end <= begin:
+            return False
+        section = self.section_at(begin)
+        return section is not None and section is self.section_at(end - 1)
+
+    def _cut_segments(self) -> None:
+        """One sweep over the range ends: O(n log n) to build, O(log n) to look up.
+
+        The cost of a lookup does not depend on how long a stated range is.
+        """
+        events: list[tuple[int, int, int]] = []
+        for begin, end, start in self.functions:
+            events.append((begin, 1, start))
+            events.append((end, -1, start))
+        events.sort()
+        active: dict[int, int] = {}
+        index = 0
+        while index < len(events):
+            at = events[index][0]
+            while index < len(events) and events[index][0] == at:
+                _at, step, start = events[index]
+                held = active.get(start, 0) + step
+                if held:
+                    active[start] = held
+                else:
+                    active.pop(start, None)
+                index += 1
+            owner = next(iter(active)) if len(active) == 1 else None
+            if self._cuts and self._cuts[-1] == at:
+                self._owners[-1] = owner
+            else:
+                self._cuts.append(at)
+                self._owners.append(owner)
 
     def function_at(self, rva: int) -> int | None:
         """The start of the function a stated range puts ``rva`` in, or ``None``.
 
-        Found by bisection; a place two stated ranges of different functions
-        both hold is in neither, since which one is not a fact.
+        Found by bisection over the cut segments. A place ranges of two
+        different functions both hold, wholly or in part, is in neither, since
+        which one is not a fact.
         """
-        index = bisect.bisect_right(self._begins, rva) - 1
-        holders: set[int] = set()
-        while index >= 0:
-            begin, end, start = self.functions[index]
-            if begin <= rva < end:
-                holders.add(start)
-            if begin < rva - self._longest:
-                break
-            index -= 1
-        return holders.pop() if len(holders) == 1 else None
+        index = bisect.bisect_right(self._cuts, rva) - 1
+        return self._owners[index] if index >= 0 else None
 
     def section_at(self, rva: int) -> _Section | None:
         index = bisect.bisect_right(self._starts, rva) - 1
@@ -186,9 +228,12 @@ class Layout:
         return section if rva < section.rva + max(section.size, section.raw_size, 1) else None
 
     def rva_of_offset(self, offset: int) -> int | None:
-        for section in self.sections:
-            if section.raw <= offset < section.raw + section.raw_size:
-                return section.rva + offset - section.raw
+        index = bisect.bisect_right(self._raw_starts, offset) - 1
+        if index < 0:
+            return None
+        section = self._by_raw[index]
+        if offset < section.raw + section.raw_size:
+            return section.rva + offset - section.raw
         return None
 
     def rvas_of(self, value: int) -> list[int]:
@@ -696,10 +741,14 @@ class RunRoots:
                 reasons.append(f"{eid}: {found.reason or NOTHING_TO_PLACE.format(tool=eid)}")
                 continue
             # A statement naming some of the entry's places by an address, a
-            # quoted value or a name gives those; naming none, the entry's
-            # whole set of roots stands.
-            named = self._named(text, found) if len(found.roots) > 1 else set()
-            roots.update(dict.fromkeys(found.ordered(named) if named else found.roots))
+            # quoted value or a name gives those; naming none, it has shown one
+            # piece of the entry, which one unknown: one root, the same for
+            # every statement citing the entry so.
+            if len(found.roots) == 1:
+                roots.update(dict.fromkeys(found.roots))
+                continue
+            named = self._named(text, found)
+            roots.update(dict.fromkeys(found.ordered(named) if named else [unnamed_row(eid)]))
         return list(roots), reasons
 
     def of_assertion(self, entry_id: str, technique_id: str) -> tuple[list[str], list[str]]:
@@ -711,10 +760,20 @@ class RunRoots:
         eid = str(entry_id).lower()
         if not found.roots:
             return [], [f"{eid}: {found.reason}"]
-        if str(technique_id).upper() in found.unplaced:
-            return [], [f"{eid}: {found.unplaced[str(technique_id).upper()]}"]
-        # No row is tied to the technique: the entry's whole set of roots stands.
-        return list(found.roots), []
+        if len(found.roots) == 1 and str(technique_id).upper() not in found.unplaced:
+            return list(found.roots), []
+        # A row naming the technique that gives no place (a capa rule with no
+        # address, a Sigma match with no process joined), or no row tied to it:
+        # one unnamed row of the entry.
+        return [unnamed_row(eid)], []
+
+
+UNNAMED_ROW = "an unnamed row of {entry}"
+
+
+def unnamed_row(entry_id: str) -> str:
+    """The root of a citation of a many-row entry that names none of its rows."""
+    return UNNAMED_ROW.format(entry=str(entry_id).strip().lower())
 
 
 def run_roots(ledger: Sequence[Any] | None) -> RunRoots:
@@ -731,9 +790,10 @@ def run_roots(ledger: Sequence[Any] | None) -> RunRoots:
 def roots_phrase(roots: Sequence[str], not_read: Sequence[str]) -> str:
     """The roots as a row states them: ``one evidence root (0x4f58 in .text)``, or ``""``.
 
-    One root says so in those words; several are counted and listed; the
-    cited entries whose root could not be read are counted beside them. Nothing
-    is said for a row with neither.
+    One root says so in those words and names it; several are counted, and
+    listed only in the record (``evidence_roots``); the cited entries whose
+    root could not be read are counted beside them. Nothing is said for a row
+    with neither.
     """
     if not roots and not not_read:
         return ""
@@ -744,7 +804,7 @@ def roots_phrase(roots: Sequence[str], not_read: Sequence[str]) -> str:
     if len(roots) == 1:
         said = f"one evidence root ({roots[0]})"
     else:
-        said = f"{len(roots)} evidence roots ({'; '.join(roots)})"
+        said = f"{len(roots)} evidence roots"
     return f"{said}, and {unread_words}" if unread else said
 
 

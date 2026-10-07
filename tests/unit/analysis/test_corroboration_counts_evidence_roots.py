@@ -169,20 +169,25 @@ class TestAStatementsRoots:
         imports, _ = roots.of_statement("it imports VirtualAlloc", ["ev_0002"])
         assert imports == [IMPORT_TABLE]
 
-    def test_naming_none_of_them_leaves_the_whole_set_standing(self) -> None:
-        named, unread = run_roots(_ledger()).of_statement("it decodes strings", ["ev_0003"])
-        assert named == ["0x5010 in .data", "0x5080 in .data"]
-        assert unread == []
+    def test_naming_none_of_them_is_one_unnamed_row(self) -> None:
+        roots = run_roots(_ledger())
+        named, unread = roots.of_statement("it decodes strings", ["ev_0003"])
+        assert (named, unread) == (["an unnamed row of ev_0003"], [])
+        # Two layers citing the entry so are one root; a named row is its own.
+        counted = RootCount()
+        counted.add(*roots.of_statement("strings are decoded", ["ev_0003"]))
+        counted.add(*roots.of_statement("so says the decoder", ["EV_0003"]))
+        counted.add(*roots.of_statement("the blob at 0x5080", ["ev_0003"]))
+        assert counted.roots == ["an unnamed row of ev_0003", "0x5080 in .data"]
 
     def test_a_passing_mention_of_a_table_narrows_nothing(self) -> None:
         roots = run_roots(_ledger())
-        whole = roots.of_entry("ev_0002").roots
         for said in (
             "the imports and the export table look ordinary",
             "the header says it is a DLL",
             "a resource or an overlay is absent",
         ):
-            assert roots.of_statement(said, ["ev_0002"]) == (whole, [])
+            assert roots.of_statement(said, ["ev_0002"]) == (["an unnamed row of ev_0002"], [])
         assert roots.of_statement("exports `run`", ["ev_0002"])[0] == [EXPORT_TABLE]
 
     def test_a_statement_citing_nothing_says_so(self) -> None:
@@ -306,7 +311,7 @@ class TestTheWords:
     def test_one_root_says_so_and_several_are_counted(self) -> None:
         assert roots_phrase(["0x4f58 in .text"], []) == "one evidence root (0x4f58 in .text)"
         assert roots_phrase(["a", "b"], ["ev_1: no: x"]) == (
-            "2 evidence roots (a; b), and 1 citation whose root could not be read"
+            "2 evidence roots, and 1 citation whose root could not be read"
         )
         assert layers_and_roots(2, ["0x4f58 in .text"], []) == (
             "2 layers, one evidence root (0x4f58 in .text)"
@@ -438,3 +443,122 @@ class TestAFunctionHoldsTheAddressesInsideIt:
             _entry("ev_0004", "read_memory", args={"address": hex(BASE + 0x1200)}),
         ]
         assert run_roots(led).of_entry("ev_0004").roots == ["function 0x1100 in .text"]
+
+
+class TestAnAssertionWithNoPlace:
+    def test_a_capa_rule_with_no_address_is_one_unnamed_row(self) -> None:
+        led = [
+            _entry("ev_0001", "pe_info", {"sections": SECTIONS}),
+            _entry(
+                "ev_0002",
+                "capa",
+                {
+                    "capabilities": [
+                        {"rule": "a", "attck": ["T1027"], "addresses": []},
+                        {"rule": "b", "attck": ["T1055"], "addresses": ["0x1300", "0x1400"]},
+                    ]
+                },
+            ),
+        ]
+        roots = run_roots(led)
+        assert roots.of_assertion("ev_0002", "T1027") == (["an unnamed row of ev_0002"], [])
+        assert roots.of_assertion("ev_0002", "T1055")[0] == ["0x1300 in .text", "0x1400 in .text"]
+
+
+class TestAStatedRangeIsCheckedAgainstTheImage:
+    """A range is read from output a sample can shape, so it is held to the image."""
+
+    @staticmethod
+    def _with(*ranges: tuple[int, int, int]) -> Any:
+        from maljan.analysis.evidence_roots import Layout, _Section
+
+        sections = tuple(
+            _Section(
+                name=row["name"],
+                rva=int(row["virtual_address"], 16),
+                size=row["virtual_size"],
+                raw=row["raw_offset"],
+                raw_size=row["raw_size"],
+            )
+            for row in SECTIONS
+        )
+        return Layout(sections=sections, bases=(BASE,), functions=tuple(ranges))
+
+    def test_a_huge_stated_size_is_not_used(self) -> None:
+        layout = self._with((0x1100, 0x1100 + 2**40, 0x1100))
+        assert layout.function_at(0x1200) is None
+        assert layout.label(0x1200) == "0x1200 in .text"
+
+    def test_a_range_crossing_a_section_boundary_is_not_used(self) -> None:
+        layout = self._with((0x4F00, 0x5100, 0x4F00))
+        assert layout.function_at(0x4F80) is None
+
+    def test_overlapping_ranges_of_two_functions_own_the_overlap_jointly_with_neither(
+        self,
+    ) -> None:
+        layout = self._with((0x1100, 0x1400, 0x1100), (0x1300, 0x1600, 0x1300))
+        assert layout.function_at(0x1200) == 0x1100
+        assert layout.function_at(0x1350) is None
+        assert layout.function_at(0x1500) == 0x1300
+        assert layout.function_at(0x1700) is None
+
+    def test_lookups_do_not_depend_on_how_many_or_how_long_the_ranges_are(self) -> None:
+        def timed(n: int) -> float:
+            # Nested and overlapping: every range holds the place looked up.
+            ranges = [(0x1000 + i % 0x100, 0x5000 - i % 0x100, 0x1000 + i) for i in range(n)]
+            start = time.perf_counter()
+            layout = self._with(*ranges)
+            for rva in range(0x1000, 0x5000, 0x10):
+                layout.function_at(rva)
+            return time.perf_counter() - start
+
+        small, large = timed(10_000), timed(100_000)
+        assert large < small * 10 * 3 + 0.5
+
+
+class TestHostileScaling:
+    """Every per-statement path is dict and set lookups built once per entry."""
+
+    def test_one_entry_of_many_rows_and_many_statements_writing_many_values(self) -> None:
+        def timed(rows: int, statements: int) -> float:
+            led = [
+                _entry("ev_0001", "pe_info", {"sections": SECTIONS}),
+                _entry(
+                    "ev_0002",
+                    "strings",
+                    {
+                        "strings": [
+                            {"offset": 0x400 + i % 0x4000, "text": f"s{i}"} for i in range(rows)
+                        ]
+                    },
+                ),
+            ]
+            said = " ".join(f'"s{k}" 0x{0x1000 + k:x} Name{k}' for k in range(100))
+            start = time.perf_counter()
+            roots = run_roots(led)
+            counted = RootCount()
+            for _ in range(statements):
+                counted.add(*roots.of_statement(said, ["ev_0002"]))
+            return time.perf_counter() - start
+
+        small, large = timed(10_000, 100), timed(100_000, 1_000)
+        assert large < small * 10 * 3 + 0.5
+
+    def test_a_ledger_of_many_entries(self) -> None:
+        def timed(n: int) -> float:
+            led = [_entry("ev_0001", "pe_info", {"sections": SECTIONS})] + [
+                _entry(
+                    f"ev_{i + 2:05d}",
+                    "decompile_function",
+                    args={"address": hex(BASE + 0x1000 + i % 0x3000)},
+                )
+                for i in range(n)
+            ]
+            start = time.perf_counter()
+            roots = run_roots(led)
+            for i in range(0, n, 7):
+                roots.of_statement("the function", [f"ev_{i + 2:05d}"])
+            return time.perf_counter() - start
+
+        small, large = timed(1_000), timed(10_000)
+        assert large < small * 10 * 3 + 0.5

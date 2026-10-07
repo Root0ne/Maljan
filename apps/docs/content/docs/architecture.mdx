@@ -580,9 +580,12 @@ the function map, a domain and a persistence target in the composer's prompt.
 A tool's JSON answer already holds each such value as one JSON string. A tool
 answer printed as text (a disassembler's listing, a decompile, a string or
 export list, any generic MCP text answer) is shown between a line
-`<<tool output [ev_0007]>>` and a line `<<end of tool output [ev_0007]>>`, and
-a line of it beginning `<<` is shown with a backslash before it, so its
-content cannot close the fence (`agents/tool_fence.py`). The sentence about a
+`<<tool output [ev_0007]>>` and a line `<<end of tool output [ev_0007]>>`.
+Every character `str.splitlines` breaks on is shown as a plain line feed, and
+a line whose first visible character (past whitespace and invisible format
+characters) is `<`, a character NFKC folds to `<`, or an angle quote or angle
+bracket is shown with a backslash before it, so its content cannot close the
+fence (`agents/tool_fence.py`). The sentence about a
 prompt's tools says once what the fence is; the judge's evidence excerpts are
 fenced the same way. The guardrails count the fence inside each answer's
 limit: a text answer and its fence together fit the room the answer was
@@ -3361,7 +3364,11 @@ is assembled from what the run gathered rather than recomputed beside it:
   `function_ranges`; a disassembler's stated function size; Ghidra's function
   hash) is that function's root, `function 0x3868 in .text`, so a capa match
   inside a function and a decompile of it are one root; two places in one
-  function with no stated range stay two. An entry whose root cannot be read has none and says why in a
+  function with no stated range stay two. A sample can shape what a reader
+  states, so a range is used only when it lies inside one section of the
+  section table; a place that ranges of two different functions both hold,
+  wholly or in part, belongs to neither. The ranges are cut into disjoint
+  segments once, so a lookup costs a bisection whatever sizes are stated. An entry whose root cannot be read has none and says why in a
   `no:` sentence: a reference lookup reads nothing of the sample, a failed
   call read nothing, a call naming its function by name gives no address, an
   answer with no offset, address, section, event or flow has nothing to place.
@@ -3369,15 +3376,21 @@ is assembled from what the run gathered rather than recomputed beside it:
   several gives the ones the statement names by an address, by a quoted value
   equal to a row's text, or by a name a row carries (an import, an export, a
   section, a resolved name). A passing mention of a table ("the imports", "the
-  header") narrows nothing: a statement naming none of an entry's places has
-  the entry's whole set of roots. The capability row and the published technique carry the distinct
+  header") narrows nothing. A statement naming none of a many-row entry's
+  places has shown one row of it, which one unknown: its root is "an unnamed
+  row of ev_0007", the same for every statement citing the entry so and its
+  own root beside any row a statement names, never the entry's whole set of
+  rows. An asserting row that names the technique and gives no place (a capa
+  rule with no address, a Sigma match with no process joined) is the same. The capability row and the published technique carry the distinct
   roots (`evidence_roots`) and one `<entry>: no: <reason>` per cited entry
   that gave none (`roots_not_read`); the corroboration record carries the same
   two lists, adding the rows of each asserting tool's entry that name the
   technique; the judge's technique question states "2 layers, one evidence
   root (0x4f58 in .text)" under each technique's mentions. The report's
-  corroboration words carry the roots inside their parentheses, and a row one
-  root stands behind says "one evidence root" in the same line; a single-layer
+  corroboration words carry the count of roots inside their parentheses, and
+  name the root only when there is exactly one ("one evidence root (0x4f58 in
+  .text)"); the full list is in `evidence_roots` in report.json and in the run
+  record; a single-layer
   row states its layer and roots on their own. No publish rule reads the
   count. The roots are read from one job's ledger in the step that needs
   them, with no cache shared between jobs, in time linear in the entries and

@@ -1783,6 +1783,7 @@ PROMPTS: dict[str, str] = {
             _layers_and_roots(2, ["0x4f58 in .text"], []),
             _layers_and_roots(3, ["0x4f58 in .text", "the import table"], ["ev_0001: no: x"]),
             _roots_phrase([], ["ev_0001: no: x"]),
+            _roots.unnamed_row("ev_0001"),
             *(
                 sentence.format(tool="a_tool", entry="ev_0001", count=2)
                 for sentence in _ROOT_SENTENCES
