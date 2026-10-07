@@ -586,12 +586,27 @@ leave. The run-state block carries one line saying the index exists, which
 entry holds it, how many rows it has, and that the analysis server's
 `function_index` tool serves it whole or by address. A count is stated only
 from a readable answer: an entry whose output the evidence byte budget dropped,
-or with no readable rows, says `no:` and why instead. The pack's entry also
-lists the functions the decoder stopped in (`undecoded`) and counts, per
-function, the calls that name nothing (`calls_unnamed`): a call through a
-register, or through a slot the import table does not fill. The pack's lines
-do not print them; the function claim check reads them to know where an absent
-call is no fact.
+or with no readable rows, says `no:` and why instead.
+
+A sample that resolves its imports by hash calls each through a pointer it
+fills itself, so its import cells alone name almost nothing. The index reads
+which slot each hashed name fills, in the straight-line run of code that holds
+the hashed value (bounded by the next transfer of control, never by an
+instruction count): after the resolver's call, a store of its return register
+to a rip-relative or absolute slot before the register is overwritten; or, in
+a table of records the resolver walks later, the one address of the record that
+some code calls or jumps through, the records' direction read from the side of
+its hashed value each record's addresses sit on (a run whose addresses sit on
+both sides names nothing). A slot two names fill, or filled by a hashed value
+that reads as two names, is ambiguous and names nothing. Every call or jump
+through a named slot, direct or through a register a straight-line load from
+the slot set, is then a cell of its row, "calls through slots the hash
+resolution fills", with the slot and the instruction that named it, sourced to
+the resolution's entry. The entry lists the named slots (`resolved_slots`) and
+the ambiguous ones (`ambiguous_slots`), the functions the decoder stopped in
+(`undecoded`), and per function the calls that still name nothing
+(`calls_unnamed`): through a register no load names, or a slot nothing names.
+The function claim check reads them to know where an absent call is no fact.
 
 The analysis server serves the same index as the tool `function_index`
 (`path`, optional `address`, `carved_path`), built by the same code from the
@@ -1857,15 +1872,17 @@ turn, each once, and what the analyst answers stands.
     with none named, all of them.
   - *What a claim names.* The Windows function names its sentence writes: an
     identifier the vendored export catalogue or this run's own facts know,
-    written with a capital after its first letter or inside a code span, so a
-    word of running text is never read as one. And the strings it quotes, in
+    written with a capital after its first letter, or alone in a code span
+    (`send`, `send()`), so neither a word of running text nor a name inside a
+    span's expression is read as one. And the strings it quotes, in
     quotes or in a code span holding quotes, of three characters or more with a
     letter or a digit in them, that some entry of the run holds: a quoted
     phrase no tool recovered is a paraphrase, not one of the sample's strings.
     The model is asked to write nothing new; the claim format is unchanged.
   - *Where a value holds.* In this order: the listing's own text; the
-    function's row in the pack's function index (its imports, resolved names,
-    decoded and plain strings and capa rules); the rows of its direct callees,
+    function's row in the pack's function index (its imports, its calls
+    through slots the hash resolution fills, resolved names, decoded and plain
+    strings and capa rules); the rows of its direct callees,
     one call deep; and the places the run's hash-resolution and decoded-string
     answers put inside it. A value another function the claim names by its
     start holds, or another entry the claim cites holds (in its text or in the
@@ -1893,9 +1910,10 @@ turn, each once, and what the analyst answers stands.
     whole; the index does not know the function; the pack the analyst was
     shown left the function's row out for room; the decoder stopped in the
     function or a callee. An API name is also not checked where the function
-    or a direct callee makes calls the index cannot name, through a register
-    or a pointer the code fills itself: a sample that resolves its imports by
-    hash calls them that way, and such a call may be the one the claim names.
+    or a direct callee makes calls the index cannot name: a call through a
+    slot the hash resolution fills is named, and only a call through a
+    register no load names, or through a slot nothing names, leaves the name
+    unchecked, since such a call may be the one the claim names.
     A function with no artefacts of its own has no callee list in the index,
     so an API name given to it is not checked either. The record also counts
     the claims checked and asked about.

@@ -269,6 +269,32 @@ class TestWhereAValueHolds:
         assert '"settings.ini path"' in violation.message
 
 
+class TestCallsThroughFilledSlots:
+    """A function whose calls go through slots the hash resolution fills is checkable."""
+
+    @staticmethod
+    def _index() -> LedgerEntry:
+        main = _row(MAIN, callees=[HELPER])
+        main["slot_calls"] = [
+            {
+                "name": "CreateMutexW",
+                "sources": ["ev_0003"],
+                "slot": hex(BASE + 0x9000),
+                "named_at": hex(BASE + 0x2000),
+            }
+        ]
+        return _index([main, *ROWS[1:]])
+
+    def test_a_call_through_a_named_slot_holds(self) -> None:
+        found = _check(f"{MAIN_VA} creates the guard with CreateMutexW.", index=self._index())
+        assert found.violations == [] and found.not_checked == [] and found.checked == 1
+
+    def test_a_name_no_slot_call_holds_is_asked(self) -> None:
+        found = _check(f"{MAIN_VA} waits with SleepEx.", index=self._index())
+        (violation,) = found.violations
+        assert 'calls through slots the hash resolution fills "CreateMutexW"' in violation.message
+
+
 class TestWhatASentenceNames:
     def test_a_word_of_running_text_is_no_api(self) -> None:
         apis, _strings = named_values("The routine will connect and send the data.")
@@ -277,6 +303,10 @@ class TestWhatASentenceNames:
     def test_a_name_in_a_code_span_or_with_a_capital_inside_is(self) -> None:
         apis, _strings = named_values("It calls `send` and then CreateMutexW and CreateProcess.")
         assert apis == ["send", "CreateMutexW", "CreateProcess"]
+
+    def test_a_name_inside_a_span_s_expression_is_no_api(self) -> None:
+        apis, _strings = named_values("It waits `(rand%150+450)s` and calls `send()`.")
+        assert apis == ["send"]
 
     def test_quoted_strings_and_code_spans_holding_quotes_are_strings(self) -> None:
         _apis, strings = named_values(

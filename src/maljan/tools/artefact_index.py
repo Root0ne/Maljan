@@ -44,6 +44,15 @@ What it states, and nothing else:
 * **The names its hashes resolve to** where the hash resolution states the
   place inside it, and **the capa rules** that matched at its start or at an
   address inside it.
+* **The calls it makes through slots the hash resolution fills.** In the
+  straight-line run of code holding a hashed value (up to a transfer of
+  control), the slot that value's name is stored to: after the resolver's
+  call, a store of its return register before the register is overwritten;
+  or, in a table of records, the one record address some code calls or jumps
+  through (``_name_slots``). A call or jump through a named slot, direct or
+  through a register a straight-line load from it set, is a call of that
+  name (``slot_calls``), and leaves the count of calls that name nothing. A
+  slot two names fill is ambiguous (``ambiguous_slots``) and names nothing.
 * **Callers and callees**, and the **indirect artefacts**: how many of its
   direct callees hold artefacts of their own, and how many those are, each
   callee's own distinct count added. One call deep and added per callee, so
@@ -145,9 +154,13 @@ class _Function:
     data_refs: set[int] = field(default_factory=set)
     undecoded: bool = False
     # Calls the decoder read whose target names neither an import nor a
-    # function: through a register, or through a slot the import table does
-    # not fill (a pointer the code fills itself, such as a resolved name's).
+    # function nor a slot the hash resolution fills: through a register no
+    # straight-line load names, or through a slot nothing names.
     unnamed_calls: int = 0
+    # Calls and jumps through a slot the import table does not fill, by slot:
+    # directly, or through a register a load from the slot set in straight-line
+    # code. Named after the walk where the hash resolution fills the slot.
+    slot_calls: dict[int, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -157,6 +170,9 @@ class _Graph:
     covered: dict[int, set[int]] = field(default_factory=dict)
     # The section lookup the walk used, for the readers of the data sections.
     sections: Any = None
+    # Each straight-line run of code that holds a hashed name, as its events
+    # (``_SlotReading``), for the slots the resolution fills.
+    runs: list[list[tuple[Any, ...]]] = field(default_factory=list)
 
 
 # -- reading the code -------------------------------------------------------
@@ -302,11 +318,23 @@ class _Reader:
     address.
     """
 
-    def __init__(self, image: Image, wanted: set[int]) -> None:
+    def __init__(
+        self,
+        image: Image,
+        wanted: set[int],
+        hashed: Mapping[int, tuple[str, ...]] | None = None,
+    ) -> None:
         self.image = image
         self.sections = _Sections(image)
         self.imports = image.imports_by_slot()
         self.wanted = wanted
+        # The places of the hash resolution's values, with the names each reads.
+        self.hashed = dict(hashed or {})
+        # The straight-line run being read: its events, whether it holds a
+        # hashed value, and the registers a load from a slot set in it.
+        self.events: list[tuple[Any, ...]] = []
+        self.holds_hash = False
+        self.loaded: dict[int, int] = {}
         self.graph = _Graph()
         self.queue: list[int] = []
         self.sorted_starts: list[int] = []
@@ -409,21 +437,108 @@ class _Reader:
                         self.add(target, _CALL_TARGETS)
             elif callee is not None and self.attributing:
                 function.imports.add(str(callee[1]))
-            if self.attributing and (
-                callee is None
-                or (callee[0] == "function" and self._section(int(callee[1])) is None)
-            ):
-                function.unnamed_calls += 1
+            if self.attributing and callee is None:
+                slot = self._through(code, at, rva, ins)
+                if slot is not None:
+                    function.slot_calls[slot] = function.slot_calls.get(slot, 0) + 1
+                else:
+                    function.unnamed_calls += 1
+            elif self.attributing and callee is not None and callee[0] == "function":
+                if self._section(int(callee[1])) is None:
+                    function.unnamed_calls += 1
         if not self.attributing:
             return
+        through = (
+            _through_slot(code, at, self.image.is64, jump=True) if ins.kind == "stop" else None
+        )
+        if through is not None:
+            slot = self._through(code, at, rva, ins, jump=True)
+            if slot is not None:
+                function.slot_calls[slot] = function.slot_calls.get(slot, 0) + 1
+            elif through[0] == "memory" and self._slot_of(code, at, rva, ins) not in self.imports:
+                # A jump through a slot nothing fills that the run can read is a
+                # call that names nothing. A jump through a register no load
+                # names is left as it was: a switch table's jump reads the same.
+                function.unnamed_calls += 1
         if self.wanted:
             for place in range(rva, rva + ins.length):
                 if place in self.wanted:
                     self.graph.covered.setdefault(place, set()).add(function.start)
+                    names = self.hashed.get(place)
+                    if names is not None:
+                        self.events.append(("hash", names, place))
+                        self.holds_hash = True
+        self._read_events(code, at, rva, ins)
         if ins.kind != "call":
             data_target = _data_address(self.image, code, at, ins, rva + ins.length)
             if data_target is not None:
                 function.data_refs.add(data_target)
+        if ins.kind == "stop":
+            self._end_run()
+
+    def _slot_of(self, code: bytes, at: int, rva: int, ins: Instruction) -> int | None:
+        """The slot an instruction's memory operand names, by offset, or ``None``."""
+        found = _memory_operand(code, at, self.image.is64)
+        if found is None:
+            return None
+        displacement = found
+        if self.image.is64:
+            return rva + ins.length + displacement
+        slot = (displacement & 0xFFFFFFFF) - self.image.image_base
+        return slot if slot >= 0 else None
+
+    def _through(
+        self, code: bytes, at: int, rva: int, ins: Instruction, *, jump: bool = False
+    ) -> int | None:
+        """The slot a call or jump goes through when the import table does not fill it:
+        its memory operand, or the register a straight-line load from a slot set."""
+        through = _through_slot(code, at, self.image.is64, jump=jump)
+        if through is None:
+            return None
+        kind, value = through
+        if kind == "register":
+            return self.loaded.get(value)
+        slot = self._slot_of(code, at, rva, ins)
+        if slot is None or slot in self.imports:
+            return None
+        return slot
+
+    def _read_events(self, code: bytes, at: int, rva: int, ins: Instruction) -> None:
+        """What one instruction adds to the straight-line run: a call, an address taken, a
+        store or an overwrite of the return register, and the slot a register is loaded from."""
+        if ins.kind == "call":
+            self.events.append(("call",))
+            self.loaded.clear()
+            return
+        shape = _slot_shape(code, at, self.image.is64, ins.length)
+        slot = None
+        if shape is not None:
+            absolute = shape[2]
+            slot = (
+                absolute - self.image.image_base
+                if absolute is not None
+                else self._slot_of(code, at, rva, ins)
+            )
+        for register in ins.writes:
+            self.loaded.pop(register, None)
+        if shape is not None and slot is not None and 0 <= slot < self.image.size_of_image:
+            kind, named = shape[0], shape[1]
+            if kind == "store" and named == 0:
+                self.events.append(("store", slot, rva))
+            elif kind == "load" and named is not None:
+                self.loaded[named] = slot
+            elif kind == "address" and self._section(slot) is None:
+                self.events.append(("address", slot, rva))
+        if 0 in ins.writes:
+            self.events.append(("overwrite",))
+
+    def _end_run(self) -> None:
+        """End the straight-line run: kept when it holds a hashed value."""
+        if self.holds_hash:
+            self.graph.runs.append(self.events)
+        self.events = []
+        self.holds_hash = False
+        self.loaded.clear()
 
     def _tail_call(self, function: _Function, target: int) -> bool:
         """An unconditional jump to another function's start, recorded as its callee."""
@@ -440,13 +555,16 @@ class _Reader:
         base, code = found
         read = self.read[base]
         at = begin - base
+        self._end_run()
         while base + at < end and at < len(code):
             if read[at]:
+                self._end_run()
                 return
             read[at] = 1
             ins = decode(code, at, self.image.is64)
             if ins is None:
                 function.undecoded |= self.attributing
+                self._end_run()
                 return
             self._note(function, base + at, ins, code, at)
             if ins.kind == "stop" and ins.target[0] == "jump":
@@ -454,6 +572,7 @@ class _Reader:
                 if not begin <= target < end:
                     self._tail_call(function, target)
             at += ins.length
+        self._end_run()
 
     def _descend(self, function: _Function) -> None:
         """Decode from the start along every branch, within the function's own bound."""
@@ -470,6 +589,7 @@ class _Reader:
         pending = [function.start]
         while pending:
             rva = pending.pop()
+            self._end_run()
             while base <= rva < base + len(code) and not read[rva - base]:
                 if rva != function.start and rva in self.known:
                     break
@@ -494,10 +614,212 @@ class _Reader:
                         continue
                     break
                 rva = after
+        self._end_run()
 
 
-def _read_code(image: Image, seeds: Mapping[str, Iterable[int]], wanted: set[int]) -> _Graph:
-    reader = _Reader(image, wanted)
+# -- the slots a hash resolution fills ----------------------------------------
+
+
+def _operand_bytes(code: bytes, at: int, is64: bool) -> tuple[int, int, int] | None:
+    """``(opcode, rex, index after the opcode)`` with legacy prefixes and REX read off; ``None``
+    for an operand-size or address-size prefix, which no pointer store or load carries."""
+    i = at
+    while i < len(code) and code[i] in _LEGACY_PREFIXES:
+        if code[i] in (0x66, 0x67):
+            return None
+        i += 1
+    rex = 0
+    if is64 and i < len(code) and 0x40 <= code[i] <= 0x4F:
+        rex = code[i]
+        i += 1
+    if i >= len(code):
+        return None
+    return code[i], rex, i + 1
+
+
+def _memory_operand(code: bytes, at: int, is64: bool) -> int | None:
+    """The 32-bit displacement of a ModRM operand that is rip-relative (x64) or an absolute
+    address (x86): mod 00, r/m 101."""
+    found = _operand_bytes(code, at, is64)
+    if found is None:
+        return None
+    _op, _rex, after = found
+    if after + 5 > len(code):
+        return None
+    modrm = code[after]
+    if modrm >> 6 != 0 or modrm & 7 != 5:
+        return None
+    return int.from_bytes(code[after + 1 : after + 5], "little", signed=is64)
+
+
+def _through_slot(
+    code: bytes, at: int, is64: bool, *, jump: bool = False
+) -> tuple[str, int] | None:
+    """What an indirect call (or, with ``jump``, an indirect jump) goes through: ``("memory",
+    0)`` for a slot at a rip-relative or absolute address, ``("register", r)``; else ``None``."""
+    found = _operand_bytes(code, at, is64)
+    if found is None:
+        return None
+    op, rex, after = found
+    if op != 0xFF or after >= len(code):
+        return None
+    modrm = code[after]
+    if (modrm >> 3) & 7 != (4 if jump else 2):
+        return None
+    if modrm >> 6 == 3:
+        return ("register", (modrm & 7) | ((rex & 1) << 3))
+    if modrm >> 6 == 0 and modrm & 7 == 5:
+        return ("memory", 0)
+    return None
+
+
+def _slot_shape(
+    code: bytes, at: int, is64: bool, length: int
+) -> tuple[str, int | None, int | None] | None:
+    """``(kind, register, absolute address)`` of an instruction that stores a register to a
+    slot, loads one from a slot, or takes an address: ``store``, ``load`` or ``address``.
+
+    The slot is a rip-relative or absolute memory operand, or the absolute
+    address an x86 immediate or ``moffs`` carries (then given). Anything else
+    is ``None``.
+    """
+    found = _operand_bytes(code, at, is64)
+    if found is None:
+        return None
+    op, rex, after = found
+    if op in (0xA1, 0xA3):
+        width = 8 if is64 else 4
+        if after + width > len(code):
+            return None
+        value = int.from_bytes(code[after : after + width], "little")
+        return ("load" if op == 0xA1 else "store", 0, value)
+    if not is64 and (op == 0x68 or 0xB8 <= op <= 0xBF):
+        if after + 4 > len(code):
+            return None
+        return ("address", None, int.from_bytes(code[after : after + 4], "little"))
+    if after >= len(code):
+        return None
+    modrm = code[after]
+    reg = ((modrm >> 3) & 7) | (((rex >> 2) & 1) << 3)
+    memory = modrm >> 6 == 0 and modrm & 7 == 5
+    if op == 0x89 and memory:
+        return ("store", reg, None)
+    if op == 0x8B and memory:
+        return ("load", reg, None)
+    if op == 0x8D and memory:
+        return ("address", None, None)
+    if not is64 and op == 0xC7 and (modrm >> 3) & 7 == 0 and length >= 4:
+        immediate = int.from_bytes(code[at + length - 4 : at + length], "little")
+        return ("address", None, immediate)
+    return None
+
+
+def _name_slots(
+    runs: Sequence[Sequence[tuple[Any, ...]]], called: set[int]
+) -> tuple[dict[int, tuple[str, int]], dict[int, list[str]]]:
+    """The slots the hash resolution fills, ``{slot: (name, where it is named)}``, and the
+    ones two names fill, ``{slot: names}``.
+
+    Read in each straight-line run that holds a hashed value, two ways:
+
+    * **The call and its store.** After the hashed value, the first call;
+      after it, a store of the return register to a slot before the register
+      is overwritten, another call is made or the next hashed value comes:
+      that slot holds the name.
+    * **A table of records.** With no such store in the run, each hashed value
+      sits in a record with the address of the slot the resolution writes.
+      When the run takes no address before its first hashed value and one
+      after its last, each record runs from its hashed value to the next; when
+      it takes one before the first and none after the last, each runs from
+      the previous hashed value to its own; any other run names nothing. Of a
+      record's addresses, only one some code calls or jumps through is a slot:
+      a record holding exactly one names it, one holding two is ambiguous.
+
+    A hashed value whose readings give two names, and a slot two names fill,
+    are ambiguous and name nothing.
+    """
+    filled: dict[int, dict[str, tuple[str, int]]] = {}
+    ambiguous: dict[int, set[str]] = {}
+
+    def fill(slot: int, names: Sequence[str], where: int) -> None:
+        distinct = {name.lower(): name for name in names}
+        if len(distinct) == 1:
+            ((key, name),) = distinct.items()
+            filled.setdefault(slot, {}).setdefault(key, (name, where))
+        elif distinct:
+            ambiguous.setdefault(slot, set()).update(distinct.values())
+
+    for run in runs:
+        hashes = [k for k, event in enumerate(run) if event[0] == "hash"]
+        stored = False
+        for index, k in enumerate(hashes):
+            end = hashes[index + 1] if index + 1 < len(hashes) else len(run)
+            j = k + 1
+            while j < end and run[j][0] != "call":
+                j += 1
+            j += 1
+            while j < end:
+                kind = run[j][0]
+                if kind == "store":
+                    fill(int(run[j][1]), run[k][1], int(run[j][2]))
+                    stored = True
+                    break
+                if kind in ("overwrite", "call"):
+                    break
+                j += 1
+        if stored or not hashes:
+            continue
+        slots = [
+            (k, int(e[1]), int(e[2]))
+            for k, e in enumerate(run)
+            if e[0] == "address" and int(e[1]) in called
+        ]
+        # Which way a record runs is read off every address the run takes,
+        # called or not: a record's addresses all sit on one side of its hash.
+        taken = [k for k, e in enumerate(run) if e[0] == "address"]
+        before = any(k < hashes[0] for k in taken)
+        after = any(k > hashes[-1] for k in taken)
+        if after and not before:
+            bounds = [
+                (h, hashes[i + 1] if i + 1 < len(hashes) else len(run))
+                for i, h in enumerate(hashes)
+            ]
+        elif before and not after:
+            bounds = [(hashes[i - 1] if i else -1, h) for i, h in enumerate(hashes)]
+        else:
+            continue
+        cursor = 0
+        for (low, high), k in zip(bounds, hashes, strict=True):
+            while cursor < len(slots) and slots[cursor][0] < low:
+                cursor += 1
+            inside = []
+            scan = cursor
+            while scan < len(slots) and slots[scan][0] < high:
+                inside.append(slots[scan])
+                scan += 1
+            names = run[k][1]
+            distinct = {slot for _k, slot, _w in inside}
+            if len(distinct) == 1:
+                fill(inside[0][1], names, inside[0][2])
+            elif len(distinct) > 1 and names:
+                for slot in distinct:
+                    ambiguous.setdefault(slot, set()).update(names)
+    named: dict[int, tuple[str, int]] = {}
+    for slot, by_name in filled.items():
+        if len(by_name) == 1 and slot not in ambiguous:
+            named[slot] = next(iter(by_name.values()))
+        else:
+            ambiguous.setdefault(slot, set()).update(n for n, _w in by_name.values())
+    return named, {slot: sorted(names) for slot, names in ambiguous.items()}
+
+
+def _read_code(
+    image: Image,
+    seeds: Mapping[str, Iterable[int]],
+    wanted: set[int],
+    hashed: Mapping[int, tuple[str, ...]] | None = None,
+) -> _Graph:
+    reader = _Reader(image, wanted, hashed)
     for begin, end, owner in zip(
         image.function_starts, image.function_ends, image.function_owners, strict=False
     ):
@@ -555,9 +877,13 @@ def _printable(byte: int) -> bool:
 class _Cell:
     """One artefact of one function, and the entries that state it."""
 
-    kind: str  # "import", "name", "decoded", "plain" or "capa"
+    kind: str  # "import", "slot", "name", "decoded", "plain" or "capa"
     value: str
     sources: list[str] = field(default_factory=list)
+    # For a call through a slot the hash resolution fills: the slot, and the
+    # instruction that names it (the store, or the record's address).
+    slot: int | None = None
+    named_at: int | None = None
 
 
 class _Rows:
@@ -566,12 +892,21 @@ class _Rows:
     def __init__(self) -> None:
         self.cells: dict[int, dict[tuple[str, str], _Cell]] = {}
 
-    def add(self, start: int, kind: str, value: str, source: str) -> None:
+    def add(
+        self,
+        start: int,
+        kind: str,
+        value: str,
+        source: str,
+        slot: tuple[int, int] | None = None,
+    ) -> None:
         group = _GROUP[kind]
         cells = self.cells.setdefault(start, {})
         cell = cells.get((group, value))
         if cell is None:
-            cells[(group, value)] = _Cell(kind, value, [source])
+            cells[(group, value)] = _Cell(
+                kind, value, [source], *(slot if slot is not None else (None, None))
+            )
             return
         if kind == "decoded" and cell.kind == "plain":
             cell.kind = "decoded"
@@ -581,7 +916,14 @@ class _Rows:
 
 # An import called and a name a hash resolves to are one artefact when they are
 # one name; a plain and a decoded string are one when they are one text.
-_GROUP = {"import": "api", "name": "api", "plain": "text", "decoded": "text", "capa": "capa"}
+_GROUP = {
+    "import": "api",
+    "name": "api",
+    "slot": "slot",
+    "plain": "text",
+    "decoded": "text",
+    "capa": "capa",
+}
 
 
 def _source(pair: tuple[str, Mapping[str, Any]] | None) -> tuple[str, Mapping[str, Any]]:
@@ -711,10 +1053,22 @@ def index_image(
 
     wanted = _places_wanted(capa_data, floss_data, hash_data, blob_data, base)
     wanted.update(offset for _, offset in addresses)
-    graph = _read_code(image, seeds, wanted)
+    graph = _read_code(image, seeds, wanted, _hashed_places(hash_data))
     placer = _Placer(image, graph)
     rows = _Rows()
     unplaced: dict[str, int] = {}
+    # The slots the hash resolution fills, and each call through one: an API
+    # call of that name, sourced to the resolution's entry. A call through a
+    # slot nothing names, or two names fill, stays a call that names nothing.
+    called = {slot for f in graph.functions.values() for slot in f.slot_calls}
+    filled, ambiguous = _name_slots(graph.runs, called) if hash_id else ({}, {})
+    for start, function in graph.functions.items():
+        for slot, count in sorted(function.slot_calls.items()):
+            if slot in filled:
+                name, named_at = filled[slot]
+                rows.add(start, "slot", name, hash_id, (slot, named_at))
+            else:
+                function.unnamed_calls += count
 
     def place(where: list[int], kind: str, value: str, source: str, what: str) -> None:
         if not where:
@@ -782,6 +1136,8 @@ def index_image(
             place(where, "capa", str(capability["rule"]), capa_id, "capa")
 
     data = _answer(image, graph, rows, names, unplaced, entry_points)
+    data["resolved_slots"] = {hex(base + slot): name for slot, (name, _w) in sorted(filled.items())}
+    data["ambiguous_slots"] = {hex(base + slot): names for slot, names in sorted(ambiguous.items())}
     data["function_lists"] = function_lists
     data["absent"] = dict(absent or {})
     if addresses:
@@ -858,11 +1214,12 @@ def _answer(
             "function": va(start),
             "offset": hex(start),
             "direct": len(cells),
-            "imports": [_cell(c) for c in listed if c.kind == "import"],
-            "resolved": [_cell(c) for c in listed if c.kind == "name"],
-            "decoded_strings": [_cell(c) for c in listed if c.kind == "decoded"],
-            "plain_strings": [_cell(c) for c in listed if c.kind == "plain"],
-            "capa": [_cell(c) for c in listed if c.kind == "capa"],
+            "imports": [_cell(c, base) for c in listed if c.kind == "import"],
+            "slot_calls": [_cell(c, base) for c in listed if c.kind == "slot"],
+            "resolved": [_cell(c, base) for c in listed if c.kind == "name"],
+            "decoded_strings": [_cell(c, base) for c in listed if c.kind == "decoded"],
+            "plain_strings": [_cell(c, base) for c in listed if c.kind == "plain"],
+            "capa": [_cell(c, base) for c in listed if c.kind == "capa"],
             "callers": [va(c) for c in sorted(callers.get(start, ()))],
             "callees": [va(c) for c in sorted(held.callees if held else ())],
             "indirect": {"artefacts": reached, "through": through},
@@ -904,12 +1261,42 @@ def _answer(
 
 _SOURCE_ORDER = (_EXCEPTION_DIRECTORY, _EXPORTS, _ENTRY_POINT, _CAPA, _CALL_TARGETS)
 _SOURCES_SAID = "functions come from " + ", ".join(_SOURCE_ORDER)
-_KIND_ORDER = {"import": 0, "name": 1, "decoded": 2, "plain": 3, "capa": 4}
+_KIND_ORDER = {"import": 0, "slot": 1, "name": 2, "decoded": 3, "plain": 4, "capa": 5}
 
 
-def _cell(cell: _Cell) -> dict[str, Any]:
+def _cell(cell: _Cell, base: int = 0) -> dict[str, Any]:
     key = "rule" if cell.kind == "capa" else "text" if cell.kind in ("plain", "decoded") else "name"
-    return {key: cell.value, "sources": list(cell.sources)}
+    out: dict[str, Any] = {key: cell.value, "sources": list(cell.sources)}
+    if cell.slot is not None and cell.named_at is not None:
+        out["slot"] = hex(base + cell.slot)
+        out["named_at"] = hex(base + cell.named_at)
+    return out
+
+
+def _hashed_places(hashes: Mapping[str, Any]) -> dict[int, tuple[str, ...]]:
+    """Each place the hash resolution states a value at, with the function names it reads.
+
+    A module's name is no function name: a place reading only modules is kept
+    with no names, so a table's records stay counted as records.
+    """
+    places: dict[int, tuple[str, ...]] = {}
+    for hit in hashes.get("hits") or []:
+        if not isinstance(hit, Mapping):
+            continue
+        names = tuple(
+            dict.fromkeys(
+                str(reading.get("name") or "")
+                for reading in hit.get("readings") or []
+                if isinstance(reading, Mapping)
+                and reading.get("set") != "modules"
+                and reading.get("name")
+            )
+        )
+        for occurrence in hit.get("occurrences") or []:
+            rva = _hex(occurrence.get("rva")) if isinstance(occurrence, Mapping) else None
+            if rva is not None:
+                places[rva] = tuple(dict.fromkeys([*places.get(rva, ()), *names]))
+    return places
 
 
 def function_index(
@@ -946,6 +1333,9 @@ SERVED_BY = "the analysis server's function_index tool serves it whole or by add
 
 # How the callees' artefacts are counted, said beside the count.
 PER_CALLEE = "counted per callee"
+
+# How a row names the calls it makes through slots the hash resolution fills.
+SLOT_CALLS_SAID = "calls through slots the hash resolution fills"
 
 _ADDRESS = re.compile(r"0x[0-9a-f]{1,16}")
 
@@ -1023,6 +1413,7 @@ def row_parts(row: Mapping[str, Any], entry_id: str) -> str:
             parts.append(f"{verb} {names} ({', '.join(_ids(cells, entry_id))})")
 
     named("imports", "calls", "name")
+    named("slot_calls", SLOT_CALLS_SAID, "name")
     named("resolved", "resolves", "name")
     texts = []
     for key, one, many in (

@@ -278,7 +278,9 @@ Every function of a PE the file lists or the platform's x86 decoder reaches,
 with the artefacts each holds (`tools.artefact_index`); nothing is run. The
 functions come from the exception directory, the exports, the entry point and
 the direct call targets the decoder reaches. Each row states the imports the
-function calls, the names its hashes resolve to, how many plain and decoded
+function calls, the calls it makes through slots the hash resolution fills
+(the slot each hashed name is stored to, read in straight-line code), the
+names its hashes resolve to, how many plain and decoded
 strings it refers to, its callers and callees, and how many artefacts its
 callees hold, counted per callee. Each cell names the tool whose answer states
 it. The answer joins `pe_info`, `resolve_api_hashes` and `decode_string_blobs`

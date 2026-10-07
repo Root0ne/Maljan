@@ -411,6 +411,14 @@ def _function_index_text() -> str:
             "offset": hex(0x1000 + 0x100 * i),
             "direct": 5 - i,
             "imports": cells("name", ["OpenThing"], artefact_index.SELF),
+            "slot_calls": [
+                {
+                    "name": "ShutThing",
+                    "sources": ["ev_0002"],
+                    "slot": "0x405000",
+                    "named_at": "0x401010",
+                }
+            ],
             "resolved": cells("name", ["CloseThing"], "ev_0002"),
             "decoded_strings": cells("text", ["a", "b"], "ev_0003"),
             "plain_strings": cells("text", ["c"], artefact_index.SELF),

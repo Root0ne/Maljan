@@ -1164,8 +1164,9 @@ def function_index(path: str, address: str = "", carved_path: str = "") -> dict[
     The functions come from the file's exception directory, its exports, its
     entry point and the direct call targets the platform's x86 decoder reaches.
     Each row names a function at the image base plus its offset (the address
-    Ghidra and radare2 take) and states the imports it calls, the names its
-    hashes resolve to, how many plain and decoded strings it refers to, its
+    Ghidra and radare2 take) and states the imports it calls, the calls it
+    makes through slots the hash resolution fills, the names its hashes
+    resolve to, how many plain and decoded strings it refers to, its
     callers and callees, and how many artefacts its callees hold (counted per
     callee). Each cell names the tool whose answer states it. Joined here:
     ``pe_info``, ``resolve_api_hashes`` and ``decode_string_blobs`` over the

@@ -35,8 +35,9 @@ Nothing is stated where the fact is not whole, and the run record says why,
 ``no: <reason>``: no index in the run, an index answer not kept whole, a
 function the index does not know, a row the pack the analyst was shown left
 out, a function the decoder stopped in, and, for an API name, a function or a
-callee whose calls the index cannot all name (a call through a register or a
-pointer the code fills itself may be the call the claim names).
+callee whose calls the index cannot all name (a call through a register no
+load names, or a slot nothing names, may be the call the claim names; one
+through a slot the hash resolution fills is named in the row).
 
 Linear in the claims, the index rows and the listings' size: the rows are
 keyed by offset once, each listing and each row is read into its names and
@@ -96,7 +97,7 @@ UNDECODED_UNKNOWN = (
 )
 UNNAMED_CALLS = (
     "no: {address} or one of its callees makes calls the index cannot name (through a register "
-    "or a pointer the code fills itself), so an API name it does not hold may be one of them"
+    "no load names, or a slot nothing names), so an API name it does not hold may be one of them"
 )
 UNNAMED_UNKNOWN = "no: [{entry}] the function index does not count the calls that name nothing"
 CALLEES_UNKNOWN = (
@@ -278,7 +279,7 @@ class FunctionFacts:
 
 def _row_held(row: Mapping[str, Any]) -> _Held:
     held = _Held()
-    for key in ("imports", "resolved"):
+    for key in ("imports", "slot_calls", "resolved"):
         for cell in row.get(key) or []:
             if isinstance(cell, Mapping) and cell.get("name"):
                 held.names.add(_api_key(str(cell["name"]).rpartition("!")[2]))
@@ -369,7 +370,7 @@ def function_facts(
         facts.run_keys |= held.names
         facts.run_names |= {
             str(cell.get("name")).rpartition("!")[2].lower()
-            for key in ("imports", "resolved")
+            for key in ("imports", "slot_calls", "resolved")
             for cell in row.get(key) or []
             if isinstance(cell, Mapping) and cell.get("name")
         }
@@ -420,16 +421,19 @@ def function_facts(
 # ---------------------------------------------------------------------------
 
 
-def _inside(spans: Sequence[tuple[int, int]], at: int) -> bool:
-    return any(begin <= at < end for begin, end in spans)
+def _named_alone(spans: Sequence[str], token: str) -> bool:
+    """Whether a code span holds ``token`` alone, or called with nothing in its parentheses:
+    a span that is an expression (``(rand%9)``) writes pseudo-code, not a name."""
+    return token in spans or f"{token}()" in spans
 
 
 def named_values(text: str, run_names: Iterable[str] = ()) -> tuple[list[str], list[str]]:
     """``(API names, string values)`` a claim's sentence names, once each, in order.
 
     An API name is an identifier the export catalogue or this run's own facts
-    know, written with a capital after its first letter or inside a code span
-    (``send``), so a word of running text is never read as one. A string is a
+    know, written with a capital after its first letter, or alone in a code
+    span (``send``, ``send()``), so neither a word of running text nor a
+    name inside a span's expression is read as one. A string is a
     value written in double, single or typographic quotes, or a code span
     that holds such a quoted value, of three characters or more, that a text
     can be said to hold (``validation.decidable``); and an unquoted value
@@ -437,7 +441,7 @@ def named_values(text: str, run_names: Iterable[str] = ()) -> tuple[list[str], l
     """
     text = str(text or "")
     known = _catalogue_lower() | {str(name).lower() for name in run_names}
-    spans = [(m.start(), m.end()) for m in _CODE_SPAN_RE.finditer(text)]
+    spans = [m.group(0).strip("`").strip() for m in _CODE_SPAN_RE.finditer(text)]
     apis: list[str] = []
     for match in _IDENTIFIER.finditer(text):
         token = match.group(0)
@@ -445,7 +449,7 @@ def named_values(text: str, run_names: Iterable[str] = ()) -> tuple[list[str], l
             continue
         if not _is_a_name(token, known):
             continue
-        if re.search(r"[A-Z]", token[1:]) or _inside(spans, match.start()):
+        if re.search(r"[A-Z]", token[1:]) or _named_alone(spans, token):
             if token not in apis:
                 apis.append(token)
     keys = {_api_key(name) for name in apis}
