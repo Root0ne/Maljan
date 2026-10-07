@@ -228,11 +228,15 @@ class TokenLedger:
         model: str = "",
         fallback: str = "",
         call: str = "",
+        estimated: dict[str, Any] | None = None,
     ) -> None:
         """One call: its reported usage, or ``None`` when the provider reported none.
 
         ``call`` names what the call was — a tool-loop turn, the verdict, a
         report section — and is recorded for a call that reported no usage.
+        ``estimated`` is a stated estimate of a call that reported none (an
+        answer ended while it streamed): it is handed to the spend meter only,
+        and the call stays one that reported no usage here.
         """
         with self._lock:
             if usage is None:
@@ -261,7 +265,7 @@ class TokenLedger:
             if fallback:
                 self._fallbacks.append({"agent": agent, "model": model, "reason": fallback})
         if self.spend is not None:
-            self.spend.settle(usage, model, call)
+            self.spend.settle(usage, model, call, estimated=estimated)
 
     @property
     def input_tokens(self) -> int:
@@ -311,10 +315,20 @@ def record_response_usage(
         return
     try:
         from maljan.llm.fallback import turn_model
+        from maljan.llm.stream_watch import estimated_usage
 
         answered_by, fallback = turn_model(response, model)
+        usage = turn_usage(response)
         ledger.add(
-            turn_usage(response), agent=agent, model=answered_by, fallback=fallback, call=call
+            usage,
+            agent=agent,
+            model=answered_by,
+            fallback=fallback,
+            call=call,
+            # An answer ended while it streamed reported nothing, and carries a
+            # stated estimate for the spend ceiling; the reported figures stay
+            # absent.
+            estimated=None if usage is not None else estimated_usage(response),
         )
     except Exception:  # noqa: BLE001 — telemetry must never break analysis
         return

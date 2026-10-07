@@ -61,6 +61,7 @@ from maljan.reporting.models import (
     ProcessNode,
     RecoveredValue,
     StringIOC,
+    stated_family,
 )
 from maljan.schemas.judgement import indicator_type_for
 from maljan.schemas.stix_models import (
@@ -1008,24 +1009,48 @@ class ExtendedSTIXRenderer:
         #    run, so the object a Benign export declines above was replaced by
         #    an identical one two steps later.
         malware_id = None if benign else self._find_malware_id(objects)
+        # The family the run states (the judge's, else the sandbox's), or none
+        # for a placeholder: "Unknown" is no family to export an object for.
+        family = stated_family(report.attribution.family)
         if malware_id is None and not benign:
-            malware_name = report.attribution.family or report.malware_category or "unknown"
+            malware_name = family or report.malware_category or "unknown"
             malware_obj = Malware(
                 name=str(malware_name),
                 description=f"Sample {report.identity.hashes.sha256}",
-                is_family=False,
+                # Named for the family the run states, it stands for that
+                # family; named for a category or ``unknown``, for this sample.
+                is_family=bool(family),
                 malware_types=[report.malware_category] if report.malware_category else [],
                 # Named from the family, so the family's own citations are
                 # this object's; a name from the category or ``unknown`` has
                 # none in the record.
                 x_maljan_evidence_refs=(
-                    self._family_refs(report, ledger_order) if report.attribution.family else None
+                    self._family_refs(report, ledger_order) if family else None
                 ),
             )
             objects.append(malware_obj)
             malware_id = malware_obj.id
-            if report.attribution.family:
+            if family:
                 minted_family_id = malware_obj.id
+        elif malware_id is not None and family and not _names_the_family(objects, family):
+            # The judge's malware objects stand for this one sample, and the
+            # run states a family: the family's own object is added beside
+            # them, and the judge's object, unedited, is a variant of it.
+            family_obj = Malware(
+                name=family,
+                description=f"The family this run attributes {report.identity.hashes.sha256} to",
+                is_family=True,
+                x_maljan_evidence_refs=self._family_refs(report, ledger_order),
+            )
+            objects.append(family_obj)
+            objects.append(
+                Relationship(
+                    relationship_type="variant-of",
+                    source_ref=malware_id,
+                    target_ref=family_obj.id,
+                )
+            )
+            minted_family_id = family_obj.id
         if malware_id is not None:
             objects.extend(_onto(edge, stood_in, malware_id) for edge in awaiting_stand_in)
 
@@ -1407,6 +1432,21 @@ class ExtendedSTIXRenderer:
             if obj_type == "malware":
                 return getattr(obj, "id", None)
         return None
+
+
+def _names_the_family(objects: list[Any], family: str) -> bool:
+    """Whether a malware object in ``objects`` is named for ``family``, whatever its case.
+
+    An object named for the family stands for it as its judge wrote it: one
+    with ``is_family: false`` is the judge's answer to the question asked of
+    exactly that (``stix.is_family_contradicts_family``), and it stands.
+    """
+    wanted = family.strip().casefold()
+    return any(
+        getattr(obj, "type", "") == "malware"
+        and str(getattr(obj, "name", "") or "").strip().casefold() == wanted
+        for obj in objects
+    )
 
 
 def _produced_by(

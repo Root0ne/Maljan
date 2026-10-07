@@ -10,8 +10,8 @@ The answer the stream adds up to is the answer the server sent: its text, its
 tool calls, its finish reason, the server's ``timings`` (on the last chunk)
 and its usage. ik_llama.cpp puts a running total of the usage on every chunk
 of the answer, and the chunks' usages are added together when the chunks are
-joined; only the total the stream closes with is kept. A hosted API is read
-as it was.
+joined; only the total the stream closes with is kept. DeepSeek's answer is
+read as a stream too; another hosted API is read as it was.
 """
 
 from __future__ import annotations
@@ -169,11 +169,35 @@ class TestWhichEndpointsStream:
 
         assert not model.stream_chunk_timeout
 
+    def test_deepseek_is_asked_for_a_stream_with_its_usage(self) -> None:
+        from .streamed_wire import reply
+
+        seen: list[dict[str, Any]] = []
+
+        def _handle(request: httpx.Request) -> httpx.Response:
+            seen.append(json.loads(request.content))
+            return reply(request, _WHOLE)
+
+        model = OpenAIProvider(_settings("https://api.deepseek.com", "deepseek")).build_model(
+            "m",
+            0.0,
+            max_tokens=512,
+            http_client=httpx.Client(transport=httpx.MockTransport(_handle)),
+        )
+
+        answer = model.invoke([HumanMessage(content="hi")])
+
+        assert answer.content == "done"
+        assert answer.usage_metadata["output_tokens"] == 3
+        assert seen[0]["stream"] is True
+        assert seen[0]["stream_options"] == {"include_usage": True}
+        assert not model.stream_chunk_timeout
+
     @pytest.mark.parametrize(
         ("base_url", "compat"),
-        [("https://api.deepseek.com", "deepseek"), ("https://api.example.org/v1", "auto")],
+        [("https://api.example.org/v1", "auto"), ("https://api.example.org/v1", "standard")],
     )
-    def test_a_hosted_api_is_read_whole_as_before(self, base_url: str, compat: str) -> None:
+    def test_another_hosted_api_is_read_whole_as_before(self, base_url: str, compat: str) -> None:
         seen: list[dict[str, Any]] = []
 
         def _handle(request: httpx.Request) -> httpx.Response:

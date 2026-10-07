@@ -1909,11 +1909,15 @@ def _macho(data: dict[str, Any]) -> str:
 
 
 def _apk(data: dict[str, Any]) -> str:
-    # A fact androguard could not read is a ``no: <reason>`` string, not a
-    # list; the degraded note beside it already names what was not read.
+    # A fact androguard could not read is one of the tool's own ``no: <reason>``
+    # strings, not a list; the degraded note beside it already names what was
+    # not read. A package name the manifest wrote is printed as written,
+    # whatever it starts with.
+    from maljan.tools.binary import is_apk_unread
+
     parts = []
     package = data.get("package")
-    if package and not str(package).startswith("no: "):
+    if package and not is_apk_unread(str(package)):
         parts.append(f"package {package}")
     if data.get("degraded"):
         parts.append(str(data["degraded"]))

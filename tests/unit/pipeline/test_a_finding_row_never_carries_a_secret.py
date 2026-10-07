@@ -248,6 +248,11 @@ CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
     ("pipeline/validation.py", "platform_mismatch_message"): frozenset(
         {"platforms", "expected_platforms", "domain", "expected_domain"}
     ),
+    # The table's own nouns and row numbers, and the section's own sentence
+    # numbers and states, around values each wrapped in the helper where the
+    # sentence is built.
+    ("pipeline/validation.py", "stated_value_violations"): frozenset({"said"}),
+    ("pipeline/validation.py", "unpublished_value_violations"): frozenset({"said"}),
     # A join of this module's own vocabulary of unsupported claims.
     ("pipeline/validation.py", "unsupported_benign_violations"): frozenset({"listed"}),
     ("pipeline/validation.py", "unsupported_malware_violations"): frozenset({"listed"}),
@@ -294,9 +299,10 @@ CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
     # chunks ("chunk 1 of 2"), and the words this function picks around it.
     ("pipeline/validation.py", "analyst_cut_violation"): frozenset({"chunk", "answer"}),
     # The same chunk wording, and the counts the platform read off the answer:
-    # numbers, never the answer's text.
+    # numbers, never the answer's text; ``streamed`` is this module's own
+    # sentence saying the answer was ended while it streamed, or nothing.
     ("pipeline/validation.py", "analyst_repeated_violation"): frozenset(
-        {"answer", "chars", "begun", "distinct", "repeated", "margin"}
+        {"answer", "chars", "begun", "distinct", "repeated", "margin", "streamed"}
     ),
 }
 

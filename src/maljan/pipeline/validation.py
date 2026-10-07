@@ -20,6 +20,7 @@ and the drop of an indicator that named a value no tool ever saw.
 
 from __future__ import annotations
 
+import bisect
 import ipaddress
 import json
 import re
@@ -45,9 +46,11 @@ from maljan.pipeline.events import (
     VALIDATION_SURVIVED,
     EventSink,
     emit_validation_feedback,
+    safe_answer_text,
     safe_finding_value,
+    unparsed_answer_kept_sentence,
 )
-from maljan.schemas.evidence import entry_ids_in
+from maljan.schemas.evidence import answer_not_shown, entry_ids_in
 from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
 from maljan.schemas.stix_pattern import read_comparisons
 from maljan.utils.marked_cut import marked_cut
@@ -62,7 +65,7 @@ MAX_SUGGESTIONS = 3
 # says anything. The index scores a *correct* id near zero often enough that a
 # bare threshold questioned almost every claim: 81 of the 92 feedback rows in
 # one audited run, 33 of 33 in another. The default is the measured one — see
-# ``tests/fixtures/attck_alignment_recorded.json`` and docs/architecture.md.
+# ``tests/fixtures/attck_alignment_recorded.json`` and apps/docs/content/docs/architecture.mdx.
 ALIGNMENT_MARGIN = 0.20
 
 
@@ -149,6 +152,15 @@ class Violation:
     # the finding to that technique's row by it: a message can name other ids
     # (an unknown id's names the closest real ones).
     subject: str = ""
+    # What a renderer prints after each of ``quoted``, in the same order, where
+    # each sentence carries its own label (a value and its publish state).
+    # Never shown to the producer and never stored on the channel.
+    labels: tuple[str, ...] = ()
+    # The answer the finding is about, as the producer wrote it, where the
+    # finding is that none of it could be read (``isr.unparsed_answer``). The
+    # run record keeps it (``unparsed_answer_rows``); the event that asks says
+    # only where. Never shown to the producer and never stored on the channel.
+    answer: str = ""
 
     def __post_init__(self) -> None:
         # A row written by a validator has no route, and its message is its
@@ -282,8 +294,9 @@ UNGROUNDED_TECHNIQUE_CODE = "isr.ungrounded_technique"
 # is still unread after it is recorded.
 UNPARSED_ANSWER_CODE = "isr.unparsed_answer"
 CLAIM_WITHOUT_CONFIDENCE_CODE = "isr.claim_without_confidence"
-# A claim whose TECHNIQUE line is more than one id or NONE. No id is read
-# from it, and the analyst is asked once for one id per claim.
+# A claim whose TECHNIQUE line is more than ids or NONE. No id is read from
+# it, and the analyst is asked once for ids alone. A list of ids separated by
+# commas or "and" is read (``base_agent.read_technique_line``) and not asked.
 TECHNIQUE_LINE_UNREAD_CODE = "isr.technique_line_unread"
 # Claim headings under the DISPUTES section, beside the analyst's own claims.
 # Not read as its own: they may be a peer's claims it quotes, or its own
@@ -322,15 +335,17 @@ def claims_kept_under_disputes_finding(count: int) -> Violation:
 
 
 def technique_line_violation(lines: list[str]) -> Violation:
-    """What an analyst is asked about TECHNIQUE lines no single id could be read from."""
+    """What an analyst is asked about TECHNIQUE lines no technique id could be read from."""
     shown = "; ".join(f'"{safe_finding_value(line)}"' for line in lines)
     return Violation(
         code=TECHNIQUE_LINE_UNREAD_CODE,
         message=(
-            f"{len(lines)} claim(s) have a TECHNIQUE line that is not one technique id or "
-            f"NONE, so no technique is read from them: {shown}. Give each claim one "
-            "technique id, or NONE when it claims none; a claim that holds several "
-            "techniques is written as one claim per technique."
+            f"{len(lines)} claim(s) have a TECHNIQUE line that is not technique ids or "
+            f"NONE, so no technique is read from them: {shown}. Write each claim's "
+            "technique ids alone, several separated by commas, or NONE when it claims "
+            "none. An id the claim does not assert (negated, absent, not supported) is "
+            "left off the line, and the claim sentence says so; a doubt about an id the "
+            "claim does assert is said in the claim and in its CONFIDENCE."
         ),
     )
 
@@ -343,7 +358,7 @@ _UNPARSED_ANSWER_MESSAGE = (
     "EVIDENCE: <artifact reference, naming the tool result you read it from, "
     "for example [ev_0002]>\n"
     "CONFIDENCE: <0.0-1.0>\n"
-    "TECHNIQUE: <T-ID or NONE>\n"
+    "TECHNIQUE: <T-ID, several separated by commas, or NONE>\n"
     "---\n"
     "A finding you cannot put a confidence on stays in your prose."
 )
@@ -358,8 +373,14 @@ def parse_violations(isr: Any) -> list[Violation]:
     the analyst's own statement. An ISR built without a parse says nothing.
     """
     found: list[Violation] = []
-    if not getattr(isr, "claims", None) and str(getattr(isr, "unparsed_answer", "") or ""):
-        found.append(Violation(code=UNPARSED_ANSWER_CODE, message=_UNPARSED_ANSWER_MESSAGE))
+    prose = str(getattr(isr, "unparsed_answer", "") or "")
+    if not getattr(isr, "claims", None) and prose:
+        # The answer as written rides with the question to the run record:
+        # without it nobody can read later why it failed to parse.
+        written = str(getattr(isr, "answer_text", "") or "") or prose
+        found.append(
+            Violation(code=UNPARSED_ANSWER_CODE, message=_UNPARSED_ANSWER_MESSAGE, answer=written)
+        )
     try:
         declined = int(getattr(isr, "blocks_without_confidence", 0) or 0)
     except (TypeError, ValueError):
@@ -492,16 +513,27 @@ def validate_isr(
     claims = list(getattr(isr, "claims", None) or [])
     agent = str(getattr(isr, "agent_id", "") or "")
     scope = expected_technique_scope(sample)
+    # The block each claim was read from: a block whose TECHNIQUE line listed
+    # several ids is one claim per id, and the analyst wrote one block.
+    blocks = claim_block_indexes(claims)
+    block_sizes = {block: blocks.count(block) for block in set(blocks)}
 
     for index, claim in enumerate(claims):
-        path = f"{agent}.claims[{index}]" if agent else f"claims[{index}]"
+        block = blocks[index]
+        block_path = f"{agent}.claims[{block}]" if agent else f"claims[{block}]"
+        listed = block_sizes[block] > 1
+        claim_tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
+        # One id of a list is named after its block, so two of its ids asked
+        # the same question are two findings.
+        path = f"{block_path}.{claim_tid}" if listed and claim_tid else block_path
+        first_of_block = index == 0 or blocks[index - 1] != block
 
         confidence: Any = getattr(claim, "confidence", None)
         try:
             numeric: float | None = float(confidence)
         except (TypeError, ValueError):
             numeric = None
-        if numeric is None or not (0.0 <= numeric <= 1.0):
+        if first_of_block and (numeric is None or not (0.0 <= numeric <= 1.0)):
             violations.append(
                 Violation(
                     code="isr.confidence_range",
@@ -509,12 +541,12 @@ def validate_isr(
                         f"CONFIDENCE is {safe_finding_value(confidence)!r}; it must be a number "
                         "between 0.0 and 1.0."
                     ),
-                    path=path,
+                    path=block_path,
                 )
             )
 
         evidence = str(getattr(claim, "evidence_ref", "") or "").strip()
-        if not evidence:
+        if first_of_block and not evidence:
             violations.append(
                 Violation(
                     code="isr.empty_evidence",
@@ -522,7 +554,7 @@ def validate_isr(
                         "the claim cites no evidence; give the concrete artifact it "
                         "rests on, or drop the claim."
                     ),
-                    path=path,
+                    path=block_path,
                 )
             )
 
@@ -552,7 +584,7 @@ def validate_isr(
         if not tid:
             continue
         if attck is None:
-            absence = absence_claim_violation(claim, tid, None, path=path)
+            absence = absence_claim_violation(claim, tid, None, path=path, listed=listed)
             if absence is not None:
                 violations.append(absence)
             continue
@@ -581,7 +613,7 @@ def validate_isr(
         # that is the one question its id is asked: where the id sits in the
         # catalogue is beside the point of a claim that says it is not there.
         # The index's ranking is still written on the claim, as on every claim.
-        absence = absence_claim_violation(claim, tid, attck, path=path)
+        absence = absence_claim_violation(claim, tid, attck, path=path, listed=listed)
         if absence is not None:
             violations.append(absence)
         else:
@@ -596,7 +628,9 @@ def validate_isr(
                 # asked about the platform; one whose sentence never names its
                 # technique is asked this one. The weak-alignment challenge,
                 # when it is on, may still be asked of the same claim.
-                undescribed = claim_does_not_describe_violation(claim, tid, attck, path=path)
+                undescribed = claim_does_not_describe_violation(
+                    claim, tid, attck, path=path, listed=listed
+                )
                 if undescribed is not None:
                     violations.append(undescribed)
         weak = _weak_alignment(
@@ -679,10 +713,58 @@ _CATEGORY_NOUN = (
 # behaviour something the sentence asserts after all: a comma (a new clause,
 # "Without encryption, the sample exfiltrates data"; a comma splice), or a
 # coordinator that joins a second statement ("No persistence exists and
-# process injection is used", "lacks persistence and instead injects").
+# process injection is used", "lacks persistence and instead injects"). A dash
+# is read before any of this (``_read_dashes``).
 _ASSERTION_BETWEEN_RE = re.compile(
     r",|\b(?:and|instead|only|but|yet|so|then|rather|while)\b", re.IGNORECASE
 )
+# A dash: an em dash however it is spaced, an en dash only with a space on
+# each side, since "0–7" is a range.
+_DASH_RE = re.compile(r"—|(?<=\s)–(?=\s)")
+# A verb of its own, by its auxiliary or copula: what makes the words after a
+# dash a new statement ("— process injection was not observed") rather than
+# the rest of the phrase before it ("— not a single HTTP request").
+_OWN_VERB_RE = re.compile(
+    r"\b(?:is|are|was|were|be|been|being|has|have|had|does|do|did|can|could|will|would"
+    r"|may|might|must|should|shall|exists?|existed|appears?|appeared|occurs?|occurred)\b",
+    re.IGNORECASE,
+)
+# A cue that sets aside only the phrase right after it: a dash ends its reach
+# whatever follows ("loops instead of exiting visibly — sandbox evasion").
+_SET_ASIDE_CUE_RE = re.compile(r"\b(?:instead\s+of|rather\s+than)\b[^.;:!?\n]*$", re.IGNORECASE)
+
+
+def _read_dashes(text: str) -> str:
+    """``text`` with its dashes read, every character kept in place.
+
+    A pair of dashes in one clause around an aside ("does not — in any run —
+    inject") is read as if the aside were not there: dashes and aside become
+    spaces, so the negation keeps its verb. A single dash becomes a clause
+    break (";") where a clause with its own verb follows it, or where the cue
+    before it sets aside only its own phrase; any other dash is left as it is,
+    and the reading is the one a dash always had.
+    """
+    chars = list(text)
+    dashes = [found.start() for found in _DASH_RE.finditer(text)]
+    paired: set[int] = set()
+    for first, second in zip(dashes, dashes[1:], strict=False):
+        if first in paired:
+            continue
+        if not _CLAUSE_BREAK_RE.search(text[first + 1 : second]):
+            for at in range(first, second + 1):
+                chars[at] = " "
+            paired.update({first, second})
+    for at in dashes:
+        if at in paired:
+            continue
+        rest = text[at + 1 :]
+        stop = _CLAUSE_BREAK_RE.search(rest)
+        after = rest[: stop.start()] if stop else rest
+        if _OWN_VERB_RE.search(after) or _SET_ASIDE_CUE_RE.search(text[:at]):
+            chars[at] = ";"
+    return "".join(chars)
+
+
 # A cue that opens a phrase asserting the verb after it: "no longer checks",
 # "not merely reads", "never stops beaconing", "not just", "not only".
 _CUE_THAT_ASSERTS_RE = re.compile(
@@ -855,6 +937,7 @@ def states_absence(text: str, pattern: re.Pattern[str] | None) -> bool:
     """
     if not text or pattern is None:
         return False
+    text = _read_dashes(text)
     matches = list(pattern.finditer(text))
     if not matches:
         return False
@@ -879,7 +962,7 @@ def states_absence(text: str, pattern: re.Pattern[str] | None) -> bool:
 
 
 def absence_claim_violation(
-    claim: Any, technique_id: str, attck: Any = None, *, path: str = ""
+    claim: Any, technique_id: str, attck: Any = None, *, path: str = "", listed: bool = False
 ) -> Violation | None:
     """The question for a claim that states a behaviour is absent and carries a technique id.
 
@@ -896,13 +979,20 @@ def absence_claim_violation(
     if not states_absence(text, behaviour_pattern(technique_id, attck)):
         return None
     tid = safe_finding_value(technique_id)
+    # On a claim whose TECHNIQUE line lists other ids, NONE would take them
+    # with it: the one id asked about is what comes off the line.
+    absent = (
+        f"remove {tid} from this claim's TECHNIQUE line"
+        if listed
+        else "write TECHNIQUE: NONE on this claim"
+    )
     return Violation(
         code=ABSENCE_CLAIM_CODE,
         message=(
             f"CLAIM {safe_finding_value(text)!r} reads as saying the behaviour is absent, "
             f"and carries TECHNIQUE {tid}. A technique on a claim is read as something the "
             f"sample does, so {tid} is published as a finding of this run. If the behaviour "
-            "is absent, write TECHNIQUE: NONE on this claim; if the sample does do it, keep "
+            f"is absent, {absent}; if the sample does do it, keep "
             "the technique and say what the sample does."
         ),
         path=path,
@@ -954,15 +1044,49 @@ def _stem(word: str) -> str:
     return stem
 
 
-def _name_terms(technique_id: str, attck: Any) -> tuple[str, set[str]]:
-    """The catalogue name of a technique and the stems of its words, parent's included.
+# The regular inflections of a verb that ends in a silent "e", by what replaces
+# that "e": "decode" is written "decodes", "decoded", "decoding". ``_stem``
+# keeps such a word whole, so without these they never met it. Only these
+# forms, compared whole: an agent noun or a nominalisation ("computer",
+# "privation") is a word of its own as often as it is the verb's.
+_SILENT_E_INFLECTIONS = ("s", "d")
+_SILENT_E_DROPPED = ("ing", "ings")
 
-    ``("", set())`` when the catalogue gives no name.
+
+def _inflected_forms(name: str) -> set[str]:
+    """The inflections of the verb a catalogue name opens with, when it ends in a silent "e".
+
+    ATT&CK writes a technique led by its action as a verb first
+    ("Deobfuscate/Decode Files or Information"); a word anywhere else in a
+    name is a noun ("Monitor Process State", "Malicious Copy and Paste"), and
+    its "-d" form is another word ("stated", "pasted"). The leading word, or
+    each word of a leading slash pair, with at least four letters before the
+    "e": a shorter one ("use", "code") has forms that are words of their own.
+    """
+    words = str(name or "").split()
+    lead = words[0] if words else ""
+    forms: set[str] = set()
+    for word in lead.split("/"):
+        lowered = word.lower()
+        if not re.fullmatch(r"[a-z]+e", lowered) or len(lowered) < 5:
+            continue
+        forms.update(lowered + ending for ending in _SILENT_E_INFLECTIONS)
+        forms.update(lowered[:-1] + ending for ending in _SILENT_E_DROPPED)
+    return forms
+
+
+def _name_terms(technique_id: str, attck: Any) -> tuple[str, set[str], set[str]]:
+    """The catalogue name, the stems of its words and the inflections of its leading verb.
+
+    The parent's name is included for a sub-technique. The inflections
+    (:func:`_inflected_forms`) are compared as whole words, so "deobfuscates"
+    and "decoded" share a term with Deobfuscate/Decode Files or Information.
+    ``("", set(), set())`` when the catalogue gives no name.
     """
     answer = _catalogue_answer(str(technique_id), attck, "attck_lookup")
     name = str(answer.get("name") or "").strip()
     if not name:
-        return "", set()
+        return "", set(), set()
     names = [name]
     if "." in str(technique_id):
         parent = _catalogue_answer(str(technique_id).split(".")[0], attck, "attck_lookup")
@@ -973,11 +1097,14 @@ def _name_terms(technique_id: str, attck: Any) -> tuple[str, set[str]]:
         for word in re.findall(r"[A-Za-z0-9]+", text)
         if len(word) >= 3 and word.lower() not in _NAME_FILLER_WORDS
     }
-    return name, stems
+    forms: set[str] = set()
+    for text in names:
+        forms |= _inflected_forms(text)
+    return name, stems, forms
 
 
 def claim_does_not_describe_violation(
-    claim: Any, technique_id: str, attck: Any, *, path: str = ""
+    claim: Any, technique_id: str, attck: Any, *, path: str = "", listed: bool = False
 ) -> Violation | None:
     """The question for a claim whose sentence shares no term with the technique it names.
 
@@ -995,15 +1122,25 @@ def claim_does_not_describe_violation(
     text = str(getattr(claim, "claim", "") or "")
     if not text.strip() or attck is None:
         return None
-    name, stems = _name_terms(technique_id, attck)
+    name, stems, forms = _name_terms(technique_id, attck)
     if not name:
         return None
     pattern = behaviour_pattern(technique_id, attck)
     if pattern is not None and pattern.search(text):
         return None
-    if any(_stem(word) in stems for word in re.findall(r"[A-Za-z0-9]+", text) if len(word) >= 3):
+    if any(
+        _stem(word) in stems or word.lower() in forms
+        for word in re.findall(r"[A-Za-z0-9]+", text)
+        if len(word) >= 3
+    ):
         return None
     tid = safe_finding_value(technique_id)
+    otherwise = (
+        f"give that behaviour's technique in its place or remove {tid} from this claim's "
+        "TECHNIQUE line"
+        if listed
+        else "give that behaviour's technique or write TECHNIQUE: NONE"
+    )
     return Violation(
         code=CLAIM_DOES_NOT_DESCRIBE_CODE,
         message=(
@@ -1012,8 +1149,7 @@ def claim_does_not_describe_violation(
             f"technique: not its name, its tactic or the words that describe it. A technique "
             f"on a claim is published as something the sample does. Keep {tid} only if the "
             f"sample does it, and then say in the claim what it does that is {tid}; if the "
-            "claim describes another behaviour, give that behaviour's technique or write "
-            "TECHNIQUE: NONE."
+            f"claim describes another behaviour, {otherwise}."
         ),
         path=path,
         subject=str(technique_id).strip().upper(),
@@ -1029,7 +1165,7 @@ def undescribed_technique_finding(technique_id: str, attck: Any, claims: int) ->
     ``""`` without the catalogue's name for the id: nothing is stated that
     cannot be checked.
     """
-    name, _stems = _name_terms(technique_id, attck)
+    name, _stems, _forms = _name_terms(technique_id, attck)
     if not name:
         return ""
     tid = safe_finding_value(technique_id)
@@ -1575,17 +1711,74 @@ def mark_invalid_technique_ids(isr: Any, violations: Iterable[Violation]) -> Non
     sent leaves the claim unnoted (see ``BaseAnalyst._validate_isr``).
     """
     claims = list(getattr(isr, "claims", None) or [])
+    blocks = claim_block_indexes(claims)
     for violation in violations:
         if violation.code not in (VALIDITY_CODE, ABSENCE_CLAIM_CODE):
             continue
-        index = _claim_index(violation.path)
-        if index is None or index >= len(claims):
+        block = _claim_index(violation.path)
+        if block is None:
             continue
-        claim = claims[index]
-        if violation.code == VALIDITY_CODE and hasattr(claim, "technique_id_valid"):
-            claim.technique_id_valid = False
-        if violation.code == ABSENCE_CLAIM_CODE and hasattr(claim, "kept_after_absence_question"):
-            claim.kept_after_absence_question = True
+        # The path names the block the analyst wrote; the finding is about the
+        # claim of that block that carries its subject.
+        subject = str(violation.subject or "").strip().upper()
+        for claim, at in zip(claims, blocks, strict=True):
+            if at != block:
+                continue
+            tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
+            if subject and tid != subject:
+                continue
+            if violation.code == VALIDITY_CODE and hasattr(claim, "technique_id_valid"):
+                claim.technique_id_valid = False
+            if violation.code == ABSENCE_CLAIM_CODE and hasattr(
+                claim, "kept_after_absence_question"
+            ):
+                claim.kept_after_absence_question = True
+
+
+def claim_block_indexes(claims: Sequence[Any]) -> list[int]:
+    """Per claim, the index of the claim block the analyst wrote it in.
+
+    A block whose TECHNIQUE line listed several ids is read as one claim per
+    id, each with the block's sentence, evidence and confidence, one after
+    another (``base_agent.read_claim_blocks``), and the reader records the
+    block on each (``ClaimEvidence.block``). Two adjacent claims the reader
+    recorded are one block when it recorded one block for both. Only for a
+    claim built without the reader is the block read from its words: a run of
+    claims written alike, each with a different id, is one block.
+    """
+    out: list[int] = []
+    block = -1
+    previous: tuple[Any, ...] | None = None
+    previous_block: int | None = None
+    ids: set[str] = set()
+    for claim in claims:
+        written = (
+            str(getattr(claim, "claim", "") or ""),
+            str(getattr(claim, "evidence_ref", "") or ""),
+            getattr(claim, "confidence", None),
+            getattr(claim, "technique_line", None),
+        )
+        tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
+        recorded = getattr(claim, "block", None)
+        if recorded is not None and previous_block is not None:
+            same = recorded == previous_block and written == previous
+        else:
+            same = bool(tid and ids and written == previous and tid not in ids)
+        previous_block = recorded
+        if same:
+            ids.add(tid)
+        else:
+            block += 1
+            previous = written
+            ids = {tid} if tid else set()
+        out.append(block)
+    return out
+
+
+def count_claim_blocks(claims: Sequence[Any]) -> int:
+    """How many claim blocks the analyst wrote, however many ids each one listed."""
+    indexes = claim_block_indexes(claims)
+    return indexes[-1] + 1 if indexes else 0
 
 
 def _claim_index(path: str) -> int | None:
@@ -2035,8 +2228,12 @@ _NEGATION_RE = re.compile(
 # The phrases that open with a cue and assert the opposite of one. "There is no
 # doubt that the sample exfiltrates data" is a claim, and "not only does it
 # persist" is two. Checked at the cue's own position, so a real cue elsewhere
-# in the window still counts.
-_NOT_A_NEGATION = ("no doubt", "not only")
+# in the window still counts. "never-" before one of the listed past
+# participles opens an adjective ("a complete, never-exercised web C2"), which
+# says how the thing it describes was used and asserts the thing itself; any
+# other "never-" ("never-contacted", "never-ever") is the negation it reads as.
+_NEVER_ADJECTIVES = ("exercised", "executed", "used", "called", "invoked", "triggered")
+_NOT_A_NEGATION = ("no doubt", "not only", *(f"never-{word}" for word in _NEVER_ADJECTIVES))
 
 # How far back a cue is allowed to reach. A negation governs the words next to
 # it, not the whole paragraph: "no persistence was observed and the sample
@@ -2487,8 +2684,12 @@ def record_flagged_statements(
         for violation in violations:
             if violation.code not in MARKED_IN_PLACE:
                 continue
-            label = violation.path.replace("_", " ")
-            for sentence in violation.quoted:
+            # A sentence with a label of its own (its values and their publish
+            # states) carries that; every other label is a term or a technique
+            # named by the finding's path.
+            default = violation.path.replace("_", " ")
+            for position, sentence in enumerate(violation.quoted):
+                label = violation.labels[position] if position < len(violation.labels) else default
                 key = (sentence, violation.code, label, asked)
                 if key not in seen:
                     seen.add(key)
@@ -2851,8 +3052,15 @@ def claims_repeated(text: str, margin: int | None = None) -> ClaimsRepeated | No
     )
 
 
+# What the repeated-claims question adds when the answer was ended while it streamed.
+ENDED_WHILE_STREAMING_SENTENCE = (
+    " It was ended while it streamed, once its repeats passed that margin; what it wrote "
+    "up to there is kept."
+)
+
+
 def analyst_repeated_violation(
-    found: ClaimsRepeated, *, chunk: str = "", cut: int | None = None
+    found: ClaimsRepeated, *, chunk: str = "", cut: int | None = None, ended: bool = False
 ) -> Violation:
     """What an analyst whose answer repeated its claims is told, and the whole-answer question.
 
@@ -2864,12 +3072,15 @@ def analyst_repeated_violation(
     stands. ``cut`` is the output cap an answer that also stopped at it was
     cut at: the one question then states that fact too, because the model
     sees the answer up to its first repeat and the cut question's own words
-    would say it sees none of it.
+    would say it sees none of it. ``ended`` says the answer was ended while it
+    streamed (``agents.base_agent.claims_repeat_rule``), so the finding and
+    the events that carry it state it.
     """
     answer = f"answer to {chunk}" if chunk else "previous answer"
     chars, begun, distinct = int(found.chars), int(found.begun), int(found.distinct)
     repeated, margin = int(found.repeated), int(found.margin)
     first = int(found.first_repeat)
+    streamed = ENDED_WHILE_STREAMING_SENTENCE if ended else ""
     limit = (
         f" It also stopped at the output limit of {int(cut):,} tokens before it ended: the "
         "whole answer has to end well inside that limit, and any reasoning you write "
@@ -2882,7 +3093,8 @@ def analyst_repeated_violation(
         message=(
             f"Your {answer} ran to {chars:,} characters and began {begun} CLAIM block(s), "
             f"{distinct} of them distinct: {repeated} repeat a claim already written, more "
-            f"than the {margin} allowed.{limit} It is shown above only up to CLAIM block {first}, "
+            f"than the {margin} allowed.{streamed}{limit} It is shown above only up to CLAIM "
+            f"block {first}, "
             "the first that repeats an earlier one; the rest is not shown to you again. Write "
             "the whole answer again: the claims shown above and any other the evidence "
             "supports, each written once, each one sentence with its EVIDENCE, CONFIDENCE and "
@@ -3125,8 +3337,10 @@ def decompiled_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
     """The functions these ledger entries decompiled, once each, in the order first asked.
 
     An entry counts when its tool's name says it decompiles and the call
-    answered. A batch answer keyed by address is one function per key, its
-    ``Error`` keys left out; a batch whose answer is not keyed takes the
+    answered with something the model read: an answer the conversation had no
+    room for (``schemas.evidence.answer_not_shown``) is no listing read. A
+    batch answer keyed by address is one function per key, its ``Error`` keys
+    left out; a batch whose answer is not keyed takes the
     addresses it was given. Otherwise the address is the one the call was
     given (hex with or without ``0x``, or an integer), or the one a
     decompiler's generic name carries. The names are the one the call was
@@ -3137,7 +3351,7 @@ def decompiled_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
     found: dict[Any, DecompiledFunction] = {}
     for entry in entries:
         tool = str(getattr(entry, "tool", "") or "").lower()
-        if "decompil" not in tool or not getattr(entry, "ok", True):
+        if "decompil" not in tool or not getattr(entry, "ok", True) or answer_not_shown(entry):
             continue
         entry_id = str(getattr(entry, "id", "") or "")
         for address, names in _entry_functions(entry):
@@ -3583,12 +3797,22 @@ CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
 UNPUBLISHED_RECOMMENDATION_CODE = "narrative.unpublished_indicator"
 ENTRY_CONTENTS_MISSTATED_CODE = "report.entry_contents_misstated"
 UNCITED_IDENTIFIER_CODE = "report.identifier_uncited"
+# A table row whose whole value is in none of the entries it cites
+# (``stated_value_violations``). Asked once; a row kept after it is marked
+# beside its evidence.
+STATED_VALUE_UNHELD_CODE = "report.value_not_in_cited_entry"
+# Technical prose naming a network value this run does not publish without
+# that value's publish state (``unpublished_value_violations``). Asked once; a
+# sentence kept after it is marked where it stands with the state.
+UNPUBLISHED_VALUE_CODE = "report.unpublished_value"
 TECHNIQUE_NAME_CODE = "report.technique_name"
 
 # The codes a report round's answer is kept with. A broken shape leaves nothing
 # to print; each of these leaves a printable answer with a finding beside it.
 # The findings whose sentences survive marked where they stand in the report.
-MARKED_IN_PLACE: frozenset[str] = frozenset({UNGROUNDED_CAPABILITY_CODE, RULE_MATCH_AS_ACTION_CODE})
+MARKED_IN_PLACE: frozenset[str] = frozenset(
+    {UNGROUNDED_CAPABILITY_CODE, RULE_MATCH_AS_ACTION_CODE, UNPUBLISHED_VALUE_CODE}
+)
 
 KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
     {
@@ -3600,6 +3824,8 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         CITATION_WRONG_ENTRY_CODE,
         ENTRY_CONTENTS_MISSTATED_CODE,
         UNCITED_IDENTIFIER_CODE,
+        STATED_VALUE_UNHELD_CODE,
+        UNPUBLISHED_VALUE_CODE,
         TECHNIQUE_NAME_CODE,
         RULE_MATCH_AS_ACTION_CODE,
         REPEATED_ITEMS_CODE,
@@ -3668,36 +3894,223 @@ def _refanged(text: str) -> str:
     return re.sub(r"\bhxxp", "http", out, flags=re.IGNORECASE)
 
 
-def network_values_in(text: str) -> list[tuple[str, str]]:
+def network_values_in(text: str, *, packages: bool = False) -> list[tuple[str, str]]:
     """The addresses and hosts a sentence names, ``(kind, value)``, once each, in order.
 
     A URL is read as its host. An address is any dotted quad that parses as
     one; a host is what the string sweep's own reader takes for one
     (``tools.strings.iocs_from_text``), so a file name is not a host.
+
+    A long name opening with a reverse-DNS root (``package_shaped``) is read
+    only with ``packages``: a caller that can ask whether the run's network
+    evidence holds a value passes it and drops such a name only when no
+    evidence does, so a host named ``com.evil-c2.update.cdn.ru`` that the
+    run resolved is never skipped.
     """
+    return _read_network_values(text, packages=packages)[0]
+
+
+def _read_network_values(text: str, *, packages: bool) -> tuple[list[tuple[str, str]], set[str]]:
+    """:func:`network_values_in`, and the names it read only because ``packages`` was asked."""
     from maljan.tools.strings import iocs_from_text
 
     plain = _refanged(text)
     found: list[tuple[str, str]] = []
+    # The names read only for a caller that asks the run's network evidence.
+    only_asked: set[str] = set()
+    # What ``found`` holds, for a membership test that does not read the list.
+    held: set[tuple[str, str]] = set()
+    # An IPv6 address with an IPv4 tail is one value; its tail is no second one.
+    v6 = ipv6_addresses_in(plain)
+    # Both readings run left to right, so one pointer walks the v6 spans.
+    spans = [(match.start(), match.end()) for match in v6]
+    at = 0
     for match in _DOTTED_ADDRESS_RE.finditer(plain):
+        while at < len(spans) and spans[at][1] < match.end():
+            at += 1
+        if at < len(spans) and spans[at][0] <= match.start():
+            continue
         try:
             ipaddress.ip_address(match.group(0))
         except ValueError:
             continue
-        if ("ip", match.group(0)) not in found:
+        if ("ip", match.group(0)) not in held:
+            held.add(("ip", match.group(0)))
             found.append(("ip", match.group(0)))
+    # An IPv6 address and a ``.onion`` name are read by their form, as the
+    # report's defanger reads them: neither is under a TLD of the root zone.
+    for match in v6:
+        value = match.group(0).lower()
+        if ("ip", value) not in held:
+            held.add(("ip", value))
+            found.append(("ip", value))
+    # Each onion name reversed, sorted once: a sweep row is the tail of one
+    # when a reversed name starts with the row reversed and a dot, found by
+    # one bisection. Memory is the names' own length, however many labels.
+    reversed_onions: list[str] = []
+    for match in ONION_NAME.finditer(plain):
+        value = match.group(0).lower()
+        reversed_onions.append(value[::-1])
+        if ("domain", value) not in held:
+            held.add(("domain", value))
+            found.append(("domain", value))
+    reversed_onions.sort()
     # A sentence's full stop is not part of the host it ends on.
     for row in (
-        iocs_from_text(re.sub(r"[.,;:!?)]+(?=\s|$)", " ", plain), ["domain"]).get("iocs") or []
+        iocs_from_text(_TRAILING_PUNCTUATION_RE.sub(" ", plain), ["domain"]).get("iocs") or []
     ):
         value = str(row.get("value") or "").strip().lower().rstrip(".")
-        if value and ("domain", value) not in found:
+        # The sweep's onion reader takes the last two labels of a longer
+        # ``.onion`` name; the name read whole above is the value.
+        if reversed_onions and _tail_of_one(value, reversed_onions):
+            continue
+        if value and ("domain", value) not in held:
+            held.add(("domain", value))
             found.append(("domain", value))
-    return found
+    # The hosts the sweep's shape rules pass over and its own TLD list still
+    # names: more than four labels ("dl.delivery.mp.microsoft.com"), or a
+    # two-label name of one letter ("x.icu", "a.ru").
+    for match in _LONG_OR_SHORT_HOST_RE.finditer(plain):
+        value = match.group(0).lower().rstrip(".")
+        if ("domain", value) in held or not _host_under_a_known_tld(match.group(0)):
+            continue
+        labels = value.split(".")
+        if not packages and package_shaped(value):
+            continue
+        # A one-letter name is a letter ("x.icu"); a digit there ("3.cz") is
+        # the tail of a version or of noise.
+        short = len(labels) == 2 and (len(labels[0]) < 2 or len(value) < 5)
+        # Two letters ("ab.ru") are a word as often as a name: read only for a
+        # caller that asks the run's network evidence (``evidence_gated_values``).
+        read = len(labels) > 4 or (short and labels[0].isalpha())
+        lettered = packages and not read and two_letter_name(value)
+        if read or lettered:
+            held.add(("domain", value))
+            found.append(("domain", value))
+        if lettered:
+            only_asked.add(value)
+    return found, only_asked
+
+
+def evidence_gated_values(text: str) -> frozenset[str]:
+    """The names ``text`` names that are hosts only where the run's network evidence holds them.
+
+    A package-shaped name (:func:`package_shaped`), and a name only the
+    evidence-asking reading reads (``network_values_in(..., packages=True)``):
+    a two-label name whose first label is two letters (``ab.ru``) that the
+    default reading does not read. A name the default reading reads is never
+    gated, so a check reads every value it read before.
+    """
+    return _values_and_gated(text)[1]
+
+
+def _values_and_gated(text: str) -> tuple[list[tuple[str, str]], frozenset[str]]:
+    """``network_values_in(text, packages=True)`` and the names of it that are gated."""
+    values, only_asked = _read_network_values(text, packages=True)
+    gated = frozenset(
+        value for _kind, value in values if value in only_asked or package_shaped(value)
+    )
+    return values, gated
+
+
+def two_letter_name(value: str) -> bool:
+    """Whether a dotted name is two labels, the first of two letters (``ab.ru``, ``to.do``)."""
+    labels = str(value or "").lower().split(".")
+    return len(labels) == 2 and len(labels[0]) == 2 and labels[0].isascii() and labels[0].isalpha()
+
+
+# An IPv6 address written in text, bare or in brackets ("[2001:db8::1]:443"):
+# hex groups and colons, and an embedded IPv4 tail read whole
+# ("::ffff:192.0.2.1"), so no piece of an address is a value of its own.
+_IPV6_CANDIDATE = re.compile(
+    r"(?<![\w:.\]])(?:[0-9A-Fa-f]{0,4}:){2,7}"
+    r"(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9A-Fa-f]{0,4})(?![\w:]|\.\d)"
+)
+# A name under ``.onion``, which the root zone does not delegate: read by its
+# form, any number of labels, in any case, ending at the TLD: an ``onion``
+# label with another label after it ("tor.onion.example.com") is no TLD.
+ONION_NAME = re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+onion(?![\w-]|\.[A-Za-z0-9])")
+
+
+def ipv6_addresses_in(text: str) -> list[re.Match[str]]:
+    """Where ``text`` writes a whole IPv6 address, each one ``ipaddress`` parses.
+
+    In brackets (``[2001:db8::1]:443``, a URL's host) any address is one. Bare,
+    an address has at least three groups (an IPv4 tail counts as two) and a
+    digit, and touches no identifier character: ``ab::cd``, ``dead::beef``,
+    ``std::vector`` and ``a::b::c`` are scope names, not addresses.
+    """
+    written = str(text or "")
+    out: list[re.Match[str]] = []
+    for match in _IPV6_CANDIDATE.finditer(written):
+        value = match.group(0)
+        try:
+            if ipaddress.ip_address(value).version != 6:
+                continue
+        except ValueError:
+            continue
+        bracketed = written[match.start() - 1 : match.start()] == "[" and (
+            written[match.end() : match.end() + 1] == "]"
+        )
+        groups = sum(2 if "." in part else 1 for part in value.split(":") if part)
+        if bracketed or (groups >= 3 and any(char.isdigit() for char in value)):
+            out.append(match)
+    return out
+
+
+def _tail_of_one(value: str, reversed_names: list[str]) -> bool:
+    """Whether ``value`` is a dotted tail of a name in ``reversed_names`` (sorted, reversed)."""
+    key = value[::-1] + "."
+    at = bisect.bisect_left(reversed_names, key)
+    return at < len(reversed_names) and reversed_names[at].startswith(key)
+
+
+# A run of a sentence's closing punctuation before a space or the end, matched
+# from the run's first character only: tried from inside a long run, each try
+# would scan the rest of it again.
+_TRAILING_PUNCTUATION_RE = re.compile(r"(?<![.,;:!?)])[.,;:!?)]++(?=\s|$)")
+
+
+def package_shaped(value: str) -> bool:
+    """Whether a dotted name reads as a Java, Kotlin or Android package rather than a host.
+
+    More than four labels and a reverse-DNS root first
+    (``com.facebook.react.bridge.app``). A name only the evidence can tell
+    apart: a caller drops one only when no network evidence holds it.
+    """
+    labels = str(value or "").lower().split(".")
+    return len(labels) > 4 and labels[0] in _REVERSE_DNS_ROOTS
+
+
+# The first labels of a Java, Kotlin or Android package name.
+_REVERSE_DNS_ROOTS = frozenset(
+    {"com", "org", "net", "io", "android", "androidx", "java", "javax", "kotlin"}
+)
+# A dotted name of any number of labels, a one-letter one included.
+_LONG_OR_SHORT_HOST_RE = re.compile(
+    r"(?<![\w.@/-])(?:[A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,24}(?![\w-]|\.[A-Za-z0-9])"
+)
+
+
+def _host_under_a_known_tld(text: str) -> bool:
+    """Whether a dotted name ends in a TLD of the sweep's own list and reads as no file or type."""
+    from maljan.tools.strings import _KNOWN_TLDS, _NAMESPACE_TOKENS, _NON_DOMAIN_SUFFIXES
+
+    lower = text.lower()
+    labels = lower.split(".")
+    if len(labels) < 2 or labels[-1] not in _KNOWN_TLDS or not all(labels):
+        return False
+    if any(lower.endswith(suffix) for suffix in _NON_DOMAIN_SUFFIXES):
+        return False
+    if any(label in _NAMESPACE_TOKENS for label in labels[:-1]) and text[:1].isupper():
+        return False
+    return not any(ch.isupper() for ch in text.split(".")[0][1:])
 
 
 # What a recommendation's check says of a value no row of the IOC table holds.
 NO_TABLE_ROW = "no row of this run's IOC table holds it"
+# What the publish check says of a value the IOC table could not answer for.
+NO_TABLE_ANSWER = "the IOC table gave no answer for it"
 
 
 def recommendation_indicator_violations(
@@ -3719,9 +4132,14 @@ def recommendation_indicator_violations(
     for index, row in enumerate(_rows_of(payload, "defensive_recommendations")):
         text = " ".join(str(row.get(key) or "") for key in ("action", "rationale", "detection"))
         refused: list[str] = []
-        for kind, value in network_values_in(text):
+        named, gated = _values_and_gated(text)
+        for kind, value in named:
             answer = str(answers(kind, value) or "")
             if publishes(answer):
+                continue
+            # A package name, or a two-letter name only the evidence reading
+            # reads, that no row of the run's evidence holds is no host.
+            if not answer and value in gated:
                 continue
             if not answer and kind == "domain" and is_well_known_benign_host(value):
                 # A reference or vendor host the run never recorded: a place to
@@ -3746,6 +4164,151 @@ def recommendation_indicator_violations(
             )
         )
     return out
+
+
+# A publish state written beside a value: ``no: <reason>``, as the IOC table
+# prints it.
+_PUBLISH_STATE_RE = re.compile(r"(?<![\w-])no:\s*\S", re.IGNORECASE)
+
+
+def _prose_of_a_section(payload: Any) -> list[str]:
+    """A composer answer's prose, in order: a body or a text, then each step's action.
+
+    Only prose: a table cell (a configuration value, an identifier, an
+    endpoint) is a value, and the report prints its publish state beside it.
+    """
+    data = payload if isinstance(payload, dict) else {}
+    texts = [data.get(key) for key in ("body", "text")]
+    for step in data.get("steps") or []:
+        if isinstance(step, dict):
+            texts.append(step.get("action"))
+    return [text for text in texts if isinstance(text, str) and text.strip()]
+
+
+# How many words of a sentence a question quotes to name it.
+_SENTENCE_START_WORDS = 6
+
+
+def _sentence_start(sentence: str) -> str:
+    """A sentence named by its first words, quoted: ``"It connects to 192.0.2.1 on…"``."""
+    words = sentence.split()
+    start = " ".join(words[:_SENTENCE_START_WORDS])
+    return f'"{start}…"' if len(words) > _SENTENCE_START_WORDS else f'"{start}"'
+
+
+def _unstated_values(
+    sentence: str, answers: Callable[[str, str], str]
+) -> list[tuple[str, str, str]]:
+    """``(kind, value, state)`` for each value of ``sentence`` the table does not publish,
+    written without a ``no: <reason>`` between it and the next value the sentence names."""
+    from maljan.extractors.network_extractor import is_well_known_benign_host
+    from maljan.reporting.renderers.stix_renderer import publishes
+
+    def _answer(kind: str, value: str) -> str:
+        try:
+            return str(answers(kind, value) or "")
+        except Exception as exc:  # noqa: BLE001 — a value the table cannot answer is refused
+            logger.debug("validation: no publish answer for a value (%s).", exc)
+            return f"no: {NO_TABLE_ANSWER}"
+
+    plain = _refanged(sentence).lower()
+    # A package name, or a two-letter name only the evidence reading reads,
+    # that no row of the run's evidence holds is no host.
+    named, gated = _values_and_gated(sentence)
+    values = [(kind, value) for kind, value in named if value not in gated or _answer(kind, value)]
+    places = sorted((plain.find(value.lower()), kind, value) for kind, value in values if value)
+    out: list[tuple[str, str, str]] = []
+    for position, (start, kind, value) in enumerate(places):
+        end = places[position + 1][0] if position + 1 < len(places) else len(plain)
+        if start >= 0 and _PUBLISH_STATE_RE.search(plain[start + len(value) : max(end, start)]):
+            continue
+        answer = _answer(kind, value)
+        if publishes(answer):
+            continue
+        if not answer and kind == "domain" and is_well_known_benign_host(value):
+            continue
+        out.append((kind, value, (answer or f"no: {NO_TABLE_ROW}").split(";", 1)[0].strip()))
+    return out
+
+
+def unpublished_value_violations(
+    payload: Any, answers: Callable[[str, str], str]
+) -> list[Violation]:
+    """Report-model prose naming an address or a host this run does not publish, without its state.
+
+    ``answers`` is ``(kind, value) -> the IOC table's answer``, ``""`` for a
+    value no row holds (``narrative_agent.published_answers``). The section's
+    prose (:func:`_prose_of_a_section`) is read sentence by sentence; a value
+    the table does not answer ``yes`` for, with no ``no: <reason>`` between it
+    and the next value its sentence names, is listed. One question per
+    section names each value with its state — the answer's first clause, the
+    one that says why — and the sentences that name it, numbered in the
+    section's order. A reference host no row holds is a place to read, not an
+    indicator, and raises nothing. Nothing is removed: what the model answers
+    stands, and each sentence it keeps is marked where it stands with its own
+    values' states (``labels``, ``MARKED_IN_PLACE``).
+    """
+
+    # (state, value) -> sentence numbers, in the order first met.
+    named: dict[tuple[str, str], list[int]] = {}
+    quoted: list[str] = []
+    labels: list[str] = []
+    # Each sentence by its number, to name it by its start in the question.
+    written_as: dict[int, str] = {}
+    number = 0
+    for text in _prose_of_a_section(payload):
+        for sentence in _SENTENCE_END_RE.split(text):
+            written = sentence.strip()
+            if not written:
+                continue
+            number += 1
+            written_as[number] = written
+            found = _unstated_values(written, answers)
+            if not found:
+                continue
+            by_state: dict[str, list[str]] = {}
+            for _kind, value, state in found:
+                named.setdefault((state, value), []).append(number)
+                # As written: the renderer escapes and defangs the label.
+                if value not in by_state.setdefault(state, []):
+                    by_state[state].append(value)
+            if written not in quoted:
+                quoted.append(written)
+                labels.append(
+                    "; ".join(
+                        f"{', '.join(values)} ({state})" for state, values in by_state.items()
+                    )
+                )
+    if not named:
+        return []
+    # Each state once, with every value it refuses and the sentences naming them.
+    grouped: dict[str, tuple[list[str], set[int]]] = {}
+    for (state, value), numbers in named.items():
+        values, sentences = grouped.setdefault(state, ([], set()))
+        values.append(value)
+        sentences.update(numbers)
+    said = "; ".join(
+        f"{', '.join(safe_finding_value(value) for value in values)} "
+        f"({safe_finding_value(state)}) in "
+        + ", ".join(
+            safe_finding_value(_sentence_start(written_as[number])) for number in sorted(sentences)
+        )
+        for state, (values, sentences) in grouped.items()
+    )
+    return [
+        Violation(
+            code=UNPUBLISHED_VALUE_CODE,
+            message=(
+                f"the text names values this run does not publish, without their state: "
+                f"{said}. A value this run does not publish is written only with its publish "
+                "state beside it. Write the state beside each value, or write the text "
+                "without the value."
+            ),
+            path="unpublished values",
+            quoted=tuple(quoted),
+            labels=tuple(labels),
+        )
+    ]
 
 
 def _step_order(row: Mapping[str, Any], index: int) -> str:
@@ -4007,6 +4570,9 @@ class EntryTexts:
     # for the model or trimmed by the byte budget. A value absent from one of
     # them may be in the part that is not here, so no absence is read off it.
     partial: frozenset[str] = frozenset()
+    # Each letter-and-digit run of the texts, and the entries it is a whole run
+    # of: built once, on first use, by :meth:`may_hold`.
+    _runs: dict[str, frozenset[str]] = field(default_factory=dict, compare=False, repr=False)
 
     @classmethod
     def from_ledger(cls, ledger: Iterable[Any], corpus: Any = None) -> EntryTexts:
@@ -4049,6 +4615,44 @@ class EntryTexts:
             for form in written_forms(spelling)
         )
 
+    def may_hold(self, value: str) -> set[str]:
+        """The entries that may hold ``value`` for :meth:`holds`: never fewer, often far fewer.
+
+        A text holds a value only where every letter-and-digit run of one of
+        its spellings is a whole run of the text — the value's own ends are
+        bounded by characters that end a run, or by an escape, which is why
+        the runs are read both as written and with the escapes taken out. Read
+        once per report into a lookup, so a table of many rows checked against
+        a ledger of many entries costs a set intersection per row, not a scan
+        of every entry's text.
+        """
+        if not self._runs:
+            runs: dict[str, set[str]] = {}
+            for entry_id, text in self.texts.items():
+                lowered = text.lower()
+                for run in {
+                    *_TEXT_RUN_RE.findall(lowered),
+                    *_TEXT_RUN_RE.findall(_ESCAPE_PAIR_RE.sub(" ", lowered)),
+                }:
+                    runs.setdefault(run, set()).add(entry_id)
+            # The empty run marks the lookup as built, for a ledger of no text too.
+            self._runs.update({run: frozenset(ids) for run, ids in runs.items()})
+            self._runs[""] = frozenset()
+        found: set[str] = set()
+        for spelling in library_spellings(value):
+            for form in written_forms(spelling):
+                needed = set(_TEXT_RUN_RE.findall(form.lower()))
+                if not needed:
+                    return set(self.texts)
+                holders: set[str] | None = None
+                for run in needed:
+                    ids = self._runs.get(run, frozenset())
+                    holders = set(ids) if holders is None else holders & ids
+                    if not holders:
+                        break
+                found |= holders or set()
+        return found
+
     def holding(self, value: str) -> list[str]:
         """Every entry whose text holds ``value``, in ledger order; none for an undecidable one."""
         if not decidable(value):
@@ -4067,6 +4671,10 @@ class EntryTexts:
 # number inside some longer run. Such a value raises no question and no note.
 # A number: ``0x``-prefixed hex, a hex run with a digit in it (a word spelled
 # only with a–f, ``added``, is a word), or digits with separators.
+# A run of letters and digits, and a two-character escape a JSON text writes:
+# what :meth:`EntryTexts.may_hold` reads a text and a value by.
+_TEXT_RUN_RE = re.compile(r"[a-z0-9]+")
+_ESCAPE_PAIR_RE = re.compile(r'\\[nrtbf"/\\]')
 _ONLY_A_NUMBER_RE = re.compile(
     r"0x[0-9a-f]+|(?=[a-f]*[0-9])[0-9a-f]+|[0-9][0-9.,:]*", re.IGNORECASE
 )
@@ -4441,6 +5049,151 @@ def wrong_entry_citations(
             Violation(code=CITATION_WRONG_ENTRY_CODE, message=message, path="citation")
         )
     return violations
+
+
+# The tables whose rows state one value each, by the list a section answers
+# with, and what a question calls one of their rows and several.
+_STATED_VALUE_ROWS = {
+    "items": ("configuration item", "configuration items"),
+    "identifiers": ("identifier", "identifiers"),
+}
+# A number written alone or with a unit: ``1000``, ``0x3e8``, ``1,000 ms``,
+# ``1000ms``. The unit is one word of ``_UNITS``.
+_NUMBER_WITH_UNIT_RE = re.compile(
+    r"(0x[0-9a-f]+|\d{1,3}(?:,\d{3})+|\d+)(\s*)([a-z]+)?", re.IGNORECASE
+)
+# The units a configuration value's number is written with: time and size.
+_UNITS = frozenset(
+    {
+        "ms", "msec", "msecs", "millisecond", "milliseconds",
+        "s", "sec", "secs", "second", "seconds",
+        "m", "min", "mins", "minute", "minutes",
+        "h", "hr", "hrs", "hour", "hours",
+        "d", "day", "days",
+        "b", "byte", "bytes",
+        "kb", "kib", "kilobytes", "mb", "mib", "megabytes", "gb", "gib", "gigabytes",
+    }
+)  # fmt: skip
+
+
+def _stated_spellings(value: str, *, numbers: bool = False) -> list[str]:
+    """The spellings an entry may hold a stated value in: as written, and a number's two.
+
+    With ``numbers`` (a configuration value), a number is also held when the
+    entry writes it in decimal or in hex, the way a decompiler or a
+    configuration dump does, and a number written with a unit of ``_UNITS``
+    is held by the number. The unit follows a space, or is written against
+    the number only when its first letter is no hex digit: ``1000ms`` is a
+    number and a unit, ``1deadbeef`` and ``2bytes`` are not. A value the
+    conversion cannot read is looked for as written and nothing else.
+    """
+    spellings = [value]
+    if not numbers:
+        return spellings
+    try:
+        number = _NUMBER_WITH_UNIT_RE.fullmatch(value.strip())
+        if number is None:
+            return spellings
+        written, gap, unit = number.group(1).replace(",", ""), number.group(2), number.group(3)
+        if unit is not None and (
+            unit.lower() not in _UNITS or (not gap and unit[0].lower() in "abcdef")
+        ):
+            return spellings
+        amount = int(written, 16) if written.lower().startswith("0x") else int(written)
+        forms = (str(amount), hex(amount))
+    except (ValueError, OverflowError):
+        return spellings
+    spellings.extend(form for form in forms if form not in spellings)
+    return spellings
+
+
+def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Violation]:
+    """Table rows whose whole value is in none of the entries the row cites.
+
+    A configuration item or a host identifier states one value and cites the
+    entries it was read in. The whole value is looked for in each cited entry
+    under the citation check's own normalisation (:meth:`EntryTexts.holds`),
+    a number also in decimal and hex (:func:`_stated_spellings`). Held by one,
+    the row stands. Held by none, the row is asked about once, together with
+    the other rows of its table that cite the same entries; each row is named
+    by its number, which is how the report marks a row kept after it.
+
+    Not asked here: a row citing no entry the run holds text for (the uncited
+    questions ask it), a row with a cited entry known to be partial (the value
+    may be in the part that is not here), a configuration value marked
+    inferred (its own column says it was not read), and a value another entry
+    of the run holds, which :func:`wrong_entry_citations` asks with that entry
+    offered. A number held only by an entry the row does not cite is a
+    coincidence, not a source, so none is offered for it.
+    """
+    if payload is None or entries is None or not entries.texts:
+        return []
+    out: list[Violation] = []
+    # Whether another entry holds a value, once per value however many rows state it.
+    held_elsewhere: dict[str, bool] = {}
+
+    def _held_by(value: str, among: set[str], numbers: bool) -> bool:
+        return any(
+            entries.holds(ref, form)
+            for form in _stated_spellings(value, numbers=numbers)
+            for ref in entries.may_hold(form) & among
+        )
+
+    for list_key, (noun, nouns) in _STATED_VALUE_ROWS.items():
+        unheld: dict[tuple[str, ...], list[tuple[int, str, str]]] = {}
+        for index, row in enumerate(_rows_of(payload, list_key)):
+            value = str(row.get("value") or "").strip()
+            if not value or str(row.get("how_obtained") or "").strip().lower() == "inferred":
+                continue
+            cited = [ref for ref in _ids_in(row.get("evidence_refs")) if ref in entries.texts]
+            if not cited or any(ref in entries.partial for ref in cited):
+                continue
+            try:
+                if _held_by(value, set(cited), list_key == "items"):
+                    continue
+                if value not in held_elsewhere:
+                    held_elsewhere[value] = decidable(value) and any(
+                        entries.holds(ref, value) for ref in entries.may_hold(value)
+                    )
+            except (ValueError, OverflowError, RecursionError) as exc:
+                # A value no reader can take is not decidable: nothing is said of it.
+                logger.debug("validation: a stated value was not read (%s).", type(exc).__name__)
+                continue
+            if held_elsewhere[value]:
+                continue
+            label = str(row.get("key") or row.get("kind") or "").strip()
+            unheld.setdefault(tuple(cited), []).append((index + 1, label, value))
+        for refs, rows in unheld.items():
+            named = safe_finding_value(", ".join(entries.named(ref) for ref in refs))
+            if len(rows) == 1:
+                ((number, label, value),) = rows
+                said = (
+                    f"{noun} {number} ({safe_finding_value(label)}: "
+                    f"{safe_finding_value(value)!r}) is in none of the entries it cites: {named}."
+                )
+            else:
+                values = "; ".join(
+                    f"{number}: {safe_finding_value(value)!r}"
+                    for number, _label, value in rows[:_MAX_NAMED_IDS]
+                )
+                more = len(rows) - _MAX_NAMED_IDS
+                said = (
+                    f"{nouns} {', '.join(str(number) for number, _l, _v in rows)} are each in "
+                    f"none of the entries they cite: {named}. Their values: {values}"
+                    f"{f' and {more} more' if more > 0 else ''}."
+                )
+            out.append(
+                Violation(
+                    code=STATED_VALUE_UNHELD_CODE,
+                    message=(
+                        f"{said} A value in this table is one an entry records as written. "
+                        "Cite the entry that holds the whole value, write the value as that "
+                        "entry records it, or leave the row out."
+                    ),
+                    path=f"{list_key}.value:{','.join(refs)}",
+                )
+            )
+    return out
 
 
 # A statement that an entry holds nothing, or one line and no more. Asked of
@@ -6687,6 +7440,15 @@ class _FeedbackFeed:
             # fold together and two violations of one code on different claims
             # do not.
             path=str(violation.path),
+            # Of an answer that could not be read, one sentence saying so and
+            # where the run record keeps it, on the line that asks and the line
+            # that says it survived. Never the answer: the event goes to every
+            # connected browser, the Redis stream and ``job_events``.
+            answer_kept=(
+                unparsed_answer_kept_sentence(violation.answer)
+                if violation.answer and state != VALIDATION_RESOLVED
+                else ""
+            ),
         )
 
 
@@ -6878,11 +7640,32 @@ def retry_with_feedback_sync[T](
 # ---------------------------------------------------------------------------
 
 
+def unparsed_answer_rows(
+    agent: str, revision_round: int, violations: Sequence[Violation]
+) -> list[dict[str, str]]:
+    """The answers no claim could be read from, as the run record keeps them.
+
+    One row per such question, naming the analyst and its round, with the
+    answer whole and masked as model text in the record is
+    (``events.safe_answer_text``). Bounded only by the answer itself.
+    """
+    return [
+        {
+            "agent": str(agent),
+            "round": str(int(revision_round or 0)),
+            "answer": safe_answer_text(violation.answer),
+        }
+        for violation in violations
+        if violation.code == UNPARSED_ANSWER_CODE and violation.answer
+    ]
+
+
 def validation_metrics(
     retries: int,
     unresolved: Sequence[tuple[str, Violation]],
     fed_back: Mapping[str, int] | None = None,
     not_run: Sequence[str] | None = None,
+    unparsed_answers: Sequence[Mapping[str, str]] | None = None,
 ) -> dict[str, Any]:
     """``run_summary.validation`` from the run's retries, corrections and leftovers.
 
@@ -6916,12 +7699,18 @@ def validation_metrics(
                 **({"subject": violation.subject} if violation.subject else {}),
             }
         )
-    return {
+    out: dict[str, Any] = {
         "retries": int(retries),
         "by_code": dict(sorted(by_code.items())),
         "unresolved": rows,
         "not_run": sorted({str(code) for code in (not_run or []) if str(code).strip()}),
     }
+    # The answers no claim could be read from, whole, so why can be read
+    # later (``unparsed_answer_rows``). Left out when there were none.
+    kept = [dict(row) for row in (unparsed_answers or []) if isinstance(row, Mapping)]
+    if kept:
+        out["unparsed_answers"] = kept
+    return out
 
 
 def corroboration(

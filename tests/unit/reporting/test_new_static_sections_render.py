@@ -268,7 +268,8 @@ class TestComputedSignalsThatWereNeverPrinted:
         )
         md = MarkdownRenderer().render(report)
         assert "xn--pple-43d[.]com" in md
-        assert "apple.com" in md, "the imitated brand is the finding"
+        # The imitated brand is the finding; a host it names is printed defanged.
+        assert "apple[.]com" in md, "the imitated brand is the finding"
         assert "punycode" in md
 
     def test_a_dga_score_reaches_the_reader(self) -> None:

@@ -282,7 +282,7 @@ to servers reached over HTTP: as a stdio sidecar this one shares the worker's
 filesystem and is handed the path instead, so these four tools sit unused in
 the default deployment and exist for the operator who runs this same file
 behind an HTTP transport. See the "Tool servers on another host" section of
-`docs/configuration.md`.
+`apps/docs/content/docs/configuration.mdx`.
 
 | variable | default | meaning |
 | --- | --- | --- |
@@ -329,12 +329,12 @@ leave it out and the sample is read. A payload carved out of a carved payload
 nests under the sample's own tree rather than opening one of its own.
 
 It exists because `path` itself is not advertised to the model on this server
-(see *The sample's path is not the model's to give* in `docs/architecture.md`):
+(see *The sample's path is not the model's to give* in `apps/docs/content/docs/architecture.mdx`):
 the sample is the platform's to supply, and which of the payloads
 `carve_payloads` wrote is worth reading is an analysis decision. A refusal is `{"error": {"code":
 "path_outside_roots", ...}}` and names no host path. The worker exports the
 directories it puts samples in, so a default deployment sets nothing; see
-"Which directories a sidecar may read" in `docs/configuration.md`.
+"Which directories a sidecar may read" in `apps/docs/content/docs/configuration.mdx`.
 
 `pattern` on `strings` and `floss` is read the same way `carved_path` is: a
 pair of quotes enclosing the whole pattern is not part of it, so
@@ -371,7 +371,7 @@ Answers `{server, version, tools: [{name, optional_dependency, available,
 reason, timeout_s}]}`, computed when the server starts by probing each optional
 module. A tool that cannot answer returns `{"error": {"code", "message",
 "remediation"}, "tool"}` (`maljan.tools.errors`); see *Writing a tool server*
-in `docs/configuration.md`.
+in `apps/docs/content/docs/configuration.mdx`.
 
 ## Optional dependencies
 

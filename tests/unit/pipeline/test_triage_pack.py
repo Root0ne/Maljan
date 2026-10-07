@@ -940,3 +940,29 @@ class TestAnApkFactAndroguardCouldNotRead:
         assert "permissions n, o" not in line
         assert "1 activities" in line
         assert "the manifest could not be parsed" in line
+
+    def test_a_package_name_the_manifest_wrote_with_a_no_prefix_is_printed_as_written(
+        self,
+    ) -> None:
+        """Only the tool's own refusal reasons are its ``no:``; a manifest's
+        package attribute is the sample's text, whatever it starts with."""
+        from maljan.pipeline.triage_pack import _apk as apk_line
+
+        line = apk_line({"package": "no: com.example.app", "dex_count": 1})
+        assert "package no: com.example.app" in line
+
+    def test_every_refusal_reason_of_the_tool_is_left_out(self) -> None:
+        from maljan.pipeline.triage_pack import _apk as apk_line
+        from maljan.tools.binary import _APK_UNREAD_REASONS
+
+        for reason in _APK_UNREAD_REASONS:
+            line = apk_line({"package": f"{reason} (BadZipFile)", "dex_count": 1})
+            assert "package" not in line, reason
+            assert "package" not in apk_line({"package": reason, "dex_count": 1}), reason
+
+    def test_a_package_name_that_begins_with_a_reason_s_words_is_printed(self) -> None:
+        from maljan.pipeline.triage_pack import _apk as apk_line
+        from maljan.tools.binary import MANIFEST_UNPARSED
+
+        name = f"{MANIFEST_UNPARSED}.com.example"
+        assert f"package {name}" in apk_line({"package": name, "dex_count": 1})

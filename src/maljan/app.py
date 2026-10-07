@@ -40,6 +40,12 @@ def _remember_the_secrets_of(config: Settings) -> None:
 
         remember_secret_values(configured_secret_values(config), scope="app")
     except Exception as exc:  # noqa: BLE001 — never worth an app
+        try:
+            from maljan.pipeline.events import secret_registration_failed
+
+            secret_registration_failed("app")
+        except Exception:  # noqa: BLE001 — the shape rules still run
+            pass
         logger.warning(
             "The configured values were not handed to the scrub (%s).", type(exc).__name__
         )
@@ -491,7 +497,10 @@ class MaljanApp:
             "validation_retries": 0,
             "validation_fed_back": {},
             "revision_replacements": [],
+            "revision_rounds": [],
+            "dropped_claims": [],
             "validation_not_run": [],
+            "validation_unparsed_answers": [],
             "triage_facts": {},
             "nudge_retry_modes": {},
             "budget_records": {},

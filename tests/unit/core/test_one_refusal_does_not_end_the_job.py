@@ -15,10 +15,12 @@ from __future__ import annotations
 import threading
 import time
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 import pytest
 
 from maljan.analysis.run_summary import spend_lines
+from maljan.core.cancellation import JobCancelled
 from maljan.core.spend import LOOP_TURN_CALL, STAGE_CALL_KINDS, SpendCeilingStop, SpendMeter
 from maljan.llm.context_window import CHARS_PER_TOKEN
 
@@ -251,6 +253,8 @@ class TestAWaitEnds:
                 )
             except SpendCeilingStop as stop:
                 outcome["refused"] = str(stop)
+            except JobCancelled as cancelled:
+                outcome["cancelled"] = str(cancelled)
             outcome["waited"] = time.monotonic() - started
 
         waiting = threading.Thread(target=second)
@@ -265,11 +269,47 @@ class TestAWaitEnds:
         meter.close()
         waiting.join(5)
         assert not waiting.is_alive()
-        assert "the job was cancelled while it waited" in str(outcome["refused"])
+        # A cancellation, which the loops record as one, not the spend cap.
+        assert "refused" not in outcome
+        assert "waited for calls in flight" in str(outcome["cancelled"])
         assert float(outcome["waited"]) < 5  # type: ignore[arg-type]
         # Not the spend's refusal: nothing is counted or latched.
         assert meter.exhausted() is False
         assert "refused_calls" not in (meter.snapshot() or {})
+
+    def test_a_cancelled_job_records_where_its_waiting_call_stopped(self) -> None:
+        from maljan.core import cancellation
+
+        meter, _first = TestParallelCalls()._two_turns()
+        job = cancellation.Cancellation()
+        outcome: dict[str, object] = {}
+
+        def second() -> None:
+            with patch.object(cancellation, "current", return_value=job):
+                try:
+                    meter.admit(
+                        kind="loop turn",
+                        model=FLASH,
+                        prompt_chars=20_000 * CHARS_PER_TOKEN,
+                        cap_tokens=CAP,
+                        slot=object(),
+                        deadline_s=60,
+                    )
+                except JobCancelled as cancelled:
+                    outcome["cancelled"] = str(cancelled)
+
+        waiting = threading.Thread(target=second)
+        waiting.start()
+        time.sleep(0.2)
+        job.cancel("the operator cancelled the job")
+        meter.close()
+        waiting.join(5)
+
+        assert not waiting.is_alive()
+        assert "the operator cancelled the job" in str(outcome["cancelled"])
+        assert (
+            job.stopped_at == "while a loop turn call of deepseek-flash waited for calls in flight"
+        )
 
     def test_it_gives_up_at_its_loop_s_own_clock(self) -> None:
         meter, _first = TestParallelCalls()._two_turns()
@@ -331,6 +371,24 @@ class TestAStageSKnownKinds:
         meter.begin_stage()
         self._refuse_an_unholdable_question(meter)
         assert meter.exhausted() is True
+
+    def test_a_seeded_kind_is_asked_about_on_the_model_used_last(self) -> None:
+        meter = SpendMeter(2.00, clock=lambda: OFF_PEAK)
+        for kind, model in (("loop turn", FLASH), ("summary", "model-b"), ("loop turn", "model-c")):
+            meter.admit(kind=kind, model=model, prompt_chars=4_000, cap_tokens=100)
+        meter.begin_stage(("revision",))
+        asked: list[str] = []
+        price = meter._admission_price
+
+        def _spy(model: str, *args: object) -> object:
+            asked.append(model)
+            return price(model, *args)
+
+        meter._admission_price = _spy  # type: ignore[method-assign]
+        with meter._lock:
+            assert meter._another_fits_locked(OFF_PEAK) is True
+
+        assert asked == ["model-c"]
 
     def test_when_not_even_a_revision_fits_it_latches(self) -> None:
         meter = self._at_the_debate()

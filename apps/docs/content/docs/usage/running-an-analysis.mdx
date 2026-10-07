@@ -1,0 +1,189 @@
+---
+title: "Running an analysis"
+description: "Samples, jobs, the per-job overrides, the sandbox choice and following a run."
+---
+
+An analysis is a **job**: one team run over one uploaded **sample**. This page
+walks the lifecycle from the operator's side — upload, submit, follow, read —
+and the choices a job can make for itself. The console does each step with a
+button; the API calls are shown so the same thing can be scripted. The worker's
+side of the same lifecycle is in
+[Architecture](/architecture/#request-and-job-lifecycle).
+
+<Steps>
+
+<Step>
+
+**Upload the sample.**
+
+ ```bash
+ curl -X POST http://localhost:8000/api/v1/samples/upload \
+   -H "Authorization: Bearer $TOKEN" -F 'file=@sample.exe'
+ ```
+
+ The answer carries the sample's id. No sample is refused for its format:
+ routing reads the file type from the bytes and picks the path, as described
+ in [format routing](/architecture/#format-routing).
+
+</Step>
+
+<Step>
+
+**Optionally attach a sandbox report produced elsewhere.**
+
+ ```bash
+ curl -X POST http://localhost:8000/api/v1/samples/<sample id>/sandbox-reports \
+   -H "Authorization: Bearer $TOKEN" -F 'file=@report.json'
+ ```
+
+ The format is sniffed from the content; CAPEv2, Cuckoo and Triage reports
+ are accepted by default (`sandbox.upload.allowed_formats`), up to 64 MiB
+ (`sandbox.upload.max_report_bytes`). The upload records whether the report's
+ own target hash matches the sample.
+
+</Step>
+
+<Step>
+
+**Submit the job.**
+
+ ```bash
+ curl -X POST http://localhost:8000/api/v1/jobs \
+   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+   -d '{"sample_id":"<sample id>","config":{"profile":"default"}}'
+ ```
+
+</Step>
+
+<Step>
+
+**Follow the run** on the console's analysis page, or over the WebSocket at
+`/ws/analysis/{job_id}`.
+
+</Step>
+
+<Step>
+
+**Read the report** once the job is `completed`; see
+[Reports and exports](/usage/reports-and-exports/).
+
+</Step>
+
+</Steps>
+
+## What a job may choose for itself
+
+`config` is optional. The keys below are checked when the job is submitted,
+with the same choices and bounds the settings have, so a bad value is a 422 at
+submit rather than a failed job minutes later. Unknown keys pass through.
+
+| Key | Effect |
+| :-- | :-- |
+| `profile` | The team this job runs. Checked against the teams the deployment holds; an unknown team, or one that lists a disabled analyst, is refused. See [Teams and profiles](/usage/teams/). |
+| `llm_provider` | `openai`, `anthropic`, `ollama` or `gemini` for this job, in place of `llm.provider`. |
+| `static_provider` | `ghidra`, `r2`, `capa_yara`, `generic_mcp` or `none` for this job, in place of `static.provider`. |
+| `sandbox_provider` | `mock`, `cape2`, `upload`, `triage` or `rest` for this job, in place of `sandbox.provider`. |
+| `sandbox_report_id` | An uploaded report to attach. It forces `sandbox.provider` to `upload` for this job, and only a report attached to this job's own sample is read. |
+| `max_iterations` | The debate's round limit for this job (`negotiation.max_iterations`). |
+| `mock_mode` | Asks for the pipeline's mock path. It runs only when an administrator has also turned on `api.mock_mode_allowed`; a mock run cannot consume an uploaded report. |
+
+## The checks made before a job is accepted
+
+`POST /api/v1/jobs` refuses, with a 422 and a sentence naming what is wrong,
+three kinds of job that could only fail later:
+
+- **A model no probe has reached.** With `llm.require_probe` on (the default),
+  every model an agent of the team names must have answered a connection test.
+  See [a model is probed before a job may name
+  it](/configuration/#a-model-is-probed-before-a-job-may-name-it).
+- **A static provider that is not ready.** Ghidra does not degrade, so a team
+  that needs it waits for it. See [a team that needs Ghidra waits for
+  it](/configuration/#a-team-that-needs-ghidra-waits-for-it).
+- **An unknown team**, or a team that lists a disabled analyst.
+
+## Choosing a sandbox
+
+The sandbox produces the dynamic evidence. The default is `mock`, which
+executes nothing.
+
+<Tabs items={["mock (default)", "cape2", "triage", "upload", "rest"]}>
+
+<Tab value="mock (default)">
+
+No detonation. The mock returns a recorded fixture for a sample it has one
+for, and an empty stand-in marked `synthetic` for any other. Where no
+sandbox ran, the report says so in one sentence, the dynamic and network
+analysts are skipped, and a stand-in's empty sections are never rendered as
+"0 processes". See [no sandbox observation where no sandbox
+ran](/architecture/#providers).
+
+</Tab>
+
+<Tab value="cape2">
+
+A CAPEv2 instance over its REST API (`sandbox.cape2.*`). A file type is
+mapped to a CAPE analysis package with `package_by_format`; further form
+fields go in `submit_options`.
+
+</Tab>
+
+<Tab value="triage">
+
+Hatching Triage's cloud API (`sandbox.triage.*`). A file type is mapped to
+a VM profile with `profile_by_format`; `analysis_seconds` sets the VM's run
+time and `timeout_seconds`, which must be longer, how long the platform
+waits for the report.
+
+</Tab>
+
+<Tab value="upload">
+
+No detonation of Maljan's own: a report produced elsewhere and attached to
+the sample (step 2 above) is read instead.
+
+</Tab>
+
+<Tab value="rest">
+
+Any HTTP sandbox, described rather than coded: the submission, the poll,
+the report's location and a JSONPath per channel (`sandbox.rest.*`).
+
+</Tab>
+
+</Tabs>
+
+Each provider's settings, and the options each format is submitted with, are
+on the [Sandboxes](/tools/sandboxes/) page.
+
+## Following a run
+
+The console's **CONVERSATION** tab draws the run as the exchange it is: every
+agent's messages, its tool calls and the verdict, while the analysis header
+draws the team's stages, each filling in as it starts and finishes. The
+**EVIDENCE** tab is the ledger of every tool call the run made. See
+[Console](/console/).
+
+Programmatically:
+
+| Surface | What it gives |
+| :-- | :-- |
+| `GET /api/v1/jobs/{job_id}` | The job's `status` — `pending`, `running`, `completed`, `failed` or `cancelled` — with its timing and error message. |
+| `/ws/analysis/{job_id}` | The run's events as they happen, including `stage_started`, `stage_skipped` and `stage_finished` once per stage. |
+| `GET /api/v1/jobs/{job_id}/events` | The same events, in sequence order, for a tab that opens mid-run or resumes with `since`. They are read first from a live buffer (24 hours, at most 1,000 events) and then from the `job_events` table, kept for `core.events.retention_days` (30 days by default). |
+| `GET /api/v1/jobs/{job_id}/evidence` | The evidence ledger, one entry per tool call, filterable by stage, agent and tool. |
+| `DELETE /api/v1/jobs/{job_id}` | Cancels a pending or running job; its model calls stop. |
+
+The event and evidence formats are in the [REST API](/api/#jobs) reference.
+
+## Running without the stack
+
+The standalone CLI runs the pipeline without the API, the worker or any of the
+backing services:
+
+```bash
+uv run maljan analyze sample_1 --mock --name test.exe
+```
+
+It builds the core `Settings` model directly, so it reads the process
+environment (and a `.env` in the working directory) rather than the settings
+store.

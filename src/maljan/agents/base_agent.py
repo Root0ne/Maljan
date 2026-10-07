@@ -51,6 +51,7 @@ from maljan.llm.context_window import (
     window_full_error,
 )
 from maljan.llm.generation_rate import ModelCallDeadline
+from maljan.llm.stream_watch import StopRule, current_rule, ended_while_streaming, watching
 from maljan.pipeline.run_state import NO_LIMIT, NoLimit, budget_line
 from maljan.pipeline.turns import with_question
 from maljan.pipeline.validation import (
@@ -69,8 +70,10 @@ from maljan.pipeline.validation import (
     analyst_cut_violation,
     analyst_repeated_violation,
     chunk_cut_unread_sentence,
+    claim_block_indexes,
     claims_kept_under_disputes_finding,
     claims_repeated,
+    count_claim_blocks,
     decompiled_functions,
     decompiled_not_described_violation,
     image_bases_in,
@@ -80,6 +83,7 @@ from maljan.pipeline.validation import (
     parse_violations,
     retry_with_feedback_sync,
     undescribed_decompiles,
+    unparsed_answer_rows,
     validate_isr,
     validity_check_available,
 )
@@ -1387,6 +1391,12 @@ async def retry_on_connection_error(
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+def _library_blocks(isr: AgentISR) -> int:
+    """How many claim blocks of ``isr`` are library-only claims, each block once."""
+    blocks = claim_block_indexes(isr.claims)
+    return len({blocks[index] for index in library_only_claims(isr) if index < len(blocks)})
+
+
 def describe_exception_for_log(exc: BaseException) -> str:
     """Return a non-empty, diagnosable description of ``exc``, for the log.
 
@@ -1509,25 +1519,44 @@ def _field(
 _ONE_TECHNIQUE_RE = re.compile(r"T\d{4}(?:\.\d{3})?", re.IGNORECASE)
 # What a TECHNIQUE line says to claim none.
 _NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
+# What separates the ids of a list on one TECHNIQUE line: a comma, "and", both
+# ("T1027, T1140, and T1106"), or a slash ("T1027 / T1140"). Every part must be
+# an id and nothing else; "or", "and/or", a doubled or trailing slash, or any
+# word beside an id leaves the line whole and asked about.
+_TECHNIQUE_LIST_SEPARATOR_RE = re.compile(r"\s*,\s*(?:and\s+)?|\s+and\s+|\s*/\s*", re.IGNORECASE)
+# The claim format's own block separator, "---", written at the end of a
+# TECHNIQUE line with a dot or bar before it ("TECHNIQUE: T1027 · ---", the
+# next claim on the line after). It is no part of what the line claims. A
+# next claim written on the same line after it is not read by this.
+_TRAILING_BLOCK_SEPARATOR_RE = re.compile(r"[\s·•|]*-{3,}\s*$")
 
 
-def read_technique_line(line: str) -> tuple[str | None, str | None]:
-    """``(technique_id, unread line)`` for one claim's TECHNIQUE line as written.
+def _bare_technique(text: str) -> str:
+    """One id as written, without the emphasis or code marks and the full stop around it."""
+    return text.strip().strip("*`_ ").rstrip(".").strip().strip("*`_ ")
 
-    Exactly one id, and nothing else, is the claimed technique; ``NONE`` or a
-    dash claims none. Anything else — words after an id ("T1027.002 not
-    supported"), a qualifier ("T1055 (unproven)"), several ids ("T1055,
-    T1106") — claims no technique the reader could name without deciding what
-    the words mean, so no id is read and the line is returned as written, for
-    the validation turn to ask about (``isr.technique_line_unread``).
+
+def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
+    """``(technique ids, unread line)`` for one claim's TECHNIQUE line as written.
+
+    One id, or a list of ids separated by commas, "and" or slashes ("T1027, T1140"),
+    and nothing else, is the claimed techniques, each once, in the order
+    written; ``NONE`` or a dash claims none. A block separator closing the
+    line (``· ---``) is not part of it. Anything else — words after an id
+    ("T1027.002 not supported"), a qualifier ("T1055 (unproven)"), a list
+    joined by another word ("T1027 or T1140") — claims no technique the
+    reader could name without deciding what the words mean, so no id is read
+    and the line is returned as written, for the validation turn to ask about
+    (``isr.technique_line_unread``).
     """
     text = str(line or "").strip()
-    bare = text.strip("*`_ ").rstrip(".").strip()
+    bare = _bare_technique(_TRAILING_BLOCK_SEPARATOR_RE.sub("", text))
     if bare.upper() in _NO_TECHNIQUE:
-        return None, None
-    if _ONE_TECHNIQUE_RE.fullmatch(bare):
-        return bare.upper(), None
-    return None, text
+        return (), None
+    parts = [_bare_technique(part) for part in _TECHNIQUE_LIST_SEPARATOR_RE.split(bare)]
+    if parts and all(_ONE_TECHNIQUE_RE.fullmatch(part) for part in parts):
+        return tuple(dict.fromkeys(part.upper() for part in parts)), None
+    return (), text
 
 
 # Model tool-call scaffolding, which is not prose and is never a finding.
@@ -1554,7 +1583,9 @@ _INVOCATION_KEYS = ({"name", "arguments"}, {"name", "parameters"}, {"tool", "arg
 def _is_tool_invocation(payload: str) -> bool:
     try:
         parsed = json.loads(payload)
-    except ValueError:
+    except (ValueError, RecursionError):
+        # Not JSON, or nested past the parser's depth: text that is not
+        # stripped, and never an error that loses the whole answer.
         return False
     if not isinstance(parsed, dict):
         return False
@@ -1683,6 +1714,11 @@ class ClaimRead:
     section, which are not the analyst's own and are not read. They count as
     unread only when none of the answer's own claims was read: then they may
     be the answer's only claims, and saying nothing would lose them silently.
+
+    ``blocks_read`` is the blocks the claims were read from. A block whose
+    TECHNIQUE line lists several ids is one claim per id, so it is the blocks,
+    not the claims, that are counted against the claims begun. ``None`` (a
+    read built by hand) counts one block per claim.
     """
 
     claims: list[ClaimEvidence]
@@ -1690,13 +1726,19 @@ class ClaimRead:
     begun: int
     after_disputes: int = 0
     confidence_unreadable: tuple[str, ...] = ()
+    blocks_read: int | None = None
+
+    @property
+    def read(self) -> int:
+        """The claim blocks read, each once however many techniques it lists."""
+        return len(self.claims) if self.blocks_read is None else int(self.blocks_read)
 
     @property
     def unread(self) -> int:
         """Claims begun that are neither read nor counted as stating no confidence."""
         own = max(
             len(self.confidence_unreadable),
-            self.begun - len(self.claims) - self.without_confidence,
+            self.begun - self.read - self.without_confidence,
             0,
         )
         return own + (self.after_disputes if not self.claims else 0)
@@ -1708,8 +1750,9 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
     The answer is split at every claim heading where a block can begin
     (``claim_headings.claims_headed``: plain, numbered or marked, with or
     without a ``---`` line between claims) and at the model's own ``---``
-    lines. Each block yields at most one claim; the heading count says how
-    many the model began, so a block the reader could not split is visible.
+    lines. Each block yields one claim, or one per id its TECHNIQUE line
+    lists; the heading count says how many the model began, so a block the
+    reader could not split is visible.
 
     ``require_evidence`` is the static, dynamic and network analysts'
     stricter reading: a block without an ``EVIDENCE:`` line, or with one that
@@ -1722,6 +1765,7 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
     claims: list[ClaimEvidence] = []
     without_confidence = 0
     unreadable: list[str] = []
+    blocks_read = 0
     # Stripped per field rather than over the whole text: removing a block
     # that sat between ``CLAIM:`` and ``EVIDENCE:`` would leave the claim
     # marker with nothing after it, and the next line would slide up into the
@@ -1759,17 +1803,20 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
             unreadable.append(_confidence_as_written(stated))
             continue
 
-        # One id is kept as written. Whether it is real, retired or a
+        # Each id is kept as written. Whether it is real, retired or a
         # placeholder is ``attck.unknown_id``'s question, asked with feedback
-        # and recorded; a line that is more than one id is kept whole and
-        # asked about, never cut to its first id.
+        # and recorded; a line that is more than ids is kept whole and asked
+        # about, never cut to its first id. A list of ids is one claim per id,
+        # each the analyst's sentence, evidence and confidence as written —
+        # what the analyst was asked to rewrite it as — so each id is checked
+        # as a technique on its own claim.
         technique_match = _field(tail, _LINE_TECHNIQUE_RE, _BLOCK_TECHNIQUE_LINE_RE)
-        technique_id, technique_line = read_technique_line(
+        technique_ids, technique_line = read_technique_line(
             technique_match.group(1) if technique_match else ""
         )
 
-        claims.append(
-            ClaimEvidence(
+        for technique_id in technique_ids or (None,):
+            read_claim = ClaimEvidence(
                 # Whole, as written: a claim stored at a fixed width was
                 # checked, retried and published as the cut text.
                 claim=claim_text,
@@ -1778,13 +1825,17 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
                 technique_id=technique_id,
                 technique_line=technique_line,
             )
-        )
+            # The block it was read from, so blocks are counted as written.
+            read_claim.note_block(blocks_read)
+            claims.append(read_claim)
+        blocks_read += 1
     return ClaimRead(
         claims=claims,
         without_confidence=without_confidence,
         begun=count_claims_begun(text or ""),
         after_disputes=count_claims_after_disputes(text or ""),
         confidence_unreadable=tuple(unreadable),
+        blocks_read=blocks_read,
     )
 
 
@@ -1806,7 +1857,7 @@ def claims_unread_sentence(agent: str, read: ClaimRead, revision_round: int = 0)
     )
     return (
         f"The {agent} analyst's answer{stage} began {read.begun} claim(s){quoted}, and "
-        f"{len(read.claims)} were read{declined}; {read.unread} could not be read as a "
+        f"{read.read} were read{declined}; {read.unread} could not be read as a "
         f"claim and are not in its findings.{unreadable}"
     )
 
@@ -2361,14 +2412,57 @@ def _submit_to_agent_loop(
     hold one: the wrapper records itself before awaiting.
     """
     running: list[asyncio.Task[Any]] = []
+    # The rule the caller's streamed answers are read under
+    # (``llm.stream_watch``), carried to the loop's task: the task runs in the
+    # loop thread's context, not the caller's.
+    rule = current_rule()
 
     async def _tracked() -> Any:
         task = asyncio.current_task()
         if task is not None:
             running.append(task)
-        return await coro
+        with watching(rule):
+            return await coro
 
     return asyncio.run_coroutine_threadsafe(_tracked(), loop), running
+
+
+def claims_repeat_rule(margin: int | None) -> StopRule:
+    """The repeated-claims check, read over an answer while it streams.
+
+    The rule the check on a finished answer applies
+    (``pipeline.validation.claims_repeated`` over the answer without its
+    tool-call scaffolding, ``margin`` the operator's
+    ``validation.claim_repeat_margin`` or ``None``): once the answer so far
+    holds more repeated claims than the margin allows, the call is ended
+    (``llm.stream_watch``) and the answer is what was written up to there. The
+    check on that answer then finds the same and asks its one whole-answer
+    question, as it does after any answer. Read line by line at a flat cost
+    (``agents.repeat_watch.ClaimRepeatReader``), with the check's own verdict
+    for every prefix.
+    """
+    from maljan.agents.repeat_watch import ClaimRepeatReader
+
+    line_ends = frozenset("\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029")
+
+    class _Watcher:
+        def __init__(self) -> None:
+            self._reader = ClaimRepeatReader(margin)
+
+        def feed(self, piece: str) -> str | None:
+            self._reader.feed(piece)
+            if not any(ch in line_ends for ch in piece):
+                return None
+            found = self._reader.count()
+            if not found.crossed:
+                return None
+            return (
+                f"{found.begun} CLAIM block(s) begun, {found.distinct} distinct, "
+                f"{found.repeated} of them repeating an earlier one, more than the "
+                f"{found.margin} allowed"
+            )
+
+    return _Watcher
 
 
 def _cancel_and_watch(
@@ -3035,6 +3129,10 @@ class BudgetMeter:
         self._last_answer_cut = answer_cut_at_cap(
             response, cap_in_force(self.output_cap_tokens(), held)
         )
+        # Whether the watch ended this answer while it streamed, its claims
+        # repeated past the margin (``claims_repeat_rule``): the question the
+        # validation turn asks of it says so.
+        self._last_answer_ended = ended_while_streaming(response) is not None
         if announce:
             self._announce_fallback(response)
 
@@ -3269,6 +3367,18 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The calls the earlier chunks of a chunked analysis made, set while a
         # later chunk's loop runs: its repeat guard is seeded with them.
         self._prior_chunk_calls: list[LedgerEntry] = []
+        # The function map's sources for the job named by ``_function_map_job``:
+        # copies of this agent's function-level entries, taken
+        # before the byte budget trims them, and the claims its answers carried.
+        # Kept across loops and drains, because the map reads every loop of the
+        # job; dropped when the job changes.
+        self._function_map_job = ""
+        self._function_map_rows: list[LedgerEntry] = []
+        self._function_map_claims: list[ClaimEvidence] = []
+        # This loop's own entries while it runs; ``None`` outside a loop.
+        self._live_map_entries: list[LedgerEntry] | None = None
+        # What the analysis server tied to each function, briefed by the node.
+        self.pack_function_artefacts: Any = None
         # Bytes of tool output this agent has already kept. The budget is the
         # agent's, not the loop's: a chunked analysis re-enters the loop once
         # per chunk and would otherwise be handed the whole budget again on
@@ -3347,6 +3457,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # retry fixed leaves no other trace, and a run summary that counts only
         # the leftovers cannot say what the retry was for.
         self.validation_fed_back: dict[str, int] = {}
+        # Every answer of this analyst no claim could be read from, whole and
+        # masked, for the run record (``validation.unparsed_answer_rows``).
+        self.validation_unparsed_answers: list[dict[str, str]] = []
         # Whether the last tool loop ended on something that was not a report,
         # after its one nudge. Read by ``_text_to_isr`` so the ISR says why it
         # is empty instead of leaving the reader to infer it from a claim list.
@@ -3773,7 +3886,65 @@ class BaseAnalyst(BudgetMeter, ABC):
         line = budget_line(steps_left, seconds_left)
         if line:
             body = f"{body}\n{line}"
-        return f"{body}\n{NO_ROOM_RUN_STATE}" if self._says_no_room() else body
+        if self._says_no_room():
+            body = f"{body}\n{NO_ROOM_RUN_STATE}"
+        found = self._function_map_text()
+        return f"{body}\n{found}" if found else body
+
+    def _function_map_sources(self) -> tuple[list[LedgerEntry], list[ClaimEvidence]]:
+        """This job's kept entries and claims, emptied first when the job has changed."""
+        job = self._job_key()
+        if getattr(self, "_function_map_job", "") != job:
+            self._function_map_job = job
+            self._function_map_rows = []
+            self._function_map_claims = []
+        return self._function_map_rows, self._function_map_claims
+
+    def _function_map_entries(self) -> list[LedgerEntry]:
+        """The entries the map reads: this job's earlier loops', then this loop's."""
+        rows, _claims = self._function_map_sources()
+        live = getattr(self, "_live_map_entries", None) or []
+        return [*rows, *live]
+
+    def _function_map_text(self) -> str:
+        """The function map block for this agent as of now, or ``""``; never raises."""
+        from maljan.agents.function_map import build_function_map, function_map_block
+
+        try:
+            _rows, claims = self._function_map_sources()
+            found = build_function_map(
+                self._function_map_entries(),
+                getattr(self, "pack_function_artefacts", None),
+                list(claims),
+                tuple(getattr(self, "pack_image_bases", None) or ()),
+            )
+            # Only an agent that has read a function is shown the map: the
+            # pack's artefacts alone are already in the pack it reads.
+            return function_map_block(found) if found.visited else ""
+        except Exception as exc:  # noqa: BLE001 — the map never costs a turn
+            self.logger.debug("%s: function map left out (%s).", self.name, exc)
+            return ""
+
+    def _keep_for_function_map(self, entries: Sequence[LedgerEntry]) -> None:
+        """Copies of the entries the map reads, taken before the byte budget trims them."""
+        from maljan.agents.function_map import keeps_for_the_map
+
+        rows, _claims = self._function_map_sources()
+        for entry in entries:
+            if keeps_for_the_map(entry):
+                try:
+                    rows.append(entry.model_copy(deep=True))
+                except Exception:  # noqa: BLE001 — a copy never costs the ledger
+                    continue
+
+    def _keep_claims_for_function_map(self, isr: AgentISR) -> AgentISR:
+        """``isr``, with its claims kept for the map's one-line summaries."""
+        try:
+            _rows, claims = self._function_map_sources()
+            claims.extend(getattr(isr, "claims", None) or [])
+        except Exception:  # noqa: BLE001 — the map never costs an answer
+            pass
+        return isr
 
     def _says_no_room(self) -> bool:
         """Whether this loop's run-state block carries the no-room line.
@@ -3854,6 +4025,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         recorder: Any = None,
         spend_slot: Any = None,
         held_binding: Any = None,
+        turn_holds: dict[int, int | None] | None = None,
     ) -> Any:
         """The per-turn hook that regenerates the run-state block's budget line.
 
@@ -3872,7 +4044,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         ``spend_slot`` is the key the loop's turn in flight is reserved under
         with the spend ceiling, and ``held_binding`` the loop's model binding
         a turn's held output cap is set on (:func:`_hold_the_turn`); without
-        one a turn is admitted only at its whole cap.
+        one a turn is admitted only at its whole cap. ``turn_holds`` records
+        the cap each turn was sent with, keyed by its place among the
+        conversation's model turns (1 for the first), so the turn the loop
+        keeps is checked against its own cap, not against a later turn's.
         """
         ledger = budget if budget is not None else LoopBudget(max_steps, timeout, started)
         from maljan.pipeline.events import BUDGET_TICK_EVERY
@@ -3917,6 +4092,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             if held_binding is not None:
                 _hold_the_turn(held_binding, self.llm, held)
+                if turn_holds is not None:
+                    turn_holds[sum(1 for m in messages if is_model_turn(m)) + 1] = turn_held_cap(
+                        held_binding, self.llm
+                    )
             # The meter, every few steps: a tick per turn would be a stream
             # of near-identical events on a forty-step loop.
             used = steps_used(messages)
@@ -4069,6 +4248,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         # an identical one is answered with the entry that holds it, as the
         # chunk's prompt lists them (``earlier_chunks_block``).
         repeats = seeded_repeat_guard(getattr(self, "_prior_chunk_calls", None))
+        # The function map reads this loop's calls as they are made.
+        self._live_map_entries = recorder.entries
         # The arguments this loop had to close off, so the ledger entry for
         # such a call says so and keeps what the model actually wrote.
         repairs = ArgumentRepairs()
@@ -4133,8 +4314,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         loop_model = _model_that_closes_off_truncated_calls(
             self.llm, recorded, _close_off_truncated_calls
         )
-        # Where each turn's held cap is set, and read back for the last turn's cut check.
+        # Where each turn's held cap is set, and the cap each turn was sent
+        # with, read back for the kept last turn's cut check.
         held_binding = _loop_binding(loop_model, self.llm)
+        turn_holds: dict[int, int | None] = {}
         agent_executor = create_react_agent(
             loop_model,
             recorded,
@@ -4146,6 +4329,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 recorder=recorder,
                 spend_slot=spend_key,
                 held_binding=held_binding,
+                turn_holds=turn_holds,
             ),
         )
 
@@ -4613,9 +4797,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         hard_timeout = hard_cap(timeout, getattr(self, "_budget_ceiling", None))
         try:
             try:
-                thread_result: dict | None = _run_coro_blocking(
-                    _invoke(), hard_timeout, label=f"react:{self.name}"
-                )
+                with BaseAnalyst._claims_watched(self):  # type: ignore[arg-type]
+                    thread_result: dict | None = _run_coro_blocking(
+                        _invoke(), hard_timeout, label=f"react:{self.name}"
+                    )
             except ModelCallDeadline as exc:
                 detail = f"model call deadline: {exc}"
                 self.logger.error("%s ReAct agent failed: %s.", self.name, detail)
@@ -4713,10 +4898,16 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Record every AI turn the executor produced (each carries its own
         # ``usage_metadata``) so the ledger reflects real LLM spend.
         # The last turn is the answer the validation turn checks for a cut, so
-        # it is checked against the cap it was sent with: the binding still
-        # holds the cap the spend ceiling set for that turn, or none.
+        # it is checked against the cap it was sent with, recorded when it was
+        # sent: a turn the loop sent later and did not keep (the question's
+        # pass rolled back, a turn the clock ended) held its own cap. The key
+        # is the turn's place among the model turns of the graph's state, as
+        # the hook counted them; it holds only while ``msgs`` keeps every model
+        # turn of that state in order, so anything that drops or merges model
+        # turns out of the state must key the holds again, or the kept turn
+        # reads no hold (the built cap).
         turns = [m for m in msgs if is_model_turn(m)]
-        last_held = turn_held_cap(held_binding, self.llm)
+        last_held = turn_holds.get(len(turns))
         for index, _m in enumerate(turns):
             self._record_usage(
                 _m,
@@ -5253,9 +5444,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return answer
 
             try:
-                return _run_coro_blocking(
-                    _ask(), None if budget is None else budget + 5, label=label
-                )
+                with BaseAnalyst._claims_watched(self):  # type: ignore[arg-type]
+                    return _run_coro_blocking(
+                        _ask(), None if budget is None else budget + 5, label=label
+                    )
             finally:
                 self._spend_release(slot)
 
@@ -5336,6 +5528,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         try:
             entries = list(recorder.entries)
+            # Kept for the map whole, before the byte budget blanks an answer.
+            self._keep_for_function_map(entries)
+            self._live_map_entries = None
             budget = int(getattr(get_settings().reporting, "evidence_budget_bytes", 0) or 0)
             trimmed, self._evidence_bytes_spent = apply_budget(
                 entries, budget, already_spent=self._evidence_bytes_spent
@@ -5632,6 +5827,19 @@ class BaseAnalyst(BudgetMeter, ABC):
         timeout, _steps = loop_limits(self.name, getattr(self, "_budget_ceiling", None))
         return self._invoke_llm_with_timeout(messages, timeout, model=model, what=what)
 
+    def _claims_watched(self) -> Any:
+        """A block whose model calls are read under the repeated-claims rule as they stream.
+
+        The margin is the one the check on the finished answer reads,
+        ``validation.claim_repeat_margin``; there is none by default. The
+        block's scope is this analyst's own answers: a tool the loop runs is
+        answered outside it (``evidence_recorder``), so a summariser or a
+        guardrail that calls a model inside a tool, or another agent asked
+        through one, is never read under this rule.
+        """
+        margin = getattr(getattr(get_settings(), "validation", None), "claim_repeat_margin", None)
+        return watching(claims_repeat_rule(None if margin is None else int(margin)))
+
     def _invoke_llm_with_timeout(
         self,
         messages: list,
@@ -5701,7 +5909,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         hard_timeout = hard_cap(timeout, getattr(self, "_budget_ceiling", None))
         try:
             try:
-                content = _run_coro_blocking(_invoke(), hard_timeout, label=f"llm:{self.name}")
+                with BaseAnalyst._claims_watched(self):  # type: ignore[arg-type]
+                    content = _run_coro_blocking(_invoke(), hard_timeout, label=f"llm:{self.name}")
             finally:
                 # Returned or failed, the call is no longer in flight.
                 self._spend_release(spend_slot)
@@ -6108,11 +6317,13 @@ class BaseAnalyst(BudgetMeter, ABC):
                     try:
                         isr = self.analyze_isr(prompt_text)
                         cut = getattr(self, "_last_answer_cut", None)
+                        ended = bool(getattr(self, "_last_answer_ended", False))
                     finally:
                         self._prior_chunk_calls = []
                         # Taken whether the chunk answered or raised: a cut
                         # left here would be read as the next chunk's.
                         self._last_answer_cut = None
+                        self._last_answer_ended = False
                     repeat_margin = getattr(
                         getattr(get_settings(), "validation", None), "claim_repeat_margin", None
                     )
@@ -6127,6 +6338,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                         # this chunk's own input, and what comes back stands
                         # for this chunk alone in the merge.
                         self._last_answer_cut = cut
+                        self._last_answer_ended = ended
                         isr = self._validate_isr(
                             isr,
                             prompt_text,
@@ -6487,6 +6699,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         }
         # Read once: the next model call records its own.
         self._last_answer_cut = None
+        # Whether each answer checked was ended while it streamed, keyed as the
+        # cuts are: its repeated-claims question says so.
+        ended_by: dict[int, bool] = {id(isr): bool(getattr(self, "_last_answer_ended", False))}
+        self._last_answer_ended = False
 
         # Whether the answer being checked wrote the same claims again past
         # the margin, read off its own text (``validation.claims_repeated``).
@@ -6512,7 +6728,14 @@ class BaseAnalyst(BudgetMeter, ABC):
                 # the model sees its answer up to the first repeat, and the
                 # cut question's words say it sees none of it.
                 widest = max((cap for cap, _text, _named in cut), default=0)
-                return [analyst_repeated_violation(found, chunk=chunk, cut=widest or None)]
+                return [
+                    analyst_repeated_violation(
+                        found,
+                        chunk=chunk,
+                        cut=widest or None,
+                        ended=ended_by.get(id(candidate), False),
+                    )
+                ]
             return [analyst_cut_violation(cap, text, chunk=named) for cap, text, named in cut]
 
         def _validator(candidate: AgentISR) -> list[Violation]:
@@ -6521,6 +6744,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             if only_cut:
                 return _whole_answer_questions(candidate)
             unread = [] if nudged else parse_violations(candidate)
+            # Every answer checked that no claim could be read from, the first
+            # and its retry alike, goes to the run record whole.
+            self._keep_unparsed_answers(unread, candidate.revision_round)
             undescribed = decompiled_not_described_violation(
                 undescribed_decompiles(candidate, decompiled, image_bases)
             )
@@ -6543,7 +6769,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             ]
 
         if nudged and not only_cut:
-            self.validation_findings.extend(parse_violations(isr))
+            unasked = parse_violations(isr)
+            self.validation_findings.extend(unasked)
+            self._keep_unparsed_answers(unasked, isr.revision_round)
 
         # The findings and artifacts the answer being checked carried are its
         # own from here on: a retry's are kept apart (``_parse``) and go with
@@ -6676,7 +6904,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                     )
                 )
             if loop_repeat is not None:
-                unasked_repeat = analyst_repeated_violation(loop_repeat, chunk=chunk)
+                unasked_repeat = analyst_repeated_violation(
+                    loop_repeat, chunk=chunk, ended=ended_by.get(id(isr), False)
+                )
                 self.validation_findings.append(
                     replace(
                         unasked_repeat,
@@ -6730,6 +6960,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             retry_cut = getattr(self, "_last_answer_cut", None)
             cuts[id(parsed)] = [(*retry_cut, chunk)] if retry_cut is not None else []
             self._last_answer_cut = None
+            ended_by[id(parsed)] = bool(getattr(self, "_last_answer_ended", False))
+            self._last_answer_ended = False
             return parsed
 
         def _keep(first_answer: AgentISR, retried: AgentISR) -> AgentISR:
@@ -6832,32 +7064,36 @@ class BaseAnalyst(BudgetMeter, ABC):
             # an answer that folds them away stands, as long as it keeps at
             # least as many other claims as the first answer had. Only where
             # the question was asked: a chunk's cut turn never asks it.
-            library_first = len(library_only_claims(first_answer))
-            library_retried = len(library_only_claims(retried))
+            # Counted in the claim blocks the analyst wrote, not in claims: a
+            # block listing several ids is one claim per id, and taking a
+            # rejected id off its line is an answer, not lost work.
+            blocks_first = count_claim_blocks(first_answer.claims)
+            blocks_retried = count_claim_blocks(retried.claims)
+            library_first = _library_blocks(first_answer)
+            library_retried = _library_blocks(retried)
             if (
                 not only_cut
                 and library_first
                 and retried.claims
-                and len(retried.claims) < len(first_answer.claims)
-                and len(retried.claims) - library_retried
-                >= len(first_answer.claims) - library_first
+                and blocks_retried < blocks_first
+                and blocks_retried - library_retried >= blocks_first - library_first
             ):
                 self.logger.info(
-                    "Validation: '%s' answered the library-claims question with %d claim(s) "
-                    "against %d, %d of them library-only; its answer is kept.",
+                    "Validation: '%s' answered the library-claims question with %d claim "
+                    "block(s) against %d, %d of them library-only; its answer is kept.",
                     self.name,
-                    len(retried.claims),
-                    len(first_answer.claims),
+                    blocks_retried,
+                    blocks_first,
                     library_first,
                 )
                 return retried
-            if len(retried.claims) < len(first_answer.claims):
+            if blocks_retried < blocks_first:
                 self.logger.warning(
-                    "Validation: the retry for '%s' returned %d claim(s) against %d; "
+                    "Validation: the retry for '%s' returned %d claim block(s) against %d; "
                     "keeping the first answer and recording what is wrong with it.",
                     self.name,
-                    len(retried.claims),
-                    len(first_answer.claims),
+                    blocks_retried,
+                    blocks_first,
                 )
                 return first_answer
             return retried
@@ -6959,6 +7195,22 @@ class BaseAnalyst(BudgetMeter, ABC):
         mode = getattr(self, "_nudge_retry_mode", None)
         self._nudge_retry_mode = None
         return str(mode) if mode else None
+
+    def _keep_unparsed_answers(self, violations: Sequence[Violation], revision_round: int) -> None:
+        """Keep each answer no claim could be read from for the run record, once."""
+        kept = getattr(self, "validation_unparsed_answers", None)
+        if not isinstance(kept, list):
+            kept = []
+            self.validation_unparsed_answers = kept
+        for row in unparsed_answer_rows(str(self.name), int(revision_round or 0), violations):
+            if row not in kept:
+                kept.append(row)
+
+    def drain_unparsed_answers(self) -> list[dict[str, str]]:
+        """The answers no claim could be read from, handed over once."""
+        rows = list(getattr(self, "validation_unparsed_answers", None) or [])
+        self.validation_unparsed_answers = []
+        return rows
 
     def drain_validation_not_run(self) -> list[str]:
         """The checks that could not run, handed over once."""
@@ -7235,7 +7487,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             blocks_without_confidence=read.without_confidence,
             confidence_unreadable=read.confidence_unreadable,
         )
-        return self._with_claims_read(isr)
+        return self._keep_claims_for_function_map(self._with_claims_read(isr))
 
     def _text_to_isr(self, text: str, revision_round: int) -> AgentISR:
         """Convert a free-text report into a minimal AgentISR.
@@ -7251,7 +7503,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             written = str(last[1])
         # Read once: the next answer's block is its own.
         self._last_written_answer = None
-        isr = self._parse_answer_text(text, revision_round)
+        isr = self._keep_claims_for_function_map(self._parse_answer_text(text, revision_round))
         # Tool-call markup a model wrote into its answer is not part of it —
         # the parser reads none of it — and replayed into a tool-free turn it
         # would be shown back as something to write again.

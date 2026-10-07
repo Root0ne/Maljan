@@ -1,0 +1,365 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+@theme {
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+/*
+ * Palette. Every colour on the site is defined here, once per scheme, from
+ * two sources only: the logo's four colours (deep blue, sky, amber, yellow)
+ * and neutral slate greys. Every other shade is mixed from those with
+ * color-mix(). Light mode leads with the deep blue and warns in amber; dark
+ * mode leads with sky on a navy-black surface and warns in yellow and amber.
+ * Text meets 4.5:1 against the surface it sits on, icons 3:1. The layout's
+ * own variables (--color-fd-*) are set from these and nothing else.
+ */
+
+:root {
+  --mj-logo-blue: #1d4ed8;
+  --mj-logo-sky: #38bdf8;
+  --mj-logo-amber: #f59e0b;
+  --mj-logo-yellow: #fde047;
+
+  --mj-bg: #ffffff;
+  --mj-surface: #f8fafc;
+  --mj-sidebar-bg: #f8fafc;
+  --mj-code-bg: #f8fafc;
+  --mj-border: #e2e8f0;
+  --mj-border-strong: #cbd5e1;
+  --mj-fg: #0f172a;
+  --mj-fg-muted: #475569;
+  --mj-fg-faint: #64748b;
+  --mj-amber-deep: color-mix(in srgb, var(--mj-logo-amber) 55%, var(--mj-fg));
+  --mj-accent: var(--mj-logo-blue);
+  --mj-accent-fg: var(--mj-bg);
+  --mj-accent-tint: color-mix(in srgb, var(--mj-logo-blue) 7%, transparent);
+  --mj-warning: var(--mj-amber-deep);
+  --mj-danger: var(--mj-amber-deep);
+  --mj-mark-bg: color-mix(in srgb, var(--mj-logo-yellow) 45%, transparent);
+  --mj-grid-line: color-mix(in srgb, var(--mj-fg) 6%, transparent);
+
+  --shiki-foreground: var(--mj-fg);
+  --shiki-background: var(--mj-code-bg);
+  --shiki-token-keyword: var(--mj-logo-blue);
+  --shiki-token-string: var(--mj-amber-deep);
+  --shiki-token-string-expression: var(--mj-amber-deep);
+  --shiki-token-constant: var(--mj-amber-deep);
+  --shiki-token-number: var(--mj-amber-deep);
+  --shiki-token-function: var(--mj-logo-blue);
+  --shiki-token-parameter: var(--mj-fg);
+  --shiki-token-comment: var(--mj-fg-faint);
+  --shiki-token-punctuation: var(--mj-fg-muted);
+  --shiki-token-link: var(--mj-logo-blue);
+}
+
+.dark {
+  --mj-bg: #0b1120;
+  --mj-surface: #0f172a;
+  --mj-sidebar-bg: #0e1628;
+  --mj-code-bg: #0d1526;
+  --mj-border: #1e293b;
+  --mj-border-strong: #334155;
+  --mj-fg: #e2e8f0;
+  --mj-fg-muted: #94a3b8;
+  --mj-fg-faint: #7c8ca2;
+  --mj-accent: var(--mj-logo-sky);
+  --mj-accent-fg: var(--mj-bg);
+  --mj-accent-tint: color-mix(in srgb, var(--mj-logo-sky) 9%, transparent);
+  --mj-warning: var(--mj-logo-yellow);
+  --mj-danger: var(--mj-logo-amber);
+  --mj-mark-bg: color-mix(in srgb, var(--mj-logo-yellow) 22%, transparent);
+  --mj-grid-line: color-mix(in srgb, var(--mj-fg-muted) 7.5%, transparent);
+
+  --shiki-token-keyword: var(--mj-logo-sky);
+  --shiki-token-string: var(--mj-logo-amber);
+  --shiki-token-string-expression: var(--mj-logo-amber);
+  --shiki-token-constant: var(--mj-logo-yellow);
+  --shiki-token-number: var(--mj-logo-yellow);
+  --shiki-token-function: var(--mj-logo-sky);
+  --shiki-token-link: var(--mj-logo-sky);
+}
+
+:root,
+.dark,
+.dark #nd-sidebar {
+  --color-fd-background: var(--mj-bg);
+  --color-fd-foreground: var(--mj-fg);
+  --color-fd-muted: var(--mj-surface);
+  --color-fd-muted-foreground: var(--mj-fg-muted);
+  --color-fd-popover: var(--mj-bg);
+  --color-fd-popover-foreground: var(--mj-fg);
+  --color-fd-card: var(--mj-surface);
+  --color-fd-card-foreground: var(--mj-fg);
+  --color-fd-border: var(--mj-border);
+  --color-fd-primary: var(--mj-accent);
+  --color-fd-primary-foreground: var(--mj-accent-fg);
+  --color-fd-secondary: var(--mj-surface);
+  --color-fd-secondary-foreground: var(--mj-fg);
+  --color-fd-accent: var(--mj-accent-tint);
+  --color-fd-accent-foreground: var(--mj-fg);
+  --color-fd-ring: var(--mj-accent);
+  --color-fd-overlay: color-mix(in srgb, var(--mj-fg) 25%, transparent);
+  --color-fd-info: var(--mj-accent);
+  --color-fd-idea: var(--mj-accent);
+  --color-fd-success: var(--mj-accent);
+  --color-fd-warning: var(--mj-warning);
+  --color-fd-error: var(--mj-danger);
+}
+
+.dark {
+  --color-fd-overlay: color-mix(in srgb, var(--mj-bg) 70%, transparent);
+}
+
+/*
+ * Nothing eases from one colour to another: a hover state arrives with the
+ * pointer. The drawer and the dialogs keep their movement.
+ */
+*,
+*::before,
+*::after {
+  transition-property: none !important;
+}
+
+/* One visible focus ring, in the accent colour, for every control. */
+:focus-visible {
+  outline: 2px solid var(--mj-accent);
+  outline-offset: 2px;
+}
+
+html {
+  scrollbar-gutter: stable;
+}
+
+html > body[data-scroll-locked] {
+  margin-right: 0px !important;
+  --removed-body-scroll-bar-size: 0px !important;
+}
+
+body {
+  background: var(--mj-bg);
+  color: var(--mj-fg);
+  font-family: var(--font-sans);
+}
+
+/* A faint grid of hairlines behind the page that thins out from the top. */
+body::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 40rem;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--mj-grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--mj-grid-line) 1px, transparent 1px);
+  background-size: 2.4rem 2.4rem;
+  mask-image: linear-gradient(to bottom, black, transparent);
+}
+
+/* The left column: its own surface behind a hairline. */
+#nd-sidebar {
+  background: var(--mj-sidebar-bg);
+  border-color: var(--mj-border);
+}
+
+/* Section labels in the sidebar. */
+#nd-sidebar p:not([data-active]) {
+  color: var(--mj-fg);
+  font-weight: 600;
+}
+
+/* The section over the title. */
+.mj-page-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mj-eyebrow {
+  margin: 0;
+  color: var(--mj-accent);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.mj-edit {
+  align-self: flex-start;
+}
+
+/* Prose: links, marks and inline code in the palette. */
+.prose {
+  --tw-prose-links: var(--mj-accent);
+}
+
+.prose mark {
+  background: var(--mj-mark-bg);
+  color: inherit;
+}
+
+.prose :where(table) {
+  font-size: 0.875rem;
+}
+
+.mj-inline-icon {
+  display: inline-block;
+  width: 1.05em;
+  height: 1.05em;
+  margin-right: 0.15em;
+  vertical-align: -0.15em;
+  color: var(--mj-accent);
+}
+
+/* Code blocks: the palette's code surface and a hairline. */
+figure.shiki {
+  background: var(--mj-code-bg);
+  border-color: var(--mj-border);
+}
+
+/* The home page's opening. */
+.mj-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem 0 2rem;
+}
+
+.mj-hero h1 {
+  margin: 0;
+  font-size: 2.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.mj-tagline {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.5;
+  color: var(--mj-fg);
+  max-width: 38rem;
+}
+
+.mj-hero-text {
+  color: var(--mj-fg-muted);
+  max-width: 40rem;
+  line-height: 1.75;
+}
+
+.mj-hero-text p {
+  margin: 0;
+}
+
+.mj-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.mj-button {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--mj-border-strong);
+  border-radius: 0.6rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--mj-fg);
+  background: var(--mj-bg);
+}
+
+.mj-button:hover {
+  border-color: var(--mj-accent);
+  color: var(--mj-accent);
+}
+
+.mj-button-primary {
+  background: var(--mj-accent);
+  border-color: var(--mj-accent);
+  color: var(--mj-accent-fg);
+}
+
+.mj-button-primary:hover {
+  color: var(--mj-accent-fg);
+  background: color-mix(in srgb, var(--mj-accent) 85%, var(--mj-fg));
+}
+
+/* The section strip: sticky under the mobile header, scrolling sideways on a
+ * narrow screen. It bleeds to the column's edges over the article's padding. */
+.mj-strip {
+  position: sticky;
+  top: var(--fd-docs-row-3, 0px);
+  z-index: 5;
+  height: 2.75rem;
+  margin: -1.5rem -1rem 0;
+  padding: 0 1rem;
+  background: color-mix(in srgb, var(--mj-bg) 92%, transparent);
+  border-bottom: 1px solid var(--mj-border);
+  backdrop-filter: blur(6px);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.mj-strip::-webkit-scrollbar {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .mj-strip {
+    margin: -2rem -1.5rem 0;
+    padding: 0 1.5rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  .mj-strip {
+    margin: -3.5rem -2rem 0;
+    padding: 0 2rem;
+  }
+}
+
+.mj-strip ul {
+  display: flex;
+  align-items: stretch;
+  gap: 1.25rem;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mj-strip li {
+  display: flex;
+}
+
+.mj-strip-link {
+  display: flex;
+  align-items: center;
+  border-bottom: 2px solid transparent;
+  color: var(--mj-fg-muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.mj-strip-link:hover {
+  color: var(--mj-fg);
+}
+
+.mj-strip-link[aria-current] {
+  border-bottom-color: var(--mj-accent);
+  color: var(--mj-accent);
+}
+
+.mj-strip-link:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Anchors land below the strip. */
+#nd-page [id] {
+  scroll-margin-top: calc(var(--fd-docs-row-3, 0px) + 4.5rem);
+}

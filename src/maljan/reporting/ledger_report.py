@@ -40,6 +40,7 @@ from maljan.reporting.dedupe import (
     merge_cell,
 )
 from maljan.reporting.models import EvidenceSection
+from maljan.schemas.evidence import answer_not_shown
 from maljan.utils.marked_cut import marked_cut
 
 if TYPE_CHECKING:
@@ -821,10 +822,17 @@ _FUNCTION_TOOLS = frozenset(
 _FUNCTION_LIST_TOOLS = frozenset({"list_functions", "get_functions", "afl", "list_methods"})
 
 
+# What a function's line says when the conversation had no room for the answer.
+FUNCTION_NOT_SHOWN = "answer not shown: no room left in the conversation"
+
+
 def _functions_examined(acc: _Sections, entry: LedgerEntry, _data: Any) -> None:
     section = acc.get("functions_examined", "Functions examined", "list")
     label = entry.symbol or entry.tool
-    acc.add_item(section, f"{label} ({entry.tool})")
+    if answer_not_shown(entry):
+        acc.add_item(section, f"{label} ({entry.tool}; {FUNCTION_NOT_SHOWN})")
+    else:
+        acc.add_item(section, f"{label} ({entry.tool})")
     acc.credit(section, entry)
 
 
@@ -1230,6 +1238,28 @@ def build_sections(
             continue
         _fallback(acc, entry)
 
+    _function_map_coverage(acc, ledger or [])
     _artifact_sections(acc, isrs or {})
     _findings_section(acc, isrs or {}, published_techniques)
     return acc.result()
+
+
+def _function_map_coverage(acc: _Sections, ledger: list[LedgerEntry]) -> None:
+    """One line under "Functions examined": functions visited against functions reaching artefacts.
+
+    Read from the whole ledger the way the analysts' function map reads it
+    (``agents.function_map``); absent when no function was visited.
+    """
+    from maljan.agents.function_map import build_function_map
+
+    section = acc._by_key.get("functions_examined")
+    if section is None:
+        return
+    try:
+        found = build_function_map(ledger, None, [])
+    except Exception:  # noqa: BLE001 — a line of the report never costs the section
+        return
+    if not found.visited:
+        return
+    line = f"Function map: {found.coverage()}."
+    section.text = f"{section.text}\n\n{line}".strip() if section.text else line

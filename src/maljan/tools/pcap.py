@@ -26,10 +26,8 @@ def pcap_summary(path: str, packet_limit: Any = None) -> dict[str, Any]:
     target = Path(path)
     if not target.is_file():
         return {"error": f"no such file: {path}", "tool": "pcap_summary"}
-    try:
-        from maljan.analysis.pcap_summary import capture_facts, summary_text
-    except ImportError as exc:
-        return {"error": f"scapy is not installed: {exc}", "tool": "pcap_summary"}
+    from maljan.analysis.pcap_summary import capture_facts, summary_text
+
     try:
         facts = capture_facts(str(target), packet_limit)
     except Exception as exc:  # noqa: BLE001 — a malformed capture is an answer

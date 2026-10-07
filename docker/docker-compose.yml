@@ -275,7 +275,7 @@ services:
     # would outlive the container. An operator who does want it elsewhere sets
     # the analysis and network servers' MALJAN_STAGING_DIR in the console; the
     # per-job directory inside it is composed by the worker and is not a
-    # setting (see docs/configuration.md).
+    # setting (see apps/docs/content/docs/configuration.mdx).
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-maljan}
       REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in docker/.env}@redis:6379/0

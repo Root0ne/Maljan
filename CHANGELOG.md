@@ -8,6 +8,13 @@ change landed on `main`.
 
 ### Added
 
+- **An analyst that has read a function sees a function map, kept by the
+  platform.** It is built from the agent's ledger entries of the job, the
+  pack's analysis-server artefacts and its parsed claims. It rides the
+  run-state block on every turn and replaces nothing.
+- **"Functions examined" in the report carries the function map's coverage in
+  one line.**
+
 - **The deobfuscation passes run on every run, and every analyst reads their
   results as facts in the pre-analysis pack.** After every earlier pack step,
   so no earlier id moves, and in the room the earlier lines leave, so no
@@ -1072,6 +1079,15 @@ change landed on `main`.
 
 ### Changed
 
+- **Captures are read by Maljan's own pcap/pcapng reader (`maljan.analysis.capture_reader`) instead of the GPL-2.0 scapy**; `tests/unit/analysis/test_pcap_reader_parity.py` pins every answer against the old one and names each difference and its reason.
+- **The documentation site is built with Fumadocs.** The pages are MDX under
+  `apps/docs/content/docs/` and the images under `apps/docs/public/assets/`;
+  `mkdocs.yml`, the theme overrides and the `docs` dependency group are gone,
+  and `docs/` keeps only `examples/`. The site is still published at
+  <https://root0ne.github.io/Maljan/> from `main`, every page at the address
+  it had, every heading at the anchor it had. `.github/workflows/docs.yml`
+  type-checks, lints and builds `apps/docs` with npm, and the build fails if
+  an address the site served before no longer leads to a page.
 - **Analysts run in parallel on a hosted API and one after another on a
   single-slot local server, decided per job.** `llm.parallel_analysts` is now
   `auto` (the default), `true` or `false`. `auto` resolves each analyst
@@ -2398,6 +2414,60 @@ change landed on `main`.
   `MALJAN_FLOSS_PATH` to a missing file unless a test names a build.
 
 ### Fixed
+
+- **A five-character string that is wholly such a host is read on its own** (`c2.ru` stored NUL-terminated, ASCII or UTF-16LE, or a table cell that is exactly `c2.ru`), by the string sweep, the host reader and the defanger; every other run under six characters stays below the sweep's floor.
+- **A cell's publish state, the composer's checks and the narrative's recommendation check read the IOC table §9 prints** (`builder.ioc_table`, rebuilt from the stored report), where they read the stored table first, so an old report's state notes word an answer as §9 does; a table that cannot be read at all still refuses every value for that reason.
+- **A bare two-label host with a two-character first label is read when the label holds a digit and a letter** (`c2.ru`, `x1.top`), by the string sweep and the report's host reader; one of two letters (`ab.ru`) is read only where the run's network evidence holds it, so prose such as `to.do` stays as written.
+- **An IPv6 address, bare or bracketed, and a `.onion` name of any labels are network values to every reader**: the publish checks, the run summary's sentences and a cell's state note read them by form: an IPv6 address whole, an embedded IPv4 tail included, in brackets or with at least three groups and a digit, so a scope name such as `dead::beef` is no address.
+- **`/iocs` and the report's §9 read the IOC table from one source** (`builder.ioc_table`, rebuilt from the stored report), so an old report's analyst rows and their notes read the same in both.
+- **A function map summary attaches only to the function its claim names**: a name that is an ordinary word, alone or as the last label of a dotted decompiler name (`sym.entry`), needs a code spelling or a function cue beside it, two virtual addresses a base apart stay two functions with a base known, and the function's own digits written without `0x` name it with no base known.
+- **A configured password under four characters, echoed after `Bearer`, `Basic` or `token`, is masked in a finding row** as the whole word after the scheme; elsewhere such a value keeps the row's words.
+- **The triage pack prints an APK's package name as the manifest wrote it**, even one that starts with `no: `; only `apk_info`'s own refusal reasons are left out (`binary.is_apk_unread`).
+- **A call waiting on the spend ceiling for calls in flight ends as cancelled when its job is cancelled** (`JobCancelled`, with where it stopped), so its loop records a cancellation rather than the spend cap.
+- **A kind of call a stage will make and has not made yet is asked about on the model of the call the job made last**, where it was the model of the kind first made last.
+- **Function summaries cut at one output limit are counted in the run's shortened inputs** ("3 function summaries ended at their 4,000-token output limit"), where every cut after the first merged into one identical line.
+- **A loop's kept last answer is checked for a cut against the cap that turn was sent with**, recorded as each turn is sent, not against a later turn's hold left on the binding (a question pass rolled back, a turn the clock ended).
+- **The worker log states a revision's dropped values as one count line per analyst and round at INFO**, each claim's sentence at DEBUG; the run summary keeps every sentence.
+- **A mediator's `[blocking]` mark with no reason blocks as it asks and is no longer recorded among `negotiation.unread_marks`**; a `[not blocking]` mark still needs its reason.
+- **A value written after a word such as "line", "section" or "no." is compared like any value among a revision's dropped values**; a claim, round, step, stage or phase number and a cross-reference to the answer's own numbering ("#3", "item 3") are left out.
+- **A LangSmith trace shows each streamed chunk as the server sent it**: the llama.cpp, DeepSeek and Ollama joins take the text, reasoning and call arguments out of their own copy of the chunk, where they emptied the chunk the trace keeps.
+- **A streamed answer's text is kept beside a chunk whose content is not a string**: llama.cpp, DeepSeek and Ollama joins add such content by langchain's own rule, with the text before and after it in place, where the text pieces were dropped.
+- **A TECHNIQUE line listing ids separated by commas, "and" or slashes is read as one claim per id**, each checked as a technique, and an id taken off the list when asked is the answer kept; a closing `· ---` is read past, the claim format says several ids are separated by commas, and only a line with words beside an id is asked about.
+- **The verb a catalogue name opens with, ending in a silent "e", is matched by its -s, -d and -ing forms**, so "deobfuscates" and "decoded" describe Deobfuscate/Decode Files or Information and no word of its own ("stated", "computer") matches; and on the absence question a dash ends a negation's reach only before a new clause or after "instead of" or "rather than", an aside between dashes keeps the negation with its verb, and "never-" before a listed past participle negates nothing.
+- **The STIX bundle holds a malware object for the family the run states** (`is_family: true`), the judge's sample object kept as written and related to it as `variant-of`.
+- **Every sample network value the report prints for reading is defanged**: a URL of any scheme, a `www.` host, a mailbox, an IPv4 or IPv6 address that is no version number and a host under a real top-level domain (any number of labels, in capitals, `.onion`), in model prose and cells, Strings of note, every indicator column, the platform's findings, tool failures and a draft rule's source line and compile error. Whether a viewer can link a value is decided by its form alone, never by its TLD: every scheme before `//` or opened by link syntax (`<…>`, `[x](…)`, `[r]: …`), every `mailto:`-style scheme, `www.` prefix and mailbox is defanged, wherever it starts (after `_`, `*`, `~`, `(`, `/` or a digit) and however deeply it is nested, in one reading linear in the text; http, https and ftp become `hxxp`, `hxxps` and `fxp`, and any other scheme's colon is bracketed. Version numbers, .NET names and file names (a two-label name under a TLD that is also a file extension, such as `lib.rs` or `install.sh`) print as written unless the run recorded them as indicators; a rule body prints as it compiles; a VirusTotal, MalwareBazaar or ATT&CK lookup of the service's own shape stays a link unless the run's indicator is in it; the HTML report links no bare text, makes anchors only of http, https, mailto, in-page and plain relative targets, fetches no image, and carries a Content-Security-Policy that loads nothing.
+- **The string sweep reads hosts under every TLD of the root zone** (`data/tlds-alpha-by-domain.txt`, IANA's list with its version line, refreshed by `scripts/knowledge/refresh_iana_tlds.py`), so `bit.ly`, `cdn.evil.sh`, `update.zip` and `c.pki.goog` are candidate hosts. The list only adds: everything the curated list's sweep extracted is still extracted. The report's file-name rule for free prose is a display rule of the report alone.
+- **The string sweep and the prose host reader read any text in linear time**: a mailbox is read from its "@" (the same matches as before), a sentence's closing punctuation is stripped from the start of its run, and names are de-duplicated and placed by lookup, so a long run of dots, labels or mailbox characters, or thousands of distinct hosts, no longer take minutes and no longer leave a report section to a stub.
+- **An analyst answer no claim could be read from is kept, whole and masked, in `run_summary.validation.unparsed_answers`**; its feedback event says only where.
+- **The mediator marks each listed contradiction `[blocking: <reason>]` or `[not blocking: <reason>]`, and consensus is reached when its confidence meets the threshold and no line is marked blocking;** an unmarked line blocks as before, and the platform overrides a mark in neither direction. A reason may cite a ledger id in brackets; a mark with no reason, two conflicting marks or one that cannot be read blocks and is recorded in `negotiation.unread_marks`, and the headline says how many lines a consensus set aside.
+- **The counts a listed line's cited ledger entries state, in a field named for a count or a total and equal to a number the line states, ride on calls the debate already makes:** the revision directive of the analysts the line names and the next mediation's prompt, every count also when two entries disagree; no call is made for them.
+- **A debate whose every revision of the last round is the answer in force again, whitespace aside, ends as `converged`,** and the round limit stays the backstop.
+- **A revision is made against the analyst's answer in force and its peers', and each value of the answer in force it states nowhere is recorded** (hex and decimal as one number, decompiler names and defanged values read as theirs) in `run_summary.negotiation.dropped_claims`, and the report's run appendix prints one count line per analyst and round; a decimal counts only as a stated value, never as a claim, round or list number; nothing is asked.
+- **The debate stage's duration counts its revision rounds, and `termination_reason` is read from the router's own rules:** `converged_early` is true only for a debate that ended before its limit for another reason.
+- **A table row's whole value is in an entry it cites** (`report.value_not_in_cited_entry`): a host identifier or a configuration value no cited entry holds whole, a number in decimal or hex included, is asked once and marked beside its evidence if kept.
+- **Technical prose names an unpublished value only beside its state** (`report.unpublished_value`): one question per section lists the values of its prose the IOC table does not publish, kept sentences are marked with their values' states, and a table cell carries the state beside the value without a question.
+- **The event scrub's shape rules never reach report text, and no operator credential does:** with configured values registered, a finding row keeps the evidence's words and loses configured values, URL userinfo and credential-named query values; otherwise it is scrubbed as before. In events an exact ATT&CK name such as "Access Token Manipulation" and a slash-joined family name away from a credential label are kept.
+- **An analyst's answer that repeats its claims past the margin is ended while
+  it streams** (llama.cpp, Ollama and DeepSeek, which is now read as a stream),
+  and the whole-answer question is asked of what it wrote; a path that does not
+  stream keeps the check after the answer. The rule is read line by line at a
+  flat cost; the ended answer's question says it was ended, its in-call pace is
+  recorded, and the spend ceiling is charged a stated estimate of its usage.
+  The reader keeps no text: a claim is a 16-byte hash, and no line is buffered.
+  A block still open is read as kept as it arrives and cut back only if it
+  resolves as removed; a tag's closing is read only after its own `>`.
+- **A streamed answer is joined as it arrives, holding no chunk** (llama.cpp,
+  DeepSeek, Ollama): 400,000 chunks join in about 11 s and 12 MB, where adding
+  the chunks took about 141 s and 990 MB; the joined answer is unchanged.
+- **A fenced JSON block nested past the parser's depth is kept as text** by the
+  tool-call strip, as invalid JSON is, rather than raising and losing the answer.
+- **A connection that drops while an answer streams is an `APIConnectionError`**
+  (llama.cpp, DeepSeek, Ollama), as on a whole answer, so the loop's replay and
+  the connection retry read it again.
+- **A tool answer the conversation had no room for is recorded as cut**
+  (`truncated`, with a statement of the cut), never as an ok and empty answer,
+  so the decompiled-not-described check, the function map and the report's
+  functions list do not count it as read.
 
 - **The APK tool survives a manifest androguard cannot parse.** On an APK whose
   `AndroidManifest.xml` is not valid AXML, androguard raised from a getter

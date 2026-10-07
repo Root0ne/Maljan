@@ -470,6 +470,13 @@ _SECRET_SCOPES: dict[str, frozenset[str]] = {}
 # or underscore touches it: ``minioadmin`` configured leaves ``minioadministrator``
 # as written. ``None`` when nothing is registered.
 _CONFIGURED_PATTERN: re.Pattern[str] | None = None
+# Configured values shorter than the floor, per scope: kept out of finding
+# rows only, each as a whole word (``_mask_short_secrets``).
+_SHORT_SECRETS: dict[str, frozenset[str]] = {}
+# The scopes whose configured values could not be read
+# (``secret_registration_failed``); while any is listed, a finding row is held
+# to the whole event scrub.
+_FAILED_SCOPES: set[str] = set()
 # A configured value shorter than this is not masked by value: a four-letter
 # password masked everywhere would take every word it spells out of every
 # sentence. Such a value is still masked by name and by shape.
@@ -567,6 +574,20 @@ _MIME_TYPE = re.compile(
 # random letters mixes its case or runs past the floor; a vendor prefix is
 # asked before this and wins.
 _WORD_PIECE = re.compile(r"\A(?:[a-z]{1,23}|[A-Z]{1,23}|[A-Z][a-z]{1,22})\Z")
+# A capitalised compound of two or three words, as a family or a product name
+# is written (``NorthWind``): a first word of three letters or more, then one
+# or two more, each a capital and small letters. A key's random case does not
+# keep that pattern, and one alternating letter by letter (``AbCdEf…``) has
+# more words than three. Read only by :func:`_is_a_family_name`, and never
+# for a run that follows a credential label.
+_COMPOUND_PIECE = re.compile(r"\A(?=[A-Za-z]{1,23}\Z)[A-Z][a-z]{2,}(?:[A-Z][a-z]+){1,2}\Z")
+# A credential label right before a run: an argument word a credential is
+# named by (``_SECRET_ARGUMENT_WORDS``, "Access Token" among them by its last
+# word), an authorization scheme, then an optional ``:`` or ``=`` and quote.
+_LABEL_BEFORE_RE = re.compile(
+    r"(?i)(?:api[_-]?key|auth\w*|bearer|basic|cookie|credentials?|passphrase|passwd|password"
+    r"|private[_-]?key|pwd|secrets?|session\w*|tokens?)[\s\"']*[:=]?[\s\"']*\Z"
+)
 # The identifier this system issues for a job, a report, a sample and a
 # message. Exempt for the reason a digest is: it is on the job, on the report
 # and on the event that announced it, and an event reading ``report_id=***``
@@ -940,7 +961,7 @@ def _is_words(run: str) -> bool:
     code from a hyphenated phrase, so a secret of that shape passes this rule.
     A vendor prefix is asked before it (``_PREFIXED_KEY_FORMATS``), and the
     secrets the platform holds are masked by value before any shape is read
-    (``remember_secret_values``); ``docs/configuration.md`` states the rest.
+    (``remember_secret_values``); ``apps/docs/content/docs/configuration.mdx`` states the rest.
     """
     pieces = re.split(r"[_\-/]", run)
     return len(pieces) >= 2 and all(_WORD_PIECE.match(piece) for piece in pieces)
@@ -992,6 +1013,22 @@ def _shorten_path(found: re.Match[str]) -> str:
     return segments[-1]
 
 
+def _is_a_family_name(run: str) -> bool:
+    """Whether ``run`` is a family name of words joined by ``/``, one a capitalised compound.
+
+    ``Rivulet/NorthWind/Calder``: two or more pieces, each a word
+    (``_WORD_PIECE``) or a capitalised compound (``_COMPOUND_PIECE``), at
+    least one a compound and none with a digit. The caller asks it only where
+    no credential label stands before the run.
+    """
+    pieces = run.split("/")
+    return (
+        len(pieces) >= 2
+        and all(_WORD_PIECE.match(piece) or _COMPOUND_PIECE.match(piece) for piece in pieces)
+        and any(_COMPOUND_PIECE.match(piece) for piece in pieces)
+    )
+
+
 def _hide_credentials(found: re.Match[str]) -> str:
     """One value run, with every key in it masked together with the base64 around it.
 
@@ -1017,6 +1054,10 @@ def _hide_credentials(found: re.Match[str]) -> str:
     """
     value = found.group(0)
     if _names_only(value):
+        return value
+    if _is_a_family_name(value) and not _LABEL_BEFORE_RE.search(
+        found.string[max(0, found.start() - 40) : found.start()]
+    ):
         return value
     if _looks_like_a_credential(value, whole=True):
         return _REDACTED
@@ -1156,20 +1197,38 @@ def remember_secret_values(values: Iterable[str], *, scope: str = "job") -> None
     A value shorter than ``CONFIGURED_SECRET_FLOOR``, or blank, is not kept.
     Only the count is logged, never a value.
     """
-    kept = frozenset(
-        text
-        for text in (str(value or "") for value in values)
-        if len(text) >= CONFIGURED_SECRET_FLOOR and text.strip()
-    )
+    texts = [text for text in (str(value or "") for value in values) if text.strip()]
+    kept = frozenset(text for text in texts if len(text) >= CONFIGURED_SECRET_FLOOR)
     _SECRET_SCOPES[scope] = kept
+    # A shorter value is kept out of finding rows only (``safe_finding_value``):
+    # masked everywhere, a short password would take a word out of every event.
+    _SHORT_SECRETS[scope] = frozenset(text for text in texts if len(text) < CONFIGURED_SECRET_FLOOR)
+    _FAILED_SCOPES.discard(scope)
     _rebuild_configured_pattern()
     logger.debug("The scrub masks %d configured value(s) under %s.", len(kept), scope)
+
+
+def secret_registration_failed(scope: str) -> None:
+    """Record that a scope's configured values could not be read.
+
+    Until that scope is registered again, a finding row is held to the whole
+    event scrub (``safe_finding_value``): with no value to mask by, the shape
+    rules are what keeps an operator credential out of report text.
+    """
+    _FAILED_SCOPES.add(scope)
 
 
 def forget_secret_values() -> None:
     """Clear every scope: nothing is masked by value afterwards."""
     _SECRET_SCOPES.clear()
+    _SHORT_SECRETS.clear()
+    _FAILED_SCOPES.clear()
     _rebuild_configured_pattern()
+
+
+def _rows_kept_as_written() -> bool:
+    """Whether finding rows may keep their words: values registered, and no scope failed."""
+    return bool(_SECRET_SCOPES) and not _FAILED_SCOPES
 
 
 def _rebuild_configured_pattern() -> None:
@@ -1224,39 +1283,210 @@ def _scrub_line(line: str) -> str:
     return line
 
 
+# The ATT&CK names a label word stands in, read once from the vendored table:
+# for each, the text in front of the word and the word after it
+# (``Access Token Manipulation`` → ``("access ", "token", "Manipulation")``).
+_ATTCK_FILE = "data/attck_techniques.json"
+_LABELLED_NAMES: frozenset[tuple[str, str, str]] | None = None
+
+
+def _labelled_attck_names() -> frozenset[tuple[str, str, str]]:
+    """``(text before, label word, word after)`` for each vendored ATT&CK name with a label word."""
+    global _LABELLED_NAMES
+    if _LABELLED_NAMES is None:
+        found: set[tuple[str, str, str]] = set()
+        try:
+            import json
+
+            from maljan.core.paths import resolve_data
+
+            table = json.loads(resolve_data(_ATTCK_FILE).read_text(encoding="utf-8"))
+            for key, row in table.items():
+                if key.startswith("_") or not isinstance(row, dict):
+                    continue
+                name = str(row.get("name") or "")
+                for match in re.finditer(r"(?i)\b(bearer|basic|token)\s+(\S+)", name):
+                    in_front = name[: match.start()].lower()
+                    found.add((in_front, match.group(1).lower(), match.group(2)))
+        except Exception as exc:  # noqa: BLE001 — every label then masks what follows it
+            logger.warning("The ATT&CK names were not read for the scrub (%s).", exc)
+        _LABELLED_NAMES = frozenset(found)
+    return _LABELLED_NAMES
+
+
+def _scheme_and_secret(found: re.Match[str]) -> str:
+    """An authorization scheme with what follows it masked, unless the two are an ATT&CK name.
+
+    Kept only on an exact match with a name in the vendored ATT&CK table, the
+    words in front of the label included: ``Access Token Manipulation``.
+    Anything else after ``Bearer``, ``Basic`` or ``token`` is masked.
+    """
+    scheme = found.group(1)
+    after = found.group(0)[len(scheme) :].strip().rstrip(".,;:!?")
+    before = found.string[max(0, found.start() - 80) : found.start()].lower()
+    for in_front, label, word in _labelled_attck_names():
+        if label == scheme.lower() and after == word and before.endswith(in_front):
+            return found.group(0)
+    return f"{scheme} {_REDACTED}"
+
+
 def _scrub_once(line: str) -> str:
     """The configured secrets by value, then the four passes, once."""
     line = _mask_configured_values(line)
-    line = _SCHEME_AND_SECRET.sub(lambda m: f"{m.group(1)} {_REDACTED}", line)
+    line = _SCHEME_AND_SECRET.sub(_scheme_and_secret, line)
     line = _URL_RUN.sub(_shorten_url, line)
     line = _VALUE_RUN.sub(_hide_credentials, line)
     return _PATH_RUN.sub(_shorten_path, line)
 
 
 # How much of a model-written value reaches a finding row. Such a row is
-# stored with the report and printed verbatim by the console, so what goes in
-# it is held to the same rule an event payload is and then bounded: a value a
-# model wrote is as long as the model cared to make it, and a 4 KB "verdict"
-# drawn as one line of a run record is a page nobody can read.
+# stored with the report and printed verbatim by the console, so it is
+# bounded: a value a model wrote is as long as the model cared to make it, and
+# a 4 KB "verdict" drawn as one line of a run record is a page nobody can read.
 FINDING_VALUE_LIMIT = 200
 
 
 def safe_finding_value(value: Any) -> str:
-    """One model-written value, made safe to store in a finding row and to print.
+    """One model-written value, made fit to store in a finding row and to print.
 
-    The same four passes :func:`scrub` makes — an authorization scheme and its
-    secret, a URL cut back to scheme and host so its userinfo goes with the
-    rest, credential-shaped runs redacted, paths cut to their last segment —
-    and then a bound. A validation message, a degradation reason and an export
-    decline all end up in ``run_summary``, in the stored report and on the
-    analysis page, and none of them is an event, so none of them was covered by
-    the scrubbing the publisher does.
+    A finding row is report text, printed in the report's notes, stored with
+    it and served by the API. With the operator's configured values
+    registered, the row keeps the words of the evidence and the catalogue it
+    quotes; what is kept out is every operator credential: each configured
+    value, by value (a short one as a whole word), a URL's userinfo, and a
+    query value whose key names a credential. The event scrub's shape rules do
+    not run, and the publisher still scrubs the event that carries the row.
+
+    With no values registered, or a scope that could not be read
+    (``secret_registration_failed``), the row is held to the whole event
+    scrub, as before: the shape rules are then what keeps a credential out.
+
+    Bounded either way, and never cut inside a value the scrub would mask.
     """
-    # Bounded where it is shown, and marked: a claim quoted back to its analyst
-    # cut mid-word read as the analyst's own ending. Cut the way an event
-    # summary is (``_cut_whole``): a row that reaches the event feed is
-    # scrubbed again, and a digest cut in two was masked there.
-    return _cut_whole(scrub(value), FINDING_VALUE_LIMIT)
+    one_line = " ".join(str(value or "").split())
+    if not _rows_kept_as_written():
+        return _cut_whole(scrub(one_line), FINDING_VALUE_LIMIT)
+    kept = _mask_short_secrets(_mask_configured_values(one_line))
+    kept = _URL_RUN.sub(_without_credentials, kept)
+    return _bound_whole(kept, FINDING_VALUE_LIMIT)
+
+
+def _mask_short_secrets(text: str) -> str:
+    """``text`` with every configured value shorter than the floor masked as a whole word.
+
+    A value of fewer than four characters is not masked as a word anywhere,
+    which would take ordinary words out of the row; it is masked as the whole
+    word after an authorization scheme (``Bearer``, ``Basic``, ``token``),
+    where it stands as the credential, and where it is a URL's password, the
+    userinfo removal takes it.
+    """
+    short = {value for values in _SHORT_SECRETS.values() for value in values}
+    values = sorted((value for value in short if len(value) >= 4), key=len, reverse=True)
+    tiny = sorted((value for value in short if len(value) < 4), key=len, reverse=True)
+    if values:
+        pattern = (
+            _SECRET_BOUNDARY_BEFORE
+            + "(?:"
+            + "|".join(re.escape(value) for value in values)
+            + r")(?![A-Za-z0-9_])"
+        )
+        text = re.sub(pattern, _REDACTED, text)
+    if tiny:
+        after_a_scheme = (
+            r"(?<![A-Za-z0-9_])(?i:bearer|basic|token)(\s+)(?:"
+            + "|".join(re.escape(value) for value in tiny)
+            + r")(?![A-Za-z0-9_])"
+        )
+        text = re.sub(
+            after_a_scheme,
+            lambda found: (
+                found.group(0)[: found.start(1) - found.start(0)] + found.group(1) + _REDACTED
+            ),
+            text,
+        )
+    return text
+
+
+# One query parameter of a URL, its key and its value.
+_QUERY_PARAMETER = re.compile(r"(?P<lead>[?&;#])(?P<key>[^=&;#?]+)=(?P<value>[^&;#]*)")
+
+
+def _without_credentials(found: re.Match[str]) -> str:
+    """One URL with its userinfo masked and each credential-named query value masked."""
+    from maljan.core.settings_catalog import names_a_credential_value
+
+    rest = found.group("rest")
+    cut = min((rest.find(mark) for mark in "/?#" if mark in rest), default=len(rest))
+    authority, tail = rest[:cut], rest[cut:]
+    if "@" in authority:
+        authority = f"{_REDACTED}@" + authority.rsplit("@", 1)[1]
+
+    def _query(parameter: re.Match[str]) -> str:
+        key = parameter.group("key")
+        if not names_a_credential_value(key) and key.lower() not in _CREDENTIAL_QUERY_KEYS:
+            return parameter.group(0)
+        return f"{parameter.group('lead')}{key}={_REDACTED}"
+
+    return f"{found.group('scheme')}://{authority}{_QUERY_PARAMETER.sub(_query, tail)}"
+
+
+# The query keys a service URL carries a credential under, named by their last
+# word or as written here.
+_CREDENTIAL_QUERY_KEYS = frozenset({"api_key", "apikey", "access_token", "token", "key"})
+
+
+def _bound_whole(text: str, limit: int) -> str:
+    """``text`` bounded near ``limit`` and marked, never cut inside a value the scrub masks.
+
+    A digest or an identifier the cut would split is kept whole. Any other
+    run the cut falls in is cut in front of when the scrub would mask it, so
+    the event that carries the row never holds the head of a key.
+    """
+    if len(text) <= limit:
+        return text
+    cut = limit - 1
+    for found in _WHOLE_RUN.finditer(text):
+        if found.start() < cut < found.end():
+            cut = found.end()
+            break
+    if cut >= len(text):
+        return text
+    for found in _VALUE_RUN.finditer(text):
+        if found.start() < cut < found.end():
+            if scrub(found.group(0)) != found.group(0) or _looks_like_a_credential(
+                text[found.start() : cut]
+            ):
+                cut = found.start()
+            break
+    return text[:cut] + CUT_MARK
+
+
+# Where the run record keeps an analyst answer no claim could be read from.
+UNPARSED_ANSWERS_RECORD = "run_summary.validation.unparsed_answers"
+
+
+def unparsed_answer_kept_sentence(answer: str) -> str:
+    """What an event says of an answer no claim could be read from: never the answer."""
+    return (
+        f"The answer ({len(str(answer or '')):,} characters) could not be read as claims; "
+        f"it is kept whole in the run record ({UNPARSED_ANSWERS_RECORD})."
+    )
+
+
+def safe_answer_text(value: Any) -> str:
+    """A whole model answer, made fit to keep in the run record.
+
+    The masking a finding row gets (:func:`safe_finding_value`) — every
+    configured value, a URL's userinfo and a credential-named query value; the
+    whole event scrub where no values are registered — with the answer's own
+    lines kept and no bound: the answer is as long as it is, and kept to be
+    read for why it could not be parsed.
+    """
+    text = str(value or "")
+    if not _rows_kept_as_written():
+        return scrub_keeping_layout(text)
+    kept = _mask_short_secrets(_mask_configured_values(text))
+    return _URL_RUN.sub(_without_credentials, kept)
 
 
 def scrub_keeping_layout(text: Any) -> str:
@@ -1488,6 +1718,7 @@ def emit_validation_feedback(
     retry_index: int,
     state: str = VALIDATION_RETRIED,
     path: str = "",
+    answer_kept: str = "",
 ) -> None:
     """One violation, and what became of it.
 
@@ -1510,6 +1741,13 @@ def emit_validation_feedback(
     judge's bundle — and it is what separates two violations of one code on
     different claims; it is ``""`` for a violation about the answer as a whole,
     where ``(agent, code)`` is already the whole key.
+
+    ``answer_kept`` is one short sentence, for a violation that says none of
+    the producer's answer could be read: that it could not, how long it was,
+    and where the run record keeps it (``unparsed_answer_kept_sentence``). The
+    answer itself never rides on an event: events reach every connected
+    browser, the Redis stream and ``job_events``, and each field on them is
+    bounded. Left out when empty.
     """
     emit(
         sink,
@@ -1522,6 +1760,7 @@ def emit_validation_feedback(
             "retry_index": max(0, int(retry_index)),
             "state": str(state),
             "path": str(path),
+            **({"answer_kept": str(answer_kept)} if answer_kept else {}),
         },
     )
 
