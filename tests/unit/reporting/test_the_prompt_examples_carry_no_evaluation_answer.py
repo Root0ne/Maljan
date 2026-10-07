@@ -436,7 +436,21 @@ def _function_index_text() -> str:
         function_artefacts([entry]),
         [],
     )
-    return " ".join([whole, cut, empty, index_sentence("ev_0005", data), found.coverage()])
+    served = function_index.head_text({**data, "capa": function_index.CAPA_NOT_JOINED}, 3)
+    served_rows = [function_index.row_line(row, function_index.THIS_ANSWER) for row in rows]
+    missing = f"no: the run knows no function starting at 0x401234 ({function_index._SOURCES_SAID})"
+    return " ".join(
+        [
+            whole,
+            cut,
+            empty,
+            index_sentence("ev_0005", data),
+            found.coverage(),
+            served,
+            *served_rows,
+            missing,
+        ]
+    )
 
 
 EXAMPLES: dict[str, str] = {"narrative": EXAMPLE_OBJECT, **_EXAMPLES}
@@ -1209,6 +1223,7 @@ PROMPTS: dict[str, str] = {
     "what a Ghidra pass that stopped says": _ghidra_pass_failures(),
     "the constant sets as the pack line names them": _constant_set_names(),
     "the constant scan's description": _analysis_tool_descriptions("find_crypto_constants"),
+    "the function index tool's description": _analysis_tool_descriptions("function_index"),
     "a term's example ids and how many more": _term_ids_said(["T1000", "T1001", "T1002"]),
     "run-state budget line of a loop with no limit": budget_line(NO_LIMIT, NO_LIMIT),
     "ask tool budget sentence with no limit": _what_an_ask_gets_sentence("lead", None, None),
