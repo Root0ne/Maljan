@@ -695,6 +695,33 @@ a `no:` sentence. It has no row limit: the MCP tool-output guardrail bounds the
 answer and records any cut. Ghidra's `get_xrefs_to` and radare2's `xrefs_to`
 take the same addresses.
 
+**Byte transforms are the model's to name and the analysis server's to run.**
+A key, a user agent or a reply format kept in an encrypted or encoded blob
+stays hidden from a model that cannot run a cipher in its head. The analysis
+server's `transform_bytes` (`tools.transforms`) reads one range of the file,
+given as a file offset or as an address the file's own section table resolves,
+and applies the steps the model lists in order: `xor` with an optional per-byte
+increment, `rc4`, `aes` (ECB, CBC or CTR), `base64` with the standard, the
+URL-safe or a 64-character custom alphabet, `hex`, `lznt1`, `zlib`, `gzip`,
+raw `deflate`, `reverse` and `slice`. A key, IV or nonce is written literally
+or named as another range of the same file, so a model points at a key it found
+rather than copying it. The answer names the range with its section and every
+step with its parameters, so the ledger entry is a call anyone can repeat, and
+then states facts about the output: its length, SHA-256 and hex head, its ASCII
+and UTF-16LE readings escaped as the pack writes a string, its printable share
+and entropy, and the indicators the platform's indicator reader finds in it,
+each with its offset. It never says what the output is. An unknown operation,
+a wrong key or IV length, an input that is not whole blocks or padding that does
+not read is an error naming the step; nothing is retried with other
+parameters. Decompression is fed a slice at a time and asked for no more than
+the room left under the sample upload cap, concatenated gzip members included,
+so a bomb is cut at the cap and the answer says so; a cut decompression ends
+the chain, and the bytes all steps write together are held to the same cap, so
+a long step list costs at most that much work. Every other step writes at most
+what it reads, and each is linear in its buffer. No prompt asks for the tool; the server's capabilities answer
+and the tool's description state what it takes. The entry's evidence root is
+the start of its input range.
+
 Ghidra's emulation is not run by the pack: Ghidra's `emulate_function`
 ignores its step limit and cannot be stopped, and one emulation took 130 to
 560 ms in a stored run. It stays a tool the reverser may call.
@@ -3364,7 +3391,9 @@ is assembled from what the run gathered rather than recomputed beside it:
   derived from what the entry holds: a place written as its offset from the
   image base and the section that holds it (`0x1a40 in .text`) for a strings
   row's file offset, a FLOSS row's call site, a decoded blob, a hash
-  occurrence, a capa match address, a function index row, or the address a
+  occurrence, a capa match address, a function index row, the start of the
+  range a `transform_bytes` call read (or the `no:` sentence its answer states
+  when no section holds it), or the address a
   decompile, disassembly or memory read was given; a table of the file (the PE
   header, the import table, the export table, the resource table, the debug
   directory, the overlay, a section by name); a sandbox process, which a Sigma

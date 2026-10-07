@@ -11,7 +11,7 @@ sidecar.
 
 | Server | Bound to | How | Offers |
 | :-- | :-- | :-- | :-- |
-| `analysis` | `static` | definition `tools` | Identity and hashes, strings and typed IOCs, PE/ELF/Mach-O/APK structure, archive and document inspection, payload carving, YARA, Sigma, capa and emulated string decoding (FLOSS), and the function index: every function of a PE with the artefacts it holds, whole or by address. |
+| `analysis` | `static` | definition `tools` | Identity and hashes, strings and typed IOCs, PE/ELF/Mach-O/APK structure, archive and document inspection, payload carving, YARA, Sigma, capa and emulated string decoding (FLOSS), the function index: every function of a PE with the artefacts it holds, whole or by address, and byte transforms: a range of the file through the decoding, decryption and decompression steps the model names, with the output stated as facts. |
 | `knowledge` | every analyst and the judge | definition `tools` | ATT&CK lookup, validation and ranking, the API-behaviour catalog, the LOLBin table, family and prior-case retrieval. |
 | `network` | `network` | role binding | DNS, HTTP and packet views of a capture, plus the whole-capture summary. |
 | `threatintel` | `judge` | role binding | VirusTotal and AbuseIPDB reputation lookups over their REST APIs. |

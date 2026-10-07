@@ -310,6 +310,82 @@ file: in each of the index's two walks each instruction start is decoded once,
 a section is found by bisection, the callee count costs one step per call, and
 nothing recurses.
 
+### Byte transforms
+
+| tool | arguments |
+| --- | --- |
+| `transform_bytes` | `path`, `carved_path=""`, `offset=null`, `rva=null`, `va=null`, `length=null`, `steps=null` |
+
+One byte range of the file through an ordered list of steps the caller names,
+each applied to the output of the one before (`tools.transforms`); nothing in
+the file is run. The model chooses the range, the operations and the keys; the
+server computes and states what came out.
+
+The range is exactly one of `offset` (a file offset), `rva` or `va`, the last
+two resolved through the file's own section table, and `length`. Left out, the
+range runs to the end of the file; a range past the end is cut there and the
+answer says so. An address no section holds, an address in a section past the
+bytes the file holds for it, and an address in a file that is not a PE image
+are errors that say which. A number is an integer, or a string read as
+hexadecimal after `0x` and as decimal otherwise.
+
+`steps` is a list of objects, each with `op` and its parameters:
+
+| op | parameters |
+| --- | --- |
+| `xor` | `key`; `increment` (output byte i is input byte i exclusive-or the key byte i mod the key length plus increment times i, mod 256) |
+| `rc4` | `key`, 1 to 256 bytes |
+| `aes` | `mode` (`ecb`, `cbc`, `ctr`); `key` of 16, 24 or 32 bytes; `iv` for cbc; `nonce` for ctr, the 16-byte initial counter block; `padding` (`none`, `pkcs7`) |
+| `base64` | `alphabet` (`standard`, `urlsafe`, or 64 distinct characters in order); `skip_whitespace` |
+| `hex` | — |
+| `lznt1` | — (4096-byte chunks, each with its two-byte header, as `RtlDecompressBuffer` reads them) |
+| `zlib`, `gzip`, `deflate` | — (`deflate` is the raw stream, with no header) |
+| `reverse` | — |
+| `slice` | `start`, `length` (within the current buffer; past its end is cut and said) |
+
+A `key`, `iv` or `nonce` is `{"hex": "..."}`, `{"text": "..."}` (UTF-8) or a
+range of the same file, `{"offset": ..., "length": ...}` (or `rva` or `va`),
+so a model points at a key it found instead of copying it. A key range past
+the end of the file is an error, since a key cut short is another key.
+
+The answer names the input range (its offset, end and length, and its rva and
+section, or a `no:` sentence when no section holds its start or the file is
+not an image) and every step with its parameters as given, its input and
+output lengths, and anything the step met: a cut, a stream that ends before
+its end marker, bytes after a stream's end. A literal key is shown as it was
+written; a key read from the file is shown as the range named and the bytes
+read there. Then the output: its length, SHA-256, the first 64 bytes in hex,
+its text read as ASCII (each byte past ASCII written as `\xNN`) and as
+UTF-16LE, each escaped as the pack writes a recovered string, the share of
+printable bytes in each reading, its Shannon entropy in bits per byte, and the
+domains, URLs, IP addresses, paths and registry keys the indicator reader
+(`iocs_from_text`) finds in it, each at its first offset in the output with the
+encoding it was read in. The answer never says what the output is.
+
+An unknown operation, a key of a length the cipher does not take, a wrong IV
+or nonce length, an input that is not whole AES blocks, padding that is not
+PKCS#7, an alphabet with a repeated character, a stray character in the
+encoded text, a malformed LZNT1 chunk or a compressed stream that does not
+read is an error naming the step and why. Nothing is guessed and nothing is
+retried with other parameters.
+
+Every step but decompression writes at most as many bytes as it reads.
+Decompression (`zlib`, `gzip`, `deflate`, `lznt1`) is held to the platform's
+default sample upload cap (`core.delivery_limits.SAMPLE_UPLOAD_MAX_BYTES`): the
+stream is fed a slice at a time and each call is asked for no more than the room
+left, so the output never holds more than the cap, and a stream that reaches it
+is cut there with the cut stated. Concatenated gzip members are read in turn
+under that one bound and counted (`members`); an LZNT1 chunk that expands past
+its 4096 bytes is an error. A decompression cut by the cap ends the chain: the
+answer's `stopped` names the steps not run and states the cut step's output.
+The bytes all steps write together are held to the same cap, so a long list of
+steps costs at most that many bytes of work, and a chain that reaches it stops
+the same way. Each step's input is let go before the next runs, and each step
+is linear in its buffer. `rc4` runs through `cryptography`'s ARC4 for the key lengths it
+takes (5, 7, 8, 10, 16, 20, 24 or 32 bytes) and through the same algorithm
+written out for every other length; `aes` needs `cryptography`. The ledger
+entry's evidence root is the start of its input range.
+
 ### Sample delivery
 
 | tool | arguments |
@@ -411,7 +487,8 @@ a caller asking for more is given that. Asking for less is honoured.
 
 Answers `{server, version, tools: [{name, optional_dependency, available,
 reason, timeout_s}]}`, computed when the server starts by probing each optional
-module. A tool that cannot answer returns `{"error": {"code", "message",
+module. The `transform_bytes` cell also carries `facts`, its arguments and
+operations in plain sentences. A tool that cannot answer returns `{"error": {"code", "message",
 "remediation"}, "tool"}` (`maljan.tools.errors`); see *Writing a tool server*
 in `apps/docs/content/docs/configuration.mdx`.
 
