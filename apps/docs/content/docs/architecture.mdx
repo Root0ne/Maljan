@@ -577,9 +577,17 @@ recovered string, so it reads as data. The same holds wherever a value the
 sample or its submitter wrote reaches a model as free text: the submitted name
 in the run-state block and in the judge's identity block, a function's name in
 the function map, a domain and a persistence target in the composer's prompt.
-A tool's JSON answer already holds each such value as one JSON string; the
-ledger keeps every answer byte for byte, and only what the prompt shows is
-quoted. A string a function refers to is
+A tool's JSON answer already holds each such value as one JSON string. A tool
+answer printed as text (a disassembler's listing, a decompile, a string or
+export list, any generic MCP text answer) is shown between a line
+`<<tool output [ev_0007]>>` and a line `<<end of tool output [ev_0007]>>`, and
+a line of it beginning `<<` is shown with a backslash before it, so its
+content cannot close the fence (`agents/tool_fence.py`). The sentence about a
+prompt's tools says once what the fence is; the judge's evidence excerpts are
+fenced the same way. The guardrails count the fence inside each answer's
+limit: a text answer and its fence together fit the room the answer was
+given. The ledger keeps every answer byte for byte, and only what the prompt
+shows is quoted or fenced. A string a function refers to is
 counted, never shown. A row states what and where and names no behaviour.
 When not every row fits, each row in rank order that fits what is left is
 shown, a row that does not is counted and the next is tried, and a last line
@@ -3348,15 +3356,21 @@ is assembled from what the run gathered rather than recomputed beside it:
   name; or the whole file, for hashes, identification, signing and a file
   reputation answer. A FLOSS row whose call site the blob decoder ties to a
   blob has the blob as its root, so the two tools reading one encoded string
-  are one root. An entry whose root cannot be read has none and says why in a
+  are one root. A place inside a function whose range a reader states (the
+  function index's exception-directory ranges, which it serves as
+  `function_ranges`; a disassembler's stated function size; Ghidra's function
+  hash) is that function's root, `function 0x3868 in .text`, so a capa match
+  inside a function and a decompile of it are one root; two places in one
+  function with no stated range stay two. An entry whose root cannot be read has none and says why in a
   `no:` sentence: a reference lookup reads nothing of the sample, a failed
   call read nothing, a call naming its function by name gives no address, an
   answer with no offset, address, section, event or flow has nothing to place.
   A statement's roots are those of the entries it cites; an entry holding
   several gives the ones the statement names by an address, by a quoted value
   equal to a row's text, or by a name a row carries (an import, an export, a
-  section, a resolved name), and says so when the statement names none of
-  them. The capability row and the published technique carry the distinct
+  section, a resolved name). A passing mention of a table ("the imports", "the
+  header") narrows nothing: a statement naming none of an entry's places has
+  the entry's whole set of roots. The capability row and the published technique carry the distinct
   roots (`evidence_roots`) and one `<entry>: no: <reason>` per cited entry
   that gave none (`roots_not_read`); the corroboration record carries the same
   two lists, adding the rows of each asserting tool's entry that name the
