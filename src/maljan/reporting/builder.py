@@ -193,6 +193,9 @@ class MalwareReportBuilder:
             # judge's bundle check were given: a technique from a domain this
             # sample cannot host is kept in the matrix and left unpublished.
             sample={"platform": self.sample_platform, "file_type": self.sample_file_type},
+            # Every call, repeats included: a statement citing a repeat cites
+            # the entry that holds its answer, and its roots are that entry's.
+            ledger=self.evidence_ledger,
         )
         severity = self._severity_from_judge(static, dynamic, identity)
         verdict = self._verdict_literal(self.final_decision)

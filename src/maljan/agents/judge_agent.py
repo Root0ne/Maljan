@@ -935,6 +935,9 @@ NO_ENTRY_TEXT = "(no text recorded in this run)"
 QUESTION_REPORTS_LABEL = "Expert Reports:"
 QUESTION_VERDICT_LABEL = "YOUR VERDICT:"
 QUESTION_CARRIED_LABEL = "TECHNIQUES YOUR BUNDLE CARRIES:"
+# The label of a technique's line stating its layers beside the distinct places
+# in the sample its mentions cite (``analysis.evidence_roots``).
+QUESTION_ROOTS_LABEL = "evidence roots:"
 
 
 def technique_question_head(reports_text: str, verdict: str, carried: Sequence[str]) -> str:
@@ -1027,6 +1030,9 @@ def technique_question_text(
             listed = ", ".join(ids) if ids else "none cited"
             lines.append(f"   - {agent}: {' '.join(str(text).split())} (evidence: {listed})")
             cited.extend(i.lower() for i in ids if i.lower() not in cited)
+        roots = str(getattr(question, "roots", "") or "")
+        if roots:
+            lines.append(f"   {QUESTION_ROOTS_LABEL} {roots}")
         check = str(getattr(question, "check", "") or "")
         if check:
             lines.append(f"   check: {check}")
@@ -3122,6 +3128,7 @@ class JudgeAgent(BudgetMeter):
         facts_block: str = "",
         run_state: str = "",
         verdict_timed_out: bool = False,
+        ledger: Sequence[Any] | None = None,
     ) -> Any:
         """Ask once, after the verdict, about the techniques the bundle does not carry.
 
@@ -3136,7 +3143,9 @@ class JudgeAgent(BudgetMeter):
         not fit the judge's window is shortened, marked, said in the question
         and recorded on the answer. ``routed`` is the routed platform and file
         type: a technique the sample cannot host, or one the catalogue
-        rejects, is not asked about and is recorded as such.
+        rejects, is not asked about and is recorded as such. ``ledger`` is
+        the run's tool calls: with it, each technique states its layers beside
+        the distinct evidence roots its mentions cite.
 
         Returns the :class:`~maljan.schemas.stix_models.TechniqueReview`, or
         ``None`` when there is nothing to ask or record. A question that times
@@ -3162,7 +3171,9 @@ class JudgeAgent(BudgetMeter):
                 attck = knowledge
             except Exception:  # noqa: BLE001 — no catalogue, no describe check
                 attck = None
-            questions, not_asked = judge_questions(dumped, isr_reports, routed, attck=attck)
+            questions, not_asked = judge_questions(
+                dumped, isr_reports, routed, attck=attck, ledger=ledger
+            )
         except Exception as exc:  # noqa: BLE001 — a question not built is none asked
             self.logger.warning("Judge technique question not built (%s).", type(exc).__name__)
             return None

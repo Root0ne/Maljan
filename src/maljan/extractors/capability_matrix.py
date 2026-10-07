@@ -45,10 +45,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from maljan.analysis.evidence_roots import RootCount, layers_and_roots, run_roots
 from maljan.analysis.technique_ids import attack_reference_id, says_no_technique
 from maljan.core.logger import logger
 from maljan.reporting.models import CapabilityCell, TTPMapping
-from maljan.schemas.evidence import ENTRY_ID_RE
+from maljan.schemas.evidence import ENTRY_ID_RE, entry_ids_in
 from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
@@ -99,6 +100,7 @@ def build_capability_matrix(
     stix_output: dict[str, Any] | None,
     isr_reports: dict[str, Any] | None,
     sample: dict[str, Any] | None = None,
+    ledger: Sequence[Any] | None = None,
 ) -> tuple[list[CapabilityCell], list[TTPMapping]]:
     """Return ``(capability_cells, ttp_mappings)`` for the report.
 
@@ -111,10 +113,16 @@ def build_capability_matrix(
     unresolvable id already follows: kept in the matrix with the reason
     written beside it, and out of the published list. Without it the question
     is not asked, which is the same fall-open answer the validator gives.
+
+    ``ledger`` is the run's tool calls. With any, each row states the distinct
+    evidence roots its analysts' statements cite (``analysis.evidence_roots``)
+    beside the layers that named it; nothing reads the count to decide.
+    Without it the row states none.
     """
     techniques = _collect_techniques(stix_output, isr_reports)
     if not techniques:
         return [], []
+    roots_of = run_roots(ledger) if ledger else None
 
     out_of_scope = _out_of_scope(list(techniques), sample)
     review = technique_review(stix_output)
@@ -146,6 +154,10 @@ def build_capability_matrix(
         layers = info.get("layers") or []
         valid = bool(info.get("valid", True))
         independent, identical = independent_statements(info.get("statements") or [])
+        counted = RootCount()
+        if roots_of is not None:
+            for text, ids in info.get("cited") or []:
+                counted.add(*roots_of.of_statement(text, ids))
 
         # Never emit a zero-confidence cell with no evidence and no contributing
         # source — it is an empty claim the UI would render as a "verified"
@@ -229,6 +241,8 @@ def build_capability_matrix(
                 statements=[f"{who}: {text}" for who, text in info.get("statements") or [] if text],
                 independent_layers=independent,
                 identical_statements=identical,
+                evidence_roots=list(counted.roots),
+                roots_not_read=list(counted.not_read),
             )
         )
         if not_published:
@@ -252,6 +266,8 @@ def build_capability_matrix(
                 technique_id_valid=valid,
                 independent_layers=independent,
                 identical_statements=identical,
+                evidence_roots=list(counted.roots),
+                roots_not_read=list(counted.not_read),
             )
         )
 
@@ -551,6 +567,11 @@ def _collect_techniques(
                 if quote and quote not in row["evidence"]:
                     row["evidence"].append(str(quote))
                 row.setdefault("statements", []).append((str(layer), str(quote)))
+                # What the statement cites, for its evidence roots: the ids its
+                # evidence line and its text write, read with both.
+                ref = getattr(claim, "evidence_ref", "") or ""
+                said = f"{getattr(claim, 'claim', '') or ''} {ref}"
+                row.setdefault("cited", []).append((said, sorted(entry_ids_in(said))))
             # 3. The findings' own technique ids. An ISR carries ids in two
             # places, and this was the one no check ever saw: the report's
             # Findings table and the corroboration metric are both built from
@@ -590,6 +611,9 @@ def _collect_techniques(
                         if detail not in row["evidence"]:
                             row["evidence"].append(detail)
                         row.setdefault("statements", []).append((str(layer), detail))
+                    cited = [str(i) for i in getattr(finding, "evidence_ids", None) or [] if i]
+                    title = str(getattr(finding, "title", "") or "")
+                    row.setdefault("cited", []).append((f"{title} {detail}", cited))
 
     # The catalogue question, asked of every id still standing. A claim was
     # asked it in the analyst's own loop and carries the answer; an id that
@@ -746,13 +770,16 @@ class TechniqueQuestion:
     evidence ids)``, the text as the analyst wrote it. ``check`` is the ATT&CK
     check's finding when no claim naming the technique describes it
     (``validation.undescribed_technique_finding``), shown with the question,
-    and ``""`` otherwise.
+    and ``""`` otherwise. ``roots`` is the layers that name it beside the
+    distinct evidence roots their mentions cite (``analysis.evidence_roots``),
+    when the question was built with the ledger, and ``""`` otherwise.
     """
 
     technique_id: str
     kind: str
     mentions: list[tuple[str, str, list[str]]] = field(default_factory=list)
     check: str = ""
+    roots: str = ""
 
 
 def technique_review(stix_output: dict[str, Any] | None) -> TechniqueReview | None:
@@ -812,6 +839,7 @@ def judge_questions(
     sample: dict[str, Any] | None = None,
     *,
     attck: Any = None,
+    ledger: Sequence[Any] | None = None,
 ) -> tuple[list[TechniqueQuestion], dict[str, str]]:
     """The techniques to put to the judge after its verdict, and the ones left out, with why.
 
@@ -828,6 +856,9 @@ def judge_questions(
     here, as the matrix asks it — or one the routed sample cannot host is not
     asked: the matrix keeps it out of the published list before any answer is
     read. Those come back as ``{id: "not asked: <reason>"}``.
+
+    With ``ledger``, each question states its layers beside the distinct
+    evidence roots its mentions cite, where the mentions are listed.
     """
     in_bundle = bundle_technique_ids(stix_output)
     questions: dict[str, TechniqueQuestion] = {}
@@ -889,7 +920,16 @@ def judge_questions(
             not_asked[tid] = not_asked_unknown_id(tid)
         elif out_of_scope.get(tid):
             not_asked[tid] = f"not asked: {out_of_scope[tid]}"
-    return [q for tid, q in questions.items() if tid not in not_asked], not_asked
+    asked = [q for tid, q in questions.items() if tid not in not_asked]
+    if ledger:
+        roots_of = run_roots(ledger)
+        for question in asked:
+            counted = RootCount()
+            for _agent, text, ids in question.mentions:
+                counted.add(*roots_of.of_statement(text, ids))
+            layers = len({agent for agent, _text, _ids in question.mentions})
+            question.roots = layers_and_roots(layers, counted.roots, counted.not_read)
+    return asked, not_asked
 
 
 def _undescribed(

@@ -3959,6 +3959,36 @@ def _resolved_only(hit: dict[str, Any]) -> bool:
 
 
 def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
+    """The row's layer words (:func:`_layer_words`) with its evidence roots beside them.
+
+    The roots are the distinct places in the sample the statements cite
+    (``analysis.evidence_roots``): "one evidence root (0x4f58 in .text)" for a
+    row a single place stands behind, counted and listed for more. A row with
+    layer words carries them inside its parentheses; a row with none states
+    its layers and roots on their own. A row stored before roots were read
+    says nothing of them.
+    """
+    words = _layer_words(mapping, rules)
+    if mapping is None:
+        return words
+    from maljan.analysis.evidence_roots import layers_and_roots, roots_phrase
+    from maljan.extractors.capability_matrix import JUDGE_SOURCE
+
+    roots = list(getattr(mapping, "evidence_roots", None) or [])
+    unread = list(getattr(mapping, "roots_not_read", None) or [])
+    phrase = roots_phrase(roots, unread)
+    if not phrase:
+        return words
+    if words.endswith(")"):
+        return f"{words[:-1]}; {phrase})"
+    if words:
+        return f"{words} ({phrase})"
+    independent = len(getattr(mapping, "independent_layers", None) or [])
+    named = len([lyr for lyr in mapping.contributing_layers if lyr != JUDGE_SOURCE])
+    return f", {layers_and_roots(independent or named, roots, unread)}"
+
+
+def _layer_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     """``, corroborated`` for a row two analyst layers named, or ``""``.
 
     A technique a rule matched only on runtime-resolved names has its analysts'
