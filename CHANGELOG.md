@@ -18,6 +18,29 @@ change landed on `main`.
 - **"Functions examined" in the report carries the function map's coverage in
   one line.**
 
+- **The deobfuscation passes run on every run, and every analyst reads their
+  results as facts in the pre-analysis pack.** After every earlier pack step,
+  so no earlier id moves, and in the room the earlier lines leave, so no
+  earlier line loses a character:
+  - `find_crypto_constants`, the platform's scan of an executable for the
+    published constants of ciphers, hash functions and checksums (Ghidra's
+    `detect_crypto_constants` answers "not yet implemented"). Each set is
+    computed from its definition; a table is found whole, other sets by two of
+    their values, and sets that share values are named only by a value that
+    tells them apart (else as their family). A set capa names in the same
+    function is said to agree with capa. The analysis server serves it too,
+    and the Ghidra workflow now points at it.
+  - Ghidra's anti-analysis scan, of which only the exact part is stated: the
+    listed instruction, and the exact TEB/PEB operand where a capa rule in the
+    same function agrees. API calls and other TEB/PEB reads are counted, not
+    stated, and an `INT3` right after a call, jump or return is not a trap.
+
+  A Ghidra that cannot be asked (switched off, over stdio, or without a copy of
+  the sample) is one `no: <reason>` line and not a failure. A pass line with no
+  room is counted in the "N more pack entries not shown" line, which takes only
+  free room or capa's addresses; with neither, the pack is unchanged and the
+  run summary's pack record lists the entry with the reason "no pack room".
+
 - **A function an analyst decompiled and no claim describes is listed to it,
   once.** The functions come from the analyst's own ledger entries that
   decompiled something and answered:

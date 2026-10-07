@@ -179,14 +179,16 @@ class TestTheStep:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """After every other tool, so every id the pack issued before it is the id it
-        always was; only the platform's own readings of the bytes follow it."""
+        always was; only the platform's own readings of the bytes and the
+        deobfuscation passes follow it."""
         _installed(monkeypatch, _answer(ROWS))
         result = _pack(tmp_path)
-        assert [entry.tool for entry in result.entries[-4:]] == [
+        assert [entry.tool for entry in result.entries[-5:]] == [
             "sandbox_status",
             "floss",
             "resolve_api_hashes",
             "decode_string_blobs",
+            "find_crypto_constants",
         ]
         entry = _floss_entry(result)
         assert entry.ok is True
@@ -394,7 +396,11 @@ class TestTheNode:
             assert call["environ"][emulated_strings.FLOSS_PATH_ENV] == "/opt/floss/floss"
             job_dir = tmp_path / "staging" / staging.job_directory_name(container.job_key())
             assert Path(call["scratch"]) == job_dir / "floss"
-            assert update["evidence_ledger"][-3]["tool"] == "floss"
+            tools = [row["tool"] for row in update["evidence_ledger"]]
+            assert tools[tools.index("floss") + 1 :][:2] == [
+                "resolve_api_hashes",
+                "decode_string_blobs",
+            ]
         finally:
             staging.remove_job_staging(container.job_key())
 
