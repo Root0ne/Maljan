@@ -573,7 +573,13 @@ number of its own distinct artefacts, ties by address: `- 0x401000: calls
 (ev_0011); called by 1, calls 3 functions; 1 callee holds 2 artefacts of their
 own, counted per callee`. Every name a row takes from the sample (an import, a
 resolved name, an export) is quoted and escaped as the pack writes every
-recovered string, so it reads as data; a string a function refers to is
+recovered string, so it reads as data. The same holds wherever a value the
+sample or its submitter wrote reaches a model as free text: the submitted name
+in the run-state block and in the judge's identity block, a function's name in
+the function map, a domain and a persistence target in the composer's prompt.
+A tool's JSON answer already holds each such value as one JSON string; the
+ledger keeps every answer byte for byte, and only what the prompt shows is
+quoted. A string a function refers to is
 counted, never shown. A row states what and where and names no behaviour.
 When not every row fits, each row in rank order that fits what is left is
 shown, a row that does not is counted and the next is tried, and a last line
@@ -3327,7 +3333,42 @@ is assembled from what the run gathered rather than recomputed beside it:
   runtime from hashes only, no import; not counted as corroboration", and
   under the table each analyst statement naming its technique is printed
   verbatim, by analyst (`CapabilityCell.statements`); the platform classifies
-  none of them. The ELF run
+  none of them. **Corroboration also counts evidence roots**
+  (`analysis/evidence_roots.py`), beside the layers and never instead of them.
+  Every ledger entry states the places in the sample its facts were read from,
+  derived from what the entry holds: a place written as its offset from the
+  image base and the section that holds it (`0x4f58 in .text`) for a strings
+  row's file offset, a FLOSS row's call site, a decoded blob, a hash
+  occurrence, a capa match address, a function index row, or the address a
+  decompile, disassembly or memory read was given; a table of the file (the PE
+  header, the import table, the export table, the resource table, the debug
+  directory, the overlay, a section by name); a sandbox process, which a Sigma
+  match's or a LOLBin hit's command line is joined to; a network flow, named
+  the same whether the sandbox or the capture states it, and a DNS query by
+  name; or the whole file, for hashes, identification, signing and a file
+  reputation answer. A FLOSS row whose call site the blob decoder ties to a
+  blob has the blob as its root, so the two tools reading one encoded string
+  are one root. An entry whose root cannot be read has none and says why in a
+  `no:` sentence: a reference lookup reads nothing of the sample, a failed
+  call read nothing, a call naming its function by name gives no address, an
+  answer with no offset, address, section, event or flow has nothing to place.
+  A statement's roots are those of the entries it cites; an entry holding
+  several gives the ones the statement names by an address, by a quoted value
+  equal to a row's text, or by a name a row carries (an import, an export, a
+  section, a resolved name), and says so when the statement names none of
+  them. The capability row and the published technique carry the distinct
+  roots (`evidence_roots`) and one `<entry>: no: <reason>` per cited entry
+  that gave none (`roots_not_read`); the corroboration record carries the same
+  two lists, adding the rows of each asserting tool's entry that name the
+  technique; the judge's technique question states "2 layers, one evidence
+  root (0x4f58 in .text)" under each technique's mentions. The report's
+  corroboration words carry the roots inside their parentheses, and a row one
+  root stands behind says "one evidence root" in the same line; a single-layer
+  row states its layer and roots on their own. No publish rule reads the
+  count. The roots are read from one job's ledger in the step that needs
+  them, with no cache shared between jobs, in time linear in the entries and
+  their rows. A stored report built before roots were read renders as it did.
+  The ELF run
   credited `STATIC ANALYST` with T1490 and T1048.001, which no source named. A
   bundle the pipeline built from the analysts' claims because the judge's
   answer was not one credits those analysts, not the judge. A technique id is
