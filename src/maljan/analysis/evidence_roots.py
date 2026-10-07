@@ -506,10 +506,11 @@ class _Files:
     sample's, or whose stem is the sample's SHA-256), or when it names no
     path and its server's program is the sample: the program a server holds
     is the one its latest program statement or open names, the sample until
-    one names another file. Any other file is named by the leading digits of
-    the SHA-256 the run states for it (a carving's, or a hash answer's), or
-    by its path, quoted. A call whose ``carved_path`` is not one path is
-    about no file that can be told (``None``).
+    one names another file, read in the order the calls were made. Any other
+    file is named by the leading digits of the SHA-256 the run states for it
+    (a carving's, or a hash answer's), or by its path, quoted. A call whose
+    ``carved_path`` is not one path is about no file that can be told
+    (``None``).
     """
 
     def __init__(self, entries: Sequence[Any]) -> None:
@@ -542,7 +543,17 @@ class _Files:
         # The entries placed by their server's stated program, not by a path.
         self.by_program: set[int] = set()
         program: dict[Any, str | None] = {}
-        for entry in entries:
+        # The order the calls were made in: ``seq``, then the start time, then
+        # the ledger's own order.
+        made = sorted(
+            enumerate(entries),
+            key=lambda pair: (
+                int(getattr(pair[1], "seq", 0) or 0),
+                float(getattr(pair[1], "started_at", 0.0) or 0.0),
+                pair[0],
+            ),
+        )
+        for _index, entry in made:
             server = getattr(entry, "server", None)
             held = self._program_named(entry)
             if held is not None:

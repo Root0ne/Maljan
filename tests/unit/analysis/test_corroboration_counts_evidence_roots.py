@@ -996,6 +996,18 @@ class TestAnEntryIsAboutTheSampleOnlyWhenItSaysSo:
         led[3] = _entry("ev_0004", "decompile_function", args={"address": "0x10003000"})
         assert run_roots(led).of_entry("ev_0004").reason == OUTSIDE_PROGRAM
 
+    def test_the_latest_program_is_read_in_the_order_the_calls_were_made(self) -> None:
+        opened = _entry(
+            "ev_0003",
+            "get_current_program_info",
+            {"image_base": "0x10000000", "name": "payload.dll"},
+            seq=3,
+        )
+        call = _entry("ev_0002", "decompile_function", args={"address": "0x401100"}, seq=2)
+        # Listed after the program statement, made before it.
+        roots = run_roots([self._pe(), opened, call])
+        assert roots.of_entry("ev_0002").roots == ["0x1100 in .text"]
+
     def test_a_program_named_as_the_sample_is_the_sample(self) -> None:
         led = [
             self._pe(),
