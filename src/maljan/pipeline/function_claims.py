@@ -12,12 +12,17 @@ statement of absence ("does not use X"), and looks for each, in this order:
    (``tools.artefact_index``): the imports it calls, its calls through slots
    the hash resolution fills, the names its hashes resolve to, the decoded
    and plain strings it refers to and the capa rules matched in it;
-3. the rows of every function reachable from it through callee edges, a
-   breadth-first walk over the index's whole call graph with no depth bound;
+3. the rows of every function reachable from it through call edges, a
+   breadth-first walk over the index's whole call graph with no depth bound,
+   read once per set of starting functions; a routine passed as an argument (a
+   thread's start, a callback) is no call edge and is not followed;
 4. the places the run's hash-resolution and decoded-string answers put inside
    any of those functions (``agents.function_map.function_artefacts``).
 
-A value any of them holds holds; nothing else excuses one. API names are
+A value any of them holds holds; nothing else excuses one. A value is the
+cited function's only where the claim gives it to it: the function the claim
+names last before the value in its sentence, or, in a claim that names no
+function at all, the cited one; any other value is recorded with why. API names are
 compared without regard to case, a module written in front
 (``kernel32.dll!Name``) read off, and the ANSI and wide spellings read as one
 name, as the API catalogue compares them
@@ -122,10 +127,16 @@ NOT_A_SAMPLE_STRING = (
     'no: "{value}" is no string a strings tool, FLOSS, the blob decoder or the function index holds'
 )
 FACTS_UNREAD = "no: the function facts could not be read ({kind})"
-UNATTRIBUTED = (
-    'no: "{value}" stands where the claim names no function whose listing it cites, so it is '
-    "not read as that function's"
+# What the reach does not follow, said with every question.
+NOT_FOLLOWED = (
+    "routines passed as arguments (a thread's start, a callback) are not followed, only calls"
 )
+UNATTRIBUTED = (
+    'no: "{value}" is given to no function the claim names: {where}, so it is not read as '
+    "any function's"
+)
+BEFORE_ANY_NAME = "the value comes before any function its sentence names"
+NO_NAME_IN_ITS_SENTENCE = "the value's sentence names no function"
 GIVEN_ELSEWHERE = (
     'no: the claim gives "{value}" to {address}, which no function whose listing it cites '
     "reaches through its callees"
@@ -138,8 +149,6 @@ _QUOTED_INSIDE = re.compile(r'"([^"\n]+)"|\'([^\'\n]+)\'|“([^”\n]+)”')
 # A JSON escape a value may be written with; a value of escapes and marks alone
 # spells no letter or digit, and no text can be said to hold or lack it.
 _ESCAPE = re.compile(r"\\(?:u[0-9a-fA-F]{4}|.)")
-# The index rows' strings, as one pseudo-entry of the sample strings' texts.
-_INDEX_STRINGS = "function index rows"
 
 _CATALOGUE_LOWER: frozenset[str] | None = None
 
@@ -262,6 +271,18 @@ class _Held:
     texts: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class _Reach:
+    """What the functions reachable from one set of starts hold, read once per set."""
+
+    functions: frozenset[int]
+    whole: bool
+    stopped: bool
+    unnamed: bool
+    names: frozenset[str]
+    texts: frozenset[str]
+
+
 @dataclass
 class FunctionFacts:
     """The facts a function claim is checked against, read once for an answer's checks.
@@ -290,6 +311,34 @@ class FunctionFacts:
     # The sample strings as data: the strings tools' answers, FLOSS's, the blob
     # decoder's, and the index rows' strings.
     strings: EntryTexts = field(default_factory=EntryTexts)
+    # The index rows' strings, each whole, lower-cased.
+    index_strings: frozenset[str] = frozenset()
+    # Each distinct set of starts' reach, read once.
+    reaches: dict[frozenset[int], _Reach] = field(default_factory=dict)
+
+    def reach(self, starts: Sequence[int]) -> _Reach:
+        """The reach of ``starts`` and what its functions hold, memoised per set."""
+        key = frozenset(starts)
+        found = self.reaches.get(key)
+        if found is None:
+            functions, whole = self.reachable(starts)
+            names: set[str] = set()
+            texts: set[str] = set()
+            for at in functions:
+                for held in (self.held_by_row.get(at), self.placed.get(at)):
+                    if held is not None:
+                        names |= held.names
+                        texts.update(held.texts)
+            found = _Reach(
+                functions=frozenset(functions),
+                whole=whole,
+                stopped=any(at in (self.undecoded or ()) for at in functions),
+                unnamed=any((self.unnamed or {}).get(at) for at in functions),
+                names=frozenset(names),
+                texts=frozenset(texts),
+            )
+            self.reaches[key] = found
+        return found
 
     def offset(self, address: int | None) -> int | None:
         """The index offset of a function an answer gave by address, or ``None``."""
@@ -479,12 +528,7 @@ def function_facts(
             elif getattr(artefact, "kind", "") in ("text", "decoded"):
                 held.texts.append(value.lower())
     strings = EntryTexts.from_ledger(sources)
-    if index_strings:
-        strings = EntryTexts(
-            texts={**strings.texts, _INDEX_STRINGS: "\n".join(index_strings).lower()},
-            tools=dict(strings.tools),
-            partial=strings.partial,
-        )
+    facts.index_strings = frozenset(text.lower() for text in index_strings)
     facts.strings = strings
     facts.known_names = _catalogue_lower() | frozenset(run_names)
     return facts
@@ -501,63 +545,60 @@ def _named_alone(spans: Sequence[str], token: str) -> bool:
     return token in spans or f"{token}()" in spans
 
 
-# Where one sentence of a claim ends and the next begins: a sentence's end or
-# a line break. A dot inside a token (``fcn.0x88f8``, ``kernel32.dll``) ends
-# nothing, and a semicolon, a colon or a dash keeps its sentence's subject.
+# Where one sentence of a claim ends and the next begins: a sentence's end or a
+# line break. A dot inside a token or a number (``fcn.0x88f8``, ``kernel32.dll``,
+# ``1.2``) ends nothing, nor does an abbreviation's (``e.g.``, ``i.e.``,
+# ``etc.``); a semicolon, a colon or a dash keeps its sentence's subject.
 _CLAUSE_END = re.compile(r"[.!?](?=\s|$)|\n")
-# An identifier's CamelCase words, for reading a slash list's shortened items.
-_CAMEL_WORD = re.compile(r"[A-Z][a-z0-9]*|[a-z0-9]+")
+_ABBREVIATIONS = frozenset({"e.g", "i.e", "etc", "cf", "vs", "viz", "approx", "resp"})
 
 
 def _clause_starts(text: str) -> list[int]:
     """Where each sentence of ``text`` begins, in order (``_CLAUSE_END``)."""
-    return [0, *(match.end() for match in _CLAUSE_END.finditer(text))]
+    starts = [0]
+    for match in _CLAUSE_END.finditer(text):
+        if match.group(0) == ".":
+            word = re.search(r"([A-Za-z.]+)$", text[: match.start()])
+            if word is not None and word.group(1).lower().strip(".") in _ABBREVIATIONS:
+                continue
+        starts.append(match.end())
+    return starts
 
 
-def _expanded(text: str, start: int, token: str, names: frozenset[str] | set[str]) -> str:
-    """``token`` as the name a slash list shortens it from, or ``token``.
+def _sentence_of(text: str, starts: Sequence[int], at: int) -> tuple[str, int]:
+    """``(the sentence of text holding at, where it begins)``."""
+    from bisect import bisect_right
 
-    In ``InternetOpenW/ConnectA/ReadFile`` an item after a slash may drop the
-    words the item before it, or the list's first item, begins with: a known
-    name those leading words and the item spell is read in its place.
-    """
-    if start == 0 or text[start - 1] != "/":
-        return token
-    run: list[str] = []
-    at = start - 1
-    while at > 0 and text[at] == "/":
-        found = re.search(r"([A-Za-z_][A-Za-z0-9_]*)$", text[:at])
-        if found is None:
-            break
-        run.append(found.group(1))
-        at = found.start() - 1
-    for item in run[:1] + run[-1:]:
-        words = _CAMEL_WORD.findall(item)
-        for cut in range(len(words) - 1, 0, -1):
-            spelled = "".join(words[:cut]) + token
-            if _is_a_name(spelled, names):
-                return spelled
-    return token
+    k = bisect_right(starts, at) - 1
+    end = starts[k + 1] if k + 1 < len(starts) else len(text)
+    return text[starts[k] : end], starts[k]
 
 
 def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, int, bool]]:
-    """``(value, where, is an API name)`` of every name and string a sentence claims."""
+    """``(value, where, is an API name)`` of every name and string a sentence claims.
+
+    Each name is read once, at its first place: whether a statement of absence
+    holds it is asked there, within the sentence that holds it.
+    """
     spans = [m.group(0).strip("`").strip() for m in _CODE_SPAN_RE.finditer(text)]
+    starts = _clause_starts(text)
+
+    def negated(begin: int, end: int) -> bool:
+        sentence, offset = _sentence_of(text, starts, begin)
+        return _is_negated(sentence, begin - offset, end - offset)
+
     found: list[tuple[str, int, bool]] = []
     seen: set[str] = set()
     for match in _IDENTIFIER.finditer(text):
         token = match.group(0)
-        if len(token) < 3 or _GENERIC_FUNCTION_NAME.fullmatch(token):
+        if token in seen or len(token) < 3 or _GENERIC_FUNCTION_NAME.fullmatch(token):
             continue
-        token = _expanded(text, match.start(), token, names)
         if not _is_a_name(token, names):
             continue
         if not (re.search(r"[A-Z]", token[1:]) or _named_alone(spans, token)):
             continue
-        if _is_negated(text, match.start(), match.end()):
-            continue
-        if token not in seen:
-            seen.add(token)
+        seen.add(token)
+        if not negated(match.start(), match.end()):
             found.append((token, match.start(), True))
     keys = {_api_key(value) for value, _at, _api in found}
     for match in _QUOTED_SPAN_RE.finditer(text):
@@ -570,23 +611,25 @@ def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, in
             value = next(g for g in match.groups()[1:] if g is not None)
         value = value.strip()
         if (
-            len(value) < 3
+            value in seen
+            or len(value) < 3
             or not re.search(r"[A-Za-z0-9]", _ESCAPE.sub("", value))
             or not decidable(value)
             or _api_key(value) in keys
             or _GENERIC_FUNCTION_NAME.fullmatch(value)
             or entry_ids_in(value)
-            or _is_negated(text, match.start(), match.end())
         ):
             continue
-        if value not in seen:
-            seen.add(value)
+        seen.add(value)
+        if not negated(match.start(), match.end()):
             found.append((value, match.start(), False))
     for value in literal_values(text):
-        at = text.find(value)
-        if value not in seen and not (at >= 0 and _is_negated(text, at, at + len(value))):
-            seen.add(value)
-            found.append((value, max(at, 0), False))
+        if value in seen:
+            continue
+        seen.add(value)
+        at = max(text.find(value), 0)
+        if not negated(at, at + len(value)):
+            found.append((value, at, False))
     return found
 
 
@@ -642,21 +685,37 @@ class FunctionClaimCheck:
         }
 
 
-def _held(value: str, api: bool, sources: Sequence[_Held]) -> bool:
+def _held(value: str, api: bool, listings: Sequence[_Held], reached: _Reach) -> bool:
+    """Whether the listings or the reachable functions' facts hold ``value``.
+
+    The facts are looked up by membership: an API key in their names, a string
+    as one of their whole texts. Only a listing's text is searched, for the
+    value as a whole value inside it.
+    """
     from maljan.agents._indicator_denylists import whole_value_in
     from maljan.utils.written_forms import written_forms
 
     if api:
         key = _api_key(value)
-        return any(key in source.names for source in sources)
+        return key in reached.names or any(key in listing.names for listing in listings)
     forms = written_forms(value.lower())
+    if any(form in reached.texts for form in forms):
+        return True
     return any(
-        whole_value_in(form, text) for source in sources for text in source.texts for form in forms
+        whole_value_in(form, text)
+        for listing in listings
+        for text in listing.texts
+        for form in forms
     )
 
 
 def _a_sample_string(value: str, facts: FunctionFacts) -> bool:
-    """Whether a strings source of the run holds ``value`` as data."""
+    """Whether a strings source of the run holds ``value`` as data: one of the index rows'
+    strings as a whole, or a strings tool's answer holding it as a whole value."""
+    from maljan.utils.written_forms import written_forms
+
+    if any(form in facts.index_strings for form in written_forms(value.lower())):
+        return True
     strings = facts.strings
     return any(strings.holds(ref, value) for ref in strings.may_hold(value))
 
@@ -763,14 +822,12 @@ def check_function_claims(
             starts.append(start)
         if not reason and facts.undecoded is None:
             reason = UNDECODED_UNKNOWN.format(entry=facts.index_entry)
-        reach: list[int] = []
-        whole = True
+        reached: _Reach | None = None
         if not reason:
-            reach, whole = facts.reachable(starts)
-            stopped = [o for o in reach if o in facts.undecoded]  # type: ignore[operator]
-            if stopped:
+            reached = facts.reach(starts)
+            if reached.stopped:
                 reason = UNDECODED.format(address=facts.va(starts[0]))
-        if reason:
+        if reason or reached is None:
             out.not_checked.append(f"claim {number}: {reason}")
             continue
         out.checked += 1
@@ -778,20 +835,21 @@ def check_function_claims(
         api_reason = ""
         if facts.unnamed is None:
             api_reason = UNNAMED_UNKNOWN.format(entry=facts.index_entry)
-        elif not whole:
+        elif not reached.whole:
             api_reason = CALLEES_UNKNOWN.format(entry=facts.index_entry, address=where)
-        elif any(facts.unnamed.get(o) for o in reach):
+        elif reached.unnamed:
             api_reason = UNNAMED_CALLS.format(address=where)
         # Each value is the function's only where the claim gives it to it: the
         # function it last names before the value, in the value's own clause.
         apis: list[str] = []
         strings: list[str] = []
-        given = _attribution(sentence, about, starts, reach, facts)
+        given = _attribution(sentence, about, reached.functions, facts)
         for value, at, api in named_here:
-            owner = given(at)
+            owner, stands = given(at)
             if owner is None:
                 out.not_checked.append(
-                    f"claim {number}: {UNATTRIBUTED.format(value=safe_finding_value(value))}"
+                    f"claim {number}: "
+                    f"{UNATTRIBUTED.format(value=safe_finding_value(value), where=stands)}"
                 )
             elif owner != "":
                 out.not_checked.append(
@@ -800,11 +858,6 @@ def check_function_claims(
                 )
             else:
                 (apis if api else strings).append(value)
-        for at in reach:
-            if at in facts.held_by_row:
-                sources.append(facts.held_by_row[at])
-            if at in facts.placed:
-                sources.append(facts.placed[at])
         claimed: list[str] = []
         for value in strings:
             if _a_sample_string(value, facts):
@@ -816,7 +869,7 @@ def check_function_claims(
         unheld = [
             (value, api)
             for value, api in [*((a, True) for a in apis), *((s, False) for s in claimed)]
-            if not _held(value, api, sources)
+            if not _held(value, api, sources, reached)
         ]
         # An API name the facts hold is held whatever else the functions call;
         # one they do not hold is no fact where a call names nothing.
@@ -834,7 +887,7 @@ def check_function_claims(
                 sentence,
                 about,
                 starts,
-                len(reach) - len(starts),
+                len(reached.functions) - len(starts),
                 unheld,
                 facts,
                 row_parts,
@@ -846,8 +899,7 @@ def check_function_claims(
 def _attribution(
     sentence: str,
     about: Sequence[DecompiledFunction],
-    starts: Sequence[int],
-    reach: Sequence[int],
+    reached: frozenset[int],
     facts: FunctionFacts,
 ) -> Any:
     """Who a value at a place of ``sentence`` is given to: ``""`` the cited functions (or a
@@ -856,20 +908,19 @@ def _attribution(
     A mention is an address the index reads as a function's start, or a name a
     decompiler gave a cited function. A value goes with the last mention before
     it in its own sentence. With no mention before it there, it goes with the
-    cited functions only when the claim mentions none of them at all: a claim
-    that names its function elsewhere gives this value to nobody it names.
+    cited functions only when the claim names no function at all: a claim that
+    names a function anywhere gives such a value to nobody, and the record says
+    where the value stands.
     """
     from bisect import bisect_right
 
-    own = set(starts)
-    reached = set(reach)
     mentions: list[tuple[int, str]] = []
     for pattern in (_HEX_ADDRESS, _GENERIC_FUNCTION_NAME, _SUFFIXED_ADDRESS, _BARE_ADDRESS):
         for match in pattern.finditer(sentence):
             start = facts.offset(int(match.group(1), 16))
             if start is None:
                 continue
-            if start in own or start in reached:
+            if start in reached:
                 mentions.append((match.start(), ""))
             elif start in facts.rows or start in facts.edges:
                 mentions.append((match.start(), facts.va(start)))
@@ -880,19 +931,21 @@ def _attribution(
             for match in re.finditer(r"(?<![\w.])" + re.escape(name) + r"(?![\w])", sentence):
                 mentions.append((match.start(), ""))
     mentions.sort()
-    cites_by_name = any(owner == "" for _at, owner in mentions)
+    places = [where for where, _owner in mentions]
     clauses = _clause_starts(sentence)
 
-    def given(at: int) -> str | None:
+    def given(at: int) -> tuple[str | None, str]:
+        """``(owner, where the value stands)``; the second says why when there is none."""
+        k = bisect_right(places, at - 1) - 1
         clause = bisect_right(clauses, at)
-        before = [
-            owner
-            for where, owner in mentions
-            if where < at and bisect_right(clauses, where) == clause
-        ]
-        if before:
-            return before[-1]
-        return None if cites_by_name else ""
+        if k >= 0 and bisect_right(clauses, places[k]) == clause:
+            return mentions[k][1], ""
+        if not mentions:
+            return "", ""
+        later = k + 1
+        if later < len(places) and bisect_right(clauses, places[later]) == clause:
+            return None, BEFORE_ANY_NAME
+        return None, NO_NAME_IN_ITS_SENTENCE
 
     return given
 
@@ -922,14 +975,15 @@ def _question(
         head = f"function {which}"
         sources = (
             f"neither its listing nor its index row {entry} holds {none}, and no function "
-            f"reachable from {facts.va(starts[0])} through its callees holds {them} "
-            f"({count} reachable)"
+            f"reachable from {facts.va(starts[0])} through its call edges holds {them} "
+            f"({count} reachable); {NOT_FOLLOWED}"
         )
     else:
         head = f"functions {which}"
         sources = (
             f"neither their listings nor their index rows {entry} hold {none}, and no function "
-            f"reachable from them through their callees holds {them} ({count} reachable)"
+            f"reachable from them through their call edges holds {them} ({count} reachable); "
+            f"{NOT_FOLLOWED}"
         )
     holds: list[str] = []
     for start in starts:

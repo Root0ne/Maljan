@@ -160,8 +160,8 @@ class TestTheQuestion:
         assert f'names "SleepEx" for function {MAIN_VA} [{LISTING_ID}]' in message
         assert (
             f'neither its listing nor its index row [{INDEX_ID}] holds "SleepEx", and no '
-            f"function reachable from {MAIN_VA} through its callees holds it (2 functions "
-            "reachable)" in message
+            f"function reachable from {MAIN_VA} through its call edges holds it (2 functions "
+            f"reachable); {fc.NOT_FOLLOWED}" in message
         )
         assert f'{MAIN_VA}\'s row holds: calls "CreateMutexW" ({INDEX_ID})' in message
         assert "refers to 1 decoded string" in message
@@ -316,13 +316,59 @@ class TestWhereAValueHolds:
     def test_a_value_in_a_sentence_that_names_no_cited_function_is_recorded(self) -> None:
         found = _check(f"{MAIN_VA} creates the guard. The sample also resolves SleepEx.")
         assert found.violations == []
-        assert found.not_checked == [f"claim 1: {fc.UNATTRIBUTED.format(value='SleepEx')}"]
+        assert found.not_checked == [
+            "claim 1: " + fc.UNATTRIBUTED.format(value="SleepEx", where=fc.NO_NAME_IN_ITS_SENTENCE)
+        ]
 
-    def test_a_slash_list_s_shortened_item_is_read_as_the_name_it_shortens(self) -> None:
-        apis, _strings = named_values("It calls InternetOpenW/ConnectA/ReadFile in turn.")
-        assert apis == ["InternetOpenW", "InternetConnectA", "InternetReadFile"]
-        apis, _strings = named_values("It calls CreateFileW/ReadFile/WriteFile in turn.")
-        assert apis == ["CreateFileW", "ReadFile", "WriteFile"]
+    def test_a_value_before_every_function_its_sentence_names_is_recorded(self) -> None:
+        found = _check(f"CreateRemoteThread is called by {MAIN_VA} to inject.")
+        assert found.violations == []
+        assert found.not_checked == [
+            "claim 1: "
+            + fc.UNATTRIBUTED.format(value="CreateRemoteThread", where=fc.BEFORE_ANY_NAME)
+        ]
+
+    def test_a_pronoun_s_sentence_after_another_function_is_no_cited_function_s(self) -> None:
+        index = _index([*ROWS[:3], _row(OTHER, imports=["InternetOpenW"])])
+        found = _check(
+            f'0x{BASE + OTHER:x} is the reader passed to CreateThread. It opens "a stack text".',
+            index=index,
+        )
+        assert found.asked == 0
+        assert any("is given to no function the claim names" in n for n in found.not_checked)
+
+    def test_an_abbreviation_s_dot_ends_no_sentence(self) -> None:
+        index = _index([*ROWS[:3], _row(OTHER, decoded=["settings.ini path"])])
+        found = _check(
+            f'0x{BASE + OTHER:x} reads its settings, e.g. it opens "settings.ini path".',
+            index=index,
+        )
+        assert found.asked == 0
+        assert found.not_checked == [
+            "claim 1: "
+            + fc.GIVEN_ELSEWHERE.format(value="settings.ini path", address=hex(BASE + OTHER))
+        ]
+
+    def test_a_slash_list_s_items_are_read_exactly_as_written(self) -> None:
+        apis, _strings = named_values("It calls NtCreateFile/WriteFile in turn.")
+        assert apis == ["NtCreateFile", "WriteFile"]
+        apis, _strings = named_values("It calls InternetOpenW/ConnectA in turn.")
+        assert apis == ["InternetOpenW"]
+
+    def test_a_slash_list_s_names_held_as_written_ask_nothing(self) -> None:
+        index = _index(
+            [_row(MAIN, imports=["NtCreateFile", "WriteFile"], callees=[HELPER]), *ROWS[1:3]]
+        )
+        found = _check(f"{MAIN_VA} fills the file with NtCreateFile/WriteFile.", index=index)
+        assert found.violations == []
+
+    def test_a_name_repeated_many_times_reads_in_well_under_a_second(self) -> None:
+        import time
+
+        body = " ".join(f"{MAIN_VA} calls CreateMutexW;" for _ in range(2_000))
+        began = time.perf_counter()
+        named_values(body)
+        assert time.perf_counter() - began < 1.0
 
     def test_a_name_inside_a_statement_of_absence_is_no_claimed_call(self) -> None:
         held = _check(f"{MAIN_VA} does not use CreateRemoteThread; it guards with CreateMutexW.")

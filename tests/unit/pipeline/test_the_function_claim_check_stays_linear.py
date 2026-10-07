@@ -91,3 +91,69 @@ class TestTheCheckGrowsWithTheClaims:
         high = min(_timed(3_000) for _ in range(2))
         print("function claims, 300 and 3,000:", round(low, 3), round(high, 3))
         assert high < low * 20
+
+
+def _grown(scale: int) -> float:
+    """``scale`` claims over a chain of ``20 * scale`` functions, each holding two strings."""
+    functions = 20 * scale
+    offsets = [0x100000 + 0x10 * i for i in range(functions)]
+    rows = [
+        {
+            "function": hex(BASE + offset),
+            "offset": hex(offset),
+            "direct": 2,
+            "imports": [],
+            "plain_strings": [
+                {"text": f"text {i} {j}", "sources": ["this entry"]} for j in range(2)
+            ],
+            "callers": [hex(BASE + offsets[i - 1])] if i else [],
+            "callees": [hex(BASE + offsets[i + 1])] if i + 1 < functions else [],
+        }
+        for i, offset in enumerate(offsets)
+    ]
+    data = {
+        "tool": "function_index",
+        "image_base": hex(BASE),
+        "undecoded_functions": 0,
+        "undecoded": [],
+        "calls_unnamed": {},
+        "other_callees": {},
+        "rows": rows,
+    }
+    index = LedgerEntry(
+        id="ev_0002", agent="pipeline", tool="function_index", output="{}", structured=data
+    )
+    listing = LedgerEntry(
+        id="ev_0007",
+        tool="decompile_function",
+        args={"address": hex(BASE + offsets[0])},
+        output="void f(void) { }",
+    )
+    far = functions - 1
+    isr = SimpleNamespace(
+        claims=[
+            ClaimEvidence(
+                claim=f'0x{BASE + offsets[0]:x} reads "text {far} 0" and "text {far} 1", {n}.',
+                evidence_ref="[ev_0007]",
+                confidence=0.5,
+            )
+            for n in range(scale)
+        ]
+    )
+    began = time.perf_counter()
+    facts = function_facts([listing], function_artefacts([index]), pack_entries=[index])
+    found = check_function_claims(isr, listed_functions([listing]), facts, (BASE,))
+    seconds = time.perf_counter() - began
+    assert found.asked == 0 and found.checked == scale
+    return seconds
+
+
+class TestTheCheckGrowsWithClaimsAndGraphTogether:
+    def test_ten_times_the_claims_over_ten_times_the_graph_take_about_ten_times_as_long(
+        self,
+    ) -> None:
+        _grown(20)
+        low = min(_grown(100) for _ in range(2))
+        high = _grown(1_000)
+        print("claims over a graph, 100 over 2,000 and 1,000 over 20,000:", low, high)
+        assert high < low * 20
