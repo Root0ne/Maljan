@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from maljan.tools import function_index, pe_image
+from maljan.tools import artefact_index, pe_image
 from maljan.utils.written_forms import pack_escaped
 from tests.unit.tools import test_the_function_index_stays_linear_on_hostile_images as hostile
 from tests.unit.tools.synthetic_pe import DATA_RVA, TEXT_RVA, SyntheticPE
@@ -75,8 +75,8 @@ class TestTheWholeTable:
         answer = server.function_index(path=_sample(tmp_path))
         lines = answer["table"].split("\n")
         assert lines[0].startswith("2 of the ")
-        assert function_index.CAPA_NOT_JOINED in lines[0]
-        assert answer["capa"] == function_index.CAPA_NOT_JOINED
+        assert artefact_index.CAPA_NOT_JOINED in lines[0]
+        assert answer["capa"] == artefact_index.CAPA_NOT_JOINED
         assert lines[1].startswith(
             f'- {hex(BASE + FIRST)} (entry point): calls "CreateMutexW" (this answer)'
         )

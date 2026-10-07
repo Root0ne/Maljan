@@ -275,7 +275,7 @@ around it. The triage pack runs it on every executable image (PE, ELF, Mach-O).
 | `function_index` | `path`, `address=""`, `carved_path=""` |
 
 Every function of a PE the file lists or the platform's x86 decoder reaches,
-with the artefacts each holds (`tools.function_index`); nothing is run. The
+with the artefacts each holds (`tools.artefact_index`); nothing is run. The
 functions come from the exception directory, the exports, the entry point and
 the direct call targets the decoder reaches. Each row states the imports the
 function calls, the names its hashes resolve to, how many plain and decoded

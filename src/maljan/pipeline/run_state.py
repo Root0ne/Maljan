@@ -34,7 +34,7 @@ from maljan.pipeline.triage_pack import (
     pack_entries,
     render_pack,
 )
-from maljan.tools.function_index import SERVED_BY
+from maljan.tools.artefact_index import SERVED_BY
 
 __all__ = [
     "NO_LIMIT",

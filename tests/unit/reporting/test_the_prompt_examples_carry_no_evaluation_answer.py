@@ -392,7 +392,7 @@ def _function_index_text() -> str:
     """The index as the pack shows it, whole and cut, its run-state line and the map's coverage."""
     from maljan.agents.function_map import build_function_map, function_artefacts
     from maljan.pipeline.run_state import index_sentence
-    from maljan.tools import function_index
+    from maljan.tools import artefact_index
 
     def cells(key: str, values: list[str], source: str) -> list[dict[str, Any]]:
         return [{key: value, "sources": [source]} for value in values]
@@ -402,10 +402,10 @@ def _function_index_text() -> str:
             "function": hex(0x401000 + 0x100 * i),
             "offset": hex(0x1000 + 0x100 * i),
             "direct": 5 - i,
-            "imports": cells("name", ["OpenThing"], function_index.SELF),
+            "imports": cells("name", ["OpenThing"], artefact_index.SELF),
             "resolved": cells("name", ["CloseThing"], "ev_0002"),
             "decoded_strings": cells("text", ["a", "b"], "ev_0003"),
-            "plain_strings": cells("text", ["c"], function_index.SELF),
+            "plain_strings": cells("text", ["c"], artefact_index.SELF),
             "capa": cells("rule", ["a rule"], "ev_0004"),
             "callers": ["0x402000"],
             "callees": ["0x403000", "0x404000"],
@@ -415,17 +415,17 @@ def _function_index_text() -> str:
         for i in range(3)
     ]
     data = {
-        "tool": function_index.TOOL,
+        "tool": artefact_index.TOOL,
         "image_base": "0x400000",
         "functions_known": 9,
         "function_sources": {"exception directory": 4, "call targets the decoder reached": 5},
-        "function_lists": function_index.FUNCTION_LISTS_ABSENT,
+        "function_lists": artefact_index.FUNCTION_LISTS_ABSENT,
         "undecoded_functions": 1,
         "unplaced": {"floss": 2},
         "total": len(rows),
         "rows": rows,
     }
-    entry = LedgerEntry(id="ev_0005", tool=function_index.TOOL, output=json.dumps(data), seq=5)
+    entry = LedgerEntry(id="ev_0005", tool=artefact_index.TOOL, output=json.dumps(data), seq=5)
     whole = triage_pack.pack_block([entry], 0)
     cut = triage_pack.render_pack([entry], len(whole.split("\n", 2)[1]) + 400)
     empty = triage_pack.render_pack(
@@ -436,9 +436,9 @@ def _function_index_text() -> str:
         function_artefacts([entry]),
         [],
     )
-    served = function_index.head_text({**data, "capa": function_index.CAPA_NOT_JOINED}, 3)
-    served_rows = [function_index.row_line(row, function_index.THIS_ANSWER) for row in rows]
-    missing = f"no: the run knows no function starting at 0x401234 ({function_index._SOURCES_SAID})"
+    served = artefact_index.head_text({**data, "capa": artefact_index.CAPA_NOT_JOINED}, 3)
+    served_rows = [artefact_index.row_line(row, artefact_index.THIS_ANSWER) for row in rows]
+    missing = f"no: the run knows no function starting at 0x401234 ({artefact_index._SOURCES_SAID})"
     return " ".join(
         [
             whole,

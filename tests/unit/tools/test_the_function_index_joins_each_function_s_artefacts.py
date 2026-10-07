@@ -12,7 +12,7 @@ import struct
 from pathlib import Path
 from typing import Any
 
-from maljan.tools import function_index
+from maljan.tools import artefact_index
 
 from .synthetic_pe import DATA_RVA, TEXT_RVA, SyntheticPE
 
@@ -97,13 +97,13 @@ class TestTheDecoderReadsEachFunction:
     def test_imports_strings_callers_and_callees(self, tmp_path: Path) -> None:
         image, code, slots = _x64()
         _first_two(code, slots)
-        answer = function_index.function_index(_load(image, tmp_path))
+        answer = artefact_index.function_index(_load(image, tmp_path))
 
         first = _row(answer, FIRST)
         assert first["function"] == hex(BASE + FIRST)
-        assert first["imports"] == [{"name": "CreateMutexW", "sources": [function_index.SELF]}]
+        assert first["imports"] == [{"name": "CreateMutexW", "sources": [artefact_index.SELF]}]
         assert first["plain_strings"] == [
-            {"text": "a plain setting", "sources": [function_index.SELF]}
+            {"text": "a plain setting", "sources": [artefact_index.SELF]}
         ]
         assert first["callees"] == [hex(BASE + SECOND)]
         assert first["callers"] == []
@@ -117,7 +117,7 @@ class TestTheDecoderReadsEachFunction:
     ) -> None:
         image, code, slots = _x64()
         _first_two(code, slots)
-        answer = function_index.function_index(_load(image, tmp_path))
+        answer = artefact_index.function_index(_load(image, tmp_path))
         assert _row(answer, FIRST)["indirect"] == {"artefacts": 1, "through": 1}
         # The leaf holds nothing, so SECOND's callees hold nothing.
         assert _row(answer, SECOND)["indirect"] == {"artefacts": 0, "through": 0}
@@ -127,7 +127,7 @@ class TestTheDecoderReadsEachFunction:
     ) -> None:
         image, code, slots = _x64()
         _first_two(code, slots)
-        answer = function_index.function_index(_load(image, tmp_path))
+        answer = artefact_index.function_index(_load(image, tmp_path))
         assert answer["function_sources"]["call targets the decoder reached"] == 2
         assert answer["functions_known"] == 3
         assert hex(LEAF) not in [row["offset"] for row in answer["rows"]]
@@ -138,7 +138,7 @@ class TestTheDecoderReadsEachFunction:
     ) -> None:
         image, code, slots = _x64()
         _first_two(code, slots)
-        answer = function_index.function_index(_load(image, tmp_path))
+        answer = artefact_index.function_index(_load(image, tmp_path))
         assert [(row["offset"], row["direct"]) for row in answer["rows"]] == [
             (hex(FIRST), 2),
             (hex(SECOND), 1),
@@ -149,8 +149,8 @@ class TestTheDecoderReadsEachFunction:
     ) -> None:
         image, code, slots = _x64()
         _first_two(code, slots)
-        answer = function_index.function_index(_load(image, tmp_path))
-        assert answer["function_lists"] == function_index.FUNCTION_LISTS_ABSENT
+        answer = artefact_index.function_index(_load(image, tmp_path))
+        assert answer["function_lists"] == artefact_index.FUNCTION_LISTS_ABSENT
         assert "no: " in answer["function_lists"]
 
     def test_a_byte_the_decoder_does_not_read_is_counted(self, tmp_path: Path) -> None:
@@ -158,14 +158,14 @@ class TestTheDecoderReadsEachFunction:
         places = _first_two(code, slots)
         code.go(places["leaf call"] + 6)  # right after its return
         code.raw(b"\x62\x00\x00\x00")  # EVEX: not decoded
-        answer = function_index.function_index(_load(image, tmp_path))
+        answer = artefact_index.function_index(_load(image, tmp_path))
         assert answer["undecoded_functions"] == 1
 
     def test_a_file_that_is_not_a_pe_is_an_error(self, tmp_path: Path) -> None:
         target = tmp_path / "a.txt"
         target.write_text("plain text\n", encoding="utf-8")
-        answer = function_index.function_index(str(target))
-        assert "error" in answer and answer["tool"] == function_index.TOOL
+        answer = artefact_index.function_index(str(target))
+        assert "error" in answer and answer["tool"] == artefact_index.TOOL
 
 
 class TestAnX86ImageWithNoTable:
@@ -181,7 +181,7 @@ class TestAnX86ImageWithNoTable:
         code.ret()
         info = {"entry_point": FIRST, "export_rows": []}
 
-        answer = function_index.function_index(_load(image, tmp_path), pe_info=("ev_0004", info))
+        answer = artefact_index.function_index(_load(image, tmp_path), pe_info=("ev_0004", info))
 
         (row,) = answer["rows"]
         assert row["function"] == hex(0x400000 + FIRST)
@@ -241,7 +241,7 @@ class TestTheRunsAnswersArePlaced:
     def test_one_text_from_two_answers_is_one_artefact_citing_both(self, tmp_path: Path) -> None:
         image, code, slots = _x64()
         places = _first_two(code, slots)
-        answer = function_index.function_index(_load(image, tmp_path), **self._answers(places))
+        answer = artefact_index.function_index(_load(image, tmp_path), **self._answers(places))
         first = _row(answer, FIRST)
         assert first["decoded_strings"] == [
             {"text": "a shared text", "sources": ["ev_0021", "ev_0019"]}
@@ -250,7 +250,7 @@ class TestTheRunsAnswersArePlaced:
     def test_a_stack_string_is_in_the_function_floss_names(self, tmp_path: Path) -> None:
         image, code, slots = _x64()
         places = _first_two(code, slots)
-        answer = function_index.function_index(_load(image, tmp_path), **self._answers(places))
+        answer = artefact_index.function_index(_load(image, tmp_path), **self._answers(places))
         second = _row(answer, SECOND)
         assert [c["text"] for c in second["decoded_strings"]] == ["built on the stack"]
 
@@ -259,14 +259,14 @@ class TestTheRunsAnswersArePlaced:
     ) -> None:
         image, code, slots = _x64()
         places = _first_two(code, slots)
-        answer = function_index.function_index(_load(image, tmp_path), **self._answers(places))
+        answer = artefact_index.function_index(_load(image, tmp_path), **self._answers(places))
         leaf = _row(answer, LEAF)
         assert leaf["resolved"] == [{"name": "VirtualAlloc", "sources": ["ev_0020"]}]
 
     def test_capa_rules_at_a_start_and_inside_a_function(self, tmp_path: Path) -> None:
         image, code, slots = _x64()
         places = _first_two(code, slots)
-        answer = function_index.function_index(_load(image, tmp_path), **self._answers(places))
+        answer = artefact_index.function_index(_load(image, tmp_path), **self._answers(places))
         second = _row(answer, SECOND)
         assert [c["rule"] for c in second["capa"]] == ["a rule at a start", "a rule inside"]
         assert all(c["sources"] == ["ev_0008"] for c in second["capa"])
@@ -274,7 +274,7 @@ class TestTheRunsAnswersArePlaced:
     def test_a_place_no_function_holds_is_counted_and_given_to_none(self, tmp_path: Path) -> None:
         image, code, slots = _x64()
         places = _first_two(code, slots)
-        answer = function_index.function_index(_load(image, tmp_path), **self._answers(places))
+        answer = artefact_index.function_index(_load(image, tmp_path), **self._answers(places))
         assert answer["unplaced"] == {"floss": 1}
         texts = [c["text"] for row in answer["rows"] for c in row["decoded_strings"]]
         assert "nowhere" not in texts

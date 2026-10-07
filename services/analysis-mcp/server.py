@@ -39,8 +39,8 @@ from maljan.tools import (
     staging,
     string_blobs,
 )
+from maljan.tools import artefact_index as artefact_index_tools
 from maljan.tools import binary as binary_tools
-from maljan.tools import function_index as function_index_tools
 from maljan.tools import identify as identify_tools
 from maljan.tools import rules as rule_tools
 from maljan.tools import strings as string_tools
@@ -1177,8 +1177,8 @@ def function_index(path: str, address: str = "", carved_path: str = "") -> dict[
     on a PE, capa joined, and its entry id is in the run-state block.
     """
     return _guard(
-        function_index_tools.TOOL,
-        function_index_tools.served_index,
+        artefact_index_tools.TOOL,
+        artefact_index_tools.served_index,
         path=path,
         carved_path=carved_path,
         address=address,

@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from maljan.tools import function_index
+from maljan.tools import artefact_index
 from maljan.tools.pe_image import Image, Section
 
 BASE = 0x140000000
@@ -149,7 +149,7 @@ def pe_bytes(image: Image) -> bytes:
 def _timed(make: Callable[[int], tuple[Image, dict[str, Any]]], n: int) -> tuple[float, Any]:
     image, joined = make(n)
     began = time.perf_counter()
-    answer = function_index.index_image(image, **joined)
+    answer = artefact_index.index_image(image, **joined)
     return time.perf_counter() - began, answer
 
 
@@ -312,7 +312,7 @@ class TestEveryShapeFinishes:
             "readings": [{"set": "exports", "name": "OpenThing"}],
             "occurrences": [place] * 20_000,
         }
-        answer = function_index.index_image(image, hashes=("ev_0020", {"hits": [hit] * 5}))
+        answer = artefact_index.index_image(image, hashes=("ev_0020", {"hits": [hit] * 5}))
         first = next(r for r in answer["rows"] if r["offset"] == hex(TEXT_RVA))
         assert first["resolved"] == [{"name": "OpenThing", "sources": ["ev_0020"]}]
 

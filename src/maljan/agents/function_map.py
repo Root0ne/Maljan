@@ -15,7 +15,7 @@ again. The map is kept for it by the platform, from facts only:
 * the first sentence of the first of the analyst's own parsed claims that
   names the function;
 * whether the function is a row of the pack's function index
-  (``tools.function_index``): with an index, the coverage line counts the
+  (``tools.artefact_index``): with an index, the coverage line counts the
   visited functions among the index's rows.
 
 The model never writes to it. The block is rendered fresh on every turn beside

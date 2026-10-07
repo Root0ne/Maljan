@@ -24,7 +24,7 @@ from maljan.pipeline.triage_pack import (
     render_pack,
 )
 from maljan.schemas.evidence import build_entry, format_entry_id
-from maljan.tools.function_index import FUNCTION_LISTS_ABSENT, SELF
+from maljan.tools.artefact_index import FUNCTION_LISTS_ABSENT, SELF
 from maljan.utils.written_forms import pack_escaped
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "ledger"

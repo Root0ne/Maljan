@@ -108,10 +108,10 @@ from maljan.providers import sandbox_tools
 from maljan.schemas.evidence import LedgerEntry, apply_budget
 from maljan.tools import (
     api_hashes,
+    artefact_index,
     binary,
     crypto_constants,
     emulated_strings,
-    function_index,
     identify,
     knowledge,
     pcap,
@@ -1179,9 +1179,9 @@ class _Pack:
         if joined:
             args["joined"] = [f"{entry_id} {tool}" for tool, (entry_id, _) in joined.items()]
         self.record(
-            function_index.TOOL,
+            artefact_index.TOOL,
             args,
-            lambda: function_index.function_index(
+            lambda: artefact_index.function_index(
                 path,
                 pe_info=joined.get("pe_info"),
                 capa=joined.get("capa"),
@@ -1473,12 +1473,12 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
 # Why a pass entry is in neither the pack nor its trailer, as the pack record says it.
 NO_PACK_ROOM = "no pack room"
 
-INDEX_TOOL = function_index.TOOL
+INDEX_TOOL = artefact_index.TOOL
 
 # The index's last line when the room cut its rows.
 INDEX_ROWS_LEFT_OUT = (
     "{n} more {noun} not shown here (pack room); every row is in [{entry}]'s full output, "
-    "and " + function_index.SERVED_BY
+    "and " + artefact_index.SERVED_BY
 )
 
 
@@ -1520,14 +1520,14 @@ def _index_block(entry: LedgerEntry, room: int | None) -> str | None:
         line = _pack_line(entry)
         return line if room is None or len(line) <= room else None
     data = entry.structured
-    rows = list(function_index.rows_of(data))
-    head = f"[{entry.id}] {_GROUP_LABELS[INDEX_TOOL]}: {function_index.head_text(data, len(rows))}"
+    rows = list(artefact_index.rows_of(data))
+    head = f"[{entry.id}] {_GROUP_LABELS[INDEX_TOOL]}: {artefact_index.head_text(data, len(rows))}"
     if room is not None and len(head) > room:
         return None
     lines = [head]
     used = len(head)
     for index, row in enumerate(rows):
-        line = function_index.row_line(row, entry.id)
+        line = artefact_index.row_line(row, entry.id)
         left = len(rows) - index - 1
         tail = len(_rows_left_out(left, entry.id)) + 1 if left else 0
         if room is not None and used + 1 + len(line) + tail > room:
@@ -3092,7 +3092,7 @@ _GROUP_LABELS: dict[str, str] = {
     "decode_string_blobs": "decoded blobs",
     crypto_constants.TOOL: "crypto constants",
     ANTI_ANALYSIS_TOOL: "anti-analysis (Ghidra)",
-    function_index.TOOL: "function index",
+    artefact_index.TOOL: "function index",
 }
 
 _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
