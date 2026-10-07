@@ -123,6 +123,9 @@ __all__ = [
     "learn_window",
     "model_family",
     "no_room_sentence",
+    "note_answer_cut",
+    "note_answer_not_shown",
+    "CallAnswer",
     "output_limit",
     "probe_plan",
     "probe_window",
@@ -382,8 +385,8 @@ def no_room_sentence(chars_in: int) -> str:
     """
     return (
         f"This tool answered with {chars_in:,} characters and none of them could be added: "
-        "the conversation has no room left for a tool answer. Nothing was left out of the "
-        "record — the evidence ledger holds the whole answer under this call's id. "
+        "the conversation has no room left for a tool answer. The evidence ledger records "
+        "this call under its id as cut. "
         "The tool phase of this stage ends here; answer from what has already been gathered."
     )
 
@@ -1776,14 +1779,55 @@ def current_agent() -> str:
     return _ANSWERING_FOR.get()
 
 
+@dataclass
+class CallAnswer:
+    """What the tool-output guardrail did to the answer of the call being answered.
+
+    ``not_shown`` is the length of an answer none of which reached the
+    conversation, because it had no room left (:func:`note_answer_not_shown`);
+    ``None`` while the answer, or a shortened form of it, was handed over.
+    ``cut`` is how many characters the guardrail dropped from an answer it
+    cut, shortened or summarised to fit (:func:`note_answer_cut`); ``None``
+    for an answer handed over whole.
+    """
+
+    not_shown: int | None = None
+    cut: int | None = None
+
+
+_CALL_ANSWER: ContextVar[CallAnswer | None] = ContextVar("maljan_call_answer", default=None)
+
+
 @contextlib.contextmanager
-def answering_for(agent: str) -> Iterator[None]:
-    """Name the agent whose call is being answered, for the length of the call."""
+def answering_for(agent: str) -> Iterator[CallAnswer]:
+    """Name the agent whose call is being answered, for the length of the call.
+
+    Yields the call's :class:`CallAnswer`, which the guardrail fills in two
+    layers down; the context is copied into the thread it runs on, and the
+    object with it.
+    """
     token = _ANSWERING_FOR.set(str(agent or ""))
+    answer = CallAnswer()
+    answer_token = _CALL_ANSWER.set(answer)
     try:
-        yield
+        yield answer
     finally:
+        _CALL_ANSWER.reset(answer_token)
         _ANSWERING_FOR.reset(token)
+
+
+def note_answer_not_shown(chars: int) -> None:
+    """Say, for the call being answered, that none of its ``chars`` reached the conversation."""
+    answer = _CALL_ANSWER.get()
+    if answer is not None:
+        answer.not_shown = max(0, int(chars))
+
+
+def note_answer_cut(chars: int) -> None:
+    """Say, for the call being answered, that the guardrail dropped ``chars`` of its answer."""
+    answer = _CALL_ANSWER.get()
+    if answer is not None and int(chars) > 0:
+        answer.cut = int(chars)
 
 
 def tool_definition_chars(tools: Iterable[Any]) -> int:

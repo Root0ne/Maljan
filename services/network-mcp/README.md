@@ -8,7 +8,9 @@ and `pcap_summary` gives the whole-capture view — external conversations, TLS
 SNI destinations and detected beaconing — from `maljan.tools.pcap`.
 
 Every one of them reads the whole capture as a stream, one packet in memory at
-a time (`maljan.analysis.pcap_summary.each_packet`). `packet_limit` is
+a time (`maljan.analysis.pcap_summary.each_packet`), with Maljan's own
+pcap/pcapng reader (`maljan.analysis.capture_reader`, no optional library, so
+every tool is always available). `packet_limit` is
 optional and has no default: a limit applies only when the caller passes one.
 Every answer states how many packets it read and how many the capture holds —
 the text tools on their first line (`14887 of 14887 packets in the capture
@@ -43,7 +45,7 @@ every tool, so it never says to leave the argument out. When a job has exactly
 one capture, the platform hides `pcap_path` from the schema the network tools
 are bound with and fills it in (`maljan.agents.tool_pinning`), the way it fills
 the sample's own path; see "Which directories a sidecar may read" in
-`docs/configuration.md`.
+`apps/docs/content/docs/configuration.mdx`.
 
 ## Capabilities and errors
 
@@ -51,4 +53,4 @@ the sample's own path; see "Which directories a sidecar may read" in
 optional_dependency, available, reason, timeout_s}]}`, computed when the server
 starts by probing what each tool needs on this host. A tool that cannot answer
 returns `{"error": {"code", "message", "remediation"}, "tool"}` rather than
-raising; see *Writing a tool server* in `docs/configuration.md`.
+raising; see *Writing a tool server* in `apps/docs/content/docs/configuration.mdx`.

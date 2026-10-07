@@ -316,7 +316,11 @@ class TestTheExport:
     def test_the_judges_malware_object_is_not_lent_the_familys_entries(self) -> None:
         objects = _dumped(_render(None, family="Latrodectus", family_evidence_ids=["ev_0007"]))
 
-        assert _carrying(objects) == []
+        # The judge's sample object carries none; the family's own object,
+        # added beside it, carries the family's.
+        (family,) = [o for o in objects if o["type"] == "malware" and o["name"] == "Latrodectus"]
+        assert _carrying(objects) == [family["id"]]
+        assert family[EVIDENCE_REFS_PROPERTY] == ["ev_0007"]
 
 
 class TestTheJudgesCopyIsNotCarried:

@@ -165,6 +165,15 @@ class StaticProvider(ABC):
         """
         return None
 
+    def open_sample(self, path: str | None = None) -> bool:
+        """Open the sample in the provider's session before an analyst's loop, where it has one.
+
+        A no-op returning ``False`` by default; a provider whose tools refuse
+        every call until a file is open (radare2's) overrides it. ``path`` is
+        the provider's own mirror; ``None`` reads the pinned one.
+        """
+        return False
+
     def switched_off(self) -> bool:
         """Whether the operator turned this provider off, so it attaches nothing.
 

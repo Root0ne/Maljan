@@ -185,7 +185,7 @@ class TestACleanupThatOverrunsTakesTheChildRatherThanCancelling:
         the child running — the log line "abandoning it" followed by a sidecar
         that was still alive an hour later. The reap that ran afterwards only
         sent SIGTERM, which this child ignores by construction, exactly as the
-        network sidecar did while it was inside scapy.
+        network sidecar did while it was inside its capture library.
         """
         from maljan.providers import servers
 

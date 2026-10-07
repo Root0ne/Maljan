@@ -108,6 +108,71 @@ class EvidenceCounter:
             return self._seq
 
 
+# What the ledger holds for a call whose answer the conversation had no room
+# for: the call was made and answered, and none of the answer reached the
+# model. A statement of the cut in place of a tool result, on an entry marked
+# ``truncated`` like any entry that is not the whole answer.
+_NOT_SHOWN_HEAD = "[cut] Not shown: the conversation had no room left for this answer of "
+_NOT_SHOWN_RE = re.compile(re.escape(_NOT_SHOWN_HEAD) + r"[\d,]+ characters\.")
+
+
+def not_shown_record(chars: int) -> str:
+    """The ledger's output for an answer of ``chars`` characters none of which reached the model."""
+    return f"{_NOT_SHOWN_HEAD}{max(0, int(chars)):,} characters."
+
+
+def answer_not_shown(entry: Any) -> bool:
+    """Whether ``entry`` is a call whose answer the conversation had no room for.
+
+    Such a call was made and answered, and the model read none of it, so a
+    reader asking whether a function was read skips it. An entry the byte
+    budget blanked was read before it was blanked, and is not one.
+    """
+    if not getattr(entry, "truncated", False):
+        return False
+    return _NOT_SHOWN_RE.fullmatch(str(getattr(entry, "output", "") or "").strip()) is not None
+
+
+def holds_its_answer(entry: Any) -> bool:
+    """Whether ``entry`` keeps the answer its call gave the model, so it can answer the call again.
+
+    An entry the byte budget blanked keeps nothing, and one whose answer the
+    conversation had no room for holds a statement of the cut. One the
+    tool-output guardrail cut keeps exactly what the model read, which is what
+    making the call again would hand it: it holds its answer.
+    """
+    if not str(getattr(entry, "output", "") or ""):
+        return False
+    if not getattr(entry, "truncated", False):
+        return True
+    return int(getattr(entry, "chars_dropped", 0) or 0) > 0 and not answer_not_shown(entry)
+
+
+def repeat_holders(entries: Any) -> dict[str, str]:
+    """Each repeat's id mapped to the id of the entry that holds its answer, lower-cased.
+
+    A repeat names the entry it was answered from (``repeated_of``); a chain is
+    followed to its end. A chain that comes round to an entry it already
+    passed holds no answer and maps to ``""``; one that leads to an id not in
+    ``entries`` maps to that id, which names nothing a reader holds. Entries
+    that ran are not in the map.
+    """
+    named: dict[str, str] = {}
+    for entry in entries or ():
+        entry_id = str(getattr(entry, "id", "") or "").strip().lower()
+        first = str(getattr(entry, "repeated_of", "") or "").strip().lower()
+        if entry_id and first:
+            named[entry_id] = first
+    holders: dict[str, str] = {}
+    for entry_id, first in named.items():
+        seen = {entry_id}
+        while first in named and first not in seen:
+            seen.add(first)
+            first = named[first]
+        holders[entry_id] = "" if first in seen else first
+    return holders
+
+
 def parse_structured(output: str) -> dict[str, Any] | list[Any] | None:
     """The tool's output as JSON when it is JSON, else ``None``.
 
@@ -156,7 +221,15 @@ class LedgerEntry(BaseModel):
         default=None, description="Parsed result when the tool returned JSON."
     )
     truncated: bool = Field(
-        default=False, description="Output dropped because the agent's byte budget was spent."
+        default=False,
+        description=(
+            "Output not the whole answer: dropped because the agent's byte budget was "
+            "spent, or cut by the tool-output guardrail (chars_dropped)."
+        ),
+    )
+    chars_dropped: int = Field(
+        default=0,
+        description="Characters the tool-output guardrail cut from the answer; 0 for none.",
     )
     repeated_of: str | None = Field(
         default=None,
@@ -233,6 +306,8 @@ def build_entry(
     args_repaired: bool = False,
     args_raw: str | None = None,
     model: str | None = None,
+    not_shown: bool = False,
+    chars_dropped: int = 0,
 ) -> LedgerEntry:
     """One entry, with the output trimmed and parsed the same way every time.
 
@@ -266,6 +341,14 @@ def build_entry(
     ``args_raw`` keeps them as the model wrote them. Both so a reader can see
     that a call was made on repaired arguments and check the repair against
     what arrived.
+
+    ``not_shown`` says the conversation had no room for any of the answer:
+    ``output`` is then the statement of the cut (:func:`not_shown_record`),
+    the entry is marked ``truncated`` and nothing is parsed out of it.
+
+    ``chars_dropped`` is what the tool-output guardrail cut from the answer
+    before the model read it: ``output`` is what the model was handed, and
+    the entry is marked ``truncated`` because it is not the whole answer.
     """
     safe_args = dict(args) if isinstance(args, dict) else {}
     full = str(output or "")
@@ -290,8 +373,9 @@ def build_entry(
         error=error,
         remediation=remediation if error else None,
         output=text,
-        truncated=len(text) < len(full),
-        structured=None if repeated_of else parse_structured(full),
+        truncated=bool(not_shown) or len(text) < len(full) or int(chars_dropped) > 0,
+        chars_dropped=max(0, int(chars_dropped)),
+        structured=None if repeated_of or not_shown else parse_structured(full),
         repeated_of=repeated_of,
         args_repaired=bool(args_repaired),
         args_raw=args_raw if args_repaired else None,
@@ -339,6 +423,11 @@ def apply_budget(
     spent = max(0, already_spent)
     trimmed = 0
     for entry in entries:
+        # A repeat holds the guard's note and no new content: the answer is
+        # the entry it names, already charged. Charging the note could blank
+        # a later answer that is new.
+        if getattr(entry, "repeated_of", None):
+            continue
         size = stored_bytes(entry)
         if spent + size <= budget_bytes:
             spent += size

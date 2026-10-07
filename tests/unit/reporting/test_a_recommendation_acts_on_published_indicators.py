@@ -26,6 +26,9 @@ from maljan.reporting.models import (
     ConsolidatedIOC,
     FileHashes,
     MalwareReport,
+    NetworkDomain,
+    NetworkIOCs,
+    NetworkIP,
     SampleIdentity,
     TTPMapping,
 )
@@ -33,31 +36,19 @@ from maljan.reporting.narrative_agent import NarrativeAgent, published_answers
 
 PUBLISHED = "gate.example.com"
 REFUSED = "198.51.100.7"
-REFUSAL = "no: the sandbox report does not say which process made the flows to it"
+# What the one publish rule answers for a documentation address the sandbox
+# recorded: the table these checks read is rebuilt from the report's evidence.
+REFUSAL = "no: not an address this run may publish"
 
 
 def _report() -> MalwareReport:
     report = MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
         verdict="Malware",
-        consolidated_iocs=[
-            ConsolidatedIOC(
-                type="Domain",
-                kind="domain",
-                value=PUBLISHED,
-                source="sandbox",
-                published="yes: the sandbox recorded it",
-                is_network=True,
-            ),
-            ConsolidatedIOC(
-                type="IPv4",
-                kind="ip",
-                value=REFUSED,
-                source="sandbox",
-                published=REFUSAL,
-                is_network=True,
-            ),
-        ],
+        network=NetworkIOCs(
+            domains=[NetworkDomain(fqdn=PUBLISHED, source="sandbox")],
+            ips=[NetworkIP(address=REFUSED, source="sandbox")],
+        ),
     )
     report.ttp_mappings = [TTPMapping(technique_id="T1071.001", technique_name="Web Protocols")]
     return report
@@ -183,16 +174,30 @@ def test_a_reference_host_no_row_holds_is_not_asked_about() -> None:
 
 def test_a_reference_host_the_table_refuses_is_still_asked_about() -> None:
     report = _report()
-    report.consolidated_iocs.append(
-        ConsolidatedIOC(
-            type="Domain",
-            kind="domain",
-            value="learn.microsoft.com",
-            source="sandbox",
-            published="no: a well-known benign name the sandbox's guest resolved",
-            is_network=True,
-        )
-    )
+    report.network.domains.append(NetworkDomain(fqdn="learn.microsoft.com", source="sandbox"))
     payload = _recommendations("Block learn.microsoft.com.")
 
-    assert recommendation_indicator_violations(payload, published_answers(report))
+    (found,) = recommendation_indicator_violations(payload, published_answers(report))
+    assert "no: a well-known benign name the sandbox's guest resolved" in found.message
+
+
+def test_the_table_read_is_the_one_the_report_prints_not_a_stale_stored_one() -> None:
+    report = _report()
+    # A table stored before the rule's current answers: it published the
+    # address. The report's §9 and ``/iocs`` print the rebuilt table, and so
+    # does this check.
+    report.consolidated_iocs = [
+        ConsolidatedIOC(
+            type="IPv4",
+            kind="ip",
+            value=REFUSED,
+            source="sandbox",
+            published="yes: the sandbox recorded it",
+            is_network=True,
+        )
+    ]
+
+    (found,) = recommendation_indicator_violations(
+        _recommendations(f"Block {REFUSED}."), published_answers(report)
+    )
+    assert REFUSAL in found.message

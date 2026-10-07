@@ -113,8 +113,21 @@ def record_guardrail_outcome(
     settings page: derived, it is worked out per call from what the window has
     left, so a reader asking why an answer was cut needs the number that cut it.
 
-    No-op when ``ledger`` is None; never raises.
+    The characters an answer lost to a cut, a shortening or a summary are
+    also told to the call being answered (``context_window.note_answer_cut``),
+    so its ledger entry says it is not the whole answer. A compact form loses
+    no value and an answer with no room is recorded as not shown; neither is
+    a cut.
+
+    No-op on the ledger when ``ledger`` is None; never raises.
     """
+    if over_limit and (hard_truncated or shortened or summarised):
+        try:
+            from maljan.llm.context_window import note_answer_cut
+
+            note_answer_cut(chars_dropped(chars_in, chars_kept))
+        except Exception:  # noqa: BLE001 — telemetry must never break a tool call
+            pass
     if ledger is None:
         return
     try:
@@ -204,6 +217,19 @@ def record_judge_response(ledger: object | None, response: object, cap: int | No
         return
 
 
+def summary_cut_sentence(cap: int, count: int) -> str:
+    """The run's sentence for ``count`` function summaries cut at a ``cap``-token output limit."""
+    if count == 1:
+        return (
+            f"A function summary ended at its {cap:,}-token output limit; the analyst was "
+            "told its end is missing."
+        )
+    return (
+        f"{count} function summaries ended at their {cap:,}-token output limit; the analyst "
+        "was told each one's end is missing."
+    )
+
+
 class TruncationLedger:
     """Thread-safe tally of bound-hits across one analysis run."""
 
@@ -251,6 +277,9 @@ class TruncationLedger:
         # (``BaseAnalyst._truncate_input``): one sentence per shortening, read by
         # the judge node into the run's degradation reasons.
         self.input_shortened: list[str] = []
+        # Function summaries cut at their output limit, counted per limit
+        # (tokens): one sentence in ``input_shortened`` per limit states the count.
+        self._summary_cuts: dict[int, int] = {}
         # ReAct loop step ceiling (agents/base_agent, LangGraph recursion_limit).
         self.react_invocations = 0
         self.react_step_cap_hits = 0
@@ -359,11 +388,43 @@ class TruncationLedger:
 
     # -- loop / generation ceilings ----------------------------------------
 
-    def record_input_shortened(self, sentence: str) -> None:
-        """One analyst input shortened to its prompt's room, in the sentence the run records."""
+    def record_input_shortened(self, sentence: str, replaces: str | None = None) -> None:
+        """One analyst input shortened to its prompt's room, in the sentence the run records.
+
+        A sentence already recorded is not recorded twice. ``replaces`` is an
+        earlier sentence this one supersedes, such as a count that grew: the
+        new sentence takes that sentence's place in the list, and when the new
+        sentence is already recorded elsewhere it stays where it is and the
+        earlier one is removed, so the newer sentence wins and appears once.
+        A ``replaces`` not recorded is ignored and the sentence is added as
+        usual.
+        """
         with self._lock:
-            if sentence not in self.input_shortened:
-                self.input_shortened.append(sentence)
+            self._shortened_locked(sentence, replaces)
+
+    def _shortened_locked(self, sentence: str, replaces: str | None) -> None:
+        if replaces is not None and replaces in self.input_shortened:
+            index = self.input_shortened.index(replaces)
+            if sentence in self.input_shortened:
+                del self.input_shortened[index]
+            else:
+                self.input_shortened[index] = sentence
+        elif sentence not in self.input_shortened:
+            self.input_shortened.append(sentence)
+
+    def record_summary_cut(self, cap: int) -> None:
+        """One function summary ended at its ``cap``-token output limit.
+
+        Counted here, under the ledger's lock, so summaries cut at once on
+        several threads, or by a summariser rebuilt during the job, are all
+        counted: one sentence per limit states how many were cut at it.
+        """
+        cap = int(cap)
+        with self._lock:
+            count = self._summary_cuts.get(cap, 0) + 1
+            self._summary_cuts[cap] = count
+            earlier = summary_cut_sentence(cap, count - 1) if count > 1 else None
+            self._shortened_locked(summary_cut_sentence(cap, count), earlier)
 
     def record_react_loop(self, *, hit_step_cap: bool) -> None:
         with self._lock:

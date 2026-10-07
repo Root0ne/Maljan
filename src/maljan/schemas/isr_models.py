@@ -94,14 +94,15 @@ class ClaimEvidence(BaseModel):
         description="MITRE ATT&CK technique ID if applicable, e.g. 'T1055.001'.",
         pattern=r"^T\d{4}(\.\d{3})?$",
     )
-    # The claim's TECHNIQUE line as written, when it is more than one id or
-    # NONE: a qualifier, a negation, several ids. No id is read from it —
-    # "T1027.002 not supported" is not a claim of T1027.002 — and the
-    # validation turn asks the analyst for one id per claim
-    # (``pipeline.validation.TECHNIQUE_LINE_UNREAD_CODE``).
+    # The claim's TECHNIQUE line as written, when it is more than ids or
+    # NONE: a qualifier, a negation, a list joined by "or". No id is read from
+    # it — "T1027.002 not supported" is not a claim of T1027.002 — and the
+    # validation turn asks the analyst for the ids alone
+    # (``pipeline.validation.TECHNIQUE_LINE_UNREAD_CODE``). A list of ids
+    # separated by commas or "and" is read as one claim per id.
     technique_line: str | None = Field(
         default=None,
-        description="The claim's TECHNIQUE line as written, when no single id could be read.",
+        description="The claim's TECHNIQUE line as written, when no technique id could be read.",
     )
     # Whether that id survived validation. ``pipeline.validation`` sets this
     # ``False`` when the analyst kept an id the ATT&CK catalogue does not have,
@@ -133,6 +134,22 @@ class ClaimEvidence(BaseModel):
         default=None,
         description="The index's gate score for the claimed id and its top candidates.",
     )
+    # The ordinal of the claim block the reader read this claim from
+    # (``base_agent.read_claim_blocks``): a block whose TECHNIQUE line listed
+    # several ids is one claim per id, all with the block's ordinal. Recorded
+    # where the claim is read, never serialised; ``None`` for a claim built any
+    # other way, whose block is then read from its words
+    # (``validation.claim_block_indexes``).
+    _block: int | None = PrivateAttr(default=None)
+
+    @property
+    def block(self) -> int | None:
+        """The ordinal of the block this claim was read from, or ``None``."""
+        return self._block
+
+    def note_block(self, ordinal: int) -> None:
+        """Record the ordinal of the block this claim was read from."""
+        self._block = int(ordinal)
 
 
 class Artifact(BaseModel):

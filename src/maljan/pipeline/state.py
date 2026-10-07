@@ -33,6 +33,30 @@ class AgentArgument(BaseModel):
             "does not end the debate."
         ),
     )
+    not_blocking: list[str] = Field(
+        default_factory=list,
+        description=(
+            "For the mediator: the lines of its block it marked [not blocking: <reason>], "
+            "as it wrote them. They do not stand against consensus; ``contradictions`` "
+            "holds the lines that do."
+        ),
+    )
+    unread_marks: list[str] = Field(
+        default_factory=list,
+        description=(
+            "For the mediator: the lines of its block written with a mark the platform did "
+            "not honour (one it could not read, a not-blocking one with no reason, or two that "
+            "conflict). "
+            "They block."
+        ),
+    )
+    ledger_facts: list[str] = Field(
+        default_factory=list,
+        description=(
+            "For the mediator: the counts the evidence ledger states for the entries its "
+            "listed lines cite, every one of them, as the platform put them to it."
+        ),
+    )
     note: str = Field(
         default="",
         description=(
@@ -126,6 +150,8 @@ def _merge_stage_results(
             "duration_ms": (
                 max(int(existing.get("duration_ms") or 0), int(entry.get("duration_ms") or 0))
                 if str(entry.get("mode") or existing.get("mode") or "") == "parallel"
+                # A debate's rounds follow one another whatever its mode.
+                and not (entry.get("rounds_add_up") or existing.get("rounds_add_up"))
                 else int(existing.get("duration_ms") or 0) + int(entry.get("duration_ms") or 0)
             ),
             "agents": agents,
@@ -328,8 +354,26 @@ class AnalysisState(TypedDict):
     # add across the analysts that ran in parallel.
     validation_fed_back: Annotated[dict[str, int], _merge_counts]
 
+    # Every analyst answer no claim could be read from, whole and masked, one
+    # row per answer (``validation.unparsed_answer_rows``). Append-only; the
+    # judge reads them into ``run_summary.validation.unparsed_answers``. Never
+    # on an event: the event that asks says only where the answer is kept.
+    validation_unparsed_answers: Annotated[list[dict[str, str]], operator.add]
+
     # A revision that stood with fewer claims than the answer it replaced, one
     # sentence each (``nodes.revision_replacement_sentence``). Append-only:
     # every round adds its own; the judge reads them into
     # ``run_summary.negotiation.revision_replacements``.
     revision_replacements: Annotated[list[str], operator.add]
+
+    # What each revision round did, one record per round: its round, its
+    # debate stage, how many revisions stood (``made``) and whether every one
+    # of them is the answer in force again after whitespace (``identical``).
+    # Append-only; the router reads the record of the round right before the
+    # mediation it routes, and a round of identical answers ends the debate.
+    revision_rounds: Annotated[list[dict[str, Any]], operator.add]
+
+    # The values of the answer in force a revision states nowhere any more,
+    # per analyst, round and claim (``pipeline.claim_drops``), with the run
+    # summary's sentence. Recorded, never asked. Append-only.
+    dropped_claims: Annotated[list[dict[str, Any]], operator.add]

@@ -503,8 +503,9 @@ class MCPLangChainToolkit:
 
         A limit of zero is not "cut to nothing": it is the conversation having
         no room left for a tool answer at all. The model is handed one sentence
-        saying so — a deterministic fact about this conversation — and the
-        whole answer stays on the evidence ledger under the call's own id.
+        saying so — a deterministic fact about this conversation — and the call
+        is said to be cut (``note_answer_not_shown``), so its ledger entry is
+        recorded as cut rather than as a successful empty answer.
 
         If the output exceeds it:
           1. Call ``_output_guardrail`` (e.g. FunctionSummarizer) when available.
@@ -548,12 +549,13 @@ class MCPLangChainToolkit:
             Potentially shortened output.
         """
         from maljan.agents.output_shortening import shorten_json_document, shorten_target
-        from maljan.llm.context_window import output_limit
+        from maljan.llm.context_window import note_answer_not_shown, output_limit
 
         chars_in = len(output)
         limit = output_limit(self._max_output_chars, self._context_budget)
 
         if limit <= 0:
+            note_answer_not_shown(chars_in)
             said = self._no_room(chars_in)
             self._record_guardrail(chars_in, len(said), over_limit=True, no_room=True, limit=limit)
             return said

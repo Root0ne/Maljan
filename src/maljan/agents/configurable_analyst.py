@@ -158,6 +158,15 @@ class ConfigurableAnalyst(BaseAnalyst):
             return ""
         provider_id = str(getattr(self._resolved, "static_provider_id", "") or "")
         if provider_id != "ghidra":
+            # A provider whose session must open the file first (radare2's)
+            # opens its own mirror before the loop; it has no hint to give.
+            provider = self._own_static_provider()
+            opener = getattr(provider, "open_sample", None)
+            if callable(opener):
+                try:
+                    opener(self._analysis_file_path or _analysis_path_in(data))
+                except Exception as exc:  # noqa: BLE001 — the model's own open is still there
+                    self.logger.debug("the provider did not open the sample early: %s", exc)
             return ""
         path = self._analysis_file_path or _analysis_path_in(data) or ""
         container = getattr(self, "_container", None)

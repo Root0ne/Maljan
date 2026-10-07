@@ -69,6 +69,17 @@ def test_a_fenced_json_block_that_is_evidence_is_kept():
     assert "VirtualAlloc" in strip_tool_call_scaffolding(text)
 
 
+def test_a_fenced_json_block_nested_past_the_parser_s_depth_is_kept_as_text():
+    """JSON too deep for the parser to read is text it cannot strip, as invalid JSON is."""
+    import sys
+
+    depth = sys.getrecursionlimit() * 10
+    block = '```json\n{"name": "x", "arguments": ' + "[" * depth + "]" * depth + "}\n```"
+    text = f"CLAIM: The file opens a key.\n{block}\n"
+
+    assert strip_tool_call_scaffolding(text) == text
+
+
 def test_a_claim_that_is_only_scaffolding_is_dropped():
     text = (
         f"CLAIM: {CAPTURED}\n"

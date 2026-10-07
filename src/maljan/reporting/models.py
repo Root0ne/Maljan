@@ -609,6 +609,21 @@ class TTPMapping(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# What a family field holds when it names no family: a placeholder a model or
+# a sandbox wrote for "none", compared case-folded.
+NO_FAMILY_WORDS = frozenset({"", "unknown", "none", "n/a"})
+
+
+def stated_family(family: Any) -> str:
+    """The family a run states, as written and on one line, or ``""`` for a placeholder.
+
+    The one reader the report and the export share, so neither names a family
+    "Unknown" that the other says is none.
+    """
+    written = " ".join(str(family or "").split())
+    return "" if written.casefold() in NO_FAMILY_WORDS else written
+
+
 class FamilyAttribution(BaseModel):
     """Best-guess malware family / actor / campaign attribution."""
 
@@ -1157,6 +1172,9 @@ class EvidenceIndexRow(BaseModel):
     ok: bool = True
     duration_ms: int = 0
     truncated: bool = False
+    # The earlier entry a call the repeat guard answered without running
+    # repeats; ``None`` for a call that ran.
+    repeated_of: str | None = None
 
 
 # ---------------------------------------------------------------------------

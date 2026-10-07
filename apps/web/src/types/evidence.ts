@@ -39,6 +39,10 @@ export interface EvidenceEntry {
    *  budget. Absent on rows written before the column existed, where the
    *  reason an output is empty is simply not recorded. */
   truncated?: boolean;
+  /** The characters the tool-output guardrail cut from the answer the model
+   *  read; such an entry is also truncated. 0 or absent for an answer stored
+   *  whole. */
+  chars_dropped?: number;
   /** The earlier identical call this one was answered from, the label the
    *  recorder parsed out of the arguments, and the run-clock time the call
    *  started at. Absent on rows written before the columns existed. */

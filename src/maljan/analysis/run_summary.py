@@ -66,8 +66,9 @@ class NegotiationMetrics:
         rounds_completed:    Number of negotiation rounds actually executed.
         max_rounds:          Hard limit configured at startup.
         termination_reason:  Why the loop stopped (consensus / hard_limit /
-                             convergence / sycophancy / not_applicable /
-                             mediation_failed).
+                             converged / convergence / not_applicable /
+                             mediation_failed), read from the router's own
+                             rules (``pipeline.routing.debate_route``).
         sycophancy_events:   Number of rounds where sycophancy was detected.
         confidence_history:  Per-round mediator confidence scores.
         final_confidence:    Last recorded confidence value; ``None`` when
@@ -91,6 +92,22 @@ class NegotiationMetrics:
     # mediation that gave no final ``CONTRADICTIONS:`` block when asked, and one
     # whose block listed contradictions and also said none stands.
     mediation_notes: list[str] = field(default_factory=list)
+    # The lines the mediator marked [not blocking: <reason>], round by round,
+    # as it wrote them: they did not stand against consensus.
+    not_blocking: list[str] = field(default_factory=list)
+    # The counts the evidence ledger states for the lines the mediator listed,
+    # as the platform put them to it.
+    ledger_facts: list[str] = field(default_factory=list)
+    # One sentence per claim whose values a revision states nowhere
+    # (``pipeline.claim_drops``): recorded, never asked.
+    dropped_claims: list[str] = field(default_factory=list)
+    # The same, counted: one row per analyst and round with the values and the
+    # earlier claims they came from. What the report prints.
+    dropped_value_counts: list[dict[str, Any]] = field(default_factory=list)
+    # The lines written with a mark the platform did not honour; they blocked.
+    unread_marks: list[str] = field(default_factory=list)
+    # How many lines the last mediation marked not blocking.
+    not_blocking_at_end: int = 0
 
     @property
     def consensus_applicable(self) -> bool:
@@ -98,7 +115,8 @@ class NegotiationMetrics:
 
     @property
     def converged_early(self) -> bool:
-        return self.termination_reason != "hard_limit"
+        """Whether the debate ended before its round limit, for a reason other than the limit."""
+        return self.termination_reason != "hard_limit" and (self.rounds_completed < self.max_rounds)
 
 
 @dataclass
@@ -685,6 +703,13 @@ def spend_lines(spend: Any) -> list[str]:
             else ""
         )
     ]
+    estimated = int(spend.get("estimated_calls") or 0)
+    if estimated:
+        lines.append(
+            f"Of it, {float(spend.get('estimated_usd') or 0.0):.4f} USD is estimated for "
+            f"{estimated} call(s) ({spend.get('estimated_source') or 'estimated'}): the "
+            "prompt as uncached input and the generated pieces as output"
+        )
     for model, source in sorted((spend.get("prices_from") or {}).items()):
         if source == "llm.model_prices":
             lines.append(f"Prices of `{model}`: the operator's (llm.model_prices)")
@@ -972,6 +997,18 @@ class RunSummary:
             lines += ["**Revisions that replaced an answer with fewer claims:**", ""]
             lines += [f"- {sentence}" for sentence in n.revision_replacements]
             lines.append("")
+        if n.dropped_claims:
+            lines += ["**Values a revision states nowhere:**", ""]
+            lines += [f"- {sentence}" for sentence in n.dropped_claims]
+            lines.append("")
+        if n.not_blocking:
+            lines += ["**Listed lines the mediator marked not blocking:**", ""]
+            lines += [f"- {sentence}" for sentence in n.not_blocking]
+            lines.append("")
+        if n.ledger_facts:
+            lines += ["**Ledger counts put to the mediator:**", ""]
+            lines += [f"- {sentence}" for sentence in n.ledger_facts]
+            lines.append("")
         if n.mediation_notes:
             lines += [f"- {sentence}" for sentence in n.mediation_notes]
             lines.append("")
@@ -1250,6 +1287,16 @@ class RunSummary:
                     else {}
                 ),
                 **({"mediation_notes": list(n.mediation_notes)} if n.mediation_notes else {}),
+                **({"not_blocking": list(n.not_blocking)} if n.not_blocking else {}),
+                **({"ledger_facts": list(n.ledger_facts)} if n.ledger_facts else {}),
+                **({"dropped_claims": list(n.dropped_claims)} if n.dropped_claims else {}),
+                **(
+                    {"dropped_value_counts": [dict(r) for r in n.dropped_value_counts]}
+                    if n.dropped_value_counts
+                    else {}
+                ),
+                **({"unread_marks": list(n.unread_marks)} if n.unread_marks else {}),
+                **({"not_blocking_at_end": n.not_blocking_at_end} if n.not_blocking_at_end else {}),
             },
             "agent_stats": [
                 {
@@ -1773,6 +1820,8 @@ class RunSummaryBuilder:
         self,
         state: dict[str, Any],
         max_iterations: int | None = None,
+        *,
+        sycophancy_check: bool = True,
     ) -> RunSummaryBuilder:
         """Extract negotiation metrics from the final pipeline state.
 
@@ -1780,6 +1829,7 @@ class RunSummaryBuilder:
             state: Final AnalysisState (subset OK).
             max_iterations: Configured hard limit. If None, falls back to
                 ``iteration_count`` so the report stays self-consistent.
+            sycophancy_check: The debate's own switch, which the router read.
         """
         confidence_history: list[float] = state.get("confidence_history") or []
         iteration_count: int = state.get("iteration_count", 0)
@@ -1797,31 +1847,26 @@ class RunSummaryBuilder:
             sycophancy_events = 1
 
         applicable = state.get("consensus_applicable", True) is not False
-        last_mediator = next(
-            (
-                arg
-                for arg in reversed(discussion_history)
-                if getattr(arg, "agent_name", "") == "Mediator"
-            ),
-            None,
-        )
-        mediation_failed = getattr(last_mediator, "status", "complete") in ("failed", "timeout")
-        if not applicable:
-            termination_reason = NOT_APPLICABLE
-        elif mediation_failed:
-            termination_reason = MEDIATION_FAILED
-        elif is_consensus:
-            termination_reason = "consensus"
-        elif len(confidence_history) >= 3 and not getattr(last_mediator, "contradictions", None):
-            recent = confidence_history[-3:]
-            std = _rolling_std(recent)
-            termination_reason = "convergence" if std < 0.02 else "hard_limit"
-        else:
-            termination_reason = "hard_limit"
 
         if max_iterations is None:
             # Backward-compat: legacy callers passed state with "_max_iterations".
             max_iterations = state.get("_max_iterations", iteration_count)
+
+        # The state the router last read is this one: the judge runs right
+        # after it. The same rules give the reason; a decision to revise at
+        # the end means the round limit ended the debate.
+        from maljan.pipeline.claim_drops import defanged
+        from maljan.pipeline.routing import HARD_LIMIT, route_within_limit
+
+        route, termination_reason = route_within_limit(
+            {**state, "is_consensus": is_consensus},
+            sycophancy_check=sycophancy_check,
+            log=False,
+        )
+        if not applicable:
+            termination_reason = NOT_APPLICABLE
+        elif route != "judge":
+            termination_reason = HARD_LIMIT
 
         self._negotiation = NegotiationMetrics(
             rounds_completed=iteration_count,
@@ -1845,6 +1890,40 @@ class RunSummaryBuilder:
                     and getattr(arg, "note", "")
                     in (CONTRADICTIONS_BLOCK_MISSING_NOTE, CONTRADICTIONS_BLOCK_MIXED_NOTE)
                 )
+            ),
+            not_blocking=[
+                defanged(str(line))
+                for arg in discussion_history
+                if getattr(arg, "agent_name", "") == "Mediator"
+                for line in getattr(arg, "not_blocking", None) or []
+            ],
+            ledger_facts=list(
+                dict.fromkeys(
+                    defanged(str(fact))
+                    for arg in discussion_history
+                    if getattr(arg, "agent_name", "") == "Mediator"
+                    for fact in getattr(arg, "ledger_facts", None) or []
+                )
+            ),
+            dropped_claims=[
+                str(row.get("sentence") or "")
+                for row in (state.get("dropped_claims") or [])
+                if isinstance(row, dict) and row.get("sentence")
+            ],
+            dropped_value_counts=_dropped_value_counts(state.get("dropped_claims") or []),
+            unread_marks=[
+                defanged(str(line))
+                for arg in discussion_history
+                if getattr(arg, "agent_name", "") == "Mediator"
+                for line in getattr(arg, "unread_marks", None) or []
+            ],
+            not_blocking_at_end=next(
+                (
+                    len(getattr(arg, "not_blocking", None) or [])
+                    for arg in reversed(discussion_history)
+                    if getattr(arg, "agent_name", "") == "Mediator"
+                ),
+                0,
             ),
         )
         return self
@@ -1958,6 +2037,21 @@ class RunSummaryBuilder:
 # ---------------------------------------------------------------------------
 # Pure-Python helper (avoids importing from routing to prevent circular deps)
 # ---------------------------------------------------------------------------
+
+
+def _dropped_value_counts(rows: list[Any]) -> list[dict[str, Any]]:
+    """One row per analyst and round: how many values, from how many earlier claims."""
+    counted: dict[tuple[str, int], dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        key = (str(row.get("agent") or ""), int(row.get("round") or 0))
+        entry = counted.setdefault(
+            key, {"agent": key[0], "round": key[1], "values": 0, "claims": 0}
+        )
+        entry["values"] += len(list(row.get("missing") or []))
+        entry["claims"] += 1
+    return list(counted.values())
 
 
 def _rolling_std(values: list[float]) -> float:

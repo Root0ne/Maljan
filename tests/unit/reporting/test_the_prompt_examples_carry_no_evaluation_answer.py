@@ -41,7 +41,7 @@ from maljan.agents.delegation import (
     WAITING_ON_EACH_OTHER_REFUSAL,
     _what_an_ask_gets_sentence,
 )
-from maljan.agents.evidence_recorder import earlier_chunk_answer
+from maljan.agents.evidence_recorder import earlier_chunk_answer, same_function_notice
 from maljan.agents.ghidra_http_client import no_program_as_error
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
@@ -67,6 +67,7 @@ from maljan.agents.judge_agent import (
 )
 from maljan.agents.network_analyst import NO_PACKET_TOOL_LINE, OTHER_TOOLS_THEN_ANALYZE
 from maljan.agents.prompt_fragments import (
+    CLAIM_FORMAT_FRAGMENT,
     ENDPOINTS_ROW_SHAPE,
     NO_TOOLS_STATEMENT,
     TOOL_FREE_TURN_STATEMENT,
@@ -97,10 +98,15 @@ from maljan.extractors.capability_matrix import (
     not_asked_unknown_id,
     unknown_id_reason,
 )
+from maljan.llm.context_window import no_room_sentence
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.memory.attck_loader import technique_label
 from maljan.memory.technique_cards import card_lines, load_cards
 from maljan.pipeline import triage_pack
+from maljan.pipeline.debate_facts import (
+    ledger_count_facts,
+    with_ledger_facts,
+)
 from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
@@ -115,6 +121,7 @@ from maljan.pipeline.nodes import (
 )
 from maljan.pipeline.run_state import NO_LIMIT, budget_line
 from maljan.pipeline.validation import (
+    _UNPARSED_ANSWER_MESSAGE,
     ANALYST_FEEDBACK_CLOSING,
     MALWARE_TYPES,
     UNATTRIBUTED_INDICATOR_CODE,
@@ -143,14 +150,17 @@ from maljan.pipeline.validation import (
     recommendation_indicator_violations,
     repeated_item_violations,
     section_cut_violation,
+    stated_value_violations,
     technique_line_violation,
     unanchored_technique_finding,
     unattributed_indicator_violations,
     undescribed_technique_finding,
     ungrounded_capabilities,
+    unpublished_value_violations,
     validate_verdict_bundle,
 )
 from maljan.providers.base import STATIC_EVIDENCE_INSTRUCTIONS, absent_provider_fragment
+from maljan.providers.static import r2 as _r2
 from maljan.providers.static.ghidra import (
     GHIDRA_GUIDANCE,
     ghidra_not_answering,
@@ -171,6 +181,7 @@ from maljan.reporting.composer import (
     section_contract,
 )
 from maljan.reporting.evidence_bundles import sample_flow_fact
+from maljan.reporting.ledger_report import FUNCTION_NOT_SHOWN
 from maljan.reporting.models import (
     FileHashes,
     MalwareReport,
@@ -208,7 +219,7 @@ from maljan.reporting.renderers.stix_renderer import (
     seen_in_reason,
     yes_because,
 )
-from maljan.schemas.evidence import LedgerEntry
+from maljan.schemas.evidence import LedgerEntry, not_shown_record
 from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
@@ -344,6 +355,35 @@ def _strings(value: Any) -> list[str]:
     return []
 
 
+def _function_map_text() -> str:
+    """The map block as a model reads it, head, coverage and both kinds of line."""
+    from types import SimpleNamespace
+
+    from maljan.agents.function_map import (
+        build_function_map,
+        function_artefacts,
+        function_map_block,
+    )
+
+    floss = LedgerEntry(
+        id="ev_0001",
+        tool="floss",
+        output=json.dumps(
+            {"strings": [{"kind": "decoded", "string": "a", "function_rva": "0x2000"}]}
+        ),
+    )
+    own = [
+        LedgerEntry(
+            id="ev_0002", tool="decompile_function", args={"address": "0x1000"}, output="x"
+        ),
+        LedgerEntry(id="ev_0003", tool="disassemble_function", args={"address": "0x3000"}),
+    ]
+    claim = SimpleNamespace(claim="0x1000 reads a value.", evidence_ref="ev_0002")
+    block = function_map_block(build_function_map(own, function_artefacts([floss]), [claim]))
+    assert block
+    return block
+
+
 EXAMPLES: dict[str, str] = {"narrative": EXAMPLE_OBJECT, **_EXAMPLES}
 
 
@@ -431,6 +471,13 @@ def _message_of(violation: Violation | None) -> str:
     return violation.message
 
 
+def _every_message(found: list[Any]) -> str:
+    """The messages of questions every one of which must be asked; one not asked fails here."""
+    missing = [index for index, violation in enumerate(found) if violation is None]
+    assert not missing, f"the questions at {missing} were not asked of their synthetic claims"
+    return " ".join(violation.message for violation in found)
+
+
 PROMPTS: dict[str, str] = {
     "example team document prompts": _TEAM_DOCUMENT_PROMPTS,
     "narrative contract": EXPECTED_OBJECT,
@@ -478,6 +525,31 @@ PROMPTS: dict[str, str] = {
             )
         ]
         if v is not None
+    ),
+    "the absence and describe questions on one id of a technique list": _every_message(
+        [
+            absence_claim_violation(
+                ClaimEvidence(
+                    claim="The file holds no persistence mechanism.",
+                    evidence_ref="[ev_0001]",
+                    confidence=0.9,
+                    technique_id="T1547",
+                ),
+                "T1547",
+                listed=True,
+            ),
+            claim_does_not_describe_violation(
+                ClaimEvidence(
+                    claim="The file opens a window.",
+                    evidence_ref="[ev_0001]",
+                    confidence=0.9,
+                    technique_id="T1003",
+                ),
+                "T1003",
+                knowledge,
+                listed=True,
+            ),
+        ]
     ),
     "capability questions for evading analysis and packing": " ".join(
         v.message
@@ -589,6 +661,25 @@ PROMPTS: dict[str, str] = {
                 ]
             },
             lambda kind, value: "no: x" if kind == "ip" else "",
+        )
+    ),
+    "composer question about table rows no cited entry holds": " ".join(
+        v.message
+        for v in stated_value_violations(
+            {
+                "items": [
+                    {"key": "k", "value": "one.example", "evidence_refs": ["ev_0001"]},
+                    {"key": "j", "value": "two.example", "evidence_refs": ["ev_0001"]},
+                ],
+                "identifiers": [{"kind": "k", "value": "three", "evidence_refs": ["ev_0001"]}],
+            },
+            EntryTexts(texts={"ev_0001": "nothing here"}, tools={"ev_0001": "strings"}),
+        )
+    ),
+    "composer question about an unpublished value in its text": " ".join(
+        v.message
+        for v in unpublished_value_violations(
+            {"body": "It reaches 192.0.2.1."}, lambda kind, value: "no: x"
         )
     ),
     "judge question about an indicator on a value the sample did not reach": " ".join(
@@ -898,6 +989,20 @@ PROMPTS: dict[str, str] = {
     "a later chunk's answer from an earlier chunk's recorded result": earlier_chunk_answer(
         "a", "ev_0001", "a recorded result"
     ),
+    "a decompile answered with a function an earlier entry holds": same_function_notice(
+        "FUN_00401000", "ev_0001"
+    ),
+    "an r2 open that failed, and an r2 call made before an open": " ".join(
+        [
+            _r2._open_failed("/srv/samples/.tmp/x.exe", "/srv/samples/r2-work/x.exe"),
+            _r2._open_failed("/srv/samples/r2-work/x.exe", "/srv/samples/r2-work/x.exe"),
+            _r2._open_first("/srv/samples/r2-work/x.exe"),
+        ]
+    ),
+    "the function map block": _function_map_text(),
+    "a tool answer the conversation had no room for, as told and as recorded": " ".join(
+        [no_room_sentence(12_345), not_shown_record(12_345), FUNCTION_NOT_SHOWN]
+    ),
     "analyst cut-at-cap question naming a chunk": analyst_cut_violation(
         4096, "CLAIM: The file opens a window.\nCLAIM: The fi", chunk="chunk 1 of 2"
     ).message,
@@ -1014,8 +1119,11 @@ PROMPTS: dict[str, str] = {
         f"{NO_REPLY_RECORDED} {NOT_RUN_REPLY}"
     ),
     "analyst question for technique lines no single id was read from": technique_line_violation(
-        ["T1000 (candidate)", "T1001, T1002"]
+        ["T1000 (candidate)", "T1001 or T1002"]
     ).message,
+    "the claim format the analysts are given and the unparsed-answer question": " ".join(
+        [CLAIM_FORMAT_FRAGMENT, _UNPARSED_ANSWER_MESSAGE]
+    ),
     "the question and the reason for claim headings under DISPUTES": (
         f"{claims_under_disputes_violation(2).message} "
         f"{claims_under_disputes_sentence('reverser', 2, 1)}"
@@ -1072,6 +1180,11 @@ PROMPTS: dict[str, str] = {
     "analyst repeated-claims question naming a chunk": analyst_repeated_violation(
         ClaimsRepeated(begun=15, distinct=3, margin=3, chars=900), chunk="chunk 1 of 2"
     ).message,
+    "analyst repeated-claims question of an answer ended while it streamed": (
+        analyst_repeated_violation(
+            ClaimsRepeated(begun=7, distinct=3, margin=3, chars=600, first_repeat=4), ended=True
+        ).message
+    ),
     "decompiled functions no claim describes": _message_of(
         decompiled_not_described_violation(
             [
@@ -1079,6 +1192,15 @@ PROMPTS: dict[str, str] = {
                 DecompiledFunction(address=None, names=("F",), entries=("ev_0002",)),
             ]
         )
+    ),
+    "ledger counts told to a revision round and to the next mediation": with_ledger_facts(
+        "mediator feedback",
+        ledger_count_facts(
+            ["A Claim 1 counts 3 [ev_0001]; B Claim 1 counts 2."],
+            {},
+            [{"id": "ev_0001", "tool": "t", "structured": {"total": 3}}],
+            ["a", "b"],
+        ),
     ),
     "claims that say only that a library is used": _message_of(
         library_only_claims_violation(
@@ -1309,6 +1431,7 @@ def _without_the_listed_vocabulary(text: str) -> str:
 RENDERED_CARDS: frozenset[str] = frozenset(
     {
         "analyst question for a claim that does not describe its technique",
+        "the absence and describe questions on one id of a technique list",
         "judge technique question",
         "judge technique question's describe-check finding and its kind's label",
         "judge technique question's card lines, card check and its kind's label",

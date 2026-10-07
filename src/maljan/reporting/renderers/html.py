@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import re
 from html import escape, unescape
+from typing import Any
 
 from markdown_it import MarkdownIt
 
@@ -163,6 +164,49 @@ figcaption b { color: var(--ink); }
 """
 
 
+# The link targets the HTML report makes anchors of: the web's and mail's own
+# schemes, and a place in the page or beside it.
+_LINKED_SCHEMES = ("http:", "https:", "mailto:")
+
+
+def _report_link(url: str) -> bool:
+    """Whether a Markdown link's target becomes an anchor in the HTML report.
+
+    An http, https or mailto target; a place in the page (``#…``); or a path
+    relative to the page that starts with neither ``/`` nor a backslash and
+    holds no backslash. A protocol-relative target (``//host/…``) names a host
+    no reader can vouch for, and on Windows a backslash path is a share.
+    """
+    target = str(url or "").strip()
+    lowered = target.lower()
+    if lowered.startswith(_LINKED_SCHEMES) or target.startswith("#"):
+        return True
+    if re.match(r"[a-z][a-z0-9+.-]*:", lowered):
+        return False
+    # The parser hands the target over percent-encoded: a backslash is "%5C",
+    # an encoded slash "%2F", which some viewers decode before resolving.
+    backslash = "\\" in target or "%5c" in lowered or "%2f" in lowered
+    return bool(target) and not target.startswith("/") and not backslash and ":" not in target
+
+
+def _no_image(renderer: Any, tokens: Any, idx: int, options: Any, env: Any) -> str:
+    """An image written in the report's Markdown, rendered as its alt text and never fetched.
+
+    The report generates its figures as inline SVG; an image in the Markdown is
+    model- or sample-written, and loading one would tell its host the report
+    was opened.
+    """
+    alt = "".join(str(child.content or "") for child in (tokens[idx].children or []))
+    return escape(alt)
+
+
+# The document's own policy, a second guard behind the renderer: nothing is
+# fetched (no script, frame, font, connection or remote image), the inline
+# stylesheet and the figures' style attributes apply, and an image may only be
+# one the page carries itself as data.
+CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+
+
 class HtmlRenderer:
     """Render a complete ``MalwareReport`` as one self-contained HTML document."""
 
@@ -191,6 +235,7 @@ class HtmlRenderer:
             "<!DOCTYPE html>\n"
             '<html lang="en">\n<head>\n'
             '<meta charset="utf-8">\n'
+            f'<meta http-equiv="Content-Security-Policy" content="{CONTENT_SECURITY_POLICY}">\n'
             '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
             f"<title>{escape(title)}</title>\n"
             '<meta name="generator" content="Maljan">\n'
@@ -219,8 +264,22 @@ class HtmlRenderer:
             ),
             markdown,
         )
-        # html=False is the XSS guard: report content is LLM- and malware-derived.
+        return self._markdown_to_html(markdown)
+
+    @staticmethod
+    def _markdown_to_html(markdown: str) -> str:
+        """The report's Markdown as HTML, linking only what the report itself links.
+
+        ``html=False`` is the XSS guard: report content is LLM- and
+        malware-derived. The CommonMark preset links no bare text (no
+        linkify), so a value the defanger left as written is never an anchor;
+        and a link is made only for an http, https or mailto target, or one
+        inside the page, so a defanged URL ("hxxps://…", written in angle
+        brackets or as a link's target) is never one either.
+        """
         md = MarkdownIt("commonmark", {"html": False}).enable("table").enable("strikethrough")
+        md.validateLink = _report_link  # type: ignore[method-assign]
+        md.add_render_rule("image", _no_image)
         return str(md.render(markdown))
 
     # ------------------------------------------------------------------

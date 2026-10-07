@@ -19,7 +19,7 @@ class UserRole(enum.StrEnum):
     ``READONLY`` is enforced nowhere: no route in ``app.api.v1`` distinguishes
     it from ``ANALYST``, so an account holding it can upload a sample, submit a
     job and cancel its own. It is a label on the row, not a permission — see
-    the Roles section of ``docs/security.md``. Kept rather than removed because
+    the Roles section of ``apps/docs/content/docs/security.mdx``. Kept rather than removed because
     a stored row carrying the value would not load against an enum without it,
     and because dropping it silently would widen those accounts rather than
     narrow them.
