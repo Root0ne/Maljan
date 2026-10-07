@@ -48,12 +48,16 @@ What it states, and nothing else:
   straight-line run of code holding a hashed value (up to a transfer of
   control), the slot that value's name is stored to: after a call exactly one
   function-name hash reaches as an argument, a store of its return register
-  before the register is overwritten; or, in a table of records each holding
-  as many addresses, the one record address some code calls or jumps through
-  (``_name_slots``). A call or jump through a named slot, direct or
-  through a register a straight-line load from it set, is a call of that
-  name (``slot_calls``), and leaves the count of calls that name nothing. A
-  slot two names fill is ambiguous (``ambiguous_slots``) and names nothing.
+  before the register is overwritten; or, in a table of records laid out by
+  frame offsets, the one record address some code calls or jumps through
+  (``_name_slots``). The tie is read from what the code places, not from what
+  the call does: a hash left live in an argument register across an unrelated
+  call ties that call, and a store of its return value names the slot after
+  the hash; the run's stores alone cannot tell the two calls apart. A call or
+  jump through a named slot, direct or through a register a straight-line
+  load from it set, is a call of that name (``slot_calls``), and leaves the
+  count of calls that name nothing. A slot two names fill is ambiguous
+  (``ambiguous_slots``) and names nothing.
 * **Callers and callees**, and the **indirect artefacts**: how many of its
   direct callees hold artefacts of their own, and how many those are, each
   callee's own distinct count added. One call deep and added per callee, so
@@ -97,6 +101,8 @@ from maljan.tools.call_sites import (
     _ONE_BYTE_MODRM,
     _TWO_BYTE_PLAIN,
     Instruction,
+    _frame_ref,
+    _frame_store,
     decode,
 )
 from maljan.tools.pe_image import Image, Section
@@ -341,6 +347,9 @@ class _Reader:
         # each ``(names, place)``.
         self.live: dict[int, tuple[tuple[str, ...], int]] = {}
         self.stacked: list[tuple[tuple[str, ...], int]] = []
+        # The registers that hold an address taken in the run, for a store of
+        # one to a frame slot.
+        self.addressed: dict[int, int] = {}
         self.graph = _Graph()
         self.queue: list[int] = []
         self.sorted_starts: list[int] = []
@@ -552,9 +561,11 @@ class _Reader:
             )
         moved = _register_copy(code, at, is64)
         carried = self.live.get(moved[1]) if moved is not None else None
+        frame = self._frame_events(code, at, rva, ins, hashed)
         for register in ins.writes:
             self.loaded.pop(register, None)
             self.live.pop(register, None)
+            self.addressed.pop(register, None)
         if carried is not None and moved is not None:
             self.live[moved[0]] = carried
         for held in hashed:
@@ -568,10 +579,53 @@ class _Reader:
                 self.events.append(("store", slot, rva))
             elif kind == "load" and named_register is not None:
                 self.loaded[named_register] = slot
-            elif kind == "address" and not hashed and self._section(slot) is None:
-                self.events.append(("address", slot, rva))
+            elif kind == "address" and named_register is not None and not hashed:
+                if self._section(slot) is None:
+                    self.addressed[named_register] = slot
+        self.events.extend(frame)
         if 0 in ins.writes:
             self.events.append(("overwrite",))
+
+    def _frame_events(
+        self,
+        code: bytes,
+        at: int,
+        rva: int,
+        ins: Instruction,
+        hashed: Sequence[tuple[tuple[str, ...], int]],
+    ) -> list[tuple[Any, ...]]:
+        """A store to a frame slot (``[rsp+x]``, ``[rbp+x]``, x86 ``esp``/``ebp``): its
+        reach, and the hashed value or the address it stores there.
+
+        Read with ``call_sites._frame_ref`` and ``call_sites._frame_store``; a
+        store that carries no frame offset (a push, an absolute slot) is none.
+        """
+        is64 = self.image.is64
+        if not is64 and at < len(code) and 0x40 <= code[at] <= 0x4F:
+            return []
+        reference = _frame_ref(code, at)
+        stored = _frame_store(code, at)
+        if reference is None or stored is None:
+            return []
+        _rex, op, register, base, displacement = reference
+        width = stored[2] or 8
+        out: list[tuple[Any, ...]] = [("extent", base, displacement + width)]
+        if op == 0x89:
+            if register in self.live:
+                names, place = self.live[register]
+                out.append(("frame hash", base, displacement, names, place))
+            elif register in self.addressed:
+                out.append(("frame address", base, displacement, self.addressed[register], rva))
+        elif op == 0xC7:
+            if hashed:
+                for names, place in hashed:
+                    out.append(("frame hash", base, displacement, names, place))
+            elif not is64 and ins.length >= 4:
+                value = int.from_bytes(code[at + ins.length - 4 : at + ins.length], "little")
+                slot = value - self.image.image_base
+                if 0 <= slot < self.image.size_of_image and self._section(slot) is None:
+                    out.append(("frame address", base, displacement, slot, rva))
+        return out
 
     def _end_run(self) -> None:
         """End the straight-line run: kept when it holds a hashed value."""
@@ -582,6 +636,7 @@ class _Reader:
         self.loaded.clear()
         self.live.clear()
         self.stacked.clear()
+        self.addressed.clear()
 
     def _tail_call(self, function: _Function, target: int) -> bool:
         """An unconditional jump to another function's start, recorded as its callee."""
@@ -782,7 +837,8 @@ def _slot_shape(
     if not is64 and (op == 0x68 or 0xB8 <= op <= 0xBF):
         if after + 4 > len(code):
             return None
-        return ("address", None, int.from_bytes(code[after : after + 4], "little"))
+        target = (op & 7) if op != 0x68 else None
+        return ("address", target, int.from_bytes(code[after : after + 4], "little"))
     if after >= len(code):
         return None
     modrm = code[after]
@@ -793,10 +849,7 @@ def _slot_shape(
     if op == 0x8B and memory:
         return ("load", reg, None)
     if op == 0x8D and memory:
-        return ("address", None, None)
-    if not is64 and op == 0xC7 and (modrm >> 3) & 7 == 0 and length >= 4:
-        immediate = int.from_bytes(code[at + length - 4 : at + length], "little")
-        return ("address", None, immediate)
+        return ("address", reg, None)
     return None
 
 
@@ -813,15 +866,15 @@ def _name_slots(
       there in the same run (``_Reader._read_events``). After a tied call, a
       store of the return register to a slot, before the register is
       overwritten or another call is made, names that slot.
-    * **A table of records.** With no tied call stored in the run, each hashed
-      value sits in a record with addresses. When the run takes no address
-      before its first hashed value and one after its last, each record runs
-      from its hashed value to the next; in the mirror case, from the previous
-      hashed value to its own; any other run names nothing. Every record must
-      hold as many addresses as every other, one at least, or the run names
-      nothing: a record's addresses are its own. Of a record's addresses, the
-      one some code calls or jumps through is its slot; a record with none
-      names nothing, and one with two is ambiguous.
+    * **A table of records.** With no tied call stored in the run, the records
+      are read from frame offsets alone (``_frame_records``): the hashed values
+      stored to the frame, sorted by offset, bound the records, and the
+      addresses stored to the frame fall in the record their offset lies in,
+      whatever order the stores were emitted in. A record names the one
+      address in it some code calls or jumps through; one with none names
+      nothing and lends nothing. A record holding two such addresses means the
+      offsets do not lay out records, and the run names nothing. Stores with no
+      frame offset (pushes, absolute slots) make no records.
 
     A hashed value whose readings give two names, and a slot two names fill,
     are ambiguous and name nothing.
@@ -853,42 +906,23 @@ def _name_slots(
                 if later[0] in ("overwrite", "call"):
                     break
                 j += 1
-        hashes = [k for k, event in enumerate(run) if event[0] == "hash"]
-        if stored or not hashes or any(e[0] == "call" and e[1] is not None for e in run):
+        if stored or any(e[0] == "call" and e[1] is not None for e in run):
             continue
-        taken = [(k, int(e[1]), int(e[2])) for k, e in enumerate(run) if e[0] == "address"]
-        before = any(k < hashes[0] for k, _s, _w in taken)
-        after = any(k > hashes[-1] for k, _s, _w in taken)
-        if after and not before:
-            bounds = [
-                (h, hashes[i + 1] if i + 1 < len(hashes) else len(run))
-                for i, h in enumerate(hashes)
+        for records in _frame_records(run).values():
+            # A record names the one address in it some code calls through. One
+            # with none names nothing (a name resolved and never called) and
+            # lends nothing: its bounds are its frame offsets. One with two means
+            # the records are not what the offsets say, and the run names nothing.
+            chosen = [
+                {(slot, where) for slot, where in inside if slot in called}
+                for _names, inside in records
             ]
-        elif before and not after:
-            bounds = [(hashes[i - 1] if i else -1, h) for i, h in enumerate(hashes)]
-        else:
-            continue
-        records: list[list[tuple[int, int, int]]] = []
-        cursor = 0
-        for low, high in bounds:
-            while cursor < len(taken) and taken[cursor][0] < low:
-                cursor += 1
-            inside = []
-            while cursor < len(taken) and taken[cursor][0] < high:
-                inside.append(taken[cursor])
-                cursor += 1
-            records.append(inside)
-        if not records[0] or any(len(inside) != len(records[0]) for inside in records):
-            continue
-        for inside, k in zip(records, hashes, strict=True):
-            names = run[k][1]
-            slots = {slot for _k, slot, _w in inside if slot in called}
-            if len(slots) == 1:
-                (slot,) = slots
-                fill(slot, names, next(w for _k, s_, w in inside if s_ == slot))
-            elif len(slots) > 1 and names:
-                for slot in slots:
-                    ambiguous.setdefault(slot, set()).update(names)
+            if any(len({slot for slot, _w in found}) > 1 for found in chosen):
+                continue
+            for (names, _inside), found in zip(records, chosen, strict=True):
+                if found:
+                    slot, where = min(found)
+                    fill(slot, names, where)
     named: dict[int, tuple[str, int]] = {}
     for slot, by_name in filled.items():
         if len(by_name) == 1 and slot not in ambiguous:
@@ -896,6 +930,47 @@ def _name_slots(
         else:
             ambiguous.setdefault(slot, set()).update(n for n, _w in by_name.values())
     return named, {slot: sorted(names) for slot, names in ambiguous.items()}
+
+
+def _frame_records(
+    run: Sequence[tuple[Any, ...]],
+) -> dict[int, list[tuple[tuple[str, ...], list[tuple[int, int]]]]]:
+    """Per frame base, each record of a run: its hashed value's names and the addresses
+    stored inside it, ``(slot, where)``.
+
+    Read from frame offsets alone, in whatever order the stores were emitted:
+    the hashed values sorted by offset bound the records, ``[h_k, h_k+1)``, and
+    the last ends where the farthest store of the run ends. Two hashed values
+    at one offset, or a run whose stores reach no farther than its last hashed
+    value, make no records.
+    """
+    from bisect import bisect_right
+
+    hashes: dict[int, list[tuple[int, tuple[str, ...]]]] = {}
+    addresses: dict[int, list[tuple[int, int, int]]] = {}
+    extent: dict[int, int] = {}
+    for event in run:
+        if event[0] == "frame hash":
+            hashes.setdefault(event[1], []).append((int(event[2]), tuple(event[3])))
+        elif event[0] == "frame address":
+            addresses.setdefault(event[1], []).append((int(event[2]), int(event[3]), int(event[4])))
+        elif event[0] == "extent":
+            extent[event[1]] = max(extent.get(event[1], 0), int(event[2]))
+    out: dict[int, list[tuple[tuple[str, ...], list[tuple[int, int]]]]] = {}
+    for base, held in hashes.items():
+        held.sort()
+        offsets = [offset for offset, _names in held]
+        if len(set(offsets)) != len(offsets) or extent.get(base, 0) <= offsets[-1]:
+            continue
+        records: list[tuple[tuple[str, ...], list[tuple[int, int]]]] = [
+            (names, []) for _offset, names in held
+        ]
+        for offset, slot, where in addresses.get(base, ()):
+            k = bisect_right(offsets, offset) - 1
+            if k >= 0 and offset < extent[base]:
+                records[k][1].append((slot, where))
+        out[base] = records
+    return out
 
 
 def _read_code(

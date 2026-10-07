@@ -284,20 +284,52 @@ class TestATableOfRecords:
 
         assert answer["resolved_slots"] == {hex(BASE + SLOT_A): "OpenThingW"}
 
-    def test_a_run_whose_records_could_run_either_way_names_nothing(self, tmp_path: Path) -> None:
+    def test_an_address_stored_below_the_first_record_belongs_to_none(self, tmp_path: Path) -> None:
         image, code = _image()
         code.go(BUILDER)
-        code.lea_rax(MODULE)  # an address before the first hashed value
+        code.lea_rax(SLOT_B)  # stored below the first hashed value's offset
         code.rax_to_frame(0x28)
         first = _record(code, 0x30, 0x1111AAAA, SLOT_A)
-        second = _record(code, 0x48, 0x2222BBBB, SLOT_B)
+        code.ret()
+        _user_calls(code)
+
+        answer = _index(image, tmp_path, _hits((first, ("OpenThingW",))))
+
+        assert answer["resolved_slots"] == {hex(BASE + SLOT_A): "OpenThingW"}
+        assert answer["calls_unnamed"] == {hex(BASE + USER): 1}
+
+    def test_a_record_holding_two_called_addresses_names_nothing_in_its_run(
+        self, tmp_path: Path
+    ) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        first = code.hash_in_record(0x30, 0x1111AAAA)
+        code.lea_rax(SLOT_A)
+        code.rax_to_frame(0x38)
+        code.lea_rax(SLOT_B)
+        code.rax_to_frame(0x40)
+        second = _record(code, 0x48, 0x2222BBBB, MODULE)
         code.ret()
         _user_calls(code)
 
         answer = _index(image, tmp_path, _hits((first, ("OpenThingW",)), (second, ("CloseThing",))))
 
         assert answer["resolved_slots"] == {}
-        assert answer["calls_unnamed"] == {hex(BASE + USER): 2}
+
+    def test_records_pushed_rather_than_stored_in_the_frame_name_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        place = code.raw(b"\x68" + struct.pack("<I", 0x1111AAAA))  # push hash
+        code.lea_rax(SLOT_A)
+        code.raw(b"\x50")  # push rax
+        code.ret()
+        _user_calls(code)
+
+        answer = _index(image, tmp_path, _hits((place, ("OpenThingW",))))
+
+        assert answer["resolved_slots"] == {}
 
     def test_with_no_hash_resolution_nothing_is_named(self, tmp_path: Path) -> None:
         image, code = _image()
@@ -388,7 +420,9 @@ class TestOnlyTheResolverSCallIsTied:
 
 
 class TestARecordReadsOnlyItsOwnAddresses:
-    def test_hashes_written_before_the_addresses_name_nothing(self, tmp_path: Path) -> None:
+    def test_hashes_written_before_the_addresses_are_read_by_their_offsets(
+        self, tmp_path: Path
+    ) -> None:
         image, code = _image()
         code.go(BUILDER)
         first = code.hash_in_record(0x30, 0x1111AAAA)
@@ -402,9 +436,12 @@ class TestARecordReadsOnlyItsOwnAddresses:
 
         answer = _index(image, tmp_path, _hits((first, ("OpenThingW",)), (second, ("CloseThing",))))
 
-        assert answer["resolved_slots"] == {}
+        # Only the first record's slot is called: it is named, the second names nothing.
+        assert answer["resolved_slots"] == {hex(BASE + SLOT_A): "OpenThingW"}
 
-    def test_addresses_written_before_the_hashes_name_nothing(self, tmp_path: Path) -> None:
+    def test_addresses_written_before_the_hashes_are_read_by_their_offsets(
+        self, tmp_path: Path
+    ) -> None:
         image, code = _image()
         code.go(BUILDER)
         code.lea_rax(SLOT_A)
@@ -419,7 +456,32 @@ class TestARecordReadsOnlyItsOwnAddresses:
 
         answer = _index(image, tmp_path, _hits((first, ("OpenThingW",)), (second, ("CloseThing",))))
 
-        assert answer["resolved_slots"] == {}
+        assert answer["resolved_slots"] == {hex(BASE + SLOT_B): "CloseThing"}
+
+    def test_records_emitted_out_of_layout_order_name_each_slot_right(self, tmp_path: Path) -> None:
+        image, code = _image()
+        code.go(BUILDER)
+        first = code.hash_in_record(0x00, 0x1111AAAA)
+        code.lea_rax(MODULE)
+        code.rax_to_frame(0x08)
+        code.lea_rax(SLOT_B)  # the second record's slot, emitted early
+        code.rax_to_frame(0x28)
+        second = code.hash_in_record(0x18, 0x2222BBBB)
+        code.lea_rax(SLOT_A)  # the first record's slot, emitted late
+        code.rax_to_frame(0x10)
+        code.lea_rax(MODULE)
+        code.rax_to_frame(0x20)
+        code.ret()
+        code.go(USER).call_slot(SLOT_A)
+        code.call_slot(SLOT_B)
+        code.ret()
+
+        answer = _index(image, tmp_path, _hits((first, ("OpenThingW",)), (second, ("CloseThing",))))
+
+        assert answer["resolved_slots"] == {
+            hex(BASE + SLOT_A): "OpenThingW",
+            hex(BASE + SLOT_B): "CloseThing",
+        }
 
     def test_only_slots_some_code_calls_through_are_stated(self, tmp_path: Path) -> None:
         image, code = _image()
@@ -483,7 +545,7 @@ class TestAnX86Image:
         answer = _x86(tmp_path, build, lambda p: _hits((p[0], ("OpenThingW",))), [X86_SLOT_B])
         assert answer["resolved_slots"] == {}
 
-    def test_hashes_before_addresses_name_nothing(self, tmp_path: Path) -> None:
+    def test_hashes_before_addresses_are_read_by_their_offsets(self, tmp_path: Path) -> None:
         def build(code: _Code) -> list[int]:
             first = code.raw(b"\xc7\x44\x24\x00" + struct.pack("<I", 0x1111AAAA))
             second = code.raw(b"\xc7\x44\x24\x08" + struct.pack("<I", 0x2222BBBB))
@@ -497,7 +559,7 @@ class TestAnX86Image:
             lambda p: _hits((p[0], ("OpenThingW",)), (p[1], ("CloseThing",))),
             [X86_SLOT_A],
         )
-        assert answer["resolved_slots"] == {}
+        assert answer["resolved_slots"] == {hex(X86_BASE + X86_SLOT_A): "OpenThingW"}
 
 
 class TestEveryIndirectJumpNamesNothing:
