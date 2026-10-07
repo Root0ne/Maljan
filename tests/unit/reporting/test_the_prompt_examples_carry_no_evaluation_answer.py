@@ -757,6 +757,56 @@ def _constant_set_names() -> str:
     return triage_pack._constant_sets({"found": rows, "sets_searched": len(rows)})
 
 
+_TRANSFORM_ENTRY = "the byte transform tool's description, facts, answers and errors"
+
+
+def _transform_sentences() -> str:
+    """What the byte transform tool tells a model: its facts, answers and every kind of error."""
+    import tempfile
+    import zlib
+
+    from maljan.tools import transforms
+    from tests.unit.tools.synthetic_pe import SyntheticPE
+
+    calls: list[tuple[str, dict[str, Any]]] = [
+        ("flat", {"offset": 0, "length": 999}),
+        ("flat", {"offset": 0, "steps": [{"op": "slice", "start": 1, "length": 999}]}),
+        ("packed", {"offset": 0, "steps": [{"op": "zlib"}]}),
+        ("cut", {"offset": 0, "steps": [{"op": "zlib"}]}),
+        ("flat", {"offset": 0, "steps": [{"op": "xor", "key": {"text": "k"}, "increment": 1}]}),
+        ("flat", {"offset": 0, "steps": [{"op": "rot13"}]}),
+        ("flat", {"offset": 0, "steps": [{"op": "xor", "key": "41"}]}),
+        ("flat", {"offset": 0, "steps": [{"op": "rc4", "key": {"offset": 60, "length": 9}}]}),
+        ("flat", {"offset": 0, "steps": [{"op": "base64", "alphabet": "A" * 64}]}),
+        ("flat", {"offset": 0, "steps": [{"op": "aes", "mode": "cbc", "key": {"hex": "00" * 16}}]}),
+        ("flat", {"rva": "0x10"}),
+        ("image", {"rva": "0x90000"}),
+        ("image", {"offset": 0, "length": 2}),
+        ("image", {"va": "0x10"}),
+    ]
+    with tempfile.TemporaryDirectory() as folder:
+        files = {
+            "flat": b"plain bytes, " * 5,
+            "packed": zlib.compress(b"x" * 64) + b"tail",
+            "cut": zlib.compress(b"x" * 64)[:-6],
+            "image": SyntheticPE().build(),
+        }
+        for name, blob in files.items():
+            (Path(folder) / name).write_bytes(blob)
+        answers = [
+            transforms.transform_bytes(str(Path(folder) / name), **args) for name, args in calls
+        ]
+    return " ".join(
+        [
+            transforms.CAPABILITY_FACTS,
+            transforms.REMEDIATION,
+            transforms._cap_sentence(),
+            _analysis_tool_descriptions("transform_bytes"),
+            *(json.dumps({k: v for k, v in a.items() if k != "output"}) for a in answers),
+        ]
+    )
+
+
 # Everything else a report model is shown on every run, as plain text.
 # A network block with one address the sample reached, one the sandbox
 # recorded and does not attribute, a name that resolved to the second, a name
@@ -1424,6 +1474,7 @@ PROMPTS: dict[str, str] = {
     "the constant sets as the pack line names them": _constant_set_names(),
     "the constant scan's description": _analysis_tool_descriptions("find_crypto_constants"),
     "the function index tool's description": _analysis_tool_descriptions("function_index"),
+    _TRANSFORM_ENTRY: _transform_sentences(),
     "a term's example ids and how many more": _term_ids_said(["T1000", "T1001", "T1002"]),
     "run-state budget line of a loop with no limit": budget_line(NO_LIMIT, NO_LIMIT),
     "ask tool budget sentence with no limit": _what_an_ask_gets_sentence("lead", None, None),
@@ -1879,12 +1930,51 @@ def _without_the_listed_vocabulary(text: str) -> str:
     return text.replace(_LISTED_VOCABULARY, " ")
 
 
+# The byte transform tool's operation names. The tool lists every operation
+# side by side and runs whichever one a model names, so a name says nothing
+# about which one a sample uses: that pairing only comes from the model's own
+# call on the sample's bytes. The allowance is the tool's own operation list,
+# and only where a name stands as an identifier: between backticks, or as the
+# value of a step's ``op`` in an answer. The same name written as a word, in
+# this entry or any other, is scanned as it stands.
+TRANSFORM_OPERATIONS_NAMED: frozenset[str] = frozenset({_TRANSFORM_ENTRY})
+_OPERATION_ID = re.compile(r'``([a-z0-9]+)``|`([a-z0-9]+)`|"op": "([a-z0-9]+)"')
+
+
+def _without_named_operations(text: str) -> str:
+    """``text`` with each transform operation written as an identifier taken out."""
+    from maljan.tools.transforms import OPERATIONS
+
+    return _OPERATION_ID.sub(
+        lambda match: (
+            " "
+            if (match.group(1) or match.group(2) or match.group(3)) in OPERATIONS
+            else match.group(0)
+        ),
+        text,
+    )
+
+
 def _scanned(name: str) -> str:
     """The text of one ``PROMPTS`` entry as the scan reads it."""
     text = PROMPTS[name].lower()
     if name in STIX_VOCABULARY_LISTED:
         text = _without_the_listed_vocabulary(text)
+    if name in TRANSFORM_OPERATIONS_NAMED:
+        text = _without_named_operations(text)
     return _without_rendered_identifiers(text) if name in RENDERED_TOOL_OUTPUT else text
+
+
+def test_the_operation_allowance_is_the_tool_s_list_and_only_as_identifiers() -> None:
+    from maljan.tools.transforms import OPERATIONS
+
+    assert TRANSFORM_OPERATIONS_NAMED <= set(PROMPTS)
+    assert all(re.fullmatch(r"[a-z0-9]+", name) for name in OPERATIONS)
+    assert "xor" not in _without_named_operations('use ``xor`` or `rc4`; {"op": "base64"}')
+    # Written as words they are scanned as they stand, and an identifier the
+    # tool does not list is not let through either.
+    sentence = "the replies are base64 encoded, then xor with a key, `beacon`"
+    assert _without_named_operations(sentence) == sentence
 
 
 @pytest.mark.parametrize("tid", sorted(load_cards()))

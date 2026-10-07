@@ -112,6 +112,9 @@ class ToolNeeds:
     # (capa, FLOSS): a caller waits for it with no deadline unless its operator
     # set one, and its caller giving up is not the server failing.
     long_running: bool = False
+    # What the tool takes and does, in plain facts, for a tool whose arguments
+    # its name does not say (the operations of ``transform_bytes``).
+    facts: str = ""
 
 
 def _cell(tool: ToolNeeds) -> dict[str, Any]:
@@ -130,6 +133,8 @@ def _cell(tool: ToolNeeds) -> dict[str, Any]:
     }
     if tool.long_running:
         cell["long_running"] = True
+    if tool.facts:
+        cell["facts"] = tool.facts
     if missing:
         kinds = {req.kind for req, _reason in missing}
         code = NOT_CONFIGURED if kinds == {"env"} else MISSING_DEPENDENCY

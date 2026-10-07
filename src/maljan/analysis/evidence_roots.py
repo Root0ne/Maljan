@@ -13,7 +13,9 @@ A root is derived from what the entry already holds, never guessed:
   offset, a FLOSS row's call site, a ``decode_string_blobs`` row's blob, a
   ``resolve_api_hashes`` occurrence, a capa match address, a function index
   row, an address a decompile, disassembly or memory read was given, an
-  address a Ghidra IOC row states. A FLOSS row whose call site and decoded
+  address a Ghidra IOC row states, the start of the range a
+  ``transform_bytes`` call read (or the ``no:`` sentence its answer states
+  for a range no section holds). A FLOSS row whose call site and decoded
   text the blob decoder states for a blob (``floss.called_at_rva``) has the
   blob as its root, so the two tools reading one encoded string are one root;
   a call site holding blobs none of which decodes to the row's text gives
@@ -943,6 +945,25 @@ def _read_function_index(found: EntryRoots, data: Any) -> None:
         _place(found, found.layout.rvas_of(address)[0], words=names, values=names)
 
 
+def _read_transform(found: EntryRoots, data: Any) -> None:
+    """A byte transform's root: where its input range starts, or the sentence saying why none.
+
+    The answer states the range's offset from the image base when a section
+    holds its start, and a ``no:`` sentence when none does or the file is not
+    an image; the steps and the output add no place of their own.
+    """
+    held = data.get("input") if isinstance(data, Mapping) else None
+    if not isinstance(held, Mapping):
+        return
+    rva = _hex(held.get("rva")) if held.get("rva") is not None else None
+    if rva is not None:
+        _place(found, rva)
+        return
+    place = held.get("place")
+    if isinstance(place, str) and place.startswith("no:"):
+        found.reason = place
+
+
 def _command_root(
     found: EntryRoots, command: str, joins: _Joins, techniques: Iterable[str]
 ) -> None:
@@ -1022,6 +1043,8 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
                 found.unplace(NOTHING_TO_PLACE.format(tool=tool), values=rule, techniques=tids)
     elif tool == "function_index":
         _read_function_index(found, data)
+    elif tool == "transform_bytes":
+        _read_transform(found, data)
     elif tool == "extract_iocs_with_context":
         for row in _rows(data, "iocs"):
             _address_root(found, row.get("address"), values=(row.get("value"),))
