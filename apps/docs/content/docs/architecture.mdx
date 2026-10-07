@@ -601,16 +601,20 @@ instruction count), two ways:
   another register ties nothing, and two function-name hashes live at one call
   tie nothing; a module's hash beside them does not count. After a tied call, a
   store of the return register to a rip-relative or absolute slot, before the
-  register is overwritten or another call is made, names that slot.
-- *A table of records.* With no tied call stored in the run, each hashed value
-  sits in a record of addresses. The direction is read off the run: no address
-  before the first hashed value and one after the last, and each record runs
-  from its hashed value to the next; the mirror case runs each from the previous
-  one; any other run names nothing. Every record must hold as many addresses as
-  the others, one at least, or the run names nothing, and an instruction that
-  holds a hashed value is never also one of the addresses. A record's slot is
-  its one address some code calls or jumps through; a record with none names
-  nothing, one with two is ambiguous.
+  register is overwritten or another call is made, names that slot. The tie
+  is read from what the code places, not from what the call does: a hash left
+  live in an argument register across an unrelated call ties that call.
+- *A table of records.* With no tied call stored in the run, the records are
+  read from frame offsets alone. Each store to `[rsp+x]` or `[rbp+x]` (x86
+  `esp`, `ebp`) carries its offset; the hashed values stored to the frame,
+  sorted by offset, bound the records, the last ending where the farthest store
+  of the run ends, and every address stored to the frame falls in the record
+  its offset lies in, whatever order the stores were emitted in. An instruction
+  that holds a hashed value is never also an address. A record's slot is its one
+  address some code calls or jumps through; a record with none names nothing
+  and lends nothing (a name resolved and never called); a record with two
+  means the offsets lay out no records, and the run names nothing. Stores that
+  carry no frame offset (pushes, absolute slots) make no records.
 
 A slot two names fill, or filled by a hashed value that reads as two names, is
 ambiguous and names nothing. Every call or jump through a named slot, direct or
@@ -1892,21 +1896,34 @@ turn, each once, and what the analyst answers stands.
     identifier the vendored export catalogue or this run's own facts know,
     written with a capital after its first letter, or alone in a code span
     (`send`, `send()`), so neither a word of running text nor a name inside a
-    span's expression is read as one. And the strings it quotes, in quotes or
+    span's expression is read as one. An item of a slash list is read exactly as
+    written: `NtCreateFile/WriteFile` names both, and in `InternetOpenW/ConnectA`
+    only the first is a name. And the strings it quotes, in quotes or
     in a code span holding quotes, of three characters or more with a letter or
     a digit in them, read as claimed strings only when a strings source holds
     them as data: a strings tool's answer, FLOSS's, the blob decoder's, or the
     index's rows; a quoted phrase none holds (a capa rule's name, a paraphrase)
     is recorded as not checked. A name or a value inside a statement of absence
     ("does not use X", read by the absence question's own reader) is no claimed
-    one. The model is asked to write nothing new; the claim format is
-    unchanged.
+    one. Each name is read once, at its first place, and the absence reader
+    reads only the sentence holding it. The model is asked to write nothing
+    new; the claim format is unchanged.
+  - *Whose a value is.* A value is the function's the claim names last before
+    it in its own sentence (an abbreviation's dot, or a dot inside a token or a
+    number, ends no sentence). When the claim names no function at all, every
+    value is the cited function's. When it names one anywhere, a value its
+    sentence gives no function is recorded as given to none, saying whether it
+    comes before every function its sentence names or its sentence names
+    none; a value given to a function the cited listings do not reach is
+    recorded as given elsewhere.
   - *Where a value holds.* In this order: the listing's own text; the
     function's row in the pack's function index (its imports, its calls
     through slots the hash resolution fills, resolved names, decoded and plain
     strings and capa rules); the row of every function reachable from it
-    through callee edges, a breadth-first walk over the index's whole call
-    graph with no depth bound; and the places the run's hash-resolution and
+    through call edges, a breadth-first walk over the index's whole call graph
+    with no depth bound, read once per set of starting functions (routines
+    passed as arguments, a thread's start or a callback, are no call edges and
+    are not followed); and the places the run's hash-resolution and
     decoded-string answers put inside any of them. Nothing else excuses a
     value. API names are compared without regard to case, a module in front
     read off, the ANSI and wide spellings read as one name as the API
@@ -1914,8 +1931,10 @@ turn, each once, and what the analyst answers stands.
     reading.
   - *The question.* One per claim block, naming every value held nowhere:
     "claim n names X for function F [ev_…]; neither its listing nor its index
-    row [ev_…] holds X, and no function reachable from F through its callees
-    holds it (k functions reachable); F's row holds …", the row in the pack's
+    row [ev_…] holds X, and no function reachable from F through its call
+    edges holds it (k functions reachable); routines passed as arguments (a
+    thread's start, a callback) are not followed, only calls; F's row holds
+    …", the row in the pack's
     own words, counted instead when those run past a finding row's bound. It
     asks to keep the claim and say where the code shows it, to correct the name
     or the function, or to withdraw the claim, with a reason.
