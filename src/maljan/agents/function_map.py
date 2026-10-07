@@ -98,6 +98,8 @@ class FunctionArtefacts:
     # The offsets of the function index's rows, and the entry that holds them.
     indexed: set[int] = field(default_factory=set)
     index_entry: str = ""
+    # The rows as ``(offset, distinct artefacts of its own)``, in the pack's rank order.
+    index_rows: list[tuple[int, int]] = field(default_factory=list)
 
     def add(self, address: int, artefact: Artefact, *, virtual: bool = False) -> None:
         self.by_function.setdefault(address, []).append(artefact)
@@ -129,6 +131,9 @@ class FunctionMap:
     # How many rows the function index has, and the entry that holds it.
     indexed: int = 0
     index_entry: str = ""
+    # The index's rows no visited function is, in the pack's rank order, as
+    # ``(offset, distinct artefacts of its own)``.
+    index_unvisited: list[tuple[int, int]] = field(default_factory=list)
 
     def coverage(self) -> str:
         """``N functions visited (…); M functions reach artefacts …, K of them visited``.
@@ -163,7 +168,7 @@ class FunctionMap:
         )
 
     def empty(self) -> bool:
-        return not self.visited and not self.unvisited
+        return not self.visited and not self.unvisited and not self.index_unvisited
 
 
 def _count(n: int, one: str, many: str) -> str:
@@ -214,6 +219,9 @@ def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
             continue
         if tool == _INDEX_TOOL:
             _index_rows(found, data, str(getattr(entry, "id", "") or ""))
+            base = _stated_base(data)
+            if base and base not in bases:
+                bases.append(base)
             continue
         base = _stated_base(data)
         if base and base not in bases:
@@ -232,13 +240,19 @@ def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
 
 
 def _index_rows(found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str) -> None:
-    """The function index's rows, by offset; the last index read is the one counted."""
-    rows: set[int] = set()
+    """The function index's rows, by offset and in its rank order; the last index read counts.
+
+    The index's own ``image_base`` is one of the bases the map joins an
+    offset and its virtual address by (``function_artefacts`` adds it).
+    """
+    ranked: list[tuple[int, int]] = []
     for row in data.get("rows") or []:
         offset = _hex(row.get("offset")) if isinstance(row, dict) else None
         if offset is not None:
-            rows.add(offset)
-    found.indexed = rows
+            direct = row.get("direct")
+            ranked.append((offset, int(direct) if isinstance(direct, int) else 0))
+    found.index_rows = ranked
+    found.indexed = {offset for offset, _ in ranked}
     found.index_entry = entry_id
 
 
@@ -372,6 +386,7 @@ def _merged(pack: FunctionArtefacts | None, own: FunctionArtefacts) -> FunctionA
         virtual=set(pack.virtual) | set(own.virtual),
         indexed=set(own.indexed or pack.indexed),
         index_entry=own.index_entry if own.indexed else pack.index_entry,
+        index_rows=list(own.index_rows if own.indexed else pack.index_rows),
     )
     for key, tied in own.by_function.items():
         merged.by_function.setdefault(key, []).extend(tied)
@@ -494,17 +509,16 @@ def build_function_map(
                 entry.summary = _first_sentence(sentence)
                 break
 
+    held: set[int] = set()
     for entry in visited:
         # The spellings ``_same`` joins, looked up rather than compared row by row.
         address = entry.address
-        entry.indexed = address is not None and any(
-            key in found.indexed and _same(address, key, bases)
-            for key in (
-                address,
-                *(address - base for base in bases),
-                *(address + base for base in bases),
-            )
-        )
+        if address is None:
+            continue
+        for key in (address, *(address - b for b in bases), *(address + b for b in bases)):
+            if key in found.indexed and _same(address, key, bases):
+                entry.indexed = True
+                held.add(key)
 
     unvisited = sorted(
         ((key, tied) for key, tied in found.by_function.items() if key not in reached),
@@ -517,6 +531,7 @@ def build_function_map(
         virtual=frozenset(found.virtual),
         indexed=len(found.indexed),
         index_entry=found.index_entry,
+        index_unvisited=[row for row in found.index_rows if row[0] not in held],
     )
 
 
@@ -668,9 +683,26 @@ def function_map_block(found: FunctionMap) -> str:
         # A visit with nothing but its entry id: the transcript already
         # stamps the id on the listing, so the address is enough here.
         lines.append("also visited: " + ", ".join(_folded(e) for e in bare))
-    if found.unvisited:
+    if found.indexed:
+        # With an index, the not-visited line reads the index's rows, as the
+        # coverage line does, in the pack's rank order.
+        if found.index_unvisited:
+            lines.append(
+                f"not visited, holding artefacts in the function index ({found.index_entry}): "
+                + "; ".join(_indexed_item(found, a, n) for a, n in found.index_unvisited)
+            )
+    elif found.unvisited:
         lines.append(
             "not visited, reaching artefacts: "
             + "; ".join(_unvisited_item(found, a, tied) for a, tied in found.unvisited)
         )
     return "\n".join(lines)
+
+
+def _indexed_item(found: FunctionMap, address: int, artefacts: int) -> str:
+    where = (
+        hex(found.image_bases[0] + address)
+        if len(found.image_bases) == 1 and address < found.image_bases[0]
+        else f"offset {hex(address)}"
+    )
+    return f"{where} ({_count(artefacts, 'artefact', 'artefacts')})"

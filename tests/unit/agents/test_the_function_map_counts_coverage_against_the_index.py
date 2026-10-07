@@ -1,9 +1,11 @@
-"""With a function index in the pack, the map's coverage line counts against the index's rows.
+"""With a function index in the pack, the map's coverage and not-visited lines read its rows.
 
 The index lists every function the run's answers and the platform's decoder
-place an artefact in, so it is the better denominator: the line then says how
-many of its rows the analyst visited and names the entry. Without an index the
-line is the one it always was. Nothing else in the block changes.
+place an artefact in, so it is the one source both lines read: the coverage
+line counts the visited functions among the rows and names the entry, and the
+not-visited line lists the other rows in the pack's rank order. Without an
+index both lines are the ones they always were. Every address here is a
+neutral synthetic value.
 """
 
 from __future__ import annotations
@@ -13,64 +15,92 @@ from typing import Any
 
 from maljan.agents.function_map import build_function_map, function_artefacts, function_map_block
 from maljan.schemas.evidence import LedgerEntry
-from tests.unit.agents.test_the_function_map_is_built_from_the_ledger import (
-    BASE,
-    _blobs,
-    _claim,
-    _decompiled,
-    _entry,
-    _floss,
-    _hashes,
-)
+
+BASE = 0x10000000
 
 
-def _index(offsets: list[int], entry_id: str = "ev_0023") -> LedgerEntry:
+def _entry(entry_id: str, tool: str, args: dict[str, Any], output: str = "") -> LedgerEntry:
+    return LedgerEntry(id=entry_id, tool=tool, args=args, output=output)
+
+
+def _index(rows: list[tuple[int, int]], entry_id: str = "ev_0009") -> LedgerEntry:
+    """An index entry whose rows are ``(offset, direct)``, in the order given (its rank)."""
     output = {
         "tool": "function_index",
         "image_base": hex(BASE),
         "rows": [
-            {"function": hex(BASE + offset), "offset": hex(offset), "direct": 1}
-            for offset in offsets
+            {"function": hex(BASE + offset), "offset": hex(offset), "direct": direct}
+            for offset, direct in rows
         ],
     }
-    return _entry(entry_id, "function_index", {}, json.dumps(output), server="pipeline")
+    return _entry(entry_id, "function_index", {}, json.dumps(output))
 
 
-def _own() -> list[Any]:
-    return [
-        _decompiled("ev_0031", "0x1360bc0904c"),
-        _entry("ev_0050", "disassemble_function", {"address": "0x1360bc0b344"}, "mov rax, rbx"),
-    ]
+def _hashes() -> LedgerEntry:
+    output = {
+        "tool": "resolve_api_hashes",
+        "image_base": hex(BASE),
+        "hits": [
+            {
+                "readings": [{"set": "exports", "name": "OpenThing"}],
+                "occurrences": [{"rva": "0x1104", "function": "0x1100"}],
+            },
+            {
+                "readings": [{"set": "exports", "name": "CloseThing"}],
+                "occurrences": [{"rva": "0x2204", "function": "0x2200"}],
+            },
+        ],
+    }
+    return _entry("ev_0005", "resolve_api_hashes", {}, json.dumps(output))
 
 
-class TestTheCoverageLine:
-    def test_with_an_index_the_rows_are_the_denominator(self) -> None:
-        pack = function_artefacts([_hashes(), _blobs(), _floss(), _index([0x904C, 0x2200, 0x4110])])
-        found = build_function_map(_own(), pack, [], (BASE,))
-        assert found.coverage() == (
-            "2 functions visited (1 decompiled, 1 listed); 3 functions hold artefacts in the "
-            "function index (ev_0023), 1 of them visited"
+def _decompiled(entry_id: str, address: int) -> LedgerEntry:
+    return _entry(
+        entry_id,
+        "decompile_function",
+        {"address": hex(address)},
+        f"void FUN_{address:x}(void)\n{{\n}}\n",
+    )
+
+
+INDEX_ROWS = [(0x3300, 7), (0x1100, 4), (0x2200, 4), (0x4400, 1)]
+
+
+class TestWithAnIndex:
+    def _map(self) -> Any:
+        pack = function_artefacts([_hashes(), _index(INDEX_ROWS)])
+        return build_function_map([_decompiled("ev_0011", BASE + 0x1100)], pack, [], (BASE,))
+
+    def test_the_coverage_line_counts_the_visited_rows(self) -> None:
+        assert self._map().coverage() == (
+            "1 function visited (1 decompiled); 4 functions hold artefacts in the function "
+            "index (ev_0009), 1 of them visited"
         )
 
-    def test_a_visit_by_offset_and_a_row_by_virtual_address_are_one_function(self) -> None:
-        pack = function_artefacts([_index([0x904C])])
-        found = build_function_map([_decompiled("ev_0031", "0x904c")], pack, [], (BASE,))
-        assert found.coverage().endswith(
-            "1 function holds artefacts in the function index (ev_0023), 1 of them visited"
+    def test_the_not_visited_line_lists_the_other_rows_in_the_pack_s_rank_order(self) -> None:
+        last = function_map_block(self._map()).splitlines()[-1]
+        assert last == (
+            "not visited, holding artefacts in the function index (ev_0009): "
+            f"{hex(BASE + 0x3300)} (7 artefacts); {hex(BASE + 0x2200)} (4 artefacts); "
+            f"{hex(BASE + 0x4400)} (1 artefact)"
         )
 
-    def test_without_an_index_the_line_is_unchanged(self) -> None:
-        pack = function_artefacts([_hashes(), _blobs(), _floss()])
-        found = build_function_map(_own(), pack, [_claim("x")], (BASE,))
-        assert found.coverage() == (
-            "2 functions visited (1 decompiled, 1 listed); 5 functions reach artefacts "
-            "the analysis server tied to them, 1 of them visited"
-        )
+    def test_the_index_s_own_image_base_joins_a_visit_by_virtual_address(self) -> None:
+        pack = function_artefacts([_index(INDEX_ROWS)])
+        found = build_function_map([_decompiled("ev_0011", BASE + 0x3300)], pack, [])
+        assert BASE in found.image_bases
+        assert found.coverage().endswith("1 of them visited")
 
-    def test_the_rest_of_the_block_is_the_same_with_and_without_an_index(self) -> None:
-        plain = function_artefacts([_hashes(), _blobs(), _floss()])
-        indexed = function_artefacts([_hashes(), _blobs(), _floss(), _index([0x904C])])
-        without = function_map_block(build_function_map(_own(), plain, [], (BASE,)))
-        with_index = function_map_block(build_function_map(_own(), indexed, [], (BASE,)))
-        assert without.splitlines()[2:] == with_index.splitlines()[2:]
-        assert without.splitlines()[0] == with_index.splitlines()[0]
+
+class TestWithoutAnIndex:
+    def test_both_lines_are_the_ones_they_always_were(self) -> None:
+        pack = function_artefacts([_hashes()])
+        found = build_function_map([_decompiled("ev_0011", BASE + 0x1100)], pack, [], (BASE,))
+        lines = function_map_block(found).splitlines()
+        assert lines[1] == (
+            "coverage: 1 function visited (1 decompiled); 2 functions reach artefacts the "
+            "analysis server tied to them, 1 of them visited"
+        )
+        assert lines[-1] == (
+            f"not visited, reaching artefacts: {hex(BASE + 0x2200)} (1 resolved name; ev_0005)"
+        )
