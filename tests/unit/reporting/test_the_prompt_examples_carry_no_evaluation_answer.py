@@ -390,9 +390,16 @@ def _function_map_text() -> str:
 
 def _function_index_text() -> str:
     """The index as the pack shows it, whole and cut, its run-state line and the map's coverage."""
-    from maljan.agents.function_map import build_function_map, function_artefacts
+    import tempfile
+
+    from maljan.agents.function_map import (
+        build_function_map,
+        function_artefacts,
+        function_map_block,
+    )
     from maljan.pipeline.run_state import index_sentence
     from maljan.tools import artefact_index
+    from tests.unit.tools.synthetic_pe import SyntheticPE
 
     def cells(key: str, values: list[str], source: str) -> list[dict[str, Any]]:
         return [{key: value, "sources": [source]} for value in values]
@@ -425,30 +432,60 @@ def _function_index_text() -> str:
         "total": len(rows),
         "rows": rows,
     }
-    entry = LedgerEntry(id="ev_0005", tool=artefact_index.TOOL, output=json.dumps(data), seq=5)
+    data["absent"] = {
+        "capa": "no: [ev_0004] failed: capa produced no result",
+        "floss": artefact_index.FLOSS_NOT_REMEMBERED,
+    }
+    # Built as the pack holds it: the answer parsed into ``structured``.
+    entry = LedgerEntry(
+        id="ev_0005", tool=artefact_index.TOOL, output=json.dumps(data), structured=data, seq=5
+    )
     whole = triage_pack.pack_block([entry], 0)
-    cut = triage_pack.render_pack([entry], len(whole.split("\n", 2)[1]) + 400)
+    head_and_rows = whole.split("\n")[1:]
+    assert len(head_and_rows) == len(rows) + 1
+    assert head_and_rows[1].startswith("- 0x401000 (export ")
+    cut = triage_pack.render_pack([entry], len(head_and_rows[0]) + len(head_and_rows[1]) + 300)
+    assert cut.split("\n")[-1].startswith("2 more rows not shown here (pack room)")
     empty = triage_pack.render_pack(
         [entry.model_copy(update={"structured": {**data, "rows": [], "total": 0}})], 0
     )
+    dropped = entry.model_copy(update={"output": "", "structured": None, "truncated": True})
     found = build_function_map(
         [LedgerEntry(id="ev_0006", tool="decompile_function", args={"address": "0x1000"})],
         function_artefacts([entry]),
         [],
     )
-    served = artefact_index.head_text({**data, "capa": artefact_index.CAPA_NOT_JOINED}, 3)
+    block = function_map_block(found)
+    assert "not visited, holding artefacts in the function index (ev_0005)" in block
+    with tempfile.TemporaryDirectory() as folder:
+        text = Path(folder) / "a.txt"
+        text.write_text("plain text\n", encoding="utf-8")
+        not_pe = artefact_index.served_index(text)["error"]
+        assert "reads Windows PE images only" in not_pe
+        image = Path(folder) / "s.exe"
+        image.write_bytes(SyntheticPE(functions=[(0x1000, 0x1010)]).build())
+        nowhere = artefact_index.served_index(image, "0x9999")["row"]
+        assert nowhere.startswith("no: no function the run knows starts at or holds")
+        served = artefact_index.served_index(image)["table"]
+    not_an_address = artefact_index.address_readings("the main one", 0x400000)
+    assert isinstance(not_an_address, str) and "is not an address" in not_an_address
     served_rows = [artefact_index.row_line(row, artefact_index.THIS_ANSWER) for row in rows]
-    missing = f"no: the run knows no function starting at 0x401234 ({artefact_index._SOURCES_SAID})"
     return " ".join(
         [
             whole,
             cut,
             empty,
             index_sentence("ev_0005", data),
+            index_sentence("ev_0005", None, dropped=True),
+            index_sentence("ev_0005", None),
+            triage_pack.render_pack([dropped], 0),
             found.coverage(),
+            block,
             served,
             *served_rows,
-            missing,
+            not_pe,
+            nowhere,
+            not_an_address,
         ]
     )
 
