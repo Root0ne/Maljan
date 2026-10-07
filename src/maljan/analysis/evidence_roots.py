@@ -39,7 +39,7 @@ name). One that names none of them gives no root, and says so.
 
 Every pass is linear in the entries and their rows: roots are kept in dicts
 keyed by address, value and name, never compared pairwise, and the whole
-reading is cached per ledger.
+reading is done once per step that owns the run, from that run's ledger alone.
 """
 
 from __future__ import annotations
@@ -217,6 +217,12 @@ class EntryRoots:
     by_word: dict[str, set[str]] = field(default_factory=dict)
     by_technique: dict[str, set[str]] = field(default_factory=dict)
     technique_reason: str = ""
+    # Each root's position in ``roots``: membership and order by dict.
+    order: dict[str, int] = field(default_factory=dict)
+
+    def ordered(self, roots: set[str]) -> list[str]:
+        """``roots`` in the order this entry holds them."""
+        return sorted(roots, key=lambda r: self.order.get(r, len(self.order)))
 
     def add(
         self,
@@ -227,7 +233,8 @@ class EntryRoots:
         words: Iterable[Any] = (),
         techniques: Iterable[str] = (),
     ) -> None:
-        if root not in self.roots:
+        if root not in self.order:
+            self.order[root] = len(self.roots)
             self.roots.append(root)
         if rva is not None:
             self.by_rva.setdefault(rva, root)
@@ -548,13 +555,17 @@ class RootCount:
 
     roots: list[str] = field(default_factory=list)
     not_read: list[str] = field(default_factory=list)
+    _held: set[str] = field(default_factory=set, repr=False, compare=False)
+    _said: set[str] = field(default_factory=set, repr=False, compare=False)
 
     def add(self, roots: Iterable[str], reasons: Iterable[str]) -> None:
         for root in roots:
-            if root not in self.roots:
+            if root not in self._held:
+                self._held.add(root)
                 self.roots.append(root)
         for reason in reasons:
-            if reason not in self.not_read:
+            if reason not in self._said:
+                self._said.add(reason)
                 self.not_read.append(reason)
 
 
@@ -606,7 +617,7 @@ class RunRoots:
         ids = list(dict.fromkeys(str(i).strip().lower() for i in entry_ids if str(i).strip()))
         if not ids:
             return [], [NO_CITATION]
-        roots: list[str] = []
+        roots: dict[str, None] = {}
         reasons: list[str] = []
         for eid in ids:
             found = self.of_entry(eid)
@@ -620,15 +631,15 @@ class RunRoots:
             if not named:
                 reasons.append(f"{eid}: {NOT_NAMED.format(count=len(found.roots), entry=eid)}")
                 continue
-            roots.extend(r for r in found.roots if r in named and r not in roots)
-        return roots, reasons
+            roots.update(dict.fromkeys(found.ordered(named)))
+        return list(roots), reasons
 
     def of_assertion(self, entry_id: str, technique_id: str) -> tuple[list[str], list[str]]:
         """``(roots, no: reasons)`` for the rows of an asserting entry that name the technique."""
         found = self.of_entry(entry_id)
         held = found.by_technique.get(str(technique_id).upper())
         if held:
-            return [r for r in found.roots if r in held], []
+            return found.ordered(held), []
         eid = str(entry_id).lower()
         if not found.roots:
             return [], [f"{eid}: {found.reason}"]
@@ -638,27 +649,15 @@ class RunRoots:
         return [], [f"{eid}: {reason}"]
 
 
-_CACHE: dict[tuple[Any, ...], RunRoots] = {}
-
-
 def run_roots(ledger: Sequence[Any] | None) -> RunRoots:
-    """The roots of ``ledger``'s entries, cached per ledger."""
-    entries = list(ledger or ())
-    key = tuple(
-        (
-            str(getattr(e, "id", "") or ""),
-            str(getattr(e, "repeated_of", "") or ""),
-            bool(getattr(e, "ok", True)),
-            len(str(getattr(e, "output", "") or "")),
-        )
-        for e in entries
-    )
-    cached = _CACHE.get(key)
-    if cached is None:
-        if len(_CACHE) >= 4:
-            _CACHE.clear()
-        cached = _CACHE[key] = RunRoots(entries)
-    return cached
+    """The roots of ``ledger``'s entries, read from that ledger alone.
+
+    No module-level cache: a worker serves many jobs in one process, and entry
+    ids repeat across jobs, so nothing read for one job may be handed to
+    another. The caller that owns the run reads it once and keeps the result
+    for as long as its step lasts; it dies with the step.
+    """
+    return RunRoots(list(ledger or ()))
 
 
 def roots_phrase(roots: Sequence[str], not_read: Sequence[str]) -> str:

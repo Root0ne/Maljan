@@ -65,6 +65,7 @@ from maljan.agents.judge_agent import (
     technique_question_text,
     verdict_cut_violation,
 )
+from maljan.agents.judge_agent import QUESTION_ROOTS_LABEL as _ROOTS_LABEL
 from maljan.agents.network_analyst import NO_PACKET_TOOL_LINE, OTHER_TOOLS_THEN_ANALYZE
 from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
@@ -89,6 +90,9 @@ from maljan.agents.tool_pinning import (
     UNREADABLE_FILLED_CAPTURE,
     UNREADABLE_FILLED_CAPTURE_REMEDIATION,
 )
+from maljan.analysis import evidence_roots as _roots
+from maljan.analysis.evidence_roots import layers_and_roots as _layers_and_roots
+from maljan.analysis.evidence_roots import roots_phrase as _roots_phrase
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
 from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE
 from maljan.analysis.pcap_summary import CaptureRead
@@ -239,6 +243,30 @@ from maljan.schemas.isr_models import (
 from maljan.schemas.stix_models import Bundle
 from maljan.tools import api_hashes, binary, knowledge, string_blobs
 from maljan.tools.errors import CAPTURES_REMEDIATION, NO_CAPTURE_REMEDIATION
+
+# Every no: sentence a root reading writes, and the names of the roots.
+_ROOT_SENTENCES = [
+    getattr(_roots, name)
+    for name in (
+        "NO_ENTRY",
+        "NO_CITATION",
+        "FAILED",
+        "REFERENCE",
+        "NOTHING_TO_PLACE",
+        "BY_NAME_ONLY",
+        "NOT_NAMED",
+        "REPEAT_LOOP",
+        "SIGNATURE_UNPLACED",
+        "MATCH_UNPLACED",
+        "WHOLE_FILE",
+        "PE_HEADER",
+        "IMPORT_TABLE",
+        "EXPORT_TABLE",
+        "RESOURCE_TABLE",
+        "DEBUG_DIRECTORY",
+        "OVERLAY",
+    )
+]
 
 # The distinctive terms of the evaluation key: how the scored sample resolves its
 # APIs, checks its host, persists, configures itself, talks to its server and
@@ -1741,6 +1769,18 @@ PROMPTS: dict[str, str] = {
             {"host one.example and two.example seen"},
         )
         if v.code in ("stix.shape_names_a_value", "stix.pattern_refused")
+    ),
+    "evidence roots beside the layers, and why a cited entry gives none": " ".join(
+        [
+            _ROOTS_LABEL,
+            _layers_and_roots(2, ["0x4f58 in .text"], []),
+            _layers_and_roots(3, ["0x4f58 in .text", "the import table"], ["ev_0001: no: x"]),
+            _roots_phrase([], ["ev_0001: no: x"]),
+            *(
+                sentence.format(tool="a_tool", entry="ev_0001", count=2)
+                for sentence in _ROOT_SENTENCES
+            ),
+        ]
     ),
 }
 

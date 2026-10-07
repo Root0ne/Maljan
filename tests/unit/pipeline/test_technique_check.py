@@ -24,7 +24,6 @@ from maljan.pipeline.validation import (
     VALIDITY_CODE,
     WEAK_ALIGNMENT_CODE,
     _weak_alignment,
-    corroboration,
     corroboration_sources,
     expected_technique_scope,
     platform_mismatch_message,
@@ -34,10 +33,24 @@ from maljan.pipeline.validation import (
     validation_metrics,
     validity_check_available,
 )
+from maljan.pipeline.validation import (
+    corroboration as _corroboration,
+)
 from maljan.schemas.evidence import build_entry, format_entry_id
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from maljan.schemas.stix_models import AttackPattern, Bundle
 from maljan.tools import knowledge
+
+
+def corroboration(isrs: Any, ledger: Any) -> dict[str, dict[str, Any]]:
+    """The record's source lists, the evidence roots beside them left out: these
+    tests are about who asserts and who claims, and the roots are tested apart
+    (``tests/unit/analysis/test_corroboration_counts_evidence_roots.py``)."""
+    return {
+        tid: {k: v for k, v in row.items() if k not in ("evidence_roots", "roots_not_read")}
+        for tid, row in _corroboration(isrs, ledger).items()
+    }
+
 
 CATALOGUE: dict[str, dict[str, Any]] = {
     "T1055": {"domain": "enterprise", "platforms": ["Windows", "Linux", "macOS"]},

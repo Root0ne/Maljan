@@ -8,12 +8,13 @@ had its turn is the object dropped — and then recorded.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from maljan.pipeline.validation import (
     FEEDBACK_PREAMBLE,
     Violation,
-    corroboration,
     drop_ungrounded_indicators,
     feedback_text,
     mark_invalid_technique_ids,
@@ -24,6 +25,9 @@ from maljan.pipeline.validation import (
     validate_verdict_bundle,
     validation_metrics,
 )
+from maljan.pipeline.validation import (
+    corroboration as _corroboration,
+)
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import (
     UNVERIFIED_TECHNIQUE_MARKER,
@@ -32,6 +36,16 @@ from maljan.schemas.isr_models import (
 )
 from maljan.schemas.judgement import FamilyVerdict, JudgeAssessment, SeverityVerdict
 from maljan.schemas.stix_models import AttackPattern, Bundle, Indicator
+
+
+def corroboration(isrs: Any, ledger: Any) -> dict[str, dict[str, Any]]:
+    """The record's source lists, the evidence roots beside them left out: these
+    tests are about who asserts and who claims, and the roots are tested apart
+    (``tests/unit/analysis/test_corroboration_counts_evidence_roots.py``)."""
+    return {
+        tid: {k: v for k, v in row.items() if k not in ("evidence_roots", "roots_not_read")}
+        for tid, row in _corroboration(isrs, ledger).items()
+    }
 
 
 class _Attck:

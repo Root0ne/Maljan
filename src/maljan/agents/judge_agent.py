@@ -1421,11 +1421,21 @@ _IDENTITY_FIELDS: tuple[tuple[str, str], ...] = (
 )
 
 
+# The identity fields a submitter writes, shown as quoted values.
+_QUOTED_IDENTITY_FIELDS = frozenset({"file_name"})
+
+
 def sample_identity_block(sample: Any) -> str:
     """The sample's own facts as one block, or ``""`` when there are none."""
+    from maljan.utils.written_forms import pack_escaped
+
     data = sample if isinstance(sample, dict) else {}
+    # The submitted name is the submitter's text: quoted and escaped as the
+    # pack writes a sample's strings, one value on one line.
     rows = [
-        f"{label}: {' '.join(str(data[key]).split())}"
+        f'{label}: "{pack_escaped(str(data[key]))}"'
+        if key in _QUOTED_IDENTITY_FIELDS
+        else f"{label}: {' '.join(str(data[key]).split())}"
         for key, label in _IDENTITY_FIELDS
         if str(data.get(key) or "").strip()
     ]
