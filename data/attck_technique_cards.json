@@ -738,10 +738,14 @@
     ],
     "indicators": [
       "the sample or its drops deleted after use",
-      "event logs cleared",
+      "history or log files other than the Windows event logs deleted",
       "timestamps altered"
     ],
     "siblings": [
+      {
+        "id": "T1685.005",
+        "criterion": "the Windows event logs themselves are cleared"
+      },
       {
         "id": "T1685",
         "criterion": "security tooling is disabled, unhooked or changed (hooks removed from system libraries, services stopped)"
