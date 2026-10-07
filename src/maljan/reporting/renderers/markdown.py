@@ -1770,7 +1770,7 @@ class MarkdownRenderer:
         validation = summary.get("validation") or {}
         # Each identical finding once, with how many times it was left: a
         # record stored before the run summary folded them is folded here.
-        from maljan.pipeline.validation import folded_rows
+        from maljan.pipeline.validation import folded_rows, unresolved_total
 
         unresolved = folded_rows(
             [row for row in (validation.get("unresolved") or []) if isinstance(row, dict)]
@@ -1785,7 +1785,7 @@ class MarkdownRenderer:
             not_run = validation.get("not_run") or []
             lines.append(
                 f"**Validation:** {validation.get('retries', 0)} feedback retries, "
-                f"{len(others)} finding(s) left unresolved"
+                f"{unresolved_total(others)} finding(s) left unresolved"
                 + (f"; checks that could not run: {', '.join(not_run)}" if not_run else "")
                 + "."
             )

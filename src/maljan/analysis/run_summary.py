@@ -157,6 +157,13 @@ VALIDATION_ANSWER_KEYS: tuple[str, ...] = (
 )
 
 
+def unresolved_total(rows: list[dict[str, str]]) -> int:
+    """How many findings the rows stand for, a folded row by its ``count``."""
+    from maljan.pipeline.validation import unresolved_total as total
+
+    return total(rows)
+
+
 @dataclass
 class ValidationMetrics:
     """What the validation loop found, and what it could not get fixed.
@@ -1106,7 +1113,7 @@ class RunSummary:
                 "| Metric | Value |",
                 "|---|---|",
                 f"| Feedback retries | {v.retries} |",
-                f"| Unresolved findings | {len(v.unresolved)} |",
+                f"| Unresolved findings | {unresolved_total(v.unresolved)} |",
                 "",
             ]
             if v.by_code:

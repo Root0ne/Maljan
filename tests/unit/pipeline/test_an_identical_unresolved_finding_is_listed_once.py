@@ -61,4 +61,17 @@ def test_section_13_lists_a_stored_repeated_row_once_with_its_count() -> None:
 
     assert markdown.count("CLAIM 'x' carries TECHNIQUE T1001.") == 1
     assert f"`{CODE}` (network) (left 3 times): " in markdown
-    assert "1 finding(s) left unresolved" in markdown
+    # The headline counts every finding left, as it always did.
+    assert "3 finding(s) left unresolved" in markdown
+
+
+def test_the_run_summary_counts_every_finding_left() -> None:
+    from maljan.analysis.run_summary import RunSummaryBuilder
+
+    same = _violation("CLAIM 'x' carries TECHNIQUE T1001.")
+    other = _violation("CLAIM 'y' carries TECHNIQUE T1001.")
+    metrics = validation_metrics(1, [("network", same)] * 7 + [("static", other)])
+    text = RunSummaryBuilder(start_time=0.0).set_validation(metrics).build().to_markdown()
+
+    assert "| Unresolved findings | 8 |" in text
+    assert "(left 7 times)" in text

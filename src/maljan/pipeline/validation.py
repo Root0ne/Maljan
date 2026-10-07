@@ -8072,6 +8072,17 @@ def retry_drop_row(
     }
 
 
+def unresolved_total(rows: Sequence[Mapping[str, Any]]) -> int:
+    """How many findings ``rows`` stand for, each folded row by its count (:func:`folded_rows`)."""
+    total = 0
+    for row in rows:
+        try:
+            total += max(1, int(str(dict(row).get("count") or 1)))
+        except ValueError:
+            total += 1
+    return total
+
+
 def validation_metrics(
     retries: int,
     unresolved: Sequence[tuple[str, Violation]],
