@@ -1178,16 +1178,16 @@ class _Pack:
         for tool in _INDEX_SOURCES:
             entry = latest.get(tool)
             if entry is None:
-                absent[tool] = "no: the pack holds no entry of it"
+                absent[tool] = INDEX_SOURCE_NOT_IN_PACK
             elif entry.ok and isinstance(entry.structured, dict):
                 joined[tool] = (entry.id, entry.structured)
             elif entry.ok:
-                absent[tool] = f"no: [{entry.id}] holds no readable answer"
+                absent[tool] = INDEX_SOURCE_UNREADABLE.format(entry=entry.id)
             elif _was_not_made(entry):
                 said = str(entry.error or entry.output or "")[len(NOT_RUN_PREFIX) :].strip()
-                absent[tool] = f"no: [{entry.id}] {_short(said, 200)}"
+                absent[tool] = f"no: [{entry.id}] {_one_line(said)}"
             else:
-                failed = _short(entry.error or entry.output, 200)
+                failed = _one_line(entry.error or entry.output)
                 absent[tool] = f"no: [{entry.id}] failed: {failed}"
         args: dict[str, Any] = {"path": path}
         if joined:
@@ -1209,6 +1209,17 @@ class _Pack:
 
 # The pack's answers the function index joins, by tool.
 _INDEX_SOURCES = ("pe_info", "capa", "floss", "resolve_api_hashes", "decode_string_blobs")
+
+
+# Why the index could not join one of the pack's answers, by case.
+INDEX_SOURCE_NOT_IN_PACK = "no: the pack holds no entry of it"
+INDEX_SOURCE_UNREADABLE = "no: [{entry}] holds no readable answer"
+
+
+def _one_line(text: str | None) -> str:
+    """``text`` whole, on one line: the head that carries it is bounded by the pack's room."""
+    return " ".join(str(text or "").split())
+
 
 # The formats the constant scan reads: the executable images.
 CONSTANT_FORMATS = frozenset({"pe", "elf", "macho"})

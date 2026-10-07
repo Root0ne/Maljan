@@ -1039,6 +1039,12 @@ CAPA_NOT_JOINED = (
     "entry joins capa's answer"
 )
 
+# What the served index says of a source it ran that raised, or answered an error.
+FAILED_HERE = "no: it failed here ({})"
+ERROR_HERE = "no: it answered an error here ({})"
+# What it says when FLOSS's remembered rows for the file could not be read.
+FLOSS_UNREADABLE = "no: FLOSS's rows for this file could not be read ({})"
+
 # What the served index says of FLOSS when this server holds no FLOSS answer for the file.
 FLOSS_NOT_REMEMBERED = "no: FLOSS has not run on this file in this server"
 
@@ -1127,7 +1133,7 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
         try:
             value = call()
         except Exception as exc:  # noqa: BLE001 - stated under ``absent``, never lost
-            absent[name] = f"no: it failed here ({type(exc).__name__}: {exc})"
+            absent[name] = FAILED_HERE.format(f"{type(exc).__name__}: {exc}")
             continue
         if isinstance(value, dict) and not value.get("error"):
             answers[name] = (name, value)
@@ -1135,12 +1141,12 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
             said = value.get("error") if isinstance(value, dict) else value
             if isinstance(said, dict):
                 said = said.get("message") or said
-            absent[name] = f"no: it answered an error here ({said})"
+            absent[name] = ERROR_HERE.format(said)
     try:
         floss_rows = emulated_strings.remembered_rows(str(path))
     except Exception as exc:  # noqa: BLE001 - stated under ``absent``, never lost
         floss_rows = []
-        absent["floss"] = f"no: FLOSS's rows for this file could not be read ({exc})"
+        absent["floss"] = FLOSS_UNREADABLE.format(exc)
     if floss_rows:
         answers["floss"] = ("floss", {"strings": floss_rows})
     elif "floss" not in absent:
