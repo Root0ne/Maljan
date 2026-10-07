@@ -63,14 +63,15 @@ class TestThePackRunsThem:
     def test_a_pe_gets_both_after_every_other_step(self, tmp_path: Path) -> None:
         result = _pack(_sample(tmp_path))
         tools = [entry.tool for entry in result.entries]
-        # Only the deobfuscation passes come after them.
-        assert tools[-4:] == [
+        # Only the deobfuscation passes and the function index come after them.
+        assert tools[-5:] == [
             "resolve_api_hashes",
             "decode_string_blobs",
             "api_capability",
             "find_crypto_constants",
+            "function_index",
         ]
-        hashes, blobs, _lookup = result.entries[-4:-1]
+        hashes, blobs, _lookup = result.entries[-5:-2]
         assert hashes.ok and blobs.ok
         assert hashes.structured["total"] == 2
         assert blobs.structured["results"][0]["text"] == "open the settings file"
@@ -79,7 +80,7 @@ class TestThePackRunsThem:
         self, tmp_path: Path
     ) -> None:
         result = _pack(_sample(tmp_path))
-        lookup = result.entries[-2]
+        lookup = result.entries[-3]
 
         assert lookup.tool == "api_capability"
         assert lookup.args["api_names"] == []

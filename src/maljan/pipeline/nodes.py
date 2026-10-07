@@ -1656,6 +1656,9 @@ def brief_agent(agent: Any, state: AnalysisState, container: ServiceContainer) -
     # What the analysis server tied to each function, read once from the pack:
     # the function map joins it to the functions the agent reads.
     agent.pack_function_artefacts = pack_function_artefacts(state)
+    # The pack's entries themselves: a claim citing one is checked against
+    # what it holds (``pipeline.function_claims``).
+    agent.pack_entries = pack_entries(state.get("evidence_ledger") or [])
     # The routed format, so the platform check compares the agent's
     # techniques against the sample it is looking at.
     agent.sample_format = (
@@ -4633,6 +4636,8 @@ def make_judge_node(
                             facts_block=pack_text(state, container),
                             run_state=render_run_state(state),
                             verdict_timed_out=VERDICT_TIMEOUT_CODE in _verdict_codes,
+                            # The run's calls, for each technique's evidence roots.
+                            ledger=_ledger,
                         )
                     except Exception as _exc:  # noqa: BLE001 — an unasked question withholds nothing
                         logger.warning(

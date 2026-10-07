@@ -1594,20 +1594,54 @@ def technique_check_note(findings: Any) -> str:
     else:
         rows.extend(findings or [])
     lines: list[str] = []
+    functions: list[str] = []
+    unasked: list[str] = []
     for row in rows:
         data = row if isinstance(row, dict) else getattr(row, "__dict__", {}) or {}
         code = str(data.get("code") or "")
+        message = " ".join(str(data.get("message") or "").split())
+        if code == FUNCTION_CLAIM_UNHELD:
+            # The facts alone: the sentence addressed to the analyst is not the judge's.
+            fact = " ".join(message.replace(FUNCTION_QUESTION_ASK, " ").split())
+            not_asked = str(data.get("asked") or "") == "false" or data.get("asked") is False
+            (unasked if not_asked else functions).append(f"- {code}: {fact}")
         if code not in (PLATFORM_MISMATCH_CODE, WEAK_ALIGNMENT_CODE):
             continue
-        message = " ".join(str(data.get("message") or "").split())
         lines.append(f"- {code}: {message}")
-    if not lines:
-        return ""
-    return (
-        "TECHNIQUE CHECK — claims the ATT&CK check questioned and the analyst kept. The ids "
-        "are the analysts' own; the check names what disagrees with them and nothing here "
-        "changed them.\n" + "\n".join(lines)
-    )
+    notes = []
+    if lines:
+        notes.append(
+            "TECHNIQUE CHECK — claims the ATT&CK check questioned and the analyst kept. The ids "
+            "are the analysts' own; the check names what disagrees with them and nothing here "
+            "changed them.\n" + "\n".join(lines)
+        )
+    if functions:
+        notes.append(FUNCTION_CHECK_HEAD + "\n" + "\n".join(functions))
+    if unasked:
+        notes.append(FUNCTION_CHECK_NOT_ASKED_HEAD + "\n" + "\n".join(unasked))
+    return "\n\n".join(notes)
+
+
+# The function claim check's code (``pipeline.function_claims``), named here so
+# the judge's note reads its rows without importing the check.
+FUNCTION_CLAIM_UNHELD = "isr.function_claim_unheld"
+FUNCTION_CHECK_HEAD = (
+    "FUNCTION CHECK — claims naming a call or a string for a function whose own facts hold "
+    "none of it, which the analyst was asked about and kept. The claims are the analysts' "
+    "own; the check names what the function's facts hold and nothing here changed them."
+)
+FUNCTION_CHECK_NOT_ASKED_HEAD = (
+    "FUNCTION CHECK, NOT ASKED — claims naming a call or a string for a function whose own "
+    "facts hold none of it, which the analyst was never asked about: no turn was left to ask "
+    "on, as each line says. Nothing here changed the claims."
+)
+# What the function claim question asks of the analyst, after the facts it states;
+# the judge's note leaves it out.
+FUNCTION_QUESTION_ASK = (
+    "A claim about a function is published as what that function's code does. Keep the claim "
+    "if its code shows it and say where, correct the name or the function it is given to, or "
+    "withdraw the claim, with a reason; what you answer stands."
+)
 
 
 # The id inside an ``isr.ungrounded_technique`` message, which is where the
@@ -8379,6 +8413,12 @@ def corroboration(
 
     The same collection feeds the judge's evidence-summary block, so the metric
     the report carries and the block the judge read cannot disagree.
+
+    Each row also states the distinct evidence roots its sources read
+    (``evidence_roots``, ``analysis.evidence_roots``): the places the claims
+    and findings naming it cite, and the rows of each asserting tool's entry
+    that name it; ``roots_not_read`` says why a cited entry gave none. Two
+    sources reading one place are one root. Nothing decides on it.
     """
     from maljan.pipeline.evidence_summary import (
         ASSERTING_SOURCES,
@@ -8388,6 +8428,7 @@ def corroboration(
 
     agents = {str(getattr(isr, "agent_id", "") or name) for name, isr in (isrs or {}).items()}
     associations = catalogue_associations(ledger)
+    roots = technique_roots(isrs, ledger)
     out: dict[str, dict[str, list[str]]] = {}
     collected = collect(isrs, ledger)
     for tid in associations:
@@ -8415,7 +8456,63 @@ def corroboration(
         reason = _retired_reason(tid)
         if reason:
             row["retired_reason"] = reason
+        counted = roots.get(tid)
+        if counted is not None and counted.roots:
+            row["evidence_roots"] = list(counted.roots)
+        if counted is not None and counted.not_read:
+            row["roots_not_read"] = list(counted.not_read)
         out[tid] = row
+    return out
+
+
+def technique_roots(isrs: dict[str, Any] | None, ledger: Sequence[Any] | None) -> dict[str, Any]:
+    """Per technique id, the evidence roots its claims, findings and asserting rows read.
+
+    ``{tid: RootCount}``, read over the sources ``evidence_summary.collect``
+    counts: a valid claim's statement and evidence line, a finding's text and
+    ``evidence_ids``, and each asserting tool's rows that name the id. Empty
+    without a ledger.
+    """
+    from maljan.analysis.evidence_roots import RootCount, run_roots
+    from maljan.pipeline.evidence_summary import (
+        ASSERTING_SOURCES,
+        _base_tool_name,
+        _technique_ids,
+        invalid_technique_ids,
+    )
+
+    entries = list(ledger or ())
+    if not entries:
+        return {}
+    found = run_roots(entries)
+    out: dict[str, RootCount] = {}
+    for isr in (isrs or {}).values():
+        for claim in getattr(isr, "claims", None) or []:
+            if not getattr(claim, "technique_id_valid", True):
+                continue
+            tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
+            if not tid:
+                continue
+            said = f"{getattr(claim, 'claim', '') or ''} {getattr(claim, 'evidence_ref', '') or ''}"
+            out.setdefault(tid, RootCount()).add(*found.of_statement(said, entry_ids_in(said)))
+        for finding in getattr(isr, "findings", None) or []:
+            said = f"{getattr(finding, 'title', '') or ''} {getattr(finding, 'detail', '') or ''}"
+            cited = [str(i) for i in getattr(finding, "evidence_ids", None) or [] if i]
+            for raw in getattr(finding, "technique_ids", None) or []:
+                tid = str(raw or "").strip().upper()
+                if tid:
+                    out.setdefault(tid, RootCount()).add(*found.of_statement(said, cited))
+    invalid = invalid_technique_ids(entries)
+    for entry in entries:
+        if _base_tool_name(getattr(entry, "tool", "")) not in ASSERTING_SOURCES:
+            continue
+        if getattr(entry, "repeated_of", None):
+            continue
+        for tid in _technique_ids(getattr(entry, "structured", None)):
+            if tid not in invalid:
+                out.setdefault(tid, RootCount()).add(
+                    *found.of_assertion(str(getattr(entry, "id", "") or ""), tid)
+                )
     return out
 
 

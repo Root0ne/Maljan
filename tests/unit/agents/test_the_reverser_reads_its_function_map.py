@@ -129,7 +129,8 @@ def test_every_call_runs_and_the_map_rides_the_latest_answer() -> None:
     last = [str(m.content) for m in model.seen[2] if isinstance(m, ToolMessage)][-1]
     # Its answer is the function ev_0001 holds, so it is handed under that id
     # and filed as a repeat of it.
-    assert last.startswith(f"[ev_0001]\n{LISTING}")
+    assert last.startswith("[ev_0001]\n<<tool output [ev_0001] ")
+    assert LISTING in last
     assert same_function_notice("FUN_1360bc0904c", "ev_0001") in last
     assert FUNCTION_MAP_HEAD in last
     assert "also visited: 0x1360bc0904c" in last

@@ -58,6 +58,11 @@
       "pattern",
       "timeout_s"
     ],
+    "function_index": [
+      "address",
+      "carved_path",
+      "path"
+    ],
     "hashes": [
       "carved_path",
       "path"
@@ -160,6 +165,7 @@
     "elf_info",
     "find_crypto_constants",
     "floss",
+    "function_index",
     "hashes",
     "identify_file",
     "iocs_from_file",

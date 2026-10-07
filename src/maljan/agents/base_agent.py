@@ -52,6 +52,14 @@ from maljan.llm.context_window import (
 )
 from maljan.llm.generation_rate import ModelCallDeadline
 from maljan.llm.stream_watch import StopRule, current_rule, ended_while_streaming, watching
+from maljan.pipeline.function_claims import (
+    FUNCTION_CLAIM_UNHELD_CODE,
+    FunctionClaimCheck,
+    check_function_claims,
+    facts_unread,
+    function_facts,
+    listed_functions,
+)
 from maljan.pipeline.run_state import NO_LIMIT, NoLimit, budget_line
 from maljan.pipeline.turns import with_question
 from maljan.pipeline.validation import (
@@ -1400,10 +1408,10 @@ async def retry_on_connection_error(
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-def _library_blocks(isr: AgentISR) -> int:
-    """How many claim blocks of ``isr`` are library-only claims, each block once."""
+def _flagged_blocks(isr: AgentISR, indexes: Sequence[int]) -> int:
+    """How many claim blocks of ``isr`` the claims at ``indexes`` are in, each block once."""
     blocks = claim_block_indexes(isr.claims)
-    return len({blocks[index] for index in library_only_claims(isr) if index < len(blocks)})
+    return len({blocks[index] for index in indexes if index < len(blocks)})
 
 
 def describe_exception_for_log(exc: BaseException) -> str:
@@ -3081,7 +3089,11 @@ def earlier_chunks_block(entries: Sequence[Any]) -> str:
                 remediation=str(getattr(entry, "remediation", "") or ""),
             ).split()
         )
-        said = f": {headline}" if headline else ""
+        # Shown through the one view of a tool answer (``agents.tool_fence``):
+        # an excerpt inside the platform's own line is one quoted value.
+        from maljan.agents.tool_fence import excerpt_view
+
+        said = f": {excerpt_view(headline)}" if headline else ""
         lines.append(f"- {tool}({shown}) \u2192 {entry_id}{failed}{said}")
     if not lines:
         return ""
@@ -3458,6 +3470,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         self._live_map_entries: list[LedgerEntry] | None = None
         # What the analysis server tied to each function, briefed by the node.
         self.pack_function_artefacts: Any = None
+        # The pack's own entries, which a claim may cite beside the agent's.
+        self.pack_entries: list[Any] = []
         # Bytes of tool output this agent has already kept. The budget is the
         # agent's, not the loop's: a chunked analysis re-enters the loop once
         # per chunk and would otherwise be handed the whole budget again on
@@ -3968,8 +3982,27 @@ class BaseAnalyst(BudgetMeter, ABC):
             body = f"{body}\n{line}"
         if self._says_no_room():
             body = f"{body}\n{NO_ROOM_RUN_STATE}"
-        found = self._function_map_text()
+        found = self._function_map_text(self._map_room(len(body)))
         return f"{body}\n{found}" if found else body
+
+    def _map_room(self, used: int) -> int | None:
+        """The characters the function map block may take after ``used`` of the block, or ``None``.
+
+        The derivation a tool answer arriving now is given
+        (``ContextBudget.cap_without_recording``: the window less the reply
+        room and what this conversation holds, at the answer share), less
+        what the run-state lines already take. ``None`` where no window was
+        measured: the map's index line then names the index without rows.
+        """
+        from maljan.llm.context_window import ContextBudget
+
+        budget = self._context_budget()
+        try:
+            if not isinstance(budget, ContextBudget) or not budget.derives:
+                return None
+            return max(0, int(budget.cap_without_recording(self.name)) - used - 1)
+        except Exception:  # noqa: BLE001 — a budget is never worth a lost turn
+            return None
 
     def _function_map_sources(self) -> tuple[list[LedgerEntry], list[ClaimEvidence]]:
         """This job's kept entries and claims, emptied first when the job has changed."""
@@ -3986,7 +4019,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         live = getattr(self, "_live_map_entries", None) or []
         return [*rows, *live]
 
-    def _function_map_text(self) -> str:
+    def _function_map_text(self, room: int | None = None) -> str:
         """The function map block for this agent as of now, or ``""``; never raises."""
         from maljan.agents.function_map import build_function_map, function_map_block
 
@@ -4000,7 +4033,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             # Only an agent that has read a function is shown the map: the
             # pack's artefacts alone are already in the pack it reads.
-            return function_map_block(found) if found.visited else ""
+            return function_map_block(found, room) if found.visited else ""
         except Exception as exc:  # noqa: BLE001 — the map never costs a turn
             self.logger.debug("%s: function map left out (%s).", self.name, exc)
             return ""
@@ -6736,6 +6769,45 @@ class BaseAnalyst(BudgetMeter, ABC):
                 ]
             )
         )
+        # The functions this analyst's own calls listed, and their facts: a
+        # claim naming a call or a string its function's facts do not hold
+        # is stated to it, once (``pipeline.function_claims``).
+        own_entries = list(getattr(self, "_evidence_entries", None) or [])
+        listed = listed_functions(own_entries)
+        facts: Any = None
+        facts_failed = ""
+        if listed:
+            try:
+                kept = getattr(self, "_function_map_entries", None)
+                copies = list(kept()) if callable(kept) else []
+                facts = function_facts(
+                    [*copies, *own_entries],
+                    getattr(self, "pack_function_artefacts", None),
+                    pack_entries=list(getattr(self, "pack_entries", None) or ()),
+                    facts_block=str(getattr(self, "facts_block", "") or ""),
+                    bases=image_bases,
+                )
+            except Exception as exc:  # noqa: BLE001 — no facts, no function question
+                facts_failed = facts_unread(exc)
+                self.logger.warning("%s: function claims %s.", self.name, facts_failed)
+                facts = None
+        function_checks: dict[int, FunctionClaimCheck] = {}
+
+        def _function_check(candidate: AgentISR) -> FunctionClaimCheck:
+            key = id(candidate)
+            if key not in function_checks:
+                if facts_failed:
+                    function_checks[key] = FunctionClaimCheck(not_checked=[facts_failed])
+                    return function_checks[key]
+                try:
+                    function_checks[key] = check_function_claims(
+                        candidate, listed, facts, image_bases
+                    )
+                except Exception as exc:  # noqa: BLE001 — a check that fails asks nothing
+                    failed = facts_unread(exc)
+                    self.logger.warning("%s: function claims %s.", self.name, failed)
+                    function_checks[key] = FunctionClaimCheck(not_checked=[failed])
+            return function_checks[key]
 
         # The validity check answers from the vendored id universe; a box
         # without it cannot check anything, and says so in the run summary
@@ -6841,6 +6913,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 *unread,
                 *([undescribed] if undescribed is not None else []),
                 *([library_only] if library_only is not None else []),
+                *_function_check(candidate).violations,
                 *validate_isr(
                     candidate,
                     attck=knowledge,
@@ -6874,6 +6947,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         except Exception as exc:  # noqa: BLE001
             self.logger.warning("Validation skipped (%s).", exc)
             return isr
+        # What the function claim check read of this answer, on the loop's
+        # record: how many claims it checked and asked about, and each it
+        # could state no fact for, with why.
+        if not only_cut and listed:
+            checked = _function_check(isr)
+            if checked.checked or checked.not_checked:
+                BaseAnalyst._note_on_last_loop(  # type: ignore[arg-type]
+                    self, "function_claims", checked.record()
+                )
         if not initial:
             return isr
 
@@ -6913,6 +6995,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     CLAIMS_UNDER_DISPUTES_CODE,
                     DECOMPILED_NOT_DESCRIBED_CODE,
                     LIBRARY_ONLY_CLAIMS_CODE,
+                    FUNCTION_CLAIM_UNHELD_CODE,
                 )
                 else v
                 for v in initial
@@ -7123,11 +7206,20 @@ class BaseAnalyst(BudgetMeter, ABC):
                     [v.subject for v in initial if v.subject],
                     messages,
                     left,
-                    set_aside=(
-                        [first_answer.claims[i] for i in library_only_claims(first_answer)]
-                        if any(v.code == LIBRARY_ONLY_CLAIMS_CODE for v in initial)
-                        else []
-                    ),
+                    set_aside=[
+                        *(
+                            [first_answer.claims[i] for i in library_only_claims(first_answer)]
+                            if any(v.code == LIBRARY_ONLY_CLAIMS_CODE for v in initial)
+                            else []
+                        ),
+                        # A claim asked about its function's facts may be
+                        # withdrawn: that is the answer, not lost work.
+                        *(
+                            [first_answer.claims[i] for i in _function_check(first_answer).flagged]
+                            if any(v.code == FUNCTION_CLAIM_UNHELD_CODE for v in initial)
+                            else []
+                        ),
+                    ],
                 )
             return kept
 
@@ -7199,24 +7291,43 @@ class BaseAnalyst(BudgetMeter, ABC):
             # Counted in the claim blocks the analyst wrote, not in claims: a
             # block listing several ids is one claim per id, and taking a
             # rejected id off its line is an answer, not lost work.
+            # Asked about claims whose function's facts hold none of what they
+            # name too: the claims either question asked about are set aside
+            # together, so a retry answering both is judged by the one rule.
             blocks_first = count_claim_blocks(first_answer.claims)
             blocks_retried = count_claim_blocks(retried.claims)
-            library_first = _library_blocks(first_answer)
-            library_retried = _library_blocks(retried)
+            function_asked = any(v.code == FUNCTION_CLAIM_UNHELD_CODE for v in initial)
+
+            def _asked_blocks(answer: AgentISR) -> int:
+                indexes = set(library_only_claims(answer))
+                if function_asked:
+                    indexes |= set(_function_check(answer).flagged)
+                return _flagged_blocks(answer, sorted(indexes))
+
+            aside_first = _asked_blocks(first_answer)
+            aside_retried = _asked_blocks(retried) if aside_first else 0
             if (
                 not only_cut
-                and library_first
+                and aside_first
                 and retried.claims
                 and blocks_retried < blocks_first
-                and blocks_retried - library_retried >= blocks_first - library_first
+                and blocks_retried - aside_retried >= blocks_first - aside_first
             ):
                 self.logger.info(
-                    "Validation: '%s' answered the library-claims question with %d claim "
-                    "block(s) against %d, %d of them library-only; its answer is kept.",
+                    (
+                        "Validation: '%s' answered the library-claims and function claim "
+                        "questions with %d claim block(s) against %d, %d of them asked about; "
+                        "its answer is kept."
+                    )
+                    if function_asked
+                    else (
+                        "Validation: '%s' answered the library-claims question with %d claim "
+                        "block(s) against %d, %d of them library-only; its answer is kept."
+                    ),
                     self.name,
                     blocks_retried,
                     blocks_first,
-                    library_first,
+                    aside_first,
                 )
                 return retried
             if blocks_retried < blocks_first:

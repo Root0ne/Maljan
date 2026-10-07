@@ -220,6 +220,15 @@ class LedgerEntry(BaseModel):
     structured: dict[str, Any] | list[Any] | None = Field(
         default=None, description="Parsed result when the tool returned JSON."
     )
+    function_ranges: dict[str, list[list[str]]] | None = Field(
+        default=None,
+        description=(
+            "The function index's alone: the file's own exception-directory ranges, by "
+            "function start, as offsets from the image base, end exclusive. A fact beside the "
+            "answer for evidence roots (analysis.evidence_roots): never shown to a model, never "
+            "charged to the evidence byte budget, and not part of the answer."
+        ),
+    )
     truncated: bool = Field(
         default=False,
         description=(

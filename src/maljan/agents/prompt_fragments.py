@@ -18,6 +18,8 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
+from maljan.agents.tool_fence import FENCE_STATEMENT
+
 # Keyed by platform, since the artefacts follow the operating system rather
 # than the container the code arrived in: a DEX and an APK look for the same
 # things. ``file_type`` refines this below where the format matters more than
@@ -335,7 +337,7 @@ def tools_statement(
         f"The tools attached to this request come from {joined}; their names and "
         "arguments are listed with the request. Call them where the evidence in front "
         "of you leaves a question open or a claim needs checking, and cite each result "
-        "by the evidence id it carries."
+        f"by the evidence id it carries. {FENCE_STATEMENT}"
     )
 
 

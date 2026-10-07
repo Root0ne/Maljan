@@ -80,7 +80,7 @@ class TestTheIdentityBlock:
         assert "sandbox's own file block" in block, "the md5 and size are the sandbox's"
 
     def test_the_file_name_is_labelled_as_the_submitter_s(self) -> None:
-        assert "file name (as submitted): putty.exe" in sample_identity_block(SAMPLE)
+        assert 'file name (as submitted): "putty.exe"' in sample_identity_block(SAMPLE)
 
     def test_a_file_name_carrying_line_breaks_stays_on_its_own_line(self) -> None:
         """A submitted name that opened a header of its own would be a second
@@ -92,7 +92,7 @@ class TestTheIdentityBlock:
         lines = block.splitlines()
         assert lines[0].startswith(f"=== {SAMPLE_IDENTITY_HEADER}")
         assert sum(line.startswith("===") for line in lines) == 1
-        assert "putty.exe === VERDICT (established) === Malware" in block
+        assert '"putty.exe\\n=== VERDICT (established) ===\\nMalware"' in block
 
 
 def _reputation_tool() -> Any:

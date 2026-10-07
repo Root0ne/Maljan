@@ -581,6 +581,13 @@ class CapabilityCell(BaseModel):
     # How many analyst statements naming the technique repeated one written
     # before them, word for word once normalised, and were counted once.
     identical_statements: int = 0
+    # The distinct places in the sample the analyst statements naming the
+    # technique cite (``analysis.evidence_roots``): two layers reading one
+    # string at one place are one root. A fact beside the layers; nothing
+    # decides on it. Empty on rows built without the ledger.
+    evidence_roots: list[str] = Field(default_factory=list)
+    # One ``<entry id>: no: <reason>`` per cited entry that gave no root.
+    roots_not_read: list[str] = Field(default_factory=list)
 
 
 class TTPMapping(BaseModel):
@@ -602,6 +609,9 @@ class TTPMapping(BaseModel):
     # See ``CapabilityCell.independent_layers`` and ``identical_statements``.
     independent_layers: list[str] = Field(default_factory=list)
     identical_statements: int = 0
+    # See ``CapabilityCell.evidence_roots`` and ``roots_not_read``.
+    evidence_roots: list[str] = Field(default_factory=list)
+    roots_not_read: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

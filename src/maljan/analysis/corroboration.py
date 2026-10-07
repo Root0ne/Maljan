@@ -18,7 +18,7 @@ def corroboration_row(row: Mapping[str, Any] | Sequence[str] | None) -> dict[str
     ``retired_in`` — the ATT&CK release that retired the id, when a source
     asserted one the catalogue no longer has — and ``associated_by`` — the
     API catalogue's association, which is reference and not a source —
-    travel with the row.
+    travel with the row, as do ``evidence_roots`` and ``roots_not_read``.
     """
     if isinstance(row, Mapping):
         out: dict[str, Any] = {
@@ -33,6 +33,12 @@ def corroboration_row(row: Mapping[str, Any] | Sequence[str] | None) -> dict[str
             out["associated_by"] = [str(x) for x in row["associated_by"]]
         if row.get("not_published"):
             out["not_published"] = str(row["not_published"])
+        # The distinct evidence roots the sources read (``analysis.evidence_roots``),
+        # and why a cited entry gave none: facts beside the two lists.
+        if row.get("evidence_roots"):
+            out["evidence_roots"] = [str(x) for x in row["evidence_roots"]]
+        if row.get("roots_not_read"):
+            out["roots_not_read"] = [str(x) for x in row["roots_not_read"]]
         return out
     return {"asserted_by": [], "claimed_by": [str(x) for x in (row or [])]}
 

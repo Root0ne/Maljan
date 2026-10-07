@@ -52,6 +52,8 @@ import time
 import unicodedata
 from typing import Any, NamedTuple
 
+from maljan.agents.tool_fence import json_view
+
 __all__ = [
     "BOOKKEEPING_KEY",
     "MAX_SHORTENABLE_CHARS",
@@ -693,7 +695,9 @@ def shorten_json_document(
         return Shortening(text, False)
     try:
         compact = json.dumps(document, ensure_ascii=False, separators=_COMPACT)
-        whole = _encodable(compact, document)
+        # Written as a model is shown it (``tool_fence.json_view``): a raw
+        # break character inside a value is its escape, the value unchanged.
+        whole = json_view(_encodable(compact, document))
     except (ValueError, TypeError, RecursionError):
         return Shortening(text, False)
     if len(whole) <= whole_cap:
@@ -765,7 +769,7 @@ def shorten_json_document(
     # the per-unit costs are exact, so the result is normally inside the limit
     # on the first try and never far outside it.
     for _ in range(3):
-        result = json.dumps(document, ensure_ascii=False, separators=separators)
+        result = json_view(json.dumps(document, ensure_ascii=False, separators=separators))
         if len(result) <= limit:
             return Shortening(result, True)
         if time.monotonic() >= deadline:

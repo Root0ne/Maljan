@@ -30,6 +30,9 @@ class EvidenceEntryResponse(BaseModel):
     model: str | None = None
     output: str = ""
     structured: Any | None = None
+    # The function index's exception-directory ranges kept beside its answer;
+    # ``None`` on every other entry and on a row older than the column.
+    function_ranges: Any | None = None
     # Whether the output was dropped to keep the agent inside its byte budget.
     # It is the only thing that says so, and a reader has to say it from this
     # rather than from an empty ``output``: a failed call is empty too.

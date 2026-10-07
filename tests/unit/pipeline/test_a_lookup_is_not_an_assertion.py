@@ -15,10 +15,20 @@ from typing import Any
 
 from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.pipeline.evidence_summary import summarise
-from maljan.pipeline.validation import corroboration
+from maljan.pipeline.validation import corroboration as _corroboration
 from maljan.schemas.evidence import build_entry, format_entry_id
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from maljan.tools import knowledge
+
+
+def corroboration(isrs: Any, ledger: Any) -> dict[str, dict[str, Any]]:
+    """The record's source lists, the evidence roots beside them left out: these
+    tests are about who asserts and who claims, and the roots are tested apart
+    (``tests/unit/analysis/test_corroboration_counts_evidence_roots.py``)."""
+    return {
+        tid: {k: v for k, v in row.items() if k not in ("evidence_roots", "roots_not_read")}
+        for tid, row in _corroboration(isrs, ledger).items()
+    }
 
 
 def _entry(tool: str, payload: dict[str, Any], seq: int, *, agent: str = "static"):

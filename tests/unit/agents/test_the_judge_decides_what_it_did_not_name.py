@@ -26,6 +26,7 @@ from maljan.agents.judge_agent import (
     read_technique_answer,
     technique_question_text,
 )
+from maljan.agents.tool_fence import fenced
 from maljan.extractors.capability_matrix import (
     FINDING_ONLY_REASON,
     NOT_ASKED_UNKNOWN_ID,
@@ -539,8 +540,15 @@ class TestTheEvidenceIsShownAsStored:
             techniques_for_the_judge(_bundle().model_dump(), _isrs()), shown
         )
 
-        assert "[ev_0012] (reg) — " + PARTIAL_ENTRY_MARK + "\nKey HKCU\\Run = C:\\A.exe" in text
-        assert "[ev_0013] (dns) — " + LOWERED_ENTRY_MARK + "\nresolver copy" in text
+        # A text answer is shown inside its fence (``agents.tool_fence``).
+        assert (
+            "[ev_0012] (reg) — "
+            + PARTIAL_ENTRY_MARK
+            + "\n"
+            + fenced("ev_0012", "Key HKCU\\Run = C:\\A.exe")
+            in text
+        )
+        assert "[ev_0013] (dns) — " + LOWERED_ENTRY_MARK + "\n<<tool output [ev_0013] " in text
 
     def test_an_id_cited_in_capitals_finds_its_entry(self) -> None:
         isrs = _isrs()
@@ -550,7 +558,7 @@ class TestTheEvidenceIsShownAsStored:
             techniques_for_the_judge(_bundle().model_dump(), isrs), {"ev_0007": "OpenProcess"}
         )
 
-        assert "[ev_0007]\nOpenProcess" in text
+        assert "[ev_0007]\n" + fenced("ev_0007", "OpenProcess") in text
         assert "no text recorded" not in text.split("[ev_0007]")[1][:40]
 
 

@@ -65,6 +65,15 @@ from maljan.agents.judge_postprocess import (
     PROPERTY_NOT_CARRIED_CODE,
 )
 from maljan.agents.prompt_fragments import tools_statement
+from maljan.agents.tool_fence import (
+    FENCE_STATEMENT,
+    escaped,
+    escapes,
+    fence_lines_room,
+    fenced,
+    json_view,
+    needs_fence,
+)
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop, call_deadline_of
@@ -935,6 +944,9 @@ NO_ENTRY_TEXT = "(no text recorded in this run)"
 QUESTION_REPORTS_LABEL = "Expert Reports:"
 QUESTION_VERDICT_LABEL = "YOUR VERDICT:"
 QUESTION_CARRIED_LABEL = "TECHNIQUES YOUR BUNDLE CARRIES:"
+# The label of a technique's line stating its layers beside the distinct places
+# in the sample its mentions cite (``analysis.evidence_roots``).
+QUESTION_ROOTS_LABEL = "evidence roots:"
 
 
 def technique_question_head(reports_text: str, verdict: str, carried: Sequence[str]) -> str:
@@ -1027,6 +1039,9 @@ def technique_question_text(
             listed = ", ".join(ids) if ids else "none cited"
             lines.append(f"   - {agent}: {' '.join(str(text).split())} (evidence: {listed})")
             cited.extend(i.lower() for i in ids if i.lower() not in cited)
+        roots = str(getattr(question, "roots", "") or "")
+        if roots:
+            lines.append(f"   {QUESTION_ROOTS_LABEL} {roots}")
         check = str(getattr(question, "check", "") or "")
         if check:
             lines.append(f"   check: {check}")
@@ -1036,6 +1051,8 @@ def technique_question_text(
         lines.extend(f"   {line}" for line in card)
     if cited:
         lines += ["", "EVIDENCE CITED"]
+        if any(needs_fence(e.text) for e in (shown.get(i) for i in cited) if e is not None):
+            lines.append(FENCE_STATEMENT)
         if notice:
             lines.append(notice)
         for entry_id in cited:
@@ -1054,7 +1071,7 @@ def technique_question_text(
             heading = f"[{entry_id}]" + (f" ({entry.tool})" if entry.tool else "")
             if marks:
                 heading += " — " + "; ".join(marks)
-            lines.append(f"{heading}\n{entry.text}")
+            lines.append(f"{heading}\n{fenced(entry_id, entry.text)}")
     return "\n".join(lines) + "\n\n" + TECHNIQUE_ANSWER_FORM
 
 
@@ -1245,6 +1262,30 @@ def _tool_call_arguments(raw: Any) -> Any:
     return None
 
 
+def fit_shown_evidence(
+    texts: dict[str, str], room: int | None
+) -> tuple[dict[str, str], str, int | None]:
+    """``texts`` as the one view of a tool answer shows them, fitted to ``room``.
+
+    Each text is put through the view first (``agents.tool_fence``): a text
+    answer escaped as its fence holds it, a JSON one with its raw breaks
+    escaped. A JSON excerpt the fit cuts is text, and fenced, so the escapes
+    the cut texts then hold are kept back from the room and the texts fitted
+    again until what is kept back covers them. Returns the fitted texts, the
+    notice saying what was shortened, and the room left for them (``room``
+    less what was kept back). The fence lines are the caller's to keep back.
+    """
+    viewed = {i: escaped(t) if needs_fence(t) else json_view(t) for i, t in texts.items()}
+    reserved = 0
+    while True:
+        room_now = None if room is None else max(0, room - reserved)
+        fitted, notice = _fit_evidence(viewed, room_now)
+        grown = sum(escapes(t) for t in fitted.values() if needs_fence(t))
+        if room is None or grown <= reserved:
+            return fitted, notice, room_now
+        reserved = grown
+
+
 def _fit_evidence(texts: dict[str, str], room: int | None) -> tuple[dict[str, str], str]:
     """``texts`` whole when they fit ``room`` characters, else each cut to an equal share.
 
@@ -1415,11 +1456,21 @@ _IDENTITY_FIELDS: tuple[tuple[str, str], ...] = (
 )
 
 
+# The identity fields a submitter writes, shown as quoted values.
+_QUOTED_IDENTITY_FIELDS = frozenset({"file_name"})
+
+
 def sample_identity_block(sample: Any) -> str:
     """The sample's own facts as one block, or ``""`` when there are none."""
+    from maljan.utils.written_forms import pack_escaped
+
     data = sample if isinstance(sample, dict) else {}
+    # The submitted name is the submitter's text: quoted and escaped as the
+    # pack writes a sample's strings, one value on one line.
     rows = [
-        f"{label}: {' '.join(str(data[key]).split())}"
+        f'{label}: "{pack_escaped(str(data[key]))}"'
+        if key in _QUOTED_IDENTITY_FIELDS
+        else f"{label}: {' '.join(str(data[key]).split())}"
         for key, label in _IDENTITY_FIELDS
         if str(data.get(key) or "").strip()
     ]
@@ -3122,6 +3173,7 @@ class JudgeAgent(BudgetMeter):
         facts_block: str = "",
         run_state: str = "",
         verdict_timed_out: bool = False,
+        ledger: Sequence[Any] | None = None,
     ) -> Any:
         """Ask once, after the verdict, about the techniques the bundle does not carry.
 
@@ -3136,7 +3188,9 @@ class JudgeAgent(BudgetMeter):
         not fit the judge's window is shortened, marked, said in the question
         and recorded on the answer. ``routed`` is the routed platform and file
         type: a technique the sample cannot host, or one the catalogue
-        rejects, is not asked about and is recorded as such.
+        rejects, is not asked about and is recorded as such. ``ledger`` is
+        the run's tool calls: with it, each technique states its layers beside
+        the distinct evidence roots its mentions cite.
 
         Returns the :class:`~maljan.schemas.stix_models.TechniqueReview`, or
         ``None`` when there is nothing to ask or record. A question that times
@@ -3162,7 +3216,9 @@ class JudgeAgent(BudgetMeter):
                 attck = knowledge
             except Exception:  # noqa: BLE001 — no catalogue, no describe check
                 attck = None
-            questions, not_asked = judge_questions(dumped, isr_reports, routed, attck=attck)
+            questions, not_asked = judge_questions(
+                dumped, isr_reports, routed, attck=attck, ledger=ledger
+            )
         except Exception as exc:  # noqa: BLE001 — a question not built is none asked
             self.logger.warning("Judge technique question not built (%s).", type(exc).__name__)
             return None
@@ -3208,7 +3264,16 @@ class JudgeAgent(BudgetMeter):
         fitted_reports, reports_notice = fit_prompt_parts(report_parts, report_room)
         head = lead + technique_question_head(join_prompt_parts(fitted_reports), decided, carried)
         evidence_room = None if room is None else max(0, room - (len(head) - len(empty_head)))
-        texts, evidence_notice = _fit_evidence(
+        # Each excerpt is shown through the one view of a tool answer
+        # (``agents.tool_fence``), applied before it is fitted. The fence lines
+        # and the one sentence saying what a fence is are kept back from the
+        # room for every entry with text, since a JSON answer cut to fit is
+        # text too; so are the escapes a JSON excerpt cut to text then holds,
+        # fitted again until what is kept back covers them.
+        if evidence_room is not None:
+            fences = sum(1 for e in entries.values() if e.text) * fence_lines_room()
+            evidence_room = max(0, evidence_room - fences - len(FENCE_STATEMENT) - 1)
+        texts, evidence_notice, evidence_room = fit_shown_evidence(
             {i: e.text for i, e in entries.items()}, evidence_room
         )
         # One notice for both, said in the question and recorded on the answer.

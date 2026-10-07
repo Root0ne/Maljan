@@ -445,8 +445,9 @@ class TestSafeAnalyzeISRChunked:
         assert first_call in prompts[1]
         assert first_call in prompts[2]
         assert failed_call in prompts[2]
-        assert f"{first_call}: int FUN_0001(void) {{ return 1; }}" in prompts[1]
-        assert f"{failed_call}: the call failed; load the program first" in prompts[2]
+        # The headline is shown as one quoted value (``tool_fence.excerpt_view``).
+        assert f'{first_call}: "int FUN_0001(void) {{ return 1; }}"' in prompts[1]
+        assert f'{failed_call}: "the call failed; load the program first"' in prompts[2]
         assert seeds == [[], ["ev_0001"], ["ev_0001", "ev_0002"]]
         # The calls of this analysis alone, and none left behind for a later loop.
         assert getattr(analyst, "_prior_chunk_calls", None) in (None, [])

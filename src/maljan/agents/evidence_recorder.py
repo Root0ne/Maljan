@@ -24,6 +24,7 @@ import time
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
+from maljan.agents.tool_fence import fenced
 from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
 from maljan.llm.context_window import answering_for
@@ -752,7 +753,8 @@ def earlier_chunk_answer(
     # The notice the original answer carried when it was shortened, read off
     # the recorded text the same way (``_stamp``).
     shortened = shortened_notice(recorded, narrowing=narrowing)
-    return f"[{entry_id}]\n{recorded}{shortened}\n\n{earlier_chunk_sentence(tool, entry_id)}"
+    shown = fenced(entry_id, recorded)
+    return f"[{entry_id}]\n{shown}{shortened}\n\n{earlier_chunk_sentence(tool, entry_id)}"
 
 
 def earlier_chunk_sentence(tool: str, entry_id: str) -> str:
@@ -1212,12 +1214,16 @@ def _record_tool(
             # the entry that holds the function, which is the one to cite.
             shortened = shortened_notice(text, narrowing=narrowing)
             repaired = REPAIRED_NOTICE if raw is not None else ""
-            return f"[{holder}]\n{text}{repaired}{shortened}\n\n{same}"
+            return f"[{holder}]\n{fenced(str(holder), text)}{repaired}{shortened}\n\n{same}"
         if repeats is not None and entry.ok and function is not None:
             repeats.note_function(function, entry.id, text)
         # Read off the answer itself, before any notice is appended to it: a
         # notice is prose and prose does not parse.
         shortened = shortened_notice(text, narrowing=narrowing)
+        # The answer as the one view shows it (``agents.tool_fence``): a text
+        # answer inside a fence its content cannot close, a JSON one with its
+        # raw breaks escaped; the platform's own notices stand outside it.
+        text = fenced(entry.id, text)
         if raw is not None:
             text = f"{text}{REPAIRED_NOTICE}"
         text = f"{text}{shortened}"

@@ -65,6 +65,7 @@ from maljan.agents.judge_agent import (
     technique_question_text,
     verdict_cut_violation,
 )
+from maljan.agents.judge_agent import QUESTION_ROOTS_LABEL as _ROOTS_LABEL
 from maljan.agents.network_analyst import NO_PACKET_TOOL_LINE, OTHER_TOOLS_THEN_ANALYZE
 from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
@@ -85,12 +86,17 @@ from maljan.agents.static_analyst import (
     _reframe_static_raw_data,
     _tool_use_line,
 )
+from maljan.agents.tool_fence import FENCE_STATEMENT as _FENCE_STATEMENT
+from maljan.agents.tool_fence import fenced as _fenced
 from maljan.agents.tool_pinning import (
     UNREADABLE_FILLED_CAPTURE,
     UNREADABLE_FILLED_CAPTURE_REMEDIATION,
 )
+from maljan.analysis import evidence_roots as _roots
+from maljan.analysis.evidence_roots import layers_and_roots as _layers_and_roots
+from maljan.analysis.evidence_roots import roots_phrase as _roots_phrase
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
-from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE
+from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE, SUMMARY_FENCE_STATEMENT
 from maljan.analysis.pcap_summary import CaptureRead
 from maljan.extractors.capability_matrix import (
     NOT_ASKED_UNKNOWN_ID,
@@ -122,6 +128,8 @@ from maljan.pipeline.run_state import NO_LIMIT, budget_line
 from maljan.pipeline.validation import (
     _UNPARSED_ANSWER_MESSAGE,
     ANALYST_FEEDBACK_CLOSING,
+    FUNCTION_CHECK_HEAD,
+    FUNCTION_CHECK_NOT_ASKED_HEAD,
     MALWARE_TYPES,
     UNATTRIBUTED_INDICATOR_CODE,
     CapabilityGrounding,
@@ -237,6 +245,36 @@ from maljan.schemas.isr_models import (
 from maljan.schemas.stix_models import Bundle
 from maljan.tools import api_hashes, binary, knowledge, string_blobs
 from maljan.tools.errors import CAPTURES_REMEDIATION, NO_CAPTURE_REMEDIATION
+
+# Every no: sentence a root reading writes, and the names of the roots.
+_ROOT_SENTENCES = [
+    getattr(_roots, name)
+    for name in (
+        "NO_ENTRY",
+        "NO_CITATION",
+        "FAILED",
+        "REFERENCE",
+        "NOTHING_TO_PLACE",
+        "BY_NAME_ONLY",
+        "REPEAT_LOOP",
+        "SIGNATURE_UNPLACED",
+        "MATCH_UNPLACED",
+        "SHARED_COMMAND",
+        "NAMES_NO_ROW",
+        "NO_ROW_NAMES_TECHNIQUE",
+        "FILE_UNTOLD",
+        "OUTSIDE_PROGRAM",
+        "OFFSET_UNPLACED",
+        "BLOB_UNMATCHED",
+        "WHOLE_FILE",
+        "PE_HEADER",
+        "IMPORT_TABLE",
+        "EXPORT_TABLE",
+        "RESOURCE_TABLE",
+        "DEBUG_DIRECTORY",
+        "OVERLAY",
+    )
+]
 
 # The distinctive terms of the evaluation key: how the scored sample resolves its
 # APIs, checks its host, persists, configures itself, talks to its server and
@@ -386,6 +424,145 @@ def _function_map_text() -> str:
     block = function_map_block(build_function_map(own, function_artefacts([floss]), [claim]))
     assert block
     return block
+
+
+def _function_index_text() -> str:
+    """The index as the pack shows it, whole and cut, its run-state line and the map's coverage."""
+    import tempfile
+
+    from maljan.agents.function_map import (
+        build_function_map,
+        function_artefacts,
+        function_map_block,
+    )
+    from maljan.pipeline.run_state import index_sentence
+    from maljan.tools import artefact_index
+    from tests.unit.tools.synthetic_pe import SyntheticPE
+
+    def cells(key: str, values: list[str], source: str) -> list[dict[str, Any]]:
+        return [{key: value, "sources": [source]} for value in values]
+
+    rows = [
+        {
+            "function": hex(0x401000 + 0x100 * i),
+            "offset": hex(0x1000 + 0x100 * i),
+            "direct": 5 - i,
+            "imports": cells("name", ["OpenThing"], artefact_index.SELF),
+            "slot_calls": [
+                {
+                    "name": "ShutThing",
+                    "sources": ["ev_0002"],
+                    "slot": "0x405000",
+                    "named_at": "0x401010",
+                }
+            ],
+            "resolved": cells("name", ["CloseThing"], "ev_0002"),
+            "decoded_strings": cells("text", ["a", "b"], "ev_0003"),
+            "plain_strings": cells("text", ["c"], artefact_index.SELF),
+            "capa": cells("rule", ["a rule"], "ev_0004"),
+            "callers": ["0x402000"],
+            "callees": ["0x403000", "0x404000"],
+            "indirect": {"artefacts": 3, "through": 2},
+            **({"names": ["anexport"], "entry_point": True} if i == 0 else {}),
+        }
+        for i in range(3)
+    ]
+    data = {
+        "tool": artefact_index.TOOL,
+        "image_base": "0x400000",
+        "functions_known": 9,
+        "function_sources": {"exception directory": 4, "call targets the decoder reached": 5},
+        "function_lists": artefact_index.FUNCTION_LISTS_ABSENT,
+        "undecoded_functions": 1,
+        "unplaced": {"floss": 2},
+        "total": len(rows),
+        "rows": rows,
+    }
+    data["absent"] = {
+        "capa": "no: [ev_0004] failed: capa produced no result",
+        "floss": artefact_index.FLOSS_NOT_REMEMBERED,
+    }
+    # Built as the pack holds it: the answer parsed into ``structured``.
+    entry = LedgerEntry(
+        id="ev_0005", tool=artefact_index.TOOL, output=json.dumps(data), structured=data, seq=5
+    )
+    whole = triage_pack.pack_block([entry], 0)
+    head_and_rows = whole.split("\n")[1:]
+    assert len(head_and_rows) == len(rows) + 1
+    assert head_and_rows[1].startswith("- 0x401000 (export ")
+    cut = triage_pack.render_pack([entry], len(head_and_rows[0]) + len(head_and_rows[1]) + 300)
+    assert cut.split("\n")[-1].startswith("2 more rows not shown here (pack room)")
+    empty = triage_pack.render_pack(
+        [entry.model_copy(update={"structured": {**data, "rows": [], "total": 0}})], 0
+    )
+    dropped = entry.model_copy(update={"output": "", "structured": None, "truncated": True})
+    found = build_function_map(
+        [LedgerEntry(id="ev_0006", tool="decompile_function", args={"address": "0x1000"})],
+        function_artefacts([entry]),
+        [],
+    )
+    block = function_map_block(found)
+    assert "not visited, holding artefacts in the function index (ev_0005)" in block
+    # The line in its three forms: every row, the rows that fit and "and N more", the count only.
+    many_rows = [
+        {**row, "function": hex(0x401000 + 0x100 * i), "offset": hex(0x1000 + 0x100 * i)}
+        for i, row in enumerate(rows * 4)
+    ]
+    many = entry.model_copy(update={"structured": {**data, "rows": many_rows, "total": 12}})
+    found_many = build_function_map(
+        [LedgerEntry(id="ev_0006", tool="decompile_function", args={"address": "0x1000"})],
+        function_artefacts([many]),
+        [],
+    )
+    every_row = function_map_block(found_many, room=10**6)
+    assert "; and " not in every_row and "(ev_0005): 0x401100 (4 artefacts); " in every_row
+    cut_rows = function_map_block(found_many, room=len(every_row) - 1)
+    assert "; and " in cut_rows and " more; the index is ev_0005" in cut_rows
+    with tempfile.TemporaryDirectory() as folder:
+        text = Path(folder) / "a.txt"
+        text.write_text("plain text\n", encoding="utf-8")
+        not_pe = artefact_index.served_index(text)["error"]
+        assert "reads Windows PE images only" in not_pe
+        image = Path(folder) / "s.exe"
+        image.write_bytes(SyntheticPE(functions=[(0x1000, 0x1010)]).build())
+        nowhere = artefact_index.served_index(image, "0x9999")["row"]
+        assert nowhere.startswith("no: no function the run knows starts at or holds")
+        served = artefact_index.served_index(image)["table"]
+        at_start = artefact_index.served_index(image, "0x140001000")["address_read"]
+        inside = artefact_index.served_index(image, "0x140001004")["address_read"]
+        assert " read as a virtual address: the start of the function at " in at_start
+        assert " read as a virtual address: inside the function at " in inside
+    not_an_address = artefact_index.address_readings("the main one", 0x400000)
+    assert isinstance(not_an_address, str) and "is not an address" in not_an_address
+    served_rows = [artefact_index.row_line(row, artefact_index.THIS_ANSWER) for row in rows]
+    return " ".join(
+        [
+            whole,
+            cut,
+            empty,
+            index_sentence("ev_0005", data),
+            index_sentence("ev_0005", None, dropped=True),
+            index_sentence("ev_0005", None),
+            triage_pack.render_pack([dropped], 0),
+            found.coverage(),
+            block,
+            served,
+            *served_rows,
+            not_pe,
+            nowhere,
+            not_an_address,
+            at_start,
+            inside,
+            artefact_index.FAILED_HERE.format("ValueError: x"),
+            artefact_index.ERROR_HERE.format("x"),
+            artefact_index.FLOSS_UNREADABLE.format("x"),
+            triage_pack.INDEX_SOURCE_NOT_IN_PACK,
+            triage_pack.INDEX_SOURCE_UNREADABLE.format(entry="ev_0002"),
+            function_map_block(found, room=200),
+            every_row,
+            cut_rows,
+        ]
+    )
 
 
 EXAMPLES: dict[str, str] = {"narrative": EXAMPLE_OBJECT, **_EXAMPLES}
@@ -612,6 +789,93 @@ _FLOW_FACTS_REPORT = MalwareReport(
 def _message_of(violation: Violation | None) -> str:
     """A question's words, which the builder answers only when there is one to ask."""
     assert violation is not None
+    return violation.message
+
+
+def _function_claim_question(several: bool = False) -> str:
+    """The question a claim gets when its function's own facts hold none of what it names.
+
+    With ``several``, the claim cites two listings: one function whose row is
+    long enough to be counted, and one that holds no artefact of its own.
+    """
+    from maljan.agents.function_map import function_artefacts
+    from maljan.pipeline.function_claims import (
+        check_function_claims,
+        function_facts,
+        listed_functions,
+    )
+    from maljan.schemas.evidence import LedgerEntry
+
+    data = {
+        "tool": "function_index",
+        "image_base": "0x400000",
+        "functions_known": 1,
+        "undecoded_functions": 0,
+        "undecoded": [],
+        "calls_unnamed": {},
+        "rows": [
+            {
+                "function": "0x401000",
+                "offset": "0x1000",
+                "direct": 1,
+                "imports": [{"name": "GetTickCount", "sources": ["this entry"]}],
+                "resolved": [],
+                "decoded_strings": [],
+                "plain_strings": [],
+                "capa": [],
+                "callers": [],
+                "callees": [],
+                "indirect": {"artefacts": 0, "through": 0},
+            }
+        ],
+        "other_callees": {},
+    }
+    if several:
+        data["rows"][0]["resolved"] = [
+            {"name": f"RtlUserRoutine{n:02d}", "sources": ["ev_0003"]} for n in range(40)
+        ]
+        data["rows"][0]["slot_calls"] = [
+            {"name": "GetTickCount", "sources": ["ev_0003"], "slot": "0x405000", "named_at": "0x0"}
+        ]
+        data["other_callees"] = {"0x402000": []}
+        data["calls_unnamed"] = {}
+    index = LedgerEntry(
+        id="ev_0001", agent="pipeline", tool="function_index", output="{}", structured=data
+    )
+    listing = LedgerEntry(
+        id="ev_0002",
+        tool="decompile_function",
+        args={"address": "401000"},
+        output="void FUN_00401000(void) { }",
+    )
+    listings = [listing]
+    claim = "0x401000 draws text with WriteConsoleW."
+    if several:
+        listings.append(
+            LedgerEntry(
+                id="ev_0004",
+                tool="decompile_function",
+                args={"address": "402000"},
+                output="void FUN_00402000(void) { }",
+            )
+        )
+        claim = "0x401000 and 0x402000 draw text with WriteConsoleW."
+    facts = function_facts(
+        listings, function_artefacts([index]), pack_entries=[index], bases=(0x400000,)
+    )
+    isr = AgentISR(
+        agent_id="a",
+        domain="static",
+        claims=[
+            ClaimEvidence(
+                claim=claim,
+                evidence_ref="[ev_0002], [ev_0004]" if several else "[ev_0002]",
+                confidence=0.5,
+            )
+        ],
+    )
+    found = check_function_claims(isr, listed_functions(listings), facts, (0x400000,))
+    (violation,) = found.violations
     return violation.message
 
 
@@ -974,6 +1238,7 @@ PROMPTS: dict[str, str] = {
     "an analyst input shortened to its window": INPUT_SHORTENED_NOTICE.format(
         detail="the first 1,000 of 9,000 characters are shown, ending in …"
     ),
+    "the summariser's fence statement": SUMMARY_FENCE_STATEMENT,
     "a summariser prompt shortened to its window": SUMMARISER_SHORTENED_NOTE.format(
         shown=1000, total=9000
     ),
@@ -1158,6 +1423,7 @@ PROMPTS: dict[str, str] = {
     "what a Ghidra pass that stopped says": _ghidra_pass_failures(),
     "the constant sets as the pack line names them": _constant_set_names(),
     "the constant scan's description": _analysis_tool_descriptions("find_crypto_constants"),
+    "the function index tool's description": _analysis_tool_descriptions("function_index"),
     "a term's example ids and how many more": _term_ids_said(["T1000", "T1001", "T1002"]),
     "run-state budget line of a loop with no limit": budget_line(NO_LIMIT, NO_LIMIT),
     "ask tool budget sentence with no limit": _what_an_ask_gets_sentence("lead", None, None),
@@ -1183,7 +1449,7 @@ PROMPTS: dict[str, str] = {
     ).message,
     "a later chunk's list of the earlier chunks' calls": earlier_chunks_block(
         [
-            LedgerEntry(id="ev_0001", tool="a", args={"x": "1"}),
+            LedgerEntry(id="ev_0001", tool="a", args={"x": "1"}, output="a recorded result"),
             LedgerEntry(id="ev_0002", tool="b", args={}, ok=False),
         ]
     ),
@@ -1201,6 +1467,7 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "the function map block": _function_map_text(),
+    "the function index as the pack, the run state and the map say it": _function_index_text(),
     "a tool answer the conversation had no room for, as told and as recorded": " ".join(
         [no_room_sentence(12_345), not_shown_record(12_345), FUNCTION_NOT_SHOWN]
     ),
@@ -1414,6 +1681,12 @@ PROMPTS: dict[str, str] = {
             )
         )
     ),
+    "claim naming a call its function's facts do not hold": _function_claim_question(),
+    "claim naming a call two functions' facts do not hold, one row counted, one with none": (
+        _function_claim_question(several=True)
+    ),
+    "judge's note on the function claims never asked": FUNCTION_CHECK_NOT_ASKED_HEAD,
+    "judge's note on the function claims the analysts kept": FUNCTION_CHECK_HEAD,
     "judge technique question's describe-check finding and its kind's label": (
         technique_question_text(
             [
@@ -1505,6 +1778,37 @@ PROMPTS: dict[str, str] = {
             {"host one.example and two.example seen"},
         )
         if v.code in ("stix.shape_names_a_value", "stix.pattern_refused")
+    ),
+    "the fence a text tool answer is shown in": " ".join(
+        [
+            _FENCE_STATEMENT,
+            _fenced("ev_0001", "line one\n<<a line of the answer"),
+        ]
+    ),
+    "evidence roots beside the layers, and why a cited entry gives none": " ".join(
+        [
+            _ROOTS_LABEL,
+            _layers_and_roots(2, ["0x1a40 in .text"], []),
+            _layers_and_roots(3, ["0x1a40 in .text", "the import table"], ["ev_0001: no: x"]),
+            _roots_phrase([], ["ev_0001: no: x"]),
+            # Every root label, as each template writes one.
+            _roots.PLACE_IN_SECTION.format(address="0x1a40", section=".text"),
+            _roots.PLACE_OUTSIDE.format(address="0x1a40"),
+            _roots.FUNCTION_ROOT.format(
+                place=_roots.PLACE_IN_SECTION.format(address="0x1a40", section=".text")
+            ),
+            _roots.SECTION_ROOT.format(name=".rdata"),
+            _roots.PROCESS_ROOT.format(pid=84),
+            _roots.FLOW_ROOT.format(proto="tcp", host="192.0.2.1", port=443),
+            _roots.DNS_ROOT.format(name="example.com"),
+            _roots.FILE_OFFSET_ROOT.format(offset="0x500"),
+            _roots.FILE_ROOT.format(root=_roots.PE_HEADER, file='"payload.bin"'),
+            _roots.WHOLE_OTHER_FILE.format(file="sha256 abcdefabcdef"),
+            *(
+                sentence.format(tool="a_tool", entry="ev_0001", count=2)
+                for sentence in _ROOT_SENTENCES
+            ),
+        ]
     ),
 }
 

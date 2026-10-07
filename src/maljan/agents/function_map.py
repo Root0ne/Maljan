@@ -13,7 +13,11 @@ again. The map is kept for it by the platform, from facts only:
   FLOSS decoded in it (``floss``) — only where the answer puts the place
   *inside* the function, never after a function start;
 * the first sentence of the first of the analyst's own parsed claims that
-  names the function.
+  names the function;
+* whether the function is a row of the pack's function index
+  (``tools.artefact_index``): with an index, the coverage line counts the
+  visited functions among the index's rows, and the not-visited line lists
+  the other rows in the pack's rank order.
 
 The model never writes to it. The block is rendered fresh on every turn beside
 the run-state lines and replaces nothing the model already sees.
@@ -38,6 +42,7 @@ from maljan.pipeline.validation import (
     image_bases_in,
 )
 from maljan.schemas.evidence import answer_not_shown
+from maljan.utils.written_forms import pack_escaped
 
 __all__ = [
     "FUNCTION_MAP_HEAD",
@@ -48,6 +53,7 @@ __all__ = [
     "build_function_map",
     "keeps_for_the_map",
     "function_artefacts",
+    "merged_artefacts",
     "function_map_block",
 ]
 
@@ -60,6 +66,7 @@ FUNCTION_MAP_HEAD = (
 _HASH_TOOL = "resolve_api_hashes"
 _BLOB_TOOL = "decode_string_blobs"
 _FLOSS_TOOL = "floss"
+_INDEX_TOOL = "function_index"
 
 # How each kind of artefact is counted in the block, singular and plural.
 _KIND_WORDS: dict[str, tuple[str, str]] = {
@@ -69,6 +76,10 @@ _KIND_WORDS: dict[str, tuple[str, str]] = {
     "decoded": ("string FLOSS decoded", "strings FLOSS decoded"),
 }
 _KIND_ORDER = tuple(_KIND_WORDS)
+
+# Why the run holds no whole function index, when an index entry is there.
+INDEX_FAILED = "no: [{entry}] the function index failed"
+INDEX_NOT_KEPT = "no: [{entry}] the function index's answer is not kept whole"
 
 
 @dataclass(frozen=True)
@@ -91,6 +102,16 @@ class FunctionArtefacts:
     by_function: dict[int, list[Artefact]] = field(default_factory=dict)
     image_bases: tuple[int, ...] = ()
     virtual: set[int] = field(default_factory=set)
+    # The offsets of the function index's rows, and the entry that holds them.
+    indexed: set[int] = field(default_factory=set)
+    index_entry: str = ""
+    # The rows as ``(offset, distinct artefacts of its own)``, in the pack's rank order.
+    index_rows: list[tuple[int, int]] = field(default_factory=list)
+    # The whole index answer the rows come from, and the entry's own state:
+    # whether its answer was cut for the model, or why none could be read.
+    index_data: Mapping[str, Any] | None = None
+    index_cut: bool = False
+    index_unread: str = ""
 
     def add(self, address: int, artefact: Artefact, *, virtual: bool = False) -> None:
         self.by_function.setdefault(address, []).append(artefact)
@@ -108,6 +129,7 @@ class MapEntry:
     listed: tuple[str, ...] = ()
     artefacts: list[Artefact] = field(default_factory=list)
     summary: str = ""
+    indexed: bool = False
 
 
 @dataclass
@@ -118,9 +140,20 @@ class FunctionMap:
     unvisited: list[tuple[int, list[Artefact]]] = field(default_factory=list)
     image_bases: tuple[int, ...] = ()
     virtual: frozenset[int] = frozenset()
+    # How many rows the function index has, and the entry that holds it.
+    indexed: int = 0
+    index_entry: str = ""
+    # The index's rows no visited function is, in the pack's rank order, as
+    # ``(offset, distinct artefacts of its own)``.
+    index_unvisited: list[tuple[int, int]] = field(default_factory=list)
 
     def coverage(self) -> str:
-        """``N functions visited (…); M functions reach artefacts …, K of them visited``."""
+        """``N functions visited (…); M functions reach artefacts …, K of them visited``.
+
+        With a function index, ``M`` is its rows and ``K`` the visited
+        functions among them: the index counts every function the run's
+        answers place an artefact in, the pack's own decoding included.
+        """
         decompiled = sum(1 for e in self.visited if e.decompiled)
         listed = sum(1 for e in self.visited if e.listed and not e.decompiled)
         how = []
@@ -131,6 +164,13 @@ class FunctionMap:
         visited = _count(len(self.visited), "function", "functions") + " visited"
         if how:
             visited += f" ({', '.join(how)})"
+        if self.indexed:
+            held = sum(1 for e in self.visited if e.indexed)
+            verb = "holds" if self.indexed == 1 else "hold"
+            return (
+                f"{visited}; {_count(self.indexed, 'function', 'functions')} {verb} artefacts "
+                f"in the function index ({self.index_entry}), {held} of them visited"
+            )
         reached_visited = sum(1 for e in self.visited if e.artefacts)
         reaching = reached_visited + len(self.unvisited)
         verb = "reaches" if reaching == 1 else "reach"
@@ -140,7 +180,7 @@ class FunctionMap:
         )
 
     def empty(self) -> bool:
-        return not self.visited and not self.unvisited
+        return not self.visited and not self.unvisited and not self.index_unvisited
 
 
 def _count(n: int, one: str, many: str) -> str:
@@ -178,16 +218,38 @@ def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
     when FLOSS gave one and otherwise as a virtual address, made an offset by
     the image base another answer stated.
     """
+    entries = list(entries)
     rows = [e for e in entries if getattr(e, "ok", True)]
     found = FunctionArtefacts()
+    for entry in entries:
+        if str(getattr(entry, "tool", "") or "") != _INDEX_TOOL:
+            continue
+        data = _parsed(entry) if getattr(entry, "ok", True) else None
+        if isinstance(data, dict) and isinstance(data.get("rows"), list):
+            continue
+        if isinstance(data, dict) and not getattr(entry, "truncated", False):
+            # An answer by address or an error: no whole index, and nothing unread.
+            continue
+        entry_id = str(getattr(entry, "id", "") or "")
+        found.index_unread = (
+            INDEX_FAILED.format(entry=entry_id)
+            if not getattr(entry, "ok", True)
+            else INDEX_NOT_KEPT.format(entry=entry_id)
+        )
     bases: list[int] = list(image_bases_in(rows))
     parsed: list[tuple[Any, str, Any]] = []
     for entry in rows:
         tool = str(getattr(entry, "tool", "") or "")
-        if tool not in (_HASH_TOOL, _BLOB_TOOL, _FLOSS_TOOL):
+        if tool not in (_HASH_TOOL, _BLOB_TOOL, _FLOSS_TOOL, _INDEX_TOOL):
             continue
         data = _parsed(entry)
         if not isinstance(data, dict):
+            continue
+        if tool == _INDEX_TOOL:
+            _index_rows(found, data, str(getattr(entry, "id", "") or ""), entry)
+            base = _stated_base(data)
+            if base and base not in bases:
+                bases.append(base)
             continue
         base = _stated_base(data)
         if base and base not in bases:
@@ -203,6 +265,29 @@ def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
         else:
             _floss_artefacts(found, data, entry_id)
     return found
+
+
+def _index_rows(
+    found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str, entry: Any = None
+) -> None:
+    """The function index's rows, by offset and in its rank order; the last index read counts.
+
+    The index's own ``image_base`` is one of the bases the map joins an
+    offset and its virtual address by (``function_artefacts`` adds it).
+    """
+    ranked: list[tuple[int, int]] = []
+    for row in data.get("rows") or []:
+        offset = _hex(row.get("offset")) if isinstance(row, dict) else None
+        if offset is not None:
+            direct = row.get("direct")
+            ranked.append((offset, int(direct) if isinstance(direct, int) else 0))
+    found.index_rows = ranked
+    found.indexed = {offset for offset, _ in ranked}
+    found.index_entry = entry_id
+    if isinstance(data.get("rows"), list):
+        found.index_data = data
+        found.index_cut = bool(getattr(entry, "truncated", False)) if entry is not None else False
+        found.index_unread = ""
 
 
 def _hash_artefacts(found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str) -> None:
@@ -284,7 +369,11 @@ def keeps_for_the_map(entry: Any) -> bool:
     if getattr(entry, "repeated_of", None):
         return False
     tool = str(getattr(entry, "tool", "") or "").lower()
-    return "decompil" in tool or _lists_code(tool) or tool in (_HASH_TOOL, _BLOB_TOOL, _FLOSS_TOOL)
+    return (
+        "decompil" in tool
+        or _lists_code(tool)
+        or tool in (_HASH_TOOL, _BLOB_TOOL, _FLOSS_TOOL, _INDEX_TOOL)
+    )
 
 
 # A tool whose name says it disassembles, and one of those whose name says the
@@ -323,16 +412,27 @@ def _merged(pack: FunctionArtefacts | None, own: FunctionArtefacts) -> FunctionA
     """
     if pack is None:
         return own
-    if not own.by_function:
+    if not own.by_function and not own.indexed:
         return pack
     merged = FunctionArtefacts(
         by_function={k: list(v) for k, v in pack.by_function.items()},
         image_bases=tuple(dict.fromkeys([*pack.image_bases, *own.image_bases])),
         virtual=set(pack.virtual) | set(own.virtual),
+        indexed=set(own.indexed or pack.indexed),
+        index_entry=own.index_entry if own.indexed else pack.index_entry,
+        index_rows=list(own.index_rows if own.indexed else pack.index_rows),
+        index_data=own.index_data if own.index_data is not None else pack.index_data,
+        index_cut=own.index_cut if own.index_data is not None else pack.index_cut,
+        index_unread=own.index_unread if own.index_data is not None else pack.index_unread,
     )
     for key, tied in own.by_function.items():
         merged.by_function.setdefault(key, []).extend(tied)
     return merged
+
+
+def merged_artefacts(pack: FunctionArtefacts | None, own: FunctionArtefacts) -> FunctionArtefacts:
+    """The pack's artefacts and an analyst's own, together (see ``_merged``)."""
+    return _merged(pack, own)
 
 
 def _same(a: int | None, b: int | None, bases: Sequence[int]) -> bool:
@@ -451,6 +551,17 @@ def build_function_map(
                 entry.summary = _first_sentence(sentence)
                 break
 
+    held: set[int] = set()
+    for entry in visited:
+        # The spellings ``_same`` joins, looked up rather than compared row by row.
+        address = entry.address
+        if address is None:
+            continue
+        for key in (address, *(address - b for b in bases), *(address + b for b in bases)):
+            if key in found.indexed and _same(address, key, bases):
+                entry.indexed = True
+                held.add(key)
+
     unvisited = sorted(
         ((key, tied) for key, tied in found.by_function.items() if key not in reached),
         key=lambda pair: pair[0],
@@ -460,6 +571,9 @@ def build_function_map(
         unvisited=unvisited,
         image_bases=bases,
         virtual=frozenset(found.virtual),
+        indexed=len(found.indexed),
+        index_entry=found.index_entry,
+        index_unvisited=[row for row in found.index_rows if row[0] not in held],
     )
 
 
@@ -547,10 +661,21 @@ def _kinds(artefacts: Sequence[Artefact]) -> list[tuple[str, int, list[str]]]:
     return out
 
 
+def _name(name: str) -> str:
+    """A function's name as the block shows it: quoted, as the pack quotes a sample's text.
+
+    A decompiler builds a name from the sample's own export and symbol names,
+    so a name is shown as one quoted, escaped value on one line.
+    """
+    return f'"{pack_escaped(str(name))}"'
+
+
 def _where(address: int | None, names: Sequence[str]) -> str:
-    head = hex(address) if address is not None else (names[0] if names else "unnamed")
-    shown = [n for n in names if n != head] if address is not None else list(names[1:])
-    return f"{head} ({', '.join(shown)})" if shown else head
+    head = hex(address) if address is not None else (_name(names[0]) if names else "unnamed")
+    shown = list(names) if address is not None else list(names[1:])
+    shown = [n for n in shown if address is None or n != head]
+    quoted = ", ".join(_name(n) for n in shown)
+    return f"{head} ({quoted})" if shown else head
 
 
 def _folded(entry: MapEntry) -> str:
@@ -559,7 +684,7 @@ def _folded(entry: MapEntry) -> str:
     kept = [n for n in entry.names if not _GENERIC_FUNCTION_NAME.fullmatch(n)]
     if entry.address is None:
         return _where(None, kept or list(entry.names))
-    return f"{hex(entry.address)} ({', '.join(kept)})" if kept else hex(entry.address)
+    return _where(entry.address, kept)
 
 
 def _visited_line(entry: MapEntry) -> str:
@@ -594,12 +719,18 @@ def _unvisited_item(found: FunctionMap, address: int, artefacts: Sequence[Artefa
     return f"{where} ({counts}; {', '.join(ids)})" if ids else f"{where} ({counts})"
 
 
-def function_map_block(found: FunctionMap) -> str:
+def function_map_block(found: FunctionMap, room: int | None = None) -> str:
     """The map as the model reads it, or ``""`` when nothing is visited or tied.
 
     A head, the coverage line, one line per visited function that reaches an
     artefact or has a summary, one line of the other visited addresses, and one
     line of the functions reaching artefacts that were not visited.
+
+    With a function index, that last line lists the index's rows not visited
+    and takes only the room the other lines leave of ``room``, the characters
+    the caller derived for the whole block: the ranked rows that fit, then how
+    many more there are and where the index is. With no ``room`` it states the
+    count, the entry and the tool that serves the index, and no rows.
     """
     if found.empty():
         return ""
@@ -611,9 +742,61 @@ def function_map_block(found: FunctionMap) -> str:
         # A visit with nothing but its entry id: the transcript already
         # stamps the id on the listing, so the address is enough here.
         lines.append("also visited: " + ", ".join(_folded(e) for e in bare))
-    if found.unvisited:
+    if found.indexed:
+        # With an index, the not-visited line reads the index's rows, as the
+        # coverage line does, in the pack's rank order.
+        if found.index_unvisited:
+            left = None if room is None else room - sum(len(line) + 1 for line in lines)
+            lines.append(_index_line(found, left))
+    elif found.unvisited:
         lines.append(
             "not visited, reaching artefacts: "
             + "; ".join(_unvisited_item(found, a, tied) for a, tied in found.unvisited)
         )
     return "\n".join(lines)
+
+
+# Where the whole index is, said after the rows the room left out.
+INDEX_ELSEWHERE = "the index is {entry}, served by the analysis server's function_index tool"
+
+
+def _index_line(found: FunctionMap, room: int | None) -> str:
+    """The index's rows not visited, in rank order, in ``room`` characters; ``None``: no rows.
+
+    Every row when they all fit; otherwise the rows that fit, room being kept
+    for the last clause at its longest, then "and N more" with where the index
+    is. With no room derived, the count, the entry and the tool only. That
+    count form is the line's floor: it stands even in a room smaller than
+    itself, since a fact is stated whole or not at all, and it does not grow
+    with the index.
+    """
+    rows = found.index_unvisited
+    head = f"not visited, holding artefacts in the function index ({found.index_entry}): "
+    elsewhere = INDEX_ELSEWHERE.format(entry=found.index_entry)
+    if room is None:
+        return f"{head}{_count(len(rows), 'row', 'rows')}; {elsewhere}"
+    items = [_indexed_item(found, a, n) for a, n in rows]
+    whole = head + "; ".join(items)
+    if len(whole) <= room:
+        return whole
+    budget = room - len(f"; and {len(rows)} more; {elsewhere}")
+    shown: list[str] = []
+    used = len(head)
+    for item in items:
+        cost = len(item) + (2 if shown else 0)
+        if used + cost > budget:
+            break
+        shown.append(item)
+        used += cost
+    if not shown:
+        return f"{head}{_count(len(rows), 'row', 'rows')}; {elsewhere}"
+    return f"{head}{'; '.join(shown)}; and {len(rows) - len(shown)} more; {elsewhere}"
+
+
+def _indexed_item(found: FunctionMap, address: int, artefacts: int) -> str:
+    where = (
+        hex(found.image_bases[0] + address)
+        if len(found.image_bases) == 1 and address < found.image_bases[0]
+        else f"offset {hex(address)}"
+    )
+    return f"{where} ({_count(artefacts, 'artefact', 'artefacts')})"

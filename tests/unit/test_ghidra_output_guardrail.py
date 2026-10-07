@@ -32,8 +32,11 @@ class TestOutputGuardrailPassthrough:
         assert toolkit._apply_output_guardrail(text) == text
 
     def test_exact_limit_unchanged(self, server_params: MagicMock) -> None:
-        toolkit = MCPLangChainToolkit(server_params, max_output_chars=100)
-        text = "A" * 100
+        # A text answer is shown fenced: the answer and its fence fill the limit.
+        from maljan.agents.tool_fence import fence_lines_room
+
+        toolkit = MCPLangChainToolkit(server_params, max_output_chars=200)
+        text = "A" * (200 - fence_lines_room())
         assert toolkit._apply_output_guardrail(text) == text
 
 
@@ -42,19 +45,21 @@ class TestOutputGuardrailTruncation:
 
     def test_large_output_truncated(self, server_params: MagicMock) -> None:
         from maljan.agents.mcp_client import TRUNCATION_MARKER
+        from maljan.agents.tool_fence import fence_lines_room
 
-        toolkit = MCPLangChainToolkit(server_params, max_output_chars=100)
+        toolkit = MCPLangChainToolkit(server_params, max_output_chars=200)
         text = "B" * 500
         result = toolkit._apply_output_guardrail(text)
 
         assert len(result) < len(text)
         assert result.endswith("[OUTPUT TRUNCATED]")
-        # The marker is kept back out of the limit rather than appended after
-        # it, the way the shortener already reserves room for its own notice:
-        # what reaches the model is the limit, marker included.
-        assert len(result) == 100
+        # The marker and the fence a text answer is shown in are kept back out
+        # of the limit rather than appended after it, the way the shortener
+        # already reserves room for its own notice: what reaches the model is
+        # the limit, marker and fence included.
+        assert len(result) == 200 - fence_lines_room()
         payload = result.split(TRUNCATION_MARKER)[0]
-        assert len(payload) == 100 - len(TRUNCATION_MARKER)
+        assert len(payload) == 200 - fence_lines_room() - len(TRUNCATION_MARKER)
 
     def test_truncation_marker_present(self, server_params: MagicMock) -> None:
         toolkit = MCPLangChainToolkit(server_params, max_output_chars=50)

@@ -53,12 +53,24 @@ may call, or the sentence saying why there is none; a pass that cannot run is
 one entry saying ``no:`` and why, and is not a failure. A call directly to
 ``run_pack`` with no Ghidra handed over makes no Ghidra entry.
 
+Last of all, for a PE, the function index (``maljan.tools.function_index``):
+every function the run knows, from the file's own tables, capa's starts and
+the call targets the platform's decoder reaches, each with the imports it
+calls, the names its hashes resolve to, the strings it refers to, the capa
+rules matched in it, its callers and callees and how many artefacts its
+callees hold, each cell naming the entry it comes from. It joins the
+pack's own answers above, so it comes after them.
+
 When the pack does not fit its room, every pass line takes only the room the
 earlier lines leave, a pass with a fact no other line carries first; a pass
 entry with no room is counted in the trailer, which takes only free room or
 room from capa's addresses. With neither, the pack
 stays as it is and the triage node records the entry in its pack record,
-"no pack room" (``render_pack``, ``pack_unsaid``).
+"no pack room" (``render_pack``, ``pack_unsaid``). The function index takes
+only the room the whole rendered pack leaves after that, its rows in rank
+order with a line counting those left out; with no room for its head it is in
+the pack record, and the run-state block names it and the analysis server's
+``function_index`` tool, which serves it whole or by address.
 """
 
 from __future__ import annotations
@@ -96,6 +108,7 @@ from maljan.providers import sandbox_tools
 from maljan.schemas.evidence import LedgerEntry, apply_budget
 from maljan.tools import (
     api_hashes,
+    artefact_index,
     binary,
     crypto_constants,
     emulated_strings,
@@ -693,6 +706,7 @@ class _Pack:
             self._resolved_values(routed, format_facts)
             self._crypto_constants(routed)
             self._ghidra_passes(routed)
+            self._function_index(routed)
         finally:
             if self._floss_pool is not None:
                 self._floss_pool.shutdown(wait=False)
@@ -1142,6 +1156,80 @@ class _Pack:
             ),
         )
 
+    # -- the function index -------------------------------------------------
+
+    def _function_index(self, routed: str) -> None:
+        """Every function of a PE with the artefacts the run's answers place in it.
+
+        Last, so every id issued before it keeps its value. Joined from the
+        pack's own ok answers (``pe_info``, ``capa``, ``floss``,
+        ``resolve_api_hashes``, ``decode_string_blobs``) and the decoder's
+        reading of the file; the arguments name the entries it read.
+        """
+        if routed != "pe":
+            return
+        path = self.inputs.sample_path
+        latest: dict[str, LedgerEntry] = {}
+        for recorded in self.recorder.entries:
+            if recorded.agent == PIPELINE and recorded.tool in _INDEX_SOURCES:
+                latest[recorded.tool] = recorded
+        joined: dict[str, tuple[str, dict[str, Any]]] = {}
+        absent: dict[str, str] = {}
+        for tool in _INDEX_SOURCES:
+            entry = latest.get(tool)
+            if entry is None:
+                absent[tool] = INDEX_SOURCE_NOT_IN_PACK
+            elif entry.ok and isinstance(entry.structured, dict):
+                joined[tool] = (entry.id, entry.structured)
+            elif entry.ok:
+                absent[tool] = INDEX_SOURCE_UNREADABLE.format(entry=entry.id)
+            elif _was_not_made(entry):
+                said = str(entry.error or entry.output or "")[len(NOT_RUN_PREFIX) :].strip()
+                absent[tool] = f"no: [{entry.id}] {_one_line(said)}"
+            else:
+                failed = _one_line(entry.error or entry.output)
+                absent[tool] = f"no: [{entry.id}] failed: {failed}"
+        args: dict[str, Any] = {"path": path}
+        if joined:
+            args["joined"] = [f"{entry_id} {tool}" for tool, (entry_id, _) in joined.items()]
+        # The exception directory's ranges are kept beside the answer, never in
+        # it (``LedgerEntry.function_ranges``): the answer is what it was, and
+        # the evidence byte budget charges the answer alone, so the ranges
+        # displace nothing in the pack.
+        ranges: dict[str, list[list[str]]] = {}
+        held = len(self.recorder.entries)
+        self.record(
+            artefact_index.TOOL,
+            args,
+            lambda: artefact_index.function_index(
+                path,
+                pe_info=joined.get("pe_info"),
+                capa=joined.get("capa"),
+                floss=joined.get("floss"),
+                hashes=joined.get("resolve_api_hashes"),
+                blobs=joined.get("decode_string_blobs"),
+                absent=absent,
+                ranges_into=ranges,
+            ),
+        )
+        made = self.recorder.entries[held:]
+        if ranges and made and made[-1].tool == artefact_index.TOOL and made[-1].ok:
+            made[-1].function_ranges = ranges
+
+
+# The pack's answers the function index joins, by tool.
+_INDEX_SOURCES = ("pe_info", "capa", "floss", "resolve_api_hashes", "decode_string_blobs")
+
+
+# Why the index could not join one of the pack's answers, by case.
+INDEX_SOURCE_NOT_IN_PACK = "no: the pack holds no entry of it"
+INDEX_SOURCE_UNREADABLE = "no: [{entry}] holds no readable answer"
+
+
+def _one_line(text: str | None) -> str:
+    """``text`` whole, on one line: the head that carries it is bounded by the pack's room."""
+    return " ".join(str(text or "").split())
+
 
 # The formats the constant scan reads: the executable images.
 CONSTANT_FORMATS = frozenset({"pe", "elf", "macho"})
@@ -1400,7 +1488,13 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
     or room from capa's addresses; with neither, the pack stays as the other
     lines are and the uncounted entries are the triage node's to record
     (``pack_unsaid``).
+
+    The function index (``INDEX_TOOL``) comes after all of that and takes only
+    the room the rendered pack leaves: the pack is rendered without it exactly
+    as it would be, and the index is placed in what is left (``_with_index``).
     """
+    if any(entry.tool == INDEX_TOOL for entry in entries):
+        return _with_index(entries, max_chars)[0]
     whole = _render_lines(entries, WHOLE)
     if max_chars <= 0 or _joined_len(whole) <= max_chars:
         return "\n".join(whole)
@@ -1413,6 +1507,82 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
 # Why a pass entry is in neither the pack nor its trailer, as the pack record says it.
 NO_PACK_ROOM = "no pack room"
 
+INDEX_TOOL = artefact_index.TOOL
+
+# The index's last line when the room cut its rows.
+INDEX_ROWS_LEFT_OUT = (
+    "{n} more {noun} not shown here (pack room); every row is in [{entry}]'s full output, "
+    "and " + artefact_index.SERVED_BY
+)
+
+
+def _with_index(entries: list[LedgerEntry], max_chars: int) -> tuple[str, list[LedgerEntry]]:
+    """The pack with the function index in the room the rest leaves, and the entries unsaid.
+
+    The other entries are rendered exactly as ``render_pack`` renders them
+    without the index, and nothing of theirs gives way to it. The index goes
+    after them and before their trailer, with as many rows as fit, in rank
+    order, and a last line counting the rows left out and saying where the
+    whole index is. With no room for even its head it is left to the pack
+    record (``pack_unsaid``) and not counted in the trailer, whose growth
+    would be room the other lines did not leave; the run-state block names
+    the entry and the tool that serves it.
+    """
+    others = [entry for entry in entries if entry.tool != INDEX_TOOL]
+    text = render_pack(others, max_chars) if others else ""
+    unsaid = [] if max_chars <= 0 else pack_unsaid(others, max_chars)
+    lines = text.split("\n") if text else []
+    said = _LEFT_OUT_LINE.match(lines[-1]) if lines else None
+    trailer = lines.pop() if said else None
+    for entry in (e for e in entries if e.tool == INDEX_TOOL):
+        used = _joined_len([*lines, *([trailer] if trailer else [])])
+        room = max_chars - used - (1 if used else 0) if max_chars > 0 else None
+        block = _index_block(entry, room)
+        if block is None:
+            # The run-state line names the entry and the tool that serves it.
+            unsaid.append(entry)
+            continue
+        lines.append(block)
+    if trailer is not None:
+        lines.append(trailer)
+    return "\n".join(lines), unsaid
+
+
+def _index_block(entry: LedgerEntry, room: int | None) -> str | None:
+    """The index entry's lines in ``room`` characters (``None``: no bound), or ``None``."""
+    if not entry.ok or not isinstance(entry.structured, dict):
+        line = _pack_line(entry)
+        return line if room is None or len(line) <= room else None
+    data = entry.structured
+    rows = list(artefact_index.rows_of(data))
+    head = f"[{entry.id}] {_GROUP_LABELS[INDEX_TOOL]}: {artefact_index.head_text(data, len(rows))}"
+    if room is not None and len(head) > room:
+        return None
+    every = [artefact_index.row_line(row, entry.id) for row in rows]
+    if room is None or _joined_len([head, *every]) <= room:
+        return "\n".join([head, *every])
+    # Not every row fits: room is kept for the last line at its longest, and
+    # each row in rank order that fits what is left is shown; a row that
+    # does not is counted as left out and the next is tried.
+    budget = room - len(_rows_left_out(len(rows), entry.id)) - 1
+    if len(head) > budget:
+        return None
+    lines = [head]
+    used = len(head)
+    left = 0
+    for line in every:
+        if used + 1 + len(line) > budget:
+            left += 1
+            continue
+        lines.append(line)
+        used += 1 + len(line)
+    lines.append(_rows_left_out(left, entry.id))
+    return "\n".join(lines)
+
+
+def _rows_left_out(n: int, entry_id: str) -> str:
+    return INDEX_ROWS_LEFT_OUT.format(n=n, noun="row" if n == 1 else "rows", entry=entry_id)
+
 
 def pack_unsaid(entries: list[LedgerEntry], max_chars: int) -> list[LedgerEntry]:
     """The pass entries a pack of ``max_chars`` neither shows nor counts in its trailer.
@@ -1421,6 +1591,8 @@ def pack_unsaid(entries: list[LedgerEntry], max_chars: int) -> list[LedgerEntry]
     addresses had none to give: the pack then stays as the earlier lines are,
     and the triage node records them in its pack record (``NO_PACK_ROOM``).
     """
+    if any(entry.tool == INDEX_TOOL for entry in entries):
+        return _with_index(entries, max_chars)[1]
     if max_chars <= 0 or not any(entry.tool in PASS_TOOLS for entry in entries):
         return []
     if _joined_len(_render_lines(entries, WHOLE)) <= max_chars:
@@ -2957,6 +3129,7 @@ _GROUP_LABELS: dict[str, str] = {
     "decode_string_blobs": "decoded blobs",
     crypto_constants.TOOL: "crypto constants",
     ANTI_ANALYSIS_TOOL: "anti-analysis (Ghidra)",
+    artefact_index.TOOL: "function index",
 }
 
 _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {

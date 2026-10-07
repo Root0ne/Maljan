@@ -14,6 +14,7 @@ from langchain_core.tools import StructuredTool
 
 from maljan.agents.base_agent import BaseAnalyst
 from maljan.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
+from maljan.agents.tool_fence import fenced
 from maljan.schemas.evidence import EvidenceCounter
 
 
@@ -88,7 +89,9 @@ class TestRecordedCalls:
         wrapped = record_tools([_tool(dump, "dump")], recorder)[0]
         result = wrapped.invoke({"path": "/samples/evil.exe"})
 
-        assert result == f"[ev_0001]\n{big}"
+        # A text answer is shown fenced (``agents.tool_fence``); the ledger
+        # holds the answer byte for byte.
+        assert result == f"[ev_0001]\n{fenced('ev_0001', big)}"
         assert recorder.entries[0].output == big
         assert recorder.entries[0].truncated is False
 
