@@ -20,7 +20,7 @@ from maljan.pipeline.validation import (
 )
 from maljan.reporting.defang import ProseDefanger
 from maljan.reporting.renderers.markdown import _defanged_text
-from maljan.tools.strings import iocs_from_text
+from maljan.tools.strings import iocs_from_text, iter_string_iocs
 
 
 def _domains(text: str) -> list[str]:
@@ -42,6 +42,34 @@ class TestALabelWithADigit:
         for text in ("took 10.ms", "rated 42.de", "1.10.ru"):
             assert _domains(text) == [], text
             assert network_values_in(text) == [], text
+
+
+class TestAStringOfItsOwn:
+    """Five characters, one under the sweep's floor: read only when the whole run is such a host."""
+
+    def _swept(self, blob: bytes) -> list[tuple[str, str]]:
+        return [(row["kind"], row["value"]) for row in iter_string_iocs(blob)]
+
+    def test_a_nul_terminated_value_is_read_in_ascii_and_in_utf16(self) -> None:
+        for name in ("c2.ru", "C2.RU", "x1.io", "7z.su"):
+            assert self._swept(b"\x00\x00" + name.encode() + b"\x00\x00") == [("domain", name)]
+            wide = name.encode("utf-16-le")
+            assert self._swept(b"\x00\x00" + wide + b"\x00\x00") == [("domain", name)], name
+
+    def test_a_lone_value_is_read_and_defanged_in_text(self) -> None:
+        assert network_values_in("c2.ru") == [("domain", "c2.ru")]
+        assert _defanged_text("c2.ru") == "c2[.]ru"
+        assert _defanged_text("| C2.RU |") == "| C2[.]RU |"
+
+    def test_any_other_five_character_run_stays_below_the_floor(self) -> None:
+        for run in (b"or.at", b"ab.ru", b"10.ru", b"c2.zz", b"c2.RU", b"a.b.c", b"GetIP"):
+            assert self._swept(b"\x00" + run + b"\x00") == [], run
+
+    def test_what_the_sweep_read_keeps_its_place_ahead_of_it(self) -> None:
+        blob = b"\x00c2.ru\x00beacon to x1.top now\x00"
+
+        assert self._swept(blob) == [("domain", "x1.top"), ("domain", "c2.ru")]
+        assert self._swept(b"\x00c2.ru\x00c2.ru\x00") == [("domain", "c2.ru")]
 
 
 class TestALabelOfTwoLetters:

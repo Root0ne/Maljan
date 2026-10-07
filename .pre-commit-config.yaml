@@ -5,8 +5,11 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
+      # Packet captures are bytes; a capture that reads as text is still one.
       - id: trailing-whitespace
+        exclude: ^tests/fixtures/pcap/
       - id: end-of-file-fixer
+        exclude: ^tests/fixtures/pcap/
       - id: check-yaml
       - id: check-toml
       - id: check-merge-conflict

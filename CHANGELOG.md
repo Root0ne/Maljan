@@ -1057,6 +1057,7 @@ change landed on `main`.
 
 ### Changed
 
+- **Captures are read by Maljan's own pcap/pcapng reader (`maljan.analysis.capture_reader`) instead of the GPL-2.0 scapy**; `tests/unit/analysis/test_pcap_reader_parity.py` pins every answer against the old one and names each difference and its reason.
 - **The documentation site is built with Fumadocs.** The pages are MDX under
   `apps/docs/content/docs/` and the images under `apps/docs/public/assets/`;
   `mkdocs.yml`, the theme overrides and the `docs` dependency group are gone,
@@ -2403,6 +2404,8 @@ change landed on `main`.
 - **A sub-technique is not described by its parent's words alone**: a claim that writes none of the sub-technique's own distinctive words and writes a sibling sub-technique's whole name is asked once whether its technique is right, naming the sibling (Change Default File Association on an accessibility features sentence passed on "persistence").
 - **A TECHNIQUE line that writes an id with the vendored catalogue's own name for it in brackets is read as that id** (`T1027 (Obfuscated Files or Information)`); any other bracketed words keep the line whole and asked about, as before.
 - **The command-line flags table and a draft rule's comments print network values defanged**, through the report's own defanger; the strings a draft rule matches on stay as they compile.
+- **A five-character string that is wholly such a host is read on its own** (`c2.ru` stored NUL-terminated, ASCII or UTF-16LE, or a table cell that is exactly `c2.ru`), by the string sweep, the host reader and the defanger; every other run under six characters stays below the sweep's floor.
+- **A cell's publish state, the composer's checks and the narrative's recommendation check read the IOC table §9 prints** (`builder.ioc_table`, rebuilt from the stored report), where they read the stored table first, so an old report's state notes word an answer as §9 does; a table that cannot be read at all still refuses every value for that reason.
 - **A bare two-label host with a two-character first label is read when the label holds a digit and a letter** (`c2.ru`, `x1.top`), by the string sweep and the report's host reader; one of two letters (`ab.ru`) is read only where the run's network evidence holds it, so prose such as `to.do` stays as written.
 - **An IPv6 address, bare or bracketed, and a `.onion` name of any labels are network values to every reader**: the publish checks, the run summary's sentences and a cell's state note read them by form: an IPv6 address whole, an embedded IPv4 tail included, in brackets or with at least three groups and a digit, so a scope name such as `dead::beef` is no address.
 - **`/iocs` and the report's §9 read the IOC table from one source** (`builder.ioc_table`, rebuilt from the stored report), so an old report's analyst rows and their notes read the same in both.

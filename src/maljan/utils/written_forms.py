@@ -18,12 +18,51 @@ spelling the question it was already asking of one.
 
 from __future__ import annotations
 
+import functools
 import json
+import re
+import sys
 
 # How the triage pack writes a character that would break its line or its
 # quoting. One table, read by the pack when it writes a string and by every
 # search that has to find the string again.
 PACK_ESCAPES: dict[str, str] = {'"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}
+
+
+def _escape(ch: str) -> str:
+    return PACK_ESCAPES.get(ch, ch if ch.isprintable() else f"\\x{ord(ch):02x}")
+
+
+# Every escape below U+00A0, where control characters run long in practice,
+# as one translate table: a run of them is written in C, one output string.
+_LOW_ESCAPES = {code: _escape(chr(code)) for code in range(0xA0)}
+
+
+@functools.lru_cache(maxsize=1)
+def _unprintable() -> re.Pattern[str]:
+    """Runs of the characters ``pack_escaped`` writes out: the quote and every
+    character that is not printable. Built once, from ``str.isprintable``
+    itself, so the two can never disagree."""
+    ranges: list[tuple[int, int]] = []
+    for code in range(sys.maxunicode + 1):
+        ch = chr(code)
+        if ch == '"' or not ch.isprintable():
+            if ranges and ranges[-1][1] == code - 1:
+                ranges[-1] = (ranges[-1][0], code)
+            else:
+                ranges.append((code, code))
+    members = "".join(
+        re.escape(chr(a)) if a == b else f"{re.escape(chr(a))}-{re.escape(chr(b))}"
+        for a, b in ranges
+    )
+    return re.compile(f"[{members}]+")
+
+
+def _escaped_run(match: re.Match[str]) -> str:
+    run = match.group()
+    if max(run) < "\xa0":
+        return run.translate(_LOW_ESCAPES)
+    return "".join(_escape(ch) for ch in run)
 
 
 def pack_escaped(text: str) -> str:
@@ -34,9 +73,10 @@ def pack_escaped(text: str) -> str:
     as a path; a backslash that would end the string is written ``\\x5c``,
     where it would otherwise read as escaping the closing quote.
     """
-    out = "".join(
-        PACK_ESCAPES.get(ch, ch if ch.isprintable() else f"\\x{ord(ch):02x}") for ch in text
-    )
+    if text.isprintable():  # the common case, decided in one pass in C
+        out = text.replace('"', PACK_ESCAPES['"'])
+    else:
+        out = _unprintable().sub(_escaped_run, text)
     if out.endswith("\\"):
         out = out[:-1] + "\\x5c"
     return out

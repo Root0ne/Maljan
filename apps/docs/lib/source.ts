@@ -37,3 +37,28 @@ export function sectionOf(url: string): string | undefined {
   }
   return undefined;
 }
+
+export interface Section {
+  name: string;
+  /* The first page under the separator; the strip links here. */
+  href: string;
+  /* Every page address in the section, to tell which one is current. */
+  urls: string[];
+}
+
+/* The top-level sections in sidebar order: each separator and the pages
+ * below it, up to the next separator. */
+export function sections(): Section[] {
+  const found: Section[] = [];
+  for (const node of source.getPageTree().children) {
+    if (node.type === 'separator') {
+      if (typeof node.name === 'string') found.push({ name: node.name, href: '', urls: [] });
+    } else if (node.type === 'page') {
+      const current = found.at(-1);
+      if (!current) continue;
+      if (!current.href) current.href = node.url;
+      current.urls.push(node.url);
+    }
+  }
+  return found.filter((section) => section.href);
+}
