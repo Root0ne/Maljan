@@ -46,10 +46,11 @@ What it states, and nothing else:
   address inside it.
 * **The calls it makes through slots the hash resolution fills.** In the
   straight-line run of code holding a hashed value (up to a transfer of
-  control), the slot that value's name is stored to: after the resolver's
-  call, a store of its return register before the register is overwritten;
-  or, in a table of records, the one record address some code calls or jumps
-  through (``_name_slots``). A call or jump through a named slot, direct or
+  control), the slot that value's name is stored to: after a call exactly one
+  function-name hash reaches as an argument, a store of its return register
+  before the register is overwritten; or, in a table of records each holding
+  as many addresses, the one record address some code calls or jumps through
+  (``_name_slots``). A call or jump through a named slot, direct or
   through a register a straight-line load from it set, is a call of that
   name (``slot_calls``), and leaves the count of calls that name nothing. A
   slot two names fill is ambiguous (``ambiguous_slots``) and names nothing.
