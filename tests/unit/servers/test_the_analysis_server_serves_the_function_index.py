@@ -76,7 +76,13 @@ class TestTheWholeTable:
         lines = answer["table"].split("\n")
         assert lines[0].startswith("2 of the ")
         assert artefact_index.CAPA_NOT_JOINED in lines[0]
-        assert answer["capa"] == artefact_index.CAPA_NOT_JOINED
+        assert answer["absent"]["capa"] == artefact_index.CAPA_NOT_JOINED
+        # FLOSS has not run on the file in this server: said, with the reason.
+        assert answer["absent"]["floss"] == artefact_index.FLOSS_NOT_REMEMBERED
+        assert f"floss: {artefact_index.FLOSS_NOT_REMEMBERED}" in lines[0]
+        # The server's own reason for the disassemblers' lists, not the pack's.
+        assert answer["function_lists"] == artefact_index.SERVED_FUNCTION_LISTS
+        assert artefact_index.SERVED_FUNCTION_LISTS in lines[0]
         assert lines[1].startswith(
             f'- {hex(BASE + FIRST)} (entry point): calls "CreateMutexW" (this answer)'
         )
@@ -104,16 +110,45 @@ class TestOneFunctionByAddress:
         assert by_va["callers"] == [hex(BASE + FIRST)]
         assert by_va["callees"] == []
         assert "table" not in by_va
+        assert by_va["address_read"] == (
+            f"{hex(BASE + SECOND)} read as a virtual address: the start of the function at "
+            f"{hex(BASE + SECOND)}"
+        )
+        assert by_offset["address_read"].startswith(
+            f"{hex(SECOND)} read as an offset from the image base: the start of"
+        )
 
-    def test_an_address_the_run_knows_no_function_at_is_a_no_sentence(
+    def test_a_bare_number_is_hexadecimal(self, server: Any, tmp_path: Path) -> None:
+        path = _sample(tmp_path)
+        bare = server.function_index(path=path, address=f"{BASE + SECOND:x}")
+        assert bare["row"] == server.function_index(path=path, address=hex(BASE + SECOND))["row"]
+
+    def test_an_address_inside_a_function_answers_that_function_and_says_so(
+        self, server: Any, tmp_path: Path
+    ) -> None:
+        answer = server.function_index(path=_sample(tmp_path), address=hex(BASE + SECOND + 3))
+        assert answer["address_read"] == (
+            f"{hex(BASE + SECOND + 3)} read as a virtual address: inside the function at "
+            f"{hex(BASE + SECOND)}"
+        )
+        assert answer["row"].startswith(f"- {hex(BASE + SECOND)}:")
+
+    def test_an_address_no_function_starts_at_or_holds_is_a_no_sentence(
         self, server: Any, tmp_path: Path
     ) -> None:
         answer = server.function_index(path=_sample(tmp_path), address="0x1234")
-        assert answer["row"].startswith("no: the run knows no function starting at ")
+        assert answer["row"].startswith(
+            "no: no function the run knows starts at or holds the address (read as an offset"
+        )
 
-    def test_an_address_that_is_not_a_number_is_an_error(self, server: Any, tmp_path: Path) -> None:
-        answer = server.function_index(path=_sample(tmp_path), address="the main one")
-        assert "error" in answer
+    def test_text_that_is_not_an_address_is_a_no_sentence(
+        self, server: Any, tmp_path: Path
+    ) -> None:
+        for asked in ("the main one", "0x" + "f" * 17, "-12", "12.5"):
+            answer = server.function_index(path=_sample(tmp_path), address=asked)
+            assert answer["row"].startswith("no: "), asked
+            assert "is not an address" in answer["row"]
+            assert "error" not in answer
 
 
 class TestTheSamplesNamesStayQuoted:

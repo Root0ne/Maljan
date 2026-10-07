@@ -17,15 +17,19 @@ What it states, and nothing else:
   the decoder reaches in an executable section. Ghidra's and radare2's lists
   are not read here: the pack runs before any analyst opens them, and the
   answer says so.
-* **What a function calls.** A function in the exception directory is decoded
-  instruction after instruction across its stated range; any other is decoded
-  from its start along every branch, up to a return, a jump it cannot follow,
-  the next function start it knows, or the end of its section. A byte the
-  decoder does not read ends that path, and the answer counts the functions
-  where that happened. A call names the import its slot or its jump thunk
-  goes through (``imports``), or the function at its target (``callees``); a
-  call through a register, or through a slot the import table does not fill,
-  names nothing.
+* **What a function calls.** Every function start is collected first (a walk
+  that adds each direct call target it reaches), then each function is read
+  from its start with all of them known. A function in the exception
+  directory is decoded instruction after instruction across its stated range;
+  any other is decoded from its start along every branch, up to a return, a
+  jump it cannot follow, another function's start, or the end of its section.
+  An unconditional jump to another function's start is that function's tail
+  call: a callee, not more of the function the jump is in. A byte the decoder
+  does not read ends that path, and the answer counts the functions where
+  that happened. A call names the import its slot or its jump thunk goes
+  through (``imports``), or the function at its target (``callees``); a call
+  through a register, or through a slot the import table does not fill, names
+  nothing.
 * **The strings it refers to.** An instruction that takes an address in a
   data section (x64: RIP-relative; x86: an absolute address as a memory
   operand or an immediate) refers to the text there when the bytes from that
@@ -48,11 +52,13 @@ What it states, and nothing else:
   artefact two callees, or the function and a callee, both hold is counted
   for each, and the answer says so.
 
-Every walk is bounded by the file: each code byte is decoded at most once in
-all, whichever functions, ranges and branches lead to it (a byte another
-function's decoding already read ends the path, so code two functions share is
-read for the first); every list is built from the answers' own entries and
-the decoder's calls, and stored once per distinct value. Nothing recurses.
+Every walk is bounded by the file: in each of the two walks each instruction
+start is decoded at most once, whichever functions, ranges and branches lead
+to it (an instruction start another function's decoding already read ends the
+path, so code two functions share is read for the first in the second walk's
+order); a section is found by bisection; every list is built from the answers'
+own entries and the decoder's calls, and stored once per distinct value.
+Nothing recurses.
 
 A place is inside a function when an instruction the decoder read in that
 function covers it, or else when the exception directory's range holds it; a
@@ -651,14 +657,21 @@ def index_image(
     floss: tuple[str, Mapping[str, Any]] | None = None,
     hashes: tuple[str, Mapping[str, Any]] | None = None,
     blobs: tuple[str, Mapping[str, Any]] | None = None,
-    address: int | None = None,
+    absent: Mapping[str, str] | None = None,
+    addresses: Sequence[tuple[str, int]] = (),
+    function_lists: str = FUNCTION_LISTS_ABSENT,
 ) -> dict[str, Any]:
     """The index of ``image`` joined with the run's answers, each given as ``(entry id, data)``.
 
-    With ``address`` (an offset from the image base), the answer also holds
-    that function's row under ``function``, its callers and callees included,
-    a row with no artefacts when it holds none, or a ``no:`` sentence when the
-    run knows no function starting there.
+    ``absent`` is the ``no: <reason>`` of each source the caller could not
+    join, by source; the answer and its head state each. ``addresses`` are
+    the readings of one asked address, in the order they are tried, each
+    ``(how it was read, offset from the image base)``: the first that is a
+    function's start, or that an instruction decoded in a function or a
+    function's stated range holds, answers, and the answer says which reading
+    it was and whether the address is the start or inside. Its row is under
+    ``function``, callers and callees included, with no artefacts when it
+    holds none; with no reading answering, ``function`` is a ``no:`` sentence.
     """
     _, info = _source(pe_info)
     capa_id, capa_data = _source(capa)
@@ -687,6 +700,7 @@ def index_image(
         seeds[_CAPA] = starts
 
     wanted = _places_wanted(capa_data, floss_data, hash_data, blob_data, base)
+    wanted.update(offset for _, offset in addresses)
     graph = _read_code(image, seeds, wanted)
     placer = _Placer(image, graph)
     rows = _Rows()
@@ -757,7 +771,47 @@ def index_image(
             where = placer.stated(hex(address)) or placer.holders(address)
             place(where, "capa", str(capability["rule"]), capa_id, "capa")
 
-    return _answer(image, graph, rows, names, unplaced, entry_points, address)
+    data = _answer(image, graph, rows, names, unplaced, entry_points)
+    data["function_lists"] = function_lists
+    data["absent"] = dict(absent or {})
+    if addresses:
+        data.update(_asked(image, graph, placer, rows, names, entry_points, addresses))
+    return data
+
+
+def _asked(
+    image: Image,
+    graph: _Graph,
+    placer: _Placer,
+    rows: _Rows,
+    names: Mapping[int, list[str]],
+    entry_points: Iterable[int],
+    addresses: Sequence[tuple[str, int]],
+) -> dict[str, Any]:
+    """The function an asked address names, by the first reading that names one."""
+    base = image.image_base
+    for how, offset in addresses:
+        if offset in graph.functions:
+            start, where = offset, "the start of"
+        else:
+            holders = placer.holders(offset)
+            if not holders:
+                continue
+            start, where = holders[0], "inside"
+        row = _answer(image, graph, rows, names, {}, entry_points, only=start)["function"]
+        asked = hex(base + offset) if how == _AS_VIRTUAL else hex(offset)
+        said = f"{asked} read as {how}: {where} the function at {hex(base + start)}"
+        return {"function": row, "address_read": said}
+    tried = ", ".join(
+        f"as {how} {hex(base + offset) if how == _AS_VIRTUAL else hex(offset)}"
+        for how, offset in addresses
+    )
+    return {
+        "function": (
+            f"no: no function the run knows starts at or holds the address (read {tried}; "
+            f"{_SOURCES_SAID})"
+        )
+    }
 
 
 def _answer(
@@ -767,7 +821,7 @@ def _answer(
     names: Mapping[int, list[str]],
     unplaced: Mapping[str, int],
     entry_points: Iterable[int] = (),
-    address: int | None = None,
+    only: int | None = None,
 ) -> dict[str, Any]:
     base = image.image_base
     entries = set(entry_points)
@@ -809,22 +863,16 @@ def _answer(
             row["entry_point"] = True
         return row
 
-    out = [row_of(start, cells) for start, cells in rows.cells.items()]
+    out = [] if only is not None else [row_of(start, c) for start, c in rows.cells.items()]
     out.sort(key=lambda r: (-int(r["direct"]), int(r["offset"], 16)))
 
     sources: dict[str, int] = {}
     for function in graph.functions.values():
         for source in function.sources:
             sources[source] = sources.get(source, 0) + 1
-    asked: dict[str, Any] = {}
-    if address is not None:
-        asked["function"] = (
-            row_of(address, rows.cells.get(address, {}))
-            if address in graph.functions
-            else f"no: the run knows no function starting at {va(address)} ({_SOURCES_SAID})"
-        )
+    if only is not None:
+        return {"function": row_of(only, rows.cells.get(only, {}))}
     return {
-        **asked,
         "tool": TOOL,
         "image_base": hex(base),
         "functions_known": len(graph.functions),
@@ -855,6 +903,7 @@ def function_index(
     floss: tuple[str, Mapping[str, Any]] | None = None,
     hashes: tuple[str, Mapping[str, Any]] | None = None,
     blobs: tuple[str, Mapping[str, Any]] | None = None,
+    absent: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """The function index of the PE at ``path`` (see the module docstring)."""
     try:
@@ -863,7 +912,9 @@ def function_index(
         return {"error": f"no such file: {path}", "tool": TOOL}
     except pe_image.NotAPortableExecutable as exc:
         return {"error": f"this tool reads Windows PE images only; {exc}", "tool": TOOL}
-    return index_image(image, pe_info=pe_info, capa=capa, floss=floss, hashes=hashes, blobs=blobs)
+    return index_image(
+        image, pe_info=pe_info, capa=capa, floss=floss, hashes=hashes, blobs=blobs, absent=absent
+    )
 
 
 def rows_of(data: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
@@ -897,8 +948,8 @@ def head_text(data: Mapping[str, Any], rows: int) -> str:
     said = f"{rows} of the {known} functions the run knows hold artefacts of their own"
     said += f" (functions from {listed}; " if listed else " ("
     said += f"{data.get('function_lists') or FUNCTION_LISTS_ABSENT})"
-    if data.get("capa"):
-        said += f"; {data['capa']}"
+    for source, reason in (data.get("absent") or {}).items():
+        said += f"; {source}: {reason}"
     undecoded = int(data.get("undecoded_functions") or 0)
     if undecoded:
         said += (
@@ -984,24 +1035,54 @@ def row_line(row: Mapping[str, Any], entry_id: str) -> str:
 
 # What the served index says of capa, which it never runs.
 CAPA_NOT_JOINED = (
-    "capa: no: this tool does not run capa, which takes minutes; the triage pack's "
-    "function_index entry joins capa's answer"
+    "no: this tool does not run capa, which takes minutes; the triage pack's function_index "
+    "entry joins capa's answer"
+)
+
+# What the served index says of FLOSS when this server holds no FLOSS answer for the file.
+FLOSS_NOT_REMEMBERED = "no: FLOSS has not run on this file in this server"
+
+# Why the served index has no disassembler's function list.
+SERVED_FUNCTION_LISTS = (
+    "Ghidra's and radare2's function lists: no: the analysis server has no disassembler of its own"
 )
 
 # The name a cell of the served answer gives its own decoding.
 THIS_ANSWER = "this answer"
 
+# An address as the pack prints one: hexadecimal, with or without ``0x``, at most 64 bits.
+_AS_VIRTUAL = "a virtual address"
+_ADDRESS_TEXT = re.compile(r"(?:0[xX])?([0-9a-fA-F]{1,16})")
 
-def _address_offset(address: Any, base: int) -> int | None:
-    """An address as an offset from the image base: a virtual address or an offset already."""
+
+def address_readings(address: Any, base: int) -> list[tuple[str, int]] | str:
+    """The readings of an asked address to try, in order, or a ``no:`` sentence.
+
+    Hexadecimal, with or without ``0x``: the pack and the disassemblers print
+    addresses in hex, so a bare number is hex, never decimal. A value at or
+    above the image base is tried first as a virtual address (its offset is
+    the value less the base), then as an offset; a value below it is an
+    offset only.
+    """
     if isinstance(address, int) and not isinstance(address, bool):
-        value: int | None = address
+        value = address
     else:
-        text = str(address or "").strip().lower()
-        value = _hex(text) if text.startswith("0x") else (int(text) if text.isdigit() else None)
-    if value is None:
-        return None
-    return value - base if value >= base > 0 else value
+        text = str(address).strip()
+        match = _ADDRESS_TEXT.fullmatch(text)
+        if match is None:
+            shown = text if len(text) <= 40 else text[:39] + "…"
+            return (
+                f"no: {shown!r} is not an address (hexadecimal, with or without 0x, at most "
+                "16 digits)"
+            )
+        value = int(match.group(1), 16)
+    if value < 0:
+        return f"no: {value} is not an address"
+    readings: list[tuple[str, int]] = []
+    if base > 0 and value >= base:
+        readings.append((_AS_VIRTUAL, value - base))
+    readings.append(("an offset from the image base", value))
+    return readings
 
 
 def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
@@ -1011,9 +1092,11 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
     exports and the entry point, ``resolve_api_hashes`` and
     ``decode_string_blobs`` run here in-process (they read only the bytes),
     and the rows FLOSS answered for the file in this server when it ran on
-    it. capa is never run here (``CAPA_NOT_JOINED``). With no address, the
-    whole table in the pack's row form; with one (a virtual address or an
-    offset), that function's row with its callers and callees.
+    it. Each source not joined is stated with its reason under ``absent``;
+    capa is never run here (``CAPA_NOT_JOINED``). With no address, the whole
+    table in the pack's row form; with one, read as ``address_readings`` says,
+    that function's row with its callers and callees and the reading that
+    answered.
     """
     from maljan.tools import api_hashes, binary, emulated_strings, string_blobs
 
@@ -1023,12 +1106,14 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
         return {"error": f"no such file: {path}", "tool": TOOL}
     except pe_image.NotAPortableExecutable as exc:
         return {"error": f"this tool reads Windows PE images only; {exc}", "tool": TOOL}
-    wanted: int | None = None
+    readings: list[tuple[str, int]] = []
     if address not in (None, ""):
-        wanted = _address_offset(address, image.image_base)
-        if wanted is None:
-            return {"error": f"address {address!r} is not a number", "tool": TOOL}
+        read = address_readings(address, image.image_base)
+        if isinstance(read, str):
+            return {"tool": TOOL, "row": read}
+        readings = read
     answers: dict[str, Any] = {}
+    absent: dict[str, str] = {}
     for name, call in (
         (
             "pe_info",
@@ -1041,34 +1126,45 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
     ):
         try:
             value = call()
-        except Exception:  # noqa: BLE001 - an answer that cannot be joined is left out
+        except Exception as exc:  # noqa: BLE001 - stated under ``absent``, never lost
+            absent[name] = f"no: it failed here ({type(exc).__name__}: {exc})"
             continue
         if isinstance(value, dict) and not value.get("error"):
             answers[name] = (name, value)
+        else:
+            said = value.get("error") if isinstance(value, dict) else value
+            if isinstance(said, dict):
+                said = said.get("message") or said
+            absent[name] = f"no: it answered an error here ({said})"
     try:
         floss_rows = emulated_strings.remembered_rows(str(path))
-    except Exception:  # noqa: BLE001 - FLOSS's absence is not this tool's failure
+    except Exception as exc:  # noqa: BLE001 - stated under ``absent``, never lost
         floss_rows = []
+        absent["floss"] = f"no: FLOSS's rows for this file could not be read ({exc})"
     if floss_rows:
         answers["floss"] = ("floss", {"strings": floss_rows})
+    elif "floss" not in absent:
+        absent["floss"] = FLOSS_NOT_REMEMBERED
+    absent["capa"] = CAPA_NOT_JOINED
     data = index_image(
         image,
         pe_info=answers.get("pe_info"),
         floss=answers.get("floss"),
         hashes=answers.get("resolve_api_hashes"),
         blobs=answers.get("decode_string_blobs"),
-        address=wanted,
+        absent=absent,
+        addresses=readings,
+        function_lists=SERVED_FUNCTION_LISTS,
     )
-    data["capa"] = CAPA_NOT_JOINED
     data["joined"] = sorted(answers)
     rows = rows_of(data)
-    head = head_text(data, len(rows))
-    if wanted is None:
-        table = [head, *(row_line(row, THIS_ANSWER) for row in rows)]
-        return {key: data[key] for key in _SERVED_KEYS} | {"table": "\n".join(table)}
-    asked = data.get("function")
     out = {key: data[key] for key in _SERVED_KEYS}
+    if not readings:
+        table = [head_text(data, len(rows)), *(row_line(row, THIS_ANSWER) for row in rows)]
+        return out | {"table": "\n".join(table)}
+    asked = data.get("function")
     if isinstance(asked, Mapping):
+        out["address_read"] = data.get("address_read", "")
         out["row"] = row_line(asked, THIS_ANSWER)
         out["callers"] = list(asked.get("callers") or [])
         out["callees"] = list(asked.get("callees") or [])
@@ -1083,7 +1179,7 @@ _SERVED_KEYS = (
     "functions_known",
     "function_sources",
     "function_lists",
-    "capa",
+    "absent",
     "joined",
     "undecoded_functions",
     "unplaced",

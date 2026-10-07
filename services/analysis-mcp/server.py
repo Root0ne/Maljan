@@ -1169,12 +1169,16 @@ def function_index(path: str, address: str = "", carved_path: str = "") -> dict[
     callers and callees, and how many artefacts its callees hold (counted per
     callee). Each cell names the tool whose answer states it. Joined here:
     ``pe_info``, ``resolve_api_hashes`` and ``decode_string_blobs`` over the
-    same file, and FLOSS's rows when FLOSS ran on it in this server; capa is
-    not run here, and the answer says so. With no ``address``, ``table`` holds
-    the whole index; with an ``address`` (a virtual address or an offset),
-    ``row`` holds that function's row and ``callers`` and ``callees`` its
-    neighbours. Nothing is run. The triage pack already built the index once
-    on a PE, capa joined, and its entry id is in the run-state block.
+    same file, and FLOSS's rows when FLOSS ran on it in this server; each
+    source not joined, capa always, is stated under ``absent`` with its reason.
+    With no ``address``, ``table`` holds the whole index. An ``address`` is
+    hexadecimal, with or without ``0x``; a value at or above the image base is
+    tried first as a virtual address, then as an offset. ``row`` then holds the
+    row of the function that starts at it or holds it, ``address_read`` which
+    reading answered and whether the address is the start or inside, and
+    ``callers`` and ``callees`` its neighbours; an address no function starts
+    at or holds is a ``no:`` sentence. Nothing is run. The triage pack's ledger
+    entry holds the index built with capa; its id is in the run-state block.
     """
     return _guard(
         artefact_index_tools.TOOL,
