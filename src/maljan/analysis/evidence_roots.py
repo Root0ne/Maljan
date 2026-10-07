@@ -102,6 +102,7 @@ SHARED_COMMAND = "no: more than one process the sandbox recorded has this comman
 NAMES_NO_ROW = "no: the statement names none of {entry}'s rows"
 NO_ROW_NAMES_TECHNIQUE = "no: no row of {entry} that gives a root names the technique"
 FILE_UNTOLD = "no: the call's carved_path names no one file"
+OUTSIDE_PROGRAM = "no: the address lies outside the program the server last named"
 OFFSET_UNPLACED = (
     "no: the file states an image base and no section table, so a file offset cannot be "
     "placed against its addresses"
@@ -210,6 +211,9 @@ class Layout:
     functions: tuple[tuple[int, int, int], ...] = ()
     # Every function start the run knows in this file, offsets from the base.
     starts: tuple[int, ...] = ()
+    # The image's size as an answer states it, 0 when none does; with none,
+    # the section table's span stands for it.
+    extent: int = 0
     _starts: list[int] = field(default_factory=list)
     _raw_starts: list[int] = field(default_factory=list)
     _by_raw: list[_Section] = field(default_factory=list)
@@ -295,6 +299,23 @@ class Layout:
             return section.rva + offset - section.raw
         return None
 
+    def holds(self, value: int) -> bool:
+        """Whether ``value`` can lie in this image, read as an address or an offset.
+
+        As an address, at or above the image base and, where the image's size
+        is stated or its section table spans it, below the end; as an offset,
+        below that size. With no base stated nothing is ruled out.
+        """
+        if not self.bases:
+            return True
+        size = self.extent or max(
+            (s.rva + max(s.size, s.raw_size) for s in self.sections), default=0
+        )
+        base = self.bases[0]
+        if size:
+            return value < size or base <= value < base + size
+        return value >= base
+
     def offsets_unplaceable(self) -> bool:
         """Whether a file offset cannot be placed: a base is stated and no section table."""
         return not self.sections and bool(self.bases)
@@ -374,6 +395,8 @@ class EntryRoots:
     # The file the entry is about: its layout, and how its roots name it.
     layout: Layout = field(default_factory=Layout)
     file: str = ""
+    # Placed by its server's last named program rather than by a path.
+    by_program: bool = False
 
     def ordered(self, roots: set[str]) -> list[str]:
         """``roots`` in the order this entry holds them."""
@@ -516,6 +539,8 @@ class _Files:
         self._sample_names = {_basename(p) for p in self._sample_paths}
         self._sample_digests = {self._digest[p] for p in self._sample_paths if p in self._digest}
         self._file: dict[int, str | None] = {}
+        # The entries placed by their server's stated program, not by a path.
+        self.by_program: set[int] = set()
         program: dict[Any, str | None] = {}
         for entry in entries:
             server = getattr(entry, "server", None)
@@ -526,6 +551,8 @@ class _Files:
                 continue
             names, said = self._named(entry)
             self._file[id(entry)] = said if names else program.get(server, "")
+            if not names and program.get(server):
+                self.by_program.add(id(entry))
 
     @staticmethod
     def _path_named(entry: Any) -> str:
@@ -597,6 +624,7 @@ class _Stated:
     starts: dict[int, None] = field(default_factory=dict)
     # Function starts written as virtual addresses, read against the bases.
     virtual_starts: list[int] = field(default_factory=list)
+    extent: int = 0
 
 
 def _gather(entry: Any, stated: _Stated) -> None:
@@ -618,6 +646,10 @@ def _gather(entry: Any, stated: _Stated) -> None:
             base = _hex(holder.get(key)) if holder.get(key) is not None else None
             if base and base % _BASE_ALIGNMENT == 0:
                 stated.bases.setdefault(base, None)
+        for key in ("size_of_image", "image_size"):
+            size = holder.get(key)
+            if isinstance(size, int) and not isinstance(size, bool) and size > 0:
+                stated.extent = max(stated.extent, size)
     if tool == "pe_info":
         for row in _rows(data, "sections"):
             rva = _hex(row.get("virtual_address"))
@@ -679,6 +711,7 @@ def layouts_of(entries: Iterable[Any], files: _Files) -> dict[str, Layout]:
             bases=plain.bases,
             functions=tuple(held.ranges),
             starts=tuple(starts),
+            extent=held.extent,
         )
     return out
 
@@ -805,6 +838,15 @@ def _address_root(found: EntryRoots, value: Any, **kwargs: Any) -> bool:
     """Add the root of an address a tool wrote, read as its file's coordinates allow."""
     number = _hex(value)
     if number is None:
+        return False
+    # An entry placed by its server's last named program, at an address that
+    # program cannot hold, is about some other program: no root of this one.
+    if found.by_program and not found.layout.holds(number):
+        found.unplace(
+            OUTSIDE_PROGRAM,
+            values=kwargs.get("values", ()),
+            techniques=kwargs.get("techniques", ()),
+        )
         return False
     _place(found, found.layout.rvas_of(number)[0], **kwargs)
     return True
@@ -1085,7 +1127,11 @@ class RunRoots:
             if file is None:
                 self.entries[eid] = EntryRoots(reason=FILE_UNTOLD)
                 continue
-            found = EntryRoots(layout=self.layouts.get(file) or Layout(), file=file)
+            found = EntryRoots(
+                layout=self.layouts.get(file) or Layout(),
+                file=file,
+                by_program=id(entry) in files.by_program,
+            )
             self.entries[eid] = _read_entry(entry, found, joins)
         for repeat, holder in repeat_holders(entries).items():
             held = self.entries.get(holder) if holder else None

@@ -973,6 +973,29 @@ class TestAnEntryIsAboutTheSampleOnlyWhenItSaysSo:
         assert roots.of_entry("ev_0002").roots == ["0x1100 in .text"]
         assert roots.of_entry("ev_0004").roots == ['0x1100 of file "payload.dll"']
 
+    def test_an_address_outside_the_named_program_gives_no_root(self) -> None:
+        from maljan.analysis.evidence_roots import OUTSIDE_PROGRAM
+
+        led = [
+            self._pe(),
+            _entry(
+                "ev_0002",
+                "get_current_program_info",
+                {"image_base": "0x10000000", "name": "payload.dll"},
+            ),
+            _entry("ev_0003", "decompile_function", args={"address": "0x10001100"}),
+            _entry("ev_0004", "decompile_function", args={"address": "0x401100"}),
+        ]
+        roots = run_roots(led)
+        assert roots.of_entry("ev_0003").roots == ['0x1100 of file "payload.dll"']
+        assert roots.of_entry("ev_0004").roots == []
+        assert roots.of_entry("ev_0004").reason == OUTSIDE_PROGRAM
+        # A stated image size bounds the program from above too.
+        sized = {"image_base": "0x10000000", "name": "payload.dll", "size_of_image": 0x2000}
+        led[1] = _entry("ev_0002", "get_current_program_info", sized)
+        led[3] = _entry("ev_0004", "decompile_function", args={"address": "0x10003000"})
+        assert run_roots(led).of_entry("ev_0004").reason == OUTSIDE_PROGRAM
+
     def test_a_program_named_as_the_sample_is_the_sample(self) -> None:
         led = [
             self._pe(),

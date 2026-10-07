@@ -263,6 +263,7 @@ _ROOT_SENTENCES = [
         "NAMES_NO_ROW",
         "NO_ROW_NAMES_TECHNIQUE",
         "FILE_UNTOLD",
+        "OUTSIDE_PROGRAM",
         "OFFSET_UNPLACED",
         "BLOB_UNMATCHED",
         "WHOLE_FILE",
