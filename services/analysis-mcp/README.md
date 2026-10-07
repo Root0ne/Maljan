@@ -314,7 +314,7 @@ nothing recurses.
 
 | tool | arguments |
 | --- | --- |
-| `transform_bytes` | `path`, `carved_path=""`, `offset=null`, `rva=null`, `va=null`, `length=null`, `steps=null` |
+| `transform_bytes` | `path`, `carved_path=""`, `offset=null`, `rva=null`, `va=null`, `length=null`, `steps=null`, `show_offset=null`, `show_length=null` |
 
 One byte range of the file through an ordered list of steps the caller names,
 each applied to the output of the one before (`tools.transforms`); nothing in
@@ -354,13 +354,19 @@ not an image) and every step with its parameters as given, its input and
 output lengths, and anything the step met: a cut, a stream that ends before
 its end marker, bytes after a stream's end. A literal key is shown as it was
 written; a key read from the file is shown as the range named and the bytes
-read there. Then the output: its length, SHA-256, the first 64 bytes in hex,
-its text read as ASCII (each byte past ASCII written as `\xNN`) and as
-UTF-16LE, each escaped as the pack writes a recovered string, the share of
-printable bytes in each reading, its Shannon entropy in bits per byte, and the
-domains, URLs, IP addresses, paths and registry keys the indicator reader
-(`iocs_from_text`) finds in it, each at its first offset in the output with the
-encoding it was read in. The answer never says what the output is.
+read there. Then the output. Over all of it: its length, SHA-256, the share of
+printable bytes (as ASCII and as UTF-16LE pairs) and its Shannon entropy in
+bits per byte. Over the part `shown`: the first 64 bytes in hex, its text read
+as ASCII (each byte past ASCII written as `\xNN`) and as UTF-16LE, each escaped
+as the pack writes a recovered string, and the domains, URLs, IP addresses,
+paths and registry keys the indicator reader (`iocs_from_text`) finds in it,
+each at its first offset in the output with the encoding it was read in. The
+part shown is the first 6000 bytes, the room the platform gives one tool answer
+when the model's window is not measured (a reading takes at least a character
+a byte), unless `show_offset` and `show_length` name another; `shown` says
+when it is not the whole output. `show_length` reaches at most the characters
+of the largest window the platform believes a model has (30,000,000). The
+answer never says what the output is.
 
 An unknown operation, a key of a length the cipher does not take, a wrong IV
 or nonce length, an input that is not whole AES blocks, padding that is not
@@ -381,7 +387,14 @@ answer's `stopped` names the steps not run and states the cut step's output.
 The bytes all steps write together are held to the same cap, so a long list of
 steps costs at most that many bytes of work, and a chain that reaches it stops
 the same way. Each step's input is let go before the next runs, and each step
-is linear in its buffer. `rc4` runs through `cryptography`'s ARC4 for the key lengths it
+is linear in its buffer. The measures over the whole output count a slice at a
+time. Measured on this project's host at the cap (100 MiB): a 1 GiB zlib bomb
+1.2 s and 200 MiB above the process; 128 gzip members of 1 MiB 1.1 s; an
+LZNT1 bomb 0.75 s, an all-literal LZNT1 stream 4.0 s and one of nothing but
+three-byte copies (the slowest shape) 29 s, each 200 MiB; the whole-output
+measures 0.5 s and 9 MiB; at the largest part a call may ask to be shown
+(30 MB) the ASCII reading 1.7 s, the UTF-16LE reading 3.4 s and the indicator
+scan 18 s over dense text. `rc4` runs through `cryptography`'s ARC4 for the key lengths it
 takes (5, 7, 8, 10, 16, 20, 24 or 32 bytes) and through the same algorithm
 written out for every other length; `aes` needs `cryptography`. The ledger
 entry's evidence root is the start of its input range.

@@ -783,9 +783,14 @@ def _transform_sentences() -> str:
         ("image", {"rva": "0x90000"}),
         ("image", {"offset": 0, "length": 2}),
         ("image", {"va": "0x10"}),
+        ("big", {"offset": 0}),
+        ("big", {"offset": 1, "show_offset": 3, "show_length": 5}),
+        ("flat", {"offset": 0, "show_offset": 999}),
+        ("flat", {"offset": 0, "show_length": transforms.MAX_SHOWN_BYTES + 1}),
     ]
     with tempfile.TemporaryDirectory() as folder:
         files = {
+            "big": b"\0" * (transforms.SHOWN_BYTES * 2),
             "flat": b"plain bytes, " * 5,
             "packed": zlib.compress(b"x" * 64) + b"tail",
             "cut": zlib.compress(b"x" * 64)[:-6],
@@ -807,6 +812,12 @@ def _transform_sentences() -> str:
             ),
             _analysis_tool_descriptions("transform_bytes"),
             *(json.dumps({k: v for k, v in a.items() if k != "output"}) for a in answers),
+            # The output's own sentences; its readings are the sample's bytes.
+            *(
+                json.dumps({k: a["output"].get(k) for k in ("shown", "utf16le_note")})
+                for a in answers
+                if "output" in a
+            ),
         ]
     )
 

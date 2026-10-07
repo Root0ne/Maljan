@@ -150,6 +150,8 @@
       "offset",
       "path",
       "rva",
+      "show_length",
+      "show_offset",
       "steps",
       "va"
     ],

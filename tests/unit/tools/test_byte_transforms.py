@@ -611,3 +611,67 @@ class TestGrowthIsBounded:
             )
             assert answer["output"]["length"] == len(blob), steps[0]["op"]
             assert peak < 24 * len(blob), (steps[0]["op"], peak)
+
+    def test_a_cap_sized_output_is_measured_whole_and_shown_in_part(self, tmp_path: Path) -> None:
+        import json
+        import time
+
+        line = b"GET http://host-%04d.example.org/a.php C:\\Users\\x\\f.exe\n"
+        text = b"".join(line % i for i in range(CAP // len(line) + 1))[:CAP]
+        path = _write(tmp_path, zlib.compress(text * 8, 9))
+        started = time.perf_counter()
+        answer, peak = _peak(lambda: transform_bytes(path, offset=0, steps=[{"op": "zlib"}]))
+        assert time.perf_counter() - started < 20
+        out = answer["output"]
+        assert out["length"] == CAP and out["sha256"] == hashlib.sha256(text).hexdigest()
+        assert out["shown"]["end"] == transforms.SHOWN_BYTES
+        assert "show_offset and show_length show another part" in out["shown"]["note"]
+        assert len(json.dumps(answer)) < 8 * transforms.SHOWN_BYTES
+        assert all(row["offset"] < transforms.SHOWN_BYTES for row in out["indicators"])
+        assert peak < 16 * CAP
+
+
+class TestTheShownPart:
+    def test_the_default_shows_the_whole_of_a_small_output(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, PLAIN)
+        out = _out(transform_bytes(path, offset=0))
+        assert out["shown"] == {"offset": 0, "end": len(PLAIN)}
+
+    def test_another_part_is_shown_on_request_with_offsets_in_the_output(
+        self, tmp_path: Path
+    ) -> None:
+        filler = b"\0" * (transforms.SHOWN_BYTES * 2)
+        path = _write(tmp_path, filler + PLAIN)
+        out = _out(transform_bytes(path, offset=0))
+        assert out["indicators"] == [] and out["length"] == len(filler) + len(PLAIN)
+        later = _out(
+            transform_bytes(path, offset=0, show_offset=len(filler), show_length=len(PLAIN))
+        )
+        assert later["ascii"] == transforms._ascii_reading(PLAIN)
+        url = next(row for row in later["indicators"] if row["kind"] == "url")
+        assert url["offset"] == len(filler) + PLAIN.index(b"http")
+        assert later["hex_head"] == PLAIN[: transforms.HEX_HEAD_BYTES].hex()
+
+    def test_a_window_outside_the_output_or_past_any_answer_is_an_error(
+        self, tmp_path: Path
+    ) -> None:
+        path = _write(tmp_path, PLAIN)
+        assert "outside the output" in _error(
+            transform_bytes(path, offset=0, show_offset=len(PLAIN))
+        )
+        assert "the most bytes one answer can show" in _error(
+            transform_bytes(path, offset=0, show_length=transforms.MAX_SHOWN_BYTES + 1)
+        )
+
+    def test_the_utf16le_reading_is_the_pack_s_escaping(self) -> None:
+        import os
+
+        from maljan.utils.written_forms import pack_escaped
+
+        for blob in (
+            os.urandom(1 << 16),
+            'a"\\\n\u00a0\U0001f600\U000e0001'.encode("utf-16-le") + b"\x00\xd8",
+            "ends in \\".encode("utf-16-le"),
+        ):
+            text = blob[: len(blob) // 2 * 2].decode("utf-16-le", errors="surrogatepass")
+            assert transforms._utf16_reading(blob) == pack_escaped(text)

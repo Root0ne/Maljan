@@ -48,12 +48,18 @@ import string
 import zlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
+from maljan.llm.context_window import (
+    CHARS_PER_TOKEN,
+    MAX_BELIEVABLE_WINDOW_TOKENS,
+    UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS,
+)
 from maljan.tools import pe_image
 from maljan.tools.errors import BAD_ARGUMENT, tool_error
 from maljan.tools.strings import iocs_from_text
@@ -65,6 +71,16 @@ TOOL = "transform_bytes"
 # sample upload. A decompressed payload is a file of that kind, and a stream
 # that inflates past it is cut there, with the cut stated.
 DECOMPRESSED_CAP = SAMPLE_UPLOAD_MAX_BYTES
+
+# How many output bytes the hex head, the readings and the indicators cover
+# when the call does not say: the room the platform gives one tool answer when
+# the model's window is not measured. A reading takes at least a character a
+# byte, so more than that is not shown whole in that room; the measures cover
+# the whole output, and ``show_offset`` and ``show_length`` show any other part.
+SHOWN_BYTES = UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
+# The most a call may ask to be shown: the characters of the largest window
+# this platform believes a model has. No answer can show a reading longer.
+MAX_SHOWN_BYTES = MAX_BELIEVABLE_WINDOW_TOKENS * CHARS_PER_TOKEN
 
 # How many leading bytes of the output are shown in hex. The whole output is
 # also stated as text in two readings; the head is the raw view of its start.
@@ -101,8 +117,11 @@ CAPABILITY_FACTS = (
     "(alphabet standard, urlsafe or 64 characters), `hex`, `lznt1`, `zlib`, `gzip`, `deflate`, "
     "`reverse` and `slice` (start, length). A key, iv "
     'or nonce is {"hex": ...}, {"text": ...} or a range of the same file {"offset": ..., '
-    '"length": ...}. The answer states the output\'s length, SHA-256, hex head, ASCII and '
-    "UTF-16LE readings, printable share, entropy and the indicators found in it with their offsets."
+    '"length": ...}. The answer states the output\'s length, SHA-256, printable share and '
+    "entropy over the whole output, and the hex head, ASCII and UTF-16LE readings and the "
+    "indicators found with their offsets over the part shown: the first 6000 bytes, or the part "
+    "show_offset and show_length name. Decompression, and the bytes a chain writes in all, stop "
+    "at the platform's sample upload cap and say so."
 )
 
 REMEDIATION = (
@@ -586,6 +605,15 @@ def _lznt1_chunk(body: bytes, base: int) -> bytes:
     while i < len(body):
         flags = body[i]
         i += 1
+        if not flags:
+            # Eight literals, taken in one slice.
+            out += body[i : i + 8]
+            i += 8
+            if len(out) > _LZNT1_CHUNK:
+                raise TransformError(
+                    f"the chunk starting at {base - 2:#x} decompresses past {_LZNT1_CHUNK} bytes"
+                )
+            continue
         for bit in range(8):
             if i >= len(body):
                 break
@@ -597,12 +625,10 @@ def _lznt1_chunk(body: bytes, base: int) -> bytes:
                 raise TransformError(f"the copy token at {base + i:#x} is cut by the chunk's end")
             token = body[i] | body[i + 1] << 8
             i += 2
-            position = len(out) - 1
-            length_mask, offset_shift = 0x0FFF, 12
-            while position >= 0x10:
-                length_mask >>= 1
-                offset_shift -= 1
-                position >>= 1
+            # The offset field widens by one bit each time the position
+            # written so far doubles past 16: halve until under 16, counted.
+            halvings = max(0, (len(out) - 1).bit_length() - 4)
+            length_mask, offset_shift = 0x0FFF >> halvings, 12 - halvings
             length = (token & length_mask) + 3
             back = (token >> offset_shift) + 1
             if back > len(out):
@@ -739,9 +765,30 @@ def _ascii_reading(data: bytes) -> str:
     return out[:-1] + "\\x5c" if out.endswith("\\") else out
 
 
+@lru_cache(maxsize=1)
+def _bmp_escapes() -> dict[int, str]:
+    """The pack's written form of every BMP character it escapes, for one translate pass."""
+    out: dict[int, str] = {}
+    for code in range(0x10000):
+        ch = chr(code)
+        if ch == '"' or not ch.isprintable():
+            out[code] = PACK_ESCAPES.get(ch) or f"\\x{code:02x}"
+    return out
+
+
+_ASTRAL = re.compile("[\U00010000-\U0010ffff]")
+
+
 def _utf16_reading(data: bytes) -> str:
-    even = data[: len(data) // 2 * 2]
-    return pack_escaped(even.decode("utf-16-le", errors="surrogatepass"))
+    """The bytes as UTF-16LE, in the pack's escaping, written in one translate pass.
+
+    Equal to ``pack_escaped`` of the decoded text: the BMP through a table of
+    the characters it escapes, the few characters past the BMP a decoded pair
+    makes one at a time.
+    """
+    text = data[: len(data) // 2 * 2].decode("utf-16-le", errors="surrogatepass")
+    out = _ASTRAL.sub(lambda m: pack_escaped(m.group()), text.translate(_bmp_escapes()))
+    return out[:-1] + "\\x5c" if out.endswith("\\") else out
 
 
 def _entropy(counts: Any, total: int) -> float:
@@ -783,25 +830,69 @@ def _indicators(data: bytes) -> list[dict[str, Any]]:
     return found
 
 
-def _output_facts(data: bytes) -> dict[str, Any]:
+def _measures(data: bytes) -> tuple[Any, int, int]:
+    """Byte counts, and the printable UTF-16LE pairs, over the whole output a slice at a time.
+
+    The working arrays are a slice long, so measuring an output of the cap's
+    size holds the output and one slice, not eight bytes of count per byte.
+    """
+    counts = np.zeros(256, dtype=np.int64)
+    wide = 0
+    pairs = len(data) // 2
     buffer = np.frombuffer(data, dtype=np.uint8)
-    counts = np.bincount(buffer, minlength=256) if len(data) else np.zeros(256, dtype=np.int64)
+    for start in range(0, pairs * 2, _WORKING_SLICE):
+        piece = buffer[start : min(start + _WORKING_SLICE, pairs * 2)].reshape(-1, 2)
+        wide += int((_PRINTABLE[piece[:, 0]] & (piece[:, 1] == 0)).sum())
+    for start in range(0, len(data), _WORKING_SLICE):
+        counts += np.bincount(buffer[start : start + _WORKING_SLICE], minlength=256)
+    return counts, wide, pairs
+
+
+def _shown_window(data: bytes, show_offset: Any, show_length: Any) -> tuple[int, int]:
+    start = _number(show_offset, "show_offset") if _given(show_offset) else 0
+    if start < 0 or (data and start >= len(data)) or (not data and start):
+        raise TransformError(f"show_offset {start} is outside the output of {len(data)} bytes")
+    if _given(show_length):
+        length = _number(show_length, "show_length")
+        if not 1 <= length <= MAX_SHOWN_BYTES:
+            raise TransformError(
+                f"show_length {length} is outside 1 to {MAX_SHOWN_BYTES}, the most bytes one "
+                "answer can show: a reading takes at least a character a byte, and no window "
+                "this platform believes holds more characters than that"
+            )
+    else:
+        length = SHOWN_BYTES
+    return start, min(len(data), start + length)
+
+
+def _output_facts(data: bytes, show_offset: Any = None, show_length: Any = None) -> dict[str, Any]:
+    start, end = _shown_window(data, show_offset, show_length)
+    counts, wide, pairs = _measures(data)
     printable = int(counts[_PRINTABLE].sum())
-    pairs = buffer[: len(data) // 2 * 2].reshape(-1, 2)
-    wide = int((_PRINTABLE[pairs[:, 0]] & (pairs[:, 1] == 0)).sum()) if len(pairs) else 0
+    shown = data[start:end]
     facts: dict[str, Any] = {
         "length": len(data),
         "sha256": hashlib.sha256(data).hexdigest(),
-        "hex_head": data[:HEX_HEAD_BYTES].hex(),
         "printable_share": round(printable / len(data), 4) if data else 0.0,
-        "printable_share_utf16le": round(wide / len(pairs), 4) if len(pairs) else 0.0,
+        "printable_share_utf16le": round(wide / pairs, 4) if pairs else 0.0,
         "entropy_bits_per_byte": _entropy(counts, len(data)),
-        "indicators": _indicators(data),
-        "ascii": _ascii_reading(data),
-        "utf16le": _utf16_reading(data),
+        "shown": {"offset": start, "end": end},
     }
-    if len(data) % 2:
-        facts["utf16le_note"] = "the output's last byte is left out of the UTF-16LE reading"
+    if start or end < len(data):
+        facts["shown"]["note"] = (
+            f"the hex head, the readings and the indicators cover output bytes {start} to {end} "
+            f"of {len(data)}; the measures above cover all of them, and show_offset and "
+            "show_length show another part"
+        )
+    facts["hex_head"] = shown[:HEX_HEAD_BYTES].hex()
+    indicators = _indicators(shown)
+    for row in indicators:
+        row["offset"] += start
+    facts["indicators"] = indicators
+    facts["ascii"] = _ascii_reading(shown)
+    facts["utf16le"] = _utf16_reading(shown)
+    if len(shown) % 2:
+        facts["utf16le_note"] = "the shown part's last byte is left out of the UTF-16LE reading"
     return facts
 
 
@@ -823,6 +914,8 @@ def transform_bytes(
     va: Any = None,
     length: Any = None,
     steps: Any = None,
+    show_offset: Any = None,
+    show_length: Any = None,
 ) -> dict[str, Any]:
     """The range of ``path`` through ``steps``, stated as facts, or an error naming why."""
     try:
@@ -872,7 +965,10 @@ def transform_bytes(
         # The input of a step is let go before the next one runs.
         data = out
         del out
-    answer["output"] = _output_facts(data)
+    try:
+        answer["output"] = _output_facts(data, show_offset, show_length)
+    except TransformError as exc:
+        return tool_error(BAD_ARGUMENT, str(exc), tool=TOOL, remediation=REMEDIATION)
     return answer
 
 

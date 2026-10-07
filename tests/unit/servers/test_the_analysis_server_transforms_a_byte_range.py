@@ -99,3 +99,14 @@ def test_the_capabilities_answer_states_the_operations(server: Any) -> None:
         assert op in cell["facts"]
     for op in transforms.OPERATIONS:
         assert f"``{op}``" in (server.transform_bytes.__doc__ or "")
+    # The shown part each text names is the module's own number.
+    shown = f"first {transforms.SHOWN_BYTES} bytes"
+    assert shown in cell["facts"]
+    assert shown in " ".join((server.transform_bytes.__doc__ or "").split())
+
+
+def test_the_shown_part_reaches_the_tool(server: Any, tmp_path: Path) -> None:
+    path, at = _sample(tmp_path)
+    answer = server.transform_bytes(path=path, rva=hex(at), show_offset="0x10", show_length=8)
+    assert answer["output"]["shown"]["offset"] == 0x10
+    assert answer["output"]["shown"]["end"] == 0x18

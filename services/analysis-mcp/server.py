@@ -1207,6 +1207,8 @@ def transform_bytes(
     va: int | str | None = None,
     length: int | str | None = None,
     steps: list[dict[str, Any]] | None = None,
+    show_offset: int | str | None = None,
+    show_length: int | str | None = None,
 ) -> dict[str, Any]:
     """Read one byte range of the file and apply an ordered list of steps to it.
 
@@ -1232,14 +1234,17 @@ def transform_bytes(
 
     The answer names the range (its offset, rva and section) and every step
     with its parameters as given, then states the output: its length, SHA-256,
-    the first 64 bytes in hex, the text it reads as in ASCII and in UTF-16LE,
-    the share of printable bytes, its entropy in bits per byte, and the hosts,
-    URLs, addresses, paths and registry keys the indicator reader finds in it
-    with their offsets in the output. An unknown operation, a key of the wrong
-    length, an input that is not whole blocks or padding that does not read is
-    an error naming the step and why; nothing is tried with other parameters.
-    Decompression stops at the platform's sample upload cap and says so.
-    Nothing is run.
+    the share of printable bytes and its entropy in bits per byte, over the
+    whole output; and, over the part ``shown``, the first 64 bytes in hex, the
+    text it reads as in ASCII and in UTF-16LE, and the hosts, URLs, addresses,
+    paths and registry keys the indicator reader finds in it with their offsets
+    in the output. The part shown is the first 6000 bytes unless
+    ``show_offset`` and ``show_length`` name another; the answer says when it
+    is not the whole output. An unknown operation, a key of the wrong length,
+    an input that is not whole blocks or padding that does not read is an
+    error naming the step and why; nothing is tried with other parameters.
+    Decompression stops at the platform's sample upload cap and says so, and
+    so does a chain whose steps have written that much in all. Nothing is run.
     """
     return _guard(
         transforms.TOOL,
@@ -1251,6 +1256,8 @@ def transform_bytes(
         va=va,
         length=length,
         steps=steps,
+        show_offset=show_offset,
+        show_length=show_length,
     )
 
 
