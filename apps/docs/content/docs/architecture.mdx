@@ -1156,8 +1156,13 @@ decides.
    analyst answers `KEEP <label>: <reason>` or `WITHDRAW <label>: <reason>`
    per item, several labels at once (`KEEP C1, C2: …`, `KEEP C1 C2: …`,
    `WITHDRAW C3 because …`), several decisions on one line (`KEEP C1: …;
-   WITHDRAW C2: …`), or `KEEP all` / `WITHDRAW all` for every item a decision
-   of its own does not name; each line is read in one pass. Each item is the first answer's own claim, its sentence,
+   WITHDRAW C2: …`, `KEEP C1, WITHDRAW C2`), or `KEEP all` / `WITHDRAW all`
+   for every item a decision of its own does not name, `all except C1`
+   leaving the listed items undecided. A decision is read only where a clause
+   begins (a line's start, after `;`, or after a `,` that follows a
+   decision's labels); once its reason opens (`:`, a dash, `.`, `because`) the
+   rest of the clause is the reason and no word in it is read as a decision.
+   Each line is read in one pass. Each item is the first answer's own claim, its sentence,
    technique id and block with it (`claim_drops.dropped_claims`), so of a
    technique list split on commas the claim left out is the one put back. A
    kept item goes back into the answer as the first answer wrote it, a

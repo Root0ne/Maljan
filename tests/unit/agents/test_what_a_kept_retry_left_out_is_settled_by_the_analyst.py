@@ -381,6 +381,30 @@ class TestSeveralDecisionsOnALine:
             "C1": ("KEEP", "I keep it because it holds"),
         }
 
+    def test_a_decision_written_inside_a_reason_is_not_read(self) -> None:
+        line = "KEEP C1: I keep it because withdraw C2 would lose data"
+
+        assert read_retry_drop_answers(line, self.LABELS) == {
+            "C1": ("KEEP", "I keep it because withdraw C2 would lose data"),
+        }
+
+    def test_all_except_leaves_the_listed_labels_undecided(self) -> None:
+        assert read_retry_drop_answers("WITHDRAW all except C1", self.LABELS) == {
+            "C2": ("WITHDRAW", ""),
+            "C3": ("WITHDRAW", ""),
+            "F1": ("WITHDRAW", ""),
+        }
+        assert read_retry_drop_answers(
+            "KEEP all except C1, C2: they hold\nWITHDRAW C1: a guess", self.LABELS
+        ) == {
+            "C1": ("WITHDRAW", "a guess"),
+            "C3": ("KEEP", "they hold"),
+            "F1": ("KEEP", "they hold"),
+        }
+
+    def test_a_decision_only_opens_a_clause(self) -> None:
+        assert read_retry_drop_answers("It holds, so KEEP C1", self.LABELS) == {}
+
     def test_a_long_hostile_line_is_read_in_linear_time(self) -> None:
         import time
 
