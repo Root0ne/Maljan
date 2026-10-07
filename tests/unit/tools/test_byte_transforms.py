@@ -270,6 +270,16 @@ class TestTheAnswerStatesFacts:
             r for r in rows if r["kind"] == "path"
         ).items()
 
+    def test_the_ascii_reading_is_the_pack_s_escaping_with_high_bytes_written_out(self) -> None:
+        from maljan.utils.written_forms import pack_escaped
+
+        every = bytes(range(256)) + b"\\"
+        expected = pack_escaped(every.decode("latin-1")).translate(
+            {code: f"\\x{code:02x}" for code in range(0xA0, 0x100)}
+        )
+        assert transforms._ascii_reading(every) == expected
+        assert transforms._ascii_reading(b"a\\") == pack_escaped("a\\")
+
     def test_the_entropy_of_known_buffers(self, tmp_path: Path) -> None:
         path = _write(tmp_path, bytes(range(256)) * 4)
         assert _out(transform_bytes(path, offset=0))["entropy_bits_per_byte"] == 8.0
@@ -466,3 +476,138 @@ class TestHostileInputs:
         small, large = timed(1 << 16), timed(1 << 19)
         # Eight times the bytes; a quadratic step would take some sixty times as long.
         assert large < small * 24 + 0.5
+
+
+CAP = 1 << 18
+
+
+def _peak(call: Any) -> tuple[Any, int]:
+    """The call's answer and the most memory Python and numpy held at once while it ran."""
+    import tracemalloc
+
+    tracemalloc.start()
+    try:
+        answer = call()
+        return answer, tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+
+class TestGrowthIsBounded:
+    """Every way the output can grow stops at the cap, says so, and holds memory to it.
+
+    The cap is set to 256 KiB here; each input expands to many times that. The
+    answer carries two text readings of the output, each a few characters a
+    byte, so the peak is held to a small multiple of the cap and below what the
+    input would have expanded to.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _small_cap(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(transforms, "DECOMPRESSED_CAP", CAP)
+
+    def _bounded(self, answer: dict[str, Any], peak: int, expands_to: int) -> None:
+        assert "error" not in answer, answer
+        assert answer["output"]["length"] <= CAP
+        assert peak < 16 * CAP < expands_to, peak
+
+    def test_a_zlib_bomb(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, zlib.compress(b"\0" * (64 * CAP), 9))
+        answer, peak = _peak(lambda: transform_bytes(path, offset=0, steps=[{"op": "zlib"}]))
+        self._bounded(answer, peak, 64 * CAP)
+        assert answer["output"]["length"] == CAP
+        assert "sample upload cap, and was cut there" in answer["steps"][0]["cut"]
+
+    def test_a_raw_deflate_bomb(self, tmp_path: Path) -> None:
+        raw = zlib.compressobj(9, zlib.DEFLATED, -15)
+        path = _write(tmp_path, raw.compress(b"\0" * (64 * CAP)) + raw.flush())
+        answer, peak = _peak(lambda: transform_bytes(path, offset=0, steps=[{"op": "deflate"}]))
+        self._bounded(answer, peak, 64 * CAP)
+        assert "cut" in answer["steps"][0]
+
+    def test_gzip_members_count_toward_one_bound(self, tmp_path: Path) -> None:
+        member = gzip.compress(b"\0" * (CAP // 4))
+        path = _write(tmp_path, member * 64)
+        answer, peak = _peak(lambda: transform_bytes(path, offset=0, steps=[{"op": "gzip"}]))
+        self._bounded(answer, peak, 16 * CAP + 1)
+        assert answer["output"]["length"] == CAP and "cut" in answer["steps"][0]
+        assert answer["steps"][0]["members"] == 5
+        small = _write(tmp_path, gzip.compress(b"one ") + gzip.compress(b"two") + b"tail", "g.bin")
+        answer = transform_bytes(small, offset=0, steps=[{"op": "gzip"}])
+        assert answer["output"]["ascii"] == "one two"
+        assert answer["steps"][0]["members"] == 2
+        assert answer["steps"][0]["trailing"].startswith("4 bytes follow")
+
+    def test_many_tiny_gzip_members_stay_linear(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, gzip.compress(b"ab") * 20_000)
+        answer = transform_bytes(path, offset=0, steps=[{"op": "gzip"}])
+        assert answer["steps"][0]["members"] == 20_000
+        assert answer["output"]["length"] == 40_000
+
+    def test_a_nested_chain_stops_at_the_cap(self, tmp_path: Path) -> None:
+        inner = zlib.compress(b"\0" * (64 * CAP), 9)
+        path = _write(tmp_path, zlib.compress(zlib.compress(inner, 9), 9))
+        steps = [{"op": "zlib"}] * 5
+        answer, peak = _peak(lambda: transform_bytes(path, offset=0, steps=steps))
+        self._bounded(answer, peak, 64 * CAP)
+        assert [s["op"] for s in answer["steps"]] == ["zlib"] * 3
+        assert "cut" in answer["steps"][2]
+        assert answer["stopped"].startswith("steps 4 to 5 were not run")
+
+    def test_an_lznt1_bomb(self, tmp_path: Path) -> None:
+        chunk = _lznt1_compress(b"\0" * 4096)
+        path = _write(tmp_path, chunk * 4096)
+        answer, peak = _peak(lambda: transform_bytes(path, offset=0, steps=[{"op": "lznt1"}]))
+        self._bounded(answer, peak, 16 * CAP + 1)
+        assert answer["output"]["length"] == CAP and "cut" in answer["steps"][0]
+
+    def test_ten_thousand_cheap_steps(self, tmp_path: Path) -> None:
+        import time
+
+        path = _write(tmp_path, PLAIN[:16])
+        steps = [{"op": "reverse"}, {"op": "xor", "key": {"hex": "5a"}}] * 5_000
+        started = time.perf_counter()
+        answer, peak = _peak(lambda: transform_bytes(path, offset=0, steps=steps))
+        assert time.perf_counter() - started < 30
+        assert len(answer["steps"]) == 10_000
+        assert answer["output"]["sha256"] == hashlib.sha256(PLAIN[:16]).hexdigest()
+        assert peak < 16 * CAP
+
+    def test_the_bytes_a_chain_writes_are_held_to_the_cap(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, bytes(CAP // 4))
+        answer, peak = _peak(
+            lambda: transform_bytes(path, offset=0, steps=[{"op": "reverse"}] * 10_000)
+        )
+        assert len(answer["steps"]) == 4
+        assert answer["stopped"].startswith("steps 5 to 10000 were not run, because the steps")
+        assert "the platform's sample upload cap" in answer["stopped"]
+        assert peak < 16 * CAP
+
+    def test_a_key_range_larger_than_the_file(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, PLAIN)
+        message = _error(
+            transform_bytes(
+                path, offset=0, steps=[{"op": "xor", "key": {"offset": 0, "length": 10 * CAP}}]
+            )
+        )
+        assert "runs past the end of the file" in message
+
+    def test_the_linear_steps_hold_to_their_input(self, tmp_path: Path) -> None:
+        blob = bytes(range(256)) * (CAP // 1024)
+        custom = "ZYXWVUTSRQPONMLKJIHGFEDCBAzyxwvutsrqponmlkjihgfedcba9876543210+/"
+        text = base64.b64encode(blob).translate(
+            bytes.maketrans(transforms._STANDARD_ALPHABET.encode(), custom.encode())
+        )
+        spaced = b" \n".join(blob[i : i + 32].hex().encode() for i in range(0, len(blob), 32))
+        cases = [
+            (blob, [{"op": "xor", "key": {"hex": "ab" * 4096}, "increment": 5}]),
+            (text, [{"op": "base64", "alphabet": custom}]),
+            (spaced, [{"op": "hex"}]),
+        ]
+        for source, steps in cases:
+            path = _write(tmp_path, source, "linear.bin")
+            answer, peak = _peak(
+                lambda path=path, steps=steps: transform_bytes(path, offset=0, steps=steps)
+            )
+            assert answer["output"]["length"] == len(blob), steps[0]["op"]
+            assert peak < 24 * len(blob), (steps[0]["op"], peak)

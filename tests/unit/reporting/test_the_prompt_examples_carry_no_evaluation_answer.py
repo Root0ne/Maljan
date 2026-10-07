@@ -801,6 +801,10 @@ def _transform_sentences() -> str:
             transforms.CAPABILITY_FACTS,
             transforms.REMEDIATION,
             transforms._cap_sentence(),
+            transforms._stopped(2, 4, "the output reached the platform's sample upload cap"),
+            transforms._stopped(
+                2, 4, "the steps had written 9 bytes in all, the platform's sample upload cap"
+            ),
             _analysis_tool_descriptions("transform_bytes"),
             *(json.dumps({k: v for k, v in a.items() if k != "output"}) for a in answers),
         ]

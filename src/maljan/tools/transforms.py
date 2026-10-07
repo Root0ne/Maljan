@@ -27,7 +27,12 @@ What the answer states, and what it never does:
 
 Bounds come from structure: every step but decompression writes at most as
 many bytes as it reads, and decompression is held to the platform's sample
-upload cap (``core.delivery_limits``), stated in the step when reached. A range
+upload cap (``core.delivery_limits``), stated in the step when reached: the
+stream is fed a slice at a time and asked for no more than the room left, so
+the output never holds more than the cap, gzip members one after another
+included. A cut decompression ends the chain, and the bytes all the steps write
+together are held to the same cap, so the cost of a step list is bounded by
+bytes, not by how many steps it names. A range
 past the end of the file is cut at the end and says so; a key range past the
 end is an error, because a key cut short is another key. Each step is linear
 in its buffer. The file is only read; nothing in it is run.
@@ -52,7 +57,7 @@ from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 from maljan.tools import pe_image
 from maljan.tools.errors import BAD_ARGUMENT, tool_error
 from maljan.tools.strings import iocs_from_text
-from maljan.utils.written_forms import pack_escaped
+from maljan.utils.written_forms import PACK_ESCAPES, pack_escaped
 
 TOOL = "transform_bytes"
 
@@ -121,13 +126,21 @@ _WORKING_SLICE = 1 << 20
 _LZNT1_COMPRESSED = 0x8000
 _LZNT1_SIGNATURE = 0x3000
 _ZLIB_WINDOWS = {"zlib": 15, "gzip": 31, "deflate": -15}
+# The two bytes every gzip member starts with: what follows one member is read
+# as the next only when it starts with them.
+_GZIP_MAGIC = b"\x1f\x8b"
 # Printable ASCII and the three whitespace controls text holds.
 _PRINTABLE = np.zeros(256, dtype=bool)
 _PRINTABLE[0x20:0x7F] = True
 _PRINTABLE[[0x09, 0x0A, 0x0D]] = True
-# Each byte of 0x80 and above written as an escape in the ASCII reading, after
-# the pack's own escaping (which writes 0x80-0x9f already).
-_HIGH_BYTES = {code: f"\\x{code:02x}" for code in range(0xA0, 0x100)}
+# The ASCII reading, one byte to one written form, applied in one pass: the
+# pack's escape for the quote and the controls, every printable ASCII byte as
+# itself, and every byte past ASCII as ``\xNN``.
+_ASCII_FORMS = {
+    code: PACK_ESCAPES.get(chr(code))
+    or (chr(code) if code < 0x80 and chr(code).isprintable() else f"\\x{code:02x}")
+    for code in range(0x100)
+}
 # The runs the indicator reader is handed, ASCII and UTF-16LE, from five
 # characters: the reader's own floor for a host standing alone.
 _ASCII_RUN = re.compile(rb"[\x20-\x7e]{5,}")
@@ -621,23 +634,57 @@ def _inflate(
     kind: str,
 ) -> Callable[[bytes, _File, Mapping[str, Any]], tuple[bytes, dict[str, Any]]]:
     def run(data: bytes, file: _File, step: Mapping[str, Any]) -> tuple[bytes, dict[str, Any]]:
-        stream = zlib.decompressobj(_ZLIB_WINDOWS[kind])
-        try:
-            out = stream.decompress(data, DECOMPRESSED_CAP)
-            said: dict[str, Any] = {}
-            if len(out) >= DECOMPRESSED_CAP and not stream.eof:
-                if stream.decompress(stream.unconsumed_tail, 1):
-                    said["cut"] = _cap_sentence()
-        except zlib.error as exc:
-            raise TransformError(f"the input is not a {kind} stream: {exc}") from exc
-        if "cut" not in said:
+        """Fed a slice of input at a time, each call asked for no more than the room left.
+
+        The output never holds more than the cap and one byte, whatever the
+        input expands to; gzip members that follow one another are read in
+        turn under that one bound.
+        """
+        view = memoryview(data)
+        out = bytearray()
+        said: dict[str, Any] = {}
+        at = 0
+        members = 0
+        while True:
+            stream = zlib.decompressobj(_ZLIB_WINDOWS[kind])
+            members += 1
+            try:
+                while not stream.eof:
+                    if stream.unconsumed_tail:
+                        piece: bytes | memoryview = stream.unconsumed_tail
+                    elif at < len(data):
+                        piece = view[at : at + _WORKING_SLICE]
+                        at += len(piece)
+                    else:
+                        break
+                    out += stream.decompress(piece, DECOMPRESSED_CAP - len(out) + 1)
+                    if len(out) > DECOMPRESSED_CAP:
+                        del out[DECOMPRESSED_CAP:]
+                        said["cut"] = _cap_sentence()
+                        break
+            except zlib.error as exc:
+                raise TransformError(
+                    f"the input is not a {kind} stream"
+                    + (f" (member {members})" if members > 1 else "")
+                    + f": {exc}"
+                ) from exc
+            if "cut" in said:
+                break
             if not stream.eof:
                 said["end"] = "the input ends before the stream's end marker"
-            elif stream.unused_data:
+                break
+            # What the stream did not use is the tail of the last slice fed.
+            at -= len(stream.unused_data)
+            if kind == "gzip" and data[at : at + 2] == _GZIP_MAGIC:
+                continue
+            if at < len(data):
                 said["trailing"] = (
-                    f"{len(stream.unused_data)} bytes follow the stream's end and were not read"
+                    f"{len(data) - at} bytes follow the stream's end and were not read"
                 )
-        return out, said
+            break
+        if kind == "gzip":
+            said["members"] = members
+        return bytes(out), said
 
     return run
 
@@ -687,7 +734,9 @@ _STEPS: dict[str, Callable[[bytes, _File, Mapping[str, Any]], tuple[bytes, dict[
 
 def _ascii_reading(data: bytes) -> str:
     """The bytes as ASCII, each byte past it written as an escape, in the pack's escaping."""
-    return pack_escaped(data.decode("latin-1")).translate(_HIGH_BYTES)
+    out = data.decode("latin-1").translate(_ASCII_FORMS)
+    # A backslash that would end the string is written as the pack writes it.
+    return out[:-1] + "\\x5c" if out.endswith("\\") else out
 
 
 def _utf16_reading(data: bytes) -> str:
@@ -785,7 +834,21 @@ def transform_bytes(
     except TransformError as exc:
         return tool_error(BAD_ARGUMENT, str(exc), tool=TOOL, remediation=REMEDIATION)
     done: list[dict[str, Any]] = []
+    answer: dict[str, Any] = {"input": input_said, "steps": done}
+    written = 0
     for number, step in enumerate(listed, 1):
+        if done and "cut" in done[-1] and done[-1]["op"] in _DECOMPRESSIONS:
+            answer["stopped"] = _stopped(
+                number - 1, len(listed), "the output reached the platform's sample upload cap"
+            )
+            break
+        if written >= DECOMPRESSED_CAP:
+            answer["stopped"] = _stopped(
+                number - 1,
+                len(listed),
+                f"the steps had written {written} bytes in all, the platform's sample upload cap",
+            )
+            break
         op = str(step.get("op") or "").strip().lower()
         run = _STEPS.get(op)
         if run is None:
@@ -805,5 +868,20 @@ def transform_bytes(
         done.append(
             {"step": number, "op": op, **said, "in_length": len(data), "out_length": len(out)}
         )
+        written += len(out)
+        # The input of a step is let go before the next one runs.
         data = out
-    return {"input": input_said, "steps": done, "output": _output_facts(data)}
+        del out
+    answer["output"] = _output_facts(data)
+    return answer
+
+
+_DECOMPRESSIONS = frozenset({"zlib", "gzip", "deflate", "lznt1"})
+
+
+def _stopped(last: int, total: int, why: str) -> str:
+    """Why the chain ended before its last step, and which step's output is stated."""
+    return (
+        f"steps {last + 1} to {total} were not run, because {why} after step {last}; the "
+        f"output stated is step {last}'s"
+    )
