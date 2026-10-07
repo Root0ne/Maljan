@@ -495,7 +495,16 @@ def build_function_map(
                 break
 
     for entry in visited:
-        entry.indexed = any(_same(entry.address, key, bases) for key in found.indexed)
+        # The spellings ``_same`` joins, looked up rather than compared row by row.
+        address = entry.address
+        entry.indexed = address is not None and any(
+            key in found.indexed and _same(address, key, bases)
+            for key in (
+                address,
+                *(address - base for base in bases),
+                *(address + base for base in bases),
+            )
+        )
 
     unvisited = sorted(
         ((key, tied) for key, tied in found.by_function.items() if key not in reached),
