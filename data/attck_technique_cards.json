@@ -1,0 +1,2332 @@
+{
+  "_meta": {
+    "attck_version": "19.2",
+    "about": "One reasoning card per technique, written from the ATT&CK definitions of the techniques in the vendored table (data/attck_techniques.json); source names the table fields each card's head is checked against. requires: what the evidence has to show; kind: behaviour (the action alone is the technique) or intent (the action needs a stated adversarial purpose); indicators: what a reader looks for; siblings: techniques it is confused with and the criterion that tells them apart. Cards are shown to the models as reference beside a technique they named; nothing is decided from them."
+  },
+  "T1003": {
+    "name": "OS Credential Dumping",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "credential material is read from the operating system: LSASS memory, the SAM or SECURITY hive, the domain database or the shadow file"
+    ],
+    "indicators": [
+      "a handle opened on lsass.exe with memory read access",
+      "MiniDumpWriteDump on another process",
+      "hive saves of SAM or SECURITY"
+    ],
+    "siblings": [
+      {
+        "id": "T1555",
+        "criterion": "the secrets come from an application's password store (a browser, a keychain, the credential manager), not from the operating system"
+      },
+      {
+        "id": "T1552",
+        "criterion": "the credentials sit in files, scripts or the registry in plain form"
+      },
+      {
+        "id": "T1003.001",
+        "criterion": "the credential material is read from the LSASS process's memory in particular"
+      }
+    ]
+  },
+  "T1005": {
+    "name": "Data from Local System",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "files or data on the local system are read and gathered for the sample's use or to be sent out"
+    ],
+    "indicators": [
+      "reads over user folders",
+      "a list of targeted file extensions",
+      "archives built from local files"
+    ],
+    "siblings": []
+  },
+  "T1006": {
+    "name": "Direct Volume Access",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a volume or disk is opened as a raw device and read around the file system"
+    ],
+    "indicators": [
+      "a device path such as \\\\.\\PhysicalDrive0 opened for reading",
+      "DeviceIoControl on a volume handle",
+      "file system structures parsed by the sample itself"
+    ],
+    "siblings": [
+      {
+        "id": "T1561",
+        "criterion": "the raw disk is written to destroy it"
+      }
+    ]
+  },
+  "T1012": {
+    "name": "Query Registry",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "registry keys or values are read"
+    ],
+    "indicators": [
+      "RegOpenKeyEx and RegQueryValueEx calls",
+      "reg query command lines",
+      "key paths under HKLM or HKCU"
+    ],
+    "siblings": [
+      {
+        "id": "T1112",
+        "criterion": "registry values are written or deleted, not only read"
+      },
+      {
+        "id": "T1518",
+        "criterion": "the keys read are of installed programs and the claim is about which software is installed"
+      }
+    ]
+  },
+  "T1014": {
+    "name": "Rootkit",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "intent",
+    "requires": [
+      "an operating-system component is modified or hooked (a kernel driver, a system call table, kernel callbacks, API hooks)",
+      "the claim states what the modification hides"
+    ],
+    "indicators": [
+      "a driver loaded with NtLoadDriver or a kernel service",
+      "hooks on system calls or kernel structures",
+      "entries removed from process or file listings"
+    ],
+    "siblings": [
+      {
+        "id": "T1564",
+        "criterion": "artefacts are hidden with ordinary attributes or locations and no operating-system component is changed"
+      },
+      {
+        "id": "T1542",
+        "criterion": "the change is made below the operating system, in firmware or boot records"
+      }
+    ]
+  },
+  "T1016": {
+    "name": "System Network Configuration Discovery",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the host's own network configuration is read: interfaces, addresses, adapters, routes, DNS, proxy or ARP"
+    ],
+    "indicators": [
+      "adapter and interface queries such as GetAdaptersAddresses or GetNetworkParams",
+      "commands that print interfaces, routes or the ARP cache",
+      "proxy settings read from the system"
+    ],
+    "siblings": [
+      {
+        "id": "T1049",
+        "criterion": "the listing is of live connections, not of the host's configuration"
+      },
+      {
+        "id": "T1018",
+        "criterion": "other hosts on the network are listed or looked up"
+      }
+    ]
+  },
+  "T1018": {
+    "name": "Remote System Discovery",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "other systems on the network are listed or looked up by name or address"
+    ],
+    "indicators": [
+      "host-listing command lines",
+      "NetServerEnum or DsGetDcName calls",
+      "ping or ARP sweeps over a subnet"
+    ],
+    "siblings": []
+  },
+  "T1020": {
+    "name": "Automated Exfiltration",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "collected data is sent out by the sample's own logic, with no operator request for it"
+    ],
+    "indicators": [
+      "an upload routine run right after collection",
+      "files sent as soon as they are found"
+    ],
+    "siblings": [
+      {
+        "id": "T1041",
+        "criterion": "the data goes over the command channel on the operator's request"
+      },
+      {
+        "id": "T1029",
+        "criterion": "the transfer is tied to a time schedule"
+      }
+    ]
+  },
+  "T1021": {
+    "name": "Remote Services",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the sample opens a session on another host through a remote service (RDP, SMB administrative shares, SSH, WinRM, VNC, DCOM)"
+    ],
+    "indicators": [
+      "connections to remote-service ports with credentials",
+      "use of administrative shares",
+      "remote sessions opened with valid accounts"
+    ],
+    "siblings": [
+      {
+        "id": "T1570",
+        "criterion": "files are copied to the other host and no service session is used to act there"
+      },
+      {
+        "id": "T1210",
+        "criterion": "the remote service is attacked through a flaw, not logged into"
+      },
+      {
+        "id": "T1219",
+        "criterion": "a remote access tool gives an operator the host"
+      }
+    ]
+  },
+  "T1027": {
+    "name": "Obfuscated Files or Information",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the sample's code, strings, configuration or files are encoded, encrypted, packed or otherwise made hard to read"
+    ],
+    "indicators": [
+      "high-entropy sections or blobs",
+      "decode loops over stored data",
+      "strings built at run time"
+    ],
+    "siblings": [
+      {
+        "id": "T1486",
+        "criterion": "the victim's files are encrypted to deny access to them"
+      }
+    ]
+  },
+  "T1027.002": {
+    "name": "Software Packing",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the executable is compressed or encrypted by a packer and restores its code when run"
+    ],
+    "indicators": [
+      "a packer stub or a known packer's section names",
+      "a very small import table beside high entropy",
+      "code restored into allocated memory at start"
+    ],
+    "siblings": []
+  },
+  "T1027.005": {
+    "name": "Indicator Removal from Tools",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "intent",
+    "requires": [
+      "the sample's own tooling was changed to remove what a detection matched (signatures, strings, names)",
+      "the claim states the change evades a detection"
+    ],
+    "indicators": [
+      "a tool variant with its detected strings removed",
+      "builds recompiled after a detection",
+      "names changed from a known version"
+    ],
+    "siblings": [
+      {
+        "id": "T1070",
+        "criterion": "traces left on the host are removed, not features of the tool"
+      }
+    ]
+  },
+  "T1027.007": {
+    "name": "Dynamic API Resolution",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "API addresses are found at run time, by name or by comparing a computed value against each exported function, instead of being imported"
+    ],
+    "indicators": [
+      "a walk of a loaded module's export table",
+      "GetProcAddress or LdrGetProcedureAddress called with computed names",
+      "few imports beside many APIs used"
+    ],
+    "siblings": [
+      {
+        "id": "T1129",
+        "criterion": "modules are loaded by name through the operating system and used as imported"
+      }
+    ]
+  },
+  "T1029": {
+    "name": "Scheduled Transfer",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "data is sent out at set times or intervals"
+    ],
+    "indicators": [
+      "a timer before each transfer",
+      "transfers only inside set hours"
+    ],
+    "siblings": [
+      {
+        "id": "T1020",
+        "criterion": "the transfer follows collection with no time rule"
+      },
+      {
+        "id": "T1041",
+        "criterion": "the claim is about the channel the data goes over, not its timing"
+      }
+    ]
+  },
+  "T1030": {
+    "name": "Data Transfer Size Limits",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "data is split into chunks of a fixed or capped size before it is sent"
+    ],
+    "indicators": [
+      "a send loop over fixed-size blocks",
+      "a cap on the size of each upload"
+    ],
+    "siblings": [
+      {
+        "id": "T1041",
+        "criterion": "the size of what is sent is not limited and only the channel is named"
+      },
+      {
+        "id": "T1560",
+        "criterion": "data is compressed or archived before sending, not split"
+      }
+    ]
+  },
+  "T1033": {
+    "name": "System Owner/User Discovery",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the current user, the signed-in users or the machine's owner are identified"
+    ],
+    "indicators": [
+      "GetUserName or GetUserNameEx calls",
+      "user-identity command lines",
+      "session or token queries for the user"
+    ],
+    "siblings": [
+      {
+        "id": "T1087",
+        "criterion": "all accounts of the host or domain are listed, not the current user"
+      },
+      {
+        "id": "T1069",
+        "criterion": "the groups a user belongs to are listed"
+      }
+    ]
+  },
+  "T1036": {
+    "name": "Masquerading",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "intent",
+    "requires": [
+      "a feature of the sample (its name, location, type, signature or metadata) imitates something legitimate",
+      "the claim states the imitation is meant to pass as legitimate"
+    ],
+    "indicators": [
+      "a copy under a system folder with a system file's name",
+      "a renamed system utility",
+      "an extension or icon that claims another file type"
+    ],
+    "siblings": [
+      {
+        "id": "T1218",
+        "criterion": "a signed system binary proxies the sample's execution and its name is not copied"
+      },
+      {
+        "id": "T1564",
+        "criterion": "the artefact is hidden from view and imitates nothing legitimate"
+      }
+    ]
+  },
+  "T1036.005": {
+    "name": "Match Legitimate Resource Name or Location",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "intent",
+    "requires": [
+      "a name or location of the sample imitates a legitimate one (a system file name, a vendor folder, a service name)",
+      "the claim states the imitation is meant to pass as legitimate"
+    ],
+    "indicators": [
+      "a copy under a system folder with a system file's name",
+      "a vendor-looking folder or product name",
+      "a name one character off a system file's"
+    ],
+    "siblings": [
+      {
+        "id": "T1218",
+        "criterion": "a signed system binary proxies the sample's execution and its name is not copied"
+      },
+      {
+        "id": "T1574.001",
+        "criterion": "the legitimate-looking DLL name is what makes a legitimate program load it, so the name serves a hijacked load"
+      }
+    ]
+  },
+  "T1036.008": {
+    "name": "Masquerade File Type",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "intent",
+    "requires": [
+      "the file's extension, header or content type claims one kind of file while it is another",
+      "the claim states the false type is meant to deceive a reader or a control"
+    ],
+    "indicators": [
+      "an executable with a document or image extension",
+      "altered magic bytes",
+      "a payload fetched as an image"
+    ],
+    "siblings": []
+  },
+  "T1041": {
+    "name": "Exfiltration Over C2 Channel",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "collected data is sent out",
+      "over the same channel the sample uses for command and control"
+    ],
+    "indicators": [
+      "collected data in the body of command requests",
+      "uploads to the command server",
+      "encoded data in request parameters"
+    ],
+    "siblings": [
+      {
+        "id": "T1048",
+        "criterion": "the data leaves over a protocol other than the command channel's"
+      },
+      {
+        "id": "T1567",
+        "criterion": "the data goes to a web service such as cloud storage or a paste site"
+      }
+    ]
+  },
+  "T1047": {
+    "name": "Windows Management Instrumentation",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "WMI is used to query or run something (the wmic tool, WMI COM classes, WQL)"
+    ],
+    "indicators": [
+      "wmic command lines",
+      "WQL queries over Win32_ classes",
+      "IWbemServices calls"
+    ],
+    "siblings": []
+  },
+  "T1048": {
+    "name": "Exfiltration Over Alternative Protocol",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "data is sent out over a protocol other than the command channel's (FTP, SMTP, DNS, ICMP, a raw socket)"
+    ],
+    "indicators": [
+      "uploads to FTP or mail servers",
+      "data carried in DNS queries",
+      "a second channel beside the command channel"
+    ],
+    "siblings": [
+      {
+        "id": "T1041",
+        "criterion": "the data goes out on the command channel itself"
+      },
+      {
+        "id": "T1567",
+        "criterion": "the data goes to a web service"
+      }
+    ]
+  },
+  "T1053": {
+    "name": "Scheduled Task/Job",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a task or job is registered with a system scheduler (the Windows Task Scheduler, at, cron, systemd timers) to run code"
+    ],
+    "indicators": [
+      "schtasks command lines or ITaskService COM calls",
+      "crontab entries written",
+      "task XML files"
+    ],
+    "siblings": [
+      {
+        "id": "T1547.001",
+        "criterion": "the autostart is a Run key or a startup-folder entry"
+      },
+      {
+        "id": "T1543",
+        "criterion": "a system service is installed"
+      }
+    ]
+  },
+  "T1053.005": {
+    "name": "Scheduled Task",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a task is registered with the Windows Task Scheduler to run the sample (schtasks, the Task Scheduler COM interface or a task file)"
+    ],
+    "indicators": [
+      "schtasks /create command lines",
+      "ITaskService, ITaskFolder or IRegisteredTask calls",
+      "task XML under the Tasks folder"
+    ],
+    "siblings": [
+      {
+        "id": "T1547.001",
+        "criterion": "the autostart is a Run key or a startup-folder entry"
+      },
+      {
+        "id": "T1543",
+        "criterion": "a system service is installed"
+      },
+      {
+        "id": "T1053.003",
+        "criterion": "the scheduler is cron"
+      }
+    ]
+  },
+  "T1055": {
+    "name": "Process Injection",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "code or data is written into another live process's memory",
+      "execution is started or redirected inside that process"
+    ],
+    "indicators": [
+      "OpenProcess with write access followed by VirtualAllocEx and WriteProcessMemory",
+      "CreateRemoteThread, QueueUserAPC or SetThreadContext on a thread of the target",
+      "a section mapped into the target"
+    ],
+    "siblings": [
+      {
+        "id": "T1620",
+        "criterion": "the code is mapped and run inside the sample's own process"
+      },
+      {
+        "id": "T1574.001",
+        "criterion": "a DLL is placed where a legitimate program loads it and nothing is written into a running process"
+      }
+    ]
+  },
+  "T1056": {
+    "name": "Input Capture",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "keystrokes or other input the user types (credentials in a prompt included) are captured"
+    ],
+    "indicators": [
+      "SetWindowsHookEx with a keyboard hook",
+      "GetAsyncKeyState polled in a loop",
+      "a fake prompt that asks for credentials"
+    ],
+    "siblings": [
+      {
+        "id": "T1115",
+        "criterion": "the clipboard is read, not typed input"
+      },
+      {
+        "id": "T1113",
+        "criterion": "the screen is captured"
+      },
+      {
+        "id": "T1010",
+        "criterion": "window titles are only listed"
+      }
+    ]
+  },
+  "T1057": {
+    "name": "Process Discovery",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the processes on the host are listed or looked up"
+    ],
+    "indicators": [
+      "CreateToolhelp32Snapshot with Process32First and Process32Next",
+      "EnumProcesses calls",
+      "tasklist command lines"
+    ],
+    "siblings": []
+  },
+  "T1059": {
+    "name": "Command and Scripting Interpreter",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "commands or scripts are run through an interpreter (cmd, PowerShell, a Unix shell, a script host)"
+    ],
+    "indicators": [
+      "an interpreter started with a command line",
+      "script files written and then run",
+      "commands piped to an interpreter"
+    ],
+    "siblings": [
+      {
+        "id": "T1218",
+        "criterion": "a signed system binary proxies the execution"
+      }
+    ]
+  },
+  "T1059.003": {
+    "name": "Windows Command Shell",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "cmd.exe runs commands or a batch file"
+    ],
+    "indicators": [
+      "cmd.exe started with /c and a command line",
+      "batch files written and then run",
+      "commands piped to cmd.exe"
+    ],
+    "siblings": [
+      {
+        "id": "T1059.001",
+        "criterion": "the interpreter is PowerShell"
+      }
+    ]
+  },
+  "T1069.002": {
+    "name": "Domain Groups",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "groups of the domain and their members are listed"
+    ],
+    "indicators": [
+      "group-listing command lines with /domain",
+      "LDAP queries for group objects",
+      "NetGroupEnum or NetGroupGetUsers calls"
+    ],
+    "siblings": [
+      {
+        "id": "T1069.001",
+        "criterion": "the groups are the local host's"
+      },
+      {
+        "id": "T1087.002",
+        "criterion": "accounts of the domain are listed, not groups"
+      }
+    ]
+  },
+  "T1070": {
+    "name": "Indicator Removal",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "intent",
+    "requires": [
+      "an artefact of the intrusion on the host (a file, a log, history, a registry value, a connection record) is deleted or altered",
+      "the claim states the removal hides the intrusion"
+    ],
+    "indicators": [
+      "the sample or its drops deleted after use",
+      "history or log files other than the Windows event logs deleted",
+      "timestamps altered"
+    ],
+    "siblings": [
+      {
+        "id": "T1685.005",
+        "criterion": "the Windows event logs themselves are cleared"
+      },
+      {
+        "id": "T1685",
+        "criterion": "security tooling is disabled, unhooked or changed (hooks removed from system libraries, services stopped)"
+      },
+      {
+        "id": "T1564",
+        "criterion": "the artefact is hidden, not removed"
+      }
+    ]
+  },
+  "T1070.004": {
+    "name": "File Deletion",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "files the sample dropped, or the sample itself, are deleted",
+      "the deleted files are the sample's own or ones it left behind"
+    ],
+    "indicators": [
+      "the running image deleted through a rename or a delayed delete",
+      "dropped files removed after use",
+      "a command line that deletes a file after a wait"
+    ],
+    "siblings": [
+      {
+        "id": "T1485",
+        "criterion": "the deleted files are the victim's, to destroy data"
+      },
+      {
+        "id": "T1685.005",
+        "criterion": "Windows event logs are cleared, not files deleted"
+      },
+      {
+        "id": "T1070.003",
+        "criterion": "command history is cleared, not files deleted"
+      }
+    ]
+  },
+  "T1071": {
+    "name": "Application Layer Protocol",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "command-and-control traffic is carried in an application protocol (HTTP or HTTPS, DNS, mail, file transfer)"
+    ],
+    "indicators": [
+      "command requests built with an HTTP library",
+      "commands carried in DNS records",
+      "a command server's URL or host in the configuration"
+    ],
+    "siblings": [
+      {
+        "id": "T1095",
+        "criterion": "the channel is raw TCP, UDP or ICMP with no application protocol"
+      }
+    ]
+  },
+  "T1071.001": {
+    "name": "Web Protocols",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "command-and-control traffic is carried over HTTP or HTTPS"
+    ],
+    "indicators": [
+      "WinHTTP or HTTP request calls such as HttpSendRequest",
+      "URLs and a user agent string in the configuration",
+      "replies from a web server that carry commands"
+    ],
+    "siblings": [
+      {
+        "id": "T1071.004",
+        "criterion": "the channel is DNS queries and answers"
+      },
+      {
+        "id": "T1102",
+        "criterion": "the server is a legitimate web service (a paste site, cloud storage, social media)"
+      },
+      {
+        "id": "T1095",
+        "criterion": "the channel is a raw socket with no web protocol"
+      }
+    ]
+  },
+  "T1080": {
+    "name": "Taint Shared Content",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "content on a shared drive or repository is changed or planted so other users run it"
+    ],
+    "indicators": [
+      "files written to network shares",
+      "existing shared programs or documents modified"
+    ],
+    "siblings": [
+      {
+        "id": "T1570",
+        "criterion": "a tool is copied to one host for the sample's own use"
+      },
+      {
+        "id": "T1091",
+        "criterion": "the content spreads on removable media"
+      }
+    ]
+  },
+  "T1082": {
+    "name": "System Information Discovery",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the host's operating system, hardware or configuration is read (version, name, architecture, locale, disks)"
+    ],
+    "indicators": [
+      "GetComputerName, RtlGetVersion or CPUID reads",
+      "system-summary command lines",
+      "volume or hardware queries"
+    ],
+    "siblings": [
+      {
+        "id": "T1614",
+        "criterion": "the language or keyboard layout is read to learn where the host is"
+      }
+    ]
+  },
+  "T1083": {
+    "name": "File and Directory Discovery",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "files or folders are listed or searched"
+    ],
+    "indicators": [
+      "FindFirstFile and FindNextFile loops",
+      "listing commands over user folders",
+      "extension filters over a folder walk"
+    ],
+    "siblings": [
+      {
+        "id": "T1005",
+        "criterion": "the contents of the files found are read and taken"
+      },
+      {
+        "id": "T1680",
+        "criterion": "storage devices and volumes are listed, not files"
+      }
+    ]
+  },
+  "T1090": {
+    "name": "Proxy",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "traffic is relayed through an intermediate host or a chain of proxies"
+    ],
+    "indicators": [
+      "a SOCKS or HTTP proxy in the channel",
+      "tor client components",
+      "a relay host between the sample and its server"
+    ],
+    "siblings": [
+      {
+        "id": "T1572",
+        "criterion": "one protocol is wrapped in another"
+      }
+    ]
+  },
+  "T1095": {
+    "name": "Non-Application Layer Protocol",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "command-and-control uses a transport or network protocol directly (raw TCP, UDP, ICMP) with no application protocol"
+    ],
+    "indicators": [
+      "socket calls carrying a custom message format",
+      "ICMP payloads that carry commands",
+      "fixed-port binary traffic"
+    ],
+    "siblings": [
+      {
+        "id": "T1071",
+        "criterion": "the traffic is HTTP, DNS or another application protocol"
+      },
+      {
+        "id": "T1571",
+        "criterion": "the claim is about the port, not the protocol"
+      }
+    ]
+  },
+  "T1102": {
+    "name": "Web Service",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a legitimate external web service (a paste site, cloud storage, social media, code hosting) relays commands or holds a dead drop"
+    ],
+    "indicators": [
+      "requests to a public service's API",
+      "commands read from a public post or file",
+      "a dead-drop address resolved from a public page"
+    ],
+    "siblings": [
+      {
+        "id": "T1567",
+        "criterion": "the service receives stolen data rather than giving commands"
+      }
+    ]
+  },
+  "T1104": {
+    "name": "Multi-Stage Channels",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "separate command channels with different servers or protocols follow one another"
+    ],
+    "indicators": [
+      "a first channel that returns the address of a second",
+      "a stager that fetches an implant with its own channel"
+    ],
+    "siblings": [
+      {
+        "id": "T1008",
+        "criterion": "several servers are tried in turn for the same channel"
+      }
+    ]
+  },
+  "T1105": {
+    "name": "Ingress Tool Transfer",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a file or tool is brought onto the host from outside, over the network"
+    ],
+    "indicators": [
+      "a network read such as InternetReadFile followed by a file write",
+      "a command line that fetches a file",
+      "a received file written and then run"
+    ],
+    "siblings": [
+      {
+        "id": "T1570",
+        "criterion": "the file moves between internal hosts"
+      }
+    ]
+  },
+  "T1106": {
+    "name": "Native API",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "operating-system API calls are made directly to run code or act on the system"
+    ],
+    "indicators": [
+      "calls into ntdll's Nt and Zw functions",
+      "direct system-call stubs",
+      "CreateProcess or other Win32 calls that start code"
+    ],
+    "siblings": [
+      {
+        "id": "T1129",
+        "criterion": "modules are loaded and their exported functions used"
+      },
+      {
+        "id": "T1059",
+        "criterion": "commands run through an interpreter"
+      }
+    ]
+  },
+  "T1113": {
+    "name": "Screen Capture",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the screen or a window is captured, as images or as a recording"
+    ],
+    "indicators": [
+      "BitBlt from a screen device context",
+      "GDI+ image encoders after a capture",
+      "image files written at intervals"
+    ],
+    "siblings": [
+      {
+        "id": "T1010",
+        "criterion": "window titles are listed and no image is taken"
+      },
+      {
+        "id": "T1125",
+        "criterion": "a camera is recorded"
+      }
+    ]
+  },
+  "T1123": {
+    "name": "Audio Capture",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the microphone or system audio is recorded"
+    ],
+    "indicators": [
+      "waveIn or Core Audio capture calls",
+      "audio files written"
+    ],
+    "siblings": [
+      {
+        "id": "T1125",
+        "criterion": "a camera is recorded"
+      },
+      {
+        "id": "T1113",
+        "criterion": "the screen is captured"
+      }
+    ]
+  },
+  "T1125": {
+    "name": "Video Capture",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "video is recorded from a camera or webcam, or through a video application such as a call service"
+    ],
+    "indicators": [
+      "avicap32 or DirectShow capture calls",
+      "camera devices listed before recording"
+    ],
+    "siblings": [
+      {
+        "id": "T1113",
+        "criterion": "the victim's screen is captured, as images or as a recording, and no camera or video application is used"
+      },
+      {
+        "id": "T1123",
+        "criterion": "only sound is recorded"
+      }
+    ]
+  },
+  "T1132": {
+    "name": "Data Encoding",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "data is encoded with a standard or custom encoding",
+      "the encoded data is command-and-control traffic"
+    ],
+    "indicators": [
+      "encoded fields in command requests",
+      "an encoding routine applied before each send",
+      "a custom alphabet table"
+    ],
+    "siblings": [
+      {
+        "id": "T1001",
+        "criterion": "the traffic is made to look like something else (junk, steganography, another protocol)"
+      }
+    ]
+  },
+  "T1132.001": {
+    "name": "Standard Encoding",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "data is encoded with a standard encoding (such as hex, MIME or a standard 64-character alphabet)",
+      "the encoded data is command-and-control traffic"
+    ],
+    "indicators": [
+      "standard-encoded fields in command requests",
+      "a stock encoding call before each send"
+    ],
+    "siblings": []
+  },
+  "T1134": {
+    "name": "Access Token Manipulation",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "an access token is duplicated, impersonated, adjusted or created to change the security context"
+    ],
+    "indicators": [
+      "OpenProcessToken with DuplicateTokenEx",
+      "ImpersonateLoggedOnUser or SetThreadToken",
+      "AdjustTokenPrivileges enabling a privilege"
+    ],
+    "siblings": [
+      {
+        "id": "T1548.002",
+        "criterion": "the elevation comes from bypassing User Account Control"
+      }
+    ]
+  },
+  "T1136": {
+    "name": "Create Account",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a new local, domain or cloud account is created"
+    ],
+    "indicators": [
+      "NetUserAdd calls",
+      "account-creation command lines",
+      "the new account added to an administrators group"
+    ],
+    "siblings": [
+      {
+        "id": "T1098",
+        "criterion": "an existing account is changed"
+      },
+      {
+        "id": "T1078",
+        "criterion": "the credentials of an existing account are used"
+      }
+    ]
+  },
+  "T1140": {
+    "name": "Deobfuscate/Decode Files or Information",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the sample decodes or decrypts its own stored data, strings or payload at run time"
+    ],
+    "indicators": [
+      "a decode loop over an embedded blob before use",
+      "a decryption routine called on stored strings",
+      "payload bytes restored into memory"
+    ],
+    "siblings": []
+  },
+  "T1197": {
+    "name": "BITS Jobs",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a BITS job is created or modified"
+    ],
+    "indicators": [
+      "bitsadmin /create or /addfile command lines",
+      "IBackgroundCopyManager COM calls",
+      "a BITS job with a notify command"
+    ],
+    "siblings": []
+  },
+  "T1204": {
+    "name": "User Execution",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "intent",
+    "requires": [
+      "a user has to open or run something for the sample to execute",
+      "the claim states the user is lured into running it"
+    ],
+    "indicators": [
+      "a lure document or file name",
+      "an icon or extension meant to be clicked",
+      "text that asks the user to enable content"
+    ],
+    "siblings": [
+      {
+        "id": "T1218",
+        "criterion": "a signed system binary runs the sample and no user action is shown"
+      },
+      {
+        "id": "T1566",
+        "criterion": "the claim is about the message that delivered the file"
+      }
+    ]
+  },
+  "T1204.002": {
+    "name": "Malicious File",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "intent",
+    "requires": [
+      "a user opens a malicious file (a document, archive, shortcut or executable)",
+      "the claim states the user is lured into opening it"
+    ],
+    "indicators": [
+      "a lure document or file name",
+      "an icon or extension meant to be clicked",
+      "text that asks the user to enable content"
+    ],
+    "siblings": [
+      {
+        "id": "T1218",
+        "criterion": "a signed system binary runs the sample and no user action is shown"
+      },
+      {
+        "id": "T1566.001",
+        "criterion": "the claim is about the message attachment that delivered the file"
+      }
+    ]
+  },
+  "T1210": {
+    "name": "Exploitation of Remote Services",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a flaw in a network service of another host is exploited"
+    ],
+    "indicators": [
+      "exploit traffic toward remote-service ports",
+      "a flaw's name beside a scan of targets"
+    ],
+    "siblings": [
+      {
+        "id": "T1021",
+        "criterion": "the sample logs into the service with credentials"
+      },
+      {
+        "id": "T1203",
+        "criterion": "the flaw is in a local client application"
+      }
+    ]
+  },
+  "T1218": {
+    "name": "System Binary Proxy Execution",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a signed system binary (such as regsvr32, mshta or msiexec) is used to run the sample's code"
+    ],
+    "indicators": [
+      "a system binary's command line naming the sample",
+      "the system binary as the sample's parent process"
+    ],
+    "siblings": [
+      {
+        "id": "T1129",
+        "criterion": "a program loads the module through LoadLibrary and no system binary proxies it"
+      },
+      {
+        "id": "T1204.002",
+        "criterion": "a user opens the file"
+      }
+    ]
+  },
+  "T1218.011": {
+    "name": "Rundll32",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the system binary this technique is named for loads the DLL and calls one of its exported functions"
+    ],
+    "indicators": [
+      "the named binary's command line with the DLL path and an export",
+      "a DLL with no other way to run than an export",
+      "the named binary as the sample's parent process"
+    ],
+    "siblings": [
+      {
+        "id": "T1218.010",
+        "criterion": "regsvr32 runs it"
+      },
+      {
+        "id": "T1129",
+        "criterion": "a program loads the DLL through LoadLibrary and no system binary proxies it"
+      },
+      {
+        "id": "T1204.002",
+        "criterion": "a user opens the file"
+      }
+    ]
+  },
+  "T1219": {
+    "name": "Remote Access Tools",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a legitimate remote access tool is installed or used to give an operator the host"
+    ],
+    "indicators": [
+      "a remote-support product installed or launched silently",
+      "its configuration pointing to an operator's account"
+    ],
+    "siblings": [
+      {
+        "id": "T1071",
+        "criterion": "the sample's own implant talks to its server"
+      },
+      {
+        "id": "T1021",
+        "criterion": "a built-in remote service is used with credentials"
+      }
+    ]
+  },
+  "T1480": {
+    "name": "Execution Guardrails",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "intent",
+    "requires": [
+      "the sample checks a property of its environment (a domain, a host name, a locale, a file, a key or a named object) and runs only when it matches",
+      "the claim states the check limits where or how often it runs"
+    ],
+    "indicators": [
+      "an exit taken when a domain or host name does not match",
+      "a payload decrypted with a key derived from the host",
+      "a named object checked so it runs once per host"
+    ],
+    "siblings": [
+      {
+        "id": "T1614.001",
+        "criterion": "the language is read and the claim is only about the read"
+      }
+    ]
+  },
+  "T1482": {
+    "name": "Domain Trust Discovery",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the trust relationships of the Active Directory domain or forest are listed"
+    ],
+    "indicators": [
+      "trust-listing command lines",
+      "DsEnumerateDomainTrusts calls",
+      "LDAP queries for trustedDomain objects"
+    ],
+    "siblings": [
+      {
+        "id": "T1018",
+        "criterion": "domain controllers or other hosts are listed, not trusts"
+      }
+    ]
+  },
+  "T1485": {
+    "name": "Data Destruction",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "files or data on the host are destroyed or overwritten so they cannot be recovered"
+    ],
+    "indicators": [
+      "overwrite loops over user files",
+      "raw disk writes",
+      "mass deletion across drives"
+    ],
+    "siblings": [
+      {
+        "id": "T1486",
+        "criterion": "the data is encrypted to demand a ransom"
+      },
+      {
+        "id": "T1561",
+        "criterion": "the disk itself is wiped"
+      }
+    ]
+  },
+  "T1486": {
+    "name": "Data Encrypted for Impact",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the victim's files are encrypted to deny access to them"
+    ],
+    "indicators": [
+      "a file walk followed by encryption and renaming",
+      "a ransom note written",
+      "recovery features removed"
+    ],
+    "siblings": [
+      {
+        "id": "T1560",
+        "criterion": "collected data is encrypted before it is sent out"
+      }
+    ]
+  },
+  "T1490": {
+    "name": "Inhibit System Recovery",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "recovery features are deleted or turned off (shadow copies, backups, boot recovery)"
+    ],
+    "indicators": [
+      "shadow-copy deletion command lines",
+      "boot configuration edits that turn off recovery",
+      "backup catalogs removed"
+    ],
+    "siblings": [
+      {
+        "id": "T1485",
+        "criterion": "data is destroyed, not recovery features"
+      },
+      {
+        "id": "T1685",
+        "criterion": "security tooling is turned off, not recovery"
+      }
+    ]
+  },
+  "T1491": {
+    "name": "Defacement",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "visible content is changed to deliver a message (a wallpaper, a web page, a banner)"
+    ],
+    "indicators": [
+      "wallpaper or background image changed",
+      "web content replaced"
+    ],
+    "siblings": [
+      {
+        "id": "T1486",
+        "criterion": "files are encrypted and a note left"
+      }
+    ]
+  },
+  "T1497": {
+    "name": "Virtualization/Sandbox Evasion",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the sample checks for a virtual machine, a sandbox or analysis tools"
+    ],
+    "indicators": [
+      "comparisons with virtual machine artefacts (device names, CPUID, MAC prefixes)",
+      "timing checks around a wait",
+      "an exit taken after an environment check"
+    ],
+    "siblings": []
+  },
+  "T1497.001": {
+    "name": "System Checks",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "system properties are compared with those of analysis environments (hardware, devices, processes, files, registry keys)"
+    ],
+    "indicators": [
+      "comparisons with virtual machine artefacts (device names, CPUID, MAC prefixes)",
+      "hardware thresholds (processor cores, memory, disk size)",
+      "an exit taken after an environment check"
+    ],
+    "siblings": []
+  },
+  "T1497.002": {
+    "name": "User Activity Based Checks",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "user activity (mouse movement, clicks, input, recent documents) is checked before running"
+    ],
+    "indicators": [
+      "GetCursorPos or GetLastInputInfo polled before the payload runs",
+      "counts of recent documents or browser history",
+      "a wait for clicks",
+      "a stated change in what the sample does after the check (it exits, waits or hides)"
+    ],
+    "siblings": []
+  },
+  "T1505": {
+    "name": "Server Software Component",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a component is installed in server software (a web shell, an IIS or Apache module, a SQL stored procedure, a transport agent, a terminal services DLL)"
+    ],
+    "indicators": [
+      "files written into a web root",
+      "server modules or service DLLs registered",
+      "database procedures created"
+    ],
+    "siblings": [
+      {
+        "id": "T1543",
+        "criterion": "a system service is created"
+      }
+    ]
+  },
+  "T1518.001": {
+    "name": "Security Software Discovery",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "installed or running security products are identified (anti-malware, EDR, firewall)"
+    ],
+    "indicators": [
+      "WMI queries over the SecurityCenter2 namespace",
+      "process or service names compared with security vendors'",
+      "registry keys of security products read"
+    ],
+    "siblings": [
+      {
+        "id": "T1685",
+        "criterion": "the products are turned off, not only found"
+      }
+    ]
+  },
+  "T1534": {
+    "name": "Internal Spearphishing",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "messages are sent from a compromised account to other users of the same organisation"
+    ],
+    "indicators": [
+      "mail sent through a local client or a compromised mailbox",
+      "address book harvesting before sending"
+    ],
+    "siblings": [
+      {
+        "id": "T1566",
+        "criterion": "the messages come from outside the organisation"
+      },
+      {
+        "id": "T1114",
+        "criterion": "mail is read, not sent"
+      }
+    ]
+  },
+  "T1539": {
+    "name": "Steal Web Session Cookie",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "web session cookies are read from a browser's store or memory"
+    ],
+    "indicators": [
+      "reads of browser cookie databases",
+      "cookie values decrypted with the browser's key"
+    ],
+    "siblings": [
+      {
+        "id": "T1555.003",
+        "criterion": "saved passwords, not session cookies, are taken"
+      },
+      {
+        "id": "T1185",
+        "criterion": "a live browser session is driven or injected into"
+      }
+    ]
+  },
+  "T1542": {
+    "name": "Pre-OS Boot",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "firmware, a boot sector or the boot manager is modified to run before the operating system"
+    ],
+    "indicators": [
+      "raw writes to the first disk sectors",
+      "EFI system partition changes",
+      "firmware update calls"
+    ],
+    "siblings": [
+      {
+        "id": "T1014",
+        "criterion": "operating-system components are changed, not the boot chain"
+      },
+      {
+        "id": "T1561",
+        "criterion": "the boot sector is overwritten to destroy it"
+      }
+    ]
+  },
+  "T1543": {
+    "name": "Create or Modify System Process",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a system-level process (a Windows service, a systemd unit, a launch daemon) is created or changed to run the sample"
+    ],
+    "indicators": [
+      "CreateService or ChangeServiceConfig calls",
+      "sc.exe command lines",
+      "unit or plist files written"
+    ],
+    "siblings": [
+      {
+        "id": "T1569.002",
+        "criterion": "a service is only used to run a command once"
+      }
+    ]
+  },
+  "T1546": {
+    "name": "Event Triggered Execution",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a system event (a program start, a file association, a WMI event, a screensaver, an accessibility feature) is set to run the sample"
+    ],
+    "indicators": [
+      "WMI filter-to-consumer bindings",
+      "Image File Execution Options values",
+      "file association or COM keys rewritten"
+    ],
+    "siblings": [
+      {
+        "id": "T1543",
+        "criterion": "a system service is installed"
+      },
+      {
+        "id": "T1574",
+        "criterion": "a program's module search is used and no event triggers it"
+      }
+    ]
+  },
+  "T1547": {
+    "name": "Boot or Logon Autostart Execution",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "an autostart location is written so the sample runs at boot or at a user's sign-in (Run keys, the startup folder, the sign-in helper values, Active Setup, shortcuts)"
+    ],
+    "indicators": [
+      "writes under Run or RunOnce keys",
+      "files placed in the startup folder",
+      "sign-in helper or Active Setup values set"
+    ],
+    "siblings": [
+      {
+        "id": "T1543",
+        "criterion": "a system service is installed"
+      },
+      {
+        "id": "T1546",
+        "criterion": "a system event other than boot or sign-in triggers it"
+      }
+    ]
+  },
+  "T1547.001": {
+    "name": "Registry Run Keys / Startup Folder",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a value under a Run or RunOnce key, or a file in a startup folder, is written to run the sample at sign-in"
+    ],
+    "indicators": [
+      "RegSetValueEx under CurrentVersion\\Run",
+      "a shortcut or a copy in the Startup folder",
+      "User Shell Folders values changed"
+    ],
+    "siblings": [
+      {
+        "id": "T1547.014",
+        "criterion": "the key is an Active Setup component"
+      }
+    ]
+  },
+  "T1547.004": {
+    "name": "Winlogon Helper DLL",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a sign-in helper value (Shell, Userinit, Notify) is written to run the sample at sign-in"
+    ],
+    "indicators": [
+      "writes under the Windows NT CurrentVersion key for sign-in",
+      "Shell or Userinit values with an extra program"
+    ],
+    "siblings": [
+      {
+        "id": "T1547.001",
+        "criterion": "the value is under a Run key or the file is in a startup folder"
+      }
+    ]
+  },
+  "T1547.014": {
+    "name": "Active Setup",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "an Active Setup component key with a StubPath is written"
+    ],
+    "indicators": [
+      "keys under Active Setup\\Installed Components with a StubPath value"
+    ],
+    "siblings": [
+      {
+        "id": "T1547.001",
+        "criterion": "the value is under a Run key or the file is in a startup folder"
+      }
+    ]
+  },
+  "T1552": {
+    "name": "Unsecured Credentials",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "credentials stored in plain or weakly protected form are read (files, the registry, scripts, history, private keys)"
+    ],
+    "indicators": [
+      "searches of files for password strings",
+      "reads of known credential files",
+      "registry values that hold passwords"
+    ],
+    "siblings": [
+      {
+        "id": "T1555",
+        "criterion": "the secrets come from a password store that protects them"
+      },
+      {
+        "id": "T1003",
+        "criterion": "the secrets come from operating-system memory or hives"
+      }
+    ]
+  },
+  "T1555": {
+    "name": "Credentials from Password Stores",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "saved credentials are read from a password store (a browser, a keychain, the credential manager, a password manager)"
+    ],
+    "indicators": [
+      "reads of browser credential databases",
+      "CredEnumerate or vault calls",
+      "CryptUnprotectData on stored blobs"
+    ],
+    "siblings": [
+      {
+        "id": "T1539",
+        "criterion": "session cookies, not saved passwords, are taken"
+      },
+      {
+        "id": "T1003",
+        "criterion": "the secrets come from operating-system memory or hives"
+      },
+      {
+        "id": "T1552",
+        "criterion": "the credentials sit in plain files or scripts"
+      }
+    ]
+  },
+  "T1564": {
+    "name": "Hide Artifacts",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "intent",
+    "requires": [
+      "a file, directory, window, user, process or data is hidden from users or tools",
+      "the claim states what is hidden and from whom"
+    ],
+    "indicators": [
+      "hidden or system file attributes set",
+      "windows created hidden",
+      "extra NTFS streams or exclusion entries used"
+    ],
+    "siblings": [
+      {
+        "id": "T1564.001",
+        "criterion": "files or directories are given hidden attributes, names or locations"
+      },
+      {
+        "id": "T1564.003",
+        "criterion": "a window is created or moved out of sight"
+      },
+      {
+        "id": "T1014",
+        "criterion": "an operating-system component is changed to hide the artefact"
+      }
+    ]
+  },
+  "T1564.001": {
+    "name": "Hidden Files and Directories",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "files or directories are given hidden attributes or hidden names or locations"
+    ],
+    "indicators": [
+      "SetFileAttributes with the hidden or system flag",
+      "attrib +h +s command lines",
+      "names that start with a dot"
+    ],
+    "siblings": [
+      {
+        "id": "T1564.004",
+        "criterion": "the data sits in an extra NTFS stream"
+      }
+    ]
+  },
+  "T1564.012": {
+    "name": "File/Path Exclusions",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a path, process or file type is added to a security product's exclusions"
+    ],
+    "indicators": [
+      "Add-MpPreference -ExclusionPath command lines",
+      "writes under the Defender Exclusions keys"
+    ],
+    "siblings": [
+      {
+        "id": "T1685",
+        "criterion": "the security tool is disabled or changed and no exclusion is added"
+      }
+    ]
+  },
+  "T1567": {
+    "name": "Exfiltration Over Web Service",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "data is sent to a legitimate web service (cloud storage, a paste site, messaging or code hosting)"
+    ],
+    "indicators": [
+      "uploads to a public service's API",
+      "service keys in the configuration"
+    ],
+    "siblings": [
+      {
+        "id": "T1041",
+        "criterion": "the data goes to the sample's own command server"
+      },
+      {
+        "id": "T1048",
+        "criterion": "the data goes out over another protocol"
+      },
+      {
+        "id": "T1102",
+        "criterion": "the service gives commands and no data is sent out"
+      }
+    ]
+  },
+  "T1568": {
+    "name": "Dynamic Resolution",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the command server's address is computed or resolved at run time (domain generation, fast flux, DNS calculation)"
+    ],
+    "indicators": [
+      "a routine that builds domain names from a seed or the date",
+      "many short-lived resolutions",
+      "dynamic-DNS provider names"
+    ],
+    "siblings": [
+      {
+        "id": "T1008",
+        "criterion": "several fixed servers are tried in turn"
+      },
+      {
+        "id": "T1071.004",
+        "criterion": "commands travel inside DNS records and the address is fixed"
+      },
+      {
+        "id": "T1102",
+        "criterion": "the address is read from a web service"
+      }
+    ]
+  },
+  "T1570": {
+    "name": "Lateral Tool Transfer",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a file or tool is copied from one compromised host to another inside the network"
+    ],
+    "indicators": [
+      "file writes to remote administrative shares",
+      "copies followed by remote execution"
+    ],
+    "siblings": [
+      {
+        "id": "T1021",
+        "criterion": "a remote session is opened, not a copy"
+      }
+    ]
+  },
+  "T1571": {
+    "name": "Non-Standard Port",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a protocol is used over a port other than its usual one"
+    ],
+    "indicators": [
+      "a web protocol on a port other than 80 or 443",
+      "a well-known protocol on a different port"
+    ],
+    "siblings": [
+      {
+        "id": "T1095",
+        "criterion": "the protocol itself is not an application protocol"
+      }
+    ]
+  },
+  "T1572": {
+    "name": "Protocol Tunneling",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "one protocol is wrapped inside another to carry it past controls"
+    ],
+    "indicators": [
+      "DNS or HTTP carrying another protocol's frames",
+      "an SSH or HTTP tunnel set up to a host"
+    ],
+    "siblings": [
+      {
+        "id": "T1090",
+        "criterion": "traffic is relayed through a proxy, not wrapped"
+      }
+    ]
+  },
+  "T1573": {
+    "name": "Encrypted Channel",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "traffic is encrypted (TLS or a cipher applied to the messages)",
+      "the encrypted data is command-and-control traffic"
+    ],
+    "indicators": [
+      "TLS or HTTPS for the command channel",
+      "a cipher applied to request bodies",
+      "a key used before each send"
+    ],
+    "siblings": [
+      {
+        "id": "T1486",
+        "criterion": "the victim's files are encrypted"
+      }
+    ]
+  },
+  "T1573.001": {
+    "name": "Symmetric Cryptography",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "traffic is encrypted with a symmetric cipher (a shared key)",
+      "the encrypted data is command-and-control traffic"
+    ],
+    "indicators": [
+      "a shared key applied to request and reply bodies",
+      "a cipher routine called before each send"
+    ],
+    "siblings": []
+  },
+  "T1574": {
+    "name": "Hijack Execution Flow",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the way a program finds and loads code (DLL search order, side-loading, PATH, service paths, COM) is used so the sample runs in its place"
+    ],
+    "indicators": [
+      "a DLL named like a legitimate one beside a signed program",
+      "PATH or service path entries that point to the sample first",
+      "a proxy DLL that forwards exports"
+    ],
+    "siblings": [
+      {
+        "id": "T1129",
+        "criterion": "the sample loads its own module on purpose"
+      }
+    ]
+  },
+  "T1574.001": {
+    "name": "DLL",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a DLL is placed where a legitimate program loads it by name (search order, side-loading)"
+    ],
+    "indicators": [
+      "a DLL named like a legitimate one beside a signed program",
+      "a proxy DLL that forwards exports to the real one"
+    ],
+    "siblings": [
+      {
+        "id": "T1574.007",
+        "criterion": "an entry of the PATH variable points to the sample first"
+      }
+    ]
+  },
+  "T1574.007": {
+    "name": "Path Interception by PATH Environment Variable",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a program is placed in a PATH directory searched before the real program's"
+    ],
+    "indicators": [
+      "a PATH entry changed to put a writable folder first",
+      "a program named like a system one in that folder"
+    ],
+    "siblings": [
+      {
+        "id": "T1574.001",
+        "criterion": "a DLL is placed where a program loads it by name"
+      },
+      {
+        "id": "T1574.009",
+        "criterion": "a path with spaces and no quotes is used"
+      }
+    ]
+  },
+  "T1599": {
+    "name": "Network Boundary Bridging",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a network device or boundary control (a router, a firewall) is taken over to pass traffic between segments"
+    ],
+    "indicators": [
+      "changes to router or firewall configurations",
+      "NAT rules added on a boundary device"
+    ],
+    "siblings": [
+      {
+        "id": "T1090",
+        "criterion": "traffic is relayed through a proxy on a host"
+      },
+      {
+        "id": "T1686",
+        "criterion": "a host firewall is changed"
+      }
+    ]
+  },
+  "T1608": {
+    "name": "Stage Capabilities",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the adversary places tools or content on infrastructure it controls for later use"
+    ],
+    "indicators": [
+      "payload URLs on adversary-controlled hosts",
+      "tooling uploaded to cloud storage before use"
+    ],
+    "siblings": [
+      {
+        "id": "T1583",
+        "criterion": "the claim is about acquiring the infrastructure"
+      }
+    ]
+  },
+  "T1620": {
+    "name": "Reflective Code Loading",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "code is mapped and run from memory inside the sample's own process without going through LoadLibrary"
+    ],
+    "indicators": [
+      "a PE image copied into allocated memory with relocations and imports fixed by the sample",
+      "execution jumping into newly allocated executable memory",
+      "no file written for the module that runs"
+    ],
+    "siblings": [
+      {
+        "id": "T1129",
+        "criterion": "a module is loaded from disk through LoadLibrary"
+      }
+    ]
+  },
+  "T1622": {
+    "name": "Debugger Evasion",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "the sample checks whether a debugging tool is attached to it"
+    ],
+    "indicators": [
+      "ProcessDebugPort or ProcessDebugFlags queries",
+      "reads of the process's debug and heap flags",
+      "trap instructions or timing tricks around them",
+      "a stated change in what the sample does after the check (it exits, waits or hides)"
+    ],
+    "siblings": []
+  },
+  "T1685": {
+    "name": "Disable or Modify Tools",
+    "source": [
+      "name",
+      "tactics"
+    ],
+    "kind": "behaviour",
+    "requires": [
+      "a security tool is disabled, stopped, unhooked or changed so it sees less"
+    ],
+    "indicators": [
+      "security services stopped or deleted",
+      "hooks restored in system libraries",
+      "tool settings changed through the registry or policy"
+    ],
+    "siblings": [
+      {
+        "id": "T1070",
+        "criterion": "traces are removed and no tool is changed"
+      },
+      {
+        "id": "T1564.012",
+        "criterion": "an exclusion is added to the tool"
+      }
+    ]
+  }
+}

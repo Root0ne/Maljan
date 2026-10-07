@@ -8,6 +8,9 @@ change landed on `main`.
 
 ### Added
 
+- **One reasoning card per ATT&CK technique, beside the vendored table** (`data/attck_technique_cards.json`, 98 cards): its kind (behaviour-focused or intent-critical), what the evidence has to show, the indicators and the confusable sibling techniques with the criterion that tells each apart, written from the ATT&CK definitions and held to the vendored table by tests; the leak test reads every card's words with no allowance, so a sibling whose label the evaluation key scores is left off.
+- **The analysts' does-not-describe question, as sent, ends with the named technique's card**; the finding recorded keeps the check's message alone, a sub-technique with no card of its own is shown none, each card is shown once per turn, and a retry turn carrying cards is measured against the window with an answer of the output cap on every path and sent without them when it does not fit with them.
+- **The judge's technique question shows each asked technique's card under its claims, as reference**, only where the window has room left after the reports and the evidence; the techniques asked, the answer and the report row are unchanged.
 - **An analyst that has read a function sees a function map, kept by the
   platform.** It is built from the agent's ledger entries of the job, the
   pack's analysis-server artefacts and its parsed claims. It rides the

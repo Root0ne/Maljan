@@ -271,14 +271,41 @@ Validator = Callable[[Any], list[Violation]]
 # ---------------------------------------------------------------------------
 
 
-def feedback_text(violations: Sequence[Violation], *, closing: str = FEEDBACK_CLOSING) -> str:
-    """The retry turn's text for a set of violations, ending on ``closing``."""
+def feedback_text(
+    violations: Sequence[Violation], *, closing: str = FEEDBACK_CLOSING, cards: bool = True
+) -> str:
+    """The retry turn's text for a set of violations, ending on ``closing``.
+
+    ``cards=False`` leaves out the technique cards a does-not-describe question
+    carries (:func:`_card_after`); each technique's card is shown once per turn,
+    after the first question about it.
+    """
     lines = [FEEDBACK_PREAMBLE]
+    carded: set[str] = set()
     for violation in violations:
         where = f" ({violation.path})" if violation.path else ""
-        lines.append(f"- [{violation.code}]{where} {violation.message}")
+        card = _card_after(violation) if cards and violation.subject not in carded else ""
+        if card:
+            carded.add(violation.subject)
+        lines.append(f"- [{violation.code}]{where} {violation.message}{card}")
     lines.append(closing)
     return "\n".join(lines)
+
+
+def _card_after(violation: Violation) -> str:
+    """The named technique's card after a does-not-describe question, or ``""``.
+
+    The card (``memory.technique_cards``) is reference beside the question the
+    analyst is asked: what the evidence for the technique has to show and the
+    sibling techniques it is confused with. Only the question sent carries it;
+    the finding recorded is the check's message alone.
+    """
+    if violation.code != CLAIM_DOES_NOT_DESCRIBE_CODE or not violation.subject:
+        return ""
+    from maljan.memory.technique_cards import technique_card_lines
+
+    lines = technique_card_lines(violation.subject)
+    return " The technique's " + " | ".join(lines) if lines else ""
 
 
 # ---------------------------------------------------------------------------
@@ -7590,6 +7617,7 @@ def _with_feedback(
     *,
     keep_answer: bool = True,
     closing: str = FEEDBACK_CLOSING,
+    cards: bool = True,
 ) -> list[Any]:
     """The conversation plus the model's answer plus the correction turn.
 
@@ -7606,7 +7634,7 @@ def _with_feedback(
     turns = list(messages)
     if keep_answer:
         turns.append(AIMessage(content=str(content if content is not None else answer)))
-    return with_question(turns, feedback_text(violations, closing=closing))
+    return with_question(turns, feedback_text(violations, closing=closing, cards=cards))
 
 
 def _announce_feedback(
@@ -7832,6 +7860,7 @@ def retry_with_feedback_sync[T](
     keep: Callable[[T, T], T] | None = None,
     drop_answer_for: frozenset[str] = frozenset(),
     closing: str = FEEDBACK_CLOSING,
+    cards: bool = True,
 ) -> tuple[T, list[Violation], int]:
     """:func:`retry_with_feedback` for the analysts, whose loop is synchronous.
 
@@ -7850,7 +7879,8 @@ def retry_with_feedback_sync[T](
     ``drop_answer_for`` is :func:`retry_with_feedback`'s: the codes whose
     correction describes the answer instead of following it. ``closing`` is
     the retry turn's last line; the analysts' names the block format their
-    parser reads (``ANALYST_FEEDBACK_CLOSING``).
+    parser reads (``ANALYST_FEEDBACK_CLOSING``). ``cards=False`` sends the
+    retry turn without technique cards (:func:`feedback_text`).
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
@@ -7864,7 +7894,9 @@ def retry_with_feedback_sync[T](
         _announce_feedback(violations, on_feedback, feed, retries + 1)
         shown.extend(violations)
         keep_answer = not any(v.code in drop_answer_for for v in violations)
-        turns = _with_feedback(turns, answer, violations, keep_answer=keep_answer, closing=closing)
+        turns = _with_feedback(
+            turns, answer, violations, keep_answer=keep_answer, closing=closing, cards=cards
+        )
         retries += 1
         with validation_retry():
             answer = run(turns)

@@ -100,6 +100,7 @@ from maljan.extractors.capability_matrix import (
 )
 from maljan.llm.context_window import no_room_sentence
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
+from maljan.memory.technique_cards import card_lines, load_cards
 from maljan.pipeline import triage_pack
 from maljan.pipeline.debate_facts import (
     ledger_count_facts,
@@ -139,6 +140,7 @@ from maljan.pipeline.validation import (
     claims_under_disputes_violation,
     confidence_violation,
     decompiled_not_described_violation,
+    feedback_text,
     flow_voice_violations,
     gate_removed_note,
     kept_after_the_sandbox_fact,
@@ -1424,6 +1426,30 @@ PROMPTS: dict[str, str] = {
             ]
         )
     ),
+    "judge technique question's card lines": technique_question_text(
+        [
+            TechniqueQuestion("T1003", "claimed", [("static", "The file opens a window.", [])]),
+            TechniqueQuestion("T1564", "finding", [("static", "The file opens a window.", [])]),
+        ]
+    ),
+    "analyst retry turn showing the technique's card": feedback_text(
+        [
+            v
+            for v in [
+                claim_does_not_describe_violation(
+                    ClaimEvidence(
+                        claim="The file opens a window.",
+                        evidence_ref="[ev_0001]",
+                        confidence=0.9,
+                        technique_id="T1003",
+                    ),
+                    "T1003",
+                    knowledge,
+                )
+            ]
+            if v is not None
+        ]
+    ),
     "question to an analyst whose first answer called no tool": no_tool_call_question(
         ["lookup", "strings"]
     ),
@@ -1555,6 +1581,19 @@ def _scanned(name: str) -> str:
     if name in STIX_VOCABULARY_LISTED:
         text = _without_the_listed_vocabulary(text)
     return _without_rendered_identifiers(text) if name in RENDERED_TOOL_OUTPUT else text
+
+
+@pytest.mark.parametrize("tid", sorted(load_cards()))
+def test_no_card_carries_a_term_the_key_scores(tid: str) -> None:
+    """Every word a card shows a model is free of the key's terms, with no allowance.
+
+    A card is read as written and again with its hyphens, underscores and
+    slashes as spaces, so a term is not let through by its spelling.
+    """
+    text = "\n".join(card_lines(load_cards()[tid])).lower()
+    spaced = re.sub(r"[-_/]+", " ", text)
+    shared = [term for term in KEY_TERMS if term in text or term in spaced]
+    assert not shared, f"the {tid} card carries {shared}"
 
 
 def test_the_vocabulary_allowance_is_the_whole_listing_and_nothing_else() -> None:

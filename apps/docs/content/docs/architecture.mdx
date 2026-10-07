@@ -1271,6 +1271,33 @@ decides.
    (`validation.sibling_named_instead`). It only adds a question where the
    check used to pass: a sentence that writes one of the sub-technique's own
    words, or names no sibling by its whole name, is read as before.
+   The question as sent ends with the named technique's card, where it has one;
+   the finding recorded is the check's message alone. Each technique's card
+   is shown once per turn. A retry turn that carries cards is measured
+   against the window with an answer of the output cap, on every path, and
+   is sent without them when it does not fit with them: a card never costs a
+   question.
+   **One reasoning card per technique** (`memory.technique_cards`, data in
+   `data/attck_technique_cards.json` beside the vendored table). A card holds
+   its kind (behaviour-focused: the action alone is the technique;
+   intent-critical: the action needs a stated adversarial purpose), what the
+   evidence has to show, the indicators to look for, and the sibling
+   techniques it is confused with, each with the criterion that tells them
+   apart (removing hooks from a security tool is T1685 Disable or Modify
+   Tools, the current id of the retired T1562, not T1070 Indicator Removal).
+   The cards are written from the ATT&CK definitions of the techniques the
+   vendored table carries and cover every technique the capability terms
+   list and every technique the analysts named in the recorded local3,
+   local4 and hosted run2 to run4 benchmark runs; techniques first named in
+   later runs may have none. A card
+   is reference shown beside a technique a model already named: in this
+   question and in the judge's technique question. Nothing is decided from
+   it, no question is asked because of it, and the report does not print it.
+   A sub-technique with no card of its own is shown none, since its parent's
+   kind and requirements need not be its own. Tests hold every card's id,
+   name and sibling ids to the vendored table, and the leak test reads every
+   card's words with no allowance: a sibling whose label is a term the
+   evaluation key scores is left off its card (115 pairs).
 2. **Domain and platform consistency** (`attck.platform_mismatch`, exact). The
    catalogue's domain and platforms for the id against the routed sample —
    a Windows PE is `enterprise`/Windows, an APK `mobile`/Android, an ELF
@@ -3079,7 +3106,12 @@ is assembled from what the run gathered rather than recomputed beside it:
   whose id the catalogue does not know or the sample cannot host), and its
   finding is stated as the term match it is: no claim naming the technique uses
   the catalogue's terms for it. The review keeps each finding it asked with
-  (`undescribed`), and the row prints it beside the judge's answer and reason. Each id is named as the
+  (`undescribed`), and the row prints it beside the judge's answer and reason.
+  Each asked technique that has a reasoning card shows the card's lines under
+  its claims, as reference, with one line above the techniques saying what a
+  card is; the techniques asked are the same with or without cards. The cards
+  go in only where the judge's window has room left after the reports and the
+  evidence, so they never shorten either. Each id is named as the
   vendored ATT&CK table names it (`attck_loader.technique_label`), in the list,
   in the techniques the question says the bundle carries and in the evidence
   summary: asked about bare ids, a judge dropped a Winlogon Helper DLL id as
