@@ -713,7 +713,10 @@ def _index_line(found: FunctionMap, room: int | None) -> str:
 
     Every row when they all fit; otherwise the rows that fit, room being kept
     for the last clause at its longest, then "and N more" with where the index
-    is. With no room derived, the count, the entry and the tool only.
+    is. With no room derived, the count, the entry and the tool only. That
+    count form is the line's floor: it stands even in a room smaller than
+    itself, since a fact is stated whole or not at all, and it does not grow
+    with the index.
     """
     rows = found.index_unvisited
     head = f"not visited, holding artefacts in the function index ({found.index_entry}): "

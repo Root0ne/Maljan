@@ -457,6 +457,21 @@ def _function_index_text() -> str:
     )
     block = function_map_block(found)
     assert "not visited, holding artefacts in the function index (ev_0005)" in block
+    # The line in its three forms: every row, the rows that fit and "and N more", the count only.
+    many_rows = [
+        {**row, "function": hex(0x401000 + 0x100 * i), "offset": hex(0x1000 + 0x100 * i)}
+        for i, row in enumerate(rows * 4)
+    ]
+    many = entry.model_copy(update={"structured": {**data, "rows": many_rows, "total": 12}})
+    found_many = build_function_map(
+        [LedgerEntry(id="ev_0006", tool="decompile_function", args={"address": "0x1000"})],
+        function_artefacts([many]),
+        [],
+    )
+    every_row = function_map_block(found_many, room=10**6)
+    assert "; and " not in every_row and "(ev_0005): 0x401100 (4 artefacts); " in every_row
+    cut_rows = function_map_block(found_many, room=len(every_row) - 1)
+    assert "; and " in cut_rows and " more; the index is ev_0005" in cut_rows
     with tempfile.TemporaryDirectory() as folder:
         text = Path(folder) / "a.txt"
         text.write_text("plain text\n", encoding="utf-8")
@@ -498,6 +513,8 @@ def _function_index_text() -> str:
             triage_pack.INDEX_SOURCE_NOT_IN_PACK,
             triage_pack.INDEX_SOURCE_UNREADABLE.format(entry="ev_0002"),
             function_map_block(found, room=200),
+            every_row,
+            cut_rows,
         ]
     )
 
