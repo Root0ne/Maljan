@@ -96,7 +96,7 @@ from maljan.analysis import evidence_roots as _roots
 from maljan.analysis.evidence_roots import layers_and_roots as _layers_and_roots
 from maljan.analysis.evidence_roots import roots_phrase as _roots_phrase
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
-from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE
+from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE, SUMMARY_FENCE_STATEMENT
 from maljan.analysis.pcap_summary import CaptureRead
 from maljan.extractors.capability_matrix import (
     NOT_ASKED_UNKNOWN_ID,
@@ -1237,6 +1237,7 @@ PROMPTS: dict[str, str] = {
     "an analyst input shortened to its window": INPUT_SHORTENED_NOTICE.format(
         detail="the first 1,000 of 9,000 characters are shown, ending in …"
     ),
+    "the summariser's fence statement": SUMMARY_FENCE_STATEMENT,
     "a summariser prompt shortened to its window": SUMMARISER_SHORTENED_NOTE.format(
         shown=1000, total=9000
     ),
