@@ -302,6 +302,20 @@ class StaticAnalyst(BaseAnalyst):
         """The provider's degrade policy: Ghidra's is loud, others may differ."""
         return self._provider().capabilities
 
+    def _open_on_provider(self, file_path: str) -> None:
+        """Have this agent's provider open the sample in its session, where it opens one.
+
+        The path is the agent's pinned mirror when one is pinned, else the
+        chunk's. Never raises: the model's own open is still there.
+        """
+        try:
+            provider = self._provider()
+            opener = getattr(provider, "open_sample", None)
+            if callable(opener):
+                opener(getattr(self, "_analysis_file_path", None) or file_path)
+        except Exception as exc:  # noqa: BLE001 — an early open is never worth a lost loop
+            self.logger.debug("the provider did not open the sample early: %s", exc)
+
     def _compute_sink_priority_hint(self, file_path: str) -> str:
         """Open the sample on Ghidra, then rank functions reachable to sensitive sinks.
 
@@ -628,6 +642,9 @@ class StaticAnalyst(BaseAnalyst):
         rag_hint = ""
         analysis_path = _extract_analysis_path(data)
         if analysis_path:
+            # A provider whose session must open the file first opens its own
+            # mirror now, as Ghidra loads its program below.
+            self._open_on_provider(analysis_path)
             sink_hint = self._compute_sink_priority_hint(analysis_path)
             # Function-hash attribution prior: exact opcode-hash matches against
             # previously analysed samples. Hoisted ABOVE the sink hint so a known
@@ -640,7 +657,7 @@ class StaticAnalyst(BaseAnalyst):
         # samples where the exact-match function-hash prior is silent. Reads the
         # raw bytes on the HOST (pe_extractor), so it needs the host path, not the
         # container path Ghidra uses. Fail-safe and gated OFF by default.
-        host_path = _extract_host_path(data)
+        host_path = getattr(self, "_host_sample_path", None)
         if host_path:
             rag_hint = self._compute_family_rag_hint(host_path)
         prompt_messages = [
@@ -870,29 +887,6 @@ def _extract_analysis_path(data: str) -> str | None:
     if not isinstance(parsed, dict):
         return None
     path = parsed.get("analysis_file_path")
-    return path if isinstance(path, str) and path else None
-
-
-def _extract_host_path(data: str) -> str | None:
-    """Return the ``host_sample_path`` from a chunk JSON, or None.
-
-    The host-readable raw-binary path (spliced in by
-    ``nodes._augment_static_chunks_with_path``) — distinct from the
-    container-visible ``analysis_file_path`` Ghidra uses. Needed by the
-    static-feature family classifier, which reads the bytes on the host.
-    """
-    import json as _json
-
-    stripped = data.strip()
-    if not stripped or not stripped.startswith("{"):
-        return None
-    try:
-        parsed = _json.loads(stripped)
-    except (_json.JSONDecodeError, ValueError):
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    path = parsed.get("host_sample_path")
     return path if isinstance(path, str) and path else None
 
 

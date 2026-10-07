@@ -3042,7 +3042,8 @@ EARLIER_CHUNKS_HEAD = (
 def earlier_chunks_block(entries: Sequence[Any]) -> str:
     """The earlier chunks' tool calls as ``tool(args) → ev_id`` lines under their head, or ``""``.
 
-    Every call, in the order made; a call that failed says so.
+    Every call that ran, in the order made; a call that failed says so. A
+    repeat the guard answered is left out: the entry it names is listed.
     """
     lines: list[str] = []
     for entry in entries or ():
@@ -3050,17 +3051,21 @@ def earlier_chunks_block(entries: Sequence[Any]) -> str:
         entry_id = str(getattr(entry, "id", "") or "")
         if not tool or not entry_id:
             continue
+        # A repeat is answered by the entry it names, which is listed itself.
+        if getattr(entry, "repeated_of", None):
+            continue
         args = getattr(entry, "args", None) or {}
         try:
             shown = json.dumps(args, sort_keys=True, default=str)
         except (TypeError, ValueError):
             shown = repr(args)
         ok = bool(getattr(entry, "ok", True))
-        # A result the run did not keep whole cannot answer the call again,
-        # which is then made once more, as a failed one may be.
-        kept = bool(str(getattr(entry, "output", "") or "")) and not bool(
-            getattr(entry, "truncated", False)
-        )
+        # A result the run did not keep cannot answer the call again, which is
+        # then made once more, as a failed one may be. One the guardrail cut is
+        # kept as the model read it.
+        from maljan.schemas.evidence import holds_its_answer
+
+        kept = holds_its_answer(entry)
         failed = (
             " (failed)" if not ok else "" if kept else " (result not kept; may be made once more)"
         )
@@ -3942,6 +3947,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             path_by_server=self._path_by_server,
             agent_name=self.name,
             captures=tuple(getattr(self, "_captures", ()) or ()),
+            staged_path=(getattr(self, "sample_path_choices", None) or {}).get("host"),
         )
 
     def _run_state_body(

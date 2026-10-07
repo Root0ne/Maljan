@@ -463,6 +463,71 @@ hidden text the platform recovered, and the publish rule reads it as it reads
 a FLOSS decoded string (see "A value a tool recovered from hidden text is a
 source of its own" under the indicator rule).
 
+**The deobfuscation passes** come after all of that, last for the same reason,
+and run on every run rather than when a model asks. First
+`find_crypto_constants` (`tools.crypto_constants`) over an executable image,
+given capa's function starts: the published constants of ciphers, hash
+functions and checksums, each set computed from its definition, a table found
+whole and other sets by two of their values, each with the places it stands and
+the function around them. Sets that share values are named only by a value that
+tells them apart: MD5's initial values are SHA-1's first four, so a set needs
+SHA-1's fifth, within 64 bytes of them (found by bisecting the sorted places, so the check stays O(n log n) on any layout), to be SHA-1 and is otherwise the MD5/SHA-1 family; SHA-256's and
+SHA-224's values are halves of SHA-512's and SHA-384's, so a half that sits
+inside a 64-bit value found is that value's, and halves standing beside the
+other halves are the SHA-2 family. A set whose algorithm capa's rules name at
+the function its place stands in is said to agree with capa there, not
+repeated. Ghidra's own `detect_crypto_constants` answers "not yet implemented",
+so the platform scans itself; the analysis server serves the same function.
+
+Then Ghidra's `find_anti_analysis_techniques` (`analysis.ghidra_passes`), the
+sample opened the way the sink pre-pass opens it (load, switch,
+auto-analysis). Ghidra's answer is kept whole, each address also as an offset
+from the image base Ghidra reports, and only its exact part is stated: an
+instruction that is the listed one (Ghidra matches mnemonics by prefix, so it
+files `INT3` under `INT 0x2d`), and a read through `FS:[0x30]` or
+`FS:[0x18]` exactly where a capa rule in the same function agrees (an
+anti-analysis rule, or one naming the PEB or TEB, such as `PEB access`); the
+line names the rule. A TEB/PEB read with no such rule is counted: the 32-bit
+UCRT's exit path reads the PEB's `NtGlobalFlag` itself, and capa leaves the
+library functions it recognises out. An `INT3` counts only alone, not as the byte before a
+function and not right after a call, jump or return (compilers put one after a
+call that never returns and pad with one where nothing falls through); a
+`CPUID` counts only where the code sets the hypervisor leaf in `eax`, or sets
+leaf 1 and tests ECX bit 31 before ECX is written again, all read in the file's
+bytes. An API call is counted and never stated: Ghidra lists every call site of
+a broad list, a language runtime's own included (the MSVC runtime calls
+`IsDebuggerPresent` on its failure path), while capa leaves the library
+functions it recognises out and the catalogue line already reads the imports.
+The rest are counted once per place. A scan that
+matched nothing says what it checks, never that the sample has no
+anti-analysis code. The node hands the pack the Ghidra it may call — switched
+on, over `http`, with the mirror the worker made for Ghidra — or the sentence
+saying why there is none, which is one entry `not run: <reason>` whose pack
+line is `no: <reason>`, not a failure. A scan Ghidra did not complete is a
+failed entry with Ghidra's own words (`no: the pass failed: …`).
+
+Ghidra's emulation is not run by the pack: Ghidra's `emulate_function`
+ignores its step limit and cannot be stopped, and one emulation took 130 to
+560 ms in a stored run. It stays a tool the reverser may call.
+
+When the pack does not fit its room, the passes' lines take only the room the
+other lines leave. **Decision:** a pass fact never shortens a decoded string
+or any other line the pack printed before the passes existed. A pass with a
+fact no other line carries — a constant set no capa rule agrees with, an exact
+instruction or TEB read at a function no capa anti-analysis rule matched — is
+offered that room first. A line that cannot show one item is left out, and every
+pass entry left out is counted in the "N more pack entries not shown" line,
+which comes after the pass lines. That line may take only room the other
+lines leave free, or room from capa's addresses; never a decoded string or any
+other fact line. **Decision:** when neither kind of room exists, the pack stays
+exactly as the other lines are, and the pass entries it lacks are recorded in
+the run summary's pack record instead (`run_summary.triage.pack_left_out`:
+their ids and tools, with the reason "no pack room"), read at the same bound
+every agent is shown the pack at. So a pass is never skipped unsaid, and no
+fact an earlier line states gives way to a pass. On the stored benchmark runs
+no pass fact is new, so the pack is as dev renders it except for capa's
+addresses where the trailer needed room.
+
 The pack states facts and draws no conclusion, and it never fails a job: a
 tool that raises or answers with an error is an entry with `ok=False` and a
 degradation reason `triage.<tool>_failed`, the next tool runs, and a
@@ -1695,6 +1760,47 @@ once more, as any retry after a failure is. A replayed conversation keeps the
 seeds. A run's second chunk re-ran ten
 decompiles the first had done.
 
+Every call the repeat guard answers without running is filed in the ledger as
+a repeat of the entry that holds its answer (`EvidenceRecorder.record_repeat`):
+an earlier chunk's call answered from its entry, and a refused third identical
+call. The entry carries `repeated_of`, the note the model was handed in place
+of a result and a duration of 0 ms, and its `tool_call_started` and
+`tool_call_finished` events go out like any call's, the finish naming
+`repeated_of`. The model is never shown the repeat's own id: the answer it
+reads carries the earlier entry's, which is the one to cite. A repeat always
+names the entry that holds the answer, never another repeat
+(`EvidenceRecorder.holder_of`), and later identical calls are noted under that
+entry, so every served or refused answer names it too. The citation check
+(`EntryTexts.from_ledger`) and the judge's evidence (`question_evidence`) read a
+cited repeat as the entry that holds its answer. A repeat's note is not
+charged against the agent's byte budget (`report.evidence_budget_bytes`): it
+holds no new content, and charging it could blank a later answer. A repeat is
+counted apart in `run_summary.evidence.repeats` and in neither `ok` nor
+`failed`; the report header and §13's evidence bounds say how many calls were
+answered from an earlier entry, and Appendix A marks each such row "repeat of
+ev_…". No report section, decompiled-function list, function map, later
+chunk's block or seeded guard reads a repeat: each reads the entry it names. A
+reverser's second chunk once made nine calls, all answered this way, and left
+no entry and no event.
+
+A decompile is also a repeat when its answer is a function an earlier entry
+already holds, whatever address it was given: a call given an address inside
+a function is answered with the whole function. The function the answer prints
+(`validation.listed_function`: the start a decompiler's generic name carries,
+`FUN_00401000` or `fcn.00401000`, else the printed name) only finds the
+candidate entries; it is text the sample can shape, a forged or a shared name,
+so the call is a repeat only when its listing is a candidate's listing, or that
+listing cut shorter (the guardrail's cut marker aside). Any other listing under
+the same name is a new entry kept whole. The tool
+has run by then, so the model is still handed the answer, stamped with the
+entry that holds the function and one sentence saying so
+(`same_function_notice`); the entry is filed as a repeat of it and keeps the
+note, not a second copy. An answer that shows more of the function than the
+entry holding it is new evidence and holds the function from then on. An
+earlier chunk's listing holds its function for a later chunk the same way. One
+r2 analyst decompiled a function at its start and again at an address inside
+it, and the ledger held the same listing twice as two different calls.
+
 An analyst that has read a function sees its function map in the run-state
 block on every turn (`agents.function_map`). The platform keeps it from facts
 only, and the model does not write to it. It lists:
@@ -2667,6 +2773,18 @@ output too, so a reader inferring the trim from the emptiness explains a
 failure with a cause that did not happen. `truncated` is persisted alongside
 `repeated_of` (the earlier identical call a repeat was answered from), `symbol`
 and `started_at`, and the evidence endpoint returns all four.
+
+An answer the tool-output guardrail cut, shortened or summarised to fit is
+`truncated` too, and carries `chars_dropped`, the characters it lost: the
+guardrail tells the call it is answering (`context_window.note_answer_cut`),
+and the entry keeps exactly what the model read. A compact form, which loses no
+value, is not a cut. `run_summary.evidence` counts such entries apart from the
+budget's trims (`cut`, `chars_dropped`), and §13's evidence bounds say
+"N cut by the tool-output guardrail (X characters dropped)"; a summary written
+before the count reads the guardrail's own count from `run_summary.truncation`.
+A cut entry still holds its answer for a later chunk, which is answered from it
+as from any kept result. Two decompilations once cut by thousands of characters
+were stored as `truncated: false`, and the report said nothing was cut.
 
 The rows are written in one batch when the run ends, so `created_at` used to be
 the flush for every one of them — thirty entries of one run had one distinct

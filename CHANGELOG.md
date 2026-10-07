@@ -15,6 +15,29 @@ change landed on `main`.
 - **"Functions examined" in the report carries the function map's coverage in
   one line.**
 
+- **The deobfuscation passes run on every run, and every analyst reads their
+  results as facts in the pre-analysis pack.** After every earlier pack step,
+  so no earlier id moves, and in the room the earlier lines leave, so no
+  earlier line loses a character:
+  - `find_crypto_constants`, the platform's scan of an executable for the
+    published constants of ciphers, hash functions and checksums (Ghidra's
+    `detect_crypto_constants` answers "not yet implemented"). Each set is
+    computed from its definition; a table is found whole, other sets by two of
+    their values, and sets that share values are named only by a value that
+    tells them apart (else as their family). A set capa names in the same
+    function is said to agree with capa. The analysis server serves it too,
+    and the Ghidra workflow now points at it.
+  - Ghidra's anti-analysis scan, of which only the exact part is stated: the
+    listed instruction, and the exact TEB/PEB operand where a capa rule in the
+    same function agrees. API calls and other TEB/PEB reads are counted, not
+    stated, and an `INT3` right after a call, jump or return is not a trap.
+
+  A Ghidra that cannot be asked (switched off, over stdio, or without a copy of
+  the sample) is one `no: <reason>` line and not a failure. A pass line with no
+  room is counted in the "N more pack entries not shown" line, which takes only
+  free room or capa's addresses; with neither, the pack is unchanged and the
+  run summary's pack record lists the entry with the reason "no pack room".
+
 - **A function an analyst decompiled and no claim describes is listed to it,
   once.** The functions come from the analyst's own ledger entries that
   decompiled something and answered:
@@ -2405,6 +2428,10 @@ change landed on `main`.
 - **A sub-technique is not described by its parent's words alone**: a claim that writes none of the sub-technique's own distinctive words and writes a sibling sub-technique's whole name is asked once whether its technique is right, naming the sibling (Change Default File Association on an accessibility features sentence passed on "persistence").
 - **A TECHNIQUE line that writes an id with the vendored catalogue's own name for it in brackets is read as that id** (`T1027 (Obfuscated Files or Information)`); any other bracketed words keep the line whole and asked about, as before.
 - **The command-line flags table and a draft rule's comments print network values defanged**, through the report's own defanger; the strings a draft rule matches on stay as they compile.
+- **The r2 analyst is handed only the mirror radare2 can open, and its session opens it before the loop**: no chunk carries the worker's staging path (the family classifier reads it from the agent), a path argument spelling the staging path is replaced with the mirror, the r2 provider opens the mirror with r2mcp's `open_file` first, and a failed open names the path tried and the mirror, as r2mcp's open-first refusal names the mirror.
+- **A decompile whose answer is a function an earlier entry already holds is filed as a repeat of that entry**, found by the function the answer prints (its generic name's start, else its name) and decided by content: its listing must be the held listing or that listing cut shorter, so a forged or shared name never makes new content a repeat, and a call through an address inside the function is recognised; the model is still handed the answer under the earlier entry's id with one sentence saying so.
+- **A tool answer the guardrail cut, shortened or summarised is recorded as `truncated` with `chars_dropped`** (a new `evidence_entries` column), and §13's evidence bounds count it ("2 cut by the tool-output guardrail (5,817 characters dropped)"), where such an entry was stored as whole.
+- **Every call the repeat guard answers without running is a ledger entry and a pair of tool-call events**, filed as a repeat of the entry that holds its answer (`repeated_of`) and always naming the entry that holds the answer, never another repeat, read as that entry by the citation check and the judge's evidence, charged nothing against the agent's byte budget, and counted apart in `run_summary.evidence.repeats`, the report header, §13's evidence bounds and Appendix A ("repeat of ev_…"); a later chunk's calls an earlier chunk had made, and a refused third identical call, left no trace before.
 - **A five-character string that is wholly such a host is read on its own** (`c2.ru` stored NUL-terminated, ASCII or UTF-16LE, or a table cell that is exactly `c2.ru`), by the string sweep, the host reader and the defanger; every other run under six characters stays below the sweep's floor.
 - **A cell's publish state, the composer's checks and the narrative's recommendation check read the IOC table §9 prints** (`builder.ioc_table`, rebuilt from the stored report), where they read the stored table first, so an old report's state notes word an answer as §9 does; a table that cannot be read at all still refuses every value for that reason.
 - **A bare two-label host with a two-character first label is read when the label holds a digit and a letter** (`c2.ru`, `x1.top`), by the string sweep and the report's host reader; one of two letters (`ab.ru`) is read only where the run's network evidence holds it, so prose such as `to.do` stays as written.

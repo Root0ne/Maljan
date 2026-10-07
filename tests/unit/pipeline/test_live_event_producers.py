@@ -81,10 +81,10 @@ class TestTheRecorderFeedsTheConversation:
         assert "/etc/maljan" not in finished["summary"]
         assert "RuntimeError" not in finished["summary"]
 
-    def test_a_refused_repeat_announces_nothing(self) -> None:
-        """No tool runs, so there is no call to draw: the notice is a message
-        to the model, and a start with no finish would leave the console
-        holding a bubble open for a call that never happened."""
+    def test_a_refused_repeat_is_announced_as_a_repeat(self) -> None:
+        """No tool runs, and the call was still made: it is drawn as a start
+        and a finish that names the entry holding its answer, so the console
+        never holds a bubble open and never shows fewer calls than were made."""
         sink = _Sink()
         recorder = _recorder(sink)
 
@@ -96,8 +96,12 @@ class TestTheRecorderFeedsTheConversation:
         for _ in range(3):
             wrapped.invoke({"path": "/x"})
 
-        assert len(sink.of("tool_call_started")) == 2
-        assert len(sink.of("tool_call_finished")) == 2
+        assert len(sink.of("tool_call_started")) == 3
+        finished = sink.of("tool_call_finished")
+        assert len(finished) == 3
+        assert "repeated_of" not in finished[0] and "repeated_of" not in finished[1]
+        assert finished[2]["repeated_of"] == finished[0]["evidence_id"]
+        assert finished[2]["evidence_id"] == recorder.entries[2].id
 
     def test_a_recorder_without_a_sink_is_silent_and_still_records(self) -> None:
         recorder = _recorder(None)

@@ -113,8 +113,21 @@ def record_guardrail_outcome(
     settings page: derived, it is worked out per call from what the window has
     left, so a reader asking why an answer was cut needs the number that cut it.
 
-    No-op when ``ledger`` is None; never raises.
+    The characters an answer lost to a cut, a shortening or a summary are
+    also told to the call being answered (``context_window.note_answer_cut``),
+    so its ledger entry says it is not the whole answer. A compact form loses
+    no value and an answer with no room is recorded as not shown; neither is
+    a cut.
+
+    No-op on the ledger when ``ledger`` is None; never raises.
     """
+    if over_limit and (hard_truncated or shortened or summarised):
+        try:
+            from maljan.llm.context_window import note_answer_cut
+
+            note_answer_cut(chars_dropped(chars_in, chars_kept))
+        except Exception:  # noqa: BLE001 — telemetry must never break a tool call
+            pass
     if ledger is None:
         return
     try:

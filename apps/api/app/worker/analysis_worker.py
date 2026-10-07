@@ -907,6 +907,7 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
         # because 0.0 there means "not recorded" and a 1970 timestamp on a tool
         # call is not a fact about anything.
         truncated=bool(entry.get("truncated", False)),
+        chars_dropped=int(entry.get("chars_dropped", 0) or 0),
         repeated_of=(str(entry["repeated_of"])[:32] if entry.get("repeated_of") else None),
         symbol=(str(entry["symbol"])[:200] if entry.get("symbol") else None),
         started_at=(float(entry["started_at"]) if entry.get("started_at") else None),

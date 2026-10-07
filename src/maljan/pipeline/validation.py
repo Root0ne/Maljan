@@ -3294,6 +3294,25 @@ def _listing_text(output: str) -> str:
     return "" if isinstance(parsed, dict | list) else output
 
 
+def listed_function(output: str) -> tuple[str, str | int] | None:
+    """The function a decompiler's answer is the listing of, as a key two answers share.
+
+    ``("start", address)`` when the listing's signature prints a decompiler's
+    generic name, which carries the function's start (``FUN_00401000``,
+    ``fcn.00401000``); ``("name", name)`` for any other printed name; ``None``
+    when the answer prints no signature (a batch answer, an error, prose).
+    Read off the answer alone: a call given an address inside a function is
+    answered with the whole function, under the same signature.
+    """
+    name = _signature_name(_listing_text(str(output or "")))
+    if not name:
+        return None
+    generic = _GENERIC_FUNCTION_NAME.fullmatch(name.lower())
+    if generic is not None:
+        return ("start", int(generic.group(1), 16))
+    return ("name", name)
+
+
 def _address_key(key: str) -> int | None:
     """A batch answer's key as an address: ``0x`` and hex digits, or four hex digits or more."""
     match = _ADDRESS_KEY.fullmatch(str(key).strip())
@@ -3408,7 +3427,8 @@ def decompiled_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
 
     An entry counts when its tool's name says it decompiles and the call
     answered with something the model read: an answer the conversation had no
-    room for (``schemas.evidence.answer_not_shown``) is no listing read. A
+    room for (``schemas.evidence.answer_not_shown``) is no listing read, and
+    neither is a repeat the guard answered from an earlier entry. A
     batch answer keyed by address is one function per key, its ``Error`` keys
     left out; a batch whose answer is not keyed takes the
     addresses it was given. Otherwise the address is the one the call was
@@ -3422,6 +3442,10 @@ def decompiled_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
     for entry in entries:
         tool = str(getattr(entry, "tool", "") or "").lower()
         if "decompil" not in tool or not getattr(entry, "ok", True) or answer_not_shown(entry):
+            continue
+        # A repeat holds the guard's note, not a listing: the function it
+        # asked for is the earlier entry's.
+        if getattr(entry, "repeated_of", None):
             continue
         entry_id = str(getattr(entry, "id", "") or "")
         for address, names in _entry_functions(entry):
@@ -4778,11 +4802,19 @@ class EntryTexts:
 
     @classmethod
     def from_ledger(cls, ledger: Iterable[Any], corpus: Any = None) -> EntryTexts:
-        """One text per entry: the corpus's copy first, the stored output after it."""
+        """One text per entry: the corpus's copy first, the stored output after it.
+
+        A repeat reads as the entry that holds its answer (``repeated_of``,
+        followed to its end): citing it is citing that entry, whose text is the
+        answer the model read, where the repeat's own text is the guard's note.
+        """
+        from maljan.schemas.evidence import repeat_holders
+
+        ledger = list(ledger or ())
         texts: dict[str, str] = {}
         tools: dict[str, str] = {}
         partial: set[str] = set()
-        for entry in ledger or ():
+        for entry in ledger:
             written = str(getattr(entry, "id", "") or "").strip()
             entry_id = written.lower()
             if not entry_id:
@@ -4799,6 +4831,17 @@ class EntryTexts:
             if text:
                 texts[entry_id] = text
                 tools[entry_id] = str(getattr(entry, "tool", "") or "")
+        holders = repeat_holders(ledger)
+        for repeat in holders:
+            texts.pop(repeat, None)
+            tools.pop(repeat, None)
+            partial.discard(repeat)
+        for repeat, holder in holders.items():
+            if holder and holder in texts:
+                texts[repeat] = texts[holder]
+                tools[repeat] = tools[holder]
+            if holder in partial:
+                partial.add(repeat)
         return cls(texts=texts, tools=tools, partial=frozenset(partial))
 
     def holds(self, entry_id: str, value: str) -> bool:

@@ -41,7 +41,7 @@ from maljan.agents.delegation import (
     WAITING_ON_EACH_OTHER_REFUSAL,
     _what_an_ask_gets_sentence,
 )
-from maljan.agents.evidence_recorder import earlier_chunk_answer
+from maljan.agents.evidence_recorder import earlier_chunk_answer, same_function_notice
 from maljan.agents.ghidra_http_client import no_program_as_error
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
@@ -160,8 +160,10 @@ from maljan.pipeline.validation import (
     validate_verdict_bundle,
 )
 from maljan.providers.base import STATIC_EVIDENCE_INSTRUCTIONS, absent_provider_fragment
+from maljan.providers.static import r2 as _r2
 from maljan.providers.static.ghidra import (
     GHIDRA_GUIDANCE,
+    GHIDRA_WORKFLOW,
     ghidra_not_answering,
     sample_not_opened,
 )
@@ -434,6 +436,146 @@ def _analysis_tool_descriptions(*names: str) -> str:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return " ".join(str(getattr(module, name).__doc__ or "") for name in names)
+
+
+def _deobfuscation_sentences() -> str:
+    """Every sentence the deobfuscation passes put in front of a model, filled in."""
+    from maljan.analysis import ghidra_passes
+    from maljan.tools import crypto_constants
+
+    return " ".join(
+        [
+            crypto_constants.SCAN_RULE,
+            ghidra_passes.SCAN_CHECKS,
+            ghidra_passes.STATED_RULE,
+            ghidra_passes.GHIDRA_SWITCHED_OFF,
+            ghidra_passes.GHIDRA_NOT_OVER_HTTP.format(transport="stdio"),
+            ghidra_passes.GHIDRA_HAS_NO_COPY,
+            triage_pack.PASS_ROOM_SENTENCE.format(shown=1, total=2),
+            triage_pack.SCAN_CHECKS_SHORT,
+        ]
+    )
+
+
+def _deobfuscation_lines() -> str:
+    """The two pass lines with and without a finding, and the lines of a pass not run."""
+    from maljan.analysis.ghidra_passes import ANTI_ANALYSIS_TOOL
+    from maljan.tools import crypto_constants
+
+    place = {"offset": "0x1", "rva": "0x2", "function": "0x0"}
+    value_row = {"value": "0x1", "places": [place]}
+    constants = {
+        "found": [
+            {
+                "algorithm": "a",
+                "what": "w",
+                "tables": [{"byte_order": "big-endian", "place": place}],
+            },
+            {"algorithm": "a", "what": "w", "matched": 2, "of": 3, "values": [value_row]},
+            {"algorithm": "a", "what": "w", "capa": [{"rule": "r", "at": "0x0"}]},
+        ],
+        "lone": [{"algorithm": "a", "what": "w", "matched": 1, "of": 3, "values": [value_row]}],
+        "sets_searched": 3,
+    }
+    findings = {
+        "stated": [{"category": "c", "what": "t", "offset": "0x1", "function": "f"}],
+        "not_stated": 2,
+        "total_findings": 4,
+        "returned": 3,
+    }
+    not_run = [
+        LedgerEntry(id=f"ev_000{i}", tool=tool, error="not run: x", ok=False, seq=i)
+        for i, tool in enumerate((crypto_constants.TOOL, ANTI_ANALYSIS_TOOL), 1)
+    ]
+    failed = [LedgerEntry(id="ev_0004", tool=ANTI_ANALYSIS_TOOL, error="x", ok=False, seq=4)]
+    return " ".join(
+        [
+            triage_pack._constant_sets(constants),
+            triage_pack._constant_sets(constants, max_chars=120),
+            triage_pack._constant_sets({"found": [], "lone": [], "sets_searched": 3}),
+            triage_pack._anti_analysis(findings),
+            triage_pack._anti_analysis({**findings, "also_stated": 2}),
+            triage_pack._anti_analysis(
+                {
+                    "stated": [
+                        {"category": "c", "what": "t", "offset": "0x1", "capa": [{"rule": "r"}]}
+                    ],
+                    "beside_capa": [{"category": "c", "what": "t", "offset": "0x2"}],
+                }
+            ),
+            triage_pack._constant_sets({**constants, "agreeing": 1}),
+            triage_pack._anti_analysis(findings, max_chars=200),
+            triage_pack._anti_analysis({"stated": [], "not_stated": 2, "total_findings": 2}),
+            triage_pack._anti_analysis({"stated": []}),
+            triage_pack.pack_block([*not_run, *failed], 0),
+        ]
+    )
+
+
+def _ghidra_pass_failures() -> str:
+    """What each way a Ghidra pass can stop says, from the passes' own code."""
+    import httpx
+
+    from maljan.analysis.ghidra_passes import GhidraPasses, GhidraPassFailed
+
+    def ghidra(answers: dict[str, Any]) -> GhidraPasses:
+        def handler(request: httpx.Request) -> httpx.Response:
+            answer = answers.get(request.url.path, {"success": True, "program": "p"})
+            if isinstance(answer, Exception):
+                raise answer
+            if isinstance(answer, int):
+                return httpx.Response(answer)
+            return httpx.Response(200, json=answer)
+
+        return GhidraPasses(base_url="http://g.invalid", transport=httpx.MockTransport(handler))
+
+    opened = {"/get_current_program_info": {"image_base": "1000"}}
+    cases = [
+        {"/load_program": {"error": "e"}},
+        {"/load_program": 500},
+        {"/load_program": httpx.ConnectError("x")},
+        {"/switch_program": 500},
+        {"/run_analysis": {"error": "e"}},
+        {"/get_current_program_info": {"image_base": None}},
+        {"/get_current_program_info": {"error": "e"}},
+        {**opened, "/find_anti_analysis_techniques": {"error": "e"}},
+        {**opened, "/find_anti_analysis_techniques": ["x"]},
+    ]
+    said: list[str] = []
+    for answers in cases:
+        try:
+            ghidra(answers).anti_analysis()
+        except GhidraPassFailed as failure:
+            said.append(str(failure))
+    try:
+        ghidra({**opened, "/find_anti_analysis_techniques": httpx.ReadTimeout("x")}).anti_analysis()
+    except GhidraPassFailed as failure:
+        said.append(str(failure))
+    assert len(said) == len(cases) + 1
+    return " ".join(said)
+
+
+def _constant_set_names() -> str:
+    """Each catalogue set as the constants line names it: algorithm, what it is, a value."""
+    from maljan.tools import crypto_constants
+
+    place = {"offset": "0x1"}
+    rows = [
+        {
+            "algorithm": entry.algorithm,
+            "what": entry.what,
+            "matched": 1,
+            "of": 1,
+            "values": [{"value": str(entry.values[0]), "places": [place]}],
+        }
+        for entry in crypto_constants.catalogue()
+        if entry.kind == crypto_constants.VALUES
+    ] + [
+        {"algorithm": entry.algorithm, "what": entry.what, "tables": [{"place": place}]}
+        for entry in crypto_constants.catalogue()
+        if entry.kind == crypto_constants.TABLE
+    ]
+    return triage_pack._constant_sets({"found": rows, "sets_searched": len(rows)})
 
 
 # Everything else a report model is shown on every run, as plain text.
@@ -1006,6 +1148,14 @@ PROMPTS: dict[str, str] = {
     "the two resolving tools' descriptions": _analysis_tool_descriptions(
         "resolve_api_hashes", "decode_string_blobs"
     ),
+    "the deobfuscation passes' rules and reasons": _deobfuscation_sentences(),
+    "the ghidra workflow's sentence on the constants": GHIDRA_WORKFLOW[
+        GHIDRA_WORKFLOW.index("- Suspected encryption") : GHIDRA_WORKFLOW.index("- Trace a key")
+    ],
+    "the deobfuscation passes' pack lines": _deobfuscation_lines(),
+    "what a Ghidra pass that stopped says": _ghidra_pass_failures(),
+    "the constant sets as the pack line names them": _constant_set_names(),
+    "the constant scan's description": _analysis_tool_descriptions("find_crypto_constants"),
     "a term's example ids and how many more": _term_ids_said(["T1000", "T1001", "T1002"]),
     "run-state budget line of a loop with no limit": budget_line(NO_LIMIT, NO_LIMIT),
     "ask tool budget sentence with no limit": _what_an_ask_gets_sentence("lead", None, None),
@@ -1037,6 +1187,16 @@ PROMPTS: dict[str, str] = {
     ),
     "a later chunk's answer from an earlier chunk's recorded result": earlier_chunk_answer(
         "a", "ev_0001", "a recorded result"
+    ),
+    "a decompile answered with a function an earlier entry holds": same_function_notice(
+        "FUN_00401000", "ev_0001"
+    ),
+    "an r2 open that failed, and an r2 call made before an open": " ".join(
+        [
+            _r2._open_failed("/srv/samples/.tmp/x.exe", "/srv/samples/r2-work/x.exe"),
+            _r2._open_failed("/srv/samples/r2-work/x.exe", "/srv/samples/r2-work/x.exe"),
+            _r2._open_first("/srv/samples/r2-work/x.exe"),
+        ]
     ),
     "the function map block": _function_map_text(),
     "a tool answer the conversation had no room for, as told and as recorded": " ".join(
