@@ -3962,7 +3962,7 @@ def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     """The row's layer words (:func:`_layer_words`) with its evidence roots beside them.
 
     The roots are the distinct places in the sample the statements cite
-    (``analysis.evidence_roots``): "one evidence root (0x4f58 in .text)" for a
+    (``analysis.evidence_roots``): "one evidence root (0x1a40 in .text)" for a
     row a single place stands behind, counted and listed for more. A row with
     layer words carries them inside its parentheses; a row with none states
     its layers and roots on their own. A row stored before roots were read

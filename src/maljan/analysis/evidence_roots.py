@@ -9,7 +9,7 @@ places stand behind it beside how many layers named it.
 A root is derived from what the entry already holds, never guessed:
 
 * **a place in the image**, written as its offset from the image base and the
-  section that holds it (``0x4f58 in .text``): a ``strings`` row's file
+  section that holds it (``0x1a40 in .text``): a ``strings`` row's file
   offset, a FLOSS row's call site, a ``decode_string_blobs`` row's blob, a
   ``resolve_api_hashes`` occurrence, a capa match address, a function index
   row, an address a decompile, disassembly or memory read was given, an
@@ -33,18 +33,22 @@ A root is derived from what the entry already holds, never guessed:
 * **the whole file**: hashes, file identification, signing, a file
   reputation answer.
 
-Each file has its own layout: an entry about a file the run carved
-(``carved_path``) is placed against that file's own section table and image
-base, and its roots name the file. An entry whose root cannot be read has
-none, and says why in a ``no:`` sentence: a reference lookup reads nothing of
-the sample, a failed call read nothing, a tool whose answer carries no
-offset, address, section, event or flow has nothing to place, a file offset
-with no section table to place it against the file's addresses.
+Each file has its own layout: an entry is about the sample only when the
+path it names is the sample's, or it names no path and its server's program
+is the sample (``_Files``); an entry about any other file is placed against
+that file's own section table and image base, and its roots name the file.
+An entry whose root cannot be read has none, and says why in a ``no:``
+sentence: a reference lookup reads nothing of the sample, a failed call read
+nothing, a tool whose answer carries no offset, address, section, event or
+flow has nothing to place, a file offset with no section table to place it
+against the file's addresses.
 
 A statement's roots are those of the entries it cites. An entry holding one
 root gives it. An entry holding several gives the ones the statement picks
-out: by an address it writes, by a quoted value or a name that only one of
-the entry's roots holds. A name or value several of them hold picks out none.
+out: by a number it writes, read in the coordinate the entry's rows state,
+or by a quoted value or a name written as one that only one of the entry's
+roots holds. A name or value several of them hold, or a prose word, picks out
+none.
 A statement that picks out none of them gives no root for that entry and
 says so: which row it read is not a fact.
 
@@ -327,7 +331,7 @@ class Layout:
         """A place as its root is written: the offset from the image base and its section.
 
         A place inside a function a kept range holds is that function:
-        ``function 0x3868 in .text``. Two places in one function with no
+        ``function 0x2c10 in .text``. Two places in one function with no
         range kept stay two roots.
         """
         start = self.function_at(rva)
@@ -1200,7 +1204,7 @@ def run_roots(ledger: Sequence[Any] | None) -> RunRoots:
 
 
 def roots_phrase(roots: Sequence[str], not_read: Sequence[str]) -> str:
-    """The roots as a row states them: ``one evidence root (0x4f58 in .text)``, or ``""``.
+    """The roots as a row states them: ``one evidence root (0x1a40 in .text)``, or ``""``.
 
     One root says so in those words and names it; several are counted, and
     listed only in the record (``evidence_roots``); the cited entries whose
@@ -1221,7 +1225,7 @@ def roots_phrase(roots: Sequence[str], not_read: Sequence[str]) -> str:
 
 
 def layers_and_roots(layers: int, roots: Sequence[str], not_read: Sequence[str]) -> str:
-    """``2 layers, one evidence root (0x4f58 in .text)``: the layer count beside the roots."""
+    """``2 layers, one evidence root (0x1a40 in .text)``: the layer count beside the roots."""
     phrase = roots_phrase(roots, not_read)
     if not phrase:
         return ""

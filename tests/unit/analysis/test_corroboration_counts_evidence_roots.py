@@ -362,12 +362,12 @@ class TestTheCorroborationRecord:
 
 class TestTheWords:
     def test_one_root_says_so_and_several_are_counted(self) -> None:
-        assert roots_phrase(["0x4f58 in .text"], []) == "one evidence root (0x4f58 in .text)"
+        assert roots_phrase(["0x1a40 in .text"], []) == "one evidence root (0x1a40 in .text)"
         assert roots_phrase(["a", "b"], ["ev_1: no: x"]) == (
             "2 evidence roots, and 1 citation whose root could not be read"
         )
-        assert layers_and_roots(2, ["0x4f58 in .text"], []) == (
-            "2 layers, one evidence root (0x4f58 in .text)"
+        assert layers_and_roots(2, ["0x1a40 in .text"], []) == (
+            "2 layers, one evidence root (0x1a40 in .text)"
         )
         assert roots_phrase([], []) == ""
 

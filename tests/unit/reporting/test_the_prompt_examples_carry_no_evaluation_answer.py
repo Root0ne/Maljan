@@ -1787,14 +1787,14 @@ PROMPTS: dict[str, str] = {
     "evidence roots beside the layers, and why a cited entry gives none": " ".join(
         [
             _ROOTS_LABEL,
-            _layers_and_roots(2, ["0x4f58 in .text"], []),
-            _layers_and_roots(3, ["0x4f58 in .text", "the import table"], ["ev_0001: no: x"]),
+            _layers_and_roots(2, ["0x1a40 in .text"], []),
+            _layers_and_roots(3, ["0x1a40 in .text", "the import table"], ["ev_0001: no: x"]),
             _roots_phrase([], ["ev_0001: no: x"]),
             # Every root label, as each template writes one.
-            _roots.PLACE_IN_SECTION.format(address="0x4f58", section=".text"),
-            _roots.PLACE_OUTSIDE.format(address="0x4f58"),
+            _roots.PLACE_IN_SECTION.format(address="0x1a40", section=".text"),
+            _roots.PLACE_OUTSIDE.format(address="0x1a40"),
             _roots.FUNCTION_ROOT.format(
-                place=_roots.PLACE_IN_SECTION.format(address="0x4f58", section=".text")
+                place=_roots.PLACE_IN_SECTION.format(address="0x1a40", section=".text")
             ),
             _roots.SECTION_ROOT.format(name=".rdata"),
             _roots.PROCESS_ROOT.format(pid=84),

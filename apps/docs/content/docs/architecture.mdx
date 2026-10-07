@@ -592,8 +592,12 @@ and a line `<<end of tool output [ev_0007] 3f2a9c1b7d0e>>`, both carrying the
 first twelve hexadecimal digits of the SHA-256 of what lies between them, so
 no line inside can be the closing line. Every `<` of a run of two or more
 inside the fence is shown with a backslash before it, wherever it stands, so
-no `<<` appears inside a fence at all; the escape is idempotent. The earlier
-chunks' list of calls shows each call's headline as one quoted value. The
+no `<<` appears inside a fence at all, and so is every character that reads
+as `<` wherever it stands (the ones NFKC folds to `<`, the angle quotes and
+angle brackets, the syllabic and arrowhead lookalikes); the escape is
+idempotent. The earlier chunks' list of calls shows each call's headline as
+one quoted value, and the guardrail summariser reads the text it shortens
+inside the same fence, its system text saying once what the fence is. The
 sentence about a prompt's tools says once what the fence is. The guardrails
 count what the view adds inside each answer's limit: a character cut keeps
 the longest prefix that fits with the fence lines and the escapes inside that
@@ -3358,7 +3362,7 @@ is assembled from what the run gathered rather than recomputed beside it:
   (`analysis/evidence_roots.py`), beside the layers and never instead of them.
   Every ledger entry states the places in the sample its facts were read from,
   derived from what the entry holds: a place written as its offset from the
-  image base and the section that holds it (`0x4f58 in .text`) for a strings
+  image base and the section that holds it (`0x1a40 in .text`) for a strings
   row's file offset, a FLOSS row's call site, a decoded blob, a hash
   occurrence, a capa match address, a function index row, or the address a
   decompile, disassembly or memory read was given; a table of the file (the PE
@@ -3375,14 +3379,20 @@ is assembled from what the run gathered rather than recomputed beside it:
   directions of one connection a capture lists are one flow, named by the end
   it was first seen going to; a host name the sandbox states joins no capture
   address it does not itself state as that name's resolution. Each file has
-  its own layout: an entry about a file the run carved (`carved_path`) is
-  placed against that file's own section table and image base, and its roots
-  name the file by the digest the carving states (`0xa100 in UPX0 of carved
+  its own layout. An entry is about the sample only when the path it names is
+  the sample's (the path the triage pack states, a path with the sample's
+  file name, or one whose stem is the sample's SHA-256), or when it names no
+  path and its server's program is the sample: a server holds the program
+  its latest program statement or open names, the sample until one names
+  another file. Any other entry (a file the run carved, a dropped file named
+  by its path, a disassembler's program of another file) is placed against
+  that file's own section table and image base, and its roots name the file
+  by the digest the run states for it or by its path (`0xa100 in UPX0 of
   file sha256 1a2b3c4d5e6f`); an entry whose file cannot be told gives no
   root. An address is read against the nearest image base below it, found by
   bisection. A file that states an image base and no section table gives a
   file offset no root, since it cannot be placed against the file's addresses.
-  A place inside a function is that function's root, `function 0x3868 in
+  A place inside a function is that function's root, `function 0x2c10 in
   .text`, so a capa match inside a function and a decompile of it are one
   root, only by the ranges the file's own exception directory states. The
   pack's function index carries them beside its answer, never in it
@@ -3400,10 +3410,14 @@ is assembled from what the run gathered rather than recomputed beside it:
   naming its function by name gives no address, an answer with no offset,
   address, section, event or flow has nothing to place. A statement's roots
   are those of the entries it cites; an entry holding several gives the ones
-  the statement picks out by an address, or by a quoted value or a name that
-  only one of the entry's roots holds (an import, an export, a section, a
-  resolved name). A name several rows hold, or a passing mention of a table
-  ("the imports", "the header"), picks out nothing. A statement picking out
+  the statement picks out by a number, or by a quoted or backticked value or
+  name, or a name written as an identifier in its own case, that only one of
+  the entry's roots holds (an import, an export, a section, a resolved name).
+  A number is read in the coordinate the entry's rows state: a file offset
+  for a strings or YARA row, an address otherwise; a number that names one
+  row so and another in the other coordinate names neither. A name several
+  rows hold, a prose word, or a passing mention of a table ("the imports",
+  "the header") picks out nothing. A statement picking out
   none of a many-row entry's rows gives no root for it and says so ("no: the
   statement names none of ev_0007's rows"): which row it read is not a fact.
   An asserting row that names the technique and gives no place (a capa rule
@@ -3413,11 +3427,11 @@ is assembled from what the run gathered rather than recomputed beside it:
   that gave none (`roots_not_read`); the corroboration record carries the same
   two lists, adding the rows of each asserting tool's entry that name the
   technique; the judge's technique question states "2 layers, one evidence
-  root (0x4f58 in .text)" under each technique's mentions, the same layer
+  root (0x1a40 in .text)" under each technique's mentions, the same layer
   count (`independent_statements`) and the same roots, read from each claim's
   text and evidence line, as the report row. The report's
   corroboration words carry the count of roots inside their parentheses, and
-  name the root only when there is exactly one ("one evidence root (0x4f58 in
+  name the root only when there is exactly one ("one evidence root (0x1a40 in
   .text)"); the full list is in `evidence_roots` in report.json and in the run
   record; a single-layer
   row states its layer and roots on their own. No publish rule reads the
