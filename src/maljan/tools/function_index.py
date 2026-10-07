@@ -30,9 +30,12 @@ What it states, and nothing else:
   data section (x64: RIP-relative; x86: an absolute address as a memory
   operand or an immediate) refers to the text there when the bytes from that
   address read as printable ASCII or UTF-16LE of at least six characters up to
-  their terminator: a plain string. A decoded string is one the blob decoder
-  states this function refers to, or one FLOSS decoded at a call site inside
-  it (a stack or tight string: in the function FLOSS names).
+  their terminator, and the address is where that text starts: a plain
+  string. A reference into the middle of a text reads nothing, so texts are
+  disjoint and all of them are read in one pass of the section. A decoded
+  string is one the blob decoder states this function refers to, or one
+  FLOSS decoded at a call site inside it (a stack or tight string: in the
+  function FLOSS names).
 * **The names its hashes resolve to** where the hash resolution states the
   place inside it, and **the capa rules** that matched at its start or at an
   address inside it.
@@ -367,13 +370,24 @@ def _text_at(image: Image, rva: int) -> str | None:
         return None
     limit = section.raw_offset + section.mapped_size
     data = image.data
-    found = _ASCII_TEXT.match(data, offset, limit)
-    if found is not None and found.end() - 1 - offset >= TEXT_MIN_CHARS:
-        return data[offset : found.end() - 1].decode("ascii")
-    found = _WIDE_TEXT.match(data, offset, limit)
-    if found is not None and (found.end() - 2 - offset) // 2 >= TEXT_MIN_CHARS:
-        return data[offset : found.end() - 2].decode("utf-16-le")
+    first = section.raw_offset
+    # Only a reference to where a text starts reads it: the byte (or, for
+    # UTF-16LE, the character) before is not part of the same text. Texts
+    # are then disjoint runs, so all of them together are read in one pass of
+    # the section, however many references point into one long run.
+    if offset == first or not _printable(data[offset - 1]):
+        found = _ASCII_TEXT.match(data, offset, limit)
+        if found is not None and found.end() - 1 - offset >= TEXT_MIN_CHARS:
+            return data[offset : found.end() - 1].decode("ascii")
+    if offset - 2 < first or not (_printable(data[offset - 2]) and data[offset - 1] == 0):
+        found = _WIDE_TEXT.match(data, offset, limit)
+        if found is not None and (found.end() - 2 - offset) // 2 >= TEXT_MIN_CHARS:
+            return data[offset : found.end() - 2].decode("utf-16-le")
     return None
+
+
+def _printable(byte: int) -> bool:
+    return 0x20 <= byte < 0x7F or byte in (9, 10, 13)
 
 
 # -- joining the run's answers ------------------------------------------------

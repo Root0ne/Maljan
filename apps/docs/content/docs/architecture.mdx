@@ -528,7 +528,9 @@ Each row holds, with the entry id that states each cell:
 - the strings it refers to: a plain string where an instruction takes an
   address in a data section (x64 RIP-relative; x86 an absolute address as an
   operand or an immediate) and the bytes there read as printable ASCII or
-  UTF-16LE of at least six characters up to their terminator; a decoded string
+  UTF-16LE of at least six characters up to their terminator, read only where
+  the address is the start of that text (texts are then disjoint, and read in
+  one pass however many references point into one); a decoded string
   the blob decoder states it refers to, or one FLOSS decoded at a call site
   inside it (a stack or tight string: in the routine FLOSS names);
 - the capa rules that matched at its start or inside it;

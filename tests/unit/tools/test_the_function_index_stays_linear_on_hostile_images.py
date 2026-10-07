@@ -188,10 +188,29 @@ def _dense(n: int, degree: int = 8) -> tuple[Image, dict[str, Any]]:
     return _image([8 + 5 * degree] * n, body, texts), {}
 
 
+def _into_one_run(n: int, length: int = 200_000) -> tuple[Image, dict[str, Any]]:
+    """One long printable run; function i loads the address ``i * step`` bytes into it."""
+    texts = [b"A" * length]
+    step = max(1, length // n)
+
+    def body(i: int, start: int, at: Callable[[int], int], data: int) -> bytes:
+        return _lea(start, data + i * step) + b"\xc3"
+
+    return _image([8] * n, body, texts), {}
+
+
 # -- the tests ----------------------------------------------------------------
 
 
 class TestEveryShapeFinishes:
+    def test_references_into_one_long_text_read_it_once_from_its_start(self) -> None:
+        _, answer = _timed(_into_one_run, 20_000)
+        # Only the reference to where the text starts reads it; the others
+        # point inside it and read nothing.
+        assert answer["total"] == 1
+        (cells,) = [row["plain_strings"] for row in answer["rows"]]
+        assert len(cells[0]["text"]) == 200_000
+
     def test_a_cyclic_graph_with_self_calls_ends_and_counts_each_callee_once(self) -> None:
         _, answer = _timed(_cycle, 2_000)
         assert answer["total"] == 2_000
@@ -253,6 +272,12 @@ class TestTheCostGrowsWithTheFunctionsAndTheCalls:
         small = min(_timed(_fan_in, 2_000)[0] for _ in range(2))
         large = _timed(_fan_in, 20_000)[0]
         print("fan-in to a function of 2,000 artefacts:", round(small, 3), round(large, 3))
+        assert large < small * 30
+
+    def test_references_into_one_long_text(self) -> None:
+        small = min(_timed(_into_one_run, 2_000)[0] for _ in range(2))
+        large = _timed(_into_one_run, 20_000)[0]
+        print("references into one 200,000-byte text:", round(small, 3), round(large, 3))
         assert large < small * 30
 
     def test_overlapping_table_ranges(self) -> None:
