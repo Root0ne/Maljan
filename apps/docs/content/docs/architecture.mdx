@@ -1157,12 +1157,17 @@ decides.
    per item, several labels at once (`KEEP C1, C2: …`, `KEEP C1 C2: …`,
    `WITHDRAW C3 because …`), several decisions on one line (`KEEP C1: …;
    WITHDRAW C2: …`, `KEEP C1, WITHDRAW C2`), or `KEEP all` / `WITHDRAW all`
-   for every item a decision of its own does not name, `all except C1`
-   leaving the listed items undecided. A decision is read only where a clause
-   begins (a line's start, after `;`, or after a `,` that follows a
-   decision's labels); once its reason opens (`:`, a dash, `.`, `because`) the
-   rest of the clause is the reason and no word in it is read as a decision.
-   Each line is read in one pass. Each item is the first answer's own claim, its sentence,
+   (`all others`, `the rest`) for every item a decision of its own does not
+   name, `all except C1` leaving the listed items undecided. A decision is
+   read only where a clause begins: a line's start (after a list mark or a
+   list number such as `1.`), after `;`, after a `,` (or `, and`) that
+   follows a decision's labels, or after a sentence's end when a whole
+   decision follows (`KEEP C1. WITHDRAW C2.`, `WITHDRAW C2: no. KEEP all
+   others.`). It may name its labels first (`C2: WITHDRAW - guess`). Once its
+   reason opens (`:`, a dash, `.`, `because`) the rest of its sentence is the
+   reason and no word in it is read as a decision, so `KEEP C1: it holds.
+   Withdraw C2 would lose data` decides C1 only. Each line is read in one
+   pass. Each item is the first answer's own claim, its sentence,
    technique id and block with it (`claim_drops.dropped_claims`), so of a
    technique list split on commas the claim left out is the one put back. A
    kept item goes back into the answer as the first answer wrote it, a

@@ -7928,26 +7928,80 @@ RETRY_DROP_KEPT = "kept when asked"
 RETRY_DROP_WITHDRAWN = "withdrawn when asked"
 RETRY_DROP_NOT_ANSWERED = "not answered; kept as the first answer wrote it"
 # One answer line: ``KEEP C2: reason``, ``WITHDRAW F1 - reason``,
-# ``KEEP C1, C2 and F1: reason`` or ``KEEP C3 because reason``, marks allowed.
+# ``KEEP C1, C2 and F1: reason``, ``KEEP C3 because reason``, ``C2: WITHDRAW -
+# reason`` or ``1. KEEP C1: reason``, marks allowed.
 _RETRY_DROP_LABEL = r"[CF]\d+"
-_RETRY_DROP_LABELS = (
-    rf"(?:{_RETRY_DROP_LABEL}|all)\b"
-    rf"(?:[\s*_`]*+(?:,|&|\band\b)?+[\s*_`]*+{_RETRY_DROP_LABEL}\b)*+"
+# Every item asked about that no decision of its own settles: ``all``,
+# ``all others``, ``the rest``, ``everything else``.
+_RETRY_DROP_ALL = (
+    r"(?:all(?:\s++(?:others|other\s++(?:items|ones)|the\s++rest|remaining|else))?"
+    r"|the\s++(?:rest|others|remaining)|everything(?:\s++else)?)"
+)
+_RETRY_DROP_LABEL_RUN = rf"(?:[\s*_`]*+(?:,|&|\band\b)?+[\s*_`]*+{_RETRY_DROP_LABEL}\b)*+"
+_RETRY_DROP_LABELS = rf"(?:{_RETRY_DROP_LABEL}|{_RETRY_DROP_ALL})\b{_RETRY_DROP_LABEL_RUN}"
+# What may come before a decision where a clause begins: list marks, quote
+# marks and a list number (``1.``, ``2)``).
+_RETRY_DROP_LEAD = r"[\s>*_`-]*+(?:\d++[.)][\s>*_`-]*+)?+"
+_RETRY_DROP_EXCEPT = (
+    rf"(?:[\s*_`]++(?:except|but(?:\s++not)?+)[\s*_`]++(?P<except>{_RETRY_DROP_LABELS}))?+"
 )
 # A decision, read only where a clause begins: KEEP or WITHDRAW, the labels
-# it is about (``C1``, ``C1, C2 and F1``, ``C1 C2``, or ``all``), and the
-# labels ``all`` leaves out (``all except C1``).
+# it is about (``C1``, ``C1, C2 and F1``, ``C1 C2``, ``all``, ``the rest``), and
+# the labels ``all`` leaves out (``all except C1``).
 _RETRY_DROP_DECISION_RE = re.compile(
-    r"[\s>*_`-]*+(?P<decision>keep|withdraw)\b[\s*_`]++"
-    rf"(?P<labels>{_RETRY_DROP_LABELS})"
-    rf"(?:[\s*_`]++(?:except|but(?:\s++not)?+)[\s*_`]++(?P<except>{_RETRY_DROP_LABELS}))?+",
+    rf"{_RETRY_DROP_LEAD}(?P<decision>keep|withdraw)\b"
+    r"(?:[\s*_`]*+:[\s*_`]*+|[\s*_`]++)"
+    rf"(?P<labels>{_RETRY_DROP_LABELS}){_RETRY_DROP_EXCEPT}",
+    re.IGNORECASE,
+)
+# The same decision written labels first: ``C2: WITHDRAW``, ``C1 C2 - KEEP``.
+_RETRY_DROP_LABEL_FIRST_RE = re.compile(
+    rf"{_RETRY_DROP_LEAD}(?P<labels>{_RETRY_DROP_LABEL}\b{_RETRY_DROP_LABEL_RUN})"
+    r"[\s*_`]*+(?:[:\-–—.)=]|=>|->)?+[\s*_`]*+(?P<decision>keep|withdraw)\b",
     re.IGNORECASE,
 )
 # What opens a decision's reason, after its labels: from there on, the clause
 # is the reason, and a decision word in it is a word.
 _RETRY_DROP_REASON_RE = re.compile(r"[\s*_`]*+(?:[:\-–—.)]|\bbecause\b)\s*+", re.IGNORECASE)
-# A comma after a decision's labels, when another decision follows it.
-_RETRY_DROP_NEXT_RE = re.compile(r"[\s*_`]*+,", re.IGNORECASE)
+# A comma after a decision's labels, ``and`` or ``then`` allowed, when another
+# decision follows it.
+_RETRY_DROP_NEXT_RE = re.compile(r"[\s*_`]*+,(?:[\s*_`]*+(?:and|then)\b)?+", re.IGNORECASE)
+# A sentence's end inside a reason: a decision may begin after it.
+_RETRY_DROP_SENTENCE_END_RE = re.compile(r"[.!?]++\s++")
+# What a decision begun after a sentence's end has to be followed by, so a
+# sentence of a reason that opens with a decision word ("Withdraw C2 would
+# lose data") stays a sentence: its reason, a mark, or the clause's end.
+_RETRY_DROP_DECIDED_RE = re.compile(r"[\s*_`]*+(?:[:\-–—.,!)]|\bbecause\b|$)", re.IGNORECASE)
+
+
+_RETRY_DROP_NAMED_RE = re.compile(
+    rf"(?P<label>{_RETRY_DROP_LABEL})|\b(?:all|rest|others|remaining|everything)\b", re.IGNORECASE
+)
+
+
+def _retry_drop_labels(found: str) -> list[str]:
+    """The labels a decision names, upper-cased; every ``all`` form is ``ALL``."""
+    return [(m.group("label") or "ALL").upper() for m in _RETRY_DROP_NAMED_RE.finditer(found)]
+
+
+def _retry_drop_decision_at(
+    clause: str, at: int, *, after_sentence: bool = False
+) -> tuple[str, list[str], set[str], int] | None:
+    """``(decision, labels, labels left out, end)`` of a decision beginning at ``at``."""
+    match = _RETRY_DROP_DECISION_RE.match(clause, at)
+    if match is not None:
+        excepted = set(_retry_drop_labels(match.group("except") or ""))
+        found = (match.group("decision").upper(), _retry_drop_labels(match.group("labels")))
+        decision = (*found, excepted, match.end())
+    else:
+        first = _RETRY_DROP_LABEL_FIRST_RE.match(clause, at)
+        if first is None:
+            return None
+        named = _retry_drop_labels(first.group("labels"))
+        decision = (first.group("decision").upper(), named, set(), first.end())
+    if after_sentence and _RETRY_DROP_DECIDED_RE.match(clause, decision[3]) is None:
+        return None
+    return decision
 
 
 @dataclass(frozen=True)
@@ -8045,49 +8099,59 @@ def retry_drop_question(drops: RetryDrops) -> str:
 def read_retry_drop_answers(text: str, labels: Iterable[str]) -> dict[str, tuple[str, str]]:
     """``{label: (KEEP or WITHDRAW, reason)}`` for each named label the answer decided, once.
 
-    A decision is read only where a clause begins: at the start of a line,
-    after a ``;``, or after a ``,`` that follows a decision's labels. Once a
-    decision's reason opens (``:``, a dash, ``.``, ``because``), the rest of
-    its clause is the reason and nothing in it is read as a decision. ``all``
-    decides every item a decision of its own does not, except the labels it
-    names after ``except``, which stay undecided unless decided elsewhere.
-    Each line is read in one pass.
+    A decision is read only where a clause begins: at the start of a line
+    (after a list mark or number), after a ``;``, after a ``,`` (``and`` or
+    ``then`` allowed) that follows a decision's labels, or after a sentence's
+    end when what follows is a whole decision (its labels then its reason, a
+    mark or the clause's end). It is written decision first (``KEEP C1``) or
+    labels first (``C1: KEEP``). Once a decision's reason opens (``:``, a
+    dash, ``.``, ``because``), the rest of its sentence is the reason and
+    nothing in it is read as a decision. ``all`` (``all others``, ``the
+    rest``) decides every item a decision of its own does not, except the
+    labels it names after ``except``, which stay undecided unless decided
+    elsewhere. Each line is read in one pass.
     """
     wanted = [str(label).upper() for label in labels]
     decided: dict[str, tuple[str, str]] = {}
     for_all: tuple[tuple[str, str], set[str]] | None = None
 
-    def _labels(found: str) -> list[str]:
-        return [
-            label.upper() for label in re.findall(rf"{_RETRY_DROP_LABEL}|all", found, re.IGNORECASE)
-        ]
+    def _said(reason: str) -> str:
+        return reason.strip().rstrip(",").strip().strip("*_`").strip()
 
     for line in str(text or "").splitlines():
         for clause in line.split(";"):
-            at = 0
-            pending: list[tuple[str, list[str], set[str]]] = []
-            reason = ""
-            while True:
-                match = _RETRY_DROP_DECISION_RE.match(clause, at)
-                if match is None:
+            read: list[tuple[str, list[str], set[str], str]] = []
+            found = _retry_drop_decision_at(clause, 0)
+            while found is not None:
+                decision, named, excepted, end = found
+                follows = _RETRY_DROP_NEXT_RE.match(clause, end)
+                if follows is not None:
+                    found = _retry_drop_decision_at(clause, follows.end())
+                    if found is not None:
+                        read.append((decision, named, excepted, ""))
+                        continue
+                opened = _RETRY_DROP_REASON_RE.match(clause, end)
+                if opened is None:
+                    read.append((decision, named, excepted, ""))
                     break
-                excepted = set(_labels(match.group("except") or ""))
-                pending.append(
-                    (match.group("decision").upper(), _labels(match.group("labels")), excepted)
-                )
-                at = match.end()
-                follows = _RETRY_DROP_NEXT_RE.match(clause, at)
-                if follows is not None and _RETRY_DROP_DECISION_RE.match(clause, follows.end()):
-                    at = follows.end()
-                    continue
-                opened = _RETRY_DROP_REASON_RE.match(clause, at)
-                if opened is not None:
-                    reason = clause[opened.end() :].strip().rstrip(",").strip().strip("*_`")
-                    reason = reason.strip()
-                break
-            for index, (decision, named, excepted) in enumerate(pending):
-                # The reason belongs to the decision it follows.
-                said = reason if index == len(pending) - 1 else ""
+                # The reason runs to the sentence's end a whole decision
+                # follows, or to the clause's end. A reason opened by a
+                # sentence's end is itself such an end.
+                start, until, found = opened.end(), len(clause), None
+                if clause[opened.start() : opened.end()].strip(" \t*_`").startswith("."):
+                    found = _retry_drop_decision_at(clause, start, after_sentence=True)
+                    until = opened.start() if found is not None else until
+                scan = start
+                while found is None:
+                    ended = _RETRY_DROP_SENTENCE_END_RE.search(clause, scan)
+                    if ended is None:
+                        break
+                    found = _retry_drop_decision_at(clause, ended.end(), after_sentence=True)
+                    if found is not None:
+                        until = ended.start()
+                    scan = ended.end()
+                read.append((decision, named, excepted, _said(clause[start:until])))
+            for decision, named, excepted, said in read:
                 for label in named:
                     if label == "ALL":
                         if for_all is None:

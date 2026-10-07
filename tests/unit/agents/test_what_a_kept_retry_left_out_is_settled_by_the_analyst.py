@@ -417,3 +417,88 @@ class TestSeveralDecisionsOnALine:
         for line in lines:
             read_retry_drop_answers(line, self.LABELS)
         assert time.perf_counter() - started < 2.0
+
+
+class TestMoreClauseStarts:
+    LABELS = ["C1", "C2", "C3", "F1"]
+
+    def test_a_decision_after_a_sentence_end(self) -> None:
+        assert read_retry_drop_answers("KEEP C1. WITHDRAW C2.", self.LABELS) == {
+            "C1": ("KEEP", ""),
+            "C2": ("WITHDRAW", ""),
+        }
+
+    def test_a_decision_after_a_comma_and(self) -> None:
+        assert read_retry_drop_answers("KEEP C1, and WITHDRAW C2: no", self.LABELS) == {
+            "C1": ("KEEP", ""),
+            "C2": ("WITHDRAW", "no"),
+        }
+
+    def test_a_decision_after_a_list_number(self) -> None:
+        assert read_retry_drop_answers("1. WITHDRAW C2: guess\n2) KEEP C1: x", self.LABELS) == {
+            "C2": ("WITHDRAW", "guess"),
+            "C1": ("KEEP", "x"),
+        }
+
+    def test_labels_written_first(self) -> None:
+        assert read_retry_drop_answers("C2: WITHDRAW - guess\nC1, F1: KEEP", self.LABELS) == {
+            "C2": ("WITHDRAW", "guess"),
+            "C1": ("KEEP", ""),
+            "F1": ("KEEP", ""),
+        }
+
+    def test_keep_all_others_after_a_reason(self) -> None:
+        assert read_retry_drop_answers("WITHDRAW C2: no. KEEP all others.", self.LABELS) == {
+            "C2": ("WITHDRAW", "no"),
+            "C1": ("KEEP", ""),
+            "C3": ("KEEP", ""),
+            "F1": ("KEEP", ""),
+        }
+
+    def test_keep_the_rest_leaves_a_decided_label_as_decided(self) -> None:
+        assert read_retry_drop_answers("KEEP the rest: they hold\nWITHDRAW C3", self.LABELS) == {
+            "C1": ("KEEP", "they hold"),
+            "C2": ("KEEP", "they hold"),
+            "C3": ("WITHDRAW", ""),
+            "F1": ("KEEP", "they hold"),
+        }
+
+    def test_a_sentence_of_a_reason_opening_with_a_decision_word_stays_a_reason(self) -> None:
+        line = "KEEP C1: it holds. Withdraw C2 would lose data"
+
+        assert read_retry_drop_answers(line, self.LABELS) == {
+            "C1": ("KEEP", "it holds. Withdraw C2 would lose data"),
+        }
+
+    def test_a_decision_after_a_comma_inside_a_reason_is_not_read(self) -> None:
+        line = "KEEP C1: I keep it because, withdraw C2 would lose data"
+
+        assert read_retry_drop_answers(line, self.LABELS) == {
+            "C1": ("KEEP", "I keep it because, withdraw C2 would lose data"),
+        }
+
+    def test_all_except_after_a_sentence_end_leaves_its_labels_undecided(self) -> None:
+        assert read_retry_drop_answers("KEEP C3: x. WITHDRAW all except C1.", self.LABELS) == {
+            "C3": ("KEEP", "x"),
+            "C2": ("WITHDRAW", ""),
+            "F1": ("WITHDRAW", ""),
+        }
+
+    def test_every_new_form_is_read_in_linear_time(self) -> None:
+        import time
+
+        repeats = 100_000
+        lines = [
+            "KEEP C1. " * repeats,
+            "KEEP C1: x. " * repeats,
+            "KEEP C1: a. " + "Withdraw C2 would. " * repeats,
+            "KEEP C1, and " * repeats + "x",
+            "C1 " * repeats + "x",
+            "1. " * repeats,
+            "KEEP C1: a" + ". KEEP C1 C2 C3 x" * repeats,
+        ]
+        started = time.perf_counter()
+        for line in lines:
+            read_retry_drop_answers(line, self.LABELS)
+        # Linear: about a second here; quadratic would take hours.
+        assert time.perf_counter() - started < 20.0
