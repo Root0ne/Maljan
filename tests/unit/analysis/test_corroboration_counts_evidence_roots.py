@@ -212,9 +212,11 @@ class TestAStatementsRoots:
         roots = run_roots(led)
         named, unread = roots.of_statement("calls CreateFileW to drop a file", ["ev_0002"])
         assert named == [] and unread == ["ev_0002: " + NAMES_NO_ROW.format(entry="ev_0002")]
-        assert roots.of_statement("at 0x1040 it calls CreateFileW", ["ev_0002"])[0] == [
-            "0x1040 in .text"
+        assert roots.of_statement("at 0x1c40 it calls CreateFileW", ["ev_0002"])[0] == [
+            "0x1c40 in .text"
         ]
+        # 0x1040 is one row's address and, read as a file offset, another's: neither.
+        assert roots.of_statement("at 0x1040 it calls CreateFileW", ["ev_0002"])[0] == []
 
     def test_an_unquoted_mention_beside_a_quoted_one_counts_only_the_quoted(self) -> None:
         led = [
@@ -742,7 +744,7 @@ class TestEachFileHasItsOwnLayout:
         roots = run_roots(led)
         assert [s.name for s in roots.layout.sections] == [".text", ".rdata"]
         assert roots.layout.bases == (0x400000,)
-        assert roots.of_entry("ev_0003").roots == ['0xa100 in UPX0 of carved file "payload.bin"']
+        assert roots.of_entry("ev_0003").roots == ['0xa100 in UPX0 of file "payload.bin"']
         assert roots.of_entry("ev_0004").roots == ["0x1100 in .text"]
 
     def test_a_carved_file_the_carving_states_is_named_by_its_digest(self) -> None:
@@ -754,7 +756,7 @@ class TestEachFileHasItsOwnLayout:
         )
         led = [carve, _entry("ev_0006", "hashes", {}, args={"carved_path": "/staged/payload.bin"})]
         assert run_roots(led).of_entry("ev_0006").roots == [
-            f"{WHOLE_FILE} of carved file sha256 {digest[:12]}"
+            f"the whole of file sha256 {digest[:12]}"
         ]
 
     def test_a_file_that_cannot_be_told_gives_no_root(self) -> None:
@@ -949,3 +951,112 @@ class TestManyImageBases:
         assert layout.rvas_of(0x10001000) == [0x1000, 0x10001000]
         assert layout.rvas_of(0x401000) == [0x1000, 0x401000]
         assert layout.rvas_of(0x1000) == [0x1000]
+
+
+class TestAnEntryIsAboutTheSampleOnlyWhenItSaysSo:
+    def _pe(self) -> LedgerEntry:
+        return _entry("ev_0001", "pe_info", SAMPLE_PE, args={"path": "/stage/sample.exe"})
+
+    def test_a_program_of_another_file_keeps_its_base_out_of_the_sample(self) -> None:
+        led = [
+            self._pe(),
+            _entry("ev_0002", "decompile_function", args={"address": "0x401100"}),
+            _entry(
+                "ev_0003",
+                "get_current_program_info",
+                {"image_base": "0x10000000", "name": "payload.dll"},
+            ),
+            _entry("ev_0004", "decompile_function", args={"address": "0x10001100"}),
+        ]
+        roots = run_roots(led)
+        assert roots.layout.bases == (0x400000,)
+        assert roots.of_entry("ev_0002").roots == ["0x1100 in .text"]
+        assert roots.of_entry("ev_0004").roots == ['0x1100 of file "payload.dll"']
+
+    def test_a_program_named_as_the_sample_is_the_sample(self) -> None:
+        led = [
+            self._pe(),
+            _entry("ev_0002", "get_current_program_info", {"name": "sample.exe"}),
+            _entry("ev_0003", "decompile_function", args={"address": "0x401100"}),
+        ]
+        assert run_roots(led).of_entry("ev_0003").roots == ["0x1100 in .text"]
+
+    def test_another_path_is_another_file(self) -> None:
+        dropped = {
+            "sections": [
+                {
+                    "name": "UPX0",
+                    "virtual_address": "0x1000",
+                    "virtual_size": 0x9000,
+                    "raw_offset": 0x200,
+                    "raw_size": 0x9000,
+                }
+            ]
+        }
+        led = [
+            self._pe(),
+            _entry("ev_0002", "pe_info", dropped, args={"path": "/tmp/dropped.exe"}),
+            _entry(
+                "ev_0003",
+                "strings",
+                {"strings": [{"offset": 0x300, "text": "dropped-only"}]},
+                args={"path": "/tmp/dropped.exe"},
+            ),
+        ]
+        roots = run_roots(led)
+        assert [s.name for s in roots.layout.sections] == [".text", ".rdata"]
+        assert roots.of_entry("ev_0003").roots == ['0x1100 in UPX0 of file "/tmp/dropped.exe"']
+
+    def test_a_working_copy_named_by_the_sample_s_digest_is_the_sample(self) -> None:
+        digest = "cd" * 32
+        led = [
+            _entry(
+                "ev_0001",
+                "hashes",
+                {"sha256": digest},
+                args={"path": f"/stage/{digest}.exe"},
+                agent="pipeline",
+            ),
+            _entry(
+                "ev_0002",
+                "pe_info",
+                SAMPLE_PE,
+                args={"path": f"/stage/{digest}.exe"},
+                agent="pipeline",
+            ),
+            _entry("ev_0003", "list_imports", args={"path": f"/work/{digest}.bin"}, output="x"),
+        ]
+        assert run_roots(led).of_entry("ev_0003").roots == [IMPORT_TABLE]
+
+
+class TestANumberIsReadInTheRowsCoordinate:
+    def test_a_strings_row_is_named_by_its_offset_and_an_ambiguous_number_names_neither(
+        self,
+    ) -> None:
+        rows = [{"offset": 0x8500, "text": "A-string"}, {"offset": 0x7900, "text": "B-string"}]
+        led = [
+            _entry("ev_0001", "pe_info", SAMPLE_PE),
+            _entry("ev_0002", "strings", {"strings": rows}),
+        ]
+        roots = run_roots(led)
+        assert roots.of_entry("ev_0002").roots == ["0x9100 in .rdata", "0x8500 in .text"]
+        # 0x8500 is A's offset and, as an address, B's place.
+        assert roots.of_statement("the string at offset 0x8500", ["ev_0002"])[0] == []
+        assert roots.of_statement("the string at offset 0x7900", ["ev_0002"])[0] == [
+            "0x8500 in .text"
+        ]
+
+
+class TestANameNarrowsOnlyWrittenAsOne:
+    def test_a_prose_word_never_narrows_and_a_quoted_or_exact_name_does(self) -> None:
+        data = {
+            **SAMPLE_PE,
+            "exports": ["the"],
+            "imports": [{"dll": "kernel32.dll", "function": "CreateFileW"}],
+        }
+        roots = run_roots([_entry("ev_0001", "pe_info", data)])
+        said = "the sample reads its header"
+        assert roots.of_statement(said, ["ev_0001"])[0] == []
+        assert roots.of_statement('it exports "the"', ["ev_0001"])[0] == [EXPORT_TABLE]
+        assert roots.of_statement("it calls CreateFileW", ["ev_0001"])[0] == [IMPORT_TABLE]
+        assert roots.of_statement("it calls createfilew", ["ev_0001"])[0] == []

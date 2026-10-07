@@ -1801,7 +1801,8 @@ PROMPTS: dict[str, str] = {
             _roots.FLOW_ROOT.format(proto="tcp", host="192.0.2.1", port=443),
             _roots.DNS_ROOT.format(name="example.com"),
             _roots.FILE_OFFSET_ROOT.format(offset="0x500"),
-            _roots.CARVED_FILE_ROOT.format(root=_roots.WHOLE_FILE, file='"payload.bin"'),
+            _roots.FILE_ROOT.format(root=_roots.PE_HEADER, file='"payload.bin"'),
+            _roots.WHOLE_OTHER_FILE.format(file="sha256 abcdefabcdef"),
             *(
                 sentence.format(tool="a_tool", entry="ev_0001", count=2)
                 for sentence in _ROOT_SENTENCES

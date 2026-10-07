@@ -82,7 +82,8 @@ PROCESS_ROOT = "sandbox process {pid}"
 FLOW_ROOT = "network flow {proto} to {host}:{port}"
 DNS_ROOT = "DNS query {name}"
 FILE_OFFSET_ROOT = "file offset {offset}"
-CARVED_FILE_ROOT = "{root} of carved file {file}"
+FILE_ROOT = "{root} of file {file}"
+WHOLE_OTHER_FILE = "the whole of file {file}"
 
 NO_ENTRY = "no: {entry} is not an entry of this run's ledger"
 NO_CITATION = "no: the statement cites no ledger entry"
@@ -143,6 +144,9 @@ _CARVE_TOOL = "carve_payloads"
 
 
 _WORD = re.compile(r"[A-Za-z_.$?@][\w.$?@]*")
+# A word of prose: small letters alone. A name a statement writes as an
+# identifier carries a capital, a digit or one of ``_.$?@``.
+_PROSE_WORD = re.compile(r"[a-z]+")
 _QUOTED = re.compile(r"`([^`\n]+)`|\"([^\"\n]+)\"|“([^”\n]+)”|'([^'\n]{2,})'")
 # A capture's packet line and a DNS name line, as the network server writes them.
 _PACKET_LINE = re.compile(
@@ -349,6 +353,11 @@ class EntryRoots:
     by_rva: dict[int, str] = field(default_factory=dict)
     by_value: dict[str, set[str]] = field(default_factory=dict)
     by_word: dict[str, set[str]] = field(default_factory=dict)
+    # The same names as written, for a statement naming one as an identifier.
+    by_name: dict[str, set[str]] = field(default_factory=dict)
+    # The coordinate the entry's rows state a place in: ``offset`` for a
+    # file offset (strings, YARA), ``address`` otherwise.
+    coordinate: str = "address"
     by_technique: dict[str, set[str]] = field(default_factory=dict)
     # The techniques a row names that the row gives no root for, with why.
     unplaced: dict[str, str] = field(default_factory=dict)
@@ -368,7 +377,11 @@ class EntryRoots:
 
     def named(self, root: str) -> str:
         """``root`` as this entry's file writes it: as it is for the sample, else naming it."""
-        return CARVED_FILE_ROOT.format(root=root, file=self.file) if self.file else root
+        if not self.file:
+            return root
+        if root == WHOLE_FILE:
+            return WHOLE_OTHER_FILE.format(file=self.file)
+        return FILE_ROOT.format(root=root, file=self.file)
 
     def add(
         self,
@@ -393,6 +406,7 @@ class EntryRoots:
             folded = _fold(word)
             if folded:
                 self.by_word.setdefault(folded, set()).add(root)
+                self.by_name.setdefault(str(word).strip(), set()).add(root)
         for tid in techniques:
             self.by_technique.setdefault(tid, set()).add(root)
 
@@ -441,47 +455,129 @@ def _unquoted(value: str) -> str:
     return unquoted(value).strip()
 
 
-class _Files:
-    """Which file each entry is about: the sample, or a file the run carved.
+# The tools that state which program a disassembler's server holds, and the
+# answer keys and arguments that name its file.
+_PROGRAM_TOOLS = frozenset(
+    {"get_current_program_info", "get_program_info", "program_info", "get_current_program"}
+)
+_OPEN_TOOLS = frozenset({"open_file", "open_program", "load_program"})
+_PROGRAM_KEYS = ("path", "executable_path", "file_path", "program_path", "name", "program")
+_PATH_ARGS = ("path", "file_path", "file", "filename", "binary_path")
+_PIPELINE = "pipeline"
 
-    The sample is ``""``. A carved file is named by the leading digits of the
-    SHA-256 the carving answer states for it, or, with no such answer, by the
-    ``carved_path`` the call was given, quoted. A call whose ``carved_path``
-    is not one path is about no file that can be told (``None``).
+
+def _basename(path: str) -> str:
+    return re.split(r"[\\/]", path)[-1]
+
+
+class _Files:
+    """Which file each entry is about: the sample, or another file the run read.
+
+    The sample is ``""``. An entry is about the sample when the path it names
+    is the sample's (the path the triage pack states, or with no pack entry
+    the first path the ledger states; or a path whose file name is the
+    sample's, or whose stem is the sample's SHA-256), or when it names no
+    path and its server's program is the sample: the program a server holds
+    is the one its latest program statement or open names, the sample until
+    one names another file. Any other file is named by the leading digits of
+    the SHA-256 the run states for it (a carving's, or a hash answer's), or
+    by its path, quoted. A call whose ``carved_path`` is not one path is
+    about no file that can be told (``None``).
     """
 
     def __init__(self, entries: Sequence[Any]) -> None:
         self._digest: dict[str, str] = {}
         for entry in entries:
-            if _tool(entry) != _CARVE_TOOL or not _usable(entry):
+            if not _usable(entry):
                 continue
-            for row in _rows(_structured(entry), "payloads"):
-                digest = str(row.get("sha256") or "").strip().lower()
-                if not digest:
-                    continue
-                for key in ("carved_path", "path"):
-                    if isinstance(row.get(key), str) and row[key].strip():
-                        self._digest.setdefault(_unquoted(row[key]), digest)
+            data = _structured(entry)
+            if _tool(entry) == _CARVE_TOOL:
+                for row in _rows(data, "payloads"):
+                    digest = str(row.get("sha256") or "").strip().lower()
+                    for key in ("carved_path", "path"):
+                        if digest and isinstance(row.get(key), str) and row[key].strip():
+                            self._digest.setdefault(_unquoted(row[key]), digest)
+            elif _tool(entry) == "hashes" and isinstance(data, Mapping):
+                digest = str(data.get("sha256") or "").strip().lower()
+                path = self._path_named(entry)
+                if digest and path:
+                    self._digest.setdefault(path, digest)
+        stated = [p for e in entries if (p := self._path_named(e))]
+        pack = [
+            p
+            for e in entries
+            if str(getattr(e, "agent", "") or "") == _PIPELINE and (p := self._path_named(e))
+        ]
+        self._sample_paths = set(pack or stated[:1])
+        self._sample_names = {_basename(p) for p in self._sample_paths}
+        self._sample_digests = {self._digest[p] for p in self._sample_paths if p in self._digest}
+        self._file: dict[int, str | None] = {}
+        program: dict[Any, str | None] = {}
+        for entry in entries:
+            server = getattr(entry, "server", None)
+            held = self._program_named(entry)
+            if held is not None:
+                program[server] = held
+                self._file[id(entry)] = held
+                continue
+            names, said = self._named(entry)
+            self._file[id(entry)] = said if names else program.get(server, "")
 
-    def _carved(self, path: str) -> str:
-        digest = self._digest.get(path)
+    @staticmethod
+    def _path_named(entry: Any) -> str:
+        args = getattr(entry, "args", None) or {}
+        for key in _PATH_ARGS:
+            if isinstance(args.get(key), str) and args[key].strip():
+                return _unquoted(args[key])
+        return ""
+
+    def _file_of_path(self, path: str) -> str:
+        """The file a path names: ``""`` for the sample, else its digest or the path quoted."""
+        digest = self._digest.get(path, "")
+        stem = _basename(path).split(".", 1)[0].lower()
+        if (
+            path in self._sample_paths
+            or _basename(path) in self._sample_names
+            or (digest and digest in self._sample_digests)
+            or (stem and stem in self._sample_digests)
+        ):
+            return ""
         if digest:
             return f"sha256 {digest[:12]}"
         return f'"{_written(path)}"'
 
-    def of(self, entry: Any) -> str | None:
+    def _program_named(self, entry: Any) -> str | None:
+        """The file a program statement or open names, or ``None`` for any other entry."""
+        tool = _tool(entry)
+        if tool in _PROGRAM_TOOLS and _usable(entry):
+            data = _structured(entry)
+            for key in _PROGRAM_KEYS:
+                value = data.get(key) if isinstance(data, Mapping) else None
+                if isinstance(value, str) and value.strip():
+                    return self._file_of_path(_unquoted(value))
+        if tool in _OPEN_TOOLS and _usable(entry):
+            path = self._path_named(entry)
+            if path:
+                return self._file_of_path(path)
+        return None
+
+    def _named(self, entry: Any) -> tuple[bool, str | None]:
+        """Whether the entry's own arguments name a file, and the file they name."""
         args = getattr(entry, "args", None) or {}
         carved = args.get(_CARVED_ARG)
         if carved not in (None, ""):
             if not isinstance(carved, str):
-                return None
+                return True, None
             path = _unquoted(carved)
             if path and path.casefold() != "null":
-                return self._carved(path)
-        named = args.get("path")
-        if isinstance(named, str) and _unquoted(named) in self._digest:
-            return self._carved(_unquoted(named))
-        return ""
+                return True, self._file_of_path(path)
+        path = self._path_named(entry)
+        return (True, self._file_of_path(path)) if path else (False, "")
+
+    def of(self, entry: Any) -> str | None:
+        if id(entry) in self._file:
+            return self._file[id(entry)]
+        return self._named(entry)[1]
 
 
 # -- each file's layout ------------------------------------------------------------
@@ -824,6 +920,7 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
     elif tool in _EXPORT_LISTINGS:
         found.add(EXPORT_TABLE, words=_WORD.findall(str(getattr(entry, "output", "") or "")))
     elif tool == "strings":
+        found.coordinate = "offset"
         for row in _rows(data, "strings"):
             offset = _hex(row.get("offset"))
             if offset is not None:
@@ -904,6 +1001,7 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
     elif tool == "sandbox_signatures":
         found.reason = SIGNATURE_UNPLACED
     elif tool == "yara_scan":
+        found.coordinate = "offset"
         for row in _rows(data, "matches"):
             tids = _row_techniques(row)
             rule = (row.get("rule"),)
@@ -996,41 +1094,55 @@ class RunRoots:
     def _named(self, text: str, found: EntryRoots) -> tuple[set[str], list[str]]:
         """The roots ``text`` picks out of ``found``, and why the rows it names give none.
 
-        An address picks out its own place. A quoted value or a name picks
-        out a root only when that root alone holds it.
+        A number written is read in the coordinate the entry's rows state (a
+        file offset for a strings or YARA row, an address otherwise); one that
+        names one row so and another in the other coordinate names neither.
+        A quoted or backticked value or name, or a name written as an
+        identifier in its own case, picks out a root only when that root
+        alone holds it; a prose word picks out nothing.
         """
         hits: set[str] = set()
         reasons: dict[str, None] = {}
         layout = found.layout
-        if found.by_rva:
+        if found.by_rva or found.coordinate == "offset":
             from maljan.pipeline.validation import _addresses_written
 
             for value in _addresses_written(text):
-                # Read as an address first; as a file offset only when no
-                # address reading is one of the entry's places.
-                held = {
+                by_address = {
                     label
                     for rva in layout.rvas_of(value)
                     if (label := found.named(layout.label(rva))) in found.order
                 }
-                offset = layout.rva_of_offset(value) if not held else None
-                if offset is not None:
-                    label = found.named(layout.label(offset))
-                    if label in found.order:
-                        held.add(label)
-                hits |= held
-        if found.by_value or found.unplaced_values:
+                by_offset: set[str] = set()
+                offset = layout.rva_of_offset(value)
+                for label in (
+                    found.named(layout.label(offset)) if offset is not None else "",
+                    found.named(FILE_OFFSET_ROOT.format(offset=f"{value:#x}")),
+                ):
+                    if label and label in found.order:
+                        by_offset.add(label)
+                primary, other = (
+                    (by_offset, by_address)
+                    if found.coordinate == "offset"
+                    else (by_address, by_offset)
+                )
+                if primary and not other - primary:
+                    hits |= primary
+        if found.by_value or found.by_word or found.unplaced_values:
             for match in _QUOTED.finditer(text):
                 said = _fold(next(g for g in match.groups() if g is not None))
-                held = found.by_value.get(said, set())
+                held = found.by_value.get(said, set()) | found.by_word.get(said, set())
                 unplaced = found.unplaced_values.get(said)
                 if len(held) == 1 and unplaced is None:
                     hits |= held
                 elif not held and unplaced is not None:
                     reasons[unplaced] = None
-        if found.by_word:
+        if found.by_name:
             for word in _WORD.findall(text):
-                held = found.by_word.get(_fold(word.rstrip(".")), set())
+                word = word.rstrip(".")
+                if _PROSE_WORD.fullmatch(word):
+                    continue
+                held = found.by_name.get(word, set())
                 if len(held) == 1:
                     hits |= held
         return hits, list(reasons)
