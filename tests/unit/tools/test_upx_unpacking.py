@@ -541,6 +541,106 @@ def test_relocations_that_overlap_are_not_read_here() -> None:
         assert bytes(buf) == before
 
 
+def _positions_one_by_one(stream: bytes) -> list[int]:
+    """UPX's relocation records read one record at a time, as its own unpacker reads them."""
+    out, position, p = [], -4, 0
+    while stream[p]:
+        if stream[p] < 0xF0:
+            position += stream[p]
+            p += 1
+        else:
+            delta = (stream[p] & 0x0F) * 0x10000 + int.from_bytes(stream[p + 1 : p + 3], "little")
+            p += 3
+            if delta == 0:
+                delta = int.from_bytes(stream[p : p + 4], "little")
+                p += 4
+            position += delta
+        out.append(position)
+    return out
+
+
+def _realistic(count: int) -> bytes:
+    """A DLL's shape: every fourth relocation a page-sized step (a long form), the rest 4 apart."""
+    out = bytearray()
+    for index in range(count):
+        out += b"\xf0\x00\x02" if index % 4 == 0 and index else b"\x04"
+    return bytes(out) + b"\0"
+
+
+def _long_forms(count: int) -> bytes:
+    return b"\xf0\x04\x00" * count + b"\0"
+
+
+def _decode(stream: bytes) -> tuple[list[int], float]:
+    image = 1 << 30
+    buf = bytearray(stream)
+    began = time.monotonic()
+    out = upx._reloc_positions(buf, 0, image, 4)
+    return out.tolist(), time.monotonic() - began
+
+
+def test_relocation_records_read_as_one_by_one_whatever_their_mix() -> None:
+    rng = random.Random(5)
+    for _ in range(40):
+        parts = bytearray()
+        for _ in range(rng.randint(1, 3000)):
+            kind = rng.random()
+            if kind < 0.6:
+                parts.append(rng.randint(1, 0xEF))
+            elif kind < 0.9:
+                parts += bytes([0xF0 | rng.randint(0, 15)]) + rng.randint(1, 0xFFFF).to_bytes(
+                    2, "little"
+                )
+            else:
+                parts += b"\xf0\0\0" + rng.randint(1, 1 << 20).to_bytes(4, "little")
+        stream = bytes(parts) + b"\0"
+        assert _decode(stream)[0] == _positions_one_by_one(stream)
+    for stream in (_realistic(5000), _long_forms(5000), b"\x04" * (3 << 20) + b"\0"):
+        assert _decode(stream)[0] == _positions_one_by_one(stream)
+
+
+@pytest.mark.parametrize("shape", [_realistic, _long_forms])
+def test_relocation_records_take_time_linear_in_the_stream(shape: object) -> None:
+    # Ten times the records take at most about ten times as long (twenty, for noise).
+    small = min(_decode(shape(20_000))[1] for _ in range(3))  # type: ignore[operator]
+    large = _decode(shape(200_000))[1]  # type: ignore[operator]
+    assert large < 20 * small + 0.05
+
+
+def test_a_moved_resource_with_origin_0_is_an_error() -> None:
+    packed = su.build()
+    pe = pefile.PE(data=packed.data, fast_load=True)
+    data = bytearray(packed.data)
+    data[pe.sections[2].PointerToRawData + 0x600 : pe.sections[2].PointerToRawData + 0x604] = bytes(
+        4
+    )
+    with pytest.raises(upx.Damaged, match="states origin 0"):
+        upx.unpack(bytes(data))
+
+
+def test_the_checksum_sentence_names_the_filter_only_when_there_is_one() -> None:
+    assert upx.unpack(su.build(su.Program(filter_id=0)).data).checksum_reading == (
+        upx.CHECKSUM_OVER_UNFILTERED
+    )
+    assert upx.unpack(su.build().data).checksum_reading == upx.CHECKSUM_OVER
+
+
+def test_the_pack_header_test_over_a_file_reads_its_windows(tmp_path: Path) -> None:
+    packed = su.build()
+    damaged = bytearray(packed.data)
+    damaged[packed.header_offset + 31] ^= 0xFF
+    for name, data in (
+        ("packed", packed.data),
+        ("damaged", bytes(damaged)),
+        ("plain", SyntheticPE().build()),
+        ("text", b"not a PE at all" * 10),
+    ):
+        target = tmp_path / name
+        target.write_bytes(data)
+        assert upx.has_pack_header_at(target) == upx.has_pack_header(data)
+    assert not upx.has_pack_header_at(tmp_path / "absent")
+
+
 def test_the_pack_header_test_reads_only_a_true_header() -> None:
     packed = su.build()
     assert upx.has_pack_header(packed.data)
