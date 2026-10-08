@@ -144,6 +144,17 @@
       "pattern",
       "start"
     ],
+    "transform_bytes": [
+      "carved_path",
+      "length",
+      "offset",
+      "path",
+      "rva",
+      "show_length",
+      "show_offset",
+      "steps",
+      "va"
+    ],
     "yara_scan": [
       "carved_path",
       "path",
@@ -181,6 +192,7 @@
     "sigma_match_sandbox",
     "signing_info",
     "strings",
+    "transform_bytes",
     "yara_scan"
   ]
 }
