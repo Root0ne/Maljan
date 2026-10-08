@@ -1268,12 +1268,11 @@ def _names_upx(format_facts: dict[str, Any] | None) -> bool:
 
 
 def _holds_a_pack_header(path: str) -> bool:
-    """Whether the file holds UPX's pack header with a true checksum byte where UPX writes it."""
-    try:
-        data = Path(path).read_bytes()
-    except OSError:
-        return False
-    return upx.has_pack_header(data)
+    """Whether the file holds UPX's pack header with a true checksum byte where UPX writes it.
+
+    Only the headers and UPX's two windows are read, not the whole sample.
+    """
+    return upx.has_pack_header_at(path)
 
 
 def _file_digest(path: str) -> str:
