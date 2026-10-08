@@ -737,7 +737,7 @@ A UPX-packed sample shows every reader the packer's stub, so the pack's
 strings, imports, capa rules and FLOSS rows describe the stub, not the
 program. When `pe_info`'s packer signatures name UPX, or a pack header with
 a true checksum byte stands where UPX writes one (sections renamed to hide
-the packer keep their header), the pack's last entry
+the packer keep their header), the pack's next entry
 is `unpack_upx` (`tools.upx`, the code the analysis server's tool of the same
 name runs), after the function index so every earlier id keeps its value. It
 reads UPX's own pack header and records in Python, with nothing run and no
@@ -757,6 +757,49 @@ the models decide what to open next. The entry's evidence root is the start of
 the compressed data in the packed file; a call that reads the program by its
 `carved_path` is about that program, named by its digest and placed against
 its own section table.
+
+**A sandbox report is sections of items, each with an id a claim cites.**
+Where a sandbox produced a report, the pack's last entry is
+`sandbox_sections` (`analysis.sandbox_sections`), after every other step so
+every earlier id keeps its value. It reads the report the run holds into
+fixed sections: processes, API calls, file operations, registry operations,
+network rows (DNS, hosts, HTTP, TCP, UDP, domains, ICMP, TLS), signatures,
+dropped files, mutexes, executed commands, services, generic events, the
+per-process API counts, the platform channels and the screenshots. An item is
+one row of the report, with the report's own fields and the list it came
+from; nothing is summarised, ranked or labelled. A process's id is its pid as
+the report writes it (`proc:84`, `proc:84.2` for a second process with that
+pid, `proc:p3` for one with none), and every other item is its position in its
+section (`net:3`, `reg:12`, `sig:5`), the network rows counted in the order the
+`sandbox_network` view lists them so the two agree. The entry states each
+section's count, or a `no:` saying why the report does not carry it (the
+report lists it as unavailable from its sandbox, as a Triage report does for
+the registry and the API calls, or holds none of the lists it is read from),
+and the process ids; its line states the count and the id form of each
+section in the room it has.
+**Decision:** the items are served by one read-only tool, `sandbox_items`,
+built in-process beside the other sandbox views over the report the job
+already holds, rather than on the analysis server: the report is in the
+worker, so a sidecar would have to be sent it, and no sandbox is asked
+anything. It takes a section and, combined, a pid, a substring of any text
+value, a signature by id or name and a list of ids, and answers the matching
+items whole with `matched`, through the answer guardrail and the one view of
+tool answers. The report is read into sections once for the job, on the first
+call; a pid and a signature name are looked up in indexes built once per
+section, an id is found by its position, a list of asked ids is read only up
+to the section's own size and the rest counted, and only the substring filter
+reads rows, once each. The `dynamic` analyst has the tool in its sandbox
+set; the `network` analyst has it alone wherever a sandbox produced a report,
+and neither prompt changed.
+An item id is cited as an entry is. An analyst's claim citing one the run's
+index holds is grounded, and one it does not hold is named in the question the
+claim is asked; a report section's bracketed item id the index does not hold
+is asked about once, like an id the ledger never issued; an execution step
+marked observed may cite items, a network item only where the sandbox
+attributed a flow to the sample's own tree, as for the network answers; and
+the evidence roots read a process item as that sandbox process, a TCP or UDP
+item as its flow and a DNS item as its query. Every check looks a cited id up
+in the index; no list of every item id is built.
 
 Ghidra's emulation is not run by the pack: Ghidra's `emulate_function`
 ignores its step limit and cannot be stopped, and one emulation took 130 to
