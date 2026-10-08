@@ -38,6 +38,8 @@ from maljan.tools import (
     emulated_strings,
     staging,
     string_blobs,
+    transforms,
+    upx,
 )
 from maljan.tools import artefact_index as artefact_index_tools
 from maljan.tools import binary as binary_tools
@@ -89,6 +91,7 @@ TOOL_NEEDS: list[ToolNeeds] = [
     ToolNeeds("macho_info", (module("macholib"),)),
     ToolNeeds("apk_info", (module("androguard"),), without="the zip-level facts"),
     ToolNeeds("carve_payloads"),
+    ToolNeeds(upx.TOOL, facts=upx.CAPABILITY_FACTS),
     ToolNeeds("archive_list", (module("py7zr"),), without="zip and tar members; 7z needs py7zr"),
     ToolNeeds("document_info", (module("olefile"),), without="the PDF and OOXML halves"),
     ToolNeeds(
@@ -111,6 +114,12 @@ TOOL_NEEDS: list[ToolNeeds] = [
     ToolNeeds("decode_string_blobs"),
     ToolNeeds(crypto_constants.TOOL),
     ToolNeeds("function_index"),
+    ToolNeeds(
+        transforms.TOOL,
+        (module("cryptography"),),
+        without="every operation but aes",
+        facts=transforms.CAPABILITY_FACTS,
+    ),
     ToolNeeds("put_sample"),
     ToolNeeds("put_sample_begin"),
     ToolNeeds("put_sample_chunk"),
@@ -250,7 +259,7 @@ CARVED_ARGUMENT = "carved_path"
 #
 # The tree now lives inside the job's own directory, so two jobs on the same
 # sample carve into two trees and neither can name the other's by any spelling.
-CARVED_DIRECTORY = "carved"
+CARVED_DIRECTORY = staging.CARVED_DIRECTORY
 
 # What a caller is told when the argument resolves onto something that is not
 # a file to read. Its own sentence rather than the roots one, which would be
@@ -441,8 +450,9 @@ def _carved_tree(digest: str) -> Path:
 # descriptions cannot come to disagree.
 CARVED_NOTE = (
     "Give ``carved_path`` to read a file an earlier call in this run wrote instead of the "
-    "sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, exactly "
-    "as it was returned and with no quotes around it. Leave it out and the sample is read."
+    "sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of "
+    "the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes "
+    "around it. Leave it out and the sample is read."
 )
 
 # The argument that names a rule corpus rather than a sample. It is a path
@@ -871,15 +881,72 @@ def _carve_under_staging(path: str, sample_digest: str = "") -> dict[str, Any]:
     target = Path(path)
     if not target.is_file():
         return {"error": f"no such file: {path}", "tool": "carve_payloads"}
+    return binary_tools._carve_into(path, _carved_destination(target, sample_digest))
+
+
+def _carved_destination(target: Path, sample_digest: str) -> Path:
+    """The directory a file written out of ``target`` lands in, created private.
+
+    ``<staging>/carved/<sha256 of the sample>/``, and a file written out of a
+    file this run wrote nests under the sample's own directory, by its own
+    digest: one tree per run, the tree ``carved_path`` may read back and the
+    sweep prunes. ``carve_payloads`` and ``unpack_upx`` both write here.
+    """
     digest = _digest_of(target)
     anchor = sample_digest or digest
     destination = _carved_tree(anchor)
+    levels = [destination.parent, destination]
     if digest != anchor:
         destination = destination / digest
+        levels.append(destination)
     _staging_dir()
-    for directory in (destination.parent, destination):
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    return binary_tools._carve_into(path, destination)
+    # Each level through the one rule every staging directory is held to: made
+    # 0o700, and refused when what stands there is a link or another user's.
+    for directory in levels:
+        staging.private_dir(directory, what="carved directory")
+    return destination
+
+
+@mcp.tool()
+@reads_a_carved_file
+def unpack_upx(path: str, carved_path: str = "") -> dict[str, Any]:
+    """Unpack a UPX-packed PE and write the program it holds out as a file of its own.
+
+    Reads UPX's own pack header and records in Python, as ``upx -d`` would,
+    with nothing in the file run and no upx program needed: the methods
+    NRV2B, NRV2D and NRV2E (32-, 16- and 8-bit streams) and LZMA, the code
+    filters 0x24, 0x25 and 0x26, the import table from UPX's import records,
+    the relocations, the export table and the resources UPX moved. The
+    unpacked file lands where ``carve_payloads`` writes, private to this
+    run, and its ``carved_path`` (in ``child``) is the value to pass to any
+    tool here that reads a file.
+
+    The answer states the pack header (offset, version, format, method,
+    level, filter), the compressed and unpacked sizes, both adler32
+    checksums as stated and computed and whether each matched, then the
+    unpacked file: its SHA-256, size, ``carved_path``, entry point, section
+    table, import count and what each rebuild step wrote. A file that is not
+    UPX-packed, or uses a method, filter or record kind not read here, or
+    states an unpacked size above the platform's fixed sample upload cap,
+    answers ``unpacked`` with a ``no:`` sentence saying which. A checksum
+    that does not match, or data that does not decode as UPX writes it, is
+    an error naming where, and no file is written.
+    """
+    return _guard(
+        upx.TOOL,
+        _unpack_under_staging,
+        path=path,
+        carved_path=carved_path,
+        sample_digest="",
+    )
+
+
+def _unpack_under_staging(path: str, sample_digest: str = "") -> dict[str, Any]:
+    """Unpack into the same per-sample tree ``carve_payloads`` writes, private like it."""
+    target = Path(path)
+    if not target.is_file():
+        return {"error": f"no such file: {path}", "tool": upx.TOOL}
+    return upx.unpack_upx(path, _carved_destination(target, sample_digest))
 
 
 @mcp.tool()
@@ -1187,6 +1254,73 @@ def function_index(path: str, address: str = "", carved_path: str = "") -> dict[
         path=path,
         carved_path=carved_path,
         address=address,
+    )
+
+
+@mcp.tool()
+@reads_a_carved_file
+def transform_bytes(
+    path: str,
+    carved_path: str = "",
+    offset: int | str | None = None,
+    rva: int | str | None = None,
+    va: int | str | None = None,
+    length: int | str | None = None,
+    steps: list[dict[str, Any]] | None = None,
+    show_offset: int | str | None = None,
+    show_length: int | str | None = None,
+) -> dict[str, Any]:
+    """Read one byte range of the file and apply an ordered list of steps to it.
+
+    The range is exactly one of ``offset`` (a file offset), ``rva`` (an offset
+    from the image base) or ``va`` (a virtual address), the last two resolved
+    through the file's own section table, with ``length``; left out, the range
+    runs to the end of the file, and a range past the end is cut there and
+    says so. A number is an integer, or a string read as hexadecimal after
+    ``0x`` and as decimal otherwise.
+
+    ``steps`` is a list of objects, each with ``op`` and its parameters, each
+    applied to the output of the one before: ``xor`` (``key``, and
+    ``increment``: output byte i is input byte i exclusive-or (key byte i mod key
+    length plus increment times i, mod 256)); ``rc4`` (``key``); ``aes`` (``mode``
+    ecb, cbc or ctr; ``key`` of 16, 24 or 32 bytes; ``iv`` for cbc;
+    ``nonce`` for ctr, the 16-byte initial counter block; ``padding`` none or
+    pkcs7); ``base64`` (``alphabet`` standard, urlsafe or the 64 characters in
+    order; ``skip_whitespace``); ``hex``; ``lznt1``; ``zlib``, ``gzip`` and
+    ``deflate`` (raw); ``reverse``; ``slice`` (``start`` and ``length``
+    within the current buffer). A ``key``, ``iv`` or ``nonce`` is
+    ``{"hex": "..."}``, ``{"text": "..."}`` (UTF-8) or a range of the same
+    file, ``{"offset": ..., "length": ...}`` (or ``rva`` or ``va``).
+
+    The answer names the range (its offset, rva and section) and every step
+    with its parameters as given, then states the output: its length, SHA-256,
+    the share of printable bytes and its entropy in bits per byte, over the
+    whole output; and, over the part ``shown``, the first 64 bytes in hex, the
+    text it reads as in ASCII and in UTF-16LE, and the hosts, URLs, addresses,
+    paths and registry keys the indicator reader finds in it with their offsets
+    in the output, as many rows as the answer's room leaves. The part shown is
+    the first bytes the 6000 characters of one answer carry beside its other
+    fields (at most 705) unless ``show_offset`` and ``show_length`` name
+    another; the answer says when it is not the whole output, and a
+    ``show_length`` past what the largest answer carries is cut to it and says
+    so. An unknown operation, a key of the wrong length, an input that is not
+    whole blocks or padding that does not read is an error naming the step and
+    why; nothing is tried with other parameters. Decompression stops at the
+    platform's fixed sample upload cap and says so, and so does a chain whose
+    steps have written that much in all. Nothing is run.
+    """
+    return _guard(
+        transforms.TOOL,
+        transforms.transform_bytes,
+        path=path,
+        carved_path=carved_path,
+        offset=offset,
+        rva=rva,
+        va=va,
+        length=length,
+        steps=steps,
+        show_offset=show_offset,
+        show_length=show_length,
     )
 
 

@@ -147,17 +147,22 @@ class NetworkAnalyst(BaseAnalyst):
         same ``network-mcp`` sidecar, the same command, cwd and environment
         this method used to spell out inline — so the tool names are
         unchanged, and ``tests/unit/servers/test_builtin_tool_sets.py`` says so.
-        An operator who adds a second network server gets both.
+        An operator who adds a second network server gets both. Where a sandbox
+        produced a report, ``sandbox_items`` is beside them.
         """
         if getattr(self, "tools", None):
             return
         registry = self._server_registry()
         if registry is None:
             return
+        # The sandbox's own tools when the definition asks for them, or else
+        # the one query over the sandbox report's items: the pack shows this
+        # analyst what the sandbox recorded, and a claim cites an item by id.
+        sandbox = self._definition_sandbox_tools() or self._sandbox_items_tool()
         # ``_attach_registry_tools`` records its own degradation reasons on the
         # analyst, so nothing here may reassign ``degradation_reasons`` — doing
         # so would erase the reason for the very server that failed to attach.
-        self.tools = self._attach_registry_tools("network")
+        self.tools = [*self._attach_registry_tools("network"), *sandbox]
         self.logger.info("Network tool servers: %d tools attached.", len(self.tools))
 
     # ``_try_initialize_mcp`` used to live here. It now lives on ``BaseAnalyst``

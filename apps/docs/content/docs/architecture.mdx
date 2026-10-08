@@ -390,7 +390,10 @@ fact that it has no signing scheme);
 the format tool the routed type selects (`pe_info`, `elf_info`, `macho_info`,
 `apk_info`, `document_info` or `archive_list`, which carry the section
 entropies, the packer signature hits and the import rows); a `strings` head
-capped by `triage.strings_head` and `iocs_from_file`; `yara_scan`, `capa`
+capped by `triage.strings_head` and `iocs_from_file` (its indicator scan reads printable
+ASCII and UTF-16LE runs; a UTF-16LE host written directly after a NUL-terminated ASCII
+string can be read with that string's last letter in front of it, because the bytes are
+the same either way); `yara_scan`, `capa`
 under the static provider's budget and, when a sandbox report exists,
 `sigma_match_sandbox`; `api_capability` over the import set (asked about the
 routed format's own platform, and a format the catalogue has no block for —
@@ -485,9 +488,30 @@ auto-analysis). Ghidra's answer is kept whole, each address also as an offset
 from the image base Ghidra reports, and only its exact part is stated: an
 instruction that is the listed one (Ghidra matches mnemonics by prefix, so it
 files `INT3` under `INT 0x2d`), and a read through `FS:[0x30]` or
-`FS:[0x18]` exactly where a capa rule in the same function agrees (an
-anti-analysis rule, or one naming the PEB or TEB, such as `PEB access`); the
-line names the rule. A TEB/PEB read with no such rule is counted: the 32-bit
+`FS:[0x18]` exactly where a capa rule in the same function agrees; the line
+names the rule. Ghidra's scan looks for FS reads only, so an x64 file's code
+bytes are read for the GS ones (`ghidra_passes.gs_reads`): a GS-prefixed
+`mov r64, gs:[0x60]` or `gs:[0x30]` (`65 48 8b 04 25` and the address, or
+`65 48 a1` and an eight-byte address) is a TEB/PEB row beside the FS ones,
+stated the same way, in a file whose machine field is AMD64. Where the file's
+own function table (`.pdata`) holds the address, it agrees with capa only
+through the function that range belongs to, so a library function capa
+leaves out is never taken for the user function before it, and the range is
+decoded from its start: a match no decode lands on is still a row, ending
+"not on an instruction boundary decoded from the function start", since a
+table shaped to miss a read would otherwise hide it. Each byte of a section is
+decoded at most once, into one map of instruction starts, however many ranges
+overlap or nest. Outside every range the byte match alone is read and the
+nearest capa function start is asked, as for an FS row. The same file bytes mapped by two sections are one
+row. A capa rule agrees with a row of the kind it states, read off
+capa's own namespaces and rule names (`ghidra_passes.CAPA_NAMESPACE_KINDS`):
+a `debugger-detection` rule with an `RDTSC`, an `INT3`, an `INT 0x2d` or a
+TEB/PEB read, a `vm-detection` rule with a hypervisor `CPUID`, `SIDT`, `SGDT`,
+`SLDT` or `STR`, capa's `PEB access` (a `lib/` rule with no namespace) and
+`access PEB ldr_data` with a TEB/PEB read, and an obfuscation, packer,
+anti-disassembly, anti-forensic, anti-AV, anti-emulation or debugger-evasion
+rule with none (a stack string is not an `SIDT`); an anti-analysis rule whose
+namespace states no kind agrees with every row in its function. A TEB/PEB read with no such rule is counted: the 32-bit
 UCRT's exit path reads the PEB's `NtGlobalFlag` itself, and capa leaves the
 library functions it recognises out. An `INT3` counts only alone, not as the byte before a
 function and not right after a call, jump or return (compilers put one after a
@@ -694,6 +718,145 @@ an address no function starts at or holds, or text that is not an address, is
 a `no:` sentence. It has no row limit: the MCP tool-output guardrail bounds the
 answer and records any cut. Ghidra's `get_xrefs_to` and radare2's `xrefs_to`
 take the same addresses.
+
+**Byte transforms are the model's to name and the analysis server's to run.**
+A key, a user agent or a reply format kept in an encrypted or encoded blob
+stays hidden from a model that cannot run a cipher in its head. The analysis
+server's `transform_bytes` (`tools.transforms`) reads one range of the file,
+given as a file offset or as an address the file's own section table resolves,
+and applies the steps the model lists in order: `xor` with an optional per-byte
+increment, `rc4`, `aes` (ECB, CBC or CTR), `base64` with the standard, the
+URL-safe or a 64-character custom alphabet, `hex`, `lznt1`, `zlib`, `gzip`,
+raw `deflate`, `reverse` and `slice`. A key, IV or nonce is written literally
+or named as another range of the same file, so a model points at a key it found
+rather than copying it. The answer names the range with its section and every
+step with its parameters, so the ledger entry is a call anyone can repeat, and
+then states facts about the output: its length, SHA-256, printable share and
+entropy over all of it, and, over the part shown, its hex head, its ASCII and
+UTF-16LE readings escaped as the pack writes a string, and the indicators the
+platform's indicator scan finds in it, each at the offset where the scan's own
+match stands, as many rows as the room leaves. The part shown is sized from
+what an answer carries: at most 17 characters per two shown bytes for the two
+readings as JSON writes them, after the rest of the answer (the input range,
+the steps and the output's own fields at their longest) is taken from the
+6,000-character room one tool answer gets when the window is not measured, so
+the default part is at most 705 bytes and the whole answer stays within that
+room; a
+`show_length` past what the largest answer any model gets carries is cut to it
+and says so. It never says what the output is. An unknown operation,
+a wrong key or IV length, an input that is not whole blocks or padding that does
+not read is an error naming the step; nothing is retried with other
+parameters. Decompression is fed a piece at a time and asked for no more than
+the room left under the platform's fixed sample upload cap (100 MiB, a number
+here and not the operator's upload setting), concatenated gzip members included,
+so a bomb is cut at the cap and the answer says so; a cut decompression ends
+the chain, and the bytes all steps write together are held to the same cap, so
+a long step list costs at most that much work. Every other step writes at most
+what it reads, and each is linear in its buffer. No prompt asks for the tool; the server's capabilities answer
+and the tool's description state what it takes. The entry's evidence root is
+the start of its input range.
+
+**A UPX-packed PE is unpacked once, and the program is a file of its own.**
+A UPX-packed sample shows every reader the packer's stub, so the pack's
+strings, imports, capa rules and FLOSS rows describe the stub, not the
+program. When `pe_info`'s packer signatures name UPX, or a pack header with
+a true checksum byte stands where UPX writes one (sections renamed to hide
+the packer keep their header), the pack's next entry
+is `unpack_upx` (`tools.upx`, the code the analysis server's tool of the same
+name runs), after the function index so every earlier id keeps its value. It
+reads UPX's own pack header and records in Python, with nothing run and no
+`upx` program needed: NRV2B, NRV2D, NRV2E and LZMA, the call and jump filters
+0x24 to 0x26, and the rebuilt import, relocation, export and resource tables.
+Both adler32 checksums are checked; a mismatch, or data that does not decode
+as UPX writes it, is a failed pass with no file written, which does not make
+the run degraded. A format, method or filter the reader does not cover is a
+`no:` entry saying which. The program is written into the job's carved tree
+for the sample, the directory the analysis server's `carved_path` reads, so
+the `carved_path` the entry states is one every file tool there takes.
+**Decision:** the pack is not run again on the unpacked program: its one
+line, in the room the other lines leave like every pass, states the method,
+filter, sizes and checksums and the program's `carved_path`, SHA-256,
+sections, imports and entry point (the `carved_path` alone in less room), and
+the models decide what to open next. The entry's evidence root is the start of
+the compressed data in the packed file; a call that reads the program by its
+`carved_path` is about that program, named by its digest and placed against
+its own section table.
+
+**A sandbox report is sections of items, each with an id a claim cites.**
+Where a sandbox produced a report, the pack's last entry is
+`sandbox_sections` (`analysis.sandbox_sections`), after every other step so
+every earlier id keeps its value; it is read in memory in time linear in the
+report, so neither the pack's time budget nor its evidence byte budget stops or blanks it. It reads the report the
+run holds into fixed sections: processes, API calls, file operations,
+registry operations, network rows (DNS, hosts, HTTP, TCP, UDP, domains, ICMP,
+TLS), signatures, dropped files, mutexes, executed commands, services, generic
+events, the per-process API counts, the platform channels and the
+screenshots, and for a raw CAPE report its extracted configurations and
+payloads, the resolved API names, the Suricata alerts and the process dumps;
+CAPE's process tree gives a process its parent where the row states none,
+and no items of its own. An item is
+one row of the report, with the report's own fields and the list it came
+from; nothing is summarised, ranked or labelled. A process's id is its pid as
+the report writes it (`proc:84`, `proc:84.2` for a second process with that
+pid, `proc:p3` for one with none), and every other item is its position in its
+section (`net:3`, `reg:12`, `sig:5`), the network rows counted in the order the
+`sandbox_network` view lists them so the two agree. The entry states each
+section's count, or a `no:` saying why the report does not carry it (the
+report lists it as unavailable from its sandbox, as a Triage report does for
+the registry and the API calls, or holds none of the lists it is read from),
+and the process ids, written as runs of consecutive pids with the repeats
+and the positions of processes with no pid, so the entry stays a few runs
+long however many processes the report holds. Each provider's reader declares the lists it can fill,
+beside the reader and held to its code by a test; a section none of whose
+lists the reader behind the run's report can fill says
+`no: the <provider> report as normalised here carries no <section>` rather
+than 0, since that reader writes the list empty for every report, while a
+reader that can fill a list and found nothing still says 0. A Triage report
+read from its overview alone (uploaded, answered by a REST sandbox, or
+fetched with every behavioural task report missing, as the reader records)
+fills the signatures and nothing else, and says so in its own `no:`; a CAPE
+report that reaches the readers without its raw dict is read as rendered
+from the model. In a
+report the platform rendered from its normalised model, a pid or parent of 0
+is the model's "not stated": such a process gets a positional id, and no
+process is linked to itself or to an unstated parent; its line states the count and the id form of each
+section in the room it has.
+**Decision:** the items are served by one read-only tool, `sandbox_items`,
+built in-process beside the other sandbox views over the report the job
+already holds, rather than on the analysis server: the report is in the
+worker, so a sidecar would have to be sent it, and no sandbox is asked
+anything. It takes a section and, combined, a pid, a substring of any text
+value, a signature by id or name and a list of ids, and answers the matching
+items whole with `matched`, through the answer guardrail and the one view of
+tool answers. The report is read into sections once for the job, on the first
+call; a pid and a signature name are looked up in indexes built once per
+section, an id is found by its position, a list of asked ids is read only up
+to the section's own size and the rest counted, and only the substring filter
+reads rows, once each. A pid filter on a section whose rows name no process
+answers a `no:` saying so. The `dynamic` analyst has the tool in its sandbox
+set. The `network` analyst has it alone wherever a sandbox produced a report,
+and the whole sandbox set where its definition asks for
+`ToolRef(kind="sandbox")`; no prompt text changed, and the sentence about
+tools that is generated from the tool list then names the job's sandbox
+report among the network analyst's sources.
+An item id is cited as an entry is, and read only where it is cited: in
+brackets or in a citing field (`evidence_ref`, `evidence_refs`), never out of
+a statement's own words, and only with a token boundary on both sides, so the
+tail of `c2.example.net:443` is never one. A report check reads a cited item
+through its own row text (the row's fields and the process and parent it
+names, not the platform's id, kind or source), from the report in hand, exactly as it reads a
+cited entry's answer: a value stated under the citation is looked for in that
+row, and an item whose text cannot be read is no citation. An analyst's claim
+citing one the run's
+index holds is grounded, and one it does not hold is named in the question the
+claim is asked; a report section's bracketed item id the index does not hold
+is asked about once, like an id the ledger never issued; an execution step
+marked observed may cite items, a network item by its own row's attribution
+where the row states one and otherwise only where the sandbox attributed a
+flow to the sample's own tree, as for the network answers; and
+the evidence roots read a process item as that sandbox process, a TCP or UDP
+item as its flow and a DNS item as its query. Every check looks a cited id up
+in the index; no list of every item id is built.
 
 Ghidra's emulation is not run by the pack: Ghidra's `emulate_function`
 ignores its step limit and cannot be stopped, and one emulation took 130 to
@@ -2098,6 +2261,17 @@ chunk's block or seeded guard reads a repeat: each reads the entry it names. A
 reverser's second chunk once made nine calls, all answered this way, and left
 no entry and no event.
 
+A call another guard answers with no tool run (an argument that names its own
+parameter, a call made after the conversation's room ran out) is filed the
+same way, as the guard's answer: the entry holds what the model was told, its
+`repeated_of` is its own id, so every reader above leaves it out and its chain
+holds no answer anyone can cite, and its start and finish events go out like
+any call's. It is a failure, since nothing answered, and never a tool failure.
+It is counted apart in `run_summary.evidence.guard_answers`; the report header
+and §13's evidence bounds say how many calls a guard answered with no tool
+run, Appendix A marks each such row "guard's answer, not run", and an agent
+whose only entries are these has gathered nothing.
+
 A decompile is also a repeat when its answer is a function an earlier entry
 already holds, whatever address it was given: a call given an address inside
 a function is answered with the whole function. The function the answer prints
@@ -2614,7 +2788,7 @@ search for that literal word cannot be made; it used to say "pass
 `pattern` as the raw text or pattern itself", and a static analyst sent
 `"pattern": "\"pattern\""` twice. A call whose argument is nothing but its own
 parameter's name — bare, quoted or in a placeholder bracket — is not run and
-not written to the ledger: the model is told which argument named its
+is filed as the guard's answer, which holds nothing to cite: the model is told which argument named its
 parameter and asked for the value it meant, the value is never rewritten, the
 question is counted under `tool.argument_names_its_parameter` in
 `run_summary.validation.by_code`, and asking the same again counts as a repeat. Content arguments — the text `iocs_from_text` and `yara_scan` scan,
@@ -3364,7 +3538,9 @@ is assembled from what the run gathered rather than recomputed beside it:
   derived from what the entry holds: a place written as its offset from the
   image base and the section that holds it (`0x1a40 in .text`) for a strings
   row's file offset, a FLOSS row's call site, a decoded blob, a hash
-  occurrence, a capa match address, a function index row, or the address a
+  occurrence, a capa match address, a function index row, the start of the
+  range a `transform_bytes` call read (or the `no:` sentence its answer states
+  when no section holds it), or the address a
   decompile, disassembly or memory read was given; a table of the file (the PE
   header, the import table, the export table, the resource table, the debug
   directory, the overlay, a section by name); a sandbox process, which a Sigma

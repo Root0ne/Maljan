@@ -9,6 +9,16 @@ the sandbox's own signatures, dropped files, registry and the rest. The
 to open, and the `network` analyst reads its capture. `core.sandbox.provider`
 picks the provider; a job can pick its own with `sandbox_provider`.
 
+The triage pack states the report's sections and how many items each holds
+(`sandbox_sections`), or why the report does not carry one, and the
+`sandbox_items` tool answers the items of a section whole, each with an id
+such as `proc:84` or `net:3` and the report fields it came from, filtered by
+pid, a substring, a signature or a list of ids. The `dynamic` analyst has it
+with the other sandbox tools and the `network` analyst has it on its own (the
+whole set where its definition asks for the sandbox tools); a claim cites an
+item by its id, in brackets or in its evidence field. See
+[the triage pack](/architecture/#the-triage-pack).
+
 | Provider | Detonates | Reached at |
 | :-- | :-- | :-- |
 | `mock` (default) | nothing | — |

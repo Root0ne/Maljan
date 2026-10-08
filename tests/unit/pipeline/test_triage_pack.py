@@ -353,6 +353,7 @@ class TestTheSandboxSteps:
             "decode_string_blobs",
             "find_crypto_constants",
             "function_index",
+            "sandbox_sections",
         ]
         (lolbin,) = [entry for entry in result.entries if entry.tool == "lolbin_lookup"]
         assert lolbin.args == {"command_lines": ["rundll32.exe javascript:x"]}

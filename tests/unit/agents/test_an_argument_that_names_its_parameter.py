@@ -69,7 +69,9 @@ class TestTheCall:
         answer = tool.invoke({"pattern": '"pattern"', "offset": 400})
 
         assert ran == []
-        assert recorder.entries == [], "no tool ran, so there is no evidence to cite"
+        # Filed as the guard's answer: no tool ran, and it holds nothing to cite.
+        (entry,) = recorder.entries
+        assert entry.repeated_of == entry.id and entry.output == answer
         assert answer.startswith("strings was not run: `pattern` is ")
         assert "the name of the parameter itself" in answer
         assert asked == [SELF_NAMED_ARGUMENT_CODE]
@@ -97,9 +99,9 @@ class TestTheCall:
         asked: list[str] = []
         tool, recorder = _recorded(ran, asked, RepeatGuard())
 
-        answer = tool.invoke({"pattern": "runnung"})
+        answer = tool.invoke({"pattern": "lookupx"})
 
-        assert ran == [{"pattern": "runnung", "offset": 0, "limit": 100}]
+        assert ran == [{"pattern": "lookupx", "offset": 0, "limit": 100}]
         assert answer.startswith("[ev_0001]")
         assert asked == []
         assert len(recorder.entries) == 1

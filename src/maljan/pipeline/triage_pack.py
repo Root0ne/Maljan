@@ -61,6 +61,14 @@ rules matched in it, its callers and callees and how many artefacts its
 callees hold, each cell naming the entry it comes from. It joins the
 pack's own answers above, so it comes after them.
 
+Last, where a sandbox produced a report, the report's section index
+(``maljan.analysis.sandbox_sections``): each section's item count, or the
+``no:`` sentence saying why the report does not carry it, and the process
+ids, so a claim can cite one item of the report by its id and the citation
+can be checked against the run. The items themselves are served by the
+``sandbox_items`` tool. It comes after every other step, so every id issued
+before it keeps its value; its line takes room as any other line does.
+
 When the pack does not fit its room, every pass line takes only the room the
 earlier lines leave, a pass with a fact no other line carries first; a pass
 entry with no room is counted in the trailer, which takes only free room or
@@ -75,6 +83,7 @@ the pack record, and the run-state block names it and the analysis server's
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -87,11 +96,15 @@ from pathlib import Path
 from typing import Any, cast
 
 from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
+from maljan.analysis import sandbox_sections
 from maljan.analysis.ghidra_passes import (
     ANTI_ANALYSIS_TOOL,
+    CAPA_RULE_KINDS,
     GHIDRA_FORMATS,
     GhidraPasses,
+    capa_agrees,
     run_pass,
+    scan_kind,
 )
 from maljan.analysis.pcap_summary import conversation_line
 from maljan.analysis.technique_ids import technique_ids_in
@@ -119,6 +132,7 @@ from maljan.tools import (
     staging,
     string_blobs,
     strings,
+    upx,
 )
 from maljan.tools.errors import error_parts, normalise_error
 from maljan.tools.knowledge import RESOLVED_AT_RUNTIME
@@ -441,6 +455,8 @@ class PackInputs:
     strings_head: int
     capa: CapaSettings
     sandbox_report: dict[str, Any] | None = None
+    # ``(provider, source_format, read_from)`` of the reader that produced the report.
+    sandbox_normalised_by: tuple[str, ...] | None = None
     evidence_budget_bytes: int = 0
     budget_s: float = 0.0
     floss: FlossSettings = field(default_factory=FlossSettings)
@@ -707,6 +723,8 @@ class _Pack:
             self._crypto_constants(routed)
             self._ghidra_passes(routed)
             self._function_index(routed)
+            self._unpacked_upx(routed, format_facts)
+            self._sandbox_sections()
         finally:
             if self._floss_pool is not None:
                 self._floss_pool.shutdown(wait=False)
@@ -1216,6 +1234,97 @@ class _Pack:
         if ranges and made and made[-1].tool == artefact_index.TOOL and made[-1].ok:
             made[-1].function_ranges = ranges
 
+    # -- UPX unpacking -------------------------------------------------------
+
+    def _unpacked_upx(self, routed: str, format_facts: dict[str, Any] | None) -> None:
+        """Unpack a PE the packer reader names UPX, once, beside the files the server carves.
+
+        After the function index, so every id issued before it keeps its value,
+        and only when ``pe_info``'s packer signatures name UPX or a pack header
+        with a true checksum byte stands where UPX writes one (renamed sections
+        keep their header; a UPX-named file with none gets its ``no:``). The unpacked
+        program is written where the analysis server's ``carve_payloads``
+        writes for this job and sample, so the ``carved_path`` the answer gives
+        is one every file tool of the server reads. The pack is not run again
+        on it: the entry states it exists and where, and the models decide
+        what to open. A run with no job directory to write in is one entry
+        saying so.
+        """
+        path = self.inputs.sample_path
+        if routed != "pe" or not (_names_upx(format_facts) or _holds_a_pack_header(path)):
+            return
+        args: dict[str, Any] = {"path": path}
+        settings = self.inputs.floss
+        if not settings.job_id:
+            self._record_absent(upx.TOOL, args, UPX_NO_JOB)
+            return
+
+        def call() -> dict[str, Any]:
+            carved = staging.open_job_directory(
+                settings.job_id, staging.CARVED_DIRECTORY, settings.environ
+            )
+            destination = staging.private_dir(carved / _file_digest(path))
+            return upx.unpack_upx(path, destination)
+
+        self.record(upx.TOOL, args, call)
+
+    def _sandbox_sections(self) -> None:
+        """The sandbox report's section index, once, where a sandbox produced a report.
+
+        Read in memory from the report in hand, in time linear in its size, so
+        the pack's time budget does not stop it: it is recorded with its own
+        clock, as a step already begun is.
+        """
+        report = observed_report(self.inputs.sandbox_report)
+        if not report:
+            return
+        self.record(
+            sandbox_sections.SECTIONS_TOOL,
+            {},
+            partial(sandbox_sections.section_index, report, self.inputs.sandbox_normalised_by),
+            started=time.monotonic(),
+        )
+
+
+def budgeted_entries(entries: list[LedgerEntry]) -> list[LedgerEntry]:
+    """The pack's entries the evidence byte budget charges: all but the section index.
+
+    The index is a few runs and counts whatever the report's size, and an item
+    citation is checked against it, so it is never blanked; it is the pack's
+    last entry, so leaving it out charges every other entry as before.
+    """
+    return [entry for entry in entries if entry.tool != sandbox_sections.SECTIONS_TOOL]
+
+
+# Why the pack did not unpack a sample the packer reader names UPX.
+UPX_NO_JOB = "the run names no job staging directory to write the unpacked program in"
+
+
+def _names_upx(format_facts: dict[str, Any] | None) -> bool:
+    """Whether ``pe_info``'s packer signatures name UPX."""
+    rows = (format_facts or {}).get("packer_signatures") or []
+    return any(
+        str(row.get("name") if isinstance(row, dict) else row).strip().upper() == "UPX"
+        for row in rows
+    )
+
+
+def _holds_a_pack_header(path: str) -> bool:
+    """Whether the file holds UPX's pack header with a true checksum byte where UPX writes it.
+
+    Only the headers and UPX's two windows are read, not the whole sample.
+    """
+    return upx.has_pack_header_at(path)
+
+
+def _file_digest(path: str) -> str:
+    """The SHA-256 of the file at ``path``, read in pieces: the name of its carved tree."""
+    hasher = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(block)
+    return hasher.hexdigest()
+
 
 # The pack's answers the function index joins, by tool.
 _INDEX_SOURCES = ("pe_info", "capa", "floss", "resolve_api_hashes", "decode_string_blobs")
@@ -1257,7 +1366,7 @@ def run_pack(
         ghidra=ghidra,
     ).run()
     budget = int(inputs.evidence_budget_bytes or 0)
-    trimmed, _ = apply_budget(result.entries, budget)
+    trimmed, _ = apply_budget(budgeted_entries(result.entries), budget)
     if trimmed:
         logger.warning(
             "triage pack: %d of %d entries exceeded the %d-byte budget and kept only "
@@ -2257,6 +2366,38 @@ def _sandbox_channels(data: dict[str, Any]) -> str:
     return _names(channels) or "none"
 
 
+# The section index line's last words: where the items are.
+SECTIONS_SERVED_BY = "each item is served by the sandbox_items tool"
+
+
+def _sandbox_sections(data: dict[str, Any]) -> str:
+    """Each section's count and id form, or its ``no:``; the process ids as the detail allows."""
+    sections = data.get("sections")
+    if not isinstance(sections, dict):
+        return "recorded"
+    parts: list[str] = []
+    for name, row in sections.items():
+        if not isinstance(row, dict):
+            continue
+        # The name as ``sandbox_items`` takes it, written as an identifier.
+        named = f"`{name}`"
+        if row.get("no"):
+            parts.append(f"{named} {_short(str(row['no']))}")
+            continue
+        count = row.get("items")
+        prefix = str(row.get("prefix") or "")
+        if not isinstance(count, int) or not count:
+            parts.append(f"{named} 0")
+        elif name == "processes":
+            forms = sandbox_sections.process_id_forms(row)
+            parts.append(f"{named} {count} ({_names(forms)})" if forms else f"{named} {count}")
+        elif count == 1:
+            parts.append(f"{named} 1 ({prefix}:1)")
+        else:
+            parts.append(f"{named} {count} ({prefix}:1 to {prefix}:{count})")
+    return "; ".join(parts) + f"; {SECTIONS_SERVED_BY}"
+
+
 # The capture line: the packet count, the protocol counts and every external
 # conversation, heaviest first. It used to be the summary's heading alone, and
 # a report model then wrote that the capture entry "holds only a header line"
@@ -2702,7 +2843,7 @@ def _decoded_blobs(data: dict[str, Any], max_chars: int | None = None) -> str:
 # The deobfuscation passes' lines
 # ---------------------------------------------------------------------------
 
-PASS_TOOLS = frozenset({crypto_constants.TOOL, ANTI_ANALYSIS_TOOL})
+PASS_TOOLS = frozenset({crypto_constants.TOOL, ANTI_ANALYSIS_TOOL, upx.TOOL})
 
 # What a pass line says when the room cut its list: how many it shows, and
 # where the rest are.
@@ -2751,22 +2892,18 @@ def _with_capa(answer: dict[str, Any], capa_rows: list[dict[str, Any]]) -> dict[
     return marked
 
 
-# A capa rule that agrees with a TEB/PEB read: its own anti-analysis rules, or
-# a rule that names the PEB or TEB it reads (capa's ``PEB access`` sits in no
-# anti-analysis namespace).
-_PEB_RULE = re.compile(r"\b(?:PEB|TEB)\b")
-
-
 def _anti_analysis_with_capa(
     answer: dict[str, Any], capa_rows: list[dict[str, Any]], starts: list[str]
 ) -> dict[str, Any]:
     """The anti-analysis answer, each match marked where a capa rule agrees.
 
-    A match agrees with capa when a capa rule of its ``anti-analysis``
-    namespaces matched in the same function: the nearest capa function start
-    at or before the match is the nearest one at or before a capa address. An
-    exact TEB/PEB read (``beside_capa``) is stated only with such a rule, or
-    one naming the PEB or TEB, in its function; without one it is counted.
+    A match agrees with capa when a capa rule that states the match's kind
+    matched in the same function (``ghidra_passes.capa_agrees``: an
+    anti-analysis rule of the row's kind or of no kind, or ``PEB access`` for
+    a TEB/PEB read): the nearest capa function start at or before the match
+    is the nearest one at or before a capa address. An exact TEB/PEB read
+    (``beside_capa``) is stated only with such a rule in its function;
+    without one it is counted.
     """
     if not isinstance(answer, dict) or ("stated" not in answer and "beside_capa" not in answer):
         return answer
@@ -2782,35 +2919,45 @@ def _anti_analysis_with_capa(
         index = bisect_right(points, value) - 1
         return points[index] if index >= 0 else None
 
-    by_start: dict[int, list[dict[str, str]]] = {}
-    peb_by_start: dict[int, list[dict[str, str]]] = {}
+    # Each rule that could agree with some row, by the function it matched in.
+    by_start: dict[int, list[tuple[str, str, dict[str, str]]]] = {}
     for capa in capa_rows:
         rule = str(capa.get("rule") or "")
-        anti = str(capa.get("namespace") or "").startswith("anti-analysis")
-        peb = anti or bool(_PEB_RULE.search(rule))
-        if not peb:
+        namespace = str(capa.get("namespace") or "")
+        if not (namespace.startswith("anti-analysis") or rule in CAPA_RULE_KINDS):
             continue
         for address in capa.get("addresses") or []:
             begin = start_of(str(address))
             if begin is None:
                 continue
             said = {"rule": rule, "at": str(address)}
-            if anti:
-                by_start.setdefault(begin, []).append(said)
-            peb_by_start.setdefault(begin, []).append(said)
+            by_start.setdefault(begin, []).append((rule, namespace, said))
+
+    def agreeing(row: dict[str, Any]) -> list[dict[str, str]]:
+        # A row the file's own function table placed (``ghidra_passes.gs_reads``)
+        # is asked about that function; any other by the nearest capa start.
+        owner = row.get("owner")
+        begin = int(str(owner), 16) if owner else start_of(str(row.get("offset") or ""))
+        if begin is None:
+            return []
+        kind = scan_kind(row)
+        return [
+            said for rule, space, said in by_start.get(begin, ()) if capa_agrees(rule, space, kind)
+        ]
+
     marked = dict(answer)
     rows = []
     for row in answer.get("stated") or []:
         row = dict(row)
-        begin = start_of(str(row.get("offset") or ""))
-        if begin is not None and begin in by_start:
-            row["capa"] = by_start[begin]
+        agree = agreeing(row)
+        if agree:
+            row["capa"] = agree
         rows.append(row)
     counted = 0
     for row in marked.pop("beside_capa", None) or []:
-        begin = start_of(str(row.get("offset") or ""))
-        if begin is not None and begin in peb_by_start:
-            rows.append({**row, "capa": peb_by_start[begin]})
+        agree = agreeing(row)
+        if agree:
+            rows.append({**row, "capa": agree})
         else:
             counted += 1
     marked["stated"] = rows
@@ -2983,6 +3130,38 @@ def _fit_some(line: Callable[[int], str], shown: int, max_chars: int | None) -> 
     return line(best) if best else ""
 
 
+def _unpacked(data: dict[str, Any], max_chars: int | None = None) -> str:
+    """The unpacking pass in one line: what was unpacked and where the program now is.
+
+    Whole: the method and filter, both sizes and both checksums, the program's
+    carved_path, SHA-256, sections, imports and entry point. In less room, the
+    carved_path alone, which is the fact no other line carries; a ``no:``
+    answer is its sentence.
+    """
+    said = data.get("unpacked")
+    if said != "yes":
+        line = str(said or "")
+        return line if max_chars is None or len(line) <= max_chars else ""
+    header = data.get("pack_header") or {}
+    child = data.get("child") or {}
+    sums = data.get("checksums") or {}
+    matched = all((sums.get(k) or {}).get("matched") is True for k in ("compressed", "unpacked"))
+    where = f"the unpacked program is file carved_path {child.get('carved_path')}"
+    whole = (
+        f"UPX {header.get('method')}, filter {header.get('filter')}: "
+        f"{_n(data.get('compressed_size'))} compressed bytes to {_n(data.get('unpacked_size'))}, "
+        f"both adler32 checksums {'matched' if matched else 'stated'}; {where} "
+        f"(sha256 {child.get('sha256')}, {_n(child.get('size'))} bytes, "
+        f"{len(data.get('sections') or [])} sections, {_n(data.get('import_count'))} imports "
+        f"from {_n(data.get('import_libraries'))} libraries, entry point "
+        f"{data.get('entry_point')})"
+    )
+    for line in (whole, where):
+        if max_chars is None or len(line) <= max_chars:
+            return line
+    return ""
+
+
 def _function_matches(data: dict[str, Any]) -> str:
     rows = [r for r in (data.get("matches") or []) if isinstance(r, dict)]
     families = sorted({str(r.get("family") or "") for r in rows if r.get("family")})
@@ -3118,6 +3297,7 @@ _GROUP_LABELS: dict[str, str] = {
     "sandbox_signatures": "sandbox signatures",
     "sandbox_dropped_files": "sandbox dropped files",
     "sandbox_channels": "sandbox channels",
+    sandbox_sections.SECTIONS_TOOL: "sandbox sections",
     STATUS_TOOL: "sandbox",
     "pcap_summary": "pcap",
     "reputation": "reputation",
@@ -3130,6 +3310,7 @@ _GROUP_LABELS: dict[str, str] = {
     crypto_constants.TOOL: "crypto constants",
     ANTI_ANALYSIS_TOOL: "anti-analysis (Ghidra)",
     artefact_index.TOOL: "function index",
+    upx.TOOL: "UPX unpacking",
 }
 
 _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
@@ -3154,6 +3335,7 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "sandbox_signatures": _sandbox_signatures,
     "sandbox_dropped_files": _sandbox_dropped,
     "sandbox_channels": _sandbox_channels,
+    sandbox_sections.SECTIONS_TOOL: _sandbox_sections,
     STATUS_TOOL: lambda data: str(data.get("statement") or ""),
     "pcap_summary": _pcap,
     "function_matches": _function_matches,
@@ -3162,6 +3344,7 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "decode_string_blobs": _decoded_blobs,
     crypto_constants.TOOL: _constant_sets,
     ANTI_ANALYSIS_TOOL: _anti_analysis,
+    upx.TOOL: _unpacked,
 }
 
 # The lines that can say less and still say something, each given the room it
@@ -3174,4 +3357,5 @@ _SHORTER_RENDERERS: dict[str, Callable[[dict[str, Any], int], str]] = {
     "decode_string_blobs": lambda data, room: _decoded_blobs(data, max_chars=room),
     crypto_constants.TOOL: lambda data, room: _constant_sets(data, max_chars=room),
     ANTI_ANALYSIS_TOOL: lambda data, room: _anti_analysis(data, max_chars=room),
+    upx.TOOL: lambda data, room: _unpacked(data, max_chars=room),
 }

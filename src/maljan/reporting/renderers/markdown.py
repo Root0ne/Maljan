@@ -72,6 +72,7 @@ from maljan.reporting.models import (
     TechnicalSubsection,
     stated_family,
 )
+from maljan.schemas.evidence import is_guard_answer
 from maljan.schemas.isr_models import UNVERIFIED_TECHNIQUE_MARKER
 
 # ---------------------------------------------------------------------------
@@ -311,6 +312,8 @@ class MarkdownRenderer:
             said += f", {failed} failed" if failed else ""
             repeats = int(evidence.get("repeats") or 0)
             said += f", {repeats} answered from an earlier entry" if repeats else ""
+            guarded = int(evidence.get("guard_answers") or 0)
+            said += f", {guarded} answered by a guard with no tool run" if guarded else ""
             lines.append(said + " (see §13).")
         profile = (report.run_summary or {}).get("profile") or {}
         # A reduced profile changes what evidence backs the verdict, so a
@@ -1774,10 +1777,12 @@ class MarkdownRenderer:
         evidence = summary.get("evidence") or {}
         if evidence:
             repeats = int(evidence.get("repeats") or 0)
+            guarded = int(evidence.get("guard_answers") or 0)
             lines.append(
                 f"**Evidence bounds:** {evidence.get('entries', 0)} ledger entries, "
                 f"{evidence.get('ok', 0)} ok, {evidence.get('failed', 0)} failed, "
                 + (f"{repeats} answered from an earlier entry without running, " if repeats else "")
+                + (f"{guarded} answered by a guard with no tool run, " if guarded else "")
                 + f"{evidence.get('trimmed', 0)} trimmed to the budget"
                 + _guardrail_cut_clause(evidence, summary.get("truncation"))
                 + "."
@@ -1899,10 +1904,7 @@ class MarkdownRenderer:
                         row.agent or "-",
                         row.server or "-",
                         row.tool or "-",
-                        # A repeat was not run: it names the entry that answered it.
-                        f"repeat of {row.repeated_of}"
-                        if row.repeated_of
-                        else ("yes" if row.ok else "no"),
+                        _ran_column(row),
                         f"{row.duration_ms} ms",
                         "yes" if row.truncated else "no",
                     )
@@ -4457,6 +4459,19 @@ def _unmapped_behaviour_lines(report: MalwareReport) -> list[str]:
         "asked for. They are not ATT&CK techniques and are not counted as any._"
     )
     return lines
+
+
+def _ran_column(row: Any) -> str:
+    """Appendix A's OK cell: whether the call answered, or where its answer is.
+
+    A repeat was not run: it names the entry that answered it. A guard's
+    answer names itself, and nothing answered it.
+    """
+    if is_guard_answer(row):
+        return "guard's answer, not run"
+    if row.repeated_of:
+        return f"repeat of {row.repeated_of}"
+    return "yes" if row.ok else "no"
 
 
 def _row(*cells: Any) -> str:

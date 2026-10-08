@@ -65,6 +65,8 @@ READS_A_FILE = frozenset(
         "decode_string_blobs",
         "find_crypto_constants",
         "function_index",
+        "transform_bytes",
+        "unpack_upx",
     }
 )
 CARVED = "carved_path"

@@ -103,7 +103,7 @@ class TestTheDefaultProfileDeliversTheReferencedServers:
         agent._try_initialize_mcp()
 
         names = [t.name for t in agent.tools]
-        assert sorted(names) == ["attck_lookup", "extract_dns"]
+        assert sorted(names) == ["attck_lookup", "extract_dns", "sandbox_items"]
         assert len(names) == len(set(names)), "a server bound and referenced yields one copy"
 
     def test_a_reference_the_registry_cannot_serve_is_a_degradation(
@@ -204,6 +204,50 @@ class TestTheDynamicAnalystsSandboxReference:
         )
 
         assert processes.invoke({})["total"] == 1
+
+
+class TestTheNetworkAnalystsSandboxItems:
+    def test_the_item_query_alone_reaches_it_where_a_sandbox_produced_a_report(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        container = _container()
+        agent = _analyst(container, "network", monkeypatch)
+
+        agent._try_initialize_mcp()
+
+        sandbox = [t.name for t in agent.tools if t.name.startswith("sandbox_")]
+        assert sandbox == ["sandbox_items"]
+        (items,) = [t for t in agent.tools if t.name == "sandbox_items"]
+        assert items.invoke({"section": "processes"})["items"][0]["id"] == "proc:1"
+
+    def test_no_report_and_a_stand_in_attach_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for report in (None, {"synthetic": True, "behavior": {"processes": []}}):
+            container = _container()
+            container.sandbox_report = report
+            agent = _analyst(container, "network", monkeypatch)
+
+            agent._try_initialize_mcp()
+
+            assert "sandbox_items" not in [t.name for t in agent.tools]
+
+    def test_a_definition_asking_for_the_sandbox_tools_gets_the_whole_set(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.core.config import ToolRef
+
+        container = _container()
+        definitions = container.config.agents.definitions
+        network = definitions["network"]
+        definitions["network"] = network.model_copy(
+            update={"tools": [*network.tools, ToolRef(kind="sandbox")]}
+        )
+        agent = _analyst(container, "network", monkeypatch)
+
+        agent._try_initialize_mcp()
+
+        names = [t.name for t in agent.tools]
+        assert "sandbox_processes" in names
+        assert names.count("sandbox_items") == 1
 
 
 class TestTheJudge:

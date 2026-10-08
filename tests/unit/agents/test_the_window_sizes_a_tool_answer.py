@@ -215,7 +215,9 @@ class TestAConversationWithNoRoomLeft:
 
         assert ran == [], "the tool was run after the room had gone"
         assert said == cw.TOOL_PHASE_ENDED_NOTICE
-        assert recorder.entries == [], "a refused call is not citable evidence"
+        # Filed as the guard's answer, which holds nothing a report could cite.
+        (entry,) = recorder.entries
+        assert entry.repeated_of == entry.id and entry.output == said
 
     def test_the_sentence_is_withheld_when_it_would_reach_the_reserve(self) -> None:
         """The long sentence is gated the way the short line is, on the same budget."""

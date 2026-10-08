@@ -17,6 +17,7 @@ consumer can iterate a fresh ``SandboxReport()`` without a null check.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit
 
@@ -161,6 +162,13 @@ class SandboxReport(BaseModel):
     # duration, and never the value this platform asked for. ``None`` where the
     # report says nothing.
     run_limit_seconds: int | None = None
+    # What the reader read, where it reads less than the whole of what a
+    # sandbox can give: ``"overview"`` for a Triage report read from its
+    # overview alone (no behavioural task report was read), ``"tasks"`` for
+    # one read with them. Empty where the reader reads one body. Held for the
+    # run in hand (``reader_of``) and left out of a dump, so a stored or golden
+    # report reads as it always did.
+    read_from: str = Field(default="", exclude=True)
     # True when no sandbox ran at all and this report stands in for one. A real
     # run that observed nothing is not synthetic: its emptiness is a finding.
     synthetic: bool = Field(default=False)
@@ -280,6 +288,145 @@ def _cape_channels(
             if rows:
                 channels[str(name)] = rows
     return channels
+
+
+# The list fields of the model a normaliser may fill, as one vocabulary: what
+# each reader below declares it can fill, and what the sandbox sections read
+# (``analysis.sandbox_sections``) to tell a list the reader never fills, which
+# says nothing, from one the sandbox left empty, which is a finding.
+REPORT_LIST_FIELDS: tuple[str, ...] = (
+    "processes",
+    "processes.calls",
+    "apistats",
+    "generic_events",
+    "signatures",
+    "network.dns",
+    "network.http",
+    "network.tcp",
+    "network.udp",
+    "network.hosts",
+    "network.domains",
+    "network.tls",
+    "network.icmp",
+    "dropped_files",
+    "registry",
+    "channels",
+    "screenshots",
+    *(f"summary.{key}" for key in _SUMMARY_KEYS),
+    "file_writes",
+)
+
+# What :func:`cape_report_to_sandbox_report` can fill: every list field, each
+# read from the report's own block of that name.
+CAPE_NORMALISER_FILLS: frozenset[str] = frozenset(REPORT_LIST_FIELDS)
+
+# The blocks of a raw CAPE report the model has no field for. A CAPE or mock
+# report reaches its readers as its own dict (``providers.cape_view``), so
+# these are there to read; a report rendered from the model never has them.
+CAPE_RAW_BLOCKS: tuple[str, ...] = (
+    "raw.CAPE",
+    "raw.behavior.processtree",
+    "raw.behavior.summary.resolved_apis",
+    "raw.suricata.alerts",
+    "raw.procdump",
+)
+# The source formats whose report reaches its readers as the raw dict.
+RAW_SOURCE_FORMATS = frozenset({"cape2", "mock"})
+
+
+def report_fills(report: SandboxReport) -> frozenset[str]:
+    """The list fields of ``report`` that hold at least one row."""
+    network = report.network
+    held: dict[str, Any] = {
+        "processes": report.processes,
+        "processes.calls": any(p.calls for p in report.processes),
+        "apistats": report.apistats,
+        "generic_events": report.generic_events,
+        "signatures": report.signatures,
+        "dropped_files": report.dropped_files,
+        "registry": report.registry,
+        "channels": report.channels,
+        "screenshots": report.screenshots,
+        "file_writes": report.file_writes,
+        **{
+            f"network.{kind}": getattr(network, kind)
+            for kind in ("dns", "http", "tcp", "udp", "hosts", "domains", "tls", "icmp")
+        },
+        **{f"summary.{key}": report.summary.get(key) for key in _SUMMARY_KEYS},
+    }
+    return frozenset(name for name, value in held.items() if value)
+
+
+@dataclass(frozen=True)
+class Reading:
+    """What one reader can fill, and how its report reaches the sections."""
+
+    fills: frozenset[str]
+    # The Triage reader given the overview and no behavioural task report.
+    overview_only: bool = False
+    # Rendered from the model (``cape_view``) rather than the raw report dict.
+    rendered: bool = True
+
+
+# What a CAPE or mock report reached its readers as (``reader_of``): its own
+# dict, or the model rendered, when the report carried no raw dict.
+READ_FROM_RAW = "raw"
+READ_FROM_MODEL = "model"
+# What the Triage reader read (``SandboxReport.read_from``).
+READ_FROM_OVERVIEW = "overview"
+READ_FROM_TASKS = "tasks"
+
+
+def reader_of(report: SandboxReport) -> tuple[str, str, str]:
+    """``(provider, source_format, read_from)`` of the reader behind ``report``.
+
+    ``read_from`` is the report's own where its reader set it; for a CAPE or
+    mock report, whether it reaches its readers as its raw dict
+    (``providers.cape_view`` hands it over only when it has one).
+    """
+    read_from = report.read_from
+    if not read_from and report.source_format in RAW_SOURCE_FORMATS:
+        read_from = READ_FROM_RAW if report.raw else READ_FROM_MODEL
+    return report.provider, report.source_format, read_from
+
+
+def normaliser_reading(
+    source_format: str, provider: str = "", read_from: str = ""
+) -> Reading | None:
+    """What the reader behind ``(source_format, read_from)`` can fill, or ``None`` when unknown.
+
+    The CAPE reader for a CAPE, Cuckoo or mock report, with the raw blocks
+    where the report reaches its readers as its own dict (a CAPE or mock
+    report with no raw dict is rendered from the model); the Triage reader for
+    a Triage one, by what it read (``read_from``: the overview alone, or with
+    the behavioural task reports; where that is not said, by whether the
+    provider is one that fetches them); the REST mapping for a generic one
+    (``providers.sandbox.rest_mapping.REST_MAPPING_FILLS``).
+    """
+    fmt = str(source_format or "").strip().lower()
+    read = str(read_from or "").strip().lower()
+    if fmt in RAW_SOURCE_FORMATS:
+        if read == READ_FROM_MODEL:
+            return Reading(CAPE_NORMALISER_FILLS)
+        return Reading(CAPE_NORMALISER_FILLS | frozenset(CAPE_RAW_BLOCKS), rendered=False)
+    if fmt == "cuckoo":
+        return Reading(CAPE_NORMALISER_FILLS)
+    if fmt == "triage":
+        if not read:
+            # Not said: the providers that fetch task reports are taken to have.
+            read = (
+                READ_FROM_TASKS
+                if str(provider or "").strip().lower() in TRIAGE_TASK_READERS
+                else READ_FROM_OVERVIEW
+            )
+        if read == READ_FROM_OVERVIEW:
+            return Reading(TRIAGE_OVERVIEW_FILLS, overview_only=True)
+        return Reading(TRIAGE_NORMALISER_FILLS)
+    if fmt == "generic":
+        from maljan.providers.sandbox.rest_mapping import REST_MAPPING_FILLS
+
+        return Reading(REST_MAPPING_FILLS)
+    return None
 
 
 def cape_report_to_sandbox_report(
@@ -549,6 +696,31 @@ def _flow_attribution(flow: dict[str, Any], lineage: _Lineage) -> dict[str, Any]
     return out
 
 
+# What :func:`triage_overview_to_sandbox_report` can fill: the process list,
+# the signatures, the dumped files, the flows split into TCP and UDP with a
+# host row per destination, and the DNS and HTTP requests with their names.
+# Every other list it leaves empty whatever the report holds. Given the
+# overview alone it fills the signatures and nothing else: the processes, the
+# dumped files and the network are read from the task reports.
+TRIAGE_OVERVIEW_FILLS: frozenset[str] = frozenset({"signatures"})
+# The providers that hand this reader task reports to read, for a report that
+# does not say what was read (``read_from``, which a fetched run states).
+TRIAGE_TASK_READERS: frozenset[str] = frozenset({"triage"})
+TRIAGE_NORMALISER_FILLS: frozenset[str] = frozenset(
+    {
+        "processes",
+        "signatures",
+        "dropped_files",
+        "network.tcp",
+        "network.udp",
+        "network.hosts",
+        "network.dns",
+        "network.domains",
+        "network.http",
+    }
+)
+
+
 def triage_overview_to_sandbox_report(
     overview: dict[str, Any],
     *,
@@ -594,7 +766,13 @@ def triage_overview_to_sandbox_report(
     dropped_files: list[dict[str, Any]] = []
     network = SandboxNetwork()
     hosts_by_ip: dict[str, dict[str, Any]] = {}
+    # Whether any behavioural task report was read: without one, the report is
+    # the overview's alone, and says so (``read_from``).
+    tasks_read = 0
     for task in (task_reports or {}).values():
+        if not isinstance(task, dict):
+            continue
+        tasks_read += 1
         lineage = _sample_process_tree(task, sample)
         for proc in task.get("processes") or []:
             if not isinstance(proc, dict):
@@ -712,6 +890,7 @@ def triage_overview_to_sandbox_report(
         cti={"family": _as_str_list(analysis.get("family")), "score": analysis.get("score")},
         unavailable=list(TriageSandboxProvider.UNAVAILABLE),
         run_limit_seconds=_triage_run_limit(overview),
+        read_from=READ_FROM_TASKS if tasks_read else READ_FROM_OVERVIEW,
         raw=overview,
     )
 

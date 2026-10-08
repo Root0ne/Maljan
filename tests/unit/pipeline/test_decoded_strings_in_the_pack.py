@@ -48,9 +48,9 @@ def _row(text: str, routine: str, site: str, kind: str = "decoded") -> dict[str,
             "kind": "decoded",
             "string": text,
             "encoding": "ASCII",
-            "function": "0x1360bc0ae78",
+            "function": "0x1400066e0",
             "function_rva": routine,
-            "called_at": "0x1360bc05c02",
+            "called_at": "0x140003c02",
             "called_at_rva": site,
             "address": "0x1000",
             "address_type": "GLOBAL",
@@ -59,19 +59,19 @@ def _row(text: str, routine: str, site: str, kind: str = "decoded") -> dict[str,
         "kind": kind,
         "string": text,
         "encoding": "ASCII",
-        "function": "0x1360bc08c4c",
+        "function": "0x140004c4c",
         "function_rva": routine,
-        "program_counter": "0x1360bc08c90",
+        "program_counter": "0x140004c90",
         "frame_offset": 32,
     }
 
 
 ROWS = [
-    _row("runnung", "0xae78", "0x3939"),
-    _row("Custom_update", "0xae78", "0x312f"),
-    _row("https://example.test/live/", "0xae78", "0x6a1f"),
-    _row("Mozilla/4.0 (compatible; MSIE 7.0)", "0xae78", "0x4e47"),
-    _row("scub", "0x8c4c", "", kind="stack"),
+    _row("fizzbuz", "0x66e0", "0x2939"),
+    _row("Sample_widget", "0x66e0", "0x212f"),
+    _row("https://example.test/item/", "0x66e0", "0x5a1f"),
+    _row("Widget/2.0 (synthetic; Probes 3.0)", "0x66e0", "0x3e47"),
+    _row("quux", "0x4c4c", "", kind="stack"),
 ]
 
 
@@ -90,11 +90,11 @@ def _answer(rows: list[dict[str, Any]], total: int | None = None) -> dict[str, A
         "truncated": total is not None,
         "meta": {
             "floss_version": "v3.1.1",
-            "imagebase": "0x1360bc00000",
+            "imagebase": "0x140000000",
             "language": "unknown",
-            "functions_discovered": 150,
-            "functions_emulated_for_decoding": 20,
-            "runtime_s": 26.7,
+            "functions_discovered": 120,
+            "functions_emulated_for_decoding": 12,
+            "runtime_s": 12.5,
         },
     }
 
@@ -297,7 +297,7 @@ class TestWhenThereIsNothingToShow:
     def test_a_pe_with_no_emulated_strings_says_so(self) -> None:
         line = _line("floss", _answer([]))
         assert "decoded strings: FLOSS recovered no decoded, stack or tight strings" in line
-        assert "150 functions, 20 emulated for decoding" in line
+        assert "120 functions, 12 emulated for decoding" in line
 
 
 class TestTheLine:
@@ -306,18 +306,18 @@ class TestTheLine:
         assert line.startswith("[ev_0012] decoded strings: 5 recovered by emulation")
         assert "(4 decoded, 1 stack, 0 tight" in line
         assert "all 5 shown" in line
-        assert 'routine 0xae78: "runnung"@0x3939, "Custom_update"@0x312f' in line
-        assert '"https://example.test/live/"@0x6a1f' in line
-        assert 'routine 0x8c4c: "scub"' in line
+        assert 'routine 0x66e0: "fizzbuz"@0x2939, "Sample_widget"@0x212f' in line
+        assert '"https://example.test/item/"@0x5a1f' in line
+        assert 'routine 0x4c4c: "quux"' in line
 
     def test_every_string_is_shown_whole_with_no_bound(self) -> None:
-        many = [_row(f"s{i:03d}", "0xae78", hex(0x1000 + i)) for i in range(150)]
+        many = [_row(f"s{i:03d}", "0x66e0", hex(0x1000 + i)) for i in range(150)]
         line = _line("floss", _answer(many))
         assert "all 150 shown" in line
         assert '"s149"' in line
 
     def test_the_room_bound_is_stated_with_its_reason_and_where_the_rest_is(self) -> None:
-        many = [_row(f"s{i:03d}", "0xae78", hex(0x1000 + i)) for i in range(150)]
+        many = [_row(f"s{i:03d}", "0x66e0", hex(0x1000 + i)) for i in range(150)]
         whole = _line("floss", _answer(many))
         line = _bounded_line("floss", _answer(many), len(whole) // 3)
         assert len(line) <= len(whole) // 3
@@ -329,14 +329,14 @@ class TestTheLine:
         assert f'"s{shown:03d}"' not in line
 
     def test_a_long_string_is_whole_with_no_bound_and_cut_said_within_one(self) -> None:
-        answer = _answer([_row("A" * 3000, "0xae78", "0x10")])
+        answer = _answer([_row("A" * 3000, "0x66e0", "0x10")])
         assert '"' + "A" * 3000 + '"' in _line("floss", answer)
         line = _bounded_line("floss", answer, 1500)
         assert len(line) <= 1500
         assert 'A…"' in line
 
     def test_a_string_s_control_characters_are_written_out(self) -> None:
-        line = _line("floss", _answer([_row('say "hi"\r\n', "0xae78", "0x10")]))
+        line = _line("floss", _answer([_row('say "hi"\r\n', "0x66e0", "0x10")]))
         assert '"say \\"hi\\"\\r\\n"@0x10' in line
         assert "\n" not in line
 
@@ -349,7 +349,7 @@ class TestTheBlock:
     def test_a_long_decoded_strings_line_shrinks_to_the_room_left_rather_than_going(
         self,
     ) -> None:
-        many = [_row(f"string number {i:03d}", "0xae78", hex(0x1000 + i)) for i in range(150)]
+        many = [_row(f"string number {i:03d}", "0x66e0", hex(0x1000 + i)) for i in range(150)]
         head = build_entry(
             entry_id=format_entry_id(1),
             seq=1,
@@ -408,7 +408,7 @@ class TestTheNode:
 
 class TestTheLineSaysWhatItDidToAString:
     def test_a_string_cut_is_said_even_when_every_string_is_shown(self) -> None:
-        line = _bounded_line("floss", _answer([_row("A" * 3000, "0xae78", "0x10")]), 1500)
+        line = _bounded_line("floss", _answer([_row("A" * 3000, "0x66e0", "0x10")]), 1500)
         assert "all 1 shown (1 cut to " in line
         assert "fits its room; the whole string is in the entry" in line
 
@@ -416,11 +416,11 @@ class TestTheLineSaysWhatItDidToAString:
         assert "cut to" not in _line("floss", _answer(ROWS))
 
     def test_a_trailing_backslash_does_not_read_as_an_escaped_quote(self) -> None:
-        line = _line("floss", _answer([_row("C:\\dir\\", "0xae78", "0x10")]))
+        line = _line("floss", _answer([_row("C:\\dir\\", "0x66e0", "0x10")]))
         assert '"C:\\dir\\x5c"@0x10' in line
 
     def test_an_address_with_no_offset_is_marked_virtual(self) -> None:
-        row = _row("runnung", "0xae78", "")
+        row = _row("fizzbuz", "0x66e0", "")
         row["called_at_rva"] = None
         line = _line("floss", _answer([row]))
-        assert '"runnung"@va 0x1360bc05c02' in line
+        assert '"fizzbuz"@va 0x140003c02' in line

@@ -1,0 +1,668 @@
+"""UPX unpacking reads a packed PE back into the program, from UPX's own records.
+
+Every packed file here is synthetic: ``synthetic_upx`` writes a small program,
+lays it out as UPX's PE packer does and compresses it with encoders written
+for the tests (NRV2B, NRV2D, NRV2E) or the standard library's LZMA1. The
+unpacked program is compared with what was packed, byte for byte where the
+bytes are the program's own and through the PE reader where UPX rebuilds a
+table. The hostile inputs are packed files of the same kind with one fact
+made untrue.
+"""
+
+from __future__ import annotations
+
+import os
+import random
+import stat
+import struct
+import time
+import tracemalloc
+import zlib
+from pathlib import Path
+
+import pefile
+import pytest
+
+from maljan.tools import binary, staging, upx
+from tests.unit.tools import synthetic_upx as su
+from tests.unit.tools.synthetic_pe import SyntheticPE
+
+
+def _sample(seed: int = 7) -> bytes:
+    """Bytes with literals, near and far repeats, a repeated offset and a long run."""
+    rng = random.Random(seed)
+    head = bytes(rng.randrange(256) for _ in range(5000))
+    words = b"".join(rng.choice([b"call ", b"push ", b"mov eax, ", b"ret\n"]) for _ in range(600))
+    return head + words + b"\0" * 3000 + head[:900] + head[100:400] + b"ab" * 700 + head[-200:]
+
+
+# ---------------------------------------------------------------------------
+# The decoders, round trip
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("method", sorted([*su.METHOD_ENCODERS, 14]))
+def test_each_method_decodes_what_its_encoder_wrote(method: int) -> None:
+    data = _sample()
+    stream = su.compress(method, data)
+    assert len(stream) < len(data)
+    assert bytes(upx.decompress(method, stream, len(data))) == data
+
+
+def test_the_nrv_encoders_reach_every_form_the_decoders_read() -> None:
+    # Far offsets (past 0xd00 and 0x500), the repeated offset and overlapping
+    # copies are all in the sample: a decoder that got one form wrong fails here.
+    data = _sample(11)
+    for kind in ("2b", "2d", "2e"):
+        for width in (1, 2, 4):
+            stream = su.nrv_compress(data, kind, width)
+            assert bytes(upx._nrv(kind, width, stream, len(data))) == data
+
+
+def test_a_single_byte_and_a_long_run_round_trip() -> None:
+    for data in (b"Z", b"Z" * 70000, bytes(range(256)) * 300):
+        for kind in ("2b", "2d", "2e"):
+            assert bytes(upx._nrv(kind, 4, su.nrv_compress(data, kind), len(data))) == data
+
+
+# ---------------------------------------------------------------------------
+# The whole unpack
+# ---------------------------------------------------------------------------
+
+
+def _section(pe: pefile.PE, name: bytes) -> pefile.SectionStructure:
+    return next(s for s in pe.sections if s.Name.rstrip(b"\0") == name)
+
+
+def _imports(pe: pefile.PE) -> dict[str, list[str | int]]:
+    found: dict[str, list[str | int]] = {}
+    for entry in pe.DIRECTORY_ENTRY_IMPORT:
+        found[entry.dll.decode()] = [
+            int(imp.ordinal) if imp.import_by_ordinal else imp.name.decode()
+            for imp in entry.imports
+        ]
+    return found
+
+
+def _expected_imports(packed: su.Packed) -> dict[str, list[str | int]]:
+    return {
+        dll: [77 if e == "#packed-ordinal" else e for e in entries]
+        for dll, entries in packed.imports.items()
+    }
+
+
+def _check_program(packed: su.Packed, image: bytes) -> pefile.PE:
+    pe = pefile.PE(data=image)
+    assert _section(pe, b".text").get_data()[: len(packed.text)] == packed.text
+    assert _section(pe, b".data").get_data()[: len(packed.data_section)] == packed.data_section
+    assert _imports(pe) == _expected_imports(packed)
+    assert pe.OPTIONAL_HEADER.AddressOfEntryPoint == su.ENTRY
+    assert pe.OPTIONAL_HEADER.ImageBase == packed.image_base
+    return pe
+
+
+def test_a_packed_program_comes_back_whole() -> None:
+    packed = su.build()
+    result = upx.unpack(packed.data)
+    pe = _check_program(packed, result.image)
+    # Relocations: every slot, as HIGHLOW, in the rebuilt table.
+    slots = sorted(e.rva for b in pe.DIRECTORY_ENTRY_BASERELOC for e in b.entries if e.type == 3)
+    assert slots == sorted(packed.relocated)
+    # Exports: the moved table written back at its place, forwarder included.
+    exports = {e.name.decode(): e for e in pe.DIRECTORY_ENTRY_EXPORT.symbols}
+    assert exports["Alpha"].address == su.TEXT + 0x20
+    assert exports["Beta"].address == su.TEXT + 0x40
+    assert exports["Gamma"].forwarder == b"NTDLL.RtlZeroMemory"
+    assert pe.DIRECTORY_ENTRY_EXPORT.struct.AddressOfFunctions > su.EXPORT_TABLE
+    # Resources: the directory rebuilt, the kept data in place, the moved icon
+    # group back with UPX's icon count written into it.
+    types = {e.id: e for e in pe.DIRECTORY_ENTRY_RESOURCE.entries}
+    assert set(types) == {10, 14}
+    icon_entry = types[14].directory.entries[0]
+    assert str(icon_entry.name) == "ICONS"
+    icon_data = icon_entry.directory.entries[0].data.struct
+    assert icon_data.OffsetToData == su.ICON_AT
+    icon = pe.get_data(su.ICON_AT, len(packed.icon))
+    assert icon[:4] == packed.icon[:4] and icon[6:] == packed.icon[6:]
+    assert struct.unpack("<H", icon[4:6])[0] == packed.icon_count
+    assert pe.get_data(su.RCDATA_AT, len(packed.rcdata)) == packed.rcdata
+    assert result.checksum_reading == upx.CHECKSUM_OVER
+    assert result.rebuilt["imports"] == "from UPX's import records: 3 libraries, 7 functions"
+    assert result.rebuilt["relocations"] == "from UPX's relocation records: 41 relocations"
+    assert "directory rebuilt" in result.rebuilt["resources"]
+    assert [w for w in pe.get_warnings() if not w.startswith("Byte 0x00 makes up")] == []
+
+
+@pytest.mark.parametrize(
+    ("method", "filter_id"),
+    [(2, 0x26), (5, 0x26), (8, 0x26), (14, 0x26), (3, 0x24), (7, 0x25), (10, 0), (9, 0x26)],
+)
+def test_every_method_and_filter_unpacks(method: int, filter_id: int) -> None:
+    packed = su.build(su.Program(method=method, filter_id=filter_id))
+    result = upx.unpack(packed.data)
+    _check_program(packed, result.image)
+    assert result.header.method == method
+    assert result.c_adler == result.header.c_adler
+    assert result.u_adler == result.header.u_adler
+
+
+def test_a_64_bit_program_comes_back() -> None:
+    for filter_id in (0, 0x26):
+        packed = su.build(su.Program(is64=True, filter_id=filter_id, method=8))
+        pe = _check_program(packed, upx.unpack(packed.data).image)
+        slots = sorted(
+            e.rva for b in pe.DIRECTORY_ENTRY_BASERELOC for e in b.entries if e.type == 10
+        )
+        assert slots == sorted(packed.relocated)
+
+
+def test_a_resource_directory_left_whole_is_kept() -> None:
+    packed = su.build(su.Program(wipe_resource_directory=False))
+    result = upx.unpack(packed.data)
+    assert result.rebuilt["resources"].endswith("the directory kept as stored")
+    pe = pefile.PE(data=result.image)
+    assert {e.id for e in pe.DIRECTORY_ENTRY_RESOURCE.entries} == {10, 14}
+
+
+def test_no_relocations_and_no_exports_are_said() -> None:
+    packed = su.build(su.Program(relocate=False, exports=[], forwarders=[]))
+    result = upx.unpack(packed.data)
+    _check_program(packed, result.image)
+    assert result.rebuilt["relocations"].startswith("none:")
+    assert result.rebuilt["exports"].startswith("none:")
+
+
+def test_the_overlay_is_carried_over() -> None:
+    packed = su.build(su.Program(overlay=b"OVERLAY-BYTES" * 10))
+    result = upx.unpack(packed.data)
+    assert result.overlay == 130
+    assert result.image.endswith(b"OVERLAY-BYTES" * 10)
+
+
+# ---------------------------------------------------------------------------
+# The file tool
+# ---------------------------------------------------------------------------
+
+
+def test_the_tool_writes_the_program_private_and_states_the_facts(tmp_path: Path) -> None:
+    packed = su.build()
+    sample = tmp_path / "packed.exe"
+    sample.write_bytes(packed.data)
+    where = staging.private_dir(tmp_path / "carved")
+    answer = upx.unpack_upx(str(sample), where)
+    child = answer["child"]
+    written = Path(child["carved_path"])
+    assert written.parent == where
+    assert written.name == binary.carved_file_name(upx.UNPACKED_LABEL, child["sha256"])
+    assert stat.S_IMODE(written.stat().st_mode) == 0o600
+    assert stat.S_IMODE(where.stat().st_mode) == 0o700
+    image = written.read_bytes()
+    _check_program(packed, image)
+    assert answer["unpacked"] == "yes"
+    assert answer["pack_header"]["method"] == "NRV2B_LE32 (2)"
+    assert answer["pack_header"]["filter"] == "0x26"
+    assert answer["unpacked_size"] == packed.u_len
+    assert answer["compressed_size"] < packed.u_len
+    assert answer["checksums"]["compressed"]["matched"] is True
+    assert answer["checksums"]["unpacked"]["matched"] is True
+    assert answer["import_count"] == 7 and answer["import_libraries"] == 3
+    assert [s["name"] for s in answer["sections"]] == [
+        ".text",
+        ".rdata",
+        ".data",
+        ".rsrc",
+        ".reloc",
+    ]
+    assert answer["entry_point"] == hex(su.ENTRY)
+    # A second run finds its own file and answers the same.
+    assert upx.unpack_upx(str(sample), where) == answer
+
+
+def test_a_file_that_is_not_upx_packed_says_why(tmp_path: Path) -> None:
+    plain = tmp_path / "plain.exe"
+    plain.write_bytes(SyntheticPE(is64=False, image_base=0x400000).build())
+    assert upx.unpack_upx(str(plain), tmp_path / "c") == {"unpacked": upx.NO_HEADER}
+    text = tmp_path / "notes.txt"
+    text.write_bytes(b"just text, no header at all, long enough to be read" * 3)
+    said = upx.unpack_upx(str(text), tmp_path / "c")["unpacked"]
+    assert said.startswith("no: the file is not a PE image")
+    assert not (tmp_path / "c").exists()
+
+
+# ---------------------------------------------------------------------------
+# Hostile inputs
+# ---------------------------------------------------------------------------
+
+
+def _with_header(packed: su.Packed, **fields: int) -> bytes:
+    """``packed`` with its pack header rewritten (checksum byte recomputed)."""
+    data = bytearray(packed.data)
+    at = packed.header_offset
+    old = data[at : at + 32]
+    u_adler, c_adler, u_len, c_len, u_file_size = struct.unpack_from("<IIIII", old, 8)
+    values = {
+        "version": old[4],
+        "format_id": old[5],
+        "method": old[6],
+        "level": old[7],
+        "u_adler": u_adler,
+        "c_adler": c_adler,
+        "u_len": u_len,
+        "c_len": c_len,
+        "u_file_size": u_file_size,
+        "filter_id": old[28],
+        "cto": old[29],
+    }
+    values.update(fields)
+    data[at : at + 32] = su.pack_header(**values)
+    return bytes(data)
+
+
+def _peak(call: object) -> tuple[object, int]:
+    tracemalloc.start()
+    try:
+        try:
+            outcome: object = call()  # type: ignore[operator]
+        except (upx.NotRead, upx.Damaged) as exc:
+            outcome = exc
+        return outcome, tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+
+def test_a_header_claiming_4_gib_is_answered_with_the_cap() -> None:
+    packed = su.build()
+    data = _with_header(packed, u_len=0xFFFFFFFF)
+    outcome, peak = _peak(lambda: upx.unpack(data))
+    assert isinstance(outcome, upx.NotRead)
+    assert str(outcome) == upx.OVER_CAP.format(size=0xFFFFFFFF, cap=upx.UNPACKED_CAP)
+    assert outcome.header is not None and outcome.header.u_len == 0xFFFFFFFF
+    assert peak < 4 * len(data) + (1 << 20)
+
+
+def test_a_header_larger_than_the_image_it_maps_is_an_error() -> None:
+    packed = su.build()
+    data = _with_header(packed, u_len=upx.UNPACKED_CAP)
+    with pytest.raises(upx.Damaged, match="more than the .* bytes of image the packed file maps"):
+        upx.unpack(data)
+
+
+def test_a_file_cut_inside_the_stream_is_an_error() -> None:
+    packed = su.build()
+    with pytest.raises(upx.Damaged, match="the file is cut short"):
+        upx.unpack(packed.data[: su.UPX1_RAW + 100])
+
+
+def test_a_stream_that_ends_before_its_marker_is_an_error() -> None:
+    packed = su.build()
+    start = packed.header_offset + 32
+    stream = su.compress(2, packed.obuf)[:-40]
+    data = bytearray(packed.data)
+    data[start : start + len(stream) + 40] = stream + bytes(40)
+    fixed = _with_header(
+        su.Packed(**{**packed.__dict__, "data": bytes(data)}),
+        c_len=len(stream),
+        c_adler=zlib.adler32(stream),
+    )
+    with pytest.raises(upx.Damaged, match="before its end marker"):
+        upx.unpack(fixed)
+
+
+def test_a_compressed_checksum_mismatch_is_an_error_and_writes_nothing(tmp_path: Path) -> None:
+    packed = su.build()
+    data = bytearray(packed.data)
+    data[packed.header_offset + 32 + 50] ^= 0x01
+    sample = tmp_path / "s.exe"
+    sample.write_bytes(bytes(data))
+    answer = upx.unpack_upx(str(sample), tmp_path)
+    assert answer["error"]["code"] == "tool_failed"
+    assert "the compressed data's adler32 is" in answer["error"]["message"]
+    assert answer["error"]["remediation"] == upx.REMEDIATION
+    assert answer["pack_header"]["method"] == "NRV2B_LE32 (2)"
+    assert [p.name for p in tmp_path.iterdir()] == ["s.exe"]
+
+
+def test_an_unpacked_checksum_mismatch_is_an_error() -> None:
+    packed = su.build()
+    data = _with_header(packed, u_adler=0x12345678)
+    with pytest.raises(upx.Damaged) as raised:
+        upx.unpack(data)
+    computed = zlib.adler32(packed.obuf)
+    assert str(raised.value) == (
+        f"the unpacked data's adler32 is {computed:#010x}; the pack header states 0x12345678"
+    )
+
+
+def test_the_tool_writes_into_the_directory_it_is_given_and_creates_none(tmp_path: Path) -> None:
+    sample = tmp_path / "packed.exe"
+    sample.write_bytes(su.build().data)
+    answer = upx.unpack_upx(str(sample), tmp_path / "absent")
+    assert answer["error"]["code"] == "tool_failed"
+    assert answer["error"]["message"].startswith("cannot write upx-unpacked_")
+    assert not (tmp_path / "absent").exists()
+
+
+def test_a_header_whose_checksum_byte_is_wrong_is_an_error() -> None:
+    packed = su.build()
+    data = bytearray(packed.data)
+    data[packed.header_offset + 31] ^= 0xFF
+    with pytest.raises(upx.Damaged, match="states checksum byte"):
+        upx.unpack(bytes(data))
+
+
+def test_an_unknown_filter_and_method_are_not_read_here() -> None:
+    packed = su.build()
+    for fields, said in (
+        ({"filter_id": 0x49}, upx.FILTER_NOT_READ.format(filter=0x49)),
+        ({"method": 15}, upx.METHOD_NOT_READ.format(method=15)),
+        (
+            {"format_id": 12},
+            upx.FORMAT_NOT_READ.format(offset=hex(packed.header_offset), format=12),
+        ),
+        ({"version": 9}, upx.OLD_VERSION.format(offset=hex(packed.header_offset), version=9)),
+    ):
+        with pytest.raises(upx.NotRead) as raised:
+            upx.unpack(_with_header(packed, **fields))
+        assert str(raised.value) == said
+
+
+def _stream_2b(*tokens: tuple[str, int, int]) -> bytes:
+    """An NRV2B stream from literal and match tokens, with no end marker unless asked."""
+    bits = su._Bits(4)
+    last = 1
+    for kind, a, b in tokens:
+        if kind == "lit":
+            bits.bit(1)
+            bits.byte(a)
+        elif kind == "match":
+            su._match(bits, "2b", a, b, last, 0xD00)
+            last = a
+        elif kind == "end":
+            bits.bit(0)
+            su._gamma(bits, su.END_PREFIX)
+            bits.byte(0xFF)
+    return bits.finish()
+
+
+def test_back_references_are_held_to_the_output_and_its_start() -> None:
+    # A copy longer than the stated size stops before it is made.
+    stream = _stream_2b(("lit", 0x41, 0), ("match", 1, 10_000_000), ("end", 0, 0))
+    outcome, peak = _peak(lambda: upx._nrv("2b", 4, stream, 1000))
+    assert isinstance(outcome, upx.Damaged)
+    assert "runs past the 1000 unpacked bytes the header states" in str(outcome)
+    assert peak < 1 << 20
+    # A copy from before the first byte is refused.
+    stream = _stream_2b(("lit", 0x41, 0), ("match", 5, 3), ("end", 0, 0))
+    with pytest.raises(upx.Damaged, match="before the start of the output"):
+        upx._nrv("2b", 4, stream, 100)
+    # A loop of back-references to one byte fills exactly the stated size.
+    tokens = [("lit", 0x41, 0)] + [("match", 1, 999)] * 100 + [("end", 0, 0)]
+    stream = _stream_2b(*tokens)
+    out, peak = _peak(lambda: upx._nrv("2b", 4, stream, 1 + 999 * 100))
+    assert out == bytearray(b"A" * (1 + 999 * 100))
+    assert peak < 4 * (1 + 999 * 100) + (1 << 20)
+    with pytest.raises(upx.Damaged, match="past the"):
+        upx._nrv("2b", 4, stream, 999 * 100)
+
+
+def test_an_endless_length_prefix_stops_at_the_room_left() -> None:
+    bits = su._Bits(4)
+    bits.bit(1)
+    bits.byte(0x41)
+    bits.bit(0)
+    su._gamma(bits, 3)
+    bits.byte(0)  # offset 1
+    bits.bit(0)
+    bits.bit(0)
+    for _ in range(200_000):
+        bits.bit(1)
+        bits.bit(0)
+    stream = bits.finish()
+    began = time.monotonic()
+    with pytest.raises(
+        upx.Damaged, match="a length at output byte 1 runs past the 4096 unpacked bytes"
+    ):
+        upx._nrv("2b", 4, stream, 4096)
+    assert time.monotonic() - began < 1.0
+
+
+def test_random_bytes_as_a_stream_fail_in_linear_time() -> None:
+    noise = os.urandom(200_000)
+    for kind in ("2b", "2d", "2e"):
+        began = time.monotonic()
+        with pytest.raises(upx.Damaged):
+            upx._nrv(kind, 4, noise, 2_000_000)
+        assert time.monotonic() - began < 10.0
+
+
+def test_a_truncated_lzma_stream_is_an_error() -> None:
+    data = _sample()
+    stream = su.lzma_compress(data)
+    with pytest.raises(upx.Damaged, match="the LZMA stream ends after"):
+        upx.decompress(14, stream[: len(stream) // 2], len(data))
+    with pytest.raises(upx.Damaged, match="properties bytes"):
+        upx.decompress(14, b"\xff\xff" + stream[2:], len(data))
+
+
+def test_lzma_properties_the_standard_library_does_not_read_are_said() -> None:
+    data = _sample()
+    stream = su.lzma_compress(data)
+    for lc, lp in ((5, 0), (4, 1), (3, 2)):
+        properties = bytes([((lc + lp) << 3) | 2, (lp << 4) | lc])
+        with pytest.raises(upx.NotRead) as raised:
+            upx.decompress(14, properties + stream[2:], len(data))
+        assert str(raised.value) == upx.LZMA_NOT_READ.format(lc=lc, lp=lp)
+
+
+def test_a_resource_tree_that_shares_its_directories_is_held_to_its_section() -> None:
+    packed = su.build()
+    pe = pefile.PE(data=packed.data, fast_load=True)
+    third = pe.sections[2]
+    tree = third.PointerToRawData + 0x400
+    data = bytearray(packed.data)
+    count = 60
+
+    def directory(at: int, child: int, flag: int) -> None:
+        data[at : at + 16] = struct.pack("<IIHHHH", 0, 0, 0, 0, 0, count)
+        for index in range(count):
+            struct.pack_into("<II", data, at + 16 + 8 * index, index + 1, child | flag)
+
+    directory(tree, 0x200, 0x80000000)
+    directory(tree + 0x200, 0x400, 0x80000000)
+    directory(tree + 0x400, 0x600, 0)
+    data[tree + 0x600 : tree + 0x610] = struct.pack("<IIII", su.RCDATA_AT, 4, 0, 0)
+    outcome, peak = _peak(lambda: upx.unpack(bytes(data)))
+    assert isinstance(outcome, upx.Damaged)
+    assert "more entries than its section holds" in str(outcome)
+
+
+def test_resource_names_shared_past_their_section_are_an_error() -> None:
+    packed = su.build()
+    pe = pefile.PE(data=packed.data, fast_load=True)
+    tree = pe.sections[2].PointerToRawData + 0x400
+    data = bytearray(packed.data)
+    data[tree : tree + 0x70] = bytes(0x70)
+    data[tree : tree + 16] = struct.pack("<IIHHHH", 0, 0, 0, 0, 2, 0)
+    for index in range(2):
+        struct.pack_into("<II", data, tree + 16 + 8 * index, 0x80000100, 0x80000020)
+    data[tree + 0x20 : tree + 0x38] = struct.pack("<IIHHHHII", 0, 0, 0, 0, 0, 1, 1, 0x80000040)
+    data[tree + 0x40 : tree + 0x58] = struct.pack("<IIHHHHII", 0, 0, 0, 0, 0, 1, 0x409, 0x60)
+    data[tree + 0x60 : tree + 0x70] = struct.pack("<IIII", su.RCDATA_AT, 4, 0, 0)
+    data[tree + 0x100 : tree + 0x102] = struct.pack("<H", 0x500)
+    with pytest.raises(upx.Damaged, match="resource names come to more bytes"):
+        upx.unpack(bytes(data))
+
+
+def _reloc_image(count: int, table_at: int, step: int = 4) -> tuple[upx._Image, bytearray]:
+    """An unpacked image of ``count`` 32-bit relocations ``step`` bytes apart, as UPX writes."""
+    raw = bytearray(248)
+    raw[:4] = b"PE\0\0"
+    struct.pack_into("<H", raw, 24, 0x10B)
+    struct.pack_into("<I", raw, 52, 0x400000)
+    original = upx._Original(raw, False)
+    original.set_directory(upx._BASERELOC, 0x1000 + table_at, 0x100)
+    image_size = step * count + 8
+    stream = b"\x04" + bytes([step]) * (count - 1) + b"\0"
+    buf = bytearray(image_size) + stream
+    records = len(buf)
+    buf += struct.pack("<IB", image_size, 0)
+    return upx._Image(buf, original, 0x1000, None, upx._Records(buf, records)), buf  # type: ignore[arg-type]
+
+
+def test_three_million_relocations_cost_a_few_bytes_each() -> None:
+    count = 3_000_000
+    image, _buf = _reloc_image(count, 0)
+    began = time.monotonic()
+    said, peak = _peak(lambda: upx._rebuild_relocations(image))
+    assert said == f"from UPX's relocation records: {count} relocations"
+    assert peak < 4 * 4 * count
+    assert time.monotonic() - began < 60
+
+
+def test_a_relocation_table_that_cannot_fit_is_refused_before_it_is_built() -> None:
+    count = 3_000_000
+    image, buf = _reloc_image(count, 0)
+    image.original.set_directory(upx._BASERELOC, 0x1000 + len(buf) - 64, 0x100)
+    before = bytes(buf[:64])
+    outcome, peak = _peak(lambda: upx._rebuild_relocations(image))
+    assert isinstance(outcome, upx.Damaged)
+    assert "does not fit the unpacked image" in str(outcome)
+    assert bytes(buf[:64]) == before
+    assert peak < 4 * 4 * count
+
+
+def test_relocations_that_overlap_are_not_read_here() -> None:
+    for step in (1, 2, 3):
+        image, buf = _reloc_image(1000, 0, step)
+        before = bytes(buf)
+        with pytest.raises(upx.NotRead) as raised:
+            upx._rebuild_relocations(image)
+        assert str(raised.value) == upx.RELOCS_OVERLAP_NOT_READ
+        assert bytes(buf) == before
+
+
+def _positions_one_by_one(stream: bytes) -> list[int]:
+    """UPX's relocation records read one record at a time, as its own unpacker reads them."""
+    out, position, p = [], -4, 0
+    while stream[p]:
+        if stream[p] < 0xF0:
+            position += stream[p]
+            p += 1
+        else:
+            delta = (stream[p] & 0x0F) * 0x10000 + int.from_bytes(stream[p + 1 : p + 3], "little")
+            p += 3
+            if delta == 0:
+                delta = int.from_bytes(stream[p : p + 4], "little")
+                p += 4
+            position += delta
+        out.append(position)
+    return out
+
+
+def _realistic(count: int) -> bytes:
+    """A DLL's shape: every fourth relocation a page-sized step (a long form), the rest 4 apart."""
+    out = bytearray()
+    for index in range(count):
+        out += b"\xf0\x00\x02" if index % 4 == 0 and index else b"\x04"
+    return bytes(out) + b"\0"
+
+
+def _long_forms(count: int) -> bytes:
+    return b"\xf0\x04\x00" * count + b"\0"
+
+
+def _decode(stream: bytes) -> tuple[list[int], float]:
+    image = 1 << 30
+    buf = bytearray(stream)
+    began = time.monotonic()
+    out = upx._reloc_positions(buf, 0, image, 4)
+    return out.tolist(), time.monotonic() - began
+
+
+def test_relocation_records_read_as_one_by_one_whatever_their_mix() -> None:
+    rng = random.Random(5)
+    for _ in range(40):
+        parts = bytearray()
+        for _ in range(rng.randint(1, 3000)):
+            kind = rng.random()
+            if kind < 0.6:
+                parts.append(rng.randint(1, 0xEF))
+            elif kind < 0.9:
+                parts += bytes([0xF0 | rng.randint(0, 15)]) + rng.randint(1, 0xFFFF).to_bytes(
+                    2, "little"
+                )
+            else:
+                parts += b"\xf0\0\0" + rng.randint(1, 1 << 20).to_bytes(4, "little")
+        stream = bytes(parts) + b"\0"
+        assert _decode(stream)[0] == _positions_one_by_one(stream)
+    for stream in (_realistic(5000), _long_forms(5000), b"\x04" * (3 << 20) + b"\0"):
+        assert _decode(stream)[0] == _positions_one_by_one(stream)
+
+
+@pytest.mark.parametrize("shape", [_realistic, _long_forms])
+def test_relocation_records_take_time_linear_in_the_stream(shape: object) -> None:
+    # Ten times the records take at most about ten times as long (twenty, for noise).
+    small = min(_decode(shape(20_000))[1] for _ in range(3))  # type: ignore[operator]
+    large = _decode(shape(200_000))[1]  # type: ignore[operator]
+    assert large < 20 * small + 0.05
+
+
+def test_a_moved_resource_with_origin_0_is_an_error() -> None:
+    packed = su.build()
+    pe = pefile.PE(data=packed.data, fast_load=True)
+    data = bytearray(packed.data)
+    data[pe.sections[2].PointerToRawData + 0x600 : pe.sections[2].PointerToRawData + 0x604] = bytes(
+        4
+    )
+    with pytest.raises(upx.Damaged, match="states origin 0"):
+        upx.unpack(bytes(data))
+
+
+def test_the_checksum_sentence_names_the_filter_only_when_there_is_one() -> None:
+    assert upx.unpack(su.build(su.Program(filter_id=0)).data).checksum_reading == (
+        upx.CHECKSUM_OVER_UNFILTERED
+    )
+    assert upx.unpack(su.build().data).checksum_reading == upx.CHECKSUM_OVER
+
+
+def test_the_pack_header_test_over_a_file_reads_its_windows(tmp_path: Path) -> None:
+    packed = su.build()
+    damaged = bytearray(packed.data)
+    damaged[packed.header_offset + 31] ^= 0xFF
+    for name, data in (
+        ("packed", packed.data),
+        ("damaged", bytes(damaged)),
+        ("plain", SyntheticPE().build()),
+        ("text", b"not a PE at all" * 10),
+    ):
+        target = tmp_path / name
+        target.write_bytes(data)
+        assert upx.has_pack_header_at(target) == upx.has_pack_header(data)
+    assert not upx.has_pack_header_at(tmp_path / "absent")
+
+
+def test_the_pack_header_test_reads_only_a_true_header() -> None:
+    packed = su.build()
+    assert upx.has_pack_header(packed.data)
+    damaged = bytearray(packed.data)
+    damaged[packed.header_offset + 31] ^= 0xFF
+    assert not upx.has_pack_header(bytes(damaged))
+    assert not upx.has_pack_header(SyntheticPE().build())
+    assert not upx.has_pack_header(b"not a PE at all" * 10)
+
+
+def test_records_pointing_outside_the_image_are_errors() -> None:
+    packed = su.build(su.Program(filter_id=0))
+    obuf = bytearray(packed.obuf)
+    # The last four bytes name where the stored header is: point them past the end.
+    obuf[-4:] = struct.pack("<I", len(obuf) + 100)
+    stream = su.compress(2, bytes(obuf))
+    data = bytearray(packed.data)
+    start = packed.header_offset + 32
+    data[start : start + len(stream)] = stream
+    patched = su.Packed(**{**packed.__dict__, "data": bytes(data)})
+    fixed = _with_header(
+        patched, c_len=len(stream), c_adler=zlib.adler32(stream), u_adler=zlib.adler32(obuf)
+    )
+    with pytest.raises(upx.Damaged, match="stored PE header .* lies outside the unpacked data"):
+        upx.unpack(fixed)

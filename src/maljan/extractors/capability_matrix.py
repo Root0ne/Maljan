@@ -631,7 +631,9 @@ def _claim_statement(layer: str, claim: Any) -> tuple[tuple[str, str], tuple[str
     quote = getattr(claim, "claim", None) or getattr(claim, "evidence_ref", None) or ""
     ref = getattr(claim, "evidence_ref", "") or ""
     said = f"{getattr(claim, 'claim', '') or ''} {ref}"
-    return (layer, str(quote)), (said, sorted(entry_ids_in(said)))
+    from maljan.analysis.sandbox_sections import item_ids_in
+
+    return (layer, str(quote)), (said, [*sorted(entry_ids_in(said)), *item_ids_in(ref)])
 
 
 def _finding_statement(

@@ -34,6 +34,7 @@ from maljan.pipeline.triage_pack import (
     pack_entries,
     render_pack,
 )
+from maljan.schemas.evidence import is_guard_answer
 from maljan.tools.artefact_index import SERVED_BY
 from maljan.utils.written_forms import pack_escaped
 
@@ -260,13 +261,13 @@ def _lines(
     index = by_tool.get(INDEX_TOOL)
     if index is not None:
         lines.append(index_sentence(index.id, index.structured, dropped=index.truncated))
-    # A call that was never made — a skipped lookup, a step after the budget —
-    # is not a failed tool; the pack line says "not done" for it, and so does
-    # this one by leaving it out.
+    # A call that was never made — a skipped lookup, a step after the budget,
+    # a call a guard answered with no tool run — is not a failed tool; the
+    # pack line says "not done" for it, and so does this one by leaving it out.
     failed = [
         f"{_get(row, 'tool')} ({_get(row, 'agent') or PIPELINE})"
         for row in rows
-        if _get(row, "ok") is False and not _was_not_made(row)
+        if _get(row, "ok") is False and not _was_not_made(row) and not is_guard_answer(row)
     ]
     if failed:
         lines.append("tools failed: " + ", ".join(failed))

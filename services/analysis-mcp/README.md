@@ -40,6 +40,7 @@ drops the reference really runs without these tools.
 | `macho_info` | `path`, `carved_path=""` |
 | `apk_info` | `path`, `carved_path=""`, `manifest`, `permissions`, `certs`, `components`, `native_libs`, `dex_strings=false`, `limit=500` |
 | `carve_payloads` | `path`, `carved_path=""` (carved files land in `<staging>/carved/<sha256>/`, never where the model says) |
+| `unpack_upx` | `path`, `carved_path=""` (see *UPX unpacking*) |
 | `archive_list` | `path`, `carved_path=""`, `limit=500` |
 | `document_info` | `path`, `carved_path=""` |
 
@@ -310,6 +311,205 @@ file: in each of the index's two walks each instruction start is decoded once,
 a section is found by bisection, the callee count costs one step per call, and
 nothing recurses.
 
+### Byte transforms
+
+| tool | arguments |
+| --- | --- |
+| `transform_bytes` | `path`, `carved_path=""`, `offset=null`, `rva=null`, `va=null`, `length=null`, `steps=null`, `show_offset=null`, `show_length=null` |
+
+One byte range of the file through an ordered list of steps the caller names,
+each applied to the output of the one before (`tools.transforms`); nothing in
+the file is run. The model chooses the range, the operations and the keys; the
+server computes and states what came out.
+
+The range is exactly one of `offset` (a file offset), `rva` or `va`, the last
+two resolved through the file's own section table, and `length`. Left out, the
+range runs to the end of the file; a range past the end is cut there and the
+answer says so. An address no section holds, an address in a section past the
+bytes the file holds for it, and an address in a file that is not a PE image
+are errors that say which. A number is an integer, or a string read as
+hexadecimal after `0x` and as decimal otherwise.
+
+`steps` is a list of objects, each with `op` and its parameters:
+
+| op | parameters |
+| --- | --- |
+| `xor` | `key`; `increment` (output byte i is input byte i exclusive-or the key byte i mod the key length plus increment times i, mod 256) |
+| `rc4` | `key`, 1 to 256 bytes |
+| `aes` | `mode` (`ecb`, `cbc`, `ctr`); `key` of 16, 24 or 32 bytes; `iv` for cbc; `nonce` for ctr, the 16-byte initial counter block; `padding` (`none`, `pkcs7`) |
+| `base64` | `alphabet` (`standard`, `urlsafe`, or 64 distinct characters in order); `skip_whitespace` |
+| `hex` | — |
+| `lznt1` | — (4096-byte chunks, each with its two-byte header, as `RtlDecompressBuffer` reads them) |
+| `zlib`, `gzip`, `deflate` | — (`deflate` is the raw stream, with no header) |
+| `reverse` | — |
+| `slice` | `start`, `length` (within the current buffer; past its end is cut and said) |
+
+A `key`, `iv` or `nonce` is `{"hex": "..."}`, `{"text": "..."}` (UTF-8) or a
+range of the same file, `{"offset": ..., "length": ...}` (or `rva` or `va`),
+so a model points at a key it found instead of copying it. A key range past
+the end of the file is an error, since a key cut short is another key.
+
+The answer names the input range (its offset, end and length, and its rva and
+section, or a `no:` sentence when no section holds its start or the file is
+not an image) and every step with its parameters as given, its input and
+output lengths, and anything the step met: a cut, a stream that ends before
+its end marker, bytes after a stream's end. A literal key is shown as it was
+written; a key read from the file is shown as the range named and the bytes
+read there. Then the output. Over all of it: its length, SHA-256, the share of
+printable bytes (as ASCII and as UTF-16LE pairs) and its Shannon entropy in
+bits per byte. Over the part `shown`: the first 64 bytes in hex, its text read
+as ASCII (each byte past ASCII written as `\xNN`) and as UTF-16LE, each escaped
+as the pack writes a recovered string, and the domains, URLs, IP addresses,
+paths and registry keys the platform's indicator scan (the reader behind
+`iocs_from_text` and `iocs_from_file`) finds in it. Each indicator's offset is
+where the scan's own match of that value stands in the output (a value the scan
+keeps once per spelling is at its first match), with the encoding of the run it
+was read in. The spans come from `tools.ioc_spans`, a path of its own that
+reads with the scan's patterns and tests and gives the same rows (a test holds
+them equal); the scan every other caller runs is unchanged. The part shown is
+sized from what an answer carries. Per two shown bytes the answer spends at
+most 17 characters as JSON writes it: 5 for each byte of the ASCII reading (a
+backslash, `x` and two digits, the backslash escaped) and 7 for the pair in the
+UTF-16LE reading. The rest of the answer is subtracted first: the input range
+and the steps as this call writes them, and the output's own fields at their
+longest (every number at ten digits, every sentence it can carry, the 64-byte
+hex head), 1,292 characters. By default the part shown is what is left of the
+room the platform gives one tool answer when the model's window is not
+measured (6,000 characters) at that rate, at most 705 bytes (524 for a call
+with no steps), so the whole answer stays within 6,000 characters whatever
+the bytes are. `show_offset` and `show_length` name another part; `shown` says
+when it is not the whole output, and a `show_length` past what the largest
+tool answer any model gets (30,000,000 characters, the largest window the
+platform believes in) carries beside the rest of the answer is cut to that and
+says so. The indicator rows take what the part's room
+leaves after everything else, and `indicators_left_out` counts the rest. The
+answer never says what the output is.
+
+An unknown operation, a key of a length the cipher does not take, a wrong IV
+or nonce length, an input that is not whole AES blocks, padding that is not
+PKCS#7, an alphabet with a repeated character, `skip_whitespace` with an
+alphabet that holds a whitespace character, a stray character in the encoded
+text, a malformed LZNT1 chunk or a compressed stream that does not read is an
+error naming the step and why. Nothing is guessed and nothing is retried with
+other parameters. A number is written in ASCII digits.
+
+Every step but decompression writes at most as many bytes as it reads.
+Decompression (`zlib`, `gzip`, `deflate`, `lznt1`) is held to the platform's
+fixed sample upload cap (`core.delivery_limits.SAMPLE_UPLOAD_MAX_BYTES`,
+100 MiB; a number here, not the operator's upload setting): the stream is fed a
+piece at a time and each call is asked for no more than the room left, so the
+output never holds more than the cap, and a stream that reaches it is cut there
+with the cut stated. Concatenated gzip members are read in turn under that one
+bound and counted (`members`); each member is fed pieces that double from 256
+bytes to 64 KiB, so what is handed back at a member's end is about the member's
+own size and a stream of many empty members stays linear. An LZNT1 chunk that
+expands past its 4096 bytes is an error. A decompression cut by the cap ends
+the chain: the answer's `stopped` names the steps not run and states the cut
+step's output. The bytes all steps write together are held to the same cap,
+so a long list of steps costs at most that many bytes of work, and a chain
+that reaches it stops the same way, stated in `stopped`. Each step's input is
+let go before the next runs, and each step is linear in its buffer. The
+measures over the whole output count a slice at a time.
+
+Measured on this project's host at the cap: a 2 GiB zlib or raw deflate bomb
+1.1 s and 238 MiB above the process; 1,572,864 empty gzip members (30 MiB)
+5.4 s and 31 MiB; 100 gzip members of 1 MiB 1.0 s; LZNT1 at 100 MiB of output
+0.8 s for the most expanding stream, 21 s for one of seven literals and a copy
+per group and 29 s for one of nothing but three-byte copies (the slowest
+shape), each 200 to 300 MiB; 100 MiB of random output with the default part
+shown 0.6 s and a 5,622-character answer. At the largest part a call is shown
+(3,529,411 bytes) the slowest of nine 30 MB shapes (dense addresses) took
+4.6 s and 286 MiB, and every answer stayed within the 30,000,000 characters it
+was sized for.
+
+`rc4` runs through `cryptography`'s ARC4 for the key lengths it takes (5, 7,
+8, 10, 16, 20, 24 or 32 bytes) and for a key whose own length divides one of
+them, repeated to it, which schedules the same (a 1-byte key as 5 bytes, 2 and
+4 as 8, 3, 6 and 12 as 24); every other length runs through the same algorithm
+written out. `aes` needs `cryptography`. The ledger entry's evidence root is
+the start of its input range.
+
+### UPX unpacking
+
+| tool | arguments |
+| --- | --- |
+| `unpack_upx` | `path`, `carved_path=""` |
+
+A UPX-packed Windows PE read back into the program it holds and written out as
+a file of its own (`tools.upx`), the way `upx -d` does it, in Python: nothing
+in the file is run and no `upx` program is needed on the host. The unpacked
+file lands where `carve_payloads` writes, `<staging>/job-<id>/carved/<sha256
+of the sample>/`, named `upx-unpacked_<first 12 hex of its own sha256>` at
+0o600 in a 0o700 directory, and the `carved_path` in the answer's `child` is
+the value every tool here that reads a file takes. Unpacking a file this run
+already wrote nests under the sample's tree, as carving one does.
+
+What it reads, in UPX's own layout:
+
+- **The pack header**, the 32 bytes starting `UPX!`, where UPX writes it: the
+  1024 bytes from 64 before the second section's file data, or (older
+  versions) from the third section's. Formats 9 (win32/pe) and 36 (win64/pep),
+  header version 10 and later. The last byte is the sum of the bytes before
+  it modulo 251; a header whose sum does not match is an error.
+- **The compressed data**, checked against the header's adler32 before it is
+  decompressed: NRV2B, NRV2D and NRV2E in their 32-, 16- and 8-bit bit-stream
+  forms (methods 2 to 10) by decoders in the module, and LZMA (method 14)
+  through the standard library's raw LZMA1 filter. The output must be
+  exactly the stated size, the stream must end at its end marker with every
+  byte read, and the unpacked data's adler32 must be the stated one, taken
+  over the data as decompressed, with the code filter still applied, which is
+  what UPX's PE packer checksums. LZMA properties the standard library's
+  LZMA1 decoder does not take (lc + lp above 4) are a `no:`.
+- **The code filter**: 0x24 (call), 0x25 (jump) and 0x26 (both), undone over
+  the code range the stored header names.
+- **The rebuild**: the original PE header and section table UPX stored after
+  the image; the import table from UPX's import records (library names from
+  the packed file's own import table, names and ordinals from UPX's list);
+  the relocations (delta-coded positions, values stored byte-swapped and less
+  the image base); the export table UPX moved out of a DLL's image; the
+  resources UPX kept uncompressed, moved back with the resource directory
+  rebuilt when the stored one is empty; the debug, bound-import and IAT
+  directories and the checksum cleared, as UPX clears them; the packed
+  file's overlay carried over.
+
+The directory each file lands in is created by the server through the rule
+every staging directory is held to (0o700, refused when it is a link or
+another user's); the unpacker itself creates none.
+
+The answer states the pack header (offset, where the compressed data starts,
+version, format, method, level, filter and its marker byte), the compressed
+and unpacked sizes and the original file size the header states, both
+checksums as stated and computed and whether each matched, then the unpacked
+file: SHA-256, size, `carved_path`, entry point, the import count and
+libraries its own import table names, what each rebuild step wrote, the
+overlay bytes carried and its section table.
+
+A file that is not a PE, has no pack header where UPX writes one, or uses a
+format, header version, method, filter or record kind not read here (UPX's
+filter 0x49, the default for 64-bit files, is one; 16-bit relocation records
+and relocation records that name one place twice or overlapping places are
+others) answers `{"unpacked": "no: <reason>"}`, with the pack header's
+facts when it was read. A header stating more unpacked bytes than the
+platform's fixed sample upload cap (100 MiB, `core.delivery_limits`) is
+answered with the cap and nothing is decompressed; one stating more than the
+image the packed file maps is an error. A checksum that does not match, a
+stream cut short, a copy past the output or before its start, or a record that
+points outside the unpacked data is an error naming where (`tool_failed`, with
+its own remediation), and no file is written: a partial image is never given
+as a whole one. Every decoder reads its input once and every count is held to
+the bytes that hold it, so time and memory are linear in the file and the
+unpacked size: relocation positions are held four bytes each and the table's
+size is counted per page and checked to fit before it is built (three million
+relocations take about 30 MiB and 1.4 s), import records four bytes each, and
+the resource tree is walked in place, never held as objects; on the eleven UPX-packed PE samples in the local corpus
+(NRV2B and NRV2E, filter 0x26) nine unpacked in 0.03 to 0.3 s each to files
+the size the header states for the original, and two whose compressed data's
+adler32 differs from the header's are refused.
+
+The ledger entry's evidence root is the start of the compressed data in the
+packed file; a call that reads the unpacked program by its `carved_path` is
+about that program, named by the digest the answer states.
+
 ### Sample delivery
 
 | tool | arguments |
@@ -411,7 +611,9 @@ a caller asking for more is given that. Asking for less is honoured.
 
 Answers `{server, version, tools: [{name, optional_dependency, available,
 reason, timeout_s}]}`, computed when the server starts by probing each optional
-module. A tool that cannot answer returns `{"error": {"code", "message",
+module. The `transform_bytes` cell also carries `facts`, its arguments and
+operations in plain sentences, and the `unpack_upx` cell the formats, methods
+and filters it reads. A tool that cannot answer returns `{"error": {"code", "message",
 "remediation"}, "tool"}` (`maljan.tools.errors`); see *Writing a tool server*
 in `apps/docs/content/docs/configuration.mdx`.
 

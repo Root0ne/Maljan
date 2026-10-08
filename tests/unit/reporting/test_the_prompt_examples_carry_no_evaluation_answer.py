@@ -130,6 +130,8 @@ from maljan.pipeline.validation import (
     ANALYST_FEEDBACK_CLOSING,
     FUNCTION_CHECK_HEAD,
     FUNCTION_CHECK_NOT_ASKED_HEAD,
+    ITEM_NOT_IN_RUN,
+    ITEM_UNREAD,
     MALWARE_TYPES,
     UNATTRIBUTED_INDICATOR_CODE,
     CapabilityGrounding,
@@ -627,6 +629,7 @@ def _deobfuscation_sentences() -> str:
             crypto_constants.SCAN_RULE,
             ghidra_passes.SCAN_CHECKS,
             ghidra_passes.STATED_RULE,
+            ghidra_passes.GS_OFF_BOUNDARY,
             ghidra_passes.GHIDRA_SWITCHED_OFF,
             ghidra_passes.GHIDRA_NOT_OVER_HTTP.format(transport="stdio"),
             ghidra_passes.GHIDRA_HAS_NO_COPY,
@@ -755,6 +758,224 @@ def _constant_set_names() -> str:
         if entry.kind == crypto_constants.TABLE
     ]
     return triage_pack._constant_sets({"found": rows, "sets_searched": len(rows)})
+
+
+_TRANSFORM_ENTRY = "the byte transform tool's description, facts, answers and errors"
+
+
+def _transform_sentences() -> str:
+    """What the byte transform tool tells a model: its facts, answers and every kind of error."""
+    import tempfile
+    import zlib
+
+    from maljan.tools import transforms
+    from tests.unit.tools.synthetic_pe import SyntheticPE
+
+    calls: list[tuple[str, dict[str, Any]]] = [
+        ("flat", {"offset": 0, "length": 999}),
+        ("flat", {"offset": 0, "steps": [{"op": "slice", "start": 1, "length": 999}]}),
+        ("packed", {"offset": 0, "steps": [{"op": "zlib"}]}),
+        ("cut", {"offset": 0, "steps": [{"op": "zlib"}]}),
+        ("flat", {"offset": 0, "steps": [{"op": "xor", "key": {"text": "k"}, "increment": 1}]}),
+        ("flat", {"offset": 0, "steps": [{"op": "rot13"}]}),
+        ("flat", {"offset": 0, "steps": [{"op": "xor", "key": "41"}]}),
+        ("flat", {"offset": 0, "steps": [{"op": "rc4", "key": {"offset": 60, "length": 9}}]}),
+        ("flat", {"offset": 0, "steps": [{"op": "base64", "alphabet": "A" * 64}]}),
+        ("flat", {"offset": 0, "steps": [{"op": "aes", "mode": "cbc", "key": {"hex": "00" * 16}}]}),
+        ("flat", {"rva": "0x10"}),
+        ("image", {"rva": "0x90000"}),
+        ("image", {"offset": 0, "length": 2}),
+        ("image", {"va": "0x10"}),
+        ("big", {"offset": 0}),
+        ("hosts", {"offset": 0}),
+        ("big", {"offset": 1, "show_offset": 3, "show_length": 5}),
+        ("flat", {"offset": 0, "show_offset": 999}),
+        ("flat", {"offset": 0, "show_length": transforms.MAX_SHOWN_BYTES + 1}),
+    ]
+    with tempfile.TemporaryDirectory() as folder:
+        files = {
+            "hosts": b" ".join(b"h%05d.example.com" % i for i in range(200)),
+            "big": b"\0" * (transforms.SHOWN_BYTES * 2),
+            "flat": b"plain bytes, " * 5,
+            "packed": zlib.compress(b"x" * 64) + b"tail",
+            "cut": zlib.compress(b"x" * 64)[:-6],
+            "image": SyntheticPE().build(),
+        }
+        for name, blob in files.items():
+            (Path(folder) / name).write_bytes(blob)
+        answers = [
+            transforms.transform_bytes(str(Path(folder) / name), **args) for name, args in calls
+        ]
+    return " ".join(
+        [
+            transforms.CAPABILITY_FACTS,
+            transforms.REMEDIATION,
+            transforms._cap_sentence(),
+            transforms._scan_stopped_sentence(9),
+            transforms._left_out_sentence(3, 6000),
+            transforms._stopped(2, 4, "the output reached the platform's sample upload cap"),
+            transforms._stopped(
+                2, 4, "the steps had written 9 bytes in all, the platform's sample upload cap"
+            ),
+            _analysis_tool_descriptions("transform_bytes"),
+            *(json.dumps({k: v for k, v in a.items() if k != "output"}) for a in answers),
+            # The output's own sentences; its readings are the sample's bytes.
+            *(
+                json.dumps(
+                    {
+                        k: a["output"].get(k)
+                        for k in (
+                            "shown",
+                            "utf16le_note",
+                            "indicators_left_out",
+                            "indicator_scan_stopped",
+                        )
+                    }
+                )
+                for a in answers
+                if "output" in a
+            ),
+        ]
+    )
+
+
+_UPX_ENTRY = "the UPX unpacking tool's description, facts, answers, errors and pack lines"
+
+
+def _upx_sentences() -> str:
+    """What UPX unpacking tells a model: the tool, every no: sentence and error, the pack line."""
+    import tempfile
+
+    from maljan.schemas.evidence import LedgerEntry
+    from maljan.tools import upx
+    from tests.unit.tools import synthetic_upx as su
+    from tests.unit.tools.synthetic_pe import SyntheticPE
+
+    packed = su.build()
+    damaged = bytearray(packed.data)
+    damaged[packed.header_offset + 40] ^= 0x10
+    offset = hex(packed.header_offset)
+    with tempfile.TemporaryDirectory() as folder:
+        files = {
+            "packed": packed.data,
+            "damaged": bytes(damaged),
+            "plain": SyntheticPE().build(),
+            "text": b"no header at all " * 8,
+        }
+        answers = []
+        for name, blob in files.items():
+            (Path(folder) / name).write_bytes(blob)
+            answers.append(upx.unpack_upx(str(Path(folder) / name), Path(folder)))
+    entries = [
+        LedgerEntry(id=f"ev_000{i}", tool=upx.TOOL, structured=a, ok="error" not in a)
+        for i, a in enumerate(answers, 1)
+    ]
+    # Every sentence the module can say, its no: and error forms included:
+    # each string the source writes, f-strings' literal parts with them.
+    import ast
+    import inspect
+
+    written = [
+        node.value
+        for node in ast.walk(ast.parse(inspect.getsource(upx)))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
+    return " ".join(
+        [
+            *written,
+            upx.CAPABILITY_FACTS,
+            upx.REMEDIATION,
+            upx.LZMA_NOT_READ.format(lc=5, lp=0),
+            upx.NOT_A_PE.format(why="no MZ header"),
+            upx.NO_HEADER,
+            upx.NO_SECTIONS,
+            upx.OLD_VERSION.format(offset=offset, version=9),
+            upx.REFUSED.format(offset=offset),
+            upx.FORMAT_NOT_READ.format(offset=offset, format=12),
+            upx.MACHINE_MISMATCH.format(format=9, name="win32/pe", machine=0x8664),
+            upx.METHOD_NOT_READ.format(method=15),
+            upx.FILTER_NOT_READ.format(filter=0x49),
+            upx.OVER_CAP.format(size=2**32 - 1, cap=upx.UNPACKED_CAP),
+            upx.FILE_OVER_CAP.format(size=2**30, cap=upx.UNPACKED_CAP),
+            upx.RELOCS16_NOT_READ,
+            triage_pack.UPX_NO_JOB,
+            _analysis_tool_descriptions("unpack_upx"),
+            *(json.dumps(a) for a in answers),
+            *(triage_pack._pack_line(e) for e in entries),
+            *(triage_pack._within_room(e, 200) or "" for e in entries),
+        ]
+    )
+
+
+_SECTIONS_ENTRY = (
+    "the sandbox report's section index, its item query and what an item citation is told"
+)
+
+
+def _sandbox_sections_sentences() -> str:
+    """What the sandbox sections tell a model: the index, the tool, its answers, the questions."""
+    from maljan.analysis import sandbox_sections as ss
+    from maljan.providers import sandbox_tools as st
+    from maljan.schemas.evidence import LedgerEntry
+
+    report: dict[str, Any] = {
+        "behavior": {
+            "processes": [
+                {"pid": 7, "ppid": 1, "process_name": "a.exe", "command_line": "a.exe /q"},
+                {"process_name": "b.exe"},
+            ],
+            "summary": {"keys": ["HKCU\\x"], "files": []},
+        },
+        "network": {"tcp": [{"dst": "192.0.2.1", "dport": 1}], "dns": []},
+        "signatures": [{"name": "s", "severity": 1}],
+        "dropped": [],
+        "unavailable": ["calls", "registry", "generic_events", "apistats", "screenshots"],
+    }
+    # Every no: sentence: a report that holds nothing, and one that lists
+    # every section its sandbox does not record.
+    indexes = [ss.section_index({}), ss.section_index(report)]
+    entries = [
+        LedgerEntry(id=f"ev_000{i}", tool=ss.SECTIONS_TOOL, structured=index)
+        for i, index in enumerate(indexes, 1)
+    ]
+    answers = [
+        st.sandbox_items(report, "processes"),
+        st.sandbox_items(report, "network", ids=["net:1", "net:9"]),
+        st.sandbox_items(report, "registry"),
+        st.sandbox_items(report, "nope"),
+        st.sandbox_items(report, "processes", pid="x"),
+        st.sandbox_items(report, "network", signature="sig:1"),
+    ]
+    return " ".join(
+        [
+            st.items_tool(report).description,
+            *(json.dumps(index) for index in indexes),
+            *(triage_pack._pack_line(entry) for entry in entries),
+            *(json.dumps(answer) for answer in answers),
+            st.ITEMS_NO_SECTION,
+            st.ITEMS_BAD_PID,
+            st.ITEMS_SIGNATURE_SECTION,
+            triage_pack.SECTIONS_SERVED_BY,
+            ITEM_NOT_IN_RUN.format(item="proc:9"),
+            _roots.NO_ITEM.format(item="proc:9"),
+            _roots.ITEM_ROW_UNREAD.format(item="net:9"),
+            _roots.ITEM_NO_PID,
+            *(_roots.ITEM_UNPLACED.format(section=name) for name in ss.SECTION_PREFIXES),
+            *(
+                ss.NO_NORMALISED.format(provider=provider, section=name)
+                for provider in ("triage", "rest", "upload")
+                for name in ss.SECTION_PREFIXES
+            ),
+            json.dumps(ss.section_index(report, ("triage", "triage"))),
+            json.dumps(ss.section_index(report, ("upload", "triage", "overview"))),
+            json.dumps(ss.section_index(report, ("cape2", "cape2"))),
+            json.dumps(st.sandbox_items(report, "files", normalised_by=("rest", "generic"))),
+            json.dumps(st.sandbox_items(report, "signatures", pid=7)),
+            *(ss.NO_OVERVIEW.format(provider="upload", section=n) for n in ss.SECTION_PREFIXES),
+            *(ss.NO_PID_ROWS.format(section=n) for n in ss.SECTION_PREFIXES),
+            ITEM_UNREAD.format(item="net:1"),
+        ]
+    )
 
 
 # Everything else a report model is shown on every run, as plain text.
@@ -1424,6 +1645,9 @@ PROMPTS: dict[str, str] = {
     "the constant sets as the pack line names them": _constant_set_names(),
     "the constant scan's description": _analysis_tool_descriptions("find_crypto_constants"),
     "the function index tool's description": _analysis_tool_descriptions("function_index"),
+    _TRANSFORM_ENTRY: _transform_sentences(),
+    _UPX_ENTRY: _upx_sentences(),
+    _SECTIONS_ENTRY: _sandbox_sections_sentences(),
     "a term's example ids and how many more": _term_ids_said(["T1000", "T1001", "T1002"]),
     "run-state budget line of a loop with no limit": budget_line(NO_LIMIT, NO_LIMIT),
     "ask tool budget sentence with no limit": _what_an_ask_gets_sentence("lead", None, None),
@@ -1879,12 +2103,126 @@ def _without_the_listed_vocabulary(text: str) -> str:
     return text.replace(_LISTED_VOCABULARY, " ")
 
 
+# The byte transform tool's operation names. The tool lists every operation
+# side by side and runs whichever one a model names, so a name says nothing
+# about which one a sample uses: that pairing only comes from the model's own
+# call on the sample's bytes. The allowance is the tool's own operation list,
+# and only where a name stands as an identifier: between backticks, or as the
+# value of a step's ``op`` in an answer. The same name written as a word, in
+# this entry or any other, is scanned as it stands.
+TRANSFORM_OPERATIONS_NAMED: frozenset[str] = frozenset({_TRANSFORM_ENTRY})
+_OPERATION_ID = re.compile(r'``([a-z0-9]+)``|`([a-z0-9]+)`|"op": "([a-z0-9]+)"')
+
+
+def _without_named_operations(text: str) -> str:
+    """``text`` with each transform operation written as an identifier taken out."""
+    from maljan.tools.transforms import OPERATIONS
+
+    return _OPERATION_ID.sub(
+        lambda match: (
+            " "
+            if (match.group(1) or match.group(2) or match.group(3)) in OPERATIONS
+            else match.group(0)
+        ),
+        text,
+    )
+
+
+# The entry that names the sandbox report's sections and lists as the report
+# names them (``analysis.sandbox_sections``): ``mutexes`` is a section and a
+# CAPE report's own list, ``mutex:<n>`` the form of its items' ids. The
+# allowance is those names, written as identifiers (between backticks, as a
+# JSON string, or as an id prefix before its number) in that entry and nowhere
+# else; the same word written as a word is scanned as it stands.
+SANDBOX_REPORT_NAMES_LISTED: frozenset[str] = frozenset({_SECTIONS_ENTRY})
+_REPORT_NAME_ID = re.compile(
+    r'``([a-z_.]+)``|`([a-z_.]+)`|"([a-z_.]+)(?:\[\d+\])?"|(?<![\w.])([a-z]+):(?=p?\d)'
+)
+
+
+def _report_names() -> frozenset[str]:
+    from maljan.analysis import sandbox_sections as ss
+
+    paths = {f"behavior.summary.{key}" for keys in ss._SUMMARY_LISTS.values() for key in keys} | {
+        key for keys in ss._SUMMARY_LISTS.values() for key in keys
+    }
+    return frozenset({*ss.SECTION_PREFIXES, *ss.SECTION_PREFIXES.values(), *paths})
+
+
+# What an allowed identifier is replaced by: a token no scored term holds, so
+# the words on either side of it cannot join into one.
+_NAME_PLACEHOLDER = "\u27e8id\u27e9"
+# A scored term of more than one word.
+_PHRASES = tuple(term for term in KEY_TERMS if " " in term)
+
+
+def _without_report_names(text: str) -> str:
+    """``text`` with each section or report list name written as an identifier taken out.
+
+    The name is replaced by a placeholder, unless the words around it would
+    read, with the name as a word, as a scored phrase (``the running
+    `processes` list``): then it is left as the word, so the scan reads it.
+    """
+    names = _report_names()
+
+    def _strip(match: re.Match[str]) -> str:
+        name = next(g for g in match.groups() if g is not None)
+        if name not in names:
+            return match.group(0)
+        before = text[max(0, match.start() - 40) : match.start()]
+        after = text[match.end() : match.end() + 40]
+        bare = name.replace("_", " ").replace(".", " ")
+        window = f"{before}{bare}{after}"
+        spans_it = any(
+            phrase in window
+            and window.index(phrase) < len(before) + len(bare)
+            and window.index(phrase) + len(phrase) > len(before)
+            for phrase in _PHRASES
+        )
+        return bare if spans_it else _NAME_PLACEHOLDER
+
+    return _REPORT_NAME_ID.sub(_strip, text)
+
+
 def _scanned(name: str) -> str:
     """The text of one ``PROMPTS`` entry as the scan reads it."""
     text = PROMPTS[name].lower()
+    if name in SANDBOX_REPORT_NAMES_LISTED:
+        text = _without_report_names(text)
     if name in STIX_VOCABULARY_LISTED:
         text = _without_the_listed_vocabulary(text)
+    if name in TRANSFORM_OPERATIONS_NAMED:
+        text = _without_named_operations(text)
     return _without_rendered_identifiers(text) if name in RENDERED_TOOL_OUTPUT else text
+
+
+def test_the_operation_allowance_is_the_tool_s_list_and_only_as_identifiers() -> None:
+    from maljan.tools.transforms import OPERATIONS
+
+    assert TRANSFORM_OPERATIONS_NAMED <= set(PROMPTS)
+    assert all(re.fullmatch(r"[a-z0-9]+", name) for name in OPERATIONS)
+    assert "xor" not in _without_named_operations('use ``xor`` or `rc4`; {"op": "base64"}')
+    # Written as words they are scanned as they stand, and an identifier the
+    # tool does not list is not let through either.
+    sentence = "the replies are base64 encoded, then xor with a key, `beacon`"
+    assert _without_named_operations(sentence) == sentence
+
+
+def test_the_report_name_allowance_is_the_section_names_and_only_as_identifiers() -> None:
+    assert SANDBOX_REPORT_NAMES_LISTED <= set(PROMPTS)
+    said = '`mutexes` 1 (mutex:1); "kind": "mutexes", "behavior.summary.mutexes[0]"'
+    assert "mutex" not in _without_report_names(said)
+    # Written as a word it is scanned as it stands, and a name the sections
+    # module does not list is not let through either.
+    sentence = "the sample creates a mutex, then `beacon` and beacon:1"
+    assert _without_report_names(sentence) == sentence
+    # A name that makes a scored phrase with the words beside it is read as the word.
+    joined = _without_report_names("the running `processes` list")
+    assert "running processes" in joined
+    # The placeholder joins nothing: no scored phrase spans it.
+    stripped = _without_report_names("mac `mutexes` address")
+    assert _NAME_PLACEHOLDER in stripped
+    assert not [term for term in KEY_TERMS if term in stripped]
 
 
 @pytest.mark.parametrize("tid", sorted(load_cards()))

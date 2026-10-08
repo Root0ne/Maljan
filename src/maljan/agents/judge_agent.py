@@ -116,7 +116,7 @@ from maljan.pipeline.validation import (
     unsupported_malware_violations,
     validate_verdict_bundle,
 )
-from maljan.schemas.evidence import EvidenceCounter, LedgerEntry
+from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, answers_held
 from maljan.schemas.isr_models import AgentISR
 from maljan.schemas.stix_models import Bundle
 
@@ -2100,14 +2100,14 @@ class JudgeAgent(BudgetMeter):
                     # turn, not the loop's clock. With something gathered the
                     # reasoning is written from it, as an analyst's is.
                     deadline_said["why"] = f"model call deadline: {exc}"
-                    if not recorder.entries:
+                    if not answers_held(recorder.entries):
                         raise
                     ended["call_deadline"] = True
                 except Exception as exc:
                     # Only a provider's own full-window answer, and only once
                     # something was gathered; anything else fails the judge's
                     # loop as it always did.
-                    if not (window_full_error(exc) and recorder.entries):
+                    if not (window_full_error(exc) and answers_held(recorder.entries)):
                         raise
                     ended["window_full"] = True
                     note_a_window_that_moved(exc)

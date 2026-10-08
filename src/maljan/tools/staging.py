@@ -71,6 +71,12 @@ JOB_DIRECTORY_PREFIX = "job-"
 # an earlier job's whole network capture.
 CAPTURES_DIRECTORY = "captures"
 
+# The child of a job directory every file written out of a sample lands in,
+# under the sample's SHA-256: the analysis server's ``carve_payloads`` and
+# ``unpack_upx``, and the triage pack's unpacking, write there, and the
+# server's ``carved_path`` reads only there.
+CARVED_DIRECTORY = "carved"
+
 # Where the release before this fetched captures. Written by nothing now; the
 # sweep still reaches it, because it is this project's directory and what is
 # in it is somebody's traffic.
