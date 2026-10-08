@@ -101,6 +101,7 @@ _TEB_OPERAND = re.compile(r"\bFS:\[0x(?:30|18)\]", re.IGNORECASE)
 # writes: ``mov r64, gs:[disp32]`` (GS prefix, REX.W with or without REX.R,
 # 8B, a ModRM of mod 00 and rm 100 with any register, SIB 25, the address) and
 # ``mov rax, gs:[moffs64]`` (GS prefix, REX.W, A1, the address in eight bytes).
+_AMD64_MACHINE = 0x8664
 _GS_READ = re.compile(
     rb"\x65[\x48\x4c]\x8b[\x04\x0c\x14\x1c\x24\x2c\x34\x3c]\x25([\x30\x60])\x00\x00\x00"
     rb"|\x65\x48\xa1([\x30\x60])\x00{7}",
@@ -364,28 +365,50 @@ def _int3_is_a_trap(code: _Code, offset: str) -> bool:
 
 
 def gs_reads(image: Any) -> list[dict[str, Any]]:
-    """The GS:[0x60] and GS:[0x30] reads in an x64 file's code bytes, as TEB/PEB rows.
+    """The GS:[0x60] and GS:[0x30] reads in an AMD64 file's code bytes, as TEB/PEB rows.
 
     Each is a ``peb_teb_access`` row as a Ghidra FS read is: its ``what`` the
     operand and the bytes read (``GS:[0x60] read (65 48 8b 04 25 60 00 00
-    00)``) and its offset from the image base. No row for a 32-bit file or
-    for no image.
+    00)``) and its offset from the image base. Where the file's own function
+    table (``.pdata``) holds the address, the row is read only when a decode
+    from the start of that range lands on it as an instruction's start (the
+    same bytes inside another instruction are no read), and it carries the
+    function that range belongs to (``owner``), which is the function its
+    agreement with capa is asked about. Outside every range the byte match
+    alone is read and the row names no owner. The same file bytes mapped by
+    two sections are one row. No row for a file whose machine field is not
+    AMD64, or for no image.
     """
-    if image is None or not getattr(image, "is64", False):
+    from maljan.tools.call_sites import _begins_an_instruction
+
+    if image is None or getattr(image, "machine", 0) != _AMD64_MACHINE:
         return []
     rows: list[dict[str, Any]] = []
+    seen: set[int] = set()
     for section in image.code_sections():
         code = image.section_bytes(section)
         for match in _GS_READ.finditer(code):
+            raw = section.raw_offset + match.start()
+            if raw in seen:
+                continue
+            rva = section.rva + match.start()
+            owner = image.function_at(rva)
+            bounds = image.function_bounds(rva) if owner is not None else None
+            if bounds is not None and not _begins_an_instruction(
+                code, section.rva, bounds[0], rva, True
+            ):
+                continue
+            seen.add(raw)
             address = (match.group(1) or match.group(2))[0]
             said = " ".join(f"{byte:02x}" for byte in match.group())
-            rows.append(
-                {
-                    "category": _TEB_CATEGORY,
-                    "what": f"GS:[{address:#x}] read ({said})",
-                    "offset": hex(section.rva + match.start()),
-                }
-            )
+            row = {
+                "category": _TEB_CATEGORY,
+                "what": f"GS:[{address:#x}] read ({said})",
+                "offset": hex(rva),
+            }
+            if owner is not None:
+                row["owner"] = hex(owner)
+            rows.append(row)
     return rows
 
 

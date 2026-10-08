@@ -156,7 +156,10 @@ class TestWhatIsStated:
                 0x70: b"\x65\x48\x8b\x04\x25\x58\x00\x00\x00",
                 # mov rax, gs:[0x60] through a 64-bit offset
                 0x90: b"\x65\x48\xa1\x60\x00\x00\x00\x00\x00\x00\x00",
-            }
+            },
+            # A function table that does not cover these bytes: the byte
+            # match alone is read (the placed case has its own tests).
+            functions=[(0x1200, 0x1300)],
         )
         fs = {
             "category": "peb_teb_access",

@@ -96,6 +96,8 @@ class Image:
     is64: bool
     size_of_image: int
     sections: list[Section] = field(default_factory=list)
+    # The COFF header's machine field (0x8664 for AMD64, 0x14c for i386).
+    machine: int = 0
     # The ranges of ``.pdata``, sorted by their begin: the begin, the end
     # (exclusive) and the start of the function each belongs to (a chained
     # fragment's primary entry), ``None`` when a chain could not be followed.
@@ -401,6 +403,7 @@ def parse(data: bytes) -> Image:
         is64=is64,
         size_of_image=size_of_image,
         sections=sections,
+        machine=machine,
     )
     if directory_count > _IMPORT_DIRECTORY:
         entry = directories + _IMPORT_DIRECTORY * 8

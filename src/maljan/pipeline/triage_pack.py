@@ -2934,7 +2934,10 @@ def _anti_analysis_with_capa(
             by_start.setdefault(begin, []).append((rule, namespace, said))
 
     def agreeing(row: dict[str, Any]) -> list[dict[str, str]]:
-        begin = start_of(str(row.get("offset") or ""))
+        # A row the file's own function table placed (``ghidra_passes.gs_reads``)
+        # is asked about that function; any other by the nearest capa start.
+        owner = row.get("owner")
+        begin = int(str(owner), 16) if owner else start_of(str(row.get("offset") or ""))
         if begin is None:
             return []
         kind = scan_kind(row)

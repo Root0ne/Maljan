@@ -493,7 +493,14 @@ names the rule. Ghidra's scan looks for FS reads only, so an x64 file's code
 bytes are read for the GS ones (`ghidra_passes.gs_reads`): a GS-prefixed
 `mov r64, gs:[0x60]` or `gs:[0x30]` (`65 48 8b 04 25` and the address, or
 `65 48 a1` and an eight-byte address) is a TEB/PEB row beside the FS ones,
-stated the same way. A capa rule agrees with a row of the kind it states, read off
+stated the same way, in a file whose machine field is AMD64. Where the file's
+own function table (`.pdata`) holds the address, the read counts only as an
+instruction start in a decode from that range's start, and it agrees with
+capa only through the function that range belongs to, so a library function
+capa leaves out is never taken for the user function before it; outside every
+range the byte match alone is read and the nearest capa function start is
+asked, as for an FS row. The same file bytes mapped by two sections are one
+row. A capa rule agrees with a row of the kind it states, read off
 capa's own namespaces and rule names (`ghidra_passes.CAPA_NAMESPACE_KINDS`):
 a `debugger-detection` rule with an `RDTSC`, an `INT3`, an `INT 0x2d` or a
 TEB/PEB read, a `vm-detection` rule with a hypervisor `CPUID`, `SIDT`, `SGDT`,
