@@ -127,7 +127,7 @@ OFFSET_UNPLACED = (
 )
 NO_ITEM = "no: {item} is not an item of this run's sandbox report"
 ITEM_ROW_UNREAD = "no: no answer in this run's ledger holds the row of {item}"
-ITEM_UNPLACED = "no: a sandbox {section} item names no process, flow or query to place"
+ITEM_UNPLACED = "no: a sandbox `{section}` item names no process, flow or query to place"
 ITEM_NO_PID = "no: the report states no pid for this process"
 BLOB_UNMATCHED = (
     "no: the call site holds blobs the blob decoder read, and none of them decodes to this text"

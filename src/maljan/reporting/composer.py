@@ -30,7 +30,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.agents.base_agent import retry_on_connection_error
-from maljan.analysis.sandbox_sections import is_item_id
+from maljan.analysis.sandbox_sections import ItemIndex
 from maljan.core.config import REPORTER_AGENT_KEY
 from maljan.core.logger import logger
 from maljan.core.spend import (
@@ -77,7 +77,7 @@ from maljan.reporting.evidence_bundles import (
     is_empty,
     sample_flow_fact,
     sandbox_entry_ids,
-    sandbox_item_citations,
+    sandbox_item_observation,
     sandbox_saw_no_persistence,
 )
 from maljan.reporting.models import (
@@ -703,6 +703,8 @@ class ReportComposer:
         # Each ledger entry's text, set per ``compose`` call; ``None`` judges
         # no citation against an entry and annotates no claim.
         self._entries: EntryTexts | None = None
+        # The run's sandbox section index, set per ``compose`` call.
+        self._items: ItemIndex | None = None
         # The IOC table's answers, set per ``compose`` call; ``None`` asks no
         # section about a value's publish state.
         self._answers: Any = None
@@ -721,6 +723,7 @@ class ReportComposer:
         run_state: str = "",
         citable_ids: Sequence[str] | None = None,
         evidence: EntryTexts | None = None,
+        items: ItemIndex | None = None,
     ) -> None:
         """Fill report.intro_background / technical_analysis / c2_channels.
 
@@ -750,6 +753,8 @@ class ReportComposer:
         # text, where a sample's decoded string can carry any.
         self._citable = list(citable_ids) if citable_ids is not None else pack_line_ids(facts_block)
         self._entries = evidence
+        # The run's sandbox section index: an item id is cited as an entry is.
+        self._items = items
         # The IOC table's answer for each value, so a section naming a value
         # this run does not publish is asked to write its state beside it.
         self._answers = _published_answers(report)
@@ -769,10 +774,10 @@ class ReportComposer:
         # execution step marked observed has to cite one of the second, and a
         # configuration value said to be decrypted one of the first.
         # A sandbox item id (``proc:84``, ``net:3``) the run's report holds is
-        # cited as an entry is: ``citable`` carries the run's item ids.
-        items = [value for value in self._citable if is_item_id(value)]
-        known_ids = [*(row.id for row in report.evidence_index), *items]
-        sandbox_ids = [*sandbox_entry_ids(report), *sandbox_item_citations(report, items)]
+        # cited as an entry is, checked against the run's section index.
+        known_ids = [row.id for row in report.evidence_index]
+        sandbox_ids = sandbox_entry_ids(report)
+        observed_item = sandbox_item_observation(report, self._items)
         # Which tool answered each entry, so a question names what a step
         # cites; and what the sandbox says about a flow to each value a step
         # names.
@@ -791,7 +796,11 @@ class ReportComposer:
             _INSTRUCTIONS["execution_flow"],
             validators=[
                 lambda p: flow_voice_violations(
-                    p, sandbox_ids, tools=entry_tools, flow_fact=flow_fact
+                    p,
+                    sandbox_ids,
+                    tools=entry_tools,
+                    flow_fact=flow_fact,
+                    observed_item=observed_item,
                 ),
                 lambda p: persistence_not_observed_violations(
                     p, saw_no_persistence, section="execution_flow"
@@ -836,7 +845,7 @@ class ReportComposer:
             _ConfigOut,
             _INSTRUCTIONS["configuration"],
             validators=[
-                lambda p: configuration_citation_violations(p, known_ids),
+                lambda p: configuration_citation_violations(p, known_ids, self._items),
                 lambda p: stated_value_violations(p, self._entries),
             ],
         )
@@ -851,7 +860,7 @@ class ReportComposer:
             _HostIdentifiersOut,
             _INSTRUCTIONS["host_identifiers"],
             validators=[
-                lambda p: identifier_citation_violations(p, known_ids),
+                lambda p: identifier_citation_violations(p, known_ids, self._items),
                 lambda p: stated_value_violations(p, self._entries),
             ],
         )
@@ -1217,7 +1226,7 @@ class ReportComposer:
                 answer = result.model_dump()
                 found = [
                     *section_capability_violations(answer, self._grounding),
-                    *citation_violations(answer, citable, prose=prose),
+                    *citation_violations(answer, citable, prose=prose, items=self._items),
                     *wrong_entry_citations(answer, entries, prose=prose),
                     *misstated_entry_contents(answer, entries, prose=prose),
                     *technique_name_violations(answer),
@@ -1354,7 +1363,7 @@ class ReportComposer:
             found = [
                 *schema_violations(schema, payload, code="composer.schema"),
                 *section_capability_violations(payload, self._grounding),
-                *citation_violations(payload, citable, prose=prose),
+                *citation_violations(payload, citable, prose=prose, items=self._items),
                 *wrong_entry_citations(payload, entries, prose=prose),
                 *misstated_entry_contents(payload, entries, prose=prose),
                 *technique_name_violations(payload),

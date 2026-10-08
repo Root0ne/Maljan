@@ -130,6 +130,7 @@ from maljan.pipeline.validation import (
     ANALYST_FEEDBACK_CLOSING,
     FUNCTION_CHECK_HEAD,
     FUNCTION_CHECK_NOT_ASKED_HEAD,
+    ITEM_NOT_IN_RUN,
     MALWARE_TYPES,
     UNATTRIBUTED_INDICATOR_CODE,
     CapabilityGrounding,
@@ -904,6 +905,64 @@ def _upx_sentences() -> str:
     )
 
 
+_SECTIONS_ENTRY = (
+    "the sandbox report's section index, its item query and what an item citation is told"
+)
+
+
+def _sandbox_sections_sentences() -> str:
+    """What the sandbox sections tell a model: the index, the tool, its answers, the questions."""
+    from maljan.analysis import sandbox_sections as ss
+    from maljan.providers import sandbox_tools as st
+    from maljan.schemas.evidence import LedgerEntry
+
+    report: dict[str, Any] = {
+        "behavior": {
+            "processes": [
+                {"pid": 7, "ppid": 1, "process_name": "a.exe", "command_line": "a.exe /q"},
+                {"process_name": "b.exe"},
+            ],
+            "summary": {"keys": ["HKCU\\x"], "files": []},
+        },
+        "network": {"tcp": [{"dst": "192.0.2.1", "dport": 1}], "dns": []},
+        "signatures": [{"name": "s", "severity": 1}],
+        "dropped": [],
+        "unavailable": ["calls", "registry", "generic_events", "apistats", "screenshots"],
+    }
+    # Every no: sentence: a report that holds nothing, and one that lists
+    # every section its sandbox does not record.
+    indexes = [ss.section_index({}), ss.section_index(report)]
+    entries = [
+        LedgerEntry(id=f"ev_000{i}", tool=ss.SECTIONS_TOOL, structured=index)
+        for i, index in enumerate(indexes, 1)
+    ]
+    answers = [
+        st.sandbox_items(report, "processes"),
+        st.sandbox_items(report, "network", ids=["net:1", "net:9"]),
+        st.sandbox_items(report, "registry"),
+        st.sandbox_items(report, "nope"),
+        st.sandbox_items(report, "processes", pid="x"),
+        st.sandbox_items(report, "network", signature="sig:1"),
+    ]
+    return " ".join(
+        [
+            st.items_tool(report).description,
+            *(json.dumps(index) for index in indexes),
+            *(triage_pack._pack_line(entry) for entry in entries),
+            *(json.dumps(answer) for answer in answers),
+            st.ITEMS_NO_SECTION,
+            st.ITEMS_BAD_PID,
+            st.ITEMS_SIGNATURE_SECTION,
+            triage_pack.SECTIONS_SERVED_BY,
+            ITEM_NOT_IN_RUN.format(item="proc:9"),
+            _roots.NO_ITEM.format(item="proc:9"),
+            _roots.ITEM_ROW_UNREAD.format(item="net:9"),
+            _roots.ITEM_NO_PID,
+            *(_roots.ITEM_UNPLACED.format(section=name) for name in ss.SECTION_PREFIXES),
+        ]
+    )
+
+
 # Everything else a report model is shown on every run, as plain text.
 # A network block with one address the sample reached, one the sandbox
 # recorded and does not attribute, a name that resolved to the second, a name
@@ -1573,6 +1632,7 @@ PROMPTS: dict[str, str] = {
     "the function index tool's description": _analysis_tool_descriptions("function_index"),
     _TRANSFORM_ENTRY: _transform_sentences(),
     _UPX_ENTRY: _upx_sentences(),
+    _SECTIONS_ENTRY: _sandbox_sections_sentences(),
     "a term's example ids and how many more": _term_ids_said(["T1000", "T1001", "T1002"]),
     "run-state budget line of a loop with no limit": budget_line(NO_LIMIT, NO_LIMIT),
     "ask tool budget sentence with no limit": _what_an_ask_gets_sentence("lead", None, None),
@@ -2053,9 +2113,43 @@ def _without_named_operations(text: str) -> str:
     )
 
 
+# The entry that names the sandbox report's sections and lists as the report
+# names them (``analysis.sandbox_sections``): ``mutexes`` is a section and a
+# CAPE report's own list, ``mutex:<n>`` the form of its items' ids. The
+# allowance is those names, written as identifiers (between backticks, as a
+# JSON string, or as an id prefix before its number) in that entry and nowhere
+# else; the same word written as a word is scanned as it stands.
+SANDBOX_REPORT_NAMES_LISTED: frozenset[str] = frozenset({_SECTIONS_ENTRY})
+_REPORT_NAME_ID = re.compile(
+    r'``([a-z_.]+)``|`([a-z_.]+)`|"([a-z_.]+)(?:\[\d+\])?"|(?<![\w.])([a-z]+):(?=p?\d)'
+)
+
+
+def _report_names() -> frozenset[str]:
+    from maljan.analysis import sandbox_sections as ss
+
+    paths = {f"behavior.summary.{key}" for keys in ss._SUMMARY_LISTS.values() for key in keys} | {
+        key for keys in ss._SUMMARY_LISTS.values() for key in keys
+    }
+    return frozenset({*ss.SECTION_PREFIXES, *ss.SECTION_PREFIXES.values(), *paths})
+
+
+def _without_report_names(text: str) -> str:
+    """``text`` with each section or report list name written as an identifier taken out."""
+    names = _report_names()
+    return _REPORT_NAME_ID.sub(
+        lambda match: (
+            " " if next(g for g in match.groups() if g is not None) in names else match.group(0)
+        ),
+        text,
+    )
+
+
 def _scanned(name: str) -> str:
     """The text of one ``PROMPTS`` entry as the scan reads it."""
     text = PROMPTS[name].lower()
+    if name in SANDBOX_REPORT_NAMES_LISTED:
+        text = _without_report_names(text)
     if name in STIX_VOCABULARY_LISTED:
         text = _without_the_listed_vocabulary(text)
     if name in TRANSFORM_OPERATIONS_NAMED:
@@ -2073,6 +2167,16 @@ def test_the_operation_allowance_is_the_tool_s_list_and_only_as_identifiers() ->
     # tool does not list is not let through either.
     sentence = "the replies are base64 encoded, then xor with a key, `beacon`"
     assert _without_named_operations(sentence) == sentence
+
+
+def test_the_report_name_allowance_is_the_section_names_and_only_as_identifiers() -> None:
+    assert SANDBOX_REPORT_NAMES_LISTED <= set(PROMPTS)
+    said = '`mutexes` 1 (mutex:1); "kind": "mutexes", "behavior.summary.mutexes[0]"'
+    assert "mutex" not in _without_report_names(said)
+    # Written as a word it is scanned as it stands, and a name the sections
+    # module does not list is not let through either.
+    sentence = "the sample creates a mutex, then `beacon` and beacon:1"
+    assert _without_report_names(sentence) == sentence
 
 
 @pytest.mark.parametrize("tid", sorted(load_cards()))

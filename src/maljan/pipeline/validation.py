@@ -24,7 +24,7 @@ import bisect
 import ipaddress
 import json
 import re
-from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, get_args, get_origin
 
@@ -37,7 +37,7 @@ from maljan.agents.run_evidence_corpus import CorpusState, both_searched
 # re-exported here, where every reader of a run's validation looks for them.
 from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
-from maljan.analysis.sandbox_sections import is_item_id, item_ids_in
+from maljan.analysis.sandbox_sections import ItemIndex, is_item_id, item_ids_in
 from maljan.analysis.technique_ids import MITRE_ATTACK_SOURCES, TECHNIQUE_ID_EXACT_RE
 from maljan.core.logger import logger
 from maljan.core.spend import validation_retry
@@ -482,7 +482,9 @@ def _cited_items(claim: Any) -> list[str]:
     return item_ids_in(str(getattr(claim, "evidence_ref", "") or ""))
 
 
-def _cites_a_ledger_entry(claim: Any, cited_by_findings: set[str], citable: set[str]) -> bool:
+def _cites_a_ledger_entry(
+    claim: Any, cited_by_findings: set[str], citable: set[str], items: ItemIndex | None = None
+) -> bool:
     """Whether a claim points at something the run actually recorded.
 
     Two ways, and only two. The evidence line is where the claim format asks
@@ -498,7 +500,7 @@ def _cites_a_ledger_entry(claim: Any, cited_by_findings: set[str], citable: set[
     if entry_ids_in(str(getattr(claim, "evidence_ref", "") or "")) & citable:
         return True
     # A sandbox item id is cited as an entry is, when the run's report holds it.
-    if any(item in citable for item in _cited_items(claim)):
+    if items is not None and any(items.known(item) for item in _cited_items(claim)):
         return True
     technique = str(getattr(claim, "technique_id", "") or "").strip().upper()
     return bool(technique and technique in cited_by_findings)
@@ -514,6 +516,7 @@ def validate_isr(
     alignment_threshold: float = 0.05,
     alignment_margin: float = ALIGNMENT_MARGIN,
     weak_alignment_challenges: bool = False,
+    items: ItemIndex | None = None,
 ) -> list[Violation]:
     """What is wrong with one analyst's structured answer.
 
@@ -525,8 +528,9 @@ def validate_isr(
 
     ``ledger_ids`` are the entries this analyst may cite: what its own tool
     calls produced in this run, and the triage pack's entries, which every
-    agent is shown, beside the ids of the items of the run's sandbox report
-    (``analysis.sandbox_sections``). They decide one thing: a technique claim
+    agent is shown; ``items`` is the run's sandbox section index, an item of
+    the report (``analysis.sandbox_sections``) being cited as an entry is.
+    They decide one thing: a technique claim
     that cites none of them is asked for one, and an item id it writes that
     the run's report does not hold is named in that question, as an entry id
     the run never issued is no citation. An analyst with nothing citable at
@@ -547,7 +551,7 @@ def validate_isr(
     """
     citable = [str(i) for i in (ledger_ids or []) if str(i).strip()]
     known = {i.strip().lower() for i in citable}
-    has_items = any(is_item_id(i) for i in citable)
+    has_items = items is not None and items.holds_items
     cited_by_findings = _techniques_cited_by_findings(isr, known)
     violations: list[Violation] = []
     claims = list(getattr(isr, "claims", None) or [])
@@ -605,11 +609,13 @@ def validate_isr(
         # speculative" — and the judge read them as sixteen techniques and said
         # Malware. The analyst is asked to cite the entry it read the technique
         # from or to drop it; nothing here removes the claim or the id.
-        if tid and citable and not _cites_a_ledger_entry(claim, cited_by_findings, known):
-            shown = ", ".join([i for i in citable if not is_item_id(i)][:3] or citable[:3])
+        if tid and citable and not _cites_a_ledger_entry(claim, cited_by_findings, known, items):
+            shown = ", ".join(citable[:3])
             # Named only in a run whose report has items to cite.
             unheld = (
-                [item for item in _cited_items(claim) if item not in known] if has_items else []
+                [i for i in _cited_items(claim) if items is None or not items.known(i)]
+                if has_items
+                else []
             )
             said = (
                 " " + " ".join(ITEM_NOT_IN_RUN.format(item=safe_finding_value(i)) for i in unheld)
@@ -3026,7 +3032,11 @@ ITEM_NOT_IN_RUN = "[{item}] is not an item of this run's sandbox report."
 
 
 def citation_violations(
-    payload: Any, citable: Sequence[str], *, prose: Sequence[str] | None = None
+    payload: Any,
+    citable: Sequence[str],
+    *,
+    prose: Sequence[str] | None = None,
+    items: ItemIndex | None = None,
 ) -> list[Violation]:
     """Each bracketed citation item in ``payload``'s prose that is not an id it may cite.
 
@@ -3037,9 +3047,10 @@ def citation_violations(
     or inline, are not read either.
 
     ``citable`` is the evidence ids the run's ledger issued — never ids read out
-    of the prompt's text, where a sample's own string can carry any — and the
-    ids of the items of the run's sandbox report (``proc:84``, ``net:3``,
-    ``analysis.sandbox_sections``), which are cited as entries are. An item that
+    of the prompt's text, where a sample's own string can carry any — and
+    ``items`` the run's sandbox section index: an item of the report
+    (``proc:84``, ``net:3``, ``analysis.sandbox_sections``) is cited as an
+    entry is, checked against the index without listing its ids. An item that
     is an ATT&CK or MBC identifier is left alone; any other item — a prompt
     block's heading, a source's name, an id the producer was not shown, an item
     id the run's sandbox report does not hold — is one violation, once however
@@ -3058,7 +3069,7 @@ def citation_violations(
         )
     )
     allowed = set(known)
-    items = {str(i).strip().lower() for i in citable if is_item_id(str(i))}
+    held_items = items is not None and items.holds_items
     offered = ", ".join(known[:_CITABLE_SHOWN])
     if len(known) > _CITABLE_SHOWN:
         offered += f" and {len(known) - _CITABLE_SHOWN} more"
@@ -3081,9 +3092,9 @@ def citation_violations(
                     if item.lower() in allowed:
                         continue
                     why = f"[{safe_finding_value(item)}] is not an entry this answer was shown."
-                elif items and is_item_id(item):
+                elif held_items and items is not None and is_item_id(item):
                     # Read as an item id only in a run whose report has items.
-                    if item.lower() in items:
+                    if items.known(item):
                         continue
                     why = ITEM_NOT_IN_RUN.format(item=safe_finding_value(item))
                 elif _IDENTIFIER_RE.fullmatch(item) or _IPV6_RE.fullmatch(item):
@@ -4051,7 +4062,14 @@ def _cited(row: dict[str, Any], key: str) -> list[str]:
     return [str(value).strip() for value in (row.get(key) or []) if str(value).strip()]
 
 
-def key_finding_citation_violations(payload: Any, known_ids: Iterable[str]) -> list[Violation]:
+def _held(value: str, known: set[str], items: ItemIndex | None) -> bool:
+    """Whether a cited value is an entry the run issued or an item its report holds."""
+    return value in known or (items is not None and items.known(value))
+
+
+def key_finding_citation_violations(
+    payload: Any, known_ids: Iterable[str], items: ItemIndex | None = None
+) -> list[Violation]:
     """Key findings that cite an evidence id this run's ledger does not carry.
 
     A bullet with no ids is not a finding here: the report prints it with "no
@@ -4064,7 +4082,11 @@ def key_finding_citation_violations(payload: Any, known_ids: Iterable[str]) -> l
         return []
     out: list[Violation] = []
     for index, row in enumerate(_rows_of(payload, "key_findings")):
-        unknown = [value for value in _cited(row, "evidence_ids") if value not in known]
+        unknown = [
+            value
+            for value in _cited(row, "evidence_ids")
+            if value not in known and not (items is not None and items.known(value))
+        ]
         if unknown:
             out.append(
                 Violation(
@@ -4556,12 +4578,33 @@ def _step_order(row: Mapping[str, Any], index: int) -> str:
     return str(index + 1 if order is None or order == "" else order)
 
 
+class _ObservedCitations:
+    """The sandbox entry ids, and the item ids the run's index holds, as one membership test."""
+
+    def __init__(self, entries: set[str], observed_item: Callable[[str], bool] | None) -> None:
+        self.entries = entries
+        self.observed_item = observed_item
+
+    def __contains__(self, value: object) -> bool:
+        text = str(value)
+        if text in self.entries:
+            return True
+        return self.observed_item is not None and is_item_id(text) and self.observed_item(text)
+
+    def __bool__(self) -> bool:
+        return bool(self.entries)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.entries)
+
+
 def flow_voice_violations(
     payload: Any,
     sandbox_ids: Iterable[str],
     *,
     tools: Mapping[str, str] | None = None,
     flow_fact: Callable[[str, str], str] | None = None,
+    observed_item: Callable[[str], bool] | None = None,
 ) -> list[Violation]:
     """Execution-flow steps marked ``observed`` that the sandbox did not watch whole.
 
@@ -4573,9 +4616,12 @@ def flow_voice_violations(
     statement of an observed step is one the sandbox watched; and one that
     names an address or a host the sandbox attributes no flow of the sample
     to (``flow_fact``, :func:`reporting.evidence_bundles.sample_flow_fact`),
-    since a network step is observed for its own value.
+    since a network step is observed for its own value. ``observed_item``
+    says whether a cited sandbox item id is an observation
+    (``evidence_bundles.sandbox_item_observation``): an item is cited as the
+    sandbox answer holding it is.
     """
-    sandbox = {str(value) for value in sandbox_ids}
+    sandbox = _ObservedCitations({str(value) for value in sandbox_ids}, observed_item)
     out: list[Violation] = []
     for index, row in enumerate(_rows_of(payload, "steps")):
         if str(row.get("voice") or "").strip().lower() != "observed":
@@ -4732,7 +4778,9 @@ def persistence_not_observed_violations(
     ]
 
 
-def configuration_citation_violations(payload: Any, known_ids: Iterable[str]) -> list[Violation]:
+def configuration_citation_violations(
+    payload: Any, known_ids: Iterable[str], items: ItemIndex | None = None
+) -> list[Violation]:
     """Configuration values said to be decrypted or observed that cite no entry.
 
     A value read off the wire or out of a decryption routine was read from a
@@ -4746,7 +4794,7 @@ def configuration_citation_violations(payload: Any, known_ids: Iterable[str]) ->
         if how not in ("decrypted", "observed"):
             continue
         cited = _cited(row, "evidence_refs")
-        if cited and (not known or any(value in known for value in cited)):
+        if cited and (not known or any(_held(value, known, items) for value in cited)):
             continue
         out.append(
             Violation(
@@ -4763,7 +4811,9 @@ def configuration_citation_violations(payload: Any, known_ids: Iterable[str]) ->
     return out
 
 
-def identifier_citation_violations(payload: Any, known_ids: Iterable[str]) -> list[Violation]:
+def identifier_citation_violations(
+    payload: Any, known_ids: Iterable[str], items: ItemIndex | None = None
+) -> list[Violation]:
     """Host identifiers that cite no entry of this run's evidence.
 
     An identifier is a value the report model says it read, and the entry it
@@ -4776,7 +4826,7 @@ def identifier_citation_violations(payload: Any, known_ids: Iterable[str]) -> li
     out: list[Violation] = []
     for index, row in enumerate(_rows_of(payload, "identifiers")):
         cited = [value.lower() for value in _cited(row, "evidence_refs")]
-        if cited and (not known or any(value in known for value in cited)):
+        if cited and (not known or any(_held(value, known, items) for value in cited)):
             continue
         out.append(
             Violation(

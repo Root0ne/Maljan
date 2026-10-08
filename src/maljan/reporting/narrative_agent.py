@@ -31,7 +31,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.agents.base_agent import retry_on_connection_error
-from maljan.analysis.sandbox_sections import is_item_id
+from maljan.analysis.sandbox_sections import ItemIndex
 from maljan.core.config import REPORTER_AGENT_KEY
 from maljan.core.logger import logger
 from maljan.core.spend import (
@@ -562,6 +562,8 @@ class NarrativeAgent:
         self.output_cap = int(output_cap or 0)
         self.budget_note = budget_note
         self.generation_rates = generation_rates
+        # The run's sandbox section index, set per ``generate`` call.
+        self._items: ItemIndex | None = None
         # The narrative round is a real LLM call and counts toward the run's
         # token total on both paths: the structured one asks for the raw turn
         # beside the parsed answer, because the parser hides the usage.
@@ -715,6 +717,7 @@ class NarrativeAgent:
         run_state: str = "",
         citable_ids: Sequence[str] | None = None,
         evidence: EntryTexts | None = None,
+        items: ItemIndex | None = None,
     ) -> NarrativeOutput | None:
         """Return a ``NarrativeOutput`` or ``None`` if both paths fail.
 
@@ -745,8 +748,8 @@ class NarrativeAgent:
         # The entries a key finding may cite: the ledger's, which the pack's
         # own entries are part of.
         known_ids = [row.id for row in report.evidence_index]
-        # A sandbox item id the run's report holds is cited as an entry is.
-        known_ids += [value for value in citable_ids or () if is_item_id(str(value))]
+        # The run's sandbox section index: an item id is cited as an entry is.
+        self._items = items
         # The ids a bracketed citation in the prose may name: the ones the
         # run's ledger issued, or, handed none, the report's evidence index
         # and the pack's own line ids — never ids read out of prompt text,
@@ -872,8 +875,10 @@ class NarrativeAgent:
                 [
                     lambda p: schema_violations(NarrativeOutput, p, code="narrative.schema"),
                     lambda p: narrative_capability_violations(p, grounding),
-                    lambda p: key_finding_citation_violations(p, known_ids),
-                    lambda p: citation_violations(p, citable, prose=NARRATIVE_PROSE),
+                    lambda p: key_finding_citation_violations(p, known_ids, self._items),
+                    lambda p: citation_violations(
+                        p, citable, prose=NARRATIVE_PROSE, items=self._items
+                    ),
                     lambda p: wrong_entry_citations(p, evidence, prose=NARRATIVE_PROSE),
                     lambda p: misstated_entry_contents(p, evidence, prose=NARRATIVE_PROSE),
                     technique_name_violations,
@@ -956,8 +961,8 @@ class NarrativeAgent:
         answer = output.model_dump()
         found = [
             *narrative_capability_violations(answer, grounding),
-            *key_finding_citation_violations(answer, known_ids or []),
-            *citation_violations(answer, citable, prose=NARRATIVE_PROSE),
+            *key_finding_citation_violations(answer, known_ids or [], self._items),
+            *citation_violations(answer, citable, prose=NARRATIVE_PROSE, items=self._items),
             *wrong_entry_citations(answer, evidence, prose=NARRATIVE_PROSE),
             *misstated_entry_contents(answer, evidence, prose=NARRATIVE_PROSE),
             *technique_name_violations(answer),

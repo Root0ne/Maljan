@@ -27,11 +27,20 @@ from maljan.pipeline.validation import (
 )
 from maljan.providers import sandbox_tools
 from maljan.providers.cape_view import to_cape_shaped_dict
+from maljan.reporting.evidence_bundles import sandbox_item_observation
+from maljan.reporting.models import (
+    FileHashes,
+    MalwareReport,
+    NetworkIOCs,
+    NetworkIP,
+    SampleIdentity,
+)
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "sandbox"
+IDENTITY = SampleIdentity(hashes=FileHashes(sha256="a" * 64))
 
 
 def _cape() -> dict[str, Any]:
@@ -94,10 +103,10 @@ class TestTheIndex:
         assert index["commands"] == {"items": 0, "prefix": "cmd"}
         # The report lists registry as unavailable, though it holds the lists.
         assert index["registry"] == {
-            "no": "no: the report lists registry as unavailable from its sandbox"
+            "no": "no: the report lists `registry` as unavailable from its sandbox"
         }
-        assert index["dropped"] == {"no": "no: the report holds none of dropped, dropped_files"}
-        assert index["events"] == {"no": "no: the report holds no behavior.generic"}
+        assert index["dropped"] == {"no": "no: the report holds none of `dropped`, `dropped_files`"}
+        assert index["events"] == {"no": "no: the report holds no `behavior.generic`"}
 
     def test_a_triage_report_names_the_sections_its_sandbox_does_not_record(self) -> None:
         index = ss.section_index(_triage())["sections"]
@@ -122,11 +131,11 @@ class TestTheIndex:
         )
         line = triage_pack.render_pack([entry], 0)
 
-        assert line.startswith("[ev_0040] sandbox sections: processes 5 (proc:84, proc:90, ")
-        assert "network 4 (net:1 to net:4)" in line
-        assert "mutexes 1 (mutex:1)" in line
-        assert "commands 0" in line
-        assert "registry no: the report lists registry as unavailable" in line
+        assert line.startswith("[ev_0040] sandbox sections: `processes` 5 (proc:84, proc:90, ")
+        assert "`network` 4 (net:1 to net:4)" in line
+        assert "`mutexes` 1 (mutex:1)" in line
+        assert "`commands` 0" in line
+        assert "`registry` no: the report lists `registry` as unavailable" in line
         assert line.endswith(triage_pack.SECTIONS_SERVED_BY)
 
 
@@ -191,14 +200,14 @@ class TestQuery:
     def test_the_filters_combine(self) -> None:
         found = ss.Sections(REPORT)
 
-        by_pid, _ = found.query("processes", pid="90")
+        by_pid = found.query("processes", pid="90").items
         assert [i["id"] for i in by_pid] == ["proc:90", "proc:90.2"]
-        text, _ = found.query("processes", pid="90", contains="/C Y")
+        text = found.query("processes", pid="90", contains="/C Y").items
         assert [i["id"] for i in text] == ["proc:90.2"]
-        flows, _ = found.query("network", pid="84")
+        flows = found.query("network", pid="84").items
         assert [i["id"] for i in flows] == ["net:4"]
-        named, _ = found.query("signatures", signature="uses task scheduler")
-        by_id, _ = found.query("signatures", signature="sig:2")
+        named = found.query("signatures", signature="uses task scheduler").items
+        by_id = found.query("signatures", signature="sig:2").items
         assert named == by_id and [i["id"] for i in named] == ["sig:2"]
 
     def test_asked_ids_are_found_by_position_and_the_rest_are_named(self) -> None:
@@ -209,9 +218,10 @@ class TestQuery:
         report = {"behavior": {"summary": {"mutexes": _NoWalk(f"m{i}" for i in range(50_000))}}}
         found = ss.Sections(report)
 
-        items, missing = found.query("mutexes", ids=["mutex:49999", "mutex:0", "net:1", "x"])
-        assert [i["fields"]["value"] for i in items] == ["m49998"]
-        assert missing == ["mutex:0", "net:1", "x"]
+        kept = found.query("mutexes", ids=["mutex:49999", "mutex:0", "net:1", "x"])
+        assert [i["fields"]["value"] for i in kept.items] == ["m49998"]
+        assert kept.missing == ["mutex:0", "net:1", "x"]
+        assert kept.not_read == 0
 
     def test_a_deeply_nested_row_is_searched_without_recursion(self) -> None:
         nested: Any = "needle"
@@ -219,8 +229,8 @@ class TestQuery:
             nested = [nested]
         found = ss.Sections({"behavior": {"generic": [{"deep": nested}]}})
 
-        items, _ = found.query("events", contains="NEEDLE")
-        assert [i["id"] for i in items] == ["event:1"]
+        kept = found.query("events", contains="NEEDLE")
+        assert [i["id"] for i in kept.items] == ["event:1"]
 
     def test_hostile_pids_are_no_pid(self) -> None:
         report = {
@@ -263,7 +273,7 @@ class TestTheTool:
         assert sandbox_tools.sandbox_items(REPORT, "nope")["sections"] == list(ss.SECTION_PREFIXES)
         assert sandbox_tools.sandbox_items(REPORT, "registry") == {
             "section": "registry",
-            "no": "no: the report lists registry as unavailable from its sandbox",
+            "no": "no: the report lists `registry` as unavailable from its sandbox",
         }
         assert sandbox_tools.sandbox_items(REPORT, "processes", pid="x1")["error"] == (
             sandbox_tools.ITEMS_BAD_PID
@@ -305,13 +315,12 @@ class TestCitations:
     def test_a_held_item_is_a_citation_and_an_unheld_one_is_asked_once(self) -> None:
         index = ss.ItemIndex.from_answer(ss.section_index(REPORT))
         assert index is not None
-        citable = ["ev_0001", *index.ids()]
         prose = {"body": "Runs rundll32 [proc:84], then [proc:99] and [proc:99] [net:3]."}
 
-        (asked,) = citation_violations(prose, citable)
+        (asked,) = citation_violations(prose, ["ev_0001"], items=index)
         assert asked.code == CITATION_NOT_EVIDENCE_CODE
         assert asked.message.startswith("[proc:99] is not an item of this run's sandbox report.")
-        assert citation_violations({"body": "x [proc:84]"}, citable) == []
+        assert citation_violations({"body": "x [proc:84]"}, ["ev_0001"], items=index) == []
 
     def test_without_an_index_an_item_shaped_bracket_is_asked_as_before(self) -> None:
         (asked,) = citation_violations({"body": "x [proc:84]"}, ["ev_0001"])
@@ -320,7 +329,7 @@ class TestCitations:
     def test_an_analyst_claim_citing_a_held_item_is_grounded(self) -> None:
         index = ss.ItemIndex.from_answer(ss.section_index(REPORT))
         assert index is not None
-        ids = ["ev_0001", *index.ids()]
+        ids = ["ev_0001"]
 
         def _claim(ref: str) -> AgentISR:
             return AgentISR(
@@ -336,11 +345,11 @@ class TestCitations:
                 ],
             )
 
-        held = validate_isr(_claim("process proc:84"), ledger_ids=ids)
+        held = validate_isr(_claim("process proc:84"), ledger_ids=ids, items=index)
         assert not [v for v in held if v.code == UNGROUNDED_TECHNIQUE_CODE]
         (unheld,) = [
             v
-            for v in validate_isr(_claim("process proc:99"), ledger_ids=ids)
+            for v in validate_isr(_claim("process proc:99"), ledger_ids=ids, items=index)
             if v.code == UNGROUNDED_TECHNIQUE_CODE
         ]
         assert "[proc:99] is not an item of this run's sandbox report." in unheld.message
@@ -356,9 +365,22 @@ class TestCitations:
                 }
             ]
         }
-        assert flow_voice_violations(step, ["proc:90"]) == []
+        index = ss.ItemIndex.from_answer(ss.section_index(REPORT))
+        observed = sandbox_item_observation(MalwareReport(identity=IDENTITY), index)
+        assert flow_voice_violations(step, ["ev_0012"], observed_item=observed) == []
         (asked,) = flow_voice_violations(step, ["ev_0012"])
         assert "cites no sandbox entry" in asked.message
+        # A network item is an observation only where the sample's tree made a flow.
+        step["steps"][0]["evidence_refs"] = ["net:4"]
+        assert flow_voice_violations(step, ["ev_0012"], observed_item=observed)
+        reached = MalwareReport(
+            identity=IDENTITY,
+            network=NetworkIOCs(
+                ips=[NetworkIP(address="192.0.2.10", source="sandbox", sample_process_tree=True)]
+            ),
+        )
+        observed = sandbox_item_observation(reached, index)
+        assert flow_voice_violations(step, ["ev_0012"], observed_item=observed) == []
 
 
 class TestRoots:
@@ -379,7 +401,7 @@ class TestRoots:
         found, why = roots.of_statement("posts net:3 and proc:99", [])
         assert found == []
         assert why == [
-            "net:3: no: a sandbox network item names no process, flow or query to place",
+            "net:3: no: a sandbox `network` item names no process, flow or query to place",
             "proc:99: no: proc:99 is not an item of this run's sandbox report",
         ]
 
@@ -409,3 +431,105 @@ class TestRoots:
 def test_the_index_never_raises_on_what_a_report_holds(report: dict[str, Any]) -> None:
     index = ss.section_index(report)
     assert set(index["sections"]) == set(ss.SECTION_PREFIXES)
+
+
+class TestBounds:
+    """Each path is linear in the report and bounded by the section's own size.
+
+    Timed at one size and ten times it: the larger may take at most ten times
+    the smaller, with a margin for the clock, and the memory a query holds is
+    measured, not guessed.
+    """
+
+    @staticmethod
+    def _report(n: int) -> dict[str, Any]:
+        return {
+            "behavior": {
+                "processes": [
+                    {"pid": i, "ppid": i - 1, "process_name": "p.exe", "command_line": f"p {i}"}
+                    for i in range(n)
+                ],
+                "summary": {"keys": [f"HKCU\\k{i}" for i in range(n)]},
+            },
+            "network": {"tcp": [{"dst": "192.0.2.1", "dport": i, "pid": i} for i in range(n)]},
+        }
+
+    @staticmethod
+    def _seconds(call: Any) -> float:
+        import time
+
+        best = float("inf")
+        for _ in range(3):
+            started = time.perf_counter()
+            call()
+            best = min(best, time.perf_counter() - started)
+        return best
+
+    def test_reading_and_querying_grow_linearly(self) -> None:
+        small, large = self._report(10_000), self._report(100_000)
+
+        def _work(report: dict[str, Any]) -> Any:
+            def run() -> None:
+                found = ss.Sections(report)
+                ss.section_index(report)
+                found.query("registry", contains="k99")
+                found.query("network", pid="77")
+                found.query("processes", contains="p 5")
+
+            return run
+
+        assert self._seconds(_work(large)) <= 10 * self._seconds(_work(small)) * 1.5 + 0.05
+
+    def test_a_million_asked_ids_are_read_only_to_the_section_s_size(self) -> None:
+        import tracemalloc
+
+        found = ss.Sections(self._report(1_000))
+        asked = [f"net:{i}" for i in range(1_000_000)]
+        tracemalloc.start()
+        try:
+            kept = found.query("network", ids=asked)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        assert len(kept.items) == 999
+        assert kept.missing == ["net:0"]
+        assert kept.not_read == 1_000_000 - 1_000
+        # The items kept and one set of the ids read, never the million.
+        assert peak < 8 * 1024 * 1024
+
+    def test_a_pid_is_looked_up_in_an_index_built_once(self) -> None:
+        found = ss.Sections(self._report(100_000))
+        found.query("network", pid="5")
+        index = found._pid_index["network"]
+        assert found.query("network", pid="5").items[0]["id"] == "net:6"
+        assert found._pid_index["network"] is index
+
+    def test_a_ten_megabyte_command_line_is_searched_once(self) -> None:
+        import tracemalloc
+
+        line = "a" * (10 * 1024 * 1024) + "needle"
+        report = {"behavior": {"processes": [{"pid": 1, "command_line": line}]}}
+        found = ss.Sections(report)
+        tracemalloc.start()
+        try:
+            kept = found.query("processes", contains="NEEDLE")
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        assert [i["id"] for i in kept.items] == ["proc:1"]
+        # One lower-cased copy of the line at most.
+        assert peak < 2.5 * len(line)
+
+    def test_the_tool_reads_the_report_once_for_the_job(self, monkeypatch: Any) -> None:
+        built: list[int] = []
+        original = ss.Sections.__init__
+
+        def _counting(self: Any, report: Any) -> None:
+            built.append(1)
+            original(self, report)
+
+        monkeypatch.setattr(ss.Sections, "__init__", _counting)
+        tool = sandbox_tools.items_tool(self._report(100))
+        for section in ("processes", "network", "registry"):
+            tool.invoke({"section": section})
+        assert built == [1]

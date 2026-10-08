@@ -6782,12 +6782,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         ledger_ids.extend(
             str(i) for i in (getattr(self, "pack_ledger_ids", None) or []) if str(i).strip()
         )
-        # The items of the run's sandbox report, by the ids the pack's section
-        # index states: a claim cites one as it cites an entry.
-        if ledger_ids:
-            items = item_index_of(getattr(self, "pack_entries", None) or ())
-            if items is not None:
-                ledger_ids.extend(items.ids())
+        # The run's sandbox section index, read off the pack's entry: a claim
+        # cites an item of the report as it cites an entry, each id one lookup.
+        items = item_index_of(getattr(self, "pack_entries", None) or ())
         # The functions this analyst's own calls decompiled: any no claim of
         # the answer names by address or name is listed to it, once.
         decompiled = decompiled_functions(getattr(self, "_evidence_entries", None) or [])
@@ -6955,6 +6952,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     alignment_threshold=threshold,
                     alignment_margin=margin,
                     weak_alignment_challenges=challenges and first,
+                    items=items,
                 ),
             ]
 

@@ -17,10 +17,10 @@ than fabricate — see other/docs/report-reference/ ("state absence explicitly")
 from __future__ import annotations
 
 import ipaddress
-from collections.abc import Iterable
+from collections.abc import Callable
 from typing import Any
 
-from maljan.analysis.sandbox_sections import ITEMS_TOOL, SECTIONS_TOOL, is_item_id
+from maljan.analysis.sandbox_sections import ITEMS_TOOL, SECTIONS_TOOL, ItemIndex
 from maljan.reporting.models import MalwareReport
 
 # Section keys the Composer authors. Kept as plain strings (not an enum) so the
@@ -493,21 +493,26 @@ def sandbox_entry_ids(report: MalwareReport) -> list[str]:
 _NOT_OBSERVATIONS = frozenset({"sandbox_status", SECTIONS_TOOL})
 
 
-def sandbox_item_citations(report: MalwareReport, citable: Iterable[str]) -> list[str]:
-    """The sandbox item ids among ``citable`` a step marked observed may cite.
+def sandbox_item_observation(
+    report: MalwareReport, items: ItemIndex | None
+) -> Callable[[str], bool] | None:
+    """Whether a sandbox item id a step marked observed cites is an observation, or ``None``.
 
-    ``citable`` holds the run's item ids beside its entry ids (``nodes``
-    hands the report models both). An item is one row the sandbox recorded,
-    so it is an observation as the answer holding it is: a network item only
-    when the sandbox attributed a flow to the sample's own tree, by the rule
-    :func:`sandbox_entry_ids` applies to the network answers.
+    ``items`` is the run's section index. An item is one row the sandbox
+    recorded, so it is an observation as the answer holding it is: a network
+    item only when the sandbox attributed a flow to the sample's own tree, by
+    the rule :func:`sandbox_entry_ids` applies to the network answers. One
+    lookup per cited id; no id list is built.
     """
+    if items is None or not items.holds_items:
+        return None
     sample_flow = _sample_tree_made_a_flow(report)
-    return [
-        value
-        for value in (str(v).strip().lower() for v in citable)
-        if is_item_id(value) and (sample_flow or not value.startswith("net:"))
-    ]
+
+    def observed(value: str) -> bool:
+        text = str(value).strip().lower()
+        return items.known(text) and (sample_flow or not text.startswith("net:"))
+
+    return observed
 
 
 # The named sections of a sandbox report that record traffic, as the section

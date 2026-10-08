@@ -604,15 +604,20 @@ def sandbox_items(
     pid: Any = None,
     contains: str = "",
     signature: str = "",
-    ids: list[str] | None = None,
+    ids: list[str] | str | None = None,
+    *,
+    sections: Any = None,
 ) -> dict[str, Any]:
     """The items of one section of the report, whole, each with its id and its report fields.
 
     Read-only over the report the job holds (``analysis.sandbox_sections``):
     no sandbox is asked anything. The filters combine; with none, every item
     of the section is answered. ``matched`` is how many items the filters
-    keep, so an answer the guardrail shortens still says how many there are.
-    Nothing is summarised, ranked or labelled.
+    keep, so an answer the guardrail shortens still says how many there are,
+    and ``ids_not_read`` how many asked ids past the section's own size were
+    not read. Nothing is summarised, ranked or labelled. ``sections`` is the
+    report read once for the job (``items_tool`` holds it); without it the
+    report is read for this call.
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
@@ -621,7 +626,7 @@ def sandbox_items(
     name = str(section or "").strip().lower()
     if name not in SECTION_PREFIXES:
         return {"error": ITEMS_NO_SECTION, "sections": list(SECTION_PREFIXES)}
-    found = Sections(report)
+    found = sections if isinstance(sections, Sections) else Sections(report)
     held = found.sections[name]
     if held.no:
         return {"section": name, "no": held.no}
@@ -633,17 +638,19 @@ def sandbox_items(
     if str(signature or "").strip() and name != "signatures":
         return {"error": ITEMS_SIGNATURE_SECTION, "section": name}
     listed = re.split(r"[\s,;]+", ids) if isinstance(ids, str) else ids
-    asked = [str(i) for i in listed or [] if str(i).strip()] if isinstance(listed, list) else []
-    items, missing = found.query(
+    asked = [i for i in listed if i] if isinstance(listed, list) else []
+    kept = found.query(
         name,
         pid=wanted_pid,
         contains=str(contains or ""),
         signature=str(signature or ""),
         ids=asked,
     )
-    answer: dict[str, Any] = {"section": name, "matched": len(items), "items": items}
-    if missing:
-        answer["not_in_section"] = missing
+    answer: dict[str, Any] = {"section": name, "matched": len(kept.items), "items": kept.items}
+    if kept.missing:
+        answer["not_in_section"] = kept.missing
+    if kept.not_read:
+        answer["ids_not_read"] = kept.not_read
     return answer
 
 
@@ -778,7 +785,18 @@ def items_tool(report: dict[str, Any] | None, sizer: Any = None) -> BaseTool:
     """The ``sandbox_items`` tool, closed over one job's report."""
     from langchain_core.tools import StructuredTool
 
-    from maljan.analysis.sandbox_sections import ITEMS_TOOL
+    from maljan.analysis.sandbox_sections import ITEMS_TOOL, Sections
+
+    # The report read into sections once for the job, on the first call, and
+    # held by this closure only: never cached across jobs.
+    held: list[Sections] = []
+
+    def _sections() -> Sections | None:
+        if report is None or _no_sandbox_ran(report):
+            return None
+        if not held:
+            held.append(Sections(report))
+        return held[0]
 
     def _items(
         section: str,
@@ -789,10 +807,11 @@ def items_tool(report: dict[str, Any] | None, sizer: Any = None) -> BaseTool:
     ) -> dict[str, Any]:
         """Read items of one section of the job's sandbox report, whole.
 
-        ``section`` is one of processes, api_calls, files, registry, network,
-        signatures, dropped, mutexes, commands, services, events, apistats,
-        channels or screenshots; the pack's sandbox section index gives each
-        one's item count, or why the report does not carry it. Each item comes
+        ``section`` is one of ``processes``, ``api_calls``, ``files``,
+        ``registry``, ``network``, ``signatures``, ``dropped``, ``mutexes``,
+        ``commands``, ``services``, ``events``, ``apistats``, ``channels`` or
+        ``screenshots``; the pack's sandbox section index gives each one's item
+        count, or why the report does not carry it. Each item comes
         with its id (proc:<pid> for a process, <prefix>:<n> for the n-th item
         of any other section), the report list it came from and the report's
         own fields. ``pid`` keeps the items of that process id; ``contains``
@@ -804,7 +823,9 @@ def items_tool(report: dict[str, Any] | None, sizer: Any = None) -> BaseTool:
         calls are the api_calls items whose process is its id. A claim may
         cite an item by its id.
         """
-        return sandbox_items(report, section, pid or None, contains, signature, ids)
+        return sandbox_items(
+            report, section, pid or None, contains, signature, ids, sections=_sections()
+        )
 
     return StructuredTool.from_function(func=_sized(_items, sizer, _ITEM_FILTERS), name=ITEMS_TOOL)
 

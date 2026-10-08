@@ -38,8 +38,9 @@ found by its position, and a filtered read is one pass over the section.
 
 from __future__ import annotations
 
+import bisect
 import re
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -118,9 +119,14 @@ _PID_FIELDS: dict[str, tuple[str, ...]] = {
 }
 
 # The ``no:`` sentences.
-NO_UNAVAILABLE = "no: the report lists {name} as unavailable from its sandbox"
+NO_UNAVAILABLE = "no: the report lists `{name}` as unavailable from its sandbox"
 NO_LISTS = "no: the report holds none of {paths}"
-NO_LIST = "no: the report holds no {path}"
+NO_LIST = "no: the report holds no `{path}`"
+
+
+def _listed(paths: Sequence[str]) -> str:
+    """Report paths as a ``no:`` sentence names them: each as an identifier."""
+    return ", ".join(f"`{path}`" for path in paths)
 
 
 def _digits(value: Any) -> str | None:
@@ -172,7 +178,26 @@ class Section:
 
     @property
     def count(self) -> int:
-        return sum(len(part.rows) for part in self.parts)
+        return self.starts[-1] if self.parts else 0
+
+    @property
+    def starts(self) -> list[int]:
+        """Each part's first item number less one, then the section's count: read once."""
+        held = self.__dict__.get("_starts")
+        if held is None or len(held) != len(self.parts) + 1:
+            held = [0]
+            for part in self.parts:
+                held.append(held[-1] + len(part.rows))
+            self.__dict__["_starts"] = held
+        return held
+
+    def place(self, number: int) -> tuple[int, int] | None:
+        """``(part, row)`` of the ``number``-th item, by bisection over the parts."""
+        starts = self.starts
+        if number < 1 or number > starts[-1]:
+            return None
+        part = bisect.bisect_left(starts, number) - 1
+        return part, number - starts[part] - 1
 
 
 class Sections:
@@ -193,6 +218,9 @@ class Sections:
         self.sections: dict[str, Section] = {}
         self._process_rows: dict[str, int] = {}
         self._parent: dict[int, str] = {}
+        # Built on the first query that needs them, then kept with the sections.
+        self._pid_index: dict[str, dict[str, list[int]]] = {}
+        self._signature_index: dict[str, list[int]] | None = None
         for name in SECTION_PREFIXES:
             self.sections[name] = self._read(name)
 
@@ -233,7 +261,7 @@ class Sections:
             section.no = (
                 NO_LIST.format(path=paths[0])
                 if len(paths) == 1
-                else NO_LISTS.format(paths=", ".join(paths))
+                else NO_LISTS.format(paths=_listed(paths))
             )
 
     def _read_processes(self, section: Section) -> None:
@@ -271,7 +299,8 @@ class Sections:
             if flat is not None:
                 section.parts.append(_Part("calls", "behavior.calls", flat))
             else:
-                section.no = NO_LISTS.format(paths="behavior.calls, behavior.processes")
+                paths = _listed(["behavior.calls", "behavior.processes"])
+                section.no = NO_LISTS.format(paths=paths)
             return
         for position, row in enumerate(rows):
             calls = self._list(row.get("calls")) if isinstance(row, Mapping) else None
@@ -308,7 +337,7 @@ class Sections:
             if rows is not None:
                 section.parts.append(_Part(key, key, rows))
                 return
-        section.no = NO_LISTS.format(paths="dropped, dropped_files")
+        section.no = NO_LISTS.format(paths=_listed(["dropped", "dropped_files"]))
 
     def _read_events(self, section: Section) -> None:
         rows = self._list(self._behavior.get("generic"))
@@ -372,6 +401,13 @@ class Sections:
             item["parent"] = self._parent[index]
         return item
 
+    def _at(self, section: Section, number: int) -> dict[str, Any] | None:
+        placed = section.place(number)
+        if placed is None:
+            return None
+        part, index = placed
+        return self._item(section, section.parts[part], index, number)
+
     def items(self, name: str) -> Iterator[dict[str, Any]]:
         """Every item of the section ``name``, in id order."""
         section = self.sections[name]
@@ -381,6 +417,68 @@ class Sections:
                 number += 1
                 yield self._item(section, part, index, number)
 
+    def _numbers_of_pid(self, name: str) -> dict[str, list[int]]:
+        """Each pid to the numbers of the items of ``name`` that are its: built once per section."""
+        held = self._pid_index.get(name)
+        if held is not None:
+            return held
+        section = self.sections[name]
+        keys = _PID_FIELDS.get(name, ("pid",))
+        index: dict[str, list[int]] = {}
+        number = 0
+        for part in section.parts:
+            owner = part.process.removeprefix("proc:").split(".", 1)[0] if part.process else ""
+            for row in part.rows:
+                number += 1
+                pids = {owner} if owner.isdigit() else set()
+                if isinstance(row, Mapping):
+                    for key in keys:
+                        found = _digits(row.get(key))
+                        if found is not None:
+                            pids.add(found)
+                for pid in pids:
+                    index.setdefault(pid, []).append(number)
+        self._pid_index[name] = index
+        return index
+
+    def _numbers_of_signature(self, mark: str) -> list[int]:
+        """The numbers of the signatures ``mark`` names, by item id or by name: indexed once."""
+        section = self.sections["signatures"]
+        if mark.startswith(f"{section.prefix}:"):
+            rest = mark.partition(":")[2]
+            if rest.isdigit() and len(rest) <= 12 and section.place(int(rest)) is not None:
+                return [int(rest)]
+            return []
+        if self._signature_index is None:
+            names: dict[str, list[int]] = {}
+            number = 0
+            for part in section.parts:
+                for row in part.rows:
+                    number += 1
+                    if not isinstance(row, Mapping):
+                        continue
+                    for key in ("name", "signature"):
+                        value = row.get(key)
+                        if isinstance(value, str):
+                            numbers = names.setdefault(value.strip().lower(), [])
+                            if not numbers or numbers[-1] != number:
+                                numbers.append(number)
+            self._signature_index = names
+        return list(self._signature_index.get(mark, ()))
+
+    def _number_of(self, section: Section, item_id: str) -> int | None:
+        """The item number ``item_id`` names in ``section``, or ``None``."""
+        prefix, _, rest = item_id.partition(":")
+        if prefix != section.prefix or not rest:
+            return None
+        if section.name == "processes":
+            position = self._process_rows.get(item_id)
+            return None if position is None else position + 1
+        if not rest.isdigit() or len(rest) > 12:
+            return None
+        number = int(rest)
+        return number if section.place(number) is not None else None
+
     def query(
         self,
         name: str,
@@ -389,72 +487,85 @@ class Sections:
         contains: str = "",
         signature: str = "",
         ids: Sequence[str] = (),
-    ) -> tuple[list[dict[str, Any]], list[str]]:
-        """The items of ``name`` every given filter keeps, and the asked ids it does not hold.
+    ) -> Query:
+        """The items of ``name`` every given filter keeps.
 
-        ``ids`` are found by their position, the other filters are one pass
-        over the section (or over the asked items): never item against item.
+        Bounds, all in the section's own size: asked ``ids`` are read until as
+        many distinct ids as the section has items were read, each found by
+        its position, and the rest are counted, not read; a pid or a
+        signature is looked up in an index built once per section; only the
+        substring filter reads rows, once each, and only the candidates the
+        other filters left. An item's dict is built for a kept row only.
         """
-        wanted = [str(i).strip().lower() for i in ids if str(i).strip()]
-        missing: list[str] = []
-        if wanted:
-            prefix = SECTION_PREFIXES[name]
-            pool: list[dict[str, Any]] = []
-            for item_id in dict.fromkeys(wanted):
-                found = self.item(item_id) if item_id.startswith(f"{prefix}:") else None
-                if found is None:
-                    missing.append(item_id)
+        section = self.sections[name]
+        found = Query()
+        candidates: Collection[int] | None = None
+        if ids:
+            numbers: dict[int, None] = {}
+            seen: set[str] = set()
+            budget = section.count
+            for position, raw in enumerate(ids):
+                if len(seen) >= budget:
+                    found.not_read = len(ids) - position
+                    break
+                item_id = str(raw).strip().lower()
+                if not item_id or item_id in seen:
+                    continue
+                seen.add(item_id)
+                number = self._number_of(section, item_id)
+                if number is None:
+                    found.missing.append(item_id)
                 else:
-                    pool.append(found)
-            candidates: Iterable[dict[str, Any]] = pool
-        else:
-            candidates = self.items(name)
-        needle = contains.lower()
+                    numbers[number] = None
+            candidates = numbers
+        if pid is not None:
+            held = self._numbers_of_pid(name).get(pid, [])
+            candidates = held if candidates is None else [n for n in held if n in candidates]
         mark = signature.strip().lower()
-        out = [
-            item
-            for item in candidates
-            if (pid is None or _has_pid(item, name, pid))
-            and (not needle or _holds_text(item.get("fields"), needle))
-            and (not mark or _is_signature(item, mark))
-        ]
-        return out, missing
+        if mark:
+            held = self._numbers_of_signature(mark)
+            if candidates is None:
+                candidates = held
+            else:
+                kept = set(candidates)
+                candidates = [n for n in held if n in kept]
+        needle = contains.lower()
+        for number in candidates if candidates is not None else range(1, section.count + 1):
+            placed = section.place(number)
+            if placed is None:
+                continue
+            part, index = placed
+            row = section.parts[part].rows[index]
+            if needle and not _holds_text(_searched(section.name, row), needle):
+                continue
+            found.items.append(self._item(section, section.parts[part], index, number))
+        return found
 
     def item(self, item_id: str) -> dict[str, Any] | None:
         """The item ``item_id`` names in this report, or ``None``."""
         text = str(item_id or "").strip().lower()
-        prefix, _, rest = text.partition(":")
-        name = SECTION_OF_PREFIX.get(prefix)
-        if name is None or not rest:
+        name = SECTION_OF_PREFIX.get(text.partition(":")[0])
+        if name is None:
             return None
         section = self.sections[name]
-        if name == "processes":
-            position = self._process_rows.get(text)
-            if position is None:
-                return None
-            return self._item(section, section.parts[0], position, position + 1)
-        if not rest.isdigit() or len(rest) > 12:
-            return None
-        number = int(rest)
-        if number < 1:
-            return None
-        before = 0
-        for part in section.parts:
-            if number <= before + len(part.rows):
-                return self._item(section, part, number - before - 1, number)
-            before += len(part.rows)
-        return None
+        number = self._number_of(section, text)
+        return None if number is None else self._at(section, number)
 
 
-def _has_pid(item: Mapping[str, Any], section: str, pid: str) -> bool:
-    """Whether ``item`` is of the process ``pid``: its own pid field, or the process it is under."""
-    fields = item.get("fields")
-    for key in _PID_FIELDS.get(section, ("pid",)):
-        value = fields.get(key) if isinstance(fields, Mapping) else None
-        if _digits(value) == pid:
-            return True
-    process = str(item.get("process") or "")
-    return bool(process) and process.removeprefix("proc:").split(".", 1)[0] == pid
+@dataclass
+class Query:
+    """What a query kept, the asked ids the section does not hold, and the asked ids not read."""
+
+    items: list[dict[str, Any]] = field(default_factory=list)
+    missing: list[str] = field(default_factory=list)
+    not_read: int = 0
+
+
+def _searched(section: str, row: Any) -> Any:
+    """What the substring filter reads of a row; a process's calls are their own section's."""
+    if section == "processes" and isinstance(row, Mapping):
+        return [value for key, value in row.items() if key != "calls"]
+    return row
 
 
 def _holds_text(value: Any, needle: str) -> bool:
@@ -470,19 +581,6 @@ def _holds_text(value: Any, needle: str) -> bool:
         elif isinstance(current, list | tuple):
             stack.extend(current)
     return False
-
-
-def _is_signature(item: Mapping[str, Any], mark: str) -> bool:
-    """Whether ``item`` is the signature ``mark`` names, by its item id or its name."""
-    if str(item.get("id") or "").lower() == mark:
-        return True
-    fields = item.get("fields")
-    if not isinstance(fields, Mapping):
-        return False
-    return any(
-        isinstance(fields.get(key), str) and fields[key].strip().lower() == mark
-        for key in ("name", "signature")
-    )
 
 
 def pid_of(value: Any) -> str | None:
@@ -553,6 +651,11 @@ class ItemIndex:
         if not rest.isdigit() or len(rest) > 12:
             return False
         return 1 <= int(rest) <= self.counts.get(name, 0)
+
+    @property
+    def holds_items(self) -> bool:
+        """Whether the report has any item to cite."""
+        return any(self.counts.values()) or bool(self.processes)
 
     def ids(self) -> Iterator[str]:
         """Every item id the index states, in index order."""

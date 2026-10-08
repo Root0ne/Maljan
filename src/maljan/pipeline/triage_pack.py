@@ -2356,19 +2356,21 @@ def _sandbox_sections(data: dict[str, Any]) -> str:
     for name, row in sections.items():
         if not isinstance(row, dict):
             continue
+        # The name as ``sandbox_items`` takes it, written as an identifier.
+        named = f"`{name}`"
         if row.get("no"):
-            parts.append(f"{name} {_short(str(row['no']))}")
+            parts.append(f"{named} {_short(str(row['no']))}")
             continue
         count = row.get("items")
         prefix = str(row.get("prefix") or "")
         if not isinstance(count, int) or not count:
-            parts.append(f"{name} 0")
+            parts.append(f"{named} 0")
         elif name == "processes":
-            parts.append(f"{name} {count} ({_names(row.get('ids') or [])})")
+            parts.append(f"{named} {count} ({_names(row.get('ids') or [])})")
         elif count == 1:
-            parts.append(f"{name} 1 ({prefix}:1)")
+            parts.append(f"{named} 1 ({prefix}:1)")
         else:
-            parts.append(f"{name} {count} ({prefix}:1 to {prefix}:{count})")
+            parts.append(f"{named} {count} ({prefix}:1 to {prefix}:{count})")
     return "; ".join(parts) + f"; {SECTIONS_SERVED_BY}"
 
 
