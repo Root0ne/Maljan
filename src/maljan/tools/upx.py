@@ -469,16 +469,19 @@ def _nrv(kind: str, width: int, src: bytes, size: int) -> bytearray:
         state[2] = at + 1
         return src[at]
 
-    def gamma(start: int, limit: int, what: str) -> int:
+    def gamma(start: int, limit: int, beyond: str) -> int:
         value = start
         while True:
             value = value * 2 + bit()
             if value > limit:
-                raise Damaged(
-                    f"{what} at output byte {len(dst)} runs past what the stream can hold"
-                )
+                raise Damaged(f"{beyond.format(at=len(dst))}")
             if bit():
                 return value
+
+    past_offsets = "an offset at output byte {at} runs past what the stream can hold"
+    past_size = (
+        f"a length at output byte {{at}} runs past the {size} unpacked bytes the header states"
+    )
 
     last_offset = 1
     near = 0xD00 if kind == "2b" else 0x500
@@ -489,22 +492,18 @@ def _nrv(kind: str, width: int, src: bytes, size: int) -> bytearray:
             dst.append(byte())
         length_bit = 0
         if kind == "2b":
-            prefix = gamma(1, _MAX_PREFIX, "an offset")
+            prefix = gamma(1, _MAX_PREFIX, past_offsets)
         else:
             prefix = 1
             while True:
                 prefix = prefix * 2 + bit()
                 if prefix > _MAX_PREFIX:
-                    raise Damaged(
-                        f"an offset at output byte {len(dst)} runs past what the stream can hold"
-                    )
+                    raise Damaged(past_offsets.format(at=len(dst)))
                 if bit():
                     break
                 prefix = (prefix - 1) * 2 + bit()
                 if prefix > _MAX_PREFIX:
-                    raise Damaged(
-                        f"an offset at output byte {len(dst)} runs past what the stream can hold"
-                    )
+                    raise Damaged(past_offsets.format(at=len(dst)))
         if prefix == 2:
             offset = last_offset
             if kind != "2b":
@@ -523,17 +522,17 @@ def _nrv(kind: str, width: int, src: bytes, size: int) -> bytearray:
         if kind == "2b":
             length = bit() * 2 + bit()
             if length == 0:
-                length = gamma(1, room + 2, "a length") + 2
+                length = gamma(1, room + 2, past_size) + 2
         elif kind == "2d":
             length = length_bit * 2 + bit()
             if length == 0:
-                length = gamma(1, room + 2, "a length") + 2
+                length = gamma(1, room + 2, past_size) + 2
         elif length_bit:
             length = 1 + bit()
         elif bit():
             length = 3 + bit()
         else:
-            length = gamma(1, room + 3, "a length") + 3
+            length = gamma(1, room + 3, past_size) + 3
         count = length + (offset > near) + 1
         olen = len(dst)
         if offset > olen:
