@@ -364,46 +364,79 @@ def _int3_is_a_trap(code: _Code, offset: str) -> bool:
     return int(offset, 16) + 1 not in code.starts
 
 
+# What a GS row says when the file's function table holds its address and no
+# decode from a function start there lands on it: the bytes may be the middle
+# of another instruction, or the table may be shaped to hide the read. The row
+# is kept and says so.
+GS_OFF_BOUNDARY = "not on an instruction boundary decoded from the function start"
+
+
+def _instruction_starts(code: bytes, at: int, starts: bytearray, limit: int) -> None:
+    """Mark the instruction starts a decode from ``at`` reaches, up to one already marked.
+
+    The decode runs on to ``limit`` (just past the section's last GS match,
+    after which no start is asked about) or the first byte it cannot read, so
+    a start marked earlier has every start after it on its own path marked
+    too, and stopping there loses nothing. Each byte is marked at most once, so
+    every decode of a section together reads it once: overlapping or nested
+    ranges decode no byte twice.
+    """
+    from maljan.tools.call_sites import decode
+
+    while 0 <= at < limit and not starts[at]:
+        starts[at] = 1
+        instruction = decode(code, at, True)
+        if instruction is None:
+            return
+        at += instruction.length
+
+
 def gs_reads(image: Any) -> list[dict[str, Any]]:
     """The GS:[0x60] and GS:[0x30] reads in an AMD64 file's code bytes, as TEB/PEB rows.
 
     Each is a ``peb_teb_access`` row as a Ghidra FS read is: its ``what`` the
     operand and the bytes read (``GS:[0x60] read (65 48 8b 04 25 60 00 00
     00)``) and its offset from the image base. Where the file's own function
-    table (``.pdata``) holds the address, the row is read only when a decode
-    from the start of that range lands on it as an instruction's start (the
-    same bytes inside another instruction are no read), and it carries the
-    function that range belongs to (``owner``), which is the function its
-    agreement with capa is asked about. Outside every range the byte match
-    alone is read and the row names no owner. The same file bytes mapped by
-    two sections are one row. No row for a file whose machine field is not
-    AMD64, or for no image.
+    table (``.pdata``) holds the address, the row carries the function that
+    range belongs to (``owner``), the function its agreement with capa is
+    asked about, and the range is decoded from its start
+    (``_instruction_starts``, one bitmap of starts per section, each byte
+    decoded once): a match no decode lands on is still a row, its ``what``
+    ending in ``GS_OFF_BOUNDARY``. Outside every range the byte match is read
+    and the row names no owner. The same file bytes mapped by two sections are
+    one row. No row for a file whose machine field is not AMD64, or for no
+    image.
     """
-    from maljan.tools.call_sites import _begins_an_instruction
-
     if image is None or getattr(image, "machine", 0) != _AMD64_MACHINE:
         return []
     rows: list[dict[str, Any]] = []
     seen: set[int] = set()
     for section in image.code_sections():
         code = image.section_bytes(section)
+        starts: bytearray | None = None
+        limit = 0
+        for match in _GS_READ.finditer(code):
+            limit = match.start() + 1
         for match in _GS_READ.finditer(code):
             raw = section.raw_offset + match.start()
             if raw in seen:
                 continue
+            seen.add(raw)
             rva = section.rva + match.start()
             owner = image.function_at(rva)
             bounds = image.function_bounds(rva) if owner is not None else None
-            if bounds is not None and not _begins_an_instruction(
-                code, section.rva, bounds[0], rva, True
-            ):
-                continue
-            seen.add(raw)
+            on_a_boundary = True
+            if bounds is not None:
+                if starts is None:
+                    starts = bytearray(len(code))
+                _instruction_starts(code, bounds[0] - section.rva, starts, limit)
+                on_a_boundary = bool(starts[match.start()])
             address = (match.group(1) or match.group(2))[0]
-            said = " ".join(f"{byte:02x}" for byte in match.group())
+            said = match.group().hex(" ")
+            what = f"GS:[{address:#x}] read ({said})"
             row = {
                 "category": _TEB_CATEGORY,
-                "what": f"GS:[{address:#x}] read ({said})",
+                "what": what if on_a_boundary else f"{what}, {GS_OFF_BOUNDARY}",
                 "offset": hex(rva),
             }
             if owner is not None:
