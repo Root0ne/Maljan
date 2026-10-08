@@ -39,6 +39,7 @@ from maljan.tools import (
     staging,
     string_blobs,
     transforms,
+    upx,
 )
 from maljan.tools import artefact_index as artefact_index_tools
 from maljan.tools import binary as binary_tools
@@ -90,6 +91,7 @@ TOOL_NEEDS: list[ToolNeeds] = [
     ToolNeeds("macho_info", (module("macholib"),)),
     ToolNeeds("apk_info", (module("androguard"),), without="the zip-level facts"),
     ToolNeeds("carve_payloads"),
+    ToolNeeds(upx.TOOL, facts=upx.CAPABILITY_FACTS),
     ToolNeeds("archive_list", (module("py7zr"),), without="zip and tar members; 7z needs py7zr"),
     ToolNeeds("document_info", (module("olefile"),), without="the PDF and OOXML halves"),
     ToolNeeds(
@@ -878,6 +880,17 @@ def _carve_under_staging(path: str, sample_digest: str = "") -> dict[str, Any]:
     target = Path(path)
     if not target.is_file():
         return {"error": f"no such file: {path}", "tool": "carve_payloads"}
+    return binary_tools._carve_into(path, _carved_destination(target, sample_digest))
+
+
+def _carved_destination(target: Path, sample_digest: str) -> Path:
+    """The directory a file written out of ``target`` lands in, created private.
+
+    ``<staging>/carved/<sha256 of the sample>/``, and a file written out of a
+    file this run wrote nests under the sample's own directory, by its own
+    digest: one tree per run, the tree ``carved_path`` may read back and the
+    sweep prunes. ``carve_payloads`` and ``unpack_upx`` both write here.
+    """
     digest = _digest_of(target)
     anchor = sample_digest or digest
     destination = _carved_tree(anchor)
@@ -886,7 +899,49 @@ def _carve_under_staging(path: str, sample_digest: str = "") -> dict[str, Any]:
     _staging_dir()
     for directory in (destination.parent, destination):
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    return binary_tools._carve_into(path, destination)
+    return destination
+
+
+@mcp.tool()
+@reads_a_carved_file
+def unpack_upx(path: str, carved_path: str = "") -> dict[str, Any]:
+    """Unpack a UPX-packed PE and write the program it holds out as a file of its own.
+
+    Reads UPX's own pack header and records in Python, as ``upx -d`` would,
+    with nothing in the file run and no upx program needed: the methods
+    NRV2B, NRV2D and NRV2E (32-, 16- and 8-bit streams) and LZMA, the code
+    filters 0x24, 0x25 and 0x26, the import table from UPX's import records,
+    the relocations, the export table and the resources UPX moved. The
+    unpacked file lands where ``carve_payloads`` writes, private to this
+    run, and its ``carved_path`` (in ``child``) is the value to pass to any
+    tool here that reads a file.
+
+    The answer states the pack header (offset, version, format, method,
+    level, filter), the compressed and unpacked sizes, both adler32
+    checksums as stated and computed and whether each matched, then the
+    unpacked file: its SHA-256, size, ``carved_path``, entry point, section
+    table, import count and what each rebuild step wrote. A file that is not
+    UPX-packed, or uses a method, filter or record kind not read here, or
+    states an unpacked size above the platform's fixed sample upload cap,
+    answers ``unpacked`` with a ``no:`` sentence saying which. A checksum
+    that does not match, or data that does not decode as UPX writes it, is
+    an error naming where, and no file is written.
+    """
+    return _guard(
+        upx.TOOL,
+        _unpack_under_staging,
+        path=path,
+        carved_path=carved_path,
+        sample_digest="",
+    )
+
+
+def _unpack_under_staging(path: str, sample_digest: str = "") -> dict[str, Any]:
+    """Unpack into the same per-sample tree ``carve_payloads`` writes, private like it."""
+    target = Path(path)
+    if not target.is_file():
+        return {"error": f"no such file: {path}", "tool": upx.TOOL}
+    return upx.unpack_upx(path, _carved_destination(target, sample_digest))
 
 
 @mcp.tool()

@@ -115,6 +115,7 @@ class TestAPathOutsideEveryRootIsRefused:
             ("archive_list", "path"),
             ("document_info", "path"),
             ("carve_payloads", "path"),
+            ("unpack_upx", "path"),
             ("capa", "path"),
             ("floss", "path"),
             ("yara_scan", "path"),
