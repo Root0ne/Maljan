@@ -15,7 +15,9 @@ A root is derived from what the entry already holds, never guessed:
   row, an address a decompile, disassembly or memory read was given, an
   address a Ghidra IOC row states, the start of the range a
   ``transform_bytes`` call read (or the ``no:`` sentence its answer states
-  for a range no section holds). A FLOSS row whose call site and decoded
+  for a range no section holds), the start of the compressed data an
+  ``unpack_upx`` call read (or the ``no:`` sentence of a file it did not
+  unpack). A FLOSS row whose call site and decoded
   text the blob decoder states for a blob (``floss.called_at_rva``) has the
   blob as its root, so the two tools reading one encoded string are one root;
   a call site holding blobs none of which decodes to the row's text gives
@@ -148,6 +150,8 @@ _NAME_ARGS = ("name", "function_name", "function", "symbol")
 # The argument that names a file the run carved, and the tool that carves.
 _CARVED_ARG = "carved_path"
 _CARVE_TOOL = "carve_payloads"
+# The tool that writes the program a UPX-packed file holds out as a file of its own.
+_UNPACK_TOOL = "unpack_upx"
 
 
 _WORD = re.compile(r"[A-Za-z_.$?@][\w.$?@]*")
@@ -510,7 +514,7 @@ class _Files:
     is the one its latest program statement or open names, the sample until
     one names another file, read in the order the calls were made. Any other
     file is named by the leading digits of the SHA-256 the run states for it
-    (a carving's, or a hash answer's), or by its path, quoted. A call whose
+    (a carving's, an unpacking's or a hash answer's), or by its path, quoted. A call whose
     ``carved_path`` is not one path is about no file that can be told
     (``None``).
     """
@@ -527,6 +531,13 @@ class _Files:
                     for key in ("carved_path", "path"):
                         if digest and isinstance(row.get(key), str) and row[key].strip():
                             self._digest.setdefault(_unquoted(row[key]), digest)
+            elif _tool(entry) == _UNPACK_TOOL and isinstance(data, Mapping):
+                child = data.get("child")
+                child = child if isinstance(child, Mapping) else {}
+                digest = str(child.get("sha256") or "").strip().lower()
+                for key in ("carved_path", "path"):
+                    if digest and isinstance(child.get(key), str) and child[key].strip():
+                        self._digest.setdefault(_unquoted(child[key]), digest)
             elif _tool(entry) == "hashes" and isinstance(data, Mapping):
                 digest = str(data.get("sha256") or "").strip().lower()
                 path = self._path_named(entry)
@@ -964,6 +975,26 @@ def _read_transform(found: EntryRoots, data: Any) -> None:
         found.reason = place
 
 
+def _read_unpack(found: EntryRoots, data: Any) -> None:
+    """An unpacking's root: where the compressed data it read starts, or why it read none.
+
+    The packed file's own layout places the offset (in the section UPX wrote
+    the stream to); the unpacked program is a file of its own, named by the
+    digest the answer states, and adds no place to this entry. A file the
+    reader did not unpack gives the ``no:`` sentence its answer states.
+    """
+    if not isinstance(data, Mapping):
+        return
+    header = data.get("pack_header")
+    offset = _hex(header.get("compressed_data_offset")) if isinstance(header, Mapping) else None
+    if offset is not None:
+        _offset_root(found, offset)
+        return
+    said = data.get("unpacked")
+    if isinstance(said, str) and said.startswith("no:"):
+        found.reason = said
+
+
 def _command_root(
     found: EntryRoots, command: str, joins: _Joins, techniques: Iterable[str]
 ) -> None:
@@ -1045,6 +1076,8 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
         _read_function_index(found, data)
     elif tool == "transform_bytes":
         _read_transform(found, data)
+    elif tool == _UNPACK_TOOL:
+        _read_unpack(found, data)
     elif tool == "extract_iocs_with_context":
         for row in _rows(data, "iocs"):
             _address_root(found, row.get("address"), values=(row.get("value"),))

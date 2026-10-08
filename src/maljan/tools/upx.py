@@ -217,6 +217,7 @@ class PackHeader:
         method = METHODS.get(self.method)
         return {
             "offset": hex(self.offset),
+            "compressed_data_offset": hex(self.data_offset),
             "version": self.version,
             "format": f"{FORMATS.get(self.format, 'not read here')} ({self.format})",
             "method": f"{method[0] if method else 'not read here'} ({self.method})",

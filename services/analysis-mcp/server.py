@@ -259,7 +259,7 @@ CARVED_ARGUMENT = "carved_path"
 #
 # The tree now lives inside the job's own directory, so two jobs on the same
 # sample carve into two trees and neither can name the other's by any spelling.
-CARVED_DIRECTORY = "carved"
+CARVED_DIRECTORY = staging.CARVED_DIRECTORY
 
 # What a caller is told when the argument resolves onto something that is not
 # a file to read. Its own sentence rather than the roots one, which would be
