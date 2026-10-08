@@ -2237,6 +2237,17 @@ chunk's block or seeded guard reads a repeat: each reads the entry it names. A
 reverser's second chunk once made nine calls, all answered this way, and left
 no entry and no event.
 
+A call another guard answers with no tool run (an argument that names its own
+parameter, a call made after the conversation's room ran out) is filed the
+same way, as the guard's answer: the entry holds what the model was told, its
+`repeated_of` is its own id, so every reader above leaves it out and its chain
+holds no answer anyone can cite, and its start and finish events go out like
+any call's. It is a failure, since nothing answered, and never a tool failure.
+It is counted apart in `run_summary.evidence.guard_answers`; the report header
+and §13's evidence bounds say how many calls a guard answered with no tool
+run, Appendix A marks each such row "guard's answer, not run", and an agent
+whose only entries are these has gathered nothing.
+
 A decompile is also a repeat when its answer is a function an earlier entry
 already holds, whatever address it was given: a call given an address inside
 a function is answered with the whole function. The function the answer prints
@@ -2753,7 +2764,7 @@ search for that literal word cannot be made; it used to say "pass
 `pattern` as the raw text or pattern itself", and a static analyst sent
 `"pattern": "\"pattern\""` twice. A call whose argument is nothing but its own
 parameter's name — bare, quoted or in a placeholder bracket — is not run and
-not written to the ledger: the model is told which argument named its
+is filed as the guard's answer, which holds nothing to cite: the model is told which argument named its
 parameter and asked for the value it meant, the value is never rewritten, the
 question is counted under `tool.argument_names_its_parameter` in
 `run_summary.validation.by_code`, and asking the same again counts as a repeat. Content arguments — the text `iocs_from_text` and `yara_scan` scan,

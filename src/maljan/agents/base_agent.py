@@ -105,7 +105,14 @@ from maljan.pipeline.validation import (
     validate_isr,
     validity_check_available,
 )
-from maljan.schemas.evidence import ENTRY_ID_RE, EvidenceCounter, LedgerEntry, apply_budget
+from maljan.schemas.evidence import (
+    ENTRY_ID_RE,
+    EvidenceCounter,
+    LedgerEntry,
+    answers_held,
+    apply_budget,
+    is_guard_answer,
+)
 from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
 from maljan.schemas.tool_evidence import CapturedToolOutput
 from maljan.utils.marked_cut import CUT_MARK
@@ -4772,7 +4779,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                         # ends here and the salvage writes the answer from
                         # what was gathered; with nothing gathered the agent
                         # fails as a provider failure does.
-                        if not recorder.entries:
+                        if not answers_held(recorder.entries):
                             raise
                         call_deadline_hit = True
                         time_detail = f"model call deadline: {exc}"
@@ -4822,7 +4829,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                         # alone does not fit, which is a configuration fault —
                         # has nothing to salvage and fails the agent as it
                         # always did.
-                        if not (window_full_error(exc) and recorder.entries):
+                        if not (window_full_error(exc) and answers_held(recorder.entries)):
                             raise
                         nonlocal window_full
                         window_full = True
@@ -4890,7 +4897,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     left_now = budget.seconds_left()
                     if left_now is None or left_now > 1.0:
                         raise
-                    if not recorder.entries:
+                    if not answers_held(recorder.entries):
                         budget_ran_out_empty = True
                         raise
                     time_capped = True
@@ -6166,8 +6173,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         self._try_initialize_mcp()
         before = len(self._evidence_entries)
         text = self.execute_tool_loop([("system", self._system_prompt("")), ("human", task)])
+        # A guard's answer is what the model was told, not what a tool said.
         gathered = "\n".join(
-            str(getattr(entry, "output", "") or "") for entry in self._evidence_entries[before:]
+            str(getattr(entry, "output", "") or "")
+            for entry in self._evidence_entries[before:]
+            if not is_guard_answer(entry)
         )
         evidence = f"{task}\n{gathered}" if gathered else task
         isr = self._text_to_isr(text, revision_round=int(self.current_round))
