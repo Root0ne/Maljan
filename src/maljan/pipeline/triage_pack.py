@@ -75,6 +75,7 @@ the pack record, and the run-state block names it and the analysis server's
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -119,6 +120,7 @@ from maljan.tools import (
     staging,
     string_blobs,
     strings,
+    upx,
 )
 from maljan.tools.errors import error_parts, normalise_error
 from maljan.tools.knowledge import RESOLVED_AT_RUNTIME
@@ -707,6 +709,7 @@ class _Pack:
             self._crypto_constants(routed)
             self._ghidra_passes(routed)
             self._function_index(routed)
+            self._unpacked_upx(routed, format_facts)
         finally:
             if self._floss_pool is not None:
                 self._floss_pool.shutdown(wait=False)
@@ -1215,6 +1218,70 @@ class _Pack:
         made = self.recorder.entries[held:]
         if ranges and made and made[-1].tool == artefact_index.TOOL and made[-1].ok:
             made[-1].function_ranges = ranges
+
+    # -- UPX unpacking -------------------------------------------------------
+
+    def _unpacked_upx(self, routed: str, format_facts: dict[str, Any] | None) -> None:
+        """Unpack a PE the packer reader names UPX, once, beside the files the server carves.
+
+        After the function index, so every id issued before it keeps its value,
+        and only when ``pe_info``'s packer signatures name UPX or a pack header
+        with a true checksum byte stands where UPX writes one (renamed sections
+        keep their header; a UPX-named file with none gets its ``no:``). The unpacked
+        program is written where the analysis server's ``carve_payloads``
+        writes for this job and sample, so the ``carved_path`` the answer gives
+        is one every file tool of the server reads. The pack is not run again
+        on it: the entry states it exists and where, and the models decide
+        what to open. A run with no job directory to write in is one entry
+        saying so.
+        """
+        path = self.inputs.sample_path
+        if routed != "pe" or not (_names_upx(format_facts) or _holds_a_pack_header(path)):
+            return
+        args: dict[str, Any] = {"path": path}
+        settings = self.inputs.floss
+        if not settings.job_id:
+            self._record_absent(upx.TOOL, args, UPX_NO_JOB)
+            return
+
+        def call() -> dict[str, Any]:
+            carved = staging.open_job_directory(
+                settings.job_id, staging.CARVED_DIRECTORY, settings.environ
+            )
+            destination = staging.private_dir(carved / _file_digest(path))
+            return upx.unpack_upx(path, destination)
+
+        self.record(upx.TOOL, args, call)
+
+
+# Why the pack did not unpack a sample the packer reader names UPX.
+UPX_NO_JOB = "the run names no job staging directory to write the unpacked program in"
+
+
+def _names_upx(format_facts: dict[str, Any] | None) -> bool:
+    """Whether ``pe_info``'s packer signatures name UPX."""
+    rows = (format_facts or {}).get("packer_signatures") or []
+    return any(
+        str(row.get("name") if isinstance(row, dict) else row).strip().upper() == "UPX"
+        for row in rows
+    )
+
+
+def _holds_a_pack_header(path: str) -> bool:
+    """Whether the file holds UPX's pack header with a true checksum byte where UPX writes it.
+
+    Only the headers and UPX's two windows are read, not the whole sample.
+    """
+    return upx.has_pack_header_at(path)
+
+
+def _file_digest(path: str) -> str:
+    """The SHA-256 of the file at ``path``, read in pieces: the name of its carved tree."""
+    hasher = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(block)
+    return hasher.hexdigest()
 
 
 # The pack's answers the function index joins, by tool.
@@ -2702,7 +2769,7 @@ def _decoded_blobs(data: dict[str, Any], max_chars: int | None = None) -> str:
 # The deobfuscation passes' lines
 # ---------------------------------------------------------------------------
 
-PASS_TOOLS = frozenset({crypto_constants.TOOL, ANTI_ANALYSIS_TOOL})
+PASS_TOOLS = frozenset({crypto_constants.TOOL, ANTI_ANALYSIS_TOOL, upx.TOOL})
 
 # What a pass line says when the room cut its list: how many it shows, and
 # where the rest are.
@@ -2983,6 +3050,38 @@ def _fit_some(line: Callable[[int], str], shown: int, max_chars: int | None) -> 
     return line(best) if best else ""
 
 
+def _unpacked(data: dict[str, Any], max_chars: int | None = None) -> str:
+    """The unpacking pass in one line: what was unpacked and where the program now is.
+
+    Whole: the method and filter, both sizes and both checksums, the program's
+    carved_path, SHA-256, sections, imports and entry point. In less room, the
+    carved_path alone, which is the fact no other line carries; a ``no:``
+    answer is its sentence.
+    """
+    said = data.get("unpacked")
+    if said != "yes":
+        line = str(said or "")
+        return line if max_chars is None or len(line) <= max_chars else ""
+    header = data.get("pack_header") or {}
+    child = data.get("child") or {}
+    sums = data.get("checksums") or {}
+    matched = all((sums.get(k) or {}).get("matched") is True for k in ("compressed", "unpacked"))
+    where = f"the unpacked program is file carved_path {child.get('carved_path')}"
+    whole = (
+        f"UPX {header.get('method')}, filter {header.get('filter')}: "
+        f"{_n(data.get('compressed_size'))} compressed bytes to {_n(data.get('unpacked_size'))}, "
+        f"both adler32 checksums {'matched' if matched else 'stated'}; {where} "
+        f"(sha256 {child.get('sha256')}, {_n(child.get('size'))} bytes, "
+        f"{len(data.get('sections') or [])} sections, {_n(data.get('import_count'))} imports "
+        f"from {_n(data.get('import_libraries'))} libraries, entry point "
+        f"{data.get('entry_point')})"
+    )
+    for line in (whole, where):
+        if max_chars is None or len(line) <= max_chars:
+            return line
+    return ""
+
+
 def _function_matches(data: dict[str, Any]) -> str:
     rows = [r for r in (data.get("matches") or []) if isinstance(r, dict)]
     families = sorted({str(r.get("family") or "") for r in rows if r.get("family")})
@@ -3130,6 +3229,7 @@ _GROUP_LABELS: dict[str, str] = {
     crypto_constants.TOOL: "crypto constants",
     ANTI_ANALYSIS_TOOL: "anti-analysis (Ghidra)",
     artefact_index.TOOL: "function index",
+    upx.TOOL: "UPX unpacking",
 }
 
 _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
@@ -3162,6 +3262,7 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "decode_string_blobs": _decoded_blobs,
     crypto_constants.TOOL: _constant_sets,
     ANTI_ANALYSIS_TOOL: _anti_analysis,
+    upx.TOOL: _unpacked,
 }
 
 # The lines that can say less and still say something, each given the room it
@@ -3174,4 +3275,5 @@ _SHORTER_RENDERERS: dict[str, Callable[[dict[str, Any], int], str]] = {
     "decode_string_blobs": lambda data, room: _decoded_blobs(data, max_chars=room),
     crypto_constants.TOOL: lambda data, room: _constant_sets(data, max_chars=room),
     ANTI_ANALYSIS_TOOL: lambda data, room: _anti_analysis(data, max_chars=room),
+    upx.TOOL: lambda data, room: _unpacked(data, max_chars=room),
 }

@@ -155,6 +155,10 @@
       "steps",
       "va"
     ],
+    "unpack_upx": [
+      "carved_path",
+      "path"
+    ],
     "yara_scan": [
       "carved_path",
       "path",
@@ -193,6 +197,7 @@
     "signing_info",
     "strings",
     "transform_bytes",
+    "unpack_upx",
     "yara_scan"
   ]
 }

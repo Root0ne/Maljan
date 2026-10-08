@@ -836,6 +836,74 @@ def _transform_sentences() -> str:
     )
 
 
+_UPX_ENTRY = "the UPX unpacking tool's description, facts, answers, errors and pack lines"
+
+
+def _upx_sentences() -> str:
+    """What UPX unpacking tells a model: the tool, every no: sentence and error, the pack line."""
+    import tempfile
+
+    from maljan.schemas.evidence import LedgerEntry
+    from maljan.tools import upx
+    from tests.unit.tools import synthetic_upx as su
+    from tests.unit.tools.synthetic_pe import SyntheticPE
+
+    packed = su.build()
+    damaged = bytearray(packed.data)
+    damaged[packed.header_offset + 40] ^= 0x10
+    offset = hex(packed.header_offset)
+    with tempfile.TemporaryDirectory() as folder:
+        files = {
+            "packed": packed.data,
+            "damaged": bytes(damaged),
+            "plain": SyntheticPE().build(),
+            "text": b"no header at all " * 8,
+        }
+        answers = []
+        for name, blob in files.items():
+            (Path(folder) / name).write_bytes(blob)
+            answers.append(upx.unpack_upx(str(Path(folder) / name), Path(folder)))
+    entries = [
+        LedgerEntry(id=f"ev_000{i}", tool=upx.TOOL, structured=a, ok="error" not in a)
+        for i, a in enumerate(answers, 1)
+    ]
+    # Every sentence the module can say, its no: and error forms included:
+    # each string the source writes, f-strings' literal parts with them.
+    import ast
+    import inspect
+
+    written = [
+        node.value
+        for node in ast.walk(ast.parse(inspect.getsource(upx)))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
+    return " ".join(
+        [
+            *written,
+            upx.CAPABILITY_FACTS,
+            upx.REMEDIATION,
+            upx.LZMA_NOT_READ.format(lc=5, lp=0),
+            upx.NOT_A_PE.format(why="no MZ header"),
+            upx.NO_HEADER,
+            upx.NO_SECTIONS,
+            upx.OLD_VERSION.format(offset=offset, version=9),
+            upx.REFUSED.format(offset=offset),
+            upx.FORMAT_NOT_READ.format(offset=offset, format=12),
+            upx.MACHINE_MISMATCH.format(format=9, name="win32/pe", machine=0x8664),
+            upx.METHOD_NOT_READ.format(method=15),
+            upx.FILTER_NOT_READ.format(filter=0x49),
+            upx.OVER_CAP.format(size=2**32 - 1, cap=upx.UNPACKED_CAP),
+            upx.FILE_OVER_CAP.format(size=2**30, cap=upx.UNPACKED_CAP),
+            upx.RELOCS16_NOT_READ,
+            triage_pack.UPX_NO_JOB,
+            _analysis_tool_descriptions("unpack_upx"),
+            *(json.dumps(a) for a in answers),
+            *(triage_pack._pack_line(e) for e in entries),
+            *(triage_pack._within_room(e, 200) or "" for e in entries),
+        ]
+    )
+
+
 # Everything else a report model is shown on every run, as plain text.
 # A network block with one address the sample reached, one the sandbox
 # recorded and does not attribute, a name that resolved to the second, a name
@@ -1504,6 +1572,7 @@ PROMPTS: dict[str, str] = {
     "the constant scan's description": _analysis_tool_descriptions("find_crypto_constants"),
     "the function index tool's description": _analysis_tool_descriptions("function_index"),
     _TRANSFORM_ENTRY: _transform_sentences(),
+    _UPX_ENTRY: _upx_sentences(),
     "a term's example ids and how many more": _term_ids_said(["T1000", "T1001", "T1002"]),
     "run-state budget line of a loop with no limit": budget_line(NO_LIMIT, NO_LIMIT),
     "ask tool budget sentence with no limit": _what_an_ask_gets_sentence("lead", None, None),

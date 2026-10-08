@@ -40,6 +40,7 @@ drops the reference really runs without these tools.
 | `macho_info` | `path`, `carved_path=""` |
 | `apk_info` | `path`, `carved_path=""`, `manifest`, `permissions`, `certs`, `components`, `native_libs`, `dex_strings=false`, `limit=500` |
 | `carve_payloads` | `path`, `carved_path=""` (carved files land in `<staging>/carved/<sha256>/`, never where the model says) |
+| `unpack_upx` | `path`, `carved_path=""` (see *UPX unpacking*) |
 | `archive_list` | `path`, `carved_path=""`, `limit=500` |
 | `document_info` | `path`, `carved_path=""` |
 
@@ -428,6 +429,87 @@ them, repeated to it, which schedules the same (a 1-byte key as 5 bytes, 2 and
 written out. `aes` needs `cryptography`. The ledger entry's evidence root is
 the start of its input range.
 
+### UPX unpacking
+
+| tool | arguments |
+| --- | --- |
+| `unpack_upx` | `path`, `carved_path=""` |
+
+A UPX-packed Windows PE read back into the program it holds and written out as
+a file of its own (`tools.upx`), the way `upx -d` does it, in Python: nothing
+in the file is run and no `upx` program is needed on the host. The unpacked
+file lands where `carve_payloads` writes, `<staging>/job-<id>/carved/<sha256
+of the sample>/`, named `upx-unpacked_<first 12 hex of its own sha256>` at
+0o600 in a 0o700 directory, and the `carved_path` in the answer's `child` is
+the value every tool here that reads a file takes. Unpacking a file this run
+already wrote nests under the sample's tree, as carving one does.
+
+What it reads, in UPX's own layout:
+
+- **The pack header**, the 32 bytes starting `UPX!`, where UPX writes it: the
+  1024 bytes from 64 before the second section's file data, or (older
+  versions) from the third section's. Formats 9 (win32/pe) and 36 (win64/pep),
+  header version 10 and later. The last byte is the sum of the bytes before
+  it modulo 251; a header whose sum does not match is an error.
+- **The compressed data**, checked against the header's adler32 before it is
+  decompressed: NRV2B, NRV2D and NRV2E in their 32-, 16- and 8-bit bit-stream
+  forms (methods 2 to 10) by decoders in the module, and LZMA (method 14)
+  through the standard library's raw LZMA1 filter. The output must be
+  exactly the stated size, the stream must end at its end marker with every
+  byte read, and the unpacked data's adler32 must be the stated one, taken
+  over the data as decompressed, with the code filter still applied, which is
+  what UPX's PE packer checksums. LZMA properties the standard library's
+  LZMA1 decoder does not take (lc + lp above 4) are a `no:`.
+- **The code filter**: 0x24 (call), 0x25 (jump) and 0x26 (both), undone over
+  the code range the stored header names.
+- **The rebuild**: the original PE header and section table UPX stored after
+  the image; the import table from UPX's import records (library names from
+  the packed file's own import table, names and ordinals from UPX's list);
+  the relocations (delta-coded positions, values stored byte-swapped and less
+  the image base); the export table UPX moved out of a DLL's image; the
+  resources UPX kept uncompressed, moved back with the resource directory
+  rebuilt when the stored one is empty; the debug, bound-import and IAT
+  directories and the checksum cleared, as UPX clears them; the packed
+  file's overlay carried over.
+
+The directory each file lands in is created by the server through the rule
+every staging directory is held to (0o700, refused when it is a link or
+another user's); the unpacker itself creates none.
+
+The answer states the pack header (offset, where the compressed data starts,
+version, format, method, level, filter and its marker byte), the compressed
+and unpacked sizes and the original file size the header states, both
+checksums as stated and computed and whether each matched, then the unpacked
+file: SHA-256, size, `carved_path`, entry point, the import count and
+libraries its own import table names, what each rebuild step wrote, the
+overlay bytes carried and its section table.
+
+A file that is not a PE, has no pack header where UPX writes one, or uses a
+format, header version, method, filter or record kind not read here (UPX's
+filter 0x49, the default for 64-bit files, is one; 16-bit relocation records
+and relocation records that name one place twice or overlapping places are
+others) answers `{"unpacked": "no: <reason>"}`, with the pack header's
+facts when it was read. A header stating more unpacked bytes than the
+platform's fixed sample upload cap (100 MiB, `core.delivery_limits`) is
+answered with the cap and nothing is decompressed; one stating more than the
+image the packed file maps is an error. A checksum that does not match, a
+stream cut short, a copy past the output or before its start, or a record that
+points outside the unpacked data is an error naming where (`tool_failed`, with
+its own remediation), and no file is written: a partial image is never given
+as a whole one. Every decoder reads its input once and every count is held to
+the bytes that hold it, so time and memory are linear in the file and the
+unpacked size: relocation positions are held four bytes each and the table's
+size is counted per page and checked to fit before it is built (three million
+relocations take about 30 MiB and 1.4 s), import records four bytes each, and
+the resource tree is walked in place, never held as objects; on the eleven UPX-packed PE samples in the local corpus
+(NRV2B and NRV2E, filter 0x26) nine unpacked in 0.03 to 0.3 s each to files
+the size the header states for the original, and two whose compressed data's
+adler32 differs from the header's are refused.
+
+The ledger entry's evidence root is the start of the compressed data in the
+packed file; a call that reads the unpacked program by its `carved_path` is
+about that program, named by the digest the answer states.
+
 ### Sample delivery
 
 | tool | arguments |
@@ -530,7 +612,8 @@ a caller asking for more is given that. Asking for less is honoured.
 Answers `{server, version, tools: [{name, optional_dependency, available,
 reason, timeout_s}]}`, computed when the server starts by probing each optional
 module. The `transform_bytes` cell also carries `facts`, its arguments and
-operations in plain sentences. A tool that cannot answer returns `{"error": {"code", "message",
+operations in plain sentences, and the `unpack_upx` cell the formats, methods
+and filters it reads. A tool that cannot answer returns `{"error": {"code", "message",
 "remediation"}, "tool"}` (`maljan.tools.errors`); see *Writing a tool server*
 in `apps/docs/content/docs/configuration.mdx`.
 

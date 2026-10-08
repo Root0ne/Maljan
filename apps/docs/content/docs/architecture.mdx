@@ -732,6 +732,32 @@ what it reads, and each is linear in its buffer. No prompt asks for the tool; th
 and the tool's description state what it takes. The entry's evidence root is
 the start of its input range.
 
+**A UPX-packed PE is unpacked once, and the program is a file of its own.**
+A UPX-packed sample shows every reader the packer's stub, so the pack's
+strings, imports, capa rules and FLOSS rows describe the stub, not the
+program. When `pe_info`'s packer signatures name UPX, or a pack header with
+a true checksum byte stands where UPX writes one (sections renamed to hide
+the packer keep their header), the pack's last entry
+is `unpack_upx` (`tools.upx`, the code the analysis server's tool of the same
+name runs), after the function index so every earlier id keeps its value. It
+reads UPX's own pack header and records in Python, with nothing run and no
+`upx` program needed: NRV2B, NRV2D, NRV2E and LZMA, the call and jump filters
+0x24 to 0x26, and the rebuilt import, relocation, export and resource tables.
+Both adler32 checksums are checked; a mismatch, or data that does not decode
+as UPX writes it, is a failed pass with no file written, which does not make
+the run degraded. A format, method or filter the reader does not cover is a
+`no:` entry saying which. The program is written into the job's carved tree
+for the sample, the directory the analysis server's `carved_path` reads, so
+the `carved_path` the entry states is one every file tool there takes.
+**Decision:** the pack is not run again on the unpacked program: its one
+line, in the room the other lines leave like every pass, states the method,
+filter, sizes and checksums and the program's `carved_path`, SHA-256,
+sections, imports and entry point (the `carved_path` alone in less room), and
+the models decide what to open next. The entry's evidence root is the start of
+the compressed data in the packed file; a call that reads the program by its
+`carved_path` is about that program, named by its digest and placed against
+its own section table.
+
 Ghidra's emulation is not run by the pack: Ghidra's `emulate_function`
 ignores its step limit and cannot be stopped, and one emulation took 130 to
 560 ms in a stored run. It stays a tool the reverser may call.
