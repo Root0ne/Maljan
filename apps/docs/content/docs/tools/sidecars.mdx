@@ -11,7 +11,7 @@ sidecar.
 
 | Server | Bound to | How | Offers |
 | :-- | :-- | :-- | :-- |
-| `analysis` | `static` | definition `tools` | Identity and hashes, strings and typed IOCs, PE/ELF/Mach-O/APK structure, archive and document inspection, payload carving, YARA, Sigma, capa and emulated string decoding (FLOSS), the function index: every function of a PE with the artefacts it holds, whole or by address, and byte transforms: a range of the file through the decoding, decryption and decompression steps the model names, with the output stated as facts. |
+| `analysis` | `static` | definition `tools` | Identity and hashes, strings and typed IOCs, PE/ELF/Mach-O/APK structure, archive and document inspection, payload carving, YARA, Sigma, capa and emulated string decoding (FLOSS), the function index: every function of a PE with the artefacts it holds, whole or by address, byte transforms: a range of the file through the decoding, decryption and decompression steps the model names, with the output stated as facts, and UPX unpacking: a UPX-packed PE read back into the program it holds, from UPX's own records, and written beside the carved files. |
 | `knowledge` | every analyst and the judge | definition `tools` | ATT&CK lookup, validation and ranking, the API-behaviour catalog, the LOLBin table, family and prior-case retrieval. |
 | `network` | `network` | role binding | DNS, HTTP and packet views of a capture, plus the whole-capture summary. |
 | `threatintel` | `judge` | role binding | VirusTotal and AbuseIPDB reputation lookups over their REST APIs. |
@@ -36,6 +36,22 @@ references in the agent definitions, which is what makes a definition's tool
 list authoritative: a clone of the static analyst without the `analysis`
 reference really runs without the analysis tools. See [Tools, and the
 measurement baseline](/configuration/#tools-and-the-measurement-baseline).
+
+## UPX unpacking needs no upx program
+
+The `analysis` server's `unpack_upx` reads a UPX-packed Windows PE in Python
+(`src/maljan/tools/upx.py`): UPX's pack header, the NRV2B, NRV2D, NRV2E and
+LZMA streams, the call and jump filters 0x24 to 0x26, and the import,
+relocation, export and resource records UPX keeps to rebuild the file. Nothing
+in the sample runs and nothing needs installing: the `upx` program is not
+used even when it is on the host. Both of UPX's adler32 checksums are checked,
+and a mismatch is an error with no file written. The unpacked program lands
+where `carve_payloads` writes, and its `carved_path` is what every file tool
+of the server takes. A method, filter or format the reader does not cover
+(UPX's filter 0x49, the default for 64-bit files, is one) is answered
+`no: UPX filter 0x49 is not read here`. The triage pack runs it once when
+`pe_info`'s packer signatures name UPX. See the server's README for every
+fact the answer states.
 
 ## Optional libraries and FLOSS
 
