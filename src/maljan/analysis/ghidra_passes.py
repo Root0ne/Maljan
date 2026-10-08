@@ -23,7 +23,9 @@ only the part of it that is exact (``read_findings``):
   within 32 bytes after it with nothing writing ECX in between (a runtime's
   feature probe asks other leaves);
 * a TEB/PEB read, when the instruction reads through ``FS:[0x30]`` or
-  ``FS:[0x18]`` exactly and a capa rule in the same function agrees (the
+  ``FS:[0x18]`` exactly, or, in an x64 file's code bytes, which Ghidra's scan
+  does not look at for GS, a GS-prefixed read of ``GS:[0x60]`` or
+  ``GS:[0x30]`` (``gs_reads``), and a capa rule in the same function agrees (the
   triage pack decides that; a read with no such rule is counted, since a
   language runtime's own code reads the PEB as well).
 
@@ -69,9 +71,10 @@ STATED_RULE = (
     "stated: an instruction that is the listed one (the same mnemonic and operand), an INT3 only "
     "alone, not as padding before a function and not right after a call, jump or return, a "
     "CPUID only where the code sets the hypervisor leaf or sets leaf 1 and tests ECX bit 31 "
-    "before ECX is written again, and a read through FS:[0x30] or FS:[0x18] exactly where a "
-    "capa rule in the same function agrees; API calls, and every other distinct match, are "
-    "counted, not stated"
+    "before ECX is written again, and a read through FS:[0x30] or FS:[0x18], or a GS:[0x60] or "
+    "GS:[0x30] read the platform finds in an x64 file's code bytes, exactly where a capa rule in "
+    "the same function agrees; API calls, and every other distinct match, are counted, not "
+    "stated"
 )
 
 GHIDRA_SWITCHED_OFF = "Ghidra is switched off (core.static.ghidra.enabled)"
@@ -92,6 +95,122 @@ class GhidraPassFailed(RuntimeError):
 _INSTRUCTION_CATEGORY = "suspicious_instruction"
 _TEB_CATEGORY = "peb_teb_access"
 _TEB_OPERAND = re.compile(r"\bFS:\[0x(?:30|18)\]", re.IGNORECASE)
+# x64's TEB is reached through GS: the PEB pointer at GS:[0x60], the TEB's
+# self pointer at GS:[0x30]. Ghidra's scan looks for FS only, so these are read
+# from an x64 file's code bytes (``gs_reads``), in the two forms a compiler
+# writes: ``mov r64, gs:[disp32]`` (GS prefix, REX.W with or without REX.R,
+# 8B, a ModRM of mod 00 and rm 100 with any register, SIB 25, the address) and
+# ``mov rax, gs:[moffs64]`` (GS prefix, REX.W, A1, the address in eight bytes).
+_GS_READ = re.compile(
+    rb"\x65[\x48\x4c]\x8b[\x04\x0c\x14\x1c\x24\x2c\x34\x3c]\x25([\x30\x60])\x00\x00\x00"
+    rb"|\x65\x48\xa1([\x30\x60])\x00{7}",
+)
+
+# What each stated row is, for matching it to a capa rule (``scan_kind``): the
+# instruction's mnemonic, ``INT`` by its operand, and a TEB/PEB read by the
+# structure it reads (a PEB read through FS:[0x30] on x86 and GS:[0x60] on
+# x64, the TEB's self pointer through FS:[0x18] and GS:[0x30]).
+_PEB_OPERAND = re.compile(r"\b(?:FS:\[0x30\]|GS:\[0x60\])", re.IGNORECASE)
+_TEB_SELF_OPERAND = re.compile(r"\b(?:FS:\[0x18\]|GS:\[0x30\])", re.IGNORECASE)
+
+# Which stated rows a capa rule agrees with, by what capa itself says the rule
+# is: its namespace, and for a rule outside the anti-analysis namespaces its
+# name. Read off capa's own rules:
+#
+# * ``anti-analysis/anti-debugging/debugger-detection`` is where capa files
+#   ``execute anti-debugging instructions`` (two RDTSC, or ICEBP), ``check for
+#   software breakpoints`` (an INT3 compared for) and the PEB flag reads
+#   (``check for PEB BeingDebugged flag``, ``check for PEB NtGlobalFlag
+#   flag``, each a ``match: PEB access``): a debugger question.
+# * ``anti-analysis/anti-vm/vm-detection`` is the virtual machine question
+#   the scan's other instructions ask: a CPUID at the hypervisor leaf, and
+#   SIDT, SGDT, SLDT and STR, which read where a hypervisor moved the
+#   descriptor tables and the task register.
+# * The other anti-analysis namespaces capa uses (anti-av, debugger evasion,
+#   anti-disasm, anti-emulation, anti-forensic, anti-llm, obfuscation,
+#   packer) state something none of the scan's rows is: a stack string is not
+#   an SIDT.
+# * ``PEB access`` is a ``lib/`` rule with no namespace (an FS:[0x30] or
+#   GS:[0x60] read, or WoW64's FS access less 0x2000), and ``access PEB
+#   ldr_data`` (``linking/runtime-linking``) is a ``match: PEB access``: both
+#   say the function reads the PEB.
+#
+# A rule in ``anti-analysis`` with no sub-namespace, or in one this table does
+# not name, states no kind and agrees with every row in its function, as every
+# anti-analysis rule did before; a row whose kind the table does not name
+# agrees with every anti-analysis rule. A namespace is matched with its own
+# sub-namespaces (``anti-analysis/packer`` holds ``anti-analysis/packer/upx``).
+_DEBUGGER_KINDS = ("rdtsc", "int3", "int 0x2d", "peb", "teb")
+_VM_KINDS = ("cpuid", "sidt", "sgdt", "sldt", "str")
+CAPA_NAMESPACE_KINDS: dict[str, tuple[str, ...]] = {
+    "anti-analysis/anti-debugging/debugger-detection": _DEBUGGER_KINDS,
+    "anti-analysis/anti-vm/vm-detection": _VM_KINDS,
+    "anti-analysis/anti-av": (),
+    "anti-analysis/anti-debugging/debugger-evasion": (),
+    "anti-analysis/anti-disasm": (),
+    "anti-analysis/anti-emulation": (),
+    "anti-analysis/anti-forensic": (),
+    "anti-analysis/anti-llm": (),
+    "anti-analysis/obfuscation": (),
+    "anti-analysis/packer": (),
+}
+CAPA_RULE_KINDS: dict[str, tuple[str, ...]] = {
+    "PEB access": ("peb", "teb"),
+    "access PEB ldr_data": ("peb", "teb"),
+}
+# Every kind a stated row can have.
+SCAN_KINDS = frozenset(_DEBUGGER_KINDS + _VM_KINDS)
+
+
+def scan_kind(row: dict[str, Any]) -> str | None:
+    """What a stated row reads or runs, as ``CAPA_NAMESPACE_KINDS`` names it, or ``None``."""
+    what = str(row.get("what") or "").strip()
+    if str(row.get("category") or "") == _TEB_CATEGORY:
+        if _PEB_OPERAND.search(what):
+            return "peb"
+        return "teb" if _TEB_SELF_OPERAND.search(what) else None
+    words = what.upper().split(None, 1)
+    if not words:
+        return None
+    if words[0] in ("INT3", "INT"):
+        operand = _operand_value(words[1].split(None, 1)[0]) if len(words) > 1 else None
+        if words[0] == "INT3" or operand == 3:
+            return "int3"
+        return "int 0x2d" if operand == 0x2D else None
+    kind = words[0].lower()
+    return kind if kind in SCAN_KINDS else None
+
+
+def capa_rule_kinds(rule: str, namespace: str) -> frozenset[str] | None:
+    """The kinds of stated row a capa rule states, or ``None`` for a rule that states none."""
+    named = CAPA_RULE_KINDS.get(str(rule))
+    if named is not None:
+        return frozenset(named)
+    space = str(namespace or "")
+    for prefix, kinds in CAPA_NAMESPACE_KINDS.items():
+        if space == prefix or space.startswith(prefix + "/"):
+            return frozenset(kinds)
+    return None
+
+
+def capa_agrees(rule: str, namespace: str, row_kind: str | None) -> bool:
+    """Whether a capa rule in a row's function agrees with the row, of ``row_kind`` (``scan_kind``).
+
+    A rule outside the anti-analysis namespaces agrees only where
+    ``CAPA_RULE_KINDS`` names it and its kind; an anti-analysis rule that
+    states no kind agrees with every row, and one that states kinds with the
+    rows of those kinds and with a row of no kind.
+    """
+    anti = str(namespace or "").startswith("anti-analysis")
+    if not anti and str(rule) not in CAPA_RULE_KINDS:
+        return False
+    kinds = capa_rule_kinds(rule, namespace)
+    if kinds is None:
+        return True
+    if row_kind is None:
+        return anti
+    return row_kind in kinds
+
 
 # The CPUID leaves a hypervisor answers, and the bytes around a CPUID read.
 _HYPERVISOR_LEAVES = range(0x40000000, 0x40000100)
@@ -244,6 +363,32 @@ def _int3_is_a_trap(code: _Code, offset: str) -> bool:
     return int(offset, 16) + 1 not in code.starts
 
 
+def gs_reads(image: Any) -> list[dict[str, Any]]:
+    """The GS:[0x60] and GS:[0x30] reads in an x64 file's code bytes, as TEB/PEB rows.
+
+    Each is a ``peb_teb_access`` row as a Ghidra FS read is: its ``what`` the
+    operand and the bytes read (``GS:[0x60] read (65 48 8b 04 25 60 00 00
+    00)``) and its offset from the image base. No row for a 32-bit file or
+    for no image.
+    """
+    if image is None or not getattr(image, "is64", False):
+        return []
+    rows: list[dict[str, Any]] = []
+    for section in image.code_sections():
+        code = image.section_bytes(section)
+        for match in _GS_READ.finditer(code):
+            address = (match.group(1) or match.group(2))[0]
+            said = " ".join(f"{byte:02x}" for byte in match.group())
+            rows.append(
+                {
+                    "category": _TEB_CATEGORY,
+                    "what": f"GS:[{address:#x}] read ({said})",
+                    "offset": hex(section.rva + match.start()),
+                }
+            )
+    return rows
+
+
 def _cpuid_leaf_said(code: _Code, offset: str) -> str:
     """What the code around a CPUID shows it asks, when it shows the hypervisor question."""
     at = code.at(offset)
@@ -339,6 +484,11 @@ def read_findings(
         if row.get("function"):
             fact["function"] = str(row["function"])
         (beside_capa if category == _TEB_CATEGORY else stated).append(fact)
+    for fact in gs_reads(image):
+        key = (fact["offset"], fact["what"])
+        if key not in stated_keys:
+            stated_keys.add(key)
+            beside_capa.append(fact)
     return {
         "stated": stated,
         "beside_capa": beside_capa,

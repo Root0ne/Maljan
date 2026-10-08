@@ -142,6 +142,53 @@ class TestWhatIsStated:
         assert [f["what"] for f in read["beside_capa"]] == ["MOV EAX,dword ptr FS:[0x30]"]
         assert read["not_stated"] == 1
 
+    def test_an_x64_gs_read_in_the_code_bytes_waits_for_capa_beside_the_fs_ones(self) -> None:
+        """Ghidra's scan looks for FS only; the GS reads are read from the bytes."""
+        image = _image(
+            {
+                # mov rax, gs:[0x60]
+                0x10: b"\x65\x48\x8b\x04\x25\x60\x00\x00\x00",
+                # mov r8, gs:[0x30]
+                0x30: b"\x65\x4c\x8b\x04\x25\x30\x00\x00\x00",
+                # mov rax, [0x60]: no GS prefix
+                0x50: b"\x48\x8b\x04\x25\x60\x00\x00\x00",
+                # mov rax, gs:[0x58]: another address
+                0x70: b"\x65\x48\x8b\x04\x25\x58\x00\x00\x00",
+                # mov rax, gs:[0x60] through a 64-bit offset
+                0x90: b"\x65\x48\xa1\x60\x00\x00\x00\x00\x00\x00\x00",
+            }
+        )
+        fs = {
+            "category": "peb_teb_access",
+            "technique": "Direct PEB/TEB access",
+            "address": "1400010b0",
+            "offset": "0x10b0",
+            "instruction": "MOV EAX,dword ptr FS:[0x30]",
+        }
+
+        read = read_findings([fs], image=image)
+
+        assert [(f["what"], f["offset"]) for f in read["beside_capa"]] == [
+            ("MOV EAX,dword ptr FS:[0x30]", "0x10b0"),
+            ("GS:[0x60] read (65 48 8b 04 25 60 00 00 00)", "0x1010"),
+            ("GS:[0x30] read (65 4c 8b 04 25 30 00 00 00)", "0x1030"),
+            ("GS:[0x60] read (65 48 a1 60 00 00 00 00 00 00 00)", "0x1090"),
+        ]
+        assert read["stated"] == [] and read["not_stated"] == 0
+
+    def test_a_32_bit_file_and_no_file_give_no_gs_read(self) -> None:
+        from tests.unit.tools.synthetic_pe import TEXT_RVA, SyntheticPE
+
+        from maljan.tools import pe_image
+
+        built = SyntheticPE(
+            image_base=0x400000, is64=False, functions=[(TEXT_RVA, TEXT_RVA + 0x300)]
+        )
+        built.put("text", 0x10, b"\x65\x48\x8b\x04\x25\x60\x00\x00\x00")
+
+        assert read_findings([], image=pe_image.parse(built.build()))["beside_capa"] == []
+        assert read_findings([])["beside_capa"] == []
+
     def test_an_api_call_is_counted_and_never_stated(self) -> None:
         read = read_findings(
             [

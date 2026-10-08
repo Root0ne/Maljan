@@ -99,9 +99,12 @@ from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
 from maljan.analysis import sandbox_sections
 from maljan.analysis.ghidra_passes import (
     ANTI_ANALYSIS_TOOL,
+    CAPA_RULE_KINDS,
     GHIDRA_FORMATS,
     GhidraPasses,
+    capa_agrees,
     run_pass,
+    scan_kind,
 )
 from maljan.analysis.pcap_summary import conversation_line
 from maljan.analysis.technique_ids import technique_ids_in
@@ -2889,22 +2892,18 @@ def _with_capa(answer: dict[str, Any], capa_rows: list[dict[str, Any]]) -> dict[
     return marked
 
 
-# A capa rule that agrees with a TEB/PEB read: its own anti-analysis rules, or
-# a rule that names the PEB or TEB it reads (capa's ``PEB access`` sits in no
-# anti-analysis namespace).
-_PEB_RULE = re.compile(r"\b(?:PEB|TEB)\b")
-
-
 def _anti_analysis_with_capa(
     answer: dict[str, Any], capa_rows: list[dict[str, Any]], starts: list[str]
 ) -> dict[str, Any]:
     """The anti-analysis answer, each match marked where a capa rule agrees.
 
-    A match agrees with capa when a capa rule of its ``anti-analysis``
-    namespaces matched in the same function: the nearest capa function start
-    at or before the match is the nearest one at or before a capa address. An
-    exact TEB/PEB read (``beside_capa``) is stated only with such a rule, or
-    one naming the PEB or TEB, in its function; without one it is counted.
+    A match agrees with capa when a capa rule that states the match's kind
+    matched in the same function (``ghidra_passes.capa_agrees``: an
+    anti-analysis rule of the row's kind or of no kind, or ``PEB access`` for
+    a TEB/PEB read): the nearest capa function start at or before the match
+    is the nearest one at or before a capa address. An exact TEB/PEB read
+    (``beside_capa``) is stated only with such a rule in its function;
+    without one it is counted.
     """
     if not isinstance(answer, dict) or ("stated" not in answer and "beside_capa" not in answer):
         return answer
@@ -2920,35 +2919,42 @@ def _anti_analysis_with_capa(
         index = bisect_right(points, value) - 1
         return points[index] if index >= 0 else None
 
-    by_start: dict[int, list[dict[str, str]]] = {}
-    peb_by_start: dict[int, list[dict[str, str]]] = {}
+    # Each rule that could agree with some row, by the function it matched in.
+    by_start: dict[int, list[tuple[str, str, dict[str, str]]]] = {}
     for capa in capa_rows:
         rule = str(capa.get("rule") or "")
-        anti = str(capa.get("namespace") or "").startswith("anti-analysis")
-        peb = anti or bool(_PEB_RULE.search(rule))
-        if not peb:
+        namespace = str(capa.get("namespace") or "")
+        if not (namespace.startswith("anti-analysis") or rule in CAPA_RULE_KINDS):
             continue
         for address in capa.get("addresses") or []:
             begin = start_of(str(address))
             if begin is None:
                 continue
             said = {"rule": rule, "at": str(address)}
-            if anti:
-                by_start.setdefault(begin, []).append(said)
-            peb_by_start.setdefault(begin, []).append(said)
+            by_start.setdefault(begin, []).append((rule, namespace, said))
+
+    def agreeing(row: dict[str, Any]) -> list[dict[str, str]]:
+        begin = start_of(str(row.get("offset") or ""))
+        if begin is None:
+            return []
+        kind = scan_kind(row)
+        return [
+            said for rule, space, said in by_start.get(begin, ()) if capa_agrees(rule, space, kind)
+        ]
+
     marked = dict(answer)
     rows = []
     for row in answer.get("stated") or []:
         row = dict(row)
-        begin = start_of(str(row.get("offset") or ""))
-        if begin is not None and begin in by_start:
-            row["capa"] = by_start[begin]
+        agree = agreeing(row)
+        if agree:
+            row["capa"] = agree
         rows.append(row)
     counted = 0
     for row in marked.pop("beside_capa", None) or []:
-        begin = start_of(str(row.get("offset") or ""))
-        if begin is not None and begin in peb_by_start:
-            rows.append({**row, "capa": peb_by_start[begin]})
+        agree = agreeing(row)
+        if agree:
+            rows.append({**row, "capa": agree})
         else:
             counted += 1
     marked["stated"] = rows
