@@ -459,6 +459,7 @@ def _arc4(key: bytes, data: bytes) -> bytes | None:
             )
     except ImportError:  # pragma: no cover - cryptography is a core dependency
         return None
+    # nosemgrep: python.cryptography.security.insecure-cipher-algorithms-arc4.insecure-cipher-algorithm-arc4 — the sample's own cipher, reproduced to read its bytes  # noqa: E501
     decryptor = Cipher(ARC4(key), mode=None).decryptor()
     return decryptor.update(data) + decryptor.finalize()
 
