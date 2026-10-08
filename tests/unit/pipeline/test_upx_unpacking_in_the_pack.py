@@ -110,6 +110,7 @@ def test_the_ids_before_it_are_the_ids_a_pack_without_it_gives(
     path = _sample(tmp_path, su.build().data)
     with_step = _pack(path, tmp_path)
     monkeypatch.setattr(triage_pack, "_names_upx", lambda facts: False)
+    monkeypatch.setattr(triage_pack, "_holds_a_pack_header", lambda path: False)
     without = _pack(path, tmp_path)
     assert [(e.id, e.tool) for e in with_step.entries][:-1] == [
         (e.id, e.tool) for e in without.entries
@@ -180,6 +181,34 @@ def test_no_job_directory_is_one_entry_saying_so(tmp_path: Path) -> None:
     entry = _entry(result)
     assert not entry.ok
     assert _line(result).endswith(f"UPX unpacking: no: {triage_pack.UPX_NO_JOB}")
+
+
+def _renamed(data: bytes) -> bytes:
+    """``data`` with its three section names changed to ones no packer signature lists."""
+    out = bytearray(data)
+    table = su.PE_OFFSET + 24 + 224
+    for index, name in enumerate((b"abc0", b"abc1", b".res")):
+        out[table + 40 * index : table + 40 * index + 8] = name.ljust(8, b"\0")
+    return bytes(out)
+
+
+def test_a_true_pack_header_runs_the_unpacking_when_the_sections_are_renamed(
+    tmp_path: Path,
+) -> None:
+    path = _sample(tmp_path, _renamed(su.build().data))
+    result = _pack(path, tmp_path)
+    pe = next(e for e in result.entries if e.tool == "pe_info")
+    assert pe.structured["packer_signatures"] == []
+    entry = _entry(result)
+    assert entry.ok and entry.structured["unpacked"] == "yes"
+
+
+def test_a_upx_named_file_with_no_header_gets_its_no_line(tmp_path: Path) -> None:
+    packed = su.build()
+    data = bytearray(packed.data)
+    data[packed.header_offset : packed.header_offset + 4] = b"\0\0\0\0"
+    result = _pack(_sample(tmp_path, bytes(data)), tmp_path)
+    assert _line(result).endswith(f"UPX unpacking: {upx.NO_HEADER}")
 
 
 def test_a_sample_the_packer_reader_does_not_name_upx_gets_no_step(tmp_path: Path) -> None:

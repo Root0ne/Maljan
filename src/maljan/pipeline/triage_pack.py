@@ -1225,7 +1225,9 @@ class _Pack:
         """Unpack a PE the packer reader names UPX, once, beside the files the server carves.
 
         After the function index, so every id issued before it keeps its value,
-        and only when ``pe_info``'s packer signatures name UPX. The unpacked
+        and only when ``pe_info``'s packer signatures name UPX or a pack header
+        with a true checksum byte stands where UPX writes one (renamed sections
+        keep their header; a UPX-named file with none gets its ``no:``). The unpacked
         program is written where the analysis server's ``carve_payloads``
         writes for this job and sample, so the ``carved_path`` the answer gives
         is one every file tool of the server reads. The pack is not run again
@@ -1233,9 +1235,9 @@ class _Pack:
         what to open. A run with no job directory to write in is one entry
         saying so.
         """
-        if routed != "pe" or not _names_upx(format_facts):
-            return
         path = self.inputs.sample_path
+        if routed != "pe" or not (_names_upx(format_facts) or _holds_a_pack_header(path)):
+            return
         args: dict[str, Any] = {"path": path}
         settings = self.inputs.floss
         if not settings.job_id:
@@ -1263,6 +1265,15 @@ def _names_upx(format_facts: dict[str, Any] | None) -> bool:
         str(row.get("name") if isinstance(row, dict) else row).strip().upper() == "UPX"
         for row in rows
     )
+
+
+def _holds_a_pack_header(path: str) -> bool:
+    """Whether the file holds UPX's pack header with a true checksum byte where UPX writes it."""
+    try:
+        data = Path(path).read_bytes()
+    except OSError:
+        return False
+    return upx.has_pack_header(data)
 
 
 def _file_digest(path: str) -> str:
