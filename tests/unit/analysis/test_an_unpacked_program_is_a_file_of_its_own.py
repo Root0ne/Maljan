@@ -30,7 +30,7 @@ def _entry(eid: str, tool: str, answer: dict[str, Any], **args: Any) -> LedgerEn
 def _ledger(tmp_path: Path) -> tuple[list[LedgerEntry], dict[str, Any], str]:
     sample = tmp_path / "packed.exe"
     sample.write_bytes(su.build().data)
-    unpacked = upx.unpack_upx(str(sample), tmp_path / "carved")
+    unpacked = upx.unpack_upx(str(sample), tmp_path)
     child = unpacked["child"]["carved_path"]
     child_strings = {"strings": [{"offset": 0x1600, "text": "child-only"}]}
     return (
@@ -77,7 +77,7 @@ def test_a_read_of_the_unpacked_program_is_placed_against_its_own_sections(
 def test_a_file_that_was_not_unpacked_gives_its_sentence(tmp_path: Path) -> None:
     plain = tmp_path / "plain.exe"
     plain.write_bytes(SyntheticPE().build())
-    answer = upx.unpack_upx(str(plain), tmp_path / "carved")
+    answer = upx.unpack_upx(str(plain), tmp_path)
     led = [_entry("ev_0001", "unpack_upx", answer, path=str(plain))]
     found = run_roots(led).of_entry("ev_0001")
     assert found.roots == [] and found.reason == upx.NO_HEADER

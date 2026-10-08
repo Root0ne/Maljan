@@ -20,9 +20,9 @@ What it reads, in UPX's own layout:
   header names: NRV2B, NRV2D and NRV2E (each in its 32-bit, 16-bit and 8-bit
   bit-stream form) by decoders written here, LZMA by the standard library's raw
   LZMA1 filter. The unpacked data must be exactly the stated size and its
-  adler32 the stated one; UPX's PE packer checksums the data as it was
-  compressed, with the code filter still applied, and the answer says which
-  reading matched. A mismatch is an error and no image is written.
+  adler32 the stated one, taken over the data as decompressed, with the code
+  filter still applied, which is what UPX's PE packer checksums. A mismatch
+  is an error and no image is written.
 * **The code filter** UPX applied to the code section (``0x24``, ``0x25``,
   ``0x26``: call and jump targets made absolute and stored big-endian behind a
   marker byte), undone over the code range the stored header names.
@@ -56,10 +56,13 @@ import lzma
 import re
 import struct
 import zlib
-from collections.abc import Callable
+from array import array
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 from maljan.tools import binary, pe_image
@@ -172,6 +175,15 @@ FILE_OVER_CAP = (
     "of {cap} bytes; nothing was written"
 )
 RELOCS16_NOT_READ = "no: the file's 16-bit relocation records are not read here"
+RELOCS_OVERLAP_NOT_READ = (
+    "no: the file's relocation records name one place twice or places that overlap, which are "
+    "not read here"
+)
+LZMA_NOT_READ = (
+    "no: UPX LZMA properties lc={lc}, lp={lp} are not read by the standard library's LZMA1 decoder"
+)
+# What the stated adler32 of the unpacked data covers, in UPX's PE packer.
+CHECKSUM_OVER = "the data as decompressed, before the code filter is undone"
 
 
 class NotRead(Exception):
@@ -279,21 +291,34 @@ def _put_word(buf: bytearray, at: int, value: int, width: int, what: str) -> Non
     _put(buf, at, (value & ((1 << (8 * width)) - 1)).to_bytes(width, "little"), what)
 
 
-def _next_nuls(data: bytes, starts: list[int], end: int) -> dict[int, int]:
-    """Where the NUL ending each string that starts at one of ``starts`` lies, before ``end``.
+def _string_ends(data: bytes, starts: np.ndarray, end: int) -> np.ndarray:
+    """For each of ``starts``, where the NUL ending its string lies before ``end``, or -1.
 
-    Each byte between the lowest start and ``end`` is scanned once: the starts
-    are visited from the highest down, and a start whose segment up to the next
-    start holds no NUL ends where that next start's string ends. A start with
-    no NUL before ``end`` maps to -1.
+    Each byte between the lowest start and ``end`` is scanned once: the
+    distinct starts are visited from the highest down, and a start whose
+    segment up to the next start holds no NUL ends where that next start's
+    string ends. Eight bytes a start, never an object per string.
     """
-    found: dict[int, int] = {}
+    distinct = np.unique(starts)
+    ends = np.full(len(distinct), -1, dtype=np.int64)
     bound, carried = end, -1
-    for start in sorted(set(starts), reverse=True):
+    for index in range(len(distinct) - 1, -1, -1):
+        start = int(distinct[index])
         at = data.find(b"\0", start, bound) if start < bound else -1
-        found[start] = at if at >= 0 else carried
-        bound, carried = start, found[start]
-    return found
+        if at >= 0:
+            carried = at
+        ends[index] = carried
+        bound = start
+    return ends[np.searchsorted(distinct, starts)]
+
+
+def _u32_at(buf: bytearray, positions: np.ndarray) -> np.ndarray:
+    """The little-endian 32-bit values at ``positions`` (each four bytes inside ``buf``)."""
+    view = np.frombuffer(buf, dtype=np.uint8)
+    values = np.zeros(len(positions), dtype=np.int64)
+    for k in range(4):
+        values |= view[positions + k].astype(np.int64) << (8 * k)
+    return values
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +389,37 @@ def read_pack_header(data: bytes) -> PackHeader:
     """The pack header where UPX writes it, or :class:`NotRead` or :class:`Damaged` saying why."""
     packed = _read_packed(data)
     return _find_header(packed)
+
+
+def has_pack_header(data: bytes) -> bool:
+    """Whether a pack header with a true checksum byte stands where UPX writes one.
+
+    The first ``UPX!`` in UPX's windows, version 10 or later and not 255, whose
+    last byte is the sum of the bytes before it modulo 251: what the triage
+    pack asks before it runs the unpacker on a file its section names do not
+    call UPX.
+    """
+    try:
+        packed = _read_packed(data)
+    except NotRead:
+        return False
+    sections = packed.image.sections
+    if len(sections) < 2:
+        return False
+    windows = [max(0, sections[1].raw_offset - _WINDOW_BEFORE)]
+    if len(sections) > 2:
+        windows.append(sections[2].raw_offset)
+    for start in windows:
+        at = data.find(_MAGIC, start, start + _WINDOW)
+        if at < 0:
+            continue
+        block = data[at : at + _HEADER_SIZE]
+        return (
+            len(block) == _HEADER_SIZE
+            and _FIRST_VERSION <= block[4] < _REFUSED_VERSION
+            and block[31] == _checksum_byte(block)
+        )
+    return False
 
 
 def _find_header(packed: _Packed) -> PackHeader:
@@ -563,6 +619,8 @@ def _lzma(src: bytes, size: int) -> bytearray:
     pb, lp, lc = src[0] & 7, src[1] >> 4, src[1] & 15
     if pb >= 5 or lp >= 5 or lc >= 9 or (src[0] >> 3) != lc + lp:
         raise Damaged(f"the LZMA stream's properties bytes {src[:2].hex()} are not UPX's")
+    if lc + lp > 4:
+        raise NotRead(LZMA_NOT_READ.format(lc=lc, lp=lp))
     filters = [
         {"id": lzma.FILTER_LZMA1, "lc": lc, "lp": lp, "pb": pb, "dict_size": max(4096, size)}
     ]
@@ -722,7 +780,13 @@ class _Image:
 
 
 def _rebuild_imports(image: _Image) -> str:
-    """Write the import table back from UPX's records; the sentence saying what was written."""
+    """Write the import table back from UPX's records; the sentence saying what was written.
+
+    The records are walked once to find where each starts (held four bytes a
+    record) and how many name bytes they write; the library names are read
+    from the packed import table by one scan; the descriptors and names are
+    checked to fit the image before anything is written.
+    """
     original, buf = image.original, image.buf
     table_rva, table_size = original.directory(_IMPORT)
     if table_rva == 0 or table_size <= _IMPORT_DESCRIPTOR:
@@ -741,8 +805,9 @@ def _rebuild_imports(image: _Image) -> str:
     width = image.width
     ord_mask = 1 << (8 * width - 1)
 
-    # First pass: where each record starts, and the library names' total size.
-    starts: list[int] = []
+    # First pass: where each record starts, and the bytes its names take.
+    starts = array("I")
+    name_bytes = 0
     p = idata
     while _u32(buf, p, "an import record") != 0:
         starts.append(p)
@@ -757,30 +822,50 @@ def _rebuild_imports(image: _Image) -> str:
                 close = buf.find(b"\0", p + 1)
                 if close < 0:
                     raise Damaged(f"an imported name at {p + 1:#x} is not terminated")
+                name_bytes += 3 + close - p
                 p = close + 1
             elif tag == 0xFF:
                 p += 3
             else:
                 p += 5
         p += 1
-    name_offsets = [base + _u32(buf, s, "a library name") for s in starts]
-    nuls = _next_nuls(data, [o for o in name_offsets if base <= o < end], end)
-    dll_names: list[bytes] = []
-    for offset in name_offsets:
-        close = nuls.get(offset, -1) if base <= offset < end else -1
-        if close < 0:
-            raise Damaged(
-                f"a library name at file offset {offset:#x} is not held in the packed import table"
-            )
-        dll_names.append(data[offset:close])
-    total_dll = _align(sum(len(n) + 1 for n in dll_names), 2)
+    count = len(starts)
+    at_starts = np.frombuffer(starts, dtype=np.uint32).astype(np.int64)
+    offsets = _u32_at(buf, at_starts) + base
+    del at_starts
+    outside = np.flatnonzero((offsets < base) | (offsets >= end))
+    if len(outside):
+        raise Damaged(
+            f"a library name at file offset {int(offsets[outside[0]]):#x} is not held in the "
+            "packed import table"
+        )
+    ends = _string_ends(data, offsets, end) if count else np.zeros(0, dtype=np.int64)
+    unended = np.flatnonzero(ends < 0)
+    if len(unended):
+        raise Damaged(
+            f"a library name at file offset {int(offsets[unended[0]]):#x} is not terminated in "
+            "the packed import table"
+        )
+    total_dll = _align(int((ends - offsets).sum()) + count, 2)
 
     descriptor = image.at(table_rva, "the import table")
+    if descriptor + _IMPORT_DESCRIPTOR * count > len(buf):
+        raise Damaged(
+            f"the {count} import descriptors UPX's records describe do not fit the unpacked "
+            f"image at rva {table_rva:#x}"
+        )
     dll_at = image.at(names_rva, "the import names") if names_rva else 0
+    if names_rva and dll_at + total_dll + name_bytes > len(buf):
+        raise Damaged(
+            f"the {total_dll + name_bytes} bytes of import names UPX's records describe do not "
+            f"fit the unpacked image at rva {names_rva:#x}"
+        )
     names_at = dll_at + total_dll
     names_start = names_at
     functions = 0
-    for start, dll in zip(starts, dll_names, strict=True):
+    for index in range(count):
+        start = starts[index]
+        dll = data[int(offsets[index]) : int(ends[index])]
         iat_rva = _u32(buf, start + 4, "an import address table") + image.rvamin
         if names_rva:
             _put(buf, dll_at, dll + b"\0", "a library name")
@@ -830,33 +915,99 @@ def _rebuild_imports(image: _Image) -> str:
             functions += 1
         _put_word(buf, slot, 0, width, "an import slot")
         descriptor += _IMPORT_DESCRIPTOR
-    return f"from UPX's import records: {len(starts)} libraries, {functions} functions"
+    return f"from UPX's import records: {count} libraries, {functions} functions"
 
 
-def _reloc_table(entries: list[tuple[int, int]]) -> bytes:
-    """Base relocation blocks, one per 4 KiB page, each padded to whole 32-bit words."""
-    out = bytearray()
-    page_entries: list[int] = []
-    page = None
-    for rva, kind in sorted(entries):
-        if page is not None and rva & ~0xFFF != page:
-            out += _reloc_block(page, page_entries)
-            page_entries = []
-        page = rva & ~0xFFF
-        page_entries.append((kind << 12) | (rva & 0xFFF))
-    if page is not None:
-        out += _reloc_block(page, page_entries)
-    return bytes(out)
+# How many record bytes are read in one vectorised piece.
+_RECORD_PIECE = 1 << 20
 
 
-def _reloc_block(page: int, items: list[int]) -> bytes:
-    if len(items) % 2:
-        items = [*items, 0]
-    return struct.pack(f"<II{len(items)}H", page, 8 + 2 * len(items), *items)
+def _reloc_positions(buf: bytearray, stream: int, image_size: int, width: int) -> array:
+    """Every position UPX's delta-coded relocation records name, in order, four bytes each.
+
+    A run of one-byte deltas is summed a piece at a time; only the long forms
+    (a byte of 0xF0 or more, then two or six bytes) are read one by one. The
+    positions only grow, so the first and last of a run bound all of it.
+    """
+    view = np.frombuffer(buf, dtype=np.uint8)
+    out = array("I")
+    p = stream
+    position = -4
+    size = len(buf)
+
+    def place(value: int) -> None:
+        if value < 0 or value + width > image_size:
+            raise Damaged(f"a relocation at {value:#x} lies outside the image its records cover")
+
+    while True:
+        if p >= size:
+            raise Damaged(f"the relocation records run past the unpacked data at {p:#x}")
+        piece = view[p : p + _RECORD_PIECE]
+        marks = np.flatnonzero((piece == 0) | (piece >= 0xF0))
+        run = int(marks[0]) if len(marks) else len(piece)
+        if run:
+            sums = np.cumsum(piece[:run], dtype=np.int64) + position
+            place(int(sums[0]))
+            place(int(sums[-1]))
+            out.frombytes(sums.astype("<u4").tobytes())
+            position = int(sums[-1])
+            p += run
+            continue
+        step = int(piece[0])
+        if step == 0:
+            return out
+        delta = (step & 0x0F) * 0x10000 + _u16(buf, p + 1, "a relocation record")
+        p += 3
+        if delta == 0:
+            delta = _u32(buf, p, "a relocation record")
+            p += 4
+        position += delta
+        place(position)
+        out.append(position)
+
+
+# How many relocations are put back in one vectorised piece, so the scratch
+# arrays stay a fixed size whatever the count.
+_RELOC_PIECE = 1 << 16
+
+
+def _reloc_pages(held: np.ndarray, rvamin: int) -> tuple[array, array, int]:
+    """The pages the sorted positions fall in, where each page's run starts, and the least gap.
+
+    Read a piece at a time, so the scratch arrays stay a fixed size: what is
+    kept is one entry a page, and a file's pages are bounded by its image.
+    """
+    pages, runs = array("Q"), array("Q")
+    previous, last, least = -1, None, None
+    for begin in range(0, len(held), _RELOC_PIECE):
+        piece = held[begin : begin + _RELOC_PIECE].astype(np.int64) + rvamin
+        page = piece >> 12
+        if int(page[0]) != previous:
+            pages.append(int(page[0]))
+            runs.append(begin)
+        for change in (np.flatnonzero(np.diff(page)) + 1).tolist():
+            pages.append(int(page[change]))
+            runs.append(begin + change)
+        previous = int(page[-1])
+        gaps = np.diff(piece)
+        lowest = int(gaps.min()) if len(gaps) else None
+        if last is not None:
+            lowest = min(int(piece[0]) - last, lowest if lowest is not None else 1 << 62)
+        if lowest is not None:
+            least = lowest if least is None else min(least, lowest)
+        last = int(piece[-1])
+    return pages, runs, least if least is not None else 1 << 62
 
 
 def _rebuild_relocations(image: _Image) -> str:
-    """Put the relocated values back and write the relocation table from UPX's records."""
+    """Put the relocated values back and write the relocation table from UPX's records.
+
+    The positions are read once into four bytes each (they only grow, so they
+    are already in page order); the table's size is counted from the runs per
+    page and checked to fit the image at the stored directory before any value
+    is touched; the values are then put back a piece at a time and the table
+    written page by page.
+    """
     original, buf = image.original, image.buf
     table_rva, table_size = original.directory(_BASERELOC)
     if not table_rva or not table_size or original.flags & _RELOCS_STRIPPED:
@@ -875,41 +1026,49 @@ def _rebuild_relocations(image: _Image) -> str:
     if big & 6:
         raise NotRead(RELOCS16_NOT_READ)
     width = image.width
-    image_size = stream
-    positions: list[int] = []
-    p = stream
-    position = -4
-    while True:
-        if p >= len(buf):
-            raise Damaged(f"the relocation records run past the unpacked data at {p:#x}")
-        step = buf[p]
-        if step == 0:
-            break
-        if step < 0xF0:
-            position += step
-            p += 1
-        else:
-            delta = (step & 0x0F) * 0x10000 + _u16(buf, p + 1, "a relocation record")
-            p += 3
-            if delta == 0:
-                delta = _u32(buf, p, "a relocation record")
-                p += 4
-            position += delta
-        if position < 0 or position + width > image_size:
-            raise Damaged(f"a relocation at {position:#x} lies outside the image its records cover")
-        buf[position : position + width] = buf[position : position + width][::-1]
-        positions.append(position)
-    add = original.image_base + image.rvamin
-    kind = 10 if original.is64 else 3
-    for position in positions:
-        value = int.from_bytes(buf[position : position + width], "little") + add
-        buf[position : position + width] = (value & ((1 << (8 * width)) - 1)).to_bytes(
-            width, "little"
+    positions = _reloc_positions(buf, stream, stream, width)
+    held = np.frombuffer(positions, dtype=np.uint32)
+    pages, runs, least = _reloc_pages(held, image.rvamin)
+    if least < width:
+        raise NotRead(RELOCS_OVERLAP_NOT_READ)
+    bounds = [*runs, len(held)]
+    lengths = [bounds[i + 1] - bounds[i] for i in range(len(runs))]
+    table_bytes = sum(8 + 2 * (n + (n & 1)) for n in lengths)
+    table_at = image.at(table_rva, "the relocation table")
+    if table_at + table_bytes > len(buf):
+        raise Damaged(
+            f"the relocation table UPX's records describe ({table_bytes} bytes for {len(held)} "
+            f"relocations) does not fit the unpacked image at rva {table_rva:#x}"
         )
-    table = _reloc_table([(image.rvamin + position, kind) for position in positions])
-    _put(buf, image.at(table_rva, "the relocation table"), table, "the relocation table")
+    add = original.image_base + image.rvamin
+    mask = (1 << (8 * width)) - 1
+    view = np.frombuffer(buf, dtype=np.uint8)
+    kind = np.uint64
+    for begin in range(0, len(held), _RELOC_PIECE):
+        piece = held[begin : begin + _RELOC_PIECE].astype(np.int64)
+        values = np.zeros(len(piece), dtype=kind)
+        for k in range(width):
+            values = (values << kind(8)) | view[piece + k].astype(kind)
+        values = values + kind(add & mask)
+        if width == 4:
+            values &= kind(0xFFFFFFFF)
+        for k in range(width):
+            view[piece + k] = ((values >> kind(8 * k)) & kind(0xFF)).astype(np.uint8)
+    del view
+    kind_bits = (10 if original.is64 else 3) << 12
+    table = bytearray(table_bytes)
+    cursor = 0
+    for index, page in enumerate(pages):
+        begin, count = int(runs[index]), int(lengths[index])
+        offsets = (held[begin : begin + count].astype(np.int64) + image.rvamin) & 0xFFF
+        padded = count + (count & 1)
+        struct.pack_into("<II", table, cursor, int(page) << 12, 8 + 2 * padded)
+        entries = (offsets | kind_bits).astype("<u2").tobytes()
+        table[cursor + 8 : cursor + 8 + len(entries)] = entries
+        cursor += 8 + 2 * padded
+    _put(buf, table_at, table, "the relocation table")
     original.set_directory(_BASERELOC, table_rva, len(table))
-    return f"from UPX's relocation records: {len(positions)} relocations"
+    return f"from UPX's relocation records: {len(held)} relocations"
 
 
 def _rebuild_exports(image: _Image) -> str:
@@ -944,22 +1103,40 @@ def _rebuild_exports(image: _Image) -> str:
         raise Damaged("the packed export table names no library name")
     name_at = offset_of(name_rva, 1, "the export table's library name")
     functions_at = offset_of(functions_rva, 4 * count, "the exported functions")
-    pointers_at = offset_of(names_rva, 4 * names, "the export name pointers")
+    pointers_at = offset_of(names_rva, 4 * names, "the exported-name pointers")
     ordinals_at = offset_of(ordinals_rva, 2 * names, "the export ordinals")
-    functions = list(struct.unpack_from(f"<{count}I", data, functions_at))
-    name_rvas = list(struct.unpack_from(f"<{names}I", data, pointers_at))
-    forwarders = [f for f in functions if packed_rva <= f < packed_rva + packed_size]
-    starts = [name_at] + [offset_of(r, 1, "an export name") for r in name_rvas]
-    starts += [base + (f - packed_rva) for f in forwarders]
-    nuls = _next_nuls(data, starts, limit)
+    functions = np.frombuffer(data, dtype="<u4", count=count, offset=functions_at)
+    name_rvas = np.frombuffer(data, dtype="<u4", count=names, offset=pointers_at)
+    below = np.flatnonzero(name_rvas < packed_rva)
+    if len(below):
+        offset_of(int(name_rvas[below[0]]), 1, "an exported name")
+    name_offsets = name_rvas.astype(np.int64) - packed_rva + base
+    beyond = np.flatnonzero(name_offsets >= limit)
+    if len(beyond):
+        offset_of(int(name_rvas[beyond[0]]), 1, "an exported name")
+    forwarded = (functions >= packed_rva) & (functions.astype(np.int64) < packed_rva + packed_size)
+    starts = np.concatenate(
+        [
+            np.array([name_at], dtype=np.int64),
+            functions[forwarded].astype(np.int64) - packed_rva + base,
+            name_offsets,
+        ]
+    )
+    ends = _string_ends(data, starts, limit)
+    unended = np.flatnonzero(ends < 0)
+    if len(unended):
+        raise Damaged(
+            f"an export string at file offset {int(starts[unended[0]]):#x} is not terminated"
+        )
+    ended = iter(zip(starts.tolist(), ends.tolist(), strict=True))
 
-    def text(at: int) -> bytes:
-        close = nuls.get(at, -1)
-        if close < 0:
-            raise Damaged(f"an export string at file offset {at:#x} is not terminated")
-        return data[at:close]
+    def text(_at: int) -> bytes:
+        # The strings are read in the order ``starts`` lists them: the
+        # library name, the forwarders in function order, then the names.
+        begin, close = next(ended)
+        return data[begin:close]
 
-    lengths = sum(nuls[s] - s + 1 for s in starts if nuls.get(s, -1) >= 0)
+    lengths = int((ends - starts).sum()) + len(starts)
     size = _EXPORT_DIRECTORY + 4 * count + 6 * names + lengths
     if size > len(buf):
         raise Damaged("the export table UPX moved is larger than the unpacked image")
@@ -974,14 +1151,14 @@ def _rebuild_exports(image: _Image) -> str:
         ordinals_at : ordinals_at + 2 * names
     ]
     cursor = name_new + len(library)
-    for index, function in enumerate(functions):
+    for index, function in enumerate(functions.tolist()):
         if packed_rva <= function < packed_rva + packed_size:
             forward = text(base + (function - packed_rva)) + b"\0"
             out[cursor - table_rva : cursor - table_rva + len(forward)] = forward
             function = cursor
             cursor += len(forward)
         struct.pack_into("<I", out, functions_new - table_rva + 4 * index, function)
-    for index, rva in enumerate(name_rvas):
+    for index, rva in enumerate(name_rvas.tolist()):
         name = text(base + (rva - packed_rva)) + b"\0"
         out[cursor - table_rva : cursor - table_rva + len(name)] = name
         struct.pack_into("<I", out, pointers_new - table_rva + 4 * index, cursor)
@@ -993,114 +1170,146 @@ def _rebuild_exports(image: _Image) -> str:
     return f"from the packed file's export table: {count} functions, {names} names"
 
 
-@dataclass
-class _Leaf:
-    data: bytearray
-    type_id: int
-    new_offset: int = 0
+class _Resources:
+    """The packed file's resource tree, read in place.
 
+    Walked three times over the packed bytes and never held as objects: once
+    to check its shape and count its sizes, held to the section's own bytes
+    (``measure``), once to move the data UPX kept uncompressed back
+    (``leaves``), and once to lay the directory out again when the stored one
+    is empty (``build``).
+    """
 
-@dataclass
-class _Branch:
-    header: bytes
-    children: list[tuple[int, bytes | None, _Branch | _Leaf]]
+    def __init__(self, packed: _Packed, root_rva: int, packed_rva: int) -> None:
+        place = packed.mapped(root_rva)
+        if place is None:
+            raise Damaged("the packed file's resource table is not in the file")
+        self.packed = packed
+        self.data = packed.data
+        self.start, self.end = place
+        self.packed_rva = packed_rva
+        self.directory_size = 0
+        self.name_size = 0
 
+    @property
+    def held(self) -> int:
+        return self.end - self.start
 
-def _read_resources(image: _Image) -> tuple[_Branch | None, list[_Leaf], int, int, int]:
-    """The packed file's resource tree, its leaves in order, its sizes and its directory's RVA."""
-    packed = image.packed
-    root_rva, _ = packed.directory(_RESOURCE)
-    place = packed.mapped(root_rva)
-    if place is None:
-        raise Damaged("the packed file's resource table is not in the file")
-    start, end = place
-    data = packed.data
-    # A tree holds each entry once; entries shared between directories could
-    # name more nodes than the section has bytes for, so the count is held there.
-    budget = (end - start) // 8 + 1
-    leaves: list[_Leaf] = []
-    sizes = [0, 0]  # directory bytes, name bytes
-
-    def read(offset: int, size: int, what: str) -> bytes:
-        at = start + offset
-        if offset < 0 or at + size > end:
+    def _at(self, offset: int, size: int, what: str) -> int:
+        at = self.start + offset
+        if offset < 0 or at + size > self.end:
             raise Damaged(f"{what} at offset {offset:#x} of the resource table lies outside it")
-        return data[at : at + size]
+        return at
 
-    def walk(offset: int, level: int, type_id: int) -> _Branch | _Leaf | None:
-        nonlocal budget
-        budget -= 1
-        if budget < 0:
-            raise Damaged("the resource table names more entries than its section holds")
-        if level == 3:
-            leaf = _Leaf(bytearray(read(offset, 16, "a resource data entry")), type_id)
-            leaves.append(leaf)
-            sizes[0] += 16
-            return leaf
-        header = read(offset, 16, "a resource directory")
-        named, ids = struct.unpack_from("<HH", header, 12)
-        count = named + ids
-        if count == 0:
-            return None
-        entries = read(offset + 16, 8 * count, "a resource directory's entries")
-        children: list[tuple[int, bytes | None, _Branch | _Leaf]] = []
-        for index in range(count):
-            name, child = struct.unpack_from("<II", entries, 8 * index)
-            if bool(child & 0x80000000) != (level < 2):
-                raise Damaged(
-                    "the resource table is not three levels of directories over data entries"
-                )
-            label: bytes | None = None
-            if name & 0x80000000:
-                length = struct.unpack("<H", read(name & 0x7FFFFFFF, 2, "a resource name"))[0]
-                # Names shared between entries could come to more bytes than
-                # the section holds; a tree's names are its own bytes.
-                sizes[1] += 2 + 2 * length
-                if sizes[1] > end - start:
-                    raise Damaged("the resource names come to more bytes than their section holds")
-                label = read(name & 0x7FFFFFFF, 2 + 2 * length, "a resource name")
-            node = walk(child & 0x7FFFFFFF, level + 1, name if level == 0 else type_id)
-            if node is None:
+    def _count(self, offset: int) -> int:
+        at = self._at(offset, 16, "a resource directory")
+        named, ids = struct.unpack_from("<HH", self.data, at + 12)
+        self._at(offset + 16, 8 * (named + ids), "a resource directory's entries")
+        return int(named + ids)
+
+    def _entry(self, offset: int, index: int) -> tuple[int, int]:
+        name, child = struct.unpack_from("<II", self.data, self.start + offset + 16 + 8 * index)
+        return int(name), int(child)
+
+    def _name_length(self, name: int) -> int:
+        at = self._at(name & 0x7FFFFFFF, 2, "a resource name")
+        length = 2 + 2 * int(struct.unpack_from("<H", self.data, at)[0])
+        self._at(name & 0x7FFFFFFF, length, "a resource name")
+        return length
+
+    def measure(self) -> bool:
+        """Check the tree's shape and count its sizes; whether it holds anything."""
+        # A tree holds each entry once: entries shared between directories
+        # could name more nodes, or more name bytes, than the section holds.
+        budget = [self.held // 8 + 1]
+
+        def walk(offset: int, level: int) -> None:
+            budget[0] -= 1
+            if budget[0] < 0:
+                raise Damaged("the resource table names more entries than its section holds")
+            if level == 3:
+                self._at(offset, 16, "a resource data entry")
+                self.directory_size += 16
+                return
+            count = self._count(offset)
+            if count == 0:
                 raise Damaged("a resource directory holds an empty directory")
-            children.append((name, label, node))
-        sizes[0] += 16 + 8 * count
-        return _Branch(header, children)
+            for index in range(count):
+                name, child = self._entry(offset, index)
+                if bool(child & 0x80000000) != (level < 2):
+                    raise Damaged(
+                        "the resource table is not three levels of directories over data entries"
+                    )
+                if name & 0x80000000:
+                    self.name_size += self._name_length(name)
+                    if self.name_size > self.held:
+                        raise Damaged(
+                            "the resource names come to more bytes than their section holds"
+                        )
+                walk(child & 0x7FFFFFFF, level + 1)
+            self.directory_size += 16 + 8 * count
 
-    root = walk(0, 0, 0)
-    if isinstance(root, _Leaf):
-        raise Damaged("the resource table's root is not a directory")
-    return root, leaves, sizes[0], sizes[1], root_rva
+        if self._count(0) == 0:
+            return False
+        walk(0, 0)
+        return True
 
+    def leaves(self) -> Iterator[tuple[int, int]]:
+        """Each data entry's offset in the table and its type, in the table's order."""
 
-def _build_resources(root: _Branch, directory_size: int, name_size: int) -> bytes:
-    """The resource directory as UPX lays it out: depth first, names after every entry."""
-    total = _align(directory_size + name_size, 4)
-    out = bytearray(total)
-    cursor = [0, directory_size]  # next directory byte, next name byte
+        def walk(offset: int, level: int, type_id: int) -> Iterator[tuple[int, int]]:
+            if level == 3:
+                yield offset, type_id
+                return
+            for index in range(self._count(offset)):
+                name, child = self._entry(offset, index)
+                yield from walk(child & 0x7FFFFFFF, level + 1, name if level == 0 else type_id)
 
-    def build(node: _Branch | _Leaf, level: int) -> None:
-        at = cursor[0]
-        if isinstance(node, _Leaf):
-            entry = bytearray(node.data)
-            if node.new_offset:
-                struct.pack_into("<I", entry, 0, node.new_offset)
-            out[at : at + 16] = entry
-            cursor[0] += 16
-            return
-        out[at : at + 16] = node.header
-        cursor[0] += 16 + 8 * len(node.children)
-        for index, (name, label, child) in enumerate(node.children):
-            tag = name
-            if label is not None:
-                tag = cursor[1] | 0x80000000
-                out[cursor[1] : cursor[1] + len(label)] = label
-                cursor[1] += len(label)
-            pointer = cursor[0] | (0x80000000 if level < 2 else 0)
-            struct.pack_into("<II", out, at + 16 + 8 * index, tag, pointer)
-            build(child, level + 1)
+        yield from walk(0, 0, 0)
 
-    build(root, 0)
-    return bytes(out)
+    def moved_origin(self, offset: int) -> int:
+        """Where the data of a data entry UPX kept uncompressed came from, or 0 if it was not."""
+        at = self.start + offset
+        data_rva = int(struct.unpack_from("<I", self.data, at)[0])
+        if data_rva <= self.packed_rva:
+            return 0
+        return int.from_bytes(
+            self.packed.read(data_rva - 4, 4, "a moved resource's origin"), "little"
+        )
+
+    def build(self) -> bytes:
+        """The directory as UPX lays it out: depth first, the names after every entry."""
+        out = bytearray(_align(self.directory_size + self.name_size, 4))
+        cursor = [0, self.directory_size]  # next directory byte, next name byte
+
+        def emit(offset: int, level: int) -> None:
+            at = cursor[0]
+            if level == 3:
+                entry = bytearray(self.data[self.start + offset : self.start + offset + 16])
+                origin = self.moved_origin(offset)
+                if origin:
+                    struct.pack_into("<I", entry, 0, origin)
+                out[at : at + 16] = entry
+                cursor[0] += 16
+                return
+            count = self._count(offset)
+            out[at : at + 16] = self.data[self.start + offset : self.start + offset + 16]
+            cursor[0] += 16 + 8 * count
+            for index in range(count):
+                name, child = self._entry(offset, index)
+                tag = name
+                if name & 0x80000000:
+                    length = self._name_length(name)
+                    source = self.start + (name & 0x7FFFFFFF)
+                    out[cursor[1] : cursor[1] + length] = self.data[source : source + length]
+                    tag = cursor[1] | 0x80000000
+                    cursor[1] += length
+                pointer = cursor[0] | (0x80000000 if level < 2 else 0)
+                struct.pack_into("<II", out, at + 16 + 8 * index, tag, pointer)
+                emit(child & 0x7FFFFFFF, level + 1)
+
+        emit(0, 0)
+        return bytes(out)
 
 
 def _rebuild_resources(image: _Image) -> str:
@@ -1111,40 +1320,38 @@ def _rebuild_resources(image: _Image) -> str:
     if table_size == 0 or packed_size == 0:
         return "none: the stored header or the packed file names no resource table"
     icons = image.records.u16("the icon count")
-    root, leaves, directory_size, name_size, root_rva = _read_resources(image)
-    section_end = packed.mapped(root_rva)
-    held = (section_end[1] - section_end[0]) if section_end else 0
+    tree = _Resources(packed, packed_rva, packed_rva)
+    holds = tree.measure()
     moved_bytes = 0
     moved = 0
-    for leaf in leaves:
-        offset, size = struct.unpack_from("<II", leaf.data, 0)
-        if offset <= packed_rva:
+    for offset, type_id in tree.leaves() if holds else ():
+        origin = tree.moved_origin(offset)
+        if not origin:
             continue
+        data_rva, size = struct.unpack_from("<II", tree.data, tree.start + offset)
         moved_bytes += size
-        if moved_bytes > held:
+        if moved_bytes > tree.held:
             raise Damaged(
                 "the resource entries name more moved data than the resource section holds"
             )
-        origin = int.from_bytes(packed.read(offset - 4, 4, "a moved resource's origin"), "little")
-        leaf.new_offset = origin
         at = image.at(origin, "a moved resource")
-        _put(buf, at, packed.read(offset, size, "a moved resource"), "a moved resource")
-        if icons and leaf.type_id == _RT_GROUP_ICON:
+        _put(buf, at, packed.read(data_rva, size, "a moved resource"), "a moved resource")
+        if icons and type_id == _RT_GROUP_ICON:
             _put_word(buf, at + 4, icons, 2, "a group icon's count")
             icons = 0
         moved += 1
     said = f"{moved} resources UPX kept uncompressed moved back"
-    if root is None or directory_size == 0:
+    if not holds:
         return said
     directory_at = image.at(table_rva, "the resource directory")
     if _u32(buf, directory_at + 12, "the resource directory") != 0:
         return f"{said}; the directory kept as stored"
-    _put(
-        buf,
-        directory_at,
-        _build_resources(root, directory_size, name_size),
-        "the resource directory",
-    )
+    if directory_at + _align(tree.directory_size + tree.name_size, 4) > len(buf):
+        raise Damaged(
+            "the resource directory the packed file holds does not fit the unpacked image at "
+            f"rva {table_rva:#x}"
+        )
+    _put(buf, directory_at, tree.build(), "the resource directory")
     return f"{said}; the directory rebuilt from the packed file's"
 
 
@@ -1202,7 +1409,14 @@ def _unpack(packed: _Packed, header: PackHeader) -> Unpacked:
         )
     buf = decompress(header.method, stream, header.u_len)
     del stream
-    as_decompressed = zlib.adler32(buf)
+    # UPX's PE packer checksums the data it compressed, with the code filter
+    # still applied; its own unpacker checks the same before undoing the filter.
+    u_adler = zlib.adler32(buf)
+    if u_adler != header.u_adler:
+        raise Damaged(
+            f"the unpacked data's adler32 is {u_adler:#010x}; the pack header states "
+            f"{header.u_adler:#010x}"
+        )
 
     is64 = header.format == FORMAT_WIN64_PEP
     records_at = _u32(buf, header.u_len - 4, "the stored header's position")
@@ -1232,22 +1446,6 @@ def _unpack(packed: _Packed, header: PackHeader) -> Unpacked:
                 "outside the unpacked data"
             )
         filtered = unfilter(buf, code_at, code_size, header.filter, header.filter_cto)
-    if as_decompressed == header.u_adler:
-        reading = "the data as decompressed"
-        if header.filter:
-            reading += ", before the filter is undone"
-        u_adler = as_decompressed
-    else:
-        u_adler = zlib.adler32(buf) if header.filter else as_decompressed
-        if u_adler != header.u_adler:
-            computed = f"{as_decompressed:#010x}"
-            if header.filter:
-                computed += f" as decompressed and {u_adler:#010x} with the filter undone"
-            raise Damaged(
-                f"the unpacked data's adler32 is {computed}; the pack header states "
-                f"{header.u_adler:#010x}"
-            )
-        reading = "the data with the filter undone"
 
     if packed.flags & _RELOCS_STRIPPED:
         original.set_u16(22, original.flags | _RELOCS_STRIPPED)
@@ -1273,7 +1471,7 @@ def _unpack(packed: _Packed, header: PackHeader) -> Unpacked:
         image=file,
         u_adler=u_adler,
         c_adler=c_adler,
-        checksum_reading=reading,
+        checksum_reading=CHECKSUM_OVER,
         entry_point=original.u32(40),
         rebuilt=rebuilt,
         overlay=overlay,
@@ -1399,12 +1597,7 @@ def unpack_upx(
         return failed
     header = result.header
     digest = hashlib.sha256(result.image).hexdigest()
-    where = Path(destination)
-    try:
-        where.mkdir(mode=0o700, parents=True, exist_ok=True)
-    except OSError as exc:
-        return {"error": f"cannot create the directory for the unpacked file: {exc}", "tool": TOOL}
-    child = where / binary.carved_file_name(UNPACKED_LABEL, digest)
+    child = Path(destination) / binary.carved_file_name(UNPACKED_LABEL, digest)
     written = (write or binary._write_carved)(child, result.image)
     if written is not None:
         return tool_error(TOOL_FAILED, written, tool=TOOL, remediation=REMEDIATION)

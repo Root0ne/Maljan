@@ -288,9 +288,6 @@ class Program:
     )
     wipe_resource_directory: bool = True
     icon_count: int = 3
-    # Whether the stated adler32 of the unpacked data is over the data with
-    # the filter undone rather than as compressed.
-    checksum_unfiltered: bool = False
     overlay: bytes = b""
 
     @property
@@ -528,11 +525,10 @@ def build(program: Program | None = None) -> Packed:
         extra += struct.pack("<IB", relocs_at, 0)
     extra += struct.pack("<H", program.icon_count)
     obuf = bytearray(image + records + extra + struct.pack("<I", extra_at))
-    unfiltered = zlib.adler32(obuf)
     opcodes = {0x24: (0xE8,), 0x25: (0xE9,), 0x26: (0xE8, 0xE9)}.get(program.filter_id)
     if opcodes:
         cto_filter(obuf, TEXT - RVAMIN, 0x1000, CTO, opcodes)
-    u_adler = unfiltered if program.checksum_unfiltered else zlib.adler32(obuf)
+    u_adler = zlib.adler32(obuf)
     stream = compress(program.method, bytes(obuf))
 
     # -- the packed file
