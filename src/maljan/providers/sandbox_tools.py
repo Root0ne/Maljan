@@ -10,6 +10,12 @@ nothing to time out, because the report is already in the container. That is
 what ``ToolRef(kind="sandbox")`` resolves to: a tool set built from the report
 the job already downloaded.
 
+One of the tools, ``sandbox_items``, reads the report as the sections of
+``analysis.sandbox_sections``: whole items, each with the id a claim cites it
+by, filtered by section, process id, a substring of any text value, a
+signature or a list of ids. It is the one tool of the set another analyst may
+be given on its own (``BaseAnalyst._sandbox_items_tool``).
+
 A report the container does not have yields the same tools, each answering
 ``{"error": "no sandbox report for this job"}``, and the mock sandbox's empty
 stand-in yields tools answering the sentence that says no sandbox ran. The
@@ -19,6 +25,7 @@ return nothing.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
@@ -591,6 +598,65 @@ def sandbox_channels(
     return {"channel": key, "rows": page, "total": len(rows), **meta}
 
 
+def sandbox_items(
+    report: dict[str, Any] | None,
+    section: str,
+    pid: Any = None,
+    contains: str = "",
+    signature: str = "",
+    ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """The items of one section of the report, whole, each with its id and its report fields.
+
+    Read-only over the report the job holds (``analysis.sandbox_sections``):
+    no sandbox is asked anything. The filters combine; with none, every item
+    of the section is answered. ``matched`` is how many items the filters
+    keep, so an answer the guardrail shortens still says how many there are.
+    Nothing is summarised, ranked or labelled.
+    """
+    if report is None or _no_sandbox_ran(report):
+        return _no_report(report)
+    from maljan.analysis.sandbox_sections import SECTION_PREFIXES, Sections, pid_of
+
+    name = str(section or "").strip().lower()
+    if name not in SECTION_PREFIXES:
+        return {"error": ITEMS_NO_SECTION, "sections": list(SECTION_PREFIXES)}
+    found = Sections(report)
+    held = found.sections[name]
+    if held.no:
+        return {"section": name, "no": held.no}
+    wanted_pid = None
+    if pid not in (None, ""):
+        wanted_pid = pid_of(pid)
+        if wanted_pid is None:
+            return {"error": ITEMS_BAD_PID, "section": name}
+    if str(signature or "").strip() and name != "signatures":
+        return {"error": ITEMS_SIGNATURE_SECTION, "section": name}
+    listed = re.split(r"[\s,;]+", ids) if isinstance(ids, str) else ids
+    asked = [str(i) for i in listed or [] if str(i).strip()] if isinstance(listed, list) else []
+    items, missing = found.query(
+        name,
+        pid=wanted_pid,
+        contains=str(contains or ""),
+        signature=str(signature or ""),
+        ids=asked,
+    )
+    answer: dict[str, Any] = {"section": name, "matched": len(items), "items": items}
+    if missing:
+        answer["not_in_section"] = missing
+    return answer
+
+
+# What ``sandbox_items`` answers for an argument it cannot read.
+ITEMS_NO_SECTION = "no such section in the sandbox report; the sections are listed"
+ITEMS_BAD_PID = "pid is not a process id in digits"
+ITEMS_SIGNATURE_SECTION = "the signature filter reads the signatures section only"
+
+# The arguments that narrow a ``sandbox_items`` answer, named in the notice a
+# shortened answer carries.
+_ITEM_FILTERS = ("pid", "contains", "signature", "ids")
+
+
 def sandbox_tools(container: Any) -> list[BaseTool]:
     """The sandbox tools, each closed over this job's report.
 
@@ -689,20 +755,58 @@ def sandbox_tools(container: Any) -> list[BaseTool]:
 
     sizer = _answer_sizer(container)
     return [
-        StructuredTool.from_function(func=_sized(func, sizer), name=name)
-        for func, name in (
-            (_report_section, "sandbox_report_section"),
-            (_processes, "sandbox_processes"),
-            (_network, "sandbox_network"),
-            (_signatures, "sandbox_signatures"),
-            (_dropped_files, "sandbox_dropped_files"),
-            (_registry_ops, "sandbox_registry_ops"),
-            (_api_calls, "sandbox_api_calls"),
-            (_mutexes, "sandbox_mutexes"),
-            (_services_and_tasks, "sandbox_services_and_tasks"),
-            (_channels, "sandbox_channels"),
-        )
+        *(
+            StructuredTool.from_function(func=_sized(func, sizer), name=name)
+            for func, name in (
+                (_report_section, "sandbox_report_section"),
+                (_processes, "sandbox_processes"),
+                (_network, "sandbox_network"),
+                (_signatures, "sandbox_signatures"),
+                (_dropped_files, "sandbox_dropped_files"),
+                (_registry_ops, "sandbox_registry_ops"),
+                (_api_calls, "sandbox_api_calls"),
+                (_mutexes, "sandbox_mutexes"),
+                (_services_and_tasks, "sandbox_services_and_tasks"),
+                (_channels, "sandbox_channels"),
+            )
+        ),
+        items_tool(report, sizer),
     ]
+
+
+def items_tool(report: dict[str, Any] | None, sizer: Any = None) -> BaseTool:
+    """The ``sandbox_items`` tool, closed over one job's report."""
+    from langchain_core.tools import StructuredTool
+
+    from maljan.analysis.sandbox_sections import ITEMS_TOOL
+
+    def _items(
+        section: str,
+        pid: str = "",
+        contains: str = "",
+        signature: str = "",
+        ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Read items of one section of the job's sandbox report, whole.
+
+        ``section`` is one of processes, api_calls, files, registry, network,
+        signatures, dropped, mutexes, commands, services, events, apistats,
+        channels or screenshots; the pack's sandbox section index gives each
+        one's item count, or why the report does not carry it. Each item comes
+        with its id (proc:<pid> for a process, <prefix>:<n> for the n-th item
+        of any other section), the report list it came from and the report's
+        own fields. ``pid`` keeps the items of that process id; ``contains``
+        keeps the items one of whose text values contains the text (a path,
+        key, host, URL or command line), case not counted; ``signature`` keeps
+        the signature with that item id or name; ``ids`` keeps the items with
+        those ids. The filters combine; with none, every item of the section
+        is answered, and ``matched`` counts the items kept. A process's API
+        calls are the api_calls items whose process is its id. A claim may
+        cite an item by its id.
+        """
+        return sandbox_items(report, section, pid or None, contains, signature, ids)
+
+    return StructuredTool.from_function(func=_sized(_items, sizer, _ITEM_FILTERS), name=ITEMS_TOOL)
 
 
 def _answer_sizer(container: Any) -> Any:
@@ -722,13 +826,14 @@ def _answer_sizer(container: Any) -> Any:
 _PAGING = ("offset", "limit")
 
 
-def _sized(func: Any, sizer: Any) -> Any:
+def _sized(func: Any, sizer: Any, narrowing: tuple[str, ...] = _PAGING) -> Any:
     """``func``, its answer sent through the MCP toolkit's guardrail when there is one.
 
     The same sizing an MCP tool's answer gets: measured against the room the
     conversation has, shortened as a JSON document whose bookkeeping says what
-    was left out, the budget charged. The recorder's notice then names
-    ``offset`` and ``limit``, so every row stays reachable a page at a time.
+    was left out, the budget charged. The recorder's notice then names the
+    arguments in ``narrowing`` (``offset`` and ``limit`` for the paged views),
+    so every row stays reachable.
     """
     import functools
     import json
@@ -740,6 +845,6 @@ def _sized(func: Any, sizer: Any) -> Any:
     def _answer(*args: Any, **kwargs: Any) -> Any:
         value = func(*args, **kwargs)
         text = json.dumps(value, default=str)
-        return sizer._apply_output_guardrail(text, _PAGING)
+        return sizer._apply_output_guardrail(text, narrowing)
 
     return _answer

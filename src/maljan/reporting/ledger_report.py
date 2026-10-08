@@ -781,6 +781,26 @@ def _sandbox_section(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -
         acc.credit(section, entry)
 
 
+def _sandbox_items(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
+    """A ``sandbox_items`` answer: its items, one row each, under the section they came from."""
+    from maljan.analysis.sandbox_sections import SECTION_PREFIXES
+
+    name = _text(data.get("section"))
+    if name not in SECTION_PREFIXES:
+        return
+    rows = [
+        {
+            "id": item.get("id"),
+            "kind": item.get("kind"),
+            "source": item.get("source"),
+            "fields": item.get("fields"),
+        }
+        for item in data.get("items") or []
+        if isinstance(item, dict)
+    ]
+    _generic_table(acc, entry, rows, key=f"sandbox_items_{name}", title=f"Sandbox items: {name}")
+
+
 def _sandbox_status(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     """The pack's one sentence on what the sandbox report is, as its own section.
 
@@ -885,6 +905,7 @@ _BUILDERS: dict[str, Any] = {
     "sandbox_mutexes": _sandbox_mutexes,
     "sandbox_services_and_tasks": _sandbox_services,
     "sandbox_report_section": _sandbox_section,
+    "sandbox_items": _sandbox_items,
     "sandbox_status": _sandbox_status,
     "pcap_summary": _pcap,
     "get_file_report": _reputation,

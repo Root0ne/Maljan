@@ -37,6 +37,7 @@ from maljan.agents.run_evidence_corpus import CorpusState, both_searched
 # re-exported here, where every reader of a run's validation looks for them.
 from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
+from maljan.analysis.sandbox_sections import is_item_id, item_ids_in
 from maljan.analysis.technique_ids import MITRE_ATTACK_SOURCES, TECHNIQUE_ID_EXACT_RE
 from maljan.core.logger import logger
 from maljan.core.spend import validation_retry
@@ -476,6 +477,11 @@ def _techniques_cited_by_findings(isr: Any, citable: set[str]) -> set[str]:
     return cited
 
 
+def _cited_items(claim: Any) -> list[str]:
+    """The sandbox item ids a claim's evidence line writes."""
+    return item_ids_in(str(getattr(claim, "evidence_ref", "") or ""))
+
+
 def _cites_a_ledger_entry(claim: Any, cited_by_findings: set[str], citable: set[str]) -> bool:
     """Whether a claim points at something the run actually recorded.
 
@@ -490,6 +496,9 @@ def _cites_a_ledger_entry(claim: Any, cited_by_findings: set[str], citable: set[
     never recorded is a citation of nothing.
     """
     if entry_ids_in(str(getattr(claim, "evidence_ref", "") or "")) & citable:
+        return True
+    # A sandbox item id is cited as an entry is, when the run's report holds it.
+    if any(item in citable for item in _cited_items(claim)):
         return True
     technique = str(getattr(claim, "technique_id", "") or "").strip().upper()
     return bool(technique and technique in cited_by_findings)
@@ -516,10 +525,13 @@ def validate_isr(
 
     ``ledger_ids`` are the entries this analyst may cite: what its own tool
     calls produced in this run, and the triage pack's entries, which every
-    agent is shown. They decide one thing: a technique claim that cites none
-    of them is asked for one. An analyst with nothing citable at all — a
-    measurement profile, which has no tools and no pack — is exempt, because
-    it has nothing it could cite.
+    agent is shown, beside the ids of the items of the run's sandbox report
+    (``analysis.sandbox_sections``). They decide one thing: a technique claim
+    that cites none of them is asked for one, and an item id it writes that
+    the run's report does not hold is named in that question, as an entry id
+    the run never issued is no citation. An analyst with nothing citable at
+    all — a measurement profile, which has no tools and no pack — is exempt,
+    because it has nothing it could cite.
 
     ``sample`` carries the routed ``platform`` and ``file_type``; a known
     technique whose catalogue domain or platforms cannot apply to them is
@@ -535,6 +547,7 @@ def validate_isr(
     """
     citable = [str(i) for i in (ledger_ids or []) if str(i).strip()]
     known = {i.strip().lower() for i in citable}
+    has_items = any(is_item_id(i) for i in citable)
     cited_by_findings = _techniques_cited_by_findings(isr, known)
     violations: list[Violation] = []
     claims = list(getattr(isr, "claims", None) or [])
@@ -593,13 +606,23 @@ def validate_isr(
         # Malware. The analyst is asked to cite the entry it read the technique
         # from or to drop it; nothing here removes the claim or the id.
         if tid and citable and not _cites_a_ledger_entry(claim, cited_by_findings, known):
-            shown = ", ".join(citable[:3])
+            shown = ", ".join([i for i in citable if not is_item_id(i)][:3] or citable[:3])
+            # Named only in a run whose report has items to cite.
+            unheld = (
+                [item for item in _cited_items(claim) if item not in known] if has_items else []
+            )
+            said = (
+                " " + " ".join(ITEM_NOT_IN_RUN.format(item=safe_finding_value(i)) for i in unheld)
+                if unheld
+                else ""
+            )
             violations.append(
                 Violation(
                     code=UNGROUNDED_TECHNIQUE_CODE,
                     message=(
                         f"TECHNIQUE {safe_finding_value(tid)} cites no evidence id from this "
-                        f"run. Name the ledger entry it was read from, for example {shown}, "
+                        f"run.{said} Name the ledger entry it was read from, for example "
+                        f"{shown}, "
                         "or drop the "
                         "technique: a technique nothing in the run establishes is read "
                         "downstream as a finding."
@@ -2998,6 +3021,10 @@ def _cited_groups(text: str) -> list[str]:
     return found
 
 
+# What a citation of a sandbox item id the run's report does not hold is told.
+ITEM_NOT_IN_RUN = "[{item}] is not an item of this run's sandbox report."
+
+
 def citation_violations(
     payload: Any, citable: Sequence[str], *, prose: Sequence[str] | None = None
 ) -> list[Violation]:
@@ -3010,12 +3037,15 @@ def citation_violations(
     or inline, are not read either.
 
     ``citable`` is the evidence ids the run's ledger issued — never ids read out
-    of the prompt's text, where a sample's own string can carry any. An item that is an
-    ATT&CK or MBC identifier is left alone; any other item — a prompt block's
-    heading, a source's name, an id the producer was not shown — is one
-    violation, once however often it appears, with a sentence naming the ids
-    it may cite. The prose is never edited: a citation the retry does not fix
-    prints as written, and the unresolved row is what tells a reader.
+    of the prompt's text, where a sample's own string can carry any — and the
+    ids of the items of the run's sandbox report (``proc:84``, ``net:3``,
+    ``analysis.sandbox_sections``), which are cited as entries are. An item that
+    is an ATT&CK or MBC identifier is left alone; any other item — a prompt
+    block's heading, a source's name, an id the producer was not shown, an item
+    id the run's sandbox report does not hold — is one violation, once however
+    often it appears, with a sentence naming the ids it may cite. The prose is
+    never edited: a citation the retry does not fix prints as written, and the
+    unresolved row is what tells a reader.
     """
     if payload is None:
         return []
@@ -3028,6 +3058,7 @@ def citation_violations(
         )
     )
     allowed = set(known)
+    items = {str(i).strip().lower() for i in citable if is_item_id(str(i))}
     offered = ", ".join(known[:_CITABLE_SHOWN])
     if len(known) > _CITABLE_SHOWN:
         offered += f" and {len(known) - _CITABLE_SHOWN} more"
@@ -3050,6 +3081,11 @@ def citation_violations(
                     if item.lower() in allowed:
                         continue
                     why = f"[{safe_finding_value(item)}] is not an entry this answer was shown."
+                elif items and is_item_id(item):
+                    # Read as an item id only in a run whose report has items.
+                    if item.lower() in items:
+                        continue
+                    why = ITEM_NOT_IN_RUN.format(item=safe_finding_value(item))
                 elif _IDENTIFIER_RE.fullmatch(item) or _IPV6_RE.fullmatch(item):
                     continue
                 else:

@@ -31,6 +31,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.agents.base_agent import retry_on_connection_error
+from maljan.analysis.sandbox_sections import is_item_id
 from maljan.core.config import REPORTER_AGENT_KEY
 from maljan.core.logger import logger
 from maljan.core.spend import (
@@ -744,6 +745,8 @@ class NarrativeAgent:
         # The entries a key finding may cite: the ledger's, which the pack's
         # own entries are part of.
         known_ids = [row.id for row in report.evidence_index]
+        # A sandbox item id the run's report holds is cited as an entry is.
+        known_ids += [value for value in citable_ids or () if is_item_id(str(value))]
         # The ids a bracketed citation in the prose may name: the ones the
         # run's ledger issued, or, handed none, the report's evidence index
         # and the pack's own line ids — never ids read out of prompt text,

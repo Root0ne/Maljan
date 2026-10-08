@@ -61,6 +61,14 @@ rules matched in it, its callers and callees and how many artefacts its
 callees hold, each cell naming the entry it comes from. It joins the
 pack's own answers above, so it comes after them.
 
+Last, where a sandbox produced a report, the report's section index
+(``maljan.analysis.sandbox_sections``): each section's item count, or the
+``no:`` sentence saying why the report does not carry it, and the process
+ids, so a claim can cite one item of the report by its id and the citation
+can be checked against the run. The items themselves are served by the
+``sandbox_items`` tool. It comes after every other step, so every id issued
+before it keeps its value; its line takes room as any other line does.
+
 When the pack does not fit its room, every pass line takes only the room the
 earlier lines leave, a pass with a fact no other line carries first; a pass
 entry with no room is counted in the trailer, which takes only free room or
@@ -88,6 +96,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
+from maljan.analysis import sandbox_sections
 from maljan.analysis.ghidra_passes import (
     ANTI_ANALYSIS_TOOL,
     GHIDRA_FORMATS,
@@ -710,6 +719,7 @@ class _Pack:
             self._ghidra_passes(routed)
             self._function_index(routed)
             self._unpacked_upx(routed, format_facts)
+            self._sandbox_sections()
         finally:
             if self._floss_pool is not None:
                 self._floss_pool.shutdown(wait=False)
@@ -1252,6 +1262,15 @@ class _Pack:
             return upx.unpack_upx(path, destination)
 
         self.record(upx.TOOL, args, call)
+
+    def _sandbox_sections(self) -> None:
+        """The sandbox report's section index, once, where a sandbox produced a report."""
+        report = observed_report(self.inputs.sandbox_report)
+        if not report:
+            return
+        self.record(
+            sandbox_sections.SECTIONS_TOOL, {}, partial(sandbox_sections.section_index, report)
+        )
 
 
 # Why the pack did not unpack a sample the packer reader names UPX.
@@ -2324,6 +2343,35 @@ def _sandbox_channels(data: dict[str, Any]) -> str:
     return _names(channels) or "none"
 
 
+# The section index line's last words: where the items are.
+SECTIONS_SERVED_BY = "each item is served by the sandbox_items tool"
+
+
+def _sandbox_sections(data: dict[str, Any]) -> str:
+    """Each section's count and id form, or its ``no:``; the process ids as the detail allows."""
+    sections = data.get("sections")
+    if not isinstance(sections, dict):
+        return "recorded"
+    parts: list[str] = []
+    for name, row in sections.items():
+        if not isinstance(row, dict):
+            continue
+        if row.get("no"):
+            parts.append(f"{name} {_short(str(row['no']))}")
+            continue
+        count = row.get("items")
+        prefix = str(row.get("prefix") or "")
+        if not isinstance(count, int) or not count:
+            parts.append(f"{name} 0")
+        elif name == "processes":
+            parts.append(f"{name} {count} ({_names(row.get('ids') or [])})")
+        elif count == 1:
+            parts.append(f"{name} 1 ({prefix}:1)")
+        else:
+            parts.append(f"{name} {count} ({prefix}:1 to {prefix}:{count})")
+    return "; ".join(parts) + f"; {SECTIONS_SERVED_BY}"
+
+
 # The capture line: the packet count, the protocol counts and every external
 # conversation, heaviest first. It used to be the summary's heading alone, and
 # a report model then wrote that the capture entry "holds only a header line"
@@ -3217,6 +3265,7 @@ _GROUP_LABELS: dict[str, str] = {
     "sandbox_signatures": "sandbox signatures",
     "sandbox_dropped_files": "sandbox dropped files",
     "sandbox_channels": "sandbox channels",
+    sandbox_sections.SECTIONS_TOOL: "sandbox sections",
     STATUS_TOOL: "sandbox",
     "pcap_summary": "pcap",
     "reputation": "reputation",
@@ -3254,6 +3303,7 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "sandbox_signatures": _sandbox_signatures,
     "sandbox_dropped_files": _sandbox_dropped,
     "sandbox_channels": _sandbox_channels,
+    sandbox_sections.SECTIONS_TOOL: _sandbox_sections,
     STATUS_TOOL: lambda data: str(data.get("statement") or ""),
     "pcap_summary": _pcap,
     "function_matches": _function_matches,

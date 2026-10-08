@@ -1624,6 +1624,19 @@ def ledger_ids(state: AnalysisState) -> list[str]:
     return ids
 
 
+def citable_ids(state: AnalysisState) -> list[str]:
+    """What a report may cite: every ledger id, and the ids of the sandbox report's items.
+
+    The items are those the pack's section index states
+    (``analysis.sandbox_sections``); a run with no index has none.
+    """
+    from maljan.analysis.sandbox_sections import item_index_of
+
+    ids = ledger_ids(state)
+    items = item_index_of(pack_entries(state.get("evidence_ledger") or []))
+    return [*ids, *items.ids()] if items is not None else ids
+
+
 def pack_ledger_ids(state: AnalysisState) -> list[str]:
     """The ids of the pack's entries: what every agent may cite besides its own."""
     return [entry.id for entry in pack_entries(state.get("evidence_ledger") or [])]
@@ -5409,7 +5422,7 @@ def make_report_node(
                         state.get("isr_reports"),
                         facts_block=_narrative_facts,
                         run_state=_narrative_state,
-                        citable_ids=ledger_ids(state),
+                        citable_ids=citable_ids(state),
                         evidence=_entry_texts,
                     ),
                     timeout=narrative_seconds,
@@ -5480,7 +5493,7 @@ def make_report_node(
                     state.get("isr_reports"),
                     facts_block=pack_text(state, container),
                     run_state=render_run_state(state),
-                    citable_ids=ledger_ids(state),
+                    citable_ids=citable_ids(state),
                     evidence=_entry_texts,
                 )
             except Exception as exc:  # noqa: BLE001

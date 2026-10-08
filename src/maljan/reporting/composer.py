@@ -30,6 +30,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.agents.base_agent import retry_on_connection_error
+from maljan.analysis.sandbox_sections import is_item_id
 from maljan.core.config import REPORTER_AGENT_KEY
 from maljan.core.logger import logger
 from maljan.core.spend import (
@@ -76,6 +77,7 @@ from maljan.reporting.evidence_bundles import (
     is_empty,
     sample_flow_fact,
     sandbox_entry_ids,
+    sandbox_item_citations,
     sandbox_saw_no_persistence,
 )
 from maljan.reporting.models import (
@@ -766,8 +768,11 @@ class ReportComposer:
         # The entries this run recorded, and which of them a sandbox wrote: an
         # execution step marked observed has to cite one of the second, and a
         # configuration value said to be decrypted one of the first.
-        known_ids = [row.id for row in report.evidence_index]
-        sandbox_ids = sandbox_entry_ids(report)
+        # A sandbox item id (``proc:84``, ``net:3``) the run's report holds is
+        # cited as an entry is: ``citable`` carries the run's item ids.
+        items = [value for value in self._citable if is_item_id(value)]
+        known_ids = [*(row.id for row in report.evidence_index), *items]
+        sandbox_ids = [*sandbox_entry_ids(report), *sandbox_item_citations(report, items)]
         # Which tool answered each entry, so a question names what a step
         # cites; and what the sandbox says about a flow to each value a step
         # names.

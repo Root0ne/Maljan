@@ -319,13 +319,14 @@ class TestToolSet:
             "sandbox_mutexes",
             "sandbox_services_and_tasks",
             "sandbox_channels",
+            "sandbox_items",
         ]
         processes = next(t for t in tools if t.name == "sandbox_processes")
         assert processes.invoke({})["total"] == 2
 
     def test_a_container_with_no_report_still_offers_every_tool(self) -> None:
         tools = sandbox_tools.sandbox_tools(_Container(None))
-        assert len(tools) == 10
+        assert len(tools) == 11
         processes = next(t for t in tools if t.name == "sandbox_processes")
         assert processes.invoke({})["error"] == "no sandbox report for this job"
 
