@@ -392,14 +392,20 @@ def _xor(data: bytes, file: _File, step: Mapping[str, Any]) -> tuple[bytes, dict
     buffer = np.frombuffer(data, dtype=np.uint8)
     keys = np.frombuffer(key, dtype=np.uint8)
     out = np.empty(len(data), dtype=np.uint8)
-    # Worked through in slices so the positions are held a slice at a time.
+    # Worked through in slices so the positions are held a slice at a time,
+    # as 32-bit words: an input never passes the upload cap, and the increment
+    # term only matters modulo 256, which a wrap modulo 2**32 keeps.
+    step_add = np.uint32(increment % 256)
     for start in range(0, len(data), _WORKING_SLICE):
         stop = min(len(data), start + _WORKING_SLICE)
-        positions = np.arange(start, stop, dtype=np.int64)
-        stream = keys[positions % len(keys)]
-        if increment % 256:
-            stream = ((stream + (increment % 256) * positions) & 0xFF).astype(np.uint8)
-        out[start:stop] = buffer[start:stop] ^ stream
+        positions = np.arange(start, stop, dtype=np.uint32)
+        stream = keys[positions % np.uint32(len(keys))]
+        if step_add:
+            positions *= step_add
+            positions += stream
+            stream = positions.astype(np.uint8)
+        del positions
+        np.bitwise_xor(buffer[start:stop], stream, out=out[start:stop])
     return out.tobytes(), {
         "key": said,
         "increment": increment,
