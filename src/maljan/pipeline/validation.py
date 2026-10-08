@@ -3027,8 +3027,23 @@ def _cited_groups(text: str) -> list[str]:
     return found
 
 
-# What a citation of a sandbox item id the run's report does not hold is told.
+# What a citation of a sandbox item id the run's report does not hold is told,
+# and one whose own text this run cannot read, which no value can be checked in.
 ITEM_NOT_IN_RUN = "[{item}] is not an item of this run's sandbox report."
+ITEM_UNREAD = (
+    "[{item}] is an item of this run's sandbox report whose text this check cannot read, "
+    "so it stands for no value."
+)
+
+
+def _item_read(items: Any, item_id: str) -> bool:
+    """Whether a cited item is accepted by a report check: indexed, and its own text read.
+
+    A value the citing text states is looked for in that text
+    (``EntryTexts.items``); an item whose text is not read stands for nothing.
+    """
+    read = getattr(items, "text", None)
+    return items is not None and callable(read) and read(item_id) is not None
 
 
 def citation_violations(
@@ -3093,10 +3108,15 @@ def citation_violations(
                         continue
                     why = f"[{safe_finding_value(item)}] is not an entry this answer was shown."
                 elif held_items and items is not None and is_item_id(item):
-                    # Read as an item id only in a run whose report has items.
-                    if items.known(item):
+                    # Read as an item id only in a run whose report has items,
+                    # and accepted only where the item's own text is read.
+                    if _item_read(items, item):
                         continue
-                    why = ITEM_NOT_IN_RUN.format(item=safe_finding_value(item))
+                    why = (
+                        ITEM_UNREAD.format(item=safe_finding_value(item))
+                        if getattr(items, "index", items).known(item)
+                        else ITEM_NOT_IN_RUN.format(item=safe_finding_value(item))
+                    )
                 elif _IDENTIFIER_RE.fullmatch(item) or _IPV6_RE.fullmatch(item):
                     continue
                 else:
@@ -4064,7 +4084,7 @@ def _cited(row: dict[str, Any], key: str) -> list[str]:
 
 def _held(value: str, known: set[str], items: ItemIndex | None) -> bool:
     """Whether a cited value is an entry the run issued or an item its report holds."""
-    return value in known or (items is not None and items.known(value))
+    return value in known or _item_read(items, value)
 
 
 def key_finding_citation_violations(
@@ -4085,7 +4105,7 @@ def key_finding_citation_violations(
         unknown = [
             value
             for value in _cited(row, "evidence_ids")
-            if value not in known and not (items is not None and items.known(value))
+            if value not in known and not _item_read(items, value)
         ]
         if unknown:
             out.append(
@@ -4591,8 +4611,13 @@ class _ObservedCitations:
             return True
         return self.observed_item is not None and is_item_id(text) and self.observed_item(text)
 
+    @property
+    def has_items(self) -> bool:
+        """Whether the run's sandbox report has items a step may cite."""
+        return self.observed_item is not None
+
     def __bool__(self) -> bool:
-        return bool(self.entries)
+        return bool(self.entries) or self.has_items
 
     def __iter__(self) -> Iterator[str]:
         return iter(self.entries)
@@ -4674,11 +4699,20 @@ def flow_voice_violations(
                     )
                 )
             continue
+        answers = sorted(sandbox)
         where = (
-            f"the sandbox answers that recorded something are {_named_ids(sorted(sandbox))}"
-            if sandbox
+            f"the sandbox answers that recorded something are {_named_ids(answers)}"
+            if answers
             else "no sandbox answer in this run recorded anything"
         )
+        if sandbox.has_items:
+            where += (
+                " and the sandbox report's items are cited by their ids (proc:<pid>, "
+                "net:<n> and the rest)"
+                if answers
+                else "; the sandbox report's items are cited by their ids (proc:<pid>, "
+                "net:<n> and the rest)"
+            )
         out.append(
             Violation(
                 code=FLOW_VOICE_CODE,
@@ -4943,6 +4977,10 @@ class EntryTexts:
     # for the model or trimmed by the byte budget. A value absent from one of
     # them may be in the part that is not here, so no absence is read off it.
     partial: frozenset[str] = frozenset()
+    # The run's sandbox items (``analysis.sandbox_sections.ItemCitations``): a
+    # cited item is read through its own text, as an entry is through its
+    # answer. Never in :meth:`holding` or :meth:`may_hold`, which offer entries.
+    items: Any = None
     # Each letter-and-digit run of the texts, and the entries it is a whole run
     # of: built once, on first use, by :meth:`may_hold`.
     _runs: dict[str, frozenset[str]] = field(default_factory=dict, compare=False, repr=False)
@@ -5000,12 +5038,24 @@ class EntryTexts:
         """
         from maljan.agents._indicator_denylists import whole_value_in
 
-        text = self.texts.get(str(entry_id).strip().lower(), "")
+        text = self.text_of(entry_id)
         return bool(text) and any(
             whole_value_in(form, text)
             for spelling in library_spellings(value)
             for form in written_forms(spelling)
         )
+
+    def text_of(self, cited: str) -> str:
+        """The text of a cited entry or a cited sandbox item, ``""`` when the run holds none."""
+        key = str(cited).strip().lower()
+        text = self.texts.get(key, "")
+        if not text and self.items is not None and is_item_id(key):
+            text = self.items.text(key) or ""
+        return text
+
+    def has_text(self, cited: str) -> bool:
+        """Whether a citation names an entry or an item whose text this run holds."""
+        return bool(self.text_of(cited))
 
     def may_hold(self, value: str) -> set[str]:
         """The entries that may hold ``value`` for :meth:`holds`: never fewer, often far fewer.
@@ -5053,7 +5103,7 @@ class EntryTexts:
 
     def named(self, entry_id: str) -> str:
         """``ev_0012 (floss)``: an id with the tool that answered it."""
-        tool = self.tools.get(entry_id, "")
+        tool = self.tools.get(entry_id, "") or ("sandbox report" if is_item_id(entry_id) else "")
         return f"{entry_id} ({tool})" if tool else entry_id
 
 
@@ -5302,11 +5352,11 @@ def literal_values(text: str) -> list[str]:
 
 
 def _ids_in(value: Any) -> list[str]:
-    """The evidence ids a citing field carries, lower-cased, in order."""
+    """The evidence ids and sandbox item ids a citing field carries, lower-cased, in order."""
     items = value if isinstance(value, list | tuple) else [value]
     ids: list[str] = []
     for item in items:
-        for found in _EVIDENCE_ID_RE.findall(str(item or "")):
+        for found in [*_EVIDENCE_ID_RE.findall(str(item or "")), *item_ids_in(str(item or ""))]:
             if found.lower() not in ids:
                 ids.append(found.lower())
     return ids
@@ -5320,7 +5370,7 @@ def _sentences_with_citations(text: str) -> list[tuple[str, list[str]]]:
         for group in _cited_groups(_CODE_SPAN_RE.sub(" ", sentence)):
             for raw in re.split(r"[,;]", group):
                 item = raw.strip().lower()
-                if _EVIDENCE_ID_RE.fullmatch(item) and item not in cited:
+                if (_EVIDENCE_ID_RE.fullmatch(item) or is_item_id(item)) and item not in cited:
                     cited.append(item)
         if cited:
             out.append((sentence, cited))
@@ -5349,14 +5399,14 @@ def wrong_entry_citations(
     citations of the record it belongs to (``evidence_refs``,
     ``evidence_ids``, ``evidence_ref``); a string with neither is not judged.
     """
-    if payload is None or entries is None or not entries.texts:
+    if payload is None or entries is None or not (entries.texts or entries.items is not None):
         return []
     data = payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {}
     wrong: dict[tuple[tuple[str, ...], tuple[str, ...]], list[str]] = {}
 
     def _ask(value: str, cited: Sequence[str]) -> None:
         value = str(value or "").strip()
-        known = [entry_id for entry_id in cited if entry_id in entries.texts]
+        known = [entry_id for entry_id in cited if entries.has_text(entry_id)]
         if not decidable(value) or not known:
             return
         if any(entries.holds(entry_id, value) for entry_id in known):
@@ -5518,17 +5568,19 @@ def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Vi
     offered. A number held only by an entry the row does not cite is a
     coincidence, not a source, so none is offered for it.
     """
-    if payload is None or entries is None or not entries.texts:
+    if payload is None or entries is None or not (entries.texts or entries.items is not None):
         return []
     out: list[Violation] = []
     # Whether another entry holds a value, once per value however many rows state it.
     held_elsewhere: dict[str, bool] = {}
 
     def _held_by(value: str, among: set[str], numbers: bool) -> bool:
+        # A cited item is read directly: it is in no lookup of the entries.
+        cited_items = [ref for ref in among if ref not in entries.texts]
         return any(
             entries.holds(ref, form)
             for form in _stated_spellings(value, numbers=numbers)
-            for ref in entries.may_hold(form) & among
+            for ref in [*(entries.may_hold(form) & among), *cited_items]
         )
 
     for list_key, (noun, nouns) in _STATED_VALUE_ROWS.items():
@@ -5537,7 +5589,7 @@ def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Vi
             value = str(row.get("value") or "").strip()
             if not value or str(row.get("how_obtained") or "").strip().lower() == "inferred":
                 continue
-            cited = [ref for ref in _ids_in(row.get("evidence_refs")) if ref in entries.texts]
+            cited = [ref for ref in _ids_in(row.get("evidence_refs")) if entries.has_text(ref)]
             if not cited or any(ref in entries.partial for ref in cited):
                 continue
             try:
@@ -8579,8 +8631,10 @@ def technique_roots(isrs: dict[str, Any] | None, ledger: Sequence[Any] | None) -
             tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
             if not tid:
                 continue
-            said = f"{getattr(claim, 'claim', '') or ''} {getattr(claim, 'evidence_ref', '') or ''}"
-            out.setdefault(tid, RootCount()).add(*found.of_statement(said, entry_ids_in(said)))
+            ref = str(getattr(claim, "evidence_ref", "") or "")
+            said = f"{getattr(claim, 'claim', '') or ''} {ref}"
+            cited = [*entry_ids_in(said), *item_ids_in(ref)]
+            out.setdefault(tid, RootCount()).add(*found.of_statement(said, cited))
         for finding in getattr(isr, "findings", None) or []:
             said = f"{getattr(finding, 'title', '') or ''} {getattr(finding, 'detail', '') or ''}"
             cited = [str(i) for i in getattr(finding, "evidence_ids", None) or [] if i]

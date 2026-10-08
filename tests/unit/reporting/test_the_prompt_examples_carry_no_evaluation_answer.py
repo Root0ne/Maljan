@@ -131,6 +131,7 @@ from maljan.pipeline.validation import (
     FUNCTION_CHECK_HEAD,
     FUNCTION_CHECK_NOT_ASKED_HEAD,
     ITEM_NOT_IN_RUN,
+    ITEM_UNREAD,
     MALWARE_TYPES,
     UNATTRIBUTED_INDICATOR_CODE,
     CapabilityGrounding,
@@ -965,7 +966,13 @@ def _sandbox_sections_sentences() -> str:
                 for name in ss.SECTION_PREFIXES
             ),
             json.dumps(ss.section_index(report, ("triage", "triage"))),
+            json.dumps(ss.section_index(report, ("upload", "triage"))),
+            json.dumps(ss.section_index(report, ("cape2", "cape2"))),
             json.dumps(st.sandbox_items(report, "files", normalised_by=("rest", "generic"))),
+            json.dumps(st.sandbox_items(report, "signatures", pid=7)),
+            *(ss.NO_OVERVIEW.format(provider="upload", section=n) for n in ss.SECTION_PREFIXES),
+            *(ss.NO_PID_ROWS.format(section=n) for n in ss.SECTION_PREFIXES),
+            ITEM_UNREAD.format(item="net:1"),
         ]
     )
 
@@ -2141,15 +2148,39 @@ def _report_names() -> frozenset[str]:
     return frozenset({*ss.SECTION_PREFIXES, *ss.SECTION_PREFIXES.values(), *paths})
 
 
+# What an allowed identifier is replaced by: a token no scored term holds, so
+# the words on either side of it cannot join into one.
+_NAME_PLACEHOLDER = "\u27e8id\u27e9"
+# A scored term of more than one word.
+_PHRASES = tuple(term for term in KEY_TERMS if " " in term)
+
+
 def _without_report_names(text: str) -> str:
-    """``text`` with each section or report list name written as an identifier taken out."""
+    """``text`` with each section or report list name written as an identifier taken out.
+
+    The name is replaced by a placeholder, unless the words around it would
+    read, with the name as a word, as a scored phrase (``the running
+    `processes` list``): then it is left as the word, so the scan reads it.
+    """
     names = _report_names()
-    return _REPORT_NAME_ID.sub(
-        lambda match: (
-            " " if next(g for g in match.groups() if g is not None) in names else match.group(0)
-        ),
-        text,
-    )
+
+    def _strip(match: re.Match[str]) -> str:
+        name = next(g for g in match.groups() if g is not None)
+        if name not in names:
+            return match.group(0)
+        before = text[max(0, match.start() - 40) : match.start()]
+        after = text[match.end() : match.end() + 40]
+        bare = name.replace("_", " ").replace(".", " ")
+        window = f"{before}{bare}{after}"
+        spans_it = any(
+            phrase in window
+            and window.index(phrase) < len(before) + len(bare)
+            and window.index(phrase) + len(phrase) > len(before)
+            for phrase in _PHRASES
+        )
+        return bare if spans_it else _NAME_PLACEHOLDER
+
+    return _REPORT_NAME_ID.sub(_strip, text)
 
 
 def _scanned(name: str) -> str:
@@ -2184,6 +2215,13 @@ def test_the_report_name_allowance_is_the_section_names_and_only_as_identifiers(
     # module does not list is not let through either.
     sentence = "the sample creates a mutex, then `beacon` and beacon:1"
     assert _without_report_names(sentence) == sentence
+    # A name that makes a scored phrase with the words beside it is read as the word.
+    joined = _without_report_names("the running `processes` list")
+    assert "running processes" in joined
+    # The placeholder joins nothing: no scored phrase spans it.
+    stripped = _without_report_names("mac `mutexes` address")
+    assert _NAME_PLACEHOLDER in stripped
+    assert not [term for term in KEY_TERMS if term in stripped]
 
 
 @pytest.mark.parametrize("tid", sorted(load_cards()))

@@ -1266,7 +1266,12 @@ class _Pack:
         self.record(upx.TOOL, args, call)
 
     def _sandbox_sections(self) -> None:
-        """The sandbox report's section index, once, where a sandbox produced a report."""
+        """The sandbox report's section index, once, where a sandbox produced a report.
+
+        Read in memory from the report in hand, in time linear in its size, so
+        the pack's time budget does not stop it: it is recorded with its own
+        clock, as a step already begun is.
+        """
         report = observed_report(self.inputs.sandbox_report)
         if not report:
             return
@@ -1274,6 +1279,7 @@ class _Pack:
             sandbox_sections.SECTIONS_TOOL,
             {},
             partial(sandbox_sections.section_index, report, self.inputs.sandbox_normalised_by),
+            started=time.monotonic(),
         )
 
 

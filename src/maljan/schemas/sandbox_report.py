@@ -17,6 +17,7 @@ consumer can iterate a fresh ``SandboxReport()`` without a null check.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit
 
@@ -312,6 +313,19 @@ REPORT_LIST_FIELDS: tuple[str, ...] = (
 # read from the report's own block of that name.
 CAPE_NORMALISER_FILLS: frozenset[str] = frozenset(REPORT_LIST_FIELDS)
 
+# The blocks of a raw CAPE report the model has no field for. A CAPE or mock
+# report reaches its readers as its own dict (``providers.cape_view``), so
+# these are there to read; a report rendered from the model never has them.
+CAPE_RAW_BLOCKS: tuple[str, ...] = (
+    "raw.CAPE",
+    "raw.behavior.processtree",
+    "raw.behavior.summary.resolved_apis",
+    "raw.suricata.alerts",
+    "raw.procdump",
+)
+# The source formats whose report reaches its readers as the raw dict.
+RAW_SOURCE_FORMATS = frozenset({"cape2", "mock"})
+
 
 def report_fills(report: SandboxReport) -> frozenset[str]:
     """The list fields of ``report`` that hold at least one row."""
@@ -336,22 +350,41 @@ def report_fills(report: SandboxReport) -> frozenset[str]:
     return frozenset(name for name, value in held.items() if value)
 
 
-def normaliser_fills(source_format: str) -> frozenset[str] | None:
-    """The list fields the reader behind ``source_format`` can fill, or ``None`` when unknown.
+@dataclass(frozen=True)
+class Reading:
+    """What one reader can fill, and how its report reaches the sections."""
 
-    The CAPE reader for a CAPE, Cuckoo or mock report, the Triage reader for a
-    Triage one, the REST mapping for a generic one
+    fills: frozenset[str]
+    # The Triage reader given the overview and no behavioural task report.
+    overview_only: bool = False
+    # Rendered from the model (``cape_view``) rather than the raw report dict.
+    rendered: bool = True
+
+
+def normaliser_reading(source_format: str, provider: str = "") -> Reading | None:
+    """What the reader behind ``(source_format, provider)`` can fill, or ``None`` when unknown.
+
+    The CAPE reader for a CAPE, Cuckoo or mock report, with the raw blocks
+    where the report reaches its readers as its own dict; the Triage reader
+    for a Triage one, reading the behavioural task reports only where the
+    Triage provider fetches them (``TriageSandboxProvider.fetch``; an uploaded
+    Triage report and one a REST sandbox answers are read from the overview
+    alone); the REST mapping for a generic one
     (``providers.sandbox.rest_mapping.REST_MAPPING_FILLS``).
     """
     fmt = str(source_format or "").strip().lower()
-    if fmt in ("cape2", "cuckoo", "mock"):
-        return CAPE_NORMALISER_FILLS
+    if fmt in RAW_SOURCE_FORMATS:
+        return Reading(CAPE_NORMALISER_FILLS | frozenset(CAPE_RAW_BLOCKS), rendered=False)
+    if fmt == "cuckoo":
+        return Reading(CAPE_NORMALISER_FILLS)
     if fmt == "triage":
-        return TRIAGE_NORMALISER_FILLS
+        if str(provider or "").strip().lower() in TRIAGE_TASK_READERS:
+            return Reading(TRIAGE_NORMALISER_FILLS)
+        return Reading(TRIAGE_OVERVIEW_FILLS, overview_only=True)
     if fmt == "generic":
         from maljan.providers.sandbox.rest_mapping import REST_MAPPING_FILLS
 
-        return REST_MAPPING_FILLS
+        return Reading(REST_MAPPING_FILLS)
     return None
 
 
@@ -625,7 +658,12 @@ def _flow_attribution(flow: dict[str, Any], lineage: _Lineage) -> dict[str, Any]
 # What :func:`triage_overview_to_sandbox_report` can fill: the process list,
 # the signatures, the dumped files, the flows split into TCP and UDP with a
 # host row per destination, and the DNS and HTTP requests with their names.
-# Every other list it leaves empty whatever the report holds.
+# Every other list it leaves empty whatever the report holds. Given the
+# overview alone it fills the signatures and nothing else: the processes, the
+# dumped files and the network are read from the task reports.
+TRIAGE_OVERVIEW_FILLS: frozenset[str] = frozenset({"signatures"})
+# The providers that hand this reader the behavioural task reports.
+TRIAGE_TASK_READERS: frozenset[str] = frozenset({"triage"})
 TRIAGE_NORMALISER_FILLS: frozenset[str] = frozenset(
     {
         "processes",

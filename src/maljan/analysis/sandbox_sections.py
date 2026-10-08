@@ -5,7 +5,10 @@ whichever sandbox produced it (``providers.cape_view``) — is read into fixed
 sections: the processes, their API calls, the file operations, the registry
 operations, the network rows, the signatures, the dropped files, the mutexes,
 the executed commands, the services, the generic events, the per-process API
-counts, the platform channels and the screenshots. Nothing is summarised,
+counts, the platform channels, the screenshots, and the blocks a raw CAPE
+report adds (its extracted configurations and payloads, the resolved API
+names, the Suricata alerts and the process dumps; its process tree gives
+parent links, not items of its own). Nothing is summarised,
 ranked or labelled: an item is one row of the report, answered with the
 report's own fields and the path it came from.
 
@@ -14,7 +17,8 @@ Each item has an id that is stable for one report:
 * a process is ``proc:<pid>``, its pid as the report writes it (``pid``, or
   ``process_id`` where the report names it so); the second process with the
   same pid is ``proc:<pid>.2`` and so on, and a process with no pid the report
-  states is ``proc:p<position>``;
+  states is ``proc:p<position>`` (in a report the platform rendered from its
+  normalised model, a pid or parent of 0 is the model's "not stated");
 * every other item is ``<prefix>:<n>``, its 1-based position in the section,
   the section's report lists read in a fixed order (``net:3`` is the third
   network row, counting the DNS rows first, then the hosts, the HTTP requests,
@@ -24,8 +28,15 @@ Each item has an id that is stable for one report:
 A section the report does not carry has no count but a ``no:`` sentence
 saying why: the report lists it as unavailable from its sandbox (a Triage
 report has no registry timeline and no API calls), or the report holds none
-of the lists the section is read from. A carried section with no rows counts
-zero; that is what the sandbox reported.
+of the lists the section is read from, or the reader that produced the
+report can fill none of them (``schemas.sandbox_report.normaliser_reading``).
+A carried section with no rows counts zero; that is what the sandbox reported.
+
+An item id is read only where it is cited: in brackets, or in a citing field
+(:data:`ITEM_ID_RE` needs a token boundary on both sides, so the tail of a
+host and port such as ``c2.example.net:443`` is never one). A report check
+cites an item through :class:`ItemCitations`, which holds the item's own
+text, so a value said under an item citation is looked for in that item.
 
 The index (:func:`section_index`) is one ledger entry the triage pack records
 once per run, before the analysts start (``SECTIONS_TOOL``). It states each
@@ -64,13 +75,20 @@ SECTION_PREFIXES: dict[str, str] = {
     "apistats": "apistat",
     "channels": "chan",
     "screenshots": "shot",
+    "cape": "cape",
+    "resolved_apis": "rapi",
+    "alerts": "alert",
+    "procdumps": "dump",
 }
 SECTION_OF_PREFIX: dict[str, str] = {prefix: name for name, prefix in SECTION_PREFIXES.items()}
 
 # An item id as a claim writes it. The process form takes the pid, a repeat's
 # ``.k`` and the positional ``p<n>`` of a process with no pid.
+# Nothing that continues a name may stand before it (a word character, ``.``,
+# ``/``, ``@``, ``-`` or ``:``), and no word character, ``:`` or ``.<digit>``
+# after it.
 ITEM_ID_RE = re.compile(
-    r"(?<![\w:])(?:proc:(?:\d{1,20}(?:\.\d{1,9})?|p\d{1,9})"
+    r"(?<![\w./@:\-])(?:proc:(?:\d{1,20}(?:\.\d{1,9})?|p\d{1,9})"
     r"|(?:" + "|".join(p for p in SECTION_PREFIXES.values() if p != "proc") + r"):\d{1,12})"
     r"(?![\w:]|\.\d)",
     re.IGNORECASE,
@@ -116,7 +134,13 @@ _PID_FIELDS: dict[str, tuple[str, ...]] = {
     "events": ("pid", "process_id", "procid"),
     "apistats": ("pid",),
     "channels": ("pid", "process_id"),
+    "dropped": ("pids", "pid"),
+    "procdumps": ("pid", "process_id"),
 }
+
+# The raw CAPE blocks the model does not carry, as the reader declarations name
+# them (``schemas.sandbox_report.CAPE_RAW_BLOCKS``).
+RAW_PROCESSTREE = "raw.behavior.processtree"
 
 # The model list fields (``schemas.sandbox_report.REPORT_LIST_FIELDS``) each
 # section is read from, for a report a known normaliser produced.
@@ -141,6 +165,10 @@ SECTION_FIELDS: dict[str, tuple[str, ...]] = {
     "apistats": ("apistats",),
     "channels": ("channels",),
     "screenshots": ("screenshots",),
+    "cape": ("raw.CAPE",),
+    "resolved_apis": ("raw.behavior.summary.resolved_apis",),
+    "alerts": ("raw.suricata.alerts",),
+    "procdumps": ("raw.procdump",),
 }
 
 # The ``no:`` sentences.
@@ -148,19 +176,43 @@ NO_UNAVAILABLE = "no: the report lists `{name}` as unavailable from its sandbox"
 NO_LISTS = "no: the report holds none of {paths}"
 NO_LIST = "no: the report holds no `{path}`"
 NO_NORMALISED = "no: the {provider} report as normalised here carries no `{section}`"
+NO_OVERVIEW = (
+    "no: the {provider} report, read from the Triage overview alone, carries no `{section}`"
+)
+NO_PID_ROWS = "no: the `{section}` rows name no process"
 
 
-def _normalised(normalised_by: Sequence[str] | None) -> tuple[str, frozenset[str]] | None:
-    """``(provider, the lists its reader can fill)``, or ``None`` for an unknown reader."""
+@dataclass(frozen=True)
+class _Reader:
+    """What the reader behind a report can fill, and how its reports reach the sections."""
+
+    provider: str
+    fills: frozenset[str]
+    overview_only: bool
+    # Rendered from the normalised model rather than handed over as raw CAPE.
+    rendered: bool
+
+    def no(self, section: str) -> str:
+        said = NO_OVERVIEW if self.overview_only else NO_NORMALISED
+        return said.format(provider=self.provider, section=section)
+
+
+def _reader(normalised_by: Sequence[str] | None) -> _Reader | None:
+    """The reader ``(provider, source_format)`` names, or ``None`` for an unknown one."""
     if not normalised_by or len(normalised_by) != 2:
         return None
-    from maljan.schemas.sandbox_report import normaliser_fills
+    from maljan.schemas.sandbox_report import normaliser_reading
 
     provider, source_format = (str(part or "").strip() for part in normalised_by)
-    fills = normaliser_fills(source_format)
-    if fills is None:
+    reading = normaliser_reading(source_format, provider)
+    if reading is None:
         return None
-    return provider or source_format, fills
+    return _Reader(
+        provider=provider or source_format,
+        fills=reading.fills,
+        overview_only=reading.overview_only,
+        rendered=reading.rendered,
+    )
 
 
 def _listed(paths: Sequence[str]) -> str:
@@ -173,7 +225,7 @@ def _digits(value: Any) -> str | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
-        return str(value) if value >= 0 else None
+        return str(value) if 0 <= value < 10**20 else None
     if isinstance(value, str):
         text = value.strip()
         if text.isascii() and text.isdigit() and len(text) <= 20:
@@ -245,7 +297,7 @@ class Sections:
     ``normalised_by`` is ``(provider, source_format)`` of the reader that
     produced the report (the container's ``sandbox_normalised``). A section
     none of whose lists that reader can fill (``schemas.sandbox_report
-    .normaliser_fills``) is not carried, whatever the dict holds: the reader
+    .normaliser_reading``) is not carried, whatever the dict holds: the reader
     writes those lists empty for every report, so a count of them would read
     as an observed absence. ``None`` reads the dict as it stands.
     """
@@ -254,7 +306,7 @@ class Sections:
         self, report: Mapping[str, Any], normalised_by: Sequence[str] | None = None
     ) -> None:
         self.report = report
-        self._normalised = _normalised(normalised_by)
+        self._reading = _reader(normalised_by)
         behavior = report.get("behavior")
         self._behavior: Mapping[str, Any] = behavior if isinstance(behavior, Mapping) else {}
         summary = self._behavior.get("summary")
@@ -282,11 +334,9 @@ class Sections:
         if listed and listed in self._unavailable:
             section.no = NO_UNAVAILABLE.format(name=listed)
             return section
-        if self._normalised is not None:
-            provider, fills = self._normalised
-            if not fills.intersection(SECTION_FIELDS[name]):
-                section.no = NO_NORMALISED.format(provider=provider, section=name)
-                return section
+        if self._reading is not None and not self._reading.fills.intersection(SECTION_FIELDS[name]):
+            section.no = self._reading.no(name)
+            return section
         reader = getattr(self, f"_read_{name}", None)
         if reader is not None:
             reader(section)
@@ -327,8 +377,10 @@ class Sections:
         section.parts.append(_Part("processes", "behavior.processes", rows))
         seen: dict[str, int] = {}
         holders: dict[str, list[str]] = {}
+        own: list[str | None] = []
         for position, row in enumerate(rows):
-            pid = _digits(_first(row, _PID_KEYS))
+            pid = self._stated(_first(row, _PID_KEYS))
+            own.append(pid)
             if pid is None:
                 item = f"proc:p{position + 1}"
             else:
@@ -337,23 +389,63 @@ class Sections:
                 holders.setdefault(pid, []).append(item)
             section.ids.append(item)
             self._process_rows[item] = position
-        # A parent is named only where exactly one process holds its pid.
+        # A parent is named only where exactly one process holds its pid, and a
+        # process is never its own parent. Where a row states no parent, the
+        # report's process tree may: a child nested under exactly one parent.
+        tree = self._tree_parents()
         for position, row in enumerate(rows):
-            ppid = _digits(_first(row, _PPID_KEYS))
-            if ppid is not None and len(holders.get(ppid, ())) == 1:
+            ppid = self._stated(_first(row, _PPID_KEYS))
+            if ppid is None and own[position] is not None:
+                ppid = tree.get(own[position] or "")
+            if ppid is None or ppid == own[position]:
+                continue
+            if len(holders.get(ppid, ())) == 1:
                 self._parent[position] = holders[ppid][0]
 
+    def _stated(self, value: Any) -> str | None:
+        """A pid the report states: in digits, and not the rendered model's 0 for "none"."""
+        pid = _digits(value)
+        if pid == "0" and self._reading is not None and self._reading.rendered:
+            return None
+        return pid
+
+    def _tree_parents(self) -> dict[str, str]:
+        """Each pid the process tree nests under exactly one parent, to that parent; one walk."""
+        tree = self._list(self._behavior.get("processtree"))
+        if not tree:
+            return {}
+        if self._reading is not None and RAW_PROCESSTREE not in self._reading.fills:
+            return {}
+        parents: dict[str, set[str]] = {}
+        stack: list[tuple[Any, str | None]] = [(node, None) for node in tree]
+        while stack:
+            node, parent = stack.pop()
+            if not isinstance(node, Mapping):
+                continue
+            pid = _digits(_first(node, _PID_KEYS))
+            if pid is not None and parent is not None and parent != pid:
+                parents.setdefault(pid, set()).add(parent)
+            children = node.get("children")
+            if isinstance(children, list):
+                stack.extend((child, pid) for child in children)
+        return {pid: next(iter(held)) for pid, held in parents.items() if len(held) == 1}
+
     def _read_api_calls(self, section: Section) -> None:
+        """Each process's own calls, under its id; the flat list only where no process has any.
+
+        A report rendered from the normalised model carries both, and only the
+        per-process lists say which process made a call.
+        """
         flat = self._list(self._behavior.get("calls"))
-        if flat:
-            section.parts.append(_Part("calls", "behavior.calls", flat))
-            return
         processes = self.sections.get("processes")
         rows = self._list(self._behavior.get("processes"))
-        if rows is None or processes is None:
+        nested = rows is not None and any(
+            isinstance(row, Mapping) and self._list(row.get("calls")) for row in rows
+        )
+        if not nested or rows is None or processes is None or not processes.ids:
             if flat is not None:
                 section.parts.append(_Part("calls", "behavior.calls", flat))
-            else:
+            elif rows is None:
                 paths = _listed(["behavior.calls", "behavior.processes"])
                 section.no = NO_LISTS.format(paths=paths)
             return
@@ -426,6 +518,43 @@ class Sections:
             return
         section.parts.append(_Part("screenshots", "screenshots", rows))
 
+    def _read_cape(self, section: Section) -> None:
+        """The ``CAPE`` block: its lists (configurations, payloads) by name, or the list it is."""
+        block = self.report.get("CAPE")
+        if isinstance(block, list):
+            section.parts.append(_Part("CAPE", "CAPE", block))
+            return
+        if isinstance(block, Mapping):
+            for key in sorted(str(k) for k in block):
+                rows = self._list(block.get(key))
+                if rows is not None:
+                    section.parts.append(_Part(key, f"CAPE.{key}", rows))
+            if section.parts:
+                return
+        section.no = NO_LIST.format(path="CAPE")
+
+    def _read_resolved_apis(self, section: Section) -> None:
+        rows = self._list(self._summary.get("resolved_apis"))
+        if rows is None:
+            section.no = NO_LIST.format(path="behavior.summary.resolved_apis")
+            return
+        section.parts.append(_Part("resolved_apis", "behavior.summary.resolved_apis", rows))
+
+    def _read_alerts(self, section: Section) -> None:
+        suricata = self.report.get("suricata")
+        rows = self._list(suricata.get("alerts")) if isinstance(suricata, Mapping) else None
+        if rows is None:
+            section.no = NO_LIST.format(path="suricata.alerts")
+            return
+        section.parts.append(_Part("alerts", "suricata.alerts", rows))
+
+    def _read_procdumps(self, section: Section) -> None:
+        rows = self._list(self.report.get("procdump"))
+        if rows is None:
+            section.no = NO_LIST.format(path="procdump")
+            return
+        section.parts.append(_Part("procdump", "procdump", rows))
+
     # -- items -----------------------------------------------------------
 
     def _item(self, section: Section, part: _Part, index: int, number: int) -> dict[str, Any]:
@@ -488,9 +617,11 @@ class Sections:
                 pids = {owner} if owner.isdigit() else set()
                 if isinstance(row, Mapping):
                     for key in keys:
-                        found = _digits(row.get(key))
-                        if found is not None:
-                            pids.add(found)
+                        value = row.get(key)
+                        for one in value if isinstance(value, list) else [value]:
+                            found = self._stated(one)
+                            if found is not None:
+                                pids.add(found)
                 for pid in pids:
                     index.setdefault(pid, []).append(number)
         self._pid_index[name] = index
@@ -558,10 +689,16 @@ class Sections:
         if ids:
             numbers: dict[int, None] = {}
             seen: set[str] = set()
-            budget = section.count
+            # As many distinct ids as the section has items, and one more so an
+            # empty section names an id it does not hold.
+            budget = max(section.count, 1)
             for position, raw in enumerate(ids):
                 if len(seen) >= budget:
-                    found.not_read = len(ids) - position
+                    if section.count:
+                        found.not_read = len(ids) - position
+                    else:
+                        # The section holds nothing, so every id left is missing.
+                        found.missing_more = len(ids) - position
                     break
                 item_id = str(raw).strip().lower()
                 if not item_id or item_id in seen:
@@ -613,6 +750,8 @@ class Query:
 
     items: list[dict[str, Any]] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
+    # Asked ids past the one named, of a section that holds no item: missing too.
+    missing_more: int = 0
     not_read: int = 0
 
 
@@ -638,6 +777,11 @@ def _holds_text(value: Any, needle: str) -> bool:
     return False
 
 
+def names_processes(section: str) -> bool:
+    """Whether the rows of ``section`` name the process they belong to, for the pid filter."""
+    return section in _PID_FIELDS
+
+
 def pid_of(value: Any) -> str | None:
     """A pid argument in the digits the items are matched in, or ``None`` when it is none."""
     return _digits(value)
@@ -661,8 +805,26 @@ def section_index(
 
 
 def item_ids_in(text: str) -> list[str]:
-    """The item ids written in ``text``, lower-cased, once each, in order."""
+    """The item ids written in ``text``, lower-cased, once each, in order.
+
+    For a citing field (``evidence_ref``, ``evidence_refs``) only; a statement's
+    own words are read for bracketed citations (:func:`cited_item_ids`).
+    """
     return list(dict.fromkeys(found.lower() for found in ITEM_ID_RE.findall(text or "")))
+
+
+_BRACKETED_RE = re.compile(r"\[([^\[\]\n]{1,200})\]")
+
+
+def cited_item_ids(text: str) -> list[str]:
+    """The item ids ``text`` cites in brackets (``[proc:84]``, ``[net:3, ev_0004]``)."""
+    found: dict[str, None] = {}
+    for group in _BRACKETED_RE.findall(text or ""):
+        for part in re.split(r"[,;]", group):
+            item = part.strip().lower()
+            if is_item_id(item):
+                found[item] = None
+    return list(found)
 
 
 def is_item_id(text: str) -> bool:
@@ -740,3 +902,41 @@ def item_index_of(entries: Iterable[Any]) -> ItemIndex | None:
     """The run's item index, read off its ledger, or ``None`` where it holds none."""
     entry = index_entry(entries)
     return ItemIndex.from_answer(entry.structured) if entry is not None else None
+
+
+class ItemCitations:
+    """The run's items as a report check cites them: by the index, read through the report.
+
+    An item is accepted as a citation only where the index states it and its
+    own text can be read from the report in hand; its text is what a value
+    stated under the citation is looked for in, as an entry's is. Texts are
+    read for the ids cited, once each.
+    """
+
+    def __init__(self, index: ItemIndex, sections: Sections | None) -> None:
+        self.index = index
+        self.sections = sections
+        self._texts: dict[str, str | None] = {}
+
+    @property
+    def holds_items(self) -> bool:
+        return self.index.holds_items
+
+    def item(self, item_id: str) -> dict[str, Any] | None:
+        text = str(item_id or "").strip().lower()
+        if self.sections is None or not self.index.known(text):
+            return None
+        return self.sections.item(text)
+
+    def text(self, item_id: str) -> str | None:
+        """The item's own text, lower-cased, as an entry's is held; ``None`` when unread."""
+        key = str(item_id or "").strip().lower()
+        if key not in self._texts:
+            import json
+
+            found = self.item(key)
+            self._texts[key] = json.dumps(found, default=str).lower() if found else None
+        return self._texts[key]
+
+    def known(self, item_id: str) -> bool:
+        return self.text(item_id) is not None

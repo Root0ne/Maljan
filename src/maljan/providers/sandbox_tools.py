@@ -202,7 +202,7 @@ def sandbox_network(
     if not isinstance(network, dict):
         return {"dns": [], "hosts": [], "http": [], "tcp": [], "udp": []}
     out: dict[str, Any] = {}
-    for key in ("dns", "hosts", "http", "tcp", "udp", "domains", "icmp", "tls"):
+    for key in NETWORK_VIEW_KINDS:
         rows = network.get(key)
         if isinstance(rows, list):
             page, meta = _page(rows, offset, limit)
@@ -212,6 +212,20 @@ def sandbox_network(
                 if "next_offset" in meta:
                     out[f"{key}_next_offset"] = meta["next_offset"]
     return out
+
+
+# The kinds the network view lists, in its order; the sandbox sections number
+# their network items in this same order (``analysis.sandbox_sections``).
+NETWORK_VIEW_KINDS: tuple[str, ...] = (
+    "dns",
+    "hosts",
+    "http",
+    "tcp",
+    "udp",
+    "domains",
+    "icmp",
+    "tls",
+)
 
 
 def _with_resolver_fact(row: Any) -> Any:
@@ -622,7 +636,13 @@ def sandbox_items(
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
-    from maljan.analysis.sandbox_sections import SECTION_PREFIXES, Sections, pid_of
+    from maljan.analysis.sandbox_sections import (
+        NO_PID_ROWS,
+        SECTION_PREFIXES,
+        Sections,
+        names_processes,
+        pid_of,
+    )
 
     name = str(section or "").strip().lower()
     if name not in SECTION_PREFIXES:
@@ -633,7 +653,9 @@ def sandbox_items(
         return {"section": name, "no": held.no}
     wanted_pid = None
     if pid not in (None, ""):
-        wanted_pid = pid_of(pid)
+        if not names_processes(name):
+            return {"section": name, "no": NO_PID_ROWS.format(section=name)}
+        wanted_pid = pid_of(pid.strip() if isinstance(pid, str) else pid)
         if wanted_pid is None:
             return {"error": ITEMS_BAD_PID, "section": name}
     if str(signature or "").strip() and name != "signatures":
@@ -650,6 +672,8 @@ def sandbox_items(
     answer: dict[str, Any] = {"section": name, "matched": len(kept.items), "items": kept.items}
     if kept.missing:
         answer["not_in_section"] = kept.missing
+    if kept.missing_more:
+        answer["more_not_in_section"] = kept.missing_more
     if kept.not_read:
         answer["ids_not_read"] = kept.not_read
     return answer
@@ -813,32 +837,34 @@ def items_tool(
 
     def _items(
         section: str,
-        pid: str = "",
+        pid: int | str | None = None,
         contains: str = "",
         signature: str = "",
-        ids: list[str] | None = None,
+        ids: list[str] | str | None = None,
     ) -> dict[str, Any]:
         """Read items of one section of the job's sandbox report, whole.
 
         ``section`` is one of ``processes``, ``api_calls``, ``files``,
         ``registry``, ``network``, ``signatures``, ``dropped``, ``mutexes``,
         ``commands``, ``services``, ``events``, ``apistats``, ``channels`` or
-        ``screenshots``; the pack's sandbox section index gives each one's item
-        count, or why the report does not carry it. Each item comes
+        ``screenshots``, and for a raw CAPE report ``cape`` (its extracted
+        configurations and payloads), ``resolved_apis``, ``alerts`` (Suricata)
+        and ``procdumps``; the pack's sandbox section index gives each one's
+        item count, or why the report does not carry it. Each item comes
         with its id (proc:<pid> for a process, <prefix>:<n> for the n-th item
         of any other section), the report list it came from and the report's
-        own fields. ``pid`` keeps the items of that process id; ``contains``
+        own fields. ``pid`` (a number) keeps the items of that process id, in
+        the sections whose rows name a process; ``contains``
         keeps the items one of whose text values contains the text (a path,
         key, host, URL or command line), case not counted; ``signature`` keeps
         the signature with that item id or name; ``ids`` keeps the items with
-        those ids. The filters combine; with none, every item of the section
+        those ids, a list or one text of ids separated by commas or spaces. The
+        filters combine; with none, every item of the section
         is answered, and ``matched`` counts the items kept. A process's API
         calls are the api_calls items whose process is its id. A claim may
         cite an item by its id.
         """
-        return sandbox_items(
-            report, section, pid or None, contains, signature, ids, sections=_sections()
-        )
+        return sandbox_items(report, section, pid, contains, signature, ids, sections=_sections())
 
     return StructuredTool.from_function(func=_sized(_items, sizer, _ITEM_FILTERS), name=ITEMS_TOOL)
 

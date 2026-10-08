@@ -34,8 +34,9 @@ A root is derived from what the entry already holds, never guessed:
 * **a network flow** (``network flow tcp to 192.0.2.1:443``), the same label
   whether the sandbox or the capture states it and for both directions of
   one connection, and a DNS query by name;
-* **an item of the sandbox report** a statement cites by its id
-  (``analysis.sandbox_sections``): a process item's root is that sandbox
+* **an item of the sandbox report** a statement cites by its id, in
+  brackets or in its citing field (``analysis.sandbox_sections``): a process
+  item's root is that sandbox
   process, a TCP or UDP item's its flow, a DNS item's its query; the row of a
   network item is read from a ``sandbox_items`` answer or the whole
   ``sandbox_network`` answer of the same ledger, and an item id is read only
@@ -80,7 +81,8 @@ from maljan.analysis.sandbox_sections import (
     NETWORK_KINDS,
     SECTION_OF_PREFIX,
     ItemIndex,
-    item_ids_in,
+    cited_item_ids,
+    is_item_id,
     item_index_of,
 )
 from maljan.schemas.evidence import repeat_holders
@@ -1366,11 +1368,18 @@ class RunRoots:
     def of_statement(self, text: str, entry_ids: Iterable[str]) -> tuple[list[str], list[str]]:
         """``(roots, no: reasons)`` for one statement citing ``entry_ids``.
 
-        The sandbox item ids the statement writes are its citations too, in a
-        run whose ledger holds the section index.
+        A sandbox item id is a citation where ``entry_ids`` carries it (read
+        from a citing field) or the statement cites it in brackets, in a run
+        whose ledger holds the section index; the statement's own words are
+        never read for one.
         """
-        ids = list(dict.fromkeys(str(i).strip().lower() for i in entry_ids if str(i).strip()))
-        items = item_ids_in(text) if self.items is not None else []
+        written = list(dict.fromkeys(str(i).strip().lower() for i in entry_ids if str(i).strip()))
+        ids = [i for i in written if not is_item_id(i)]
+        items = (
+            list(dict.fromkeys([*(i for i in written if is_item_id(i)), *cited_item_ids(text)]))
+            if self.items is not None
+            else []
+        )
         if not ids and not items:
             return [], [NO_CITATION]
         roots: dict[str, None] = {}

@@ -8,6 +8,7 @@ no per-agent branching exists.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import inspect
 import json
 import os
@@ -1627,15 +1628,23 @@ def ledger_ids(state: AnalysisState) -> list[str]:
     return ids
 
 
-def sandbox_item_index(state: AnalysisState) -> Any:
-    """The run's sandbox section index (``analysis.sandbox_sections``), or ``None``.
+def sandbox_item_citations(state: AnalysisState, container: Any) -> Any:
+    """The run's sandbox items as a report cites them (``ItemCitations``), or ``None``.
 
-    What a report checks a cited item id against: counts and process ids,
-    never a list of every id.
+    The pack's section index says which ids exist; the report in hand,
+    read into sections once here, gives each cited item's own text. Never a
+    list of every id.
     """
-    from maljan.analysis.sandbox_sections import item_index_of
+    from maljan.analysis.sandbox_sections import ItemCitations, Sections, item_index_of
+    from maljan.pipeline.sandbox_status import observed_report
+    from maljan.providers.sandbox_tools import normalised_by_of
 
-    return item_index_of(pack_entries(state.get("evidence_ledger") or []))
+    index = item_index_of(pack_entries(state.get("evidence_ledger") or []))
+    if index is None:
+        return None
+    report = observed_report(state.get("sandbox_report"))
+    sections = Sections(report, normalised_by_of(container)) if report else None
+    return ItemCitations(index, sections)
 
 
 def pack_ledger_ids(state: AnalysisState) -> list[str]:
@@ -5377,6 +5386,11 @@ def make_report_node(
         # it cites, and the composer is shown which entries hold what the
         # analysts' claims quote.
         _entry_texts = _report_entry_texts(container, _ledger)
+        # The run's sandbox items, read once for both report rounds: a cited
+        # item is read through its own text, as a cited entry is.
+        _items = sandbox_item_citations(state, container)
+        if _entry_texts is not None and _items is not None:
+            _entry_texts = dataclasses.replace(_entry_texts, items=_items)
 
         narrative_dict: dict[str, Any] | None = None
         # Why no summary was written, when none is: said where the summary
@@ -5424,7 +5438,7 @@ def make_report_node(
                         facts_block=_narrative_facts,
                         run_state=_narrative_state,
                         citable_ids=ledger_ids(state),
-                        items=sandbox_item_index(state),
+                        items=_items,
                         evidence=_entry_texts,
                     ),
                     timeout=narrative_seconds,
@@ -5496,7 +5510,7 @@ def make_report_node(
                     facts_block=pack_text(state, container),
                     run_state=render_run_state(state),
                     citable_ids=ledger_ids(state),
-                    items=sandbox_item_index(state),
+                    items=_items,
                     evidence=_entry_texts,
                 )
             except Exception as exc:  # noqa: BLE001

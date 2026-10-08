@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from maljan.analysis import sandbox_sections as ss
-from maljan.analysis.evidence_roots import run_roots
+from maljan.analysis.evidence_roots import NO_CITATION, run_roots
 from maljan.pipeline import triage_pack
 from maljan.pipeline.validation import (
     CITATION_NOT_EVIDENCE_CODE,
@@ -305,6 +305,12 @@ class TestTheTool:
         assert sizer.narrowing == ("pid", "contains", "signature", "ids")
 
 
+def _citations(report: dict[str, Any], normalised_by: Any = None) -> ss.ItemCitations:
+    index = ss.ItemIndex.from_answer(ss.section_index(report, normalised_by))
+    assert index is not None
+    return ss.ItemCitations(index, ss.Sections(report, normalised_by))
+
+
 def _index_entry(report: dict[str, Any], eid: str = "ev_0040") -> LedgerEntry:
     return LedgerEntry(
         id=eid, tool=ss.SECTIONS_TOOL, agent="pipeline", structured=ss.section_index(report)
@@ -313,14 +319,21 @@ def _index_entry(report: dict[str, Any], eid: str = "ev_0040") -> LedgerEntry:
 
 class TestCitations:
     def test_a_held_item_is_a_citation_and_an_unheld_one_is_asked_once(self) -> None:
-        index = ss.ItemIndex.from_answer(ss.section_index(REPORT))
-        assert index is not None
+        items = _citations(REPORT)
         prose = {"body": "Runs rundll32 [proc:84], then [proc:99] and [proc:99] [net:3]."}
 
-        (asked,) = citation_violations(prose, ["ev_0001"], items=index)
+        (asked,) = citation_violations(prose, ["ev_0001"], items=items)
         assert asked.code == CITATION_NOT_EVIDENCE_CODE
         assert asked.message.startswith("[proc:99] is not an item of this run's sandbox report.")
-        assert citation_violations({"body": "x [proc:84]"}, ["ev_0001"], items=index) == []
+        assert citation_violations({"body": "x [proc:84]"}, ["ev_0001"], items=items) == []
+
+    def test_an_item_whose_text_is_not_read_is_no_citation(self) -> None:
+        index = ss.ItemIndex.from_answer(ss.section_index(REPORT))
+        (asked,) = citation_violations({"body": "x [proc:84]"}, ["ev_0001"], items=index)
+        assert "whose text this check cannot read" in asked.message
+        unread = ss.ItemCitations(index, None) if index is not None else None
+        (asked,) = citation_violations({"body": "x [proc:84]"}, ["ev_0001"], items=unread)
+        assert "whose text this check cannot read" in asked.message
 
     def test_without_an_index_an_item_shaped_bracket_is_asked_as_before(self) -> None:
         (asked,) = citation_violations({"body": "x [proc:84]"}, ["ev_0001"])
@@ -392,13 +405,13 @@ class TestRoots:
         ]
         roots = run_roots(ledger)
 
-        assert roots.of_statement("rundll32 runs as proc:84", []) == (["sandbox process 84"], [])
-        assert roots.of_statement("connects (net:4)", []) == (
+        assert roots.of_statement("rundll32 runs [proc:84]", []) == (["sandbox process 84"], [])
+        assert roots.of_statement("connects", ["net:4"]) == (
             ["network flow tcp to 192.0.2.10:443"],
             [],
         )
-        assert roots.of_statement("resolves net:1", []) == (["DNS query gate.example.com"], [])
-        found, why = roots.of_statement("posts net:3 and proc:99", [])
+        assert roots.of_statement("resolves [net:1]", []) == (["DNS query gate.example.com"], [])
+        found, why = roots.of_statement("posts [net:3, proc:99]", [])
         assert found == []
         assert why == [
             "net:3: no: a sandbox `network` item names no process, flow or query to place",
@@ -417,11 +430,11 @@ class TestRoots:
             ["network flow tcp to 192.0.2.10:443"],
             [],
         )
-        assert roots.of_statement("net:4", [])[0] == ["network flow tcp to 192.0.2.10:443"]
+        assert roots.of_statement("[net:4]", [])[0] == ["network flow tcp to 192.0.2.10:443"]
 
     def test_a_run_with_no_index_reads_no_item_ids(self) -> None:
         roots = run_roots([LedgerEntry(id="ev_0001", tool="hashes", agent="pipeline")])
-        assert roots.of_statement("as proc:84 shows", []) == (
+        assert roots.of_statement("as [proc:84] shows", []) == (
             [],
             ["no: the statement cites no ledger entry"],
         )
@@ -668,8 +681,248 @@ class TestTheReadersDeclareWhatTheyFill:
         assert report_fills(report.report) == REST_MAPPING_FILLS
 
     def test_every_section_reads_fields_of_the_one_vocabulary(self) -> None:
-        from maljan.schemas.sandbox_report import REPORT_LIST_FIELDS
+        from maljan.schemas.sandbox_report import CAPE_RAW_BLOCKS, REPORT_LIST_FIELDS
 
         named = {field for fields in ss.SECTION_FIELDS.values() for field in fields}
         assert set(ss.SECTION_FIELDS) == set(ss.SECTION_PREFIXES)
-        assert named == set(REPORT_LIST_FIELDS)
+        # The process tree gives parent links, not a section.
+        assert named == set(REPORT_LIST_FIELDS) | set(CAPE_RAW_BLOCKS) - {ss.RAW_PROCESSTREE}
+
+
+class TestReviewRoundOne:
+    """Each finding of the first review, held by a test of its own."""
+
+    def test_an_item_citation_faces_the_value_checks_an_entry_citation_faces(self) -> None:
+        from maljan.pipeline.validation import (
+            EntryTexts,
+            identifier_citation_violations,
+            stated_value_violations,
+            wrong_entry_citations,
+        )
+
+        items = _citations(REPORT)
+        entries = EntryTexts(
+            texts={"ev_0041": "dns gate.example.com", "ev_0042": "http evil.example.org"},
+            tools={},
+            items=items,
+        )
+        made_up = {
+            "identifiers": [
+                {"kind": "mutex", "value": "Global\\Fabricated", "evidence_refs": ["mutex:1"]}
+            ]
+        }
+        assert identifier_citation_violations(made_up, ["ev_0041"], items) == []
+        (unheld,) = stated_value_violations(made_up, entries)
+        assert "mutex:1 (sandbox report)" in unheld.message
+        held = {
+            "identifiers": [{"kind": "mutex", "value": "Global\\m1", "evidence_refs": ["mutex:1"]}]
+        }
+        assert stated_value_violations(held, entries) == []
+        (wrong,) = wrong_entry_citations(
+            {"body": "The sample contacts evil.example.org [net:1]."}, entries, prose=["body"]
+        )
+        assert "net:1 (sandbox report)" in wrong.message and "ev_0042" in wrong.message
+
+    def test_an_item_id_is_never_read_out_of_a_host_and_port(self) -> None:
+        text = "C2 at c2.example.net:443, ns.foo.net:53, a@net:2, x/net:3, y-net:4, proc:84, sig:1"
+        assert ss.item_ids_in(text) == ["proc:84", "sig:1"]
+        ledger = [_index_entry(REPORT)]
+        roots = run_roots(ledger)
+        assert roots.of_statement("beacons to cdn.example.net:4", []) == ([], [NO_CITATION])
+        # A statement's own words are not read for an item; a bracket or a citing field is.
+        assert roots.of_statement("runs as proc:84", []) == ([], [NO_CITATION])
+        index = ss.ItemIndex.from_answer(ss.section_index(REPORT))
+        isr = AgentISR(
+            agent_id="static",
+            domain="static",
+            claims=[
+                ClaimEvidence(
+                    claim="C2 over HTTPS",
+                    evidence_ref="string cdn.example.net:4 in .rdata",
+                    confidence=0.8,
+                    technique_id="T1071.001",
+                )
+            ],
+        )
+        codes = [v.code for v in validate_isr(isr, ledger_ids=["ev_0001"], items=index)]
+        assert UNGROUNDED_TECHNIQUE_CODE in codes
+
+    def test_a_rendered_report_s_pid_zero_is_no_pid_and_no_process_is_its_own_parent(self) -> None:
+        from maljan.schemas.sandbox_report import SandboxProcess, SandboxReport
+
+        report = to_cape_shaped_dict(
+            SandboxReport(
+                provider="rest",
+                source_format="generic",
+                processes=[
+                    SandboxProcess(name="nopid"),
+                    SandboxProcess(pid=7, ppid=7, name="self"),
+                    SandboxProcess(pid=8, ppid=0, name="root"),
+                    SandboxProcess(pid=9, ppid=8, name="child"),
+                ],
+            )
+        )
+        found = ss.Sections(report, ("rest", "generic"))
+        assert [(i["id"], i.get("parent")) for i in found.items("processes")] == [
+            ("proc:p1", None),
+            ("proc:7", None),
+            ("proc:8", None),
+            ("proc:9", "proc:8"),
+        ]
+
+    def test_the_uploaded_triage_overview_fills_only_the_signatures(self) -> None:
+        from maljan.core.config import Settings
+        from maljan.providers.sandbox.upload import UploadSandboxProvider
+        from maljan.schemas.sandbox_report import TRIAGE_OVERVIEW_FILLS, report_fills
+
+        cfg = Settings(_env_file=None)
+        cfg.sandbox.provider = "upload"
+        blob = (FIXTURES / "triage_overview.json").read_bytes()
+        run = UploadSandboxProvider.from_settings(cfg).attach_report(blob, filename="r.json")
+        assert report_fills(run.report) == TRIAGE_OVERVIEW_FILLS
+        index = ss.section_index(
+            to_cape_shaped_dict(run.report), (run.report.provider, run.report.source_format)
+        )["sections"]
+        assert index["signatures"]["items"] > 0
+        assert index["processes"] == {
+            "no": "no: the upload report, read from the Triage overview alone, carries no "
+            "`processes`"
+        }
+
+    def test_rest_calls_are_read_under_their_process_and_filtered_by_pid(self) -> None:
+        from maljan.schemas.sandbox_report import SandboxProcess, SandboxReport
+
+        report = to_cape_shaped_dict(
+            SandboxReport(
+                provider="rest",
+                source_format="generic",
+                processes=[
+                    SandboxProcess(pid=84, name="a", calls=[{"api": "NtWriteFile"}]),
+                    SandboxProcess(pid=90, ppid=84, name="b", calls=[{"api": "connect"}]),
+                ],
+            )
+        )
+        found = ss.Sections(report, ("rest", "generic"))
+        kept = found.query("api_calls", pid="84").items
+        assert [(i["id"], i["process"]) for i in kept] == [("call:1", "proc:84")]
+
+    def test_a_pid_on_rows_that_name_no_process_says_so(self) -> None:
+        answer = sandbox_tools.sandbox_items(REPORT, "signatures", pid=84)
+        assert answer == {
+            "section": "signatures",
+            "no": "no: the `signatures` rows name no process",
+        }
+        dropped = {"dropped": [{"name": "a", "pids": [5, 6]}, {"name": "b", "pids": [7]}]}
+        kept = sandbox_tools.sandbox_items(dropped, "dropped", pid="6")
+        assert [i["id"] for i in kept["items"]] == ["drop:1"]
+
+    def test_the_index_is_recorded_after_the_pack_s_budget_is_spent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.agents.evidence_recorder import EvidenceRecorder
+        from maljan.pipeline.triage_pack import PIPELINE, CapaSettings, PackInputs, _Pack
+        from maljan.schemas.evidence import EvidenceCounter
+
+        inputs = PackInputs(
+            sample_path=str(tmp_path / "s"),
+            sha256="a" * 64,
+            file_type="pe",
+            strings_head=10,
+            capa=CapaSettings(rules_dir="", signatures_dir="", timeout_s=1),
+            sandbox_report=REPORT,
+            budget_s=1.0,
+        )
+        recorder = EvidenceRecorder(PIPELINE, counter=EvidenceCounter(), stage="triage_pack")
+        pack = _Pack(recorder, inputs, reputation=None, function_matches=None)
+        pack.steps_run = 1
+        pack.started -= 100
+        pack._sandbox_sections()
+        (entry,) = [e for e in pack.recorder.entries if e.tool == ss.SECTIONS_TOOL]
+        assert entry.ok is True
+
+    def test_pid_takes_a_number_or_digits_and_ids_a_list_or_one_text(self) -> None:
+        tool = sandbox_tools.items_tool(REPORT)
+        assert tool.invoke({"section": "processes", "pid": 84})["matched"] == 1
+        assert tool.invoke({"section": "processes", "pid": "84"})["matched"] == 1
+        assert tool.invoke({"section": "network", "ids": "net:1, net:2"})["matched"] == 2
+        assert tool.invoke({"section": "network", "ids": ["net:1"]})["matched"] == 1
+
+    def test_ids_asked_of_an_empty_section_are_missing(self) -> None:
+        kept = ss.Sections({"network": {"dns": []}}).query("network", ids=["net:1", "net:2"])
+        assert (kept.missing, kept.missing_more, kept.not_read) == (["net:1"], 1, 0)
+
+    def test_a_pid_past_the_id_pattern_gets_a_positional_id(self) -> None:
+        ids = ss.section_index({"behavior": {"processes": [{"pid": 10**25}]}})["sections"][
+            "processes"
+        ]["ids"]
+        assert ids == ["proc:p1"]
+
+    def test_an_observed_step_is_told_of_the_items_when_no_answer_recorded_anything(self) -> None:
+        index = ss.ItemIndex.from_answer(ss.section_index(REPORT))
+        observed = sandbox_item_observation(MalwareReport(identity=IDENTITY), index)
+        step = {
+            "steps": [
+                {"order": 1, "action": "x", "voice": "observed", "evidence_refs": ["ev_0099"]}
+            ]
+        }
+        (asked,) = flow_voice_violations(step, [], observed_item=observed)
+        assert "the sandbox report's items are cited by their ids" in asked.message
+
+    def test_a_network_row_s_own_attribution_decides_its_item(self) -> None:
+        report = {
+            "network": {
+                "tcp": [
+                    {"dst": "192.0.2.1", "dport": 1, "sample_process_tree": True},
+                    {"dst": "192.0.2.2", "dport": 2, "sample_process_tree": False},
+                    {"dst": "192.0.2.3", "dport": 3},
+                ]
+            }
+        }
+        observed = sandbox_item_observation(MalwareReport(identity=IDENTITY), _citations(report))
+        assert observed is not None
+        assert [observed(f"net:{n}") for n in (1, 2, 3)] == [True, False, False]
+
+    def test_the_network_order_is_the_network_view_s(self) -> None:
+        assert ss.NETWORK_KINDS == sandbox_tools.NETWORK_VIEW_KINDS
+
+    def test_the_raw_cape_blocks_are_sections_and_the_tree_gives_parents(self) -> None:
+        raw = {
+            "behavior": {
+                "processes": [{"process_id": 10}, {"process_id": 11}],
+                "processtree": [{"pid": 10, "children": [{"pid": 11, "children": []}]}],
+                "summary": {"resolved_apis": ["kernel32.dll.GetProcAddress"]},
+            },
+            "CAPE": {"payloads": [{"sha256": "b" * 64}], "configs": [{"Family": {"k": "v"}}]},
+            "suricata": {"alerts": [{"signature": "s"}]},
+            "procdump": [{"pid": 10}],
+        }
+        index = ss.section_index(raw, ("cape2", "cape2"))["sections"]
+        assert index["cape"]["items"] == 2
+        assert index["resolved_apis"]["items"] == 1
+        assert index["alerts"]["items"] == 1
+        assert index["procdumps"]["items"] == 1
+        found = ss.Sections(raw, ("cape2", "cape2"))
+        assert found.item("proc:11")["parent"] == "proc:10"
+        assert [i["id"] for i in found.query("procdumps", pid="10").items] == ["dump:1"]
+        rendered = ss.section_index(raw, ("upload", "cuckoo"))["sections"]
+        assert rendered["cape"] == {
+            "no": "no: the upload report as normalised here carries no `cape`"
+        }
+
+    def test_the_raw_blocks_are_declared_where_the_report_is_its_own_dict(self) -> None:
+        from maljan.schemas.sandbox_report import (
+            CAPE_RAW_BLOCKS,
+            cape_report_to_sandbox_report,
+            normaliser_reading,
+        )
+
+        raw = {**_rich_cape(), "CAPE": {"payloads": [{}]}, "suricata": {"alerts": [{}]}}
+        raw["procdump"] = [{}]
+        for fmt, held in (("cape2", True), ("mock", True), ("cuckoo", False)):
+            shown = to_cape_shaped_dict(
+                cape_report_to_sandbox_report(raw, provider="x", source_format=fmt)
+            )
+            reading = normaliser_reading(fmt, "x")
+            assert reading is not None
+            assert (set(CAPE_RAW_BLOCKS) <= reading.fills) is held
+            assert ("CAPE" in shown and "suricata" in shown and "procdump" in shown) is held

@@ -22,6 +22,7 @@ from typing import Any
 
 from maljan.analysis.sandbox_sections import ITEMS_TOOL, SECTIONS_TOOL, ItemIndex
 from maljan.reporting.models import MalwareReport
+from maljan.schemas.sandbox_report import SAMPLE_TREE_KEY
 
 # Section keys the Composer authors. Kept as plain strings (not an enum) so the
 # Composer can iterate a config-driven subset per malware type.
@@ -501,16 +502,26 @@ def sandbox_item_observation(
     ``items`` is the run's section index. An item is one row the sandbox
     recorded, so it is an observation as the answer holding it is: a network
     item only when the sandbox attributed a flow to the sample's own tree, by
-    the rule :func:`sandbox_entry_ids` applies to the network answers. One
-    lookup per cited id; no id list is built.
+    the rule :func:`sandbox_entry_ids` applies to the network answers, unless
+    the item's own row states its attribution (``sample_process_tree``), which
+    then decides it. One lookup per cited id; no id list is built.
     """
     if items is None or not items.holds_items:
         return None
     sample_flow = _sample_tree_made_a_flow(report)
+    read_item = getattr(items, "item", None)
 
     def observed(value: str) -> bool:
         text = str(value).strip().lower()
-        return items.known(text) and (sample_flow or not text.startswith("net:"))
+        if not items.known(text):
+            return False
+        if not text.startswith("net:"):
+            return True
+        # A row that states its own attribution is read by it; else the run's rule.
+        found = read_item(text) if callable(read_item) else None
+        fields = found.get("fields") if isinstance(found, dict) else None
+        stated = fields.get(SAMPLE_TREE_KEY) if isinstance(fields, dict) else None
+        return stated if isinstance(stated, bool) else sample_flow
 
     return observed
 
