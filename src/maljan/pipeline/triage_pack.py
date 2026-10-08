@@ -452,6 +452,8 @@ class PackInputs:
     strings_head: int
     capa: CapaSettings
     sandbox_report: dict[str, Any] | None = None
+    # ``(provider, source_format)`` of the reader that produced the report.
+    sandbox_normalised_by: tuple[str, str] | None = None
     evidence_budget_bytes: int = 0
     budget_s: float = 0.0
     floss: FlossSettings = field(default_factory=FlossSettings)
@@ -1269,7 +1271,9 @@ class _Pack:
         if not report:
             return
         self.record(
-            sandbox_sections.SECTIONS_TOOL, {}, partial(sandbox_sections.section_index, report)
+            sandbox_sections.SECTIONS_TOOL,
+            {},
+            partial(sandbox_sections.section_index, report, self.inputs.sandbox_normalised_by),
         )
 
 

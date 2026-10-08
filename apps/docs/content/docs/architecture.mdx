@@ -775,7 +775,12 @@ section (`net:3`, `reg:12`, `sig:5`), the network rows counted in the order the
 section's count, or a `no:` saying why the report does not carry it (the
 report lists it as unavailable from its sandbox, as a Triage report does for
 the registry and the API calls, or holds none of the lists it is read from),
-and the process ids; its line states the count and the id form of each
+and the process ids. Each provider's reader declares the lists it can fill,
+beside the reader and held to its code by a test; a section none of whose
+lists the reader behind the run's report can fill says
+`no: the <provider> report as normalised here carries no <section>` rather
+than 0, since that reader writes the list empty for every report, while a
+reader that can fill a list and found nothing still says 0; its line states the count and the id form of each
 section in the room it has.
 **Decision:** the items are served by one read-only tool, `sandbox_items`,
 built in-process beside the other sandbox views over the report the job

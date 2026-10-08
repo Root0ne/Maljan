@@ -65,6 +65,29 @@ CHANNELS: tuple[str, ...] = (
     "registry",
 )
 
+# What :func:`apply_mapping` can fill, in ``schemas.sandbox_report``'s list
+# field names: one list per mapped channel, the calls under their processes,
+# the API counts tallied from them, and the operator's own channels. No path
+# can reach the behaviour summary, the file writes, TLS, ICMP, the generic
+# events or the screenshots.
+REST_MAPPING_FILLS: frozenset[str] = frozenset(
+    {
+        "processes",
+        "processes.calls",
+        "apistats",
+        "signatures",
+        "network.dns",
+        "network.http",
+        "network.tcp",
+        "network.udp",
+        "network.hosts",
+        "network.domains",
+        "dropped_files",
+        "registry",
+        "channels",
+    }
+)
+
 MAX_ROWS_PER_CHANNEL = 5000
 
 # The field each channel's consumer indexes on. A row without it is not a

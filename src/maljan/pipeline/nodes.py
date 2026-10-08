@@ -1422,6 +1422,8 @@ def make_triage_node(
         )
         cfg = container.config
         capa_cfg = cfg.static.capa
+        from maljan.providers import sandbox_tools
+
         inputs = PackInputs(
             sample_path=path,
             sha256=str(state.get("file_hash") or ""),
@@ -1434,6 +1436,7 @@ def make_triage_node(
                 backend=str(capa_cfg.backend),
             ),
             sandbox_report=state.get("sandbox_report"),
+            sandbox_normalised_by=sandbox_tools.normalised_by_of(container),
             evidence_budget_bytes=int(getattr(cfg.reporting, "evidence_budget_bytes", 0) or 0),
             budget_s=float(cfg.triage.budget_seconds),
             memory_floor_bytes=int(cfg.triage.memory_floor_mb) * 1024 * 1024,

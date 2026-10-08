@@ -524,12 +524,152 @@ class TestBounds:
         built: list[int] = []
         original = ss.Sections.__init__
 
-        def _counting(self: Any, report: Any) -> None:
+        def _counting(self: Any, report: Any, normalised_by: Any = None) -> None:
             built.append(1)
-            original(self, report)
+            original(self, report, normalised_by)
 
         monkeypatch.setattr(ss.Sections, "__init__", _counting)
         tool = sandbox_tools.items_tool(self._report(100))
         for section in ("processes", "network", "registry"):
             tool.invoke({"section": section})
         assert built == [1]
+
+
+class TestWhatTheReaderCanFill:
+    """A list the provider's reader never fills is not carried; one it left empty counts 0."""
+
+    def test_a_triage_report_states_the_lists_its_reader_never_fills(self) -> None:
+        index = ss.section_index(_triage(), ("triage", "triage"))["sections"]
+
+        for name in ("files", "mutexes", "commands", "services", "channels"):
+            assert index[name] == {
+                "no": f"no: the triage report as normalised here carries no `{name}`"
+            }
+        # The report's own statement comes first.
+        assert index["registry"]["no"].startswith("no: the report lists `registry`")
+        assert index["dropped"]["items"] >= 0 and "no" not in index["dropped"]
+        answer = sandbox_tools.sandbox_items(
+            _triage(), "mutexes", normalised_by=("triage", "triage")
+        )
+        assert answer == {
+            "section": "mutexes",
+            "no": "no: the triage report as normalised here carries no `mutexes`",
+        }
+
+    def test_a_reader_that_can_fill_a_list_and_filled_none_says_zero(self) -> None:
+        report = {**_cape(), "dropped": []}
+        index = ss.section_index(report, ("cape2", "cape2"))["sections"]
+        assert index["dropped"] == {"items": 0, "prefix": "drop"}
+        assert index["mutexes"] == {"items": 0, "prefix": "mutex"}
+
+    def test_an_unknown_reader_reads_the_dict_as_it_stands(self) -> None:
+        assert ss.section_index(_triage(), ("x", "nope")) == ss.section_index(_triage())
+
+    def test_the_tool_holds_the_reader_the_job_names(self) -> None:
+        class _Container:
+            sandbox_report = _triage()
+            sandbox_normalised = ("triage", "triage")
+
+        (tool,) = [t for t in sandbox_tools.sandbox_tools(_Container()) if t.name == ss.ITEMS_TOOL]
+        assert tool.invoke({"section": "files"})["no"].startswith("no: the triage report")
+
+
+def _rich_cape() -> dict[str, Any]:
+    from maljan.schemas.sandbox_report import _SUMMARY_KEYS
+
+    one = [{"x": 1}]
+    return {
+        "behavior": {
+            "processes": [{"pid": 1, "calls": [{"api": "A"}]}],
+            "apistats": {"1": {"A": 1}},
+            "generic": one,
+            "summary": {key: ["v"] for key in (*_SUMMARY_KEYS, "keys")},
+        },
+        "network": {
+            kind: one for kind in ("dns", "http", "tcp", "udp", "hosts", "domains", "tls", "icmp")
+        },
+        "signatures": [{"name": "s"}],
+        "dropped": one,
+        "screenshots": one,
+        "file_writes": ["f"],
+        "channels": {"linux.systemd": one},
+    }
+
+
+class TestTheReadersDeclareWhatTheyFill:
+    """Each reader's declaration is what its code fills: all on a full input, no more on any."""
+
+    def test_the_cape_reader(self) -> None:
+        from maljan.schemas.sandbox_report import (
+            CAPE_NORMALISER_FILLS,
+            cape_report_to_sandbox_report,
+            report_fills,
+        )
+
+        report = cape_report_to_sandbox_report(_rich_cape(), provider="cape2")
+        assert report_fills(report) == CAPE_NORMALISER_FILLS
+
+    def test_the_triage_reader(self) -> None:
+        from maljan.schemas.sandbox_report import (
+            TRIAGE_NORMALISER_FILLS,
+            report_fills,
+            triage_overview_to_sandbox_report,
+        )
+
+        overview = json.loads((FIXTURES / "triage_overview.json").read_text())
+        task = json.loads((FIXTURES / "triage_report_behavioral1.json").read_text())
+        report = triage_overview_to_sandbox_report(overview, task_reports={"b": task})
+        assert report_fills(report) == TRIAGE_NORMALISER_FILLS
+        # Every other block a CAPE report has, given to it too, fills nothing more.
+        crowded = {**_rich_cape(), **overview}
+        crowded_task = {**_rich_cape(), **task}
+        more = triage_overview_to_sandbox_report(crowded, task_reports={"b": crowded_task})
+        assert report_fills(more) <= TRIAGE_NORMALISER_FILLS
+
+    def test_the_rest_mapping(self) -> None:
+        from maljan.core.config import RestMappingConfig
+        from maljan.providers.sandbox.rest_mapping import (
+            REST_MAPPING_FILLS,
+            apply_mapping,
+            compile_mapping,
+        )
+        from maljan.schemas.sandbox_report import report_fills
+
+        mapping = RestMappingConfig(
+            processes="$.p[*]",
+            calls="$.c[*]",
+            signatures="$.s[*]",
+            dns="$.dns[*]",
+            http="$.http[*]",
+            tcp="$.tcp[*]",
+            udp="$.udp[*]",
+            hosts="$.hosts[*]",
+            domains="$.domains[*]",
+            dropped_files="$.d[*]",
+            registry="$.r[*]",
+            channels={"linux.systemd": "$.sd[*]"},
+        )
+        payload = {
+            "p": [{"pid": 1, "name": "a", "command_line": "a"}],
+            "c": [{"pid": 1, "api": "A"}],
+            "s": [{"name": "s", "description": "d", "severity": 1, "ttps": []}],
+            "dns": [{"request": "a.example"}],
+            "http": [{"uri": "/x", "host": "a.example"}],
+            "tcp": [{"dst": "192.0.2.1", "dport": 1}],
+            "udp": [{"dst": "192.0.2.1", "dport": 1}],
+            "hosts": ["192.0.2.1"],
+            "domains": ["a.example"],
+            "d": [{"name": "f", "sha256": "a" * 64, "size": 1}],
+            "r": ["HKCU\\x"],
+            "sd": [{"unit": "u"}],
+            **_rich_cape(),
+        }
+        report = apply_mapping(compile_mapping(mapping), payload, provider="rest", task_id="t")
+        assert report_fills(report.report) == REST_MAPPING_FILLS
+
+    def test_every_section_reads_fields_of_the_one_vocabulary(self) -> None:
+        from maljan.schemas.sandbox_report import REPORT_LIST_FIELDS
+
+        named = {field for fields in ss.SECTION_FIELDS.values() for field in fields}
+        assert set(ss.SECTION_FIELDS) == set(ss.SECTION_PREFIXES)
+        assert named == set(REPORT_LIST_FIELDS)

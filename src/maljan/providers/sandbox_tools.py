@@ -607,6 +607,7 @@ def sandbox_items(
     ids: list[str] | str | None = None,
     *,
     sections: Any = None,
+    normalised_by: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     """The items of one section of the report, whole, each with its id and its report fields.
 
@@ -617,7 +618,7 @@ def sandbox_items(
     and ``ids_not_read`` how many asked ids past the section's own size were
     not read. Nothing is summarised, ranked or labelled. ``sections`` is the
     report read once for the job (``items_tool`` holds it); without it the
-    report is read for this call.
+    report is read for this call, as ``normalised_by`` produced it.
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
@@ -626,7 +627,7 @@ def sandbox_items(
     name = str(section or "").strip().lower()
     if name not in SECTION_PREFIXES:
         return {"error": ITEMS_NO_SECTION, "sections": list(SECTION_PREFIXES)}
-    found = sections if isinstance(sections, Sections) else Sections(report)
+    found = sections if isinstance(sections, Sections) else Sections(report, normalised_by)
     held = found.sections[name]
     if held.no:
         return {"section": name, "no": held.no}
@@ -777,12 +778,24 @@ def sandbox_tools(container: Any) -> list[BaseTool]:
                 (_channels, "sandbox_channels"),
             )
         ),
-        items_tool(report, sizer),
+        items_tool(report, sizer, normalised_by_of(container)),
     ]
 
 
-def items_tool(report: dict[str, Any] | None, sizer: Any = None) -> BaseTool:
-    """The ``sandbox_items`` tool, closed over one job's report."""
+def normalised_by_of(container: Any) -> tuple[str, str] | None:
+    """``(provider, source_format)`` of the reader behind the job's report, where the job says."""
+    value = getattr(container, "sandbox_normalised", None)
+    if isinstance(value, tuple) and len(value) == 2:
+        return (str(value[0]), str(value[1]))
+    return None
+
+
+def items_tool(
+    report: dict[str, Any] | None,
+    sizer: Any = None,
+    normalised_by: tuple[str, str] | None = None,
+) -> BaseTool:
+    """The ``sandbox_items`` tool, closed over one job's report and the reader that produced it."""
     from langchain_core.tools import StructuredTool
 
     from maljan.analysis.sandbox_sections import ITEMS_TOOL, Sections
@@ -795,7 +808,7 @@ def items_tool(report: dict[str, Any] | None, sizer: Any = None) -> BaseTool:
         if report is None or _no_sandbox_ran(report):
             return None
         if not held:
-            held.append(Sections(report))
+            held.append(Sections(report, normalised_by))
         return held[0]
 
     def _items(

@@ -118,10 +118,49 @@ _PID_FIELDS: dict[str, tuple[str, ...]] = {
     "channels": ("pid", "process_id"),
 }
 
+# The model list fields (``schemas.sandbox_report.REPORT_LIST_FIELDS``) each
+# section is read from, for a report a known normaliser produced.
+SECTION_FIELDS: dict[str, tuple[str, ...]] = {
+    "processes": ("processes",),
+    "api_calls": ("processes.calls",),
+    "files": (
+        "summary.files",
+        "summary.write_files",
+        "summary.modified_files",
+        "summary.wrote_files",
+        "file_writes",
+    ),
+    "registry": ("registry",),
+    "network": tuple(f"network.{kind}" for kind in NETWORK_KINDS),
+    "signatures": ("signatures",),
+    "dropped": ("dropped_files",),
+    "mutexes": ("summary.mutexes",),
+    "commands": ("summary.executed_commands",),
+    "services": ("summary.created_services", "summary.started_services"),
+    "events": ("generic_events",),
+    "apistats": ("apistats",),
+    "channels": ("channels",),
+    "screenshots": ("screenshots",),
+}
+
 # The ``no:`` sentences.
 NO_UNAVAILABLE = "no: the report lists `{name}` as unavailable from its sandbox"
 NO_LISTS = "no: the report holds none of {paths}"
 NO_LIST = "no: the report holds no `{path}`"
+NO_NORMALISED = "no: the {provider} report as normalised here carries no `{section}`"
+
+
+def _normalised(normalised_by: Sequence[str] | None) -> tuple[str, frozenset[str]] | None:
+    """``(provider, the lists its reader can fill)``, or ``None`` for an unknown reader."""
+    if not normalised_by or len(normalised_by) != 2:
+        return None
+    from maljan.schemas.sandbox_report import normaliser_fills
+
+    provider, source_format = (str(part or "").strip() for part in normalised_by)
+    fills = normaliser_fills(source_format)
+    if fills is None:
+        return None
+    return provider or source_format, fills
 
 
 def _listed(paths: Sequence[str]) -> str:
@@ -201,10 +240,21 @@ class Section:
 
 
 class Sections:
-    """Every section of one report, read once, the rows left where they are."""
+    """Every section of one report, read once, the rows left where they are.
 
-    def __init__(self, report: Mapping[str, Any]) -> None:
+    ``normalised_by`` is ``(provider, source_format)`` of the reader that
+    produced the report (the container's ``sandbox_normalised``). A section
+    none of whose lists that reader can fill (``schemas.sandbox_report
+    .normaliser_fills``) is not carried, whatever the dict holds: the reader
+    writes those lists empty for every report, so a count of them would read
+    as an observed absence. ``None`` reads the dict as it stands.
+    """
+
+    def __init__(
+        self, report: Mapping[str, Any], normalised_by: Sequence[str] | None = None
+    ) -> None:
         self.report = report
+        self._normalised = _normalised(normalised_by)
         behavior = report.get("behavior")
         self._behavior: Mapping[str, Any] = behavior if isinstance(behavior, Mapping) else {}
         summary = self._behavior.get("summary")
@@ -232,6 +282,11 @@ class Sections:
         if listed and listed in self._unavailable:
             section.no = NO_UNAVAILABLE.format(name=listed)
             return section
+        if self._normalised is not None:
+            provider, fills = self._normalised
+            if not fills.intersection(SECTION_FIELDS[name]):
+                section.no = NO_NORMALISED.format(provider=provider, section=name)
+                return section
         reader = getattr(self, f"_read_{name}", None)
         if reader is not None:
             reader(section)
@@ -588,9 +643,11 @@ def pid_of(value: Any) -> str | None:
     return _digits(value)
 
 
-def section_index(report: Mapping[str, Any]) -> dict[str, Any]:
+def section_index(
+    report: Mapping[str, Any], normalised_by: Sequence[str] | None = None
+) -> dict[str, Any]:
     """The index the pack records: each section's count, or its ``no:``, and the process ids."""
-    found = Sections(report)
+    found = Sections(report, normalised_by)
     sections: dict[str, Any] = {}
     for name, section in found.sections.items():
         if section.no:

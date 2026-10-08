@@ -282,6 +282,79 @@ def _cape_channels(
     return channels
 
 
+# The list fields of the model a normaliser may fill, as one vocabulary: what
+# each reader below declares it can fill, and what the sandbox sections read
+# (``analysis.sandbox_sections``) to tell a list the reader never fills, which
+# says nothing, from one the sandbox left empty, which is a finding.
+REPORT_LIST_FIELDS: tuple[str, ...] = (
+    "processes",
+    "processes.calls",
+    "apistats",
+    "generic_events",
+    "signatures",
+    "network.dns",
+    "network.http",
+    "network.tcp",
+    "network.udp",
+    "network.hosts",
+    "network.domains",
+    "network.tls",
+    "network.icmp",
+    "dropped_files",
+    "registry",
+    "channels",
+    "screenshots",
+    *(f"summary.{key}" for key in _SUMMARY_KEYS),
+    "file_writes",
+)
+
+# What :func:`cape_report_to_sandbox_report` can fill: every list field, each
+# read from the report's own block of that name.
+CAPE_NORMALISER_FILLS: frozenset[str] = frozenset(REPORT_LIST_FIELDS)
+
+
+def report_fills(report: SandboxReport) -> frozenset[str]:
+    """The list fields of ``report`` that hold at least one row."""
+    network = report.network
+    held: dict[str, Any] = {
+        "processes": report.processes,
+        "processes.calls": any(p.calls for p in report.processes),
+        "apistats": report.apistats,
+        "generic_events": report.generic_events,
+        "signatures": report.signatures,
+        "dropped_files": report.dropped_files,
+        "registry": report.registry,
+        "channels": report.channels,
+        "screenshots": report.screenshots,
+        "file_writes": report.file_writes,
+        **{
+            f"network.{kind}": getattr(network, kind)
+            for kind in ("dns", "http", "tcp", "udp", "hosts", "domains", "tls", "icmp")
+        },
+        **{f"summary.{key}": report.summary.get(key) for key in _SUMMARY_KEYS},
+    }
+    return frozenset(name for name, value in held.items() if value)
+
+
+def normaliser_fills(source_format: str) -> frozenset[str] | None:
+    """The list fields the reader behind ``source_format`` can fill, or ``None`` when unknown.
+
+    The CAPE reader for a CAPE, Cuckoo or mock report, the Triage reader for a
+    Triage one, the REST mapping for a generic one
+    (``providers.sandbox.rest_mapping.REST_MAPPING_FILLS``).
+    """
+    fmt = str(source_format or "").strip().lower()
+    if fmt in ("cape2", "cuckoo", "mock"):
+        return CAPE_NORMALISER_FILLS
+    if fmt == "triage":
+        return TRIAGE_NORMALISER_FILLS
+    if fmt == "generic":
+        from maljan.providers.sandbox.rest_mapping import REST_MAPPING_FILLS
+
+        return REST_MAPPING_FILLS
+    return None
+
+
 def cape_report_to_sandbox_report(
     raw: dict[str, Any],
     *,
@@ -547,6 +620,25 @@ def _flow_attribution(flow: dict[str, Any], lineage: _Lineage) -> dict[str, Any]
         if flow.get(key) not in (None, ""):
             out[key] = flow[key]
     return out
+
+
+# What :func:`triage_overview_to_sandbox_report` can fill: the process list,
+# the signatures, the dumped files, the flows split into TCP and UDP with a
+# host row per destination, and the DNS and HTTP requests with their names.
+# Every other list it leaves empty whatever the report holds.
+TRIAGE_NORMALISER_FILLS: frozenset[str] = frozenset(
+    {
+        "processes",
+        "signatures",
+        "dropped_files",
+        "network.tcp",
+        "network.udp",
+        "network.hosts",
+        "network.dns",
+        "network.domains",
+        "network.http",
+    }
+)
 
 
 def triage_overview_to_sandbox_report(

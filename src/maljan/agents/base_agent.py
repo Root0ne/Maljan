@@ -3918,12 +3918,18 @@ class BaseAnalyst(BudgetMeter, ABC):
             return []
         from maljan.agents.prompt_fragments import SANDBOX_FAMILY, stamp_source
         from maljan.pipeline.sandbox_status import observed_report
-        from maljan.providers.sandbox_tools import _answer_sizer, _report_of, items_tool
+        from maljan.providers.sandbox_tools import (
+            _answer_sizer,
+            _report_of,
+            items_tool,
+            normalised_by_of,
+        )
 
         report = observed_report(_report_of(container))
         if report is None:
             return []
-        return stamp_source([items_tool(report, _answer_sizer(container))], SANDBOX_FAMILY)
+        tool = items_tool(report, _answer_sizer(container), normalised_by_of(container))
+        return stamp_source([tool], SANDBOX_FAMILY)
 
     def _profile_excluded_servers(self) -> str:
         """The servers the active profile withholds, as ``for_agent``'s argument."""

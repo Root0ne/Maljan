@@ -959,6 +959,13 @@ def _sandbox_sections_sentences() -> str:
             _roots.ITEM_ROW_UNREAD.format(item="net:9"),
             _roots.ITEM_NO_PID,
             *(_roots.ITEM_UNPLACED.format(section=name) for name in ss.SECTION_PREFIXES),
+            *(
+                ss.NO_NORMALISED.format(provider=provider, section=name)
+                for provider in ("triage", "rest", "upload")
+                for name in ss.SECTION_PREFIXES
+            ),
+            json.dumps(ss.section_index(report, ("triage", "triage"))),
+            json.dumps(st.sandbox_items(report, "files", normalised_by=("rest", "generic"))),
         ]
     )
 
