@@ -34,6 +34,13 @@ A root is derived from what the entry already holds, never guessed:
 * **a network flow** (``network flow tcp to 192.0.2.1:443``), the same label
   whether the sandbox or the capture states it and for both directions of
   one connection, and a DNS query by name;
+* **an item of the sandbox report** a statement cites by its id, in
+  brackets or in its citing field (``analysis.sandbox_sections``): a process
+  item's root is that sandbox
+  process, a TCP or UDP item's its flow, a DNS item's its query; the row of a
+  network item is read from a ``sandbox_items`` answer or the whole
+  ``sandbox_network`` answer of the same ledger, and an item id is read only
+  in a run whose ledger holds the section index, against that index;
 * **the whole file**: hashes, file identification, signing, a file
   reputation answer.
 
@@ -69,6 +76,15 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from maljan.analysis.sandbox_sections import (
+    ITEMS_TOOL,
+    NETWORK_KINDS,
+    SECTION_OF_PREFIX,
+    ItemIndex,
+    cited_item_ids,
+    is_item_id,
+    item_index_of,
+)
 from maljan.schemas.evidence import repeat_holders
 
 WHOLE_FILE = "the whole file"
@@ -111,6 +127,10 @@ OFFSET_UNPLACED = (
     "no: the file states an image base and no section table, so a file offset cannot be "
     "placed against its addresses"
 )
+NO_ITEM = "no: {item} is not an item of this run's sandbox report"
+ITEM_ROW_UNREAD = "no: no answer in this run's ledger holds the row of {item}"
+ITEM_UNPLACED = "no: a sandbox `{section}` item names no process, flow or query to place"
+ITEM_NO_PID = "no: the report states no pid for this process"
 BLOB_UNMATCHED = (
     "no: the call site holds blobs the blob decoder read, and none of them decodes to this text"
 )
@@ -763,6 +783,8 @@ class _Joins:
     flow_ends: dict[tuple[str, tuple[str, str], tuple[str, str]], tuple[str, str]] = field(
         default_factory=dict
     )
+    # A sandbox network item's id to its kind and row, as an answer in the ledger holds it.
+    network_items: dict[str, tuple[str, Any]] = field(default_factory=dict)
 
 
 def _flow_key(
@@ -824,6 +846,19 @@ def _joins(entries: Iterable[Any], files: _Files) -> _Joins:
                 command = str(row.get("command_line") or "").strip()
                 if command and isinstance(row.get("pid"), int):
                     found.processes_of_command.setdefault(command, {})[int(row["pid"])] = None
+        if tool == ITEMS_TOOL and isinstance(data, Mapping) and data.get("section") == "network":
+            for row in _rows(data, "items"):
+                if isinstance(row.get("id"), str):
+                    found.network_items.setdefault(
+                        row["id"].lower(), (str(row.get("kind") or ""), row.get("fields"))
+                    )
+        elif tool == "sandbox_network" and _whole_network_answer(entry):
+            number = 0
+            for kind in NETWORK_KINDS:
+                rows = data.get(kind)
+                for row in rows if isinstance(rows, list) else ():
+                    number += 1
+                    found.network_items.setdefault(f"net:{number}", (kind, row))
         for row in _flow_rows(entry):
             key = _flow_key(
                 row.get("proto"), row.get("src"), row.get("sport"), row.get("dst"), row.get("dport")
@@ -831,6 +866,48 @@ def _joins(entries: Iterable[Any], files: _Files) -> _Joins:
             if key is not None:
                 found.flow_ends.setdefault(key, (str(row["dst"]), str(row["dport"])))
     return found
+
+
+def _whole_network_answer(entry: Any) -> bool:
+    """Whether a ``sandbox_network`` answer lists every row: asked for no page, and cut nowhere."""
+    data = _structured(entry)
+    args = getattr(entry, "args", None) or {}
+    if not isinstance(data, Mapping) or args.get("offset") or args.get("limit"):
+        return False
+    return not any(str(key).endswith(("_total", "_next_offset", "shortened")) for key in data)
+
+
+def _item_root(item: str, joins: _Joins) -> tuple[str, str]:
+    """``(root, "")`` for a sandbox item id the run's index holds, or ``("", why none)``."""
+    prefix, _, rest = item.partition(":")
+    section = SECTION_OF_PREFIX.get(prefix, "")
+    if section == "processes":
+        pid = rest.split(".", 1)[0]
+        return (_process(pid), "") if pid.isdigit() else ("", ITEM_NO_PID)
+    if section == "signatures":
+        return "", SIGNATURE_UNPLACED
+    if section != "network":
+        return "", ITEM_UNPLACED.format(section=section)
+    held = joins.network_items.get(item)
+    if held is None:
+        return "", ITEM_ROW_UNREAD.format(item=item)
+    kind, row = held
+    if not isinstance(row, Mapping):
+        return "", ITEM_UNPLACED.format(section=section)
+    if kind in ("tcp", "udp"):
+        label = _flow_of({**row, "proto": kind}, joins)
+        return (label, "") if label else ("", ITEM_UNPLACED.format(section=section))
+    if kind == "dns":
+        name = str(row.get("request") or row.get("query") or row.get("name") or "").rstrip(".")
+        return (
+            (DNS_ROOT.format(name=_written(name)), "")
+            if name
+            else (
+                "",
+                ITEM_UNPLACED.format(section=section),
+            )
+        )
+    return "", ITEM_UNPLACED.format(section=section)
 
 
 def _process(pid: Any) -> str:
@@ -1113,6 +1190,20 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
             _command_root(found, str(command or "").strip(), joins, tids)
     elif tool == "sandbox_signatures":
         found.reason = SIGNATURE_UNPLACED
+    elif tool == ITEMS_TOOL:
+        for row in _rows(data, "items"):
+            item = str(row.get("id") or "").lower()
+            fields = row.get("fields")
+            values = (
+                [fields.get(key) for key in ("command_line", "name", "process_name")]
+                if isinstance(fields, Mapping)
+                else []
+            )
+            label, reason = _item_root(item, joins)
+            if label:
+                found.add(label, values=[item, *values])
+            else:
+                found.unplace(reason or ITEM_UNPLACED.format(section="report"), values=[item])
     elif tool == "yara_scan":
         found.coordinate = "offset"
         for row in _rows(data, "matches"):
@@ -1185,6 +1276,9 @@ class RunRoots:
         self.layouts = layouts_of(entries, files)
         self.layout = self.layouts.get("") or Layout()
         joins = _joins(entries, files)
+        self._joins = joins
+        # The run's sandbox section index: an item id is read only against it.
+        self.items: ItemIndex | None = item_index_of(entries)
         self.entries: dict[str, EntryRoots] = {}
         for entry in entries:
             eid = str(getattr(entry, "id", "") or "").strip().lower()
@@ -1264,13 +1358,38 @@ class RunRoots:
                     hits |= held
         return hits, list(reasons)
 
+    def of_item(self, item: str) -> tuple[str, str]:
+        """``(root, "")`` for a sandbox item id this run's index holds, or ``("", why none)``."""
+        found = str(item or "").strip().lower()
+        if self.items is None or not self.items.known(found):
+            return "", NO_ITEM.format(item=found)
+        return _item_root(found, self._joins)
+
     def of_statement(self, text: str, entry_ids: Iterable[str]) -> tuple[list[str], list[str]]:
-        """``(roots, no: reasons)`` for one statement citing ``entry_ids``."""
-        ids = list(dict.fromkeys(str(i).strip().lower() for i in entry_ids if str(i).strip()))
-        if not ids:
+        """``(roots, no: reasons)`` for one statement citing ``entry_ids``.
+
+        A sandbox item id is a citation where ``entry_ids`` carries it (read
+        from a citing field) or the statement cites it in brackets, in a run
+        whose ledger holds the section index; the statement's own words are
+        never read for one.
+        """
+        written = list(dict.fromkeys(str(i).strip().lower() for i in entry_ids if str(i).strip()))
+        ids = [i for i in written if not is_item_id(i)]
+        items = (
+            list(dict.fromkeys([*(i for i in written if is_item_id(i)), *cited_item_ids(text)]))
+            if self.items is not None
+            else []
+        )
+        if not ids and not items:
             return [], [NO_CITATION]
         roots: dict[str, None] = {}
         reasons: list[str] = []
+        for item in items:
+            label, reason = self.of_item(item)
+            if label:
+                roots[label] = None
+            else:
+                reasons.append(f"{item}: {reason}")
         for eid in ids:
             found = self.of_entry(eid)
             if not found.roots:

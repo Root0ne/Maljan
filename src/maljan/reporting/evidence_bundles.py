@@ -17,9 +17,12 @@ than fabricate — see other/docs/report-reference/ ("state absence explicitly")
 from __future__ import annotations
 
 import ipaddress
+from collections.abc import Callable
 from typing import Any
 
+from maljan.analysis.sandbox_sections import ITEMS_TOOL, SECTIONS_TOOL, ItemIndex
 from maljan.reporting.models import MalwareReport
+from maljan.schemas.sandbox_report import SAMPLE_TREE_KEY
 
 # Section keys the Composer authors. Kept as plain strings (not an enum) so the
 # Composer can iterate a config-driven subset per malware type.
@@ -467,12 +470,14 @@ def sandbox_entry_ids(report: MalwareReport) -> list[str]:
     Process, file and registry answers are the sample's by what they record.
     """
     sample_flow = _sample_tree_made_a_flow(report)
-    # The pack's sandbox-status entry states what the sandbox report is; it
-    # records no behaviour and is never an observation to cite.
+    # The pack's sandbox-status entry states what the sandbox report is, and
+    # its section index how many items each section holds; neither records
+    # behaviour, and neither is an observation to cite.
     tools = {
         row.id: str(row.tool or "")
         for row in report.evidence_index
-        if str(row.tool or "").startswith(SANDBOX_TOOL_PREFIXES) and row.tool != "sandbox_status"
+        if str(row.tool or "").startswith(SANDBOX_TOOL_PREFIXES)
+        and row.tool not in _NOT_OBSERVATIONS
     }
     holding: set[str] = set()
     for section in report.sections:
@@ -483,6 +488,42 @@ def sandbox_entry_ids(report: MalwareReport) -> list[str]:
             cited = {eid for eid in cited if not _answers_about_the_network(tools[eid], section)}
         holding.update(cited)
     return [row.id for row in report.evidence_index if row.id in holding]
+
+
+# The sandbox entries that state what the report is or holds, not what it saw.
+_NOT_OBSERVATIONS = frozenset({"sandbox_status", SECTIONS_TOOL})
+
+
+def sandbox_item_observation(
+    report: MalwareReport, items: ItemIndex | None
+) -> Callable[[str], bool] | None:
+    """Whether a sandbox item id a step marked observed cites is an observation, or ``None``.
+
+    ``items`` is the run's section index. An item is one row the sandbox
+    recorded, so it is an observation as the answer holding it is: a network
+    item only when the sandbox attributed a flow to the sample's own tree, by
+    the rule :func:`sandbox_entry_ids` applies to the network answers, unless
+    the item's own row states its attribution (``sample_process_tree``), which
+    then decides it. One lookup per cited id; no id list is built.
+    """
+    if items is None or not items.holds_items:
+        return None
+    sample_flow = _sample_tree_made_a_flow(report)
+    read_item = getattr(items, "item", None)
+
+    def observed(value: str) -> bool:
+        text = str(value).strip().lower()
+        if not items.known(text):
+            return False
+        if not text.startswith("net:"):
+            return True
+        # A row that states its own attribution is read by it; else the run's rule.
+        found = read_item(text) if callable(read_item) else None
+        fields = found.get("fields") if isinstance(found, dict) else None
+        stated = fields.get(SAMPLE_TREE_KEY) if isinstance(fields, dict) else None
+        return stated if isinstance(stated, bool) else sample_flow
+
+    return observed
 
 
 # The named sections of a sandbox report that record traffic, as the section
@@ -497,6 +538,8 @@ def _answers_about_the_network(tool: str, section: Any) -> bool:
     if tool in _NETWORK_SANDBOX_TOOLS:
         return True
     name = str(getattr(section, "key", "") or "").removeprefix("sandbox_").lower()
+    if tool == ITEMS_TOOL:
+        return name == "items_network"
     return tool == "sandbox_report_section" and name in _NETWORK_REPORT_SECTIONS
 
 

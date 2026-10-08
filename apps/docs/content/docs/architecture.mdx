@@ -737,7 +737,7 @@ A UPX-packed sample shows every reader the packer's stub, so the pack's
 strings, imports, capa rules and FLOSS rows describe the stub, not the
 program. When `pe_info`'s packer signatures name UPX, or a pack header with
 a true checksum byte stands where UPX writes one (sections renamed to hide
-the packer keep their header), the pack's last entry
+the packer keep their header), the pack's next entry
 is `unpack_upx` (`tools.upx`, the code the analysis server's tool of the same
 name runs), after the function index so every earlier id keeps its value. It
 reads UPX's own pack header and records in Python, with nothing run and no
@@ -757,6 +757,82 @@ the models decide what to open next. The entry's evidence root is the start of
 the compressed data in the packed file; a call that reads the program by its
 `carved_path` is about that program, named by its digest and placed against
 its own section table.
+
+**A sandbox report is sections of items, each with an id a claim cites.**
+Where a sandbox produced a report, the pack's last entry is
+`sandbox_sections` (`analysis.sandbox_sections`), after every other step so
+every earlier id keeps its value; it is read in memory in time linear in the
+report, so neither the pack's time budget nor its evidence byte budget stops or blanks it. It reads the report the
+run holds into fixed sections: processes, API calls, file operations,
+registry operations, network rows (DNS, hosts, HTTP, TCP, UDP, domains, ICMP,
+TLS), signatures, dropped files, mutexes, executed commands, services, generic
+events, the per-process API counts, the platform channels and the
+screenshots, and for a raw CAPE report its extracted configurations and
+payloads, the resolved API names, the Suricata alerts and the process dumps;
+CAPE's process tree gives a process its parent where the row states none,
+and no items of its own. An item is
+one row of the report, with the report's own fields and the list it came
+from; nothing is summarised, ranked or labelled. A process's id is its pid as
+the report writes it (`proc:84`, `proc:84.2` for a second process with that
+pid, `proc:p3` for one with none), and every other item is its position in its
+section (`net:3`, `reg:12`, `sig:5`), the network rows counted in the order the
+`sandbox_network` view lists them so the two agree. The entry states each
+section's count, or a `no:` saying why the report does not carry it (the
+report lists it as unavailable from its sandbox, as a Triage report does for
+the registry and the API calls, or holds none of the lists it is read from),
+and the process ids, written as runs of consecutive pids with the repeats
+and the positions of processes with no pid, so the entry stays a few runs
+long however many processes the report holds. Each provider's reader declares the lists it can fill,
+beside the reader and held to its code by a test; a section none of whose
+lists the reader behind the run's report can fill says
+`no: the <provider> report as normalised here carries no <section>` rather
+than 0, since that reader writes the list empty for every report, while a
+reader that can fill a list and found nothing still says 0. A Triage report
+read from its overview alone (uploaded, answered by a REST sandbox, or
+fetched with every behavioural task report missing, as the reader records)
+fills the signatures and nothing else, and says so in its own `no:`; a CAPE
+report that reaches the readers without its raw dict is read as rendered
+from the model. In a
+report the platform rendered from its normalised model, a pid or parent of 0
+is the model's "not stated": such a process gets a positional id, and no
+process is linked to itself or to an unstated parent; its line states the count and the id form of each
+section in the room it has.
+**Decision:** the items are served by one read-only tool, `sandbox_items`,
+built in-process beside the other sandbox views over the report the job
+already holds, rather than on the analysis server: the report is in the
+worker, so a sidecar would have to be sent it, and no sandbox is asked
+anything. It takes a section and, combined, a pid, a substring of any text
+value, a signature by id or name and a list of ids, and answers the matching
+items whole with `matched`, through the answer guardrail and the one view of
+tool answers. The report is read into sections once for the job, on the first
+call; a pid and a signature name are looked up in indexes built once per
+section, an id is found by its position, a list of asked ids is read only up
+to the section's own size and the rest counted, and only the substring filter
+reads rows, once each. A pid filter on a section whose rows name no process
+answers a `no:` saying so. The `dynamic` analyst has the tool in its sandbox
+set. The `network` analyst has it alone wherever a sandbox produced a report,
+and the whole sandbox set where its definition asks for
+`ToolRef(kind="sandbox")`; no prompt text changed, and the sentence about
+tools that is generated from the tool list then names the job's sandbox
+report among the network analyst's sources.
+An item id is cited as an entry is, and read only where it is cited: in
+brackets or in a citing field (`evidence_ref`, `evidence_refs`), never out of
+a statement's own words, and only with a token boundary on both sides, so the
+tail of `c2.example.net:443` is never one. A report check reads a cited item
+through its own row text (the row's fields and the process and parent it
+names, not the platform's id, kind or source), from the report in hand, exactly as it reads a
+cited entry's answer: a value stated under the citation is looked for in that
+row, and an item whose text cannot be read is no citation. An analyst's claim
+citing one the run's
+index holds is grounded, and one it does not hold is named in the question the
+claim is asked; a report section's bracketed item id the index does not hold
+is asked about once, like an id the ledger never issued; an execution step
+marked observed may cite items, a network item by its own row's attribution
+where the row states one and otherwise only where the sandbox attributed a
+flow to the sample's own tree, as for the network answers; and
+the evidence roots read a process item as that sandbox process, a TCP or UDP
+item as its flow and a DNS item as its query. Every check looks a cited id up
+in the index; no list of every item id is built.
 
 Ghidra's emulation is not run by the pack: Ghidra's `emulate_function`
 ignores its step limit and cannot be stopped, and one emulation took 130 to

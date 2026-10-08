@@ -39,6 +39,7 @@ from maljan.agents.claim_headings import (
     count_claims_begun,
 )
 from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT, KEEP_REPLY
+from maljan.analysis.sandbox_sections import item_index_of
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
 from maljan.core.logger import logger
@@ -3899,6 +3900,37 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         return stamp_source(sandbox_tools(container), SANDBOX_FAMILY)
 
+    def _sandbox_items_tool(self) -> list[Any]:
+        """The ``sandbox_items`` tool alone, for an analyst that reads the sandbox's evidence.
+
+        For a role whose definition does not ask for the sandbox tools but
+        reads what the sandbox recorded in the pack (the network analyst): the
+        one read-only query over the job's own report, built in-process like
+        the rest of the set. Only where a sandbox produced a report, and
+        withheld by a profile that sets ``exclude_sandbox_tools``.
+        """
+        container = getattr(self, "_container", None)
+        if container is None:
+            return []
+        from maljan.agents.composition import active_profile
+
+        if active_profile(container.config).exclude_sandbox_tools:
+            return []
+        from maljan.agents.prompt_fragments import SANDBOX_FAMILY, stamp_source
+        from maljan.pipeline.sandbox_status import observed_report
+        from maljan.providers.sandbox_tools import (
+            _answer_sizer,
+            _report_of,
+            items_tool,
+            normalised_by_of,
+        )
+
+        report = observed_report(_report_of(container))
+        if report is None:
+            return []
+        tool = items_tool(report, _answer_sizer(container), normalised_by_of(container))
+        return stamp_source([tool], SANDBOX_FAMILY)
+
     def _profile_excluded_servers(self) -> str:
         """The servers the active profile withholds, as ``for_agent``'s argument."""
         container = getattr(self, "_container", None)
@@ -6756,6 +6788,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         ledger_ids.extend(
             str(i) for i in (getattr(self, "pack_ledger_ids", None) or []) if str(i).strip()
         )
+        # The run's sandbox section index, read off the pack's entry: a claim
+        # cites an item of the report as it cites an entry, each id one lookup.
+        items = item_index_of(getattr(self, "pack_entries", None) or ())
         # The functions this analyst's own calls decompiled: any no claim of
         # the answer names by address or name is listed to it, once.
         decompiled = decompiled_functions(getattr(self, "_evidence_entries", None) or [])
@@ -6923,6 +6958,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     alignment_threshold=threshold,
                     alignment_margin=margin,
                     weak_alignment_challenges=challenges and first,
+                    items=items,
                 ),
             ]
 

@@ -8,6 +8,7 @@ no per-agent branching exists.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import inspect
 import json
 import os
@@ -89,6 +90,7 @@ from maljan.pipeline.triage_pack import (
     CapaSettings,
     FlossSettings,
     PackInputs,
+    budgeted_entries,
     failure_reason,
     pack_block,
     pack_entries,
@@ -1422,6 +1424,8 @@ def make_triage_node(
         )
         cfg = container.config
         capa_cfg = cfg.static.capa
+        from maljan.providers import sandbox_tools
+
         inputs = PackInputs(
             sample_path=path,
             sha256=str(state.get("file_hash") or ""),
@@ -1434,6 +1438,7 @@ def make_triage_node(
                 backend=str(capa_cfg.backend),
             ),
             sandbox_report=state.get("sandbox_report"),
+            sandbox_normalised_by=sandbox_tools.normalised_by_of(container),
             evidence_budget_bytes=int(getattr(cfg.reporting, "evidence_budget_bytes", 0) or 0),
             budget_s=float(cfg.triage.budget_seconds),
             memory_floor_bytes=int(cfg.triage.memory_floor_mb) * 1024 * 1024,
@@ -1462,7 +1467,7 @@ def make_triage_node(
             # the same budget a finished pack gets; the crash is the one
             # failure this path counts.
             entries = list(recorder.entries)
-            apply_budget(entries, inputs.evidence_budget_bytes)
+            apply_budget(budgeted_entries(entries), inputs.evidence_budget_bytes)
             update: dict[str, Any] = {
                 "triage_facts": {
                     **TriageFacts().to_dict(),
@@ -1622,6 +1627,32 @@ def ledger_ids(state: AnalysisState) -> list[str]:
         if value and str(value) not in ids:
             ids.append(str(value))
     return ids
+
+
+def with_item_texts(entries: Any, items: Any) -> Any:
+    """``entries`` (``EntryTexts``) reading a cited sandbox item through ``items``' texts."""
+    if entries is None or items is None:
+        return entries
+    return dataclasses.replace(entries, items=items)
+
+
+def sandbox_item_citations(state: AnalysisState, container: Any) -> Any:
+    """The run's sandbox items as a report cites them (``ItemCitations``), or ``None``.
+
+    The pack's section index says which ids exist; the report in hand,
+    read into sections once here, gives each cited item's own text. Never a
+    list of every id.
+    """
+    from maljan.analysis.sandbox_sections import ItemCitations, Sections, item_index_of
+    from maljan.pipeline.sandbox_status import observed_report
+    from maljan.providers.sandbox_tools import normalised_by_of
+
+    index = item_index_of(pack_entries(state.get("evidence_ledger") or []))
+    if index is None:
+        return None
+    report = observed_report(state.get("sandbox_report"))
+    sections = Sections(report, normalised_by_of(container)) if report else None
+    return ItemCitations(index, sections)
 
 
 def pack_ledger_ids(state: AnalysisState) -> list[str]:
@@ -5362,7 +5393,10 @@ def make_report_node(
         # report rounds: a value their prose quotes is looked for in the entry
         # it cites, and the composer is shown which entries hold what the
         # analysts' claims quote.
-        _entry_texts = _report_entry_texts(container, _ledger)
+        # The run's sandbox items, read once for both report rounds: a cited
+        # item is read through its own text, as a cited entry is.
+        _items = sandbox_item_citations(state, container)
+        _entry_texts = with_item_texts(_report_entry_texts(container, _ledger), _items)
 
         narrative_dict: dict[str, Any] | None = None
         # Why no summary was written, when none is: said where the summary
@@ -5410,6 +5444,7 @@ def make_report_node(
                         facts_block=_narrative_facts,
                         run_state=_narrative_state,
                         citable_ids=ledger_ids(state),
+                        items=_items,
                         evidence=_entry_texts,
                     ),
                     timeout=narrative_seconds,
@@ -5481,6 +5516,7 @@ def make_report_node(
                     facts_block=pack_text(state, container),
                     run_state=render_run_state(state),
                     citable_ids=ledger_ids(state),
+                    items=_items,
                     evidence=_entry_texts,
                 )
             except Exception as exc:  # noqa: BLE001
