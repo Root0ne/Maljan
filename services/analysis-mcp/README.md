@@ -456,9 +456,10 @@ What it reads, in UPX's own layout:
   forms (methods 2 to 10) by decoders in the module, and LZMA (method 14)
   through the standard library's raw LZMA1 filter. The output must be
   exactly the stated size, the stream must end at its end marker with every
-  byte read, and the unpacked data's adler32 must be the stated one. UPX's PE
-  packer checksums the data as it was compressed, with the code filter still
-  applied; the answer says which reading matched.
+  byte read, and the unpacked data's adler32 must be the stated one, taken
+  over the data as decompressed, with the code filter still applied, which is
+  what UPX's PE packer checksums. LZMA properties the standard library's
+  LZMA1 decoder does not take (lc + lp above 4) are a `no:`.
 - **The code filter**: 0x24 (call), 0x25 (jump) and 0x26 (both), undone over
   the code range the stored header names.
 - **The rebuild**: the original PE header and section table UPX stored after
@@ -471,6 +472,10 @@ What it reads, in UPX's own layout:
   directories and the checksum cleared, as UPX clears them; the packed
   file's overlay carried over.
 
+The directory each file lands in is created by the server through the rule
+every staging directory is held to (0o700, refused when it is a link or
+another user's); the unpacker itself creates none.
+
 The answer states the pack header (offset, where the compressed data starts,
 version, format, method, level, filter and its marker byte), the compressed
 and unpacked sizes and the original file size the header states, both
@@ -482,7 +487,8 @@ overlay bytes carried and its section table.
 A file that is not a PE, has no pack header where UPX writes one, or uses a
 format, header version, method, filter or record kind not read here (UPX's
 filter 0x49, the default for 64-bit files, is one; 16-bit relocation records
-are another) answers `{"unpacked": "no: <reason>"}`, with the pack header's
+and relocation records that name one place twice or overlapping places are
+others) answers `{"unpacked": "no: <reason>"}`, with the pack header's
 facts when it was read. A header stating more unpacked bytes than the
 platform's fixed sample upload cap (100 MiB, `core.delivery_limits`) is
 answered with the cap and nothing is decompressed; one stating more than the
@@ -492,7 +498,10 @@ points outside the unpacked data is an error naming where (`tool_failed`, with
 its own remediation), and no file is written: a partial image is never given
 as a whole one. Every decoder reads its input once and every count is held to
 the bytes that hold it, so time and memory are linear in the file and the
-unpacked size; on the eleven UPX-packed PE samples in the local corpus
+unpacked size: relocation positions are held four bytes each and the table's
+size is counted per page and checked to fit before it is built (three million
+relocations take about 30 MiB and 1.4 s), import records four bytes each, and
+the resource tree is walked in place, never held as objects; on the eleven UPX-packed PE samples in the local corpus
 (NRV2B and NRV2E, filter 0x26) nine unpacked in 0.03 to 0.3 s each to files
 the size the header states for the original, and two whose compressed data's
 adler32 differs from the header's are refused.

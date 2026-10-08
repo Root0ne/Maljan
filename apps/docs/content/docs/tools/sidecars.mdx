@@ -50,7 +50,8 @@ where `carve_payloads` writes, and its `carved_path` is what every file tool
 of the server takes. A method, filter or format the reader does not cover
 (UPX's filter 0x49, the default for 64-bit files, is one) is answered
 `no: UPX filter 0x49 is not read here`. The triage pack runs it once when
-`pe_info`'s packer signatures name UPX. See the server's README for every
+`pe_info`'s packer signatures name UPX or a pack header with a true checksum
+byte stands where UPX writes one. See the server's README for every
 fact the answer states.
 
 ## Optional libraries and FLOSS

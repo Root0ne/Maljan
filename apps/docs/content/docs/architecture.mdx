@@ -735,7 +735,9 @@ the start of its input range.
 **A UPX-packed PE is unpacked once, and the program is a file of its own.**
 A UPX-packed sample shows every reader the packer's stub, so the pack's
 strings, imports, capa rules and FLOSS rows describe the stub, not the
-program. When `pe_info`'s packer signatures name UPX, the pack's last entry
+program. When `pe_info`'s packer signatures name UPX, or a pack header with
+a true checksum byte stands where UPX writes one (sections renamed to hide
+the packer keep their header), the pack's last entry
 is `unpack_upx` (`tools.upx`, the code the analysis server's tool of the same
 name runs), after the function index so every earlier id keeps its value. It
 reads UPX's own pack header and records in Python, with nothing run and no

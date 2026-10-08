@@ -862,15 +862,27 @@ def _upx_sentences() -> str:
         answers = []
         for name, blob in files.items():
             (Path(folder) / name).write_bytes(blob)
-            answers.append(upx.unpack_upx(str(Path(folder) / name), Path(folder) / "carved"))
+            answers.append(upx.unpack_upx(str(Path(folder) / name), Path(folder)))
     entries = [
         LedgerEntry(id=f"ev_000{i}", tool=upx.TOOL, structured=a, ok="error" not in a)
         for i, a in enumerate(answers, 1)
     ]
+    # Every sentence the module can say, its no: and error forms included:
+    # each string the source writes, f-strings' literal parts with them.
+    import ast
+    import inspect
+
+    written = [
+        node.value
+        for node in ast.walk(ast.parse(inspect.getsource(upx)))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
     return " ".join(
         [
+            *written,
             upx.CAPABILITY_FACTS,
             upx.REMEDIATION,
+            upx.LZMA_NOT_READ.format(lc=5, lp=0),
             upx.NOT_A_PE.format(why="no MZ header"),
             upx.NO_HEADER,
             upx.NO_SECTIONS,
