@@ -1053,8 +1053,12 @@ def _read_resources(image: _Image) -> tuple[_Branch | None, list[_Leaf], int, in
             label: bytes | None = None
             if name & 0x80000000:
                 length = struct.unpack("<H", read(name & 0x7FFFFFFF, 2, "a resource name"))[0]
+                # Names shared between entries could come to more bytes than
+                # the section holds; a tree's names are its own bytes.
+                sizes[1] += 2 + 2 * length
+                if sizes[1] > end - start:
+                    raise Damaged("the resource names come to more bytes than their section holds")
                 label = read(name & 0x7FFFFFFF, 2 + 2 * length, "a resource name")
-                sizes[1] += len(label)
             node = walk(child & 0x7FFFFFFF, level + 1, name if level == 0 else type_id)
             if node is None:
                 raise Damaged("a resource directory holds an empty directory")

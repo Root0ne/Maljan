@@ -463,6 +463,23 @@ def test_a_resource_tree_that_shares_its_directories_is_held_to_its_section() ->
     assert "more entries than its section holds" in str(outcome)
 
 
+def test_resource_names_shared_past_their_section_are_an_error() -> None:
+    packed = su.build()
+    pe = pefile.PE(data=packed.data, fast_load=True)
+    tree = pe.sections[2].PointerToRawData + 0x400
+    data = bytearray(packed.data)
+    data[tree : tree + 0x70] = bytes(0x70)
+    data[tree : tree + 16] = struct.pack("<IIHHHH", 0, 0, 0, 0, 2, 0)
+    for index in range(2):
+        struct.pack_into("<II", data, tree + 16 + 8 * index, 0x80000100, 0x80000020)
+    data[tree + 0x20 : tree + 0x38] = struct.pack("<IIHHHHII", 0, 0, 0, 0, 0, 1, 1, 0x80000040)
+    data[tree + 0x40 : tree + 0x58] = struct.pack("<IIHHHHII", 0, 0, 0, 0, 0, 1, 0x409, 0x60)
+    data[tree + 0x60 : tree + 0x70] = struct.pack("<IIII", su.RCDATA_AT, 4, 0, 0)
+    data[tree + 0x100 : tree + 0x102] = struct.pack("<H", 0x500)
+    with pytest.raises(upx.Damaged, match="resource names come to more bytes"):
+        upx.unpack(bytes(data))
+
+
 def test_records_pointing_outside_the_image_are_errors() -> None:
     packed = su.build(su.Program(filter_id=0))
     obuf = bytearray(packed.obuf)
