@@ -25,9 +25,9 @@ from maljan.agents.evidence_recorder import same_function_notice
 from maljan.agents.function_map import FUNCTION_MAP_HEAD, function_artefacts
 from maljan.schemas.evidence import LedgerEntry
 
-LISTING = "void FUN_1360bc0904c(void)\n{\n  lookup(0x1);\n}\n"
+LISTING = "void FUN_1400050ac(void)\n{\n  lookup(0x1);\n}\n"
 REPORT = (
-    "CLAIM: FUN_1360bc0904c looks a name up by a stored value.\n"
+    "CLAIM: FUN_1400050ac looks a name up by a stored value.\n"
     "EVIDENCE: ev_0001\nCONFIDENCE: 0.6\nTECHNIQUE: NONE"
 )
 
@@ -121,7 +121,7 @@ def _run(analyst: _Analyst) -> None:
 
 def test_every_call_runs_and_the_map_rides_the_latest_answer() -> None:
     calls: list[dict[str, Any]] = []
-    analyst, model = _analyst(["0x1360bc0904c", "1360bc0904c"], calls)
+    analyst, model = _analyst(["0x1400050ac", "1400050ac"], calls)
 
     _run(analyst)
 
@@ -131,9 +131,9 @@ def test_every_call_runs_and_the_map_rides_the_latest_answer() -> None:
     # and filed as a repeat of it.
     assert last.startswith("[ev_0001]\n<<tool output [ev_0001] ")
     assert LISTING in last
-    assert same_function_notice("FUN_1360bc0904c", "ev_0001") in last
+    assert same_function_notice("FUN_1400050ac", "ev_0001") in last
     assert FUNCTION_MAP_HEAD in last
-    assert "also visited: 0x1360bc0904c" in last
+    assert "also visited: 0x1400050ac" in last
     assert "ledger_answers" not in analyst.drain_budget_records()[0]
 
 
@@ -141,7 +141,7 @@ def test_an_identical_repeat_is_served_by_the_repeat_guard_as_before() -> None:
     from maljan.agents.evidence_recorder import served_repeat_notice
 
     calls: list[dict[str, Any]] = []
-    analyst, model = _analyst(["0x1360bc0904c", "0x1360bc0904c"], calls)
+    analyst, model = _analyst(["0x1400050ac", "0x1400050ac"], calls)
 
     _run(analyst)
 
@@ -152,26 +152,26 @@ def test_an_identical_repeat_is_served_by_the_repeat_guard_as_before() -> None:
 
 def test_the_next_loop_of_the_job_reads_the_map_and_the_claims_of_the_last() -> None:
     calls: list[dict[str, Any]] = []
-    analyst, model = _analyst(["0x1360bc0904c"], calls)
+    analyst, model = _analyst(["0x1400050ac"], calls)
     _run(analyst)
     model.seen = []
-    model.asks = ["1360bc0904c"]
+    model.asks = ["1400050ac"]
 
     _run(analyst)
 
     assert len(calls) == 2
     first = str(model.seen[0][-1].content)
     assert FUNCTION_MAP_HEAD in first
-    assert "summary: FUN_1360bc0904c looks a name up by a stored value." in first
+    assert "summary: FUN_1400050ac looks a name up by a stored value." in first
 
 
 def test_a_new_job_starts_with_an_empty_map() -> None:
     calls: list[dict[str, Any]] = []
-    analyst, model = _analyst(["0x1360bc0904c"], calls)
+    analyst, model = _analyst(["0x1400050ac"], calls)
     _run(analyst)
     analyst._job_id = "job-2"
     model.seen = []
-    model.asks = ["1360bc0904c"]
+    model.asks = ["1400050ac"]
 
     _run(analyst)
 
@@ -186,18 +186,18 @@ def test_the_pack_s_artefacts_join_the_function_the_analyst_read() -> None:
         server="pipeline",
         output=json.dumps(
             {
-                "image_base": "0x1360bc00000",
+                "image_base": "0x140000000",
                 "hits": [
                     {
                         "readings": [{"set": "exports", "name": "OpenThing"}],
-                        "occurrences": [{"rva": "0x9057", "function": "0x904c"}],
+                        "occurrences": [{"rva": "0x50b7", "function": "0x50ac"}],
                     }
                 ],
             }
         ),
     )
     calls: list[dict[str, Any]] = []
-    analyst, model = _analyst(["0x1360bc0904c"], calls)
+    analyst, model = _analyst(["0x1400050ac"], calls)
     analyst.pack_function_artefacts = function_artefacts([hashes])
 
     _run(analyst)
@@ -227,7 +227,7 @@ def test_an_agent_that_read_no_function_is_sent_no_map_whatever_the_pack_tied() 
 
 def test_an_agent_with_no_run_state_block_is_sent_no_map() -> None:
     calls: list[dict[str, Any]] = []
-    analyst, model = _analyst(["0x1360bc0904c"], calls)
+    analyst, model = _analyst(["0x1400050ac"], calls)
     analyst.run_state_block = ""
 
     _run(analyst)
@@ -249,7 +249,7 @@ def test_the_node_briefs_the_artefacts_and_an_ask_hands_them_on() -> None:
                 "hits": [
                     {
                         "readings": [{"set": "exports", "name": "OpenThing"}],
-                        "occurrences": [{"function": "0x904c"}],
+                        "occurrences": [{"function": "0x50ac"}],
                     }
                 ]
             }
@@ -263,5 +263,5 @@ def test_the_node_briefs_the_artefacts_and_an_ask_hands_them_on() -> None:
 
     _brief_callee(caller, callee, stage="reversing", round_index=0)
 
-    assert 0x904C in caller.pack_function_artefacts.by_function
+    assert 0x50AC in caller.pack_function_artefacts.by_function
     assert callee.pack_function_artefacts is caller.pack_function_artefacts
