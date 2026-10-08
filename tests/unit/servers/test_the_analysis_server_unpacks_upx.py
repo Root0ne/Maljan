@@ -108,6 +108,26 @@ def test_a_carved_path_outside_this_sample_s_tree_is_refused(server: Any, tmp_pa
     assert answer["error"]["remediation"] == server.CARVED_REMEDIATION
 
 
+def test_a_linked_carved_directory_is_refused_and_nothing_written(
+    server: Any, tmp_path: Path
+) -> None:
+    path = _sample(tmp_path, su.build().data)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    tree = server._carved_tree(server._digest_of(Path(path)))
+    tree.parent.mkdir(parents=True, mode=0o700)
+    tree.symlink_to(elsewhere, target_is_directory=True)
+    answer = server.unpack_upx(path=path)
+    assert "is a symlink" in answer["error"]["message"]
+    assert list(elsewhere.iterdir()) == []
+    assert "is a symlink" in server.carve_payloads(path=path)["error"]["message"]
+
+
+def test_the_carved_note_names_both_tools_that_give_a_carved_path(server: Any) -> None:
+    assert "``carve_payloads``" in server.CARVED_NOTE
+    assert "``unpack_upx``" in server.CARVED_NOTE
+
+
 def test_the_capabilities_answer_states_what_is_read(server: Any) -> None:
     cell = next(c for c in server.capabilities()["tools"] if c["name"] == upx.TOOL)
     assert cell["available"] is True

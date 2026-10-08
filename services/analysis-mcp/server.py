@@ -450,8 +450,9 @@ def _carved_tree(digest: str) -> Path:
 # descriptions cannot come to disagree.
 CARVED_NOTE = (
     "Give ``carved_path`` to read a file an earlier call in this run wrote instead of the "
-    "sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, exactly "
-    "as it was returned and with no quotes around it. Leave it out and the sample is read."
+    "sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of "
+    "the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes "
+    "around it. Leave it out and the sample is read."
 )
 
 # The argument that names a rule corpus rather than a sample. It is a path
@@ -894,11 +895,15 @@ def _carved_destination(target: Path, sample_digest: str) -> Path:
     digest = _digest_of(target)
     anchor = sample_digest or digest
     destination = _carved_tree(anchor)
+    levels = [destination.parent, destination]
     if digest != anchor:
         destination = destination / digest
+        levels.append(destination)
     _staging_dir()
-    for directory in (destination.parent, destination):
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # Each level through the one rule every staging directory is held to: made
+    # 0o700, and refused when what stands there is a link or another user's.
+    for directory in levels:
+        staging.private_dir(directory, what="carved directory")
     return destination
 
 
