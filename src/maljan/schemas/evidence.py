@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -148,6 +149,26 @@ def holds_its_answer(entry: Any) -> bool:
     return int(getattr(entry, "chars_dropped", 0) or 0) > 0 and not answer_not_shown(entry)
 
 
+def is_guard_answer(entry: Any) -> bool:
+    """Whether the entry is a guard's answer: a call answered with no tool run and no holder.
+
+    Such an entry names itself in ``repeated_of``, so every reader that leaves
+    a repeat out of the tool results leaves it out too, and its chain holds no
+    answer (``repeat_holders``).
+    """
+    if isinstance(entry, Mapping):
+        first, own = entry.get("repeated_of"), entry.get("id")
+    else:
+        first, own = getattr(entry, "repeated_of", None), getattr(entry, "id", None)
+    first = str(first or "").strip().lower()
+    return bool(first) and first == str(own or "").strip().lower()
+
+
+def answers_held(entries: Any) -> bool:
+    """Whether any entry is a call that ran or a repeat of one: anything but a guard's answer."""
+    return any(not is_guard_answer(entry) for entry in entries or ())
+
+
 def repeat_holders(entries: Any) -> dict[str, str]:
     """Each repeat's id mapped to the id of the entry that holds its answer, lower-cased.
 
@@ -242,7 +263,10 @@ class LedgerEntry(BaseModel):
     )
     repeated_of: str | None = Field(
         default=None,
-        description="Id of the earlier identical call this one was answered from.",
+        description=(
+            "Id of the earlier identical call this one was answered from; the entry's own id "
+            "for a call a guard answered with no tool run and no earlier entry behind it."
+        ),
     )
     args_repaired: bool = Field(
         default=False,

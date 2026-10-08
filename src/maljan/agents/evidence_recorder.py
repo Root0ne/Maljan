@@ -310,8 +310,13 @@ class EvidenceRecorder:
         args_raw: str | None = None,
         not_shown: int | None = None,
         cut: int | None = None,
+        guard_answer: bool = False,
     ) -> LedgerEntry:
         """Append one entry and return it, so the caller can quote its id.
+
+        ``guard_answer`` files a call a guard answered with no tool run and no
+        earlier entry behind the answer: its ``repeated_of`` is its own id
+        (``schemas.evidence.is_guard_answer``).
 
         ``not_shown`` is the length of an answer the conversation had no room
         for: the entry is recorded as cut (``schemas.evidence.not_shown_record``)
@@ -323,6 +328,8 @@ class EvidenceRecorder:
         if repeated_of:
             repeated_of = self.holder_of(repeated_of)
         entry_id, seq = self.counter.next_id()
+        if guard_answer:
+            repeated_of = entry_id
         entry = build_entry(
             entry_id=entry_id,
             seq=seq,
@@ -427,6 +434,34 @@ class EvidenceRecorder:
             started_at=time.time(),
             duration_ms=0,
             repeated_of=str(first),
+        )
+
+    def record_guard_answer(
+        self, *, tool: str, args: dict[str, Any] | None, server: str | None, said: str
+    ) -> LedgerEntry:
+        """File a call a guard answered without running any tool, as the guard's answer.
+
+        Filed and announced as a repeat is, so a reader of the ledger sees that
+        the model asked and what it was told (``said``, which is empty when not
+        even a line fitted). No entry holds an answer to it: its
+        ``repeated_of`` is its own id, which every reader of a repeat already
+        leaves out of the tool results, the run's grounding corpus, the
+        evidence byte budget and the citable texts (a chain that comes round
+        to itself holds no answer, ``schemas.evidence.repeat_holders``). It is
+        a failure, since nothing answered, and never a tool failure: the model
+        is never shown its id.
+        """
+        self.call_started(tool=tool, args=args, server=server)
+        return self.record(
+            tool=tool,
+            args=args,
+            server=server,
+            output=said,
+            ok=False,
+            error=said or None,
+            started_at=time.time(),
+            duration_ms=0,
+            guard_answer=True,
         )
 
 
@@ -1006,7 +1041,7 @@ def _record_tool(
     # an answer reserves room for the sentence naming exactly these.
     narrowing = narrowing_arguments(accepted)
 
-    def _the_room_is_gone() -> str | None:
+    def _the_room_is_gone(kwargs: dict[str, Any]) -> str | None:
         """The line a call gets once this agent's conversation has no room left.
 
         The first answer that would not fit was met by the guardrail, which
@@ -1017,8 +1052,8 @@ def _record_tool(
         model that asks anyway gets is one short charged line, and the
         run-state block carries the same fact every turn at no cumulative cost.
 
-        Nothing is written to the ledger: no tool ran, and an entry here would
-        be a citable id for evidence that does not exist.
+        The ask is filed as the guard's answer (``record_guard_answer``): no
+        tool ran, and the entry holds no evidence a report could cite.
         """
         from maljan.llm.context_window import TOOL_PHASE_ENDED_NOTICE, ContextBudget
 
@@ -1030,9 +1065,12 @@ def _record_tool(
             # Not even a line fits. Handing one over anyway is how a loop that
             # had already stopped being given answers walked past the window a
             # word at a time.
-            return ""
-        context_budget.charge(len(TOOL_PHASE_ENDED_NOTICE), recorder.agent)
-        return TOOL_PHASE_ENDED_NOTICE
+            said = ""
+        else:
+            context_budget.charge(len(TOOL_PHASE_ENDED_NOTICE), recorder.agent)
+            said = TOOL_PHASE_ENDED_NOTICE
+        recorder.record_guard_answer(tool=name, args=kwargs, server=server, said=said)
+        return said
 
     # How often each self-named call has been asked about in this loop. The
     # first time is a question; asking the same thing again is a repeat, and
@@ -1042,10 +1080,10 @@ def _record_tool(
     def _names_its_own_parameter(kwargs: dict[str, Any]) -> str | None:
         """The question for a call whose argument is its own parameter's name, if it is one.
 
-        Not run and not written to the ledger: no tool ran, no earlier entry
-        holds an answer to it, and an entry would be a citable id for evidence
-        that does not exist. The model is told which argument and why, and the value is
-        left exactly as it wrote it.
+        Not run, and filed as the guard's answer (``record_guard_answer``): no
+        tool ran and no earlier entry holds an answer to it, so the entry holds
+        no evidence a report could cite. The model is told which argument and
+        why, and the value is left exactly as it wrote it.
         """
         found = self_named_arguments(kwargs)
         if not found:
@@ -1065,7 +1103,9 @@ def _record_tool(
                 on_question(SELF_NAMED_ARGUMENT_CODE)
             except Exception as exc:  # noqa: BLE001 — a count never costs a call
                 logger.debug("the question was not counted (%s).", exc)
-        return self_named_notice(name, found)
+        notice = self_named_notice(name, found)
+        recorder.record_guard_answer(tool=name, args=kwargs, server=server, said=notice)
+        return notice
 
     def _already_answered(kwargs: dict[str, Any]) -> str | None:
         """The note for a call that has been made twice already, if it has."""
@@ -1292,10 +1332,11 @@ def _record_tool(
         def wrapped_func(**kwargs: Any) -> str:  # noqa: F811
             # The guards first. A call the repeat guard answers is filed and
             # announced as a repeat of the entry that holds its answer
-            # (``record_repeat``); the other guards' answers are questions, and
-            # a start with no finish behind it would leave the console holding
-            # a bubble open for a call that never happened.
-            ended = _the_room_is_gone()
+            # (``record_repeat``); a call another guard answers is filed and
+            # announced as the guard's answer (``record_guard_answer``). Each
+            # files its own start and finish, so the console never holds a
+            # bubble open for a call that never ran.
+            ended = _the_room_is_gone(kwargs)
             if ended is not None:
                 return ended
             question = _names_its_own_parameter(kwargs)
@@ -1333,7 +1374,7 @@ def _record_tool(
     if coroutine is not None:
 
         async def wrapped_coroutine(**kwargs: Any) -> str:  # noqa: F811
-            ended = _the_room_is_gone()
+            ended = _the_room_is_gone(kwargs)
             if ended is not None:
                 return ended
             question = _names_its_own_parameter(kwargs)

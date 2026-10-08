@@ -629,6 +629,7 @@ def _deobfuscation_sentences() -> str:
             crypto_constants.SCAN_RULE,
             ghidra_passes.SCAN_CHECKS,
             ghidra_passes.STATED_RULE,
+            ghidra_passes.GS_OFF_BOUNDARY,
             ghidra_passes.GHIDRA_SWITCHED_OFF,
             ghidra_passes.GHIDRA_NOT_OVER_HTTP.format(transport="stdio"),
             ghidra_passes.GHIDRA_HAS_NO_COPY,

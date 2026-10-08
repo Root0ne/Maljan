@@ -452,6 +452,29 @@ class TestOneSequenceAcrossTheRun:
         assert counter.issued == len(persisted)
 
 
+class _AskedAgainAnalyst(_Analyst):
+    """One tool call, then one call a guard answered with no tool run."""
+
+    def _run_one_loop(self) -> None:
+        recorder = EvidenceRecorder(self.name, counter=self.evidence_counter)
+        record_tools([_tool()], recorder)[0].invoke({})
+        recorder.record_guard_answer(tool="probe", args={}, server=None, said="probe was not run")
+        self.calls_made += 1
+        self._finish_evidence(recorder)
+
+
+class TestAGuardSAnswer:
+    def test_it_reaches_the_ledger_and_never_the_composer_s_evidence(self) -> None:
+        counter = EvidenceCounter()
+        agents: dict[str, _Analyst] = {"static": _AskedAgainAnalyst("static", counter)}
+        container = _container(agents, {"static": [_Chunk("PE32 executable, 9 sections.")]})
+
+        update = make_stage_agent_node(ANALYSIS_STAGE, "static", container)(_analysis_state())
+
+        assert _ids(update) == ["ev_0001", "ev_0002"]
+        assert [row["output"] for row in update["tool_evidence"]["static"]] == ["ok"]
+
+
 class TestNoRoundPastTheSpendCeiling:
     def test_the_negotiation_goes_straight_on_to_the_verdict(self) -> None:
         from maljan.core.spend import SpendMeter

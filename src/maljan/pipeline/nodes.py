@@ -113,7 +113,7 @@ from maljan.pipeline.validation import (
     validity_check_available,
 )
 from maljan.reporting.ledger_report import section_is_grounded
-from maljan.schemas.evidence import LedgerEntry, apply_budget
+from maljan.schemas.evidence import LedgerEntry, apply_budget, is_guard_answer
 from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, AgentISR
 from maljan.schemas.stix_models import Bundle
 from maljan.schemas.tool_evidence import trim_output
@@ -1194,9 +1194,13 @@ def evidence_summary(ledger: Sequence[Any]) -> dict[str, Any]:
         "by_tool": dict(sorted(by_tool.items())),
         "failures": tool_failures(ledger),
     }
-    repeats = len(ledger) - len(ran)
+    # A call a guard answered with no tool run is neither: counted on its own.
+    guarded = sum(1 for e in ledger if is_guard_answer(e))
+    repeats = len(ledger) - len(ran) - guarded
     if repeats:
         summary["repeats"] = repeats
+    if guarded:
+        summary["guard_answers"] = guarded
     if cut:
         summary["cut"] = len(cut)
         summary["chars_dropped"] = sum(int(e.chars_dropped) for e in cut)
@@ -2657,9 +2661,11 @@ def make_stage_agent_node(
             update: dict[str, Any] = {}
             if entries:
                 update["evidence_ledger"] = [e.model_dump(mode="json") for e in entries]
-                update["tool_evidence"] = {
-                    agent_name: [e.to_captured().model_dump() for e in entries]
-                }
+                # A guard's answer holds what the model was told, not what a
+                # tool said: it is on the ledger and never composer evidence.
+                captured = [e.to_captured().model_dump() for e in entries if not is_guard_answer(e)]
+                if captured:
+                    update["tool_evidence"] = {agent_name: captured}
             update.update(_validation_update(bound_agent, agent_name))
             mode = _nudge_mode(bound_agent)
             if mode:
