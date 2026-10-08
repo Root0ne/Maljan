@@ -762,7 +762,7 @@ its own section table.
 Where a sandbox produced a report, the pack's last entry is
 `sandbox_sections` (`analysis.sandbox_sections`), after every other step so
 every earlier id keeps its value; it is read in memory in time linear in the
-report, so the pack's time budget does not stop it. It reads the report the
+report, so neither the pack's time budget nor its evidence byte budget stops or blanks it. It reads the report the
 run holds into fixed sections: processes, API calls, file operations,
 registry operations, network rows (DNS, hosts, HTTP, TCP, UDP, domains, ICMP,
 TLS), signatures, dropped files, mutexes, executed commands, services, generic
@@ -780,14 +780,19 @@ section (`net:3`, `reg:12`, `sig:5`), the network rows counted in the order the
 section's count, or a `no:` saying why the report does not carry it (the
 report lists it as unavailable from its sandbox, as a Triage report does for
 the registry and the API calls, or holds none of the lists it is read from),
-and the process ids. Each provider's reader declares the lists it can fill,
+and the process ids, written as runs of consecutive pids with the repeats
+and the positions of processes with no pid, so the entry stays a few runs
+long however many processes the report holds. Each provider's reader declares the lists it can fill,
 beside the reader and held to its code by a test; a section none of whose
 lists the reader behind the run's report can fill says
 `no: the <provider> report as normalised here carries no <section>` rather
 than 0, since that reader writes the list empty for every report, while a
 reader that can fill a list and found nothing still says 0. A Triage report
-uploaded or answered by a REST sandbox is read from its overview alone, which
-fills the signatures and nothing else, and says so in its own `no:`. In a
+read from its overview alone (uploaded, answered by a REST sandbox, or
+fetched with every behavioural task report missing, as the reader records)
+fills the signatures and nothing else, and says so in its own `no:`; a CAPE
+report that reaches the readers without its raw dict is read as rendered
+from the model. In a
 report the platform rendered from its normalised model, a pid or parent of 0
 is the model's "not stated": such a process gets a positional id, and no
 process is linked to itself or to an unstated parent; its line states the count and the id form of each
@@ -814,7 +819,8 @@ An item id is cited as an entry is, and read only where it is cited: in
 brackets or in a citing field (`evidence_ref`, `evidence_refs`), never out of
 a statement's own words, and only with a token boundary on both sides, so the
 tail of `c2.example.net:443` is never one. A report check reads a cited item
-through its own row text, from the report in hand, exactly as it reads a
+through its own row text (the row's fields and the process and parent it
+names, not the platform's id, kind or source), from the report in hand, exactly as it reads a
 cited entry's answer: a value stated under the citation is looked for in that
 row, and an item whose text cannot be read is no citation. An analyst's claim
 citing one the run's

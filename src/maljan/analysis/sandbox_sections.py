@@ -84,11 +84,12 @@ SECTION_OF_PREFIX: dict[str, str] = {prefix: name for name, prefix in SECTION_PR
 
 # An item id as a claim writes it. The process form takes the pid, a repeat's
 # ``.k`` and the positional ``p<n>`` of a process with no pid.
-# Nothing that continues a name may stand before it (a word character, ``.``,
-# ``/``, ``@``, ``-`` or ``:``), and no word character, ``:`` or ``.<digit>``
-# after it.
+# Nothing that continues a name, a path, a URL's query or fragment may stand
+# before it (a word character, ``.``, ``/``, ``\``, ``@``, ``-``, ``:``, ``?``,
+# ``#``, ``&``, ``=`` or ``%``), and no word character, ``:`` or ``.<digit>``
+# after it: ``http://h/?a=net:4`` and ``C:\Users\x\file:3`` hold no item.
 ITEM_ID_RE = re.compile(
-    r"(?<![\w./@:\-])(?:proc:(?:\d{1,20}(?:\.\d{1,9})?|p\d{1,9})"
+    r"(?<![\w./\\@:\-?#&=%])(?:proc:(?:\d{1,20}(?:\.\d{1,9})?|p\d{1,9})"
     r"|(?:" + "|".join(p for p in SECTION_PREFIXES.values() if p != "proc") + r"):\d{1,12})"
     r"(?![\w:]|\.\d)",
     re.IGNORECASE,
@@ -198,13 +199,18 @@ class _Reader:
 
 
 def _reader(normalised_by: Sequence[str] | None) -> _Reader | None:
-    """The reader ``(provider, source_format)`` names, or ``None`` for an unknown one."""
-    if not normalised_by or len(normalised_by) != 2:
+    """The reader ``(provider, source_format[, read_from])`` names, or ``None`` when unknown.
+
+    ``read_from`` is what the reader read (``SandboxReport.read_from``,
+    ``schemas.sandbox_report.reader_of``): the Triage overview alone or with
+    its task reports, a CAPE report's own dict or the model.
+    """
+    if not normalised_by or len(normalised_by) not in (2, 3):
         return None
     from maljan.schemas.sandbox_report import normaliser_reading
 
-    provider, source_format = (str(part or "").strip() for part in normalised_by)
-    reading = normaliser_reading(source_format, provider)
+    provider, source_format, *rest = (str(part or "").strip() for part in normalised_by)
+    reading = normaliser_reading(source_format, provider, rest[0] if rest else "")
     if reading is None:
         return None
     return _Reader(
@@ -799,9 +805,79 @@ def section_index(
             continue
         row: dict[str, Any] = {"items": section.count, "prefix": section.prefix}
         if name == "processes":
-            row["ids"] = list(section.ids)
+            row.update(_compact_process_ids(section.ids))
         sections[name] = row
     return {"sections": sections, "tool": ITEMS_TOOL}
+
+
+def _ranges(numbers: Iterable[int]) -> list[list[int]]:
+    """Sorted numbers as ``[first, last]`` runs of consecutive ones."""
+    runs: list[list[int]] = []
+    for number in sorted(set(numbers)):
+        if runs and number == runs[-1][1] + 1:
+            runs[-1][1] = number
+        else:
+            runs.append([number, number])
+    return runs
+
+
+def _compact_process_ids(ids: Sequence[str]) -> dict[str, Any]:
+    """The process ids as runs of consecutive pids and the exceptions to them.
+
+    ``pids`` are the stated pids as ``[first, last]`` runs; ``repeats`` names
+    each pid more than one process holds with how many (``proc:<pid>.2`` up to
+    that count); ``unstated`` are the positions of the processes with no pid
+    as runs (``proc:p<n>``). Every id is one of these, so the index stays the
+    size of the runs, not of the processes.
+    """
+    pids: dict[int, int] = {}
+    unstated: list[int] = []
+    for item in ids:
+        rest = item.removeprefix("proc:")
+        if rest.startswith("p"):
+            unstated.append(int(rest[1:]))
+            continue
+        pid = int(rest.split(".", 1)[0])
+        pids[pid] = pids.get(pid, 0) + 1
+    out: dict[str, Any] = {"pids": _ranges(pids)}
+    repeats = [[pid, count] for pid, count in sorted(pids.items()) if count > 1]
+    if repeats:
+        out["repeats"] = repeats
+    if unstated:
+        out["unstated"] = _ranges(unstated)
+    return out
+
+
+def process_id_forms(row: Mapping[str, Any]) -> list[str]:
+    """The process ids an index row states, as a reader writes them: ``proc:84``, runs, repeats."""
+    forms: list[str] = []
+    for first, last in _runs_of(row.get("pids")):
+        forms.append(f"proc:{first}" if first == last else f"proc:{first} to proc:{last}")
+    for pid, count in _pairs_of(row.get("repeats")):
+        forms.append(f"proc:{pid}.2" if count == 2 else f"proc:{pid}.2 to proc:{pid}.{count}")
+    for first, last in _runs_of(row.get("unstated")):
+        forms.append(f"proc:p{first}" if first == last else f"proc:p{first} to proc:p{last}")
+    return forms
+
+
+def _int_pair(value: Any) -> tuple[int, int] | None:
+    if (
+        isinstance(value, list | tuple)
+        and len(value) == 2
+        and all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in value)
+    ):
+        return int(value[0]), int(value[1])
+    return None
+
+
+def _runs_of(value: Any) -> list[tuple[int, int]]:
+    pairs = [_int_pair(v) for v in value] if isinstance(value, list) else []
+    return [pair for pair in pairs if pair is not None and pair[0] <= pair[1]]
+
+
+def _pairs_of(value: Any) -> list[tuple[int, int]]:
+    pairs = [_int_pair(v) for v in value] if isinstance(value, list) else []
+    return [pair for pair in pairs if pair is not None]
 
 
 def item_ids_in(text: str) -> list[str]:
@@ -834,11 +910,17 @@ def is_item_id(text: str) -> bool:
 
 @dataclass
 class ItemIndex:
-    """What a run's index entry says exists: each section's count and the process ids."""
+    """What a run's index entry says exists: each section's count and the process ids.
+
+    The process ids are held as the index states them, compactly: runs of
+    pids, the repeats and the runs of positions with no pid. A lookup is a
+    bisection over the runs.
+    """
 
     counts: dict[str, int] = field(default_factory=dict)
-    processes: frozenset[str] = frozenset()
-    process_order: tuple[str, ...] = ()
+    pid_runs: tuple[tuple[int, int], ...] = ()
+    repeats: dict[int, int] = field(default_factory=dict)
+    unstated_runs: tuple[tuple[int, int], ...] = ()
 
     @classmethod
     def from_answer(cls, data: Any) -> ItemIndex | None:
@@ -847,7 +929,7 @@ class ItemIndex:
         if not isinstance(sections, Mapping):
             return None
         counts: dict[str, int] = {}
-        order: list[str] = []
+        found = cls(counts)
         for name, row in sections.items():
             if name not in SECTION_PREFIXES or not isinstance(row, Mapping):
                 continue
@@ -855,8 +937,26 @@ class ItemIndex:
             if isinstance(items, int) and not isinstance(items, bool) and items >= 0:
                 counts[str(name)] = items
             if name == "processes":
-                order = [str(i).lower() for i in row.get("ids") or [] if isinstance(i, str)]
-        return cls(counts, frozenset(order), tuple(order))
+                found.pid_runs = tuple(sorted(_runs_of(row.get("pids"))))
+                found.repeats = dict(_pairs_of(row.get("repeats")))
+                found.unstated_runs = tuple(sorted(_runs_of(row.get("unstated"))))
+        return found
+
+    @staticmethod
+    def _in_runs(runs: tuple[tuple[int, int], ...], number: int) -> bool:
+        at = bisect.bisect_right(runs, (number, float("inf"))) - 1
+        return at >= 0 and runs[at][0] <= number <= runs[at][1]
+
+    def _process_known(self, rest: str) -> bool:
+        if rest.startswith("p"):
+            position = rest[1:]
+            return position.isdigit() and self._in_runs(self.unstated_runs, int(position))
+        pid, _, repeat = rest.partition(".")
+        if not pid.isdigit() or len(pid) > 20 or not self._in_runs(self.pid_runs, int(pid)):
+            return False
+        if not repeat:
+            return True
+        return repeat.isdigit() and 2 <= int(repeat) <= self.repeats.get(int(pid), 1)
 
     def known(self, item_id: str) -> bool:
         """Whether ``item_id`` names an item of the run's report."""
@@ -866,7 +966,7 @@ class ItemIndex:
         if name is None:
             return False
         if name == "processes":
-            return text in self.processes
+            return self._process_known(rest)
         if not rest.isdigit() or len(rest) > 12:
             return False
         return 1 <= int(rest) <= self.counts.get(name, 0)
@@ -874,13 +974,20 @@ class ItemIndex:
     @property
     def holds_items(self) -> bool:
         """Whether the report has any item to cite."""
-        return any(self.counts.values()) or bool(self.processes)
+        return any(self.counts.values())
 
     def ids(self) -> Iterator[str]:
-        """Every item id the index states, in index order."""
+        """Every item id the index states, section by section, the processes by pid."""
         for name, prefix in SECTION_PREFIXES.items():
             if name == "processes":
-                yield from self.process_order
+                for first, last in self.pid_runs:
+                    for pid in range(first, last + 1):
+                        yield f"proc:{pid}"
+                        for repeat in range(2, self.repeats.get(pid, 1) + 1):
+                            yield f"proc:{pid}.{repeat}"
+                for first, last in self.unstated_runs:
+                    for position in range(first, last + 1):
+                        yield f"proc:p{position}"
                 continue
             for number in range(1, self.counts.get(name, 0) + 1):
                 yield f"{prefix}:{number}"
@@ -935,7 +1042,14 @@ class ItemCitations:
             import json
 
             found = self.item(key)
-            self._texts[key] = json.dumps(found, default=str).lower() if found else None
+            # The row's own fields and the process and parent it names; not the
+            # platform's id, kind and source, which no value is read from.
+            said = (
+                {k: found[k] for k in ("fields", "process", "parent") if k in found}
+                if found
+                else None
+            )
+            self._texts[key] = json.dumps(said, default=str).lower() if said else None
         return self._texts[key]
 
     def known(self, item_id: str) -> bool:

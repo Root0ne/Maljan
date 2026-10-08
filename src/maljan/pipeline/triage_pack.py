@@ -452,8 +452,8 @@ class PackInputs:
     strings_head: int
     capa: CapaSettings
     sandbox_report: dict[str, Any] | None = None
-    # ``(provider, source_format)`` of the reader that produced the report.
-    sandbox_normalised_by: tuple[str, str] | None = None
+    # ``(provider, source_format, read_from)`` of the reader that produced the report.
+    sandbox_normalised_by: tuple[str, ...] | None = None
     evidence_budget_bytes: int = 0
     budget_s: float = 0.0
     floss: FlossSettings = field(default_factory=FlossSettings)
@@ -1283,6 +1283,16 @@ class _Pack:
         )
 
 
+def budgeted_entries(entries: list[LedgerEntry]) -> list[LedgerEntry]:
+    """The pack's entries the evidence byte budget charges: all but the section index.
+
+    The index is a few runs and counts whatever the report's size, and an item
+    citation is checked against it, so it is never blanked; it is the pack's
+    last entry, so leaving it out charges every other entry as before.
+    """
+    return [entry for entry in entries if entry.tool != sandbox_sections.SECTIONS_TOOL]
+
+
 # Why the pack did not unpack a sample the packer reader names UPX.
 UPX_NO_JOB = "the run names no job staging directory to write the unpacked program in"
 
@@ -1353,7 +1363,7 @@ def run_pack(
         ghidra=ghidra,
     ).run()
     budget = int(inputs.evidence_budget_bytes or 0)
-    trimmed, _ = apply_budget(result.entries, budget)
+    trimmed, _ = apply_budget(budgeted_entries(result.entries), budget)
     if trimmed:
         logger.warning(
             "triage pack: %d of %d entries exceeded the %d-byte budget and kept only "
@@ -2376,7 +2386,8 @@ def _sandbox_sections(data: dict[str, Any]) -> str:
         if not isinstance(count, int) or not count:
             parts.append(f"{named} 0")
         elif name == "processes":
-            parts.append(f"{named} {count} ({_names(row.get('ids') or [])})")
+            forms = sandbox_sections.process_id_forms(row)
+            parts.append(f"{named} {count} ({_names(forms)})" if forms else f"{named} {count}")
         elif count == 1:
             parts.append(f"{named} 1 ({prefix}:1)")
         else:

@@ -966,7 +966,7 @@ def _sandbox_sections_sentences() -> str:
                 for name in ss.SECTION_PREFIXES
             ),
             json.dumps(ss.section_index(report, ("triage", "triage"))),
-            json.dumps(ss.section_index(report, ("upload", "triage"))),
+            json.dumps(ss.section_index(report, ("upload", "triage", "overview"))),
             json.dumps(ss.section_index(report, ("cape2", "cape2"))),
             json.dumps(st.sandbox_items(report, "files", normalised_by=("rest", "generic"))),
             json.dumps(st.sandbox_items(report, "signatures", pid=7)),

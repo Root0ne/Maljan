@@ -90,6 +90,7 @@ from maljan.pipeline.triage_pack import (
     CapaSettings,
     FlossSettings,
     PackInputs,
+    budgeted_entries,
     failure_reason,
     pack_block,
     pack_entries,
@@ -1466,7 +1467,7 @@ def make_triage_node(
             # the same budget a finished pack gets; the crash is the one
             # failure this path counts.
             entries = list(recorder.entries)
-            apply_budget(entries, inputs.evidence_budget_bytes)
+            apply_budget(budgeted_entries(entries), inputs.evidence_budget_bytes)
             update: dict[str, Any] = {
                 "triage_facts": {
                     **TriageFacts().to_dict(),
@@ -1626,6 +1627,13 @@ def ledger_ids(state: AnalysisState) -> list[str]:
         if value and str(value) not in ids:
             ids.append(str(value))
     return ids
+
+
+def with_item_texts(entries: Any, items: Any) -> Any:
+    """``entries`` (``EntryTexts``) reading a cited sandbox item through ``items``' texts."""
+    if entries is None or items is None:
+        return entries
+    return dataclasses.replace(entries, items=items)
 
 
 def sandbox_item_citations(state: AnalysisState, container: Any) -> Any:
@@ -5385,12 +5393,10 @@ def make_report_node(
         # report rounds: a value their prose quotes is looked for in the entry
         # it cites, and the composer is shown which entries hold what the
         # analysts' claims quote.
-        _entry_texts = _report_entry_texts(container, _ledger)
         # The run's sandbox items, read once for both report rounds: a cited
         # item is read through its own text, as a cited entry is.
         _items = sandbox_item_citations(state, container)
-        if _entry_texts is not None and _items is not None:
-            _entry_texts = dataclasses.replace(_entry_texts, items=_items)
+        _entry_texts = with_item_texts(_report_entry_texts(container, _ledger), _items)
 
         narrative_dict: dict[str, Any] | None = None
         # Why no summary was written, when none is: said where the summary

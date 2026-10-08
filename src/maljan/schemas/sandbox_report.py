@@ -162,6 +162,13 @@ class SandboxReport(BaseModel):
     # duration, and never the value this platform asked for. ``None`` where the
     # report says nothing.
     run_limit_seconds: int | None = None
+    # What the reader read, where it reads less than the whole of what a
+    # sandbox can give: ``"overview"`` for a Triage report read from its
+    # overview alone (no behavioural task report was read), ``"tasks"`` for
+    # one read with them. Empty where the reader reads one body. Held for the
+    # run in hand (``reader_of``) and left out of a dump, so a stored or golden
+    # report reads as it always did.
+    read_from: str = Field(default="", exclude=True)
     # True when no sandbox ran at all and this report stands in for one. A real
     # run that observed nothing is not synthetic: its emptiness is a finding.
     synthetic: bool = Field(default=False)
@@ -361,26 +368,60 @@ class Reading:
     rendered: bool = True
 
 
-def normaliser_reading(source_format: str, provider: str = "") -> Reading | None:
-    """What the reader behind ``(source_format, provider)`` can fill, or ``None`` when unknown.
+# What a CAPE or mock report reached its readers as (``reader_of``): its own
+# dict, or the model rendered, when the report carried no raw dict.
+READ_FROM_RAW = "raw"
+READ_FROM_MODEL = "model"
+# What the Triage reader read (``SandboxReport.read_from``).
+READ_FROM_OVERVIEW = "overview"
+READ_FROM_TASKS = "tasks"
+
+
+def reader_of(report: SandboxReport) -> tuple[str, str, str]:
+    """``(provider, source_format, read_from)`` of the reader behind ``report``.
+
+    ``read_from`` is the report's own where its reader set it; for a CAPE or
+    mock report, whether it reaches its readers as its raw dict
+    (``providers.cape_view`` hands it over only when it has one).
+    """
+    read_from = report.read_from
+    if not read_from and report.source_format in RAW_SOURCE_FORMATS:
+        read_from = READ_FROM_RAW if report.raw else READ_FROM_MODEL
+    return report.provider, report.source_format, read_from
+
+
+def normaliser_reading(
+    source_format: str, provider: str = "", read_from: str = ""
+) -> Reading | None:
+    """What the reader behind ``(source_format, read_from)`` can fill, or ``None`` when unknown.
 
     The CAPE reader for a CAPE, Cuckoo or mock report, with the raw blocks
-    where the report reaches its readers as its own dict; the Triage reader
-    for a Triage one, reading the behavioural task reports only where the
-    Triage provider fetches them (``TriageSandboxProvider.fetch``; an uploaded
-    Triage report and one a REST sandbox answers are read from the overview
-    alone); the REST mapping for a generic one
+    where the report reaches its readers as its own dict (a CAPE or mock
+    report with no raw dict is rendered from the model); the Triage reader for
+    a Triage one, by what it read (``read_from``: the overview alone, or with
+    the behavioural task reports; where that is not said, by whether the
+    provider is one that fetches them); the REST mapping for a generic one
     (``providers.sandbox.rest_mapping.REST_MAPPING_FILLS``).
     """
     fmt = str(source_format or "").strip().lower()
+    read = str(read_from or "").strip().lower()
     if fmt in RAW_SOURCE_FORMATS:
+        if read == READ_FROM_MODEL:
+            return Reading(CAPE_NORMALISER_FILLS)
         return Reading(CAPE_NORMALISER_FILLS | frozenset(CAPE_RAW_BLOCKS), rendered=False)
     if fmt == "cuckoo":
         return Reading(CAPE_NORMALISER_FILLS)
     if fmt == "triage":
-        if str(provider or "").strip().lower() in TRIAGE_TASK_READERS:
-            return Reading(TRIAGE_NORMALISER_FILLS)
-        return Reading(TRIAGE_OVERVIEW_FILLS, overview_only=True)
+        if not read:
+            # Not said: the providers that fetch task reports are taken to have.
+            read = (
+                READ_FROM_TASKS
+                if str(provider or "").strip().lower() in TRIAGE_TASK_READERS
+                else READ_FROM_OVERVIEW
+            )
+        if read == READ_FROM_OVERVIEW:
+            return Reading(TRIAGE_OVERVIEW_FILLS, overview_only=True)
+        return Reading(TRIAGE_NORMALISER_FILLS)
     if fmt == "generic":
         from maljan.providers.sandbox.rest_mapping import REST_MAPPING_FILLS
 
@@ -662,7 +703,8 @@ def _flow_attribution(flow: dict[str, Any], lineage: _Lineage) -> dict[str, Any]
 # overview alone it fills the signatures and nothing else: the processes, the
 # dumped files and the network are read from the task reports.
 TRIAGE_OVERVIEW_FILLS: frozenset[str] = frozenset({"signatures"})
-# The providers that hand this reader the behavioural task reports.
+# The providers that hand this reader task reports to read, for a report that
+# does not say what was read (``read_from``, which a fetched run states).
 TRIAGE_TASK_READERS: frozenset[str] = frozenset({"triage"})
 TRIAGE_NORMALISER_FILLS: frozenset[str] = frozenset(
     {
@@ -724,7 +766,13 @@ def triage_overview_to_sandbox_report(
     dropped_files: list[dict[str, Any]] = []
     network = SandboxNetwork()
     hosts_by_ip: dict[str, dict[str, Any]] = {}
+    # Whether any behavioural task report was read: without one, the report is
+    # the overview's alone, and says so (``read_from``).
+    tasks_read = 0
     for task in (task_reports or {}).values():
+        if not isinstance(task, dict):
+            continue
+        tasks_read += 1
         lineage = _sample_process_tree(task, sample)
         for proc in task.get("processes") or []:
             if not isinstance(proc, dict):
@@ -842,6 +890,7 @@ def triage_overview_to_sandbox_report(
         cti={"family": _as_str_list(analysis.get("family")), "score": analysis.get("score")},
         unavailable=list(TriageSandboxProvider.UNAVAILABLE),
         run_limit_seconds=_triage_run_limit(overview),
+        read_from=READ_FROM_TASKS if tasks_read else READ_FROM_OVERVIEW,
         raw=overview,
     )
 

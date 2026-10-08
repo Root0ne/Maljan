@@ -221,6 +221,8 @@ class MaljanApp:
 
         Returns None if no sample_path is provided or if submission fails.
         """
+        from maljan.schemas.sandbox_report import reader_of
+
         # Which reader produced this job's report, for the sandbox sections;
         # cleared first so a job with no report never reads the last one's.
         self.container.sandbox_normalised = None
@@ -242,7 +244,7 @@ class MaljanApp:
                 except Exception as exc:  # noqa: BLE001 — same degrade contract as a failed submit
                     logger.error("Attached sandbox report unusable: %s", exc)
                     return None
-                self.container.sandbox_normalised = (run.report.provider, run.report.source_format)
+                self.container.sandbox_normalised = reader_of(run.report)
                 return to_cape_shaped_dict(run.report)
             logger.info("Submitting sample to sandbox: %s", sample_path)
 
@@ -269,7 +271,7 @@ class MaljanApp:
             )
             if status == "reported":
                 run = await asyncio.to_thread(provider.fetch, task_id)
-                self.container.sandbox_normalised = (run.report.provider, run.report.source_format)
+                self.container.sandbox_normalised = reader_of(run.report)
                 result = SubmissionResult(
                     task_id=run.task_id,
                     sample_sha256=run.sample_sha256,

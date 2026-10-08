@@ -446,9 +446,10 @@ class ServiceContainer:
         # happens in nodes that do not all carry the graph state. ``None``
         # outside a job, and the tools then say so rather than answering empty.
         self.sandbox_report: dict[str, Any] | None = None
-        # ``(provider, source_format)`` of the reader that produced it, set by
-        # ``app.arun`` beside it; read by the sandbox sections.
-        self.sandbox_normalised: tuple[str, str] | None = None
+        # ``(provider, source_format, read_from)`` of the reader that produced
+        # it (``schemas.sandbox_report.reader_of``), set by ``app.arun`` beside
+        # it; read by the sandbox sections.
+        self.sandbox_normalised: tuple[str, str, str] | None = None
 
         # The job's sample, for the one step that needs the bytes rather than
         # a report: staging the sample to a tool server that does not share

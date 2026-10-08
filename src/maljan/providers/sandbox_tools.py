@@ -621,7 +621,7 @@ def sandbox_items(
     ids: list[str] | str | None = None,
     *,
     sections: Any = None,
-    normalised_by: tuple[str, str] | None = None,
+    normalised_by: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """The items of one section of the report, whole, each with its id and its report fields.
 
@@ -806,18 +806,18 @@ def sandbox_tools(container: Any) -> list[BaseTool]:
     ]
 
 
-def normalised_by_of(container: Any) -> tuple[str, str] | None:
-    """``(provider, source_format)`` of the reader behind the job's report, where the job says."""
+def normalised_by_of(container: Any) -> tuple[str, ...] | None:
+    """``(provider, source_format, read_from)`` of the reader behind the job's report, if said."""
     value = getattr(container, "sandbox_normalised", None)
-    if isinstance(value, tuple) and len(value) == 2:
-        return (str(value[0]), str(value[1]))
+    if isinstance(value, tuple) and len(value) in (2, 3):
+        return tuple(str(part) for part in value)
     return None
 
 
 def items_tool(
     report: dict[str, Any] | None,
     sizer: Any = None,
-    normalised_by: tuple[str, str] | None = None,
+    normalised_by: tuple[str, ...] | None = None,
 ) -> BaseTool:
     """The ``sandbox_items`` tool, closed over one job's report and the reader that produced it."""
     from langchain_core.tools import StructuredTool

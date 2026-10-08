@@ -37,7 +37,7 @@ from maljan.reporting.models import (
 )
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
+from maljan.schemas.sandbox_report import reader_of, triage_overview_to_sandbox_report
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "sandbox"
 IDENTITY = SampleIdentity(hashes=FileHashes(sha256="a" * 64))
@@ -91,7 +91,7 @@ class TestTheIndex:
 
         assert list(index) == list(ss.SECTION_PREFIXES)
         assert index["processes"]["items"] == 5
-        assert index["processes"]["ids"] == [
+        assert _process_ids(REPORT) == [
             "proc:84",
             "proc:90",
             "proc:90.2",
@@ -113,13 +113,13 @@ class TestTheIndex:
 
         for name in ("api_calls", "registry", "events", "apistats", "screenshots"):
             assert index[name]["no"].startswith("no: the report lists ")
-        assert index["processes"]["ids"] == ["proc:1000", "proc:1001"]
+        assert _process_ids(_triage()) == ["proc:1000", "proc:1001"]
         assert index["network"]["items"] > 0
 
     def test_a_cape_process_is_named_by_its_process_id(self) -> None:
         index = ss.section_index(_cape())["sections"]
 
-        assert index["processes"]["ids"] == ["proc:4616"]
+        assert _process_ids(_cape()) == ["proc:4616"]
         assert index["api_calls"]["items"] == 5
 
     def test_the_pack_line_states_counts_id_forms_and_reasons(self) -> None:
@@ -146,7 +146,7 @@ class TestItems:
             index = ss.ItemIndex.from_answer(ss.section_index(report))
             assert index is not None
             listed = [item["id"] for name in ss.SECTION_PREFIXES for item in found.items(name)]
-            assert listed == list(index.ids())
+            assert sorted(listed) == sorted(index.ids())
             for item_id in listed:
                 assert index.known(item_id)
                 item = found.item(item_id)
@@ -243,7 +243,7 @@ class TestQuery:
                 ]
             }
         }
-        ids = ss.section_index(report)["sections"]["processes"]["ids"]
+        ids = _process_ids(report)
         assert ids == ["proc:p1", "proc:p2", "proc:p3", "proc:12"]
 
 
@@ -303,6 +303,10 @@ class TestTheTool:
         answer = json.loads(sized.invoke({"section": "mutexes"}))
         assert answer["matched"] == 1
         assert sizer.narrowing == ("pid", "contains", "signature", "ids")
+
+
+def _process_ids(report: dict[str, Any], normalised_by: Any = None) -> list[str]:
+    return list(ss.Sections(report, normalised_by).sections["processes"].ids)
 
 
 def _citations(report: dict[str, Any], normalised_by: Any = None) -> ss.ItemCitations:
@@ -780,9 +784,7 @@ class TestReviewRoundOne:
         blob = (FIXTURES / "triage_overview.json").read_bytes()
         run = UploadSandboxProvider.from_settings(cfg).attach_report(blob, filename="r.json")
         assert report_fills(run.report) == TRIAGE_OVERVIEW_FILLS
-        index = ss.section_index(
-            to_cape_shaped_dict(run.report), (run.report.provider, run.report.source_format)
-        )["sections"]
+        index = ss.section_index(to_cape_shaped_dict(run.report), reader_of(run.report))["sections"]
         assert index["signatures"]["items"] > 0
         assert index["processes"] == {
             "no": "no: the upload report, read from the Triage overview alone, carries no "
@@ -852,9 +854,7 @@ class TestReviewRoundOne:
         assert (kept.missing, kept.missing_more, kept.not_read) == (["net:1"], 1, 0)
 
     def test_a_pid_past_the_id_pattern_gets_a_positional_id(self) -> None:
-        ids = ss.section_index({"behavior": {"processes": [{"pid": 10**25}]}})["sections"][
-            "processes"
-        ]["ids"]
+        ids = _process_ids({"behavior": {"processes": [{"pid": 10**25}]}})
         assert ids == ["proc:p1"]
 
     def test_an_observed_step_is_told_of_the_items_when_no_answer_recorded_anything(self) -> None:
@@ -926,3 +926,143 @@ class TestReviewRoundOne:
             assert reading is not None
             assert (set(CAPE_RAW_BLOCKS) <= reading.fills) is held
             assert ("CAPE" in shown and "suricata" in shown and "procdump" in shown) is held
+
+
+class TestReviewRoundTwo:
+    """Each finding of the second review, held by a test of its own."""
+
+    def test_a_fetched_run_whose_task_reports_all_failed_is_read_from_its_overview(
+        self,
+    ) -> None:
+        import httpx
+        from pydantic import SecretStr
+
+        from maljan.core.config import Settings
+        from maljan.providers.sandbox.triage import TriageSandboxProvider
+
+        overview = json.loads((FIXTURES / "triage_overview.json").read_text())
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("overview.json"):
+                return httpx.Response(200, json=overview)
+            return httpx.Response(404, json={"error": "NOT_FOUND"})
+
+        cfg = Settings(_env_file=None)
+        cfg.sandbox.provider = "triage"
+        cfg.sandbox.triage.api_token = SecretStr("not-a-real-token")
+        provider = TriageSandboxProvider.from_settings(cfg)
+        provider._http = httpx.Client(
+            base_url=cfg.sandbox.triage.base_url, transport=httpx.MockTransport(handler)
+        )
+        run = provider.fetch("260904-abcdefgh1")
+        assert run.report.read_from == "overview"
+        index = ss.section_index(to_cape_shaped_dict(run.report), reader_of(run.report))["sections"]
+        for name in ("processes", "network", "dropped"):
+            assert index[name] == {
+                "no": f"no: the triage report, read from the Triage overview alone, carries "
+                f"no `{name}`"
+            }
+        # With no behavioural task listed at all, the same.
+        bare = {**overview, "tasks": {}}
+        report = triage_overview_to_sandbox_report(bare, provider="triage", task_reports={})
+        assert reader_of(report) == ("triage", "triage", "overview")
+        # A run whose task report was read states its counts.
+        assert reader_of(_triage_report())[2] == "tasks"
+
+    def test_the_index_is_a_few_runs_for_a_hundred_thousand_processes(self) -> None:
+        report = {
+            "behavior": {
+                "processes": [{"pid": 1000 + i} for i in range(100_000)]
+                + [{"pid": 1000}, {"pid": 1000}, {"name": "x"}]
+            }
+        }
+        index = ss.section_index(report)
+        assert len(json.dumps(index)) < 4096
+        known = ss.ItemIndex.from_answer(index)
+        assert known is not None
+        assert all(known.known(f"proc:{1000 + i}") for i in range(100_000))
+        assert known.known("proc:1000.3") and not known.known("proc:1000.4")
+        assert known.known("proc:p100003") and not known.known("proc:p1")
+        assert not known.known("proc:999") and not known.known(f"proc:{101_000}")
+
+    def test_the_index_is_not_blanked_by_the_byte_budget(self) -> None:
+        from maljan.pipeline.triage_pack import budgeted_entries
+        from maljan.schemas.evidence import apply_budget
+
+        entries = [
+            LedgerEntry(id="ev_0001", tool="strings", agent="pipeline", output="x" * 100),
+            _index_entry(REPORT),
+        ]
+        entries[1].output = json.dumps(entries[1].structured)
+        apply_budget(budgeted_entries(entries), 10)
+        assert entries[0].truncated and not entries[1].truncated
+        assert entries[1].structured is not None
+
+    def test_the_report_node_reads_cited_items_through_their_rows(self) -> None:
+        from maljan.pipeline.nodes import sandbox_item_citations, with_item_texts
+        from maljan.pipeline.validation import EntryTexts, stated_value_violations
+
+        class _Container:
+            sandbox_normalised = None
+
+        ledger = [_index_entry(REPORT, "ev_0001")]
+        state = {"evidence_ledger": ledger, "sandbox_report": REPORT}
+        items = sandbox_item_citations(state, _Container())
+        assert items is not None and items.known("mutex:1")
+        entries = with_item_texts(EntryTexts.from_ledger(ledger), items)
+        assert entries.items is items
+        row = {
+            "identifiers": [{"kind": "m", "value": "Global\\Other", "evidence_refs": ["mutex:1"]}]
+        }
+        assert stated_value_violations(row, entries)
+        assert with_item_texts(None, items) is None
+        assert with_item_texts(entries, None) is entries
+        assert (
+            sandbox_item_citations({"evidence_ledger": [], "sandbox_report": REPORT}, None) is None
+        )
+
+    def test_an_item_s_text_is_its_row_not_the_platform_s_words(self) -> None:
+        items = _citations(REPORT)
+        text = items.text("mutex:1") or ""
+        assert "global" in text
+        for platform_word in ("mutex:1", "behavior.summary.mutexes", '"kind"', '"source"'):
+            assert platform_word not in text
+        assert '"parent": "proc:84"' in (items.text("proc:90") or "")
+
+    def test_no_item_is_read_out_of_a_url_query_or_a_windows_path(self) -> None:
+        for text in (
+            "http://h/?a=net:4",
+            "http://h/#net:4",
+            "https://h/path?x=1&sig:2",
+            "C:\\Users\\x\\file:3",
+            "%net:4",
+            "=net:4",
+        ):
+            assert ss.item_ids_in(text) == [], text
+        assert ss.item_ids_in("(net:4) [net:5] 'net:6', net:7;") == [
+            "net:4",
+            "net:5",
+            "net:6",
+            "net:7",
+        ]
+
+    def test_a_cape_report_with_no_raw_dict_is_read_as_rendered(self) -> None:
+        from maljan.schemas.sandbox_report import SandboxProcess, SandboxReport
+
+        model = SandboxReport(
+            provider="cape2",
+            source_format="cape2",
+            processes=[SandboxProcess(pid=0, name="a"), SandboxProcess(pid=5, ppid=0, name="b")],
+        )
+        assert reader_of(model) == ("cape2", "cape2", "model")
+        found = ss.Sections(to_cape_shaped_dict(model), reader_of(model))
+        assert [(i["id"], i.get("parent")) for i in found.items("processes")] == [
+            ("proc:p1", None),
+            ("proc:5", None),
+        ]
+
+
+def _triage_report() -> Any:
+    overview = json.loads((FIXTURES / "triage_overview.json").read_text())
+    task = json.loads((FIXTURES / "triage_report_behavioral1.json").read_text())
+    return triage_overview_to_sandbox_report(overview, provider="triage", task_reports={"b": task})
