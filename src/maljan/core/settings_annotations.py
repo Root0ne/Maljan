@@ -35,6 +35,23 @@ class Annotation(TypedDict):
     advanced: NotRequired[bool]  # folded into the group's closed "Advanced" disclosure
 
 
+# Settings that were retired with no effect, each with what replaces it. An
+# export written before a retirement still carries the key; the import refuses
+# it like any key the catalogue no longer knows, and says it is this one, so
+# the operator knows which key to delete from the file.
+RETIRED_SETTINGS: dict[str, str] = {
+    "core.preprocessing.summarizer_provider": (
+        "the function summariser's model is the llm.agents.summarizer entry"
+    ),
+    "core.preprocessing.summarizer_model": (
+        "the function summariser's model is the llm.agents.summarizer entry"
+    ),
+    "core.reporting.narrative_max_tokens": (
+        "the report stage's output budget is llm.judge_max_tokens or derived"
+    ),
+}
+
+
 GROUP_ORDER: list[tuple[str, str]] = [
     ("llm", "LLM & model"),
     ("providers", "Providers"),

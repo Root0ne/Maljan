@@ -2755,8 +2755,12 @@ sets `Content-Disposition: attachment; filename=maljan-settings.json`:
 `POST /api/v1/settings/import` (admin) accepts the same document. A `format`
 other than `maljan-settings/1` is rejected with 422; unknown or read-only keys
 are rejected with 422 and a per-key error, and nothing is applied when any key
-fails. A successful import writes one audit row (`settings.import`) naming the
-applied keys. The console previews the document against the current
+fails. A key of a setting retired with no effect — `core.preprocessing.summarizer_provider`,
+`core.preprocessing.summarizer_model`, `core.reporting.narrative_max_tokens` —
+is refused the same way, and its error says it is retired, what replaced it and
+to delete that key from the file and import again; an export written before the
+retirement carries it only if the setting had been saved. A successful import
+writes one audit row (`settings.import`) naming the applied keys. The console previews the document against the current
 configuration before sending it.
 
 ## Secrets

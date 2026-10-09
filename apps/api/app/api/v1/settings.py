@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from maljan.core.model_assignments import endpoint_label
-from maljan.core.settings_annotations import GROUP_DESCRIPTIONS, GROUP_ORDER
+from maljan.core.settings_annotations import GROUP_DESCRIPTIONS, GROUP_ORDER, RETIRED_SETTINGS
 from maljan.core.settings_overrides import redact_url
 from maljan.core.virustotal import SERVER_KEY as VIRUSTOTAL_SERVER_KEY
 from maljan.pipeline.conditions import validate_condition
@@ -433,7 +433,12 @@ async def import_values(
     errors: dict[str, str] = {}
     for key in body.values:
         entry = index.get(key)
-        if entry is None:
+        if entry is None and key in RETIRED_SETTINGS:
+            errors[key] = (
+                f"retired setting with no effect ({RETIRED_SETTINGS[key]}); "
+                "delete this key from the file and import again"
+            )
+        elif entry is None:
             errors[key] = "unknown key"
         elif not entry.editable:
             errors[key] = "read-only"
