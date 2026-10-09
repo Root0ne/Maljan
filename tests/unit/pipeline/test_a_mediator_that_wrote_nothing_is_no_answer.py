@@ -240,7 +240,74 @@ class TestTheMediatorRecordsNoAnswer:
         assert consensus is None
         assert argument.status == MEDIATOR_NO_ANSWER
         # The loop has its own nudge and salvage; it is not run a second time.
-        assert argument.note == mediator_no_answer_note("the answer was empty")
+        assert argument.note == mediator_no_answer_note(
+            "the answer was empty; the tool loop was not run again"
+        )
+
+    def test_a_tool_loop_that_ended_without_an_answer_says_how_it_ended(self) -> None:
+        judge = JudgeAgent(llm=MagicMock())
+
+        async def _stopped(_prompt: Any) -> str:
+            judge._last_loop_ending = "the tool loop stopped at its step limit with no text"
+            return ""
+
+        with (
+            patch.object(judge, "_has_explicit_dissent", return_value=True),
+            patch.object(judge, "_initialize_mcp_client", AsyncMock()),
+            patch.object(judge, "execute_tool_loop", side_effect=_stopped),
+        ):
+            argument, consensus = asyncio.run(
+                judge.mediate(
+                    CLAIMING_STATE["reports"], [], isr_reports=CLAIMING_STATE["isr_reports"]
+                )
+            )
+
+        assert consensus is None
+        assert argument.note == mediator_no_answer_note(
+            "the tool loop stopped at its step limit with no text; the tool loop was not run again"
+        )
+
+    def test_a_failed_salvage_call_is_recorded_as_failed(self) -> None:
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        import maljan.agents.judge_agent as judge_agent
+
+        class _Fails:
+            async def ainvoke(self, _messages: Any, **_kw: Any) -> AIMessage:
+                raise RuntimeError("the server went away")
+
+            def bind_tools(self, *_args: Any, **_kw: Any) -> _Fails:
+                return self
+
+        judge = JudgeAgent(llm=_Fails())  # type: ignore[arg-type]
+        gathered = [SystemMessage(content="You mediate."), HumanMessage(content="Reports: x")]
+        with (
+            patch.object(judge_agent, "_trim_for_synthesis", lambda msgs, _budget: msgs),
+            patch.object(judge_agent, "synthesis_budget_chars", return_value=1),
+        ):
+            said = asyncio.run(
+                judge._reasoning_from_what_was_gathered(
+                    gathered, 10.0, None, ended_why="3 repeated tool call(s)"
+                )
+            )
+
+        assert said == ""
+        assert judge._last_loop_ending == (
+            "the tool loop ended (3 repeated tool call(s)) and the call to write its "
+            "reasoning failed (RuntimeError)"
+        )
+
+    def test_a_salvage_with_no_time_left_says_so(self) -> None:
+        judge = JudgeAgent(llm=MagicMock())
+
+        said = asyncio.run(
+            judge._reasoning_from_what_was_gathered([], 0.2, None, ended_why="its clock ran out")
+        )
+
+        assert said == ""
+        assert judge._last_loop_ending == (
+            "the tool loop ended (its clock ran out) with no time left to write its reasoning"
+        )
 
     def test_an_answer_with_text_is_mediated_as_before(self) -> None:
         (argument, consensus), _model, extract = _mediate(

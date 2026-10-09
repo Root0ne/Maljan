@@ -1485,6 +1485,23 @@ PROMPTS: dict[str, str] = {
             ),
             mediator_no_answer_note("the answer was empty; asking once more failed (TimeoutError)"),
             mediator_no_answer_note("the call was not admitted under the job's spend ceiling"),
+            mediator_no_answer_note(
+                "the tool loop stopped at its step limit with no text; the tool loop was not "
+                "run again"
+            ),
+            mediator_no_answer_note(
+                "the tool loop ended (3 repeated tool call(s)) and the call to write its "
+                "reasoning failed (TimeoutError); the tool loop was not run again"
+            ),
+            mediator_no_answer_note(
+                "the tool loop ended (the job's spend ceiling was reached) and the call to write "
+                "its reasoning was not admitted under the job's spend ceiling; the tool loop was "
+                "not run again"
+            ),
+            mediator_no_answer_note(
+                "the tool loop ended (before its final answer) with no time left to write its "
+                "reasoning; the tool loop was not run again"
+            ),
         ]
     ),
     "a chunk still cut after its question": chunk_cut_unread_sentence("chunk 1 of 2"),

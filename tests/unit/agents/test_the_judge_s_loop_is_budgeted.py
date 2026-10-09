@@ -265,7 +265,9 @@ class TestTheJudgeSalvageKeepsToTheLoopsTime:
         judge = _judge(_budget(), model)
         given: list[float] = []
 
-        async def _salvage(msgs: Any, timeout: float, settings: Any, window: int = 0) -> str:
+        async def _salvage(
+            msgs: Any, timeout: float, settings: Any, window: int = 0, **_kw: Any
+        ) -> str:
             given.append(timeout)
             return REASONING
 

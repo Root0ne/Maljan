@@ -1622,8 +1622,12 @@ class JudgeAgent(BudgetMeter):
         # What the tool definitions of the current loop weigh with each
         # request, for the budget record and the ticks; none before a loop.
         self._tool_definition_chars: int = 0
-        # The model message the last tool loop's text was read from.
+        # The model message the last tool loop's text was read from, the
+        # bound its call was sent with, and how a loop with no final answer
+        # of its own ended.
         self._last_answer: Any = None
+        self._last_answer_cap: int | None = None
+        self._last_loop_ending: str = ""
 
     def _output_cap(self) -> Any:
         """The output cap this judge's model was built with, and how it was reached.
@@ -1866,8 +1870,12 @@ class JudgeAgent(BudgetMeter):
             elif role == "human":
                 messages_pre.append(HumanMessage(content=content))
         # The model message the returned text was read from, for a caller that
-        # has to say why the text is empty (an answer cut at the output cap).
+        # has to say why the text is empty (an answer cut at the output cap),
+        # the bound that call was sent with, and how the loop ended when it
+        # ended without a final answer of its own.
         self._last_answer = None
+        self._last_answer_cap = None
+        self._last_loop_ending = ""
 
         # The job's spend meter: a loop that starts after its ceiling was
         # reached runs no tool phase, and one running ends its tool phase there.
@@ -2183,13 +2191,18 @@ class JudgeAgent(BudgetMeter):
                 # What is left of the loop's own time, as the analysts'
                 # salvage gets: loop and salvage together stay inside it.
                 return await self._reasoning_from_what_was_gathered(
-                    _msgs, budget.seconds_left(), settings, counted_window_tokens(room)
+                    _msgs,
+                    budget.seconds_left(),
+                    settings,
+                    counted_window_tokens(room),
+                    ended_why=why,
                 )
             # The graph's own sentence at its step limit is not the judge's
             # reasoning, and what reads the reasoning next is a model. The
             # judge wrote none; the budget record says why.
             if _msgs and is_the_graph_s_step_stop(_msgs[-1]):
                 cap = "steps"
+                self._last_loop_ending = "the tool loop stopped at its step limit with no text"
                 return ""
             self._last_answer = _msgs[-1] if _msgs else None
             return answer_text(_msgs[-1].content) if _msgs else ""
@@ -2252,18 +2265,28 @@ class JudgeAgent(BudgetMeter):
             return self.llm
 
     async def _reasoning_from_what_was_gathered(
-        self, msgs: list[Any], timeout: float | None, settings: Any, window_tokens: int = 0
+        self,
+        msgs: list[Any],
+        timeout: float | None,
+        settings: Any,
+        window_tokens: int = 0,
+        *,
+        ended_why: str = "",
     ) -> str:
         """The judge's reasoning, asked for once from what its loop gathered.
 
         The analysts' salvage, for the judge: the conversation trimmed to the
         salvage budget, and one turn with no tools asking for the reasoning
         the loop did not get to write. What comes back is the model's own; a
-        salvage that fails leaves the reasoning empty, which mediation reads
-        as no agreement.
+        salvage that fails leaves the reasoning empty, which mediation records
+        as no answer with how the loop ended (``_last_loop_ending``).
         """
         if timeout is not None and timeout < 1.0:
             self.logger.warning("JudgeAgent reasoning salvage skipped: no time left.")
+            self._last_loop_ending = (
+                f"the tool loop ended ({ended_why or 'before its final answer'}) with no time "
+                "left to write its reasoning"
+            )
             return ""
         # Kept whole where the model binds its thinking to the turns before it
         # (``anthropic_history``); the tool-reply completion answers an
@@ -2288,6 +2311,10 @@ class JudgeAgent(BudgetMeter):
             bound = self._spend_admits("salvage", asked, slot=salvage_slot, deadline_s=timeout)
         except SpendCeilingStop as stop:
             self.logger.warning("JudgeAgent reasoning salvage not made: %s.", stop)
+            self._last_loop_ending = (
+                f"the tool loop ended ({ended_why or 'before its final answer'}) and the call "
+                "to write its reasoning was not admitted under the job's spend ceiling"
+            )
             return ""
         held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
         try:
@@ -2300,10 +2327,15 @@ class JudgeAgent(BudgetMeter):
             self._record_usage(response, call="reasoning salvage")
         except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves no reasoning
             self.logger.warning("JudgeAgent reasoning salvage failed (%s).", type(exc).__name__)
+            self._last_loop_ending = (
+                f"the tool loop ended ({ended_why or 'before its final answer'}) and the call "
+                f"to write its reasoning failed ({type(exc).__name__})"
+            )
             return ""
         finally:
             self._spend_release(salvage_slot)
         self._last_answer = response
+        self._last_answer_cap = bound if held else None
         return _answer_text(response)
 
     def drain_evidence_entries(self) -> list[LedgerEntry]:
@@ -2416,6 +2448,10 @@ class JudgeAgent(BudgetMeter):
         answered_cap: int | None = None
         not_asked = False
         fast_answered = False
+        # A tool loop answers for itself: how it ended when it wrote no final
+        # answer, and it is not run a second time.
+        looped = False
+        loop_ending = ""
         needs_tools = self._has_explicit_dissent(isr_reports)
         identity_unanswered = not needs_tools and self._can_ask_an_identity_question(ledger_servers)
         needs_tools = needs_tools or identity_unanswered
@@ -2497,6 +2533,9 @@ class JudgeAgent(BudgetMeter):
             await self._initialize_mcp_client()
             reasoning_text = await self.execute_tool_loop(prompt_messages)
             answered_by = getattr(self, "_last_answer", None)
+            answered_cap = getattr(self, "_last_answer_cap", None)
+            loop_ending = getattr(self, "_last_loop_ending", "")
+            looped = True
         else:
             self.logger.info("Mediator: no dissent — fast path (single LLM call).")
             # Pass already-formatted content as BaseMessage list to avoid
@@ -2550,6 +2589,9 @@ class JudgeAgent(BudgetMeter):
                 ]
                 reasoning_text = await self.execute_tool_loop(prompt_messages)
                 answered_by = getattr(self, "_last_answer", None)
+                answered_cap = getattr(self, "_last_answer_cap", None)
+                loop_ending = getattr(self, "_last_loop_ending", "")
+                looped = True
             else:
                 reasoning_text = "" if response is None else answer_text(response.content)
                 answered_by = response
@@ -2618,9 +2660,13 @@ class JudgeAgent(BudgetMeter):
                 else:
                     second_ask = f"{first}; {outcome}"
         if not reasoning_text.strip():
-            reason = second_ask or self._no_answer_reason(
-                answered_by, answered_cap, not_asked=not_asked
-            )
+            if looped:
+                ending = loop_ending or self._no_answer_reason(answered_by, answered_cap)
+                reason = f"{ending}; the tool loop was not run again"
+            else:
+                reason = second_ask or self._no_answer_reason(
+                    answered_by, answered_cap, not_asked=not_asked
+                )
             self.logger.warning(
                 "Mediator wrote no answer; the round is not mediated (the round's note says why)."
             )
