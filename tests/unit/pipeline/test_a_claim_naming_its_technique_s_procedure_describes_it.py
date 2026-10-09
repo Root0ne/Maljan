@@ -8,10 +8,12 @@ SecurityCenter2" under Security Software Discovery. Those words come from the
 vendored data that ties an id to its procedures (the technique cards and the
 API catalogue's rules), only where they name a call, a class or an artefact,
 and only where one technique family's data writes them; a sentence's word
-counts in the same shape. An identifier written as joined words names each of
-its words. A sentence that names such a word only to say it is absent is asked
-the absence question, and one that says the behaviour was not seen is asked as
-before: the words widen what a claim of behaviour shares, nothing else.
+counts in the same shape, and a program or a module's call only where it is
+written as something run or called. An identifier written as joined words names
+each of its words. A sentence that names such a word only to say it is absent,
+names it only as an object, or says the behaviour was not seen is asked the
+does-not-describe question as before: the words widen what a claim of
+behaviour shares, nothing else.
 
 Every sentence here is made up for the test.
 """
@@ -79,7 +81,7 @@ def test_a_procedure_word_is_a_shared_term(text: str, technique: str) -> None:
 @pytest.mark.parametrize(
     ("text", "technique"),
     [
-        # Named only to say it is absent: the absence question.
+        # Named only to say it is absent.
         ("The sample does not invoke wmic.", "T1047"),
         ("No wmic process was observed in the sandbox.", "T1047"),
         ("tasklist is absent from the decoded strings.", "T1057"),
@@ -104,6 +106,11 @@ def test_a_procedure_word_is_a_shared_term(text: str, technique: str) -> None:
         ("InternetGetConnectedState is called to check whether the host is online.", "T1071.001"),
         # An ordinary word the cards write in running text is no procedure word.
         ("The routine reads the services listed under one key and their version.", "T1505"),
+        # A program or a call named only as an object, not as something run.
+        ("The injector skips lsass.exe and csrss.exe when choosing a host process.", "T1003"),
+        ("The kill list holds wmic.exe and tasklist.exe among 40 names.", "T1047"),
+        ("The string table holds `cmd.exe` among the process names it hides from.", "T1059.003"),
+        ("The hash table holds NtUnmapViewOfSection among the resolved names.", "T1106"),
         # Another technique's procedure, not this one's.
         ("Module bases are found by walking the PEB loader list and hashing names.", "T1622"),
         ("The sample uses Volume Shadow Copy APIs and WMI providers.", "T1003"),
@@ -125,12 +132,21 @@ def test_a_sentence_that_names_no_procedure_of_the_technique_is_still_asked(
         ("The sample does not invoke wmic.", "T1047"),
         ("tasklist is absent from the decoded strings.", "T1057"),
         ("The code holds no BeingDebugged check.", "T1622"),
+        # A contrast negation: the procedure word is negated, the claim is not.
+        (
+            "0x8378 resolves APIs by hash, not an ordinary LoadLibrary/GetProcAddress pair.",
+            "T1027.007",
+        ),
+        (
+            "Without ntdll's NtAllocateVirtualMemory the stage would fail; it calls it at 0x3a24.",
+            "T1106",
+        ),
     ],
 )
-def test_a_procedure_word_named_to_say_it_is_absent_is_asked_the_absence_question(
+def test_a_procedure_word_named_as_absent_keeps_the_describe_question(
     text: str, technique: str
 ) -> None:
-    assert _asked(text, technique) == [ABSENCE_CLAIM_CODE]
+    assert _asked(text, technique) == [CLAIM_DOES_NOT_DESCRIBE_CODE]
 
 
 def test_a_procedure_word_named_as_present_is_no_absence() -> None:

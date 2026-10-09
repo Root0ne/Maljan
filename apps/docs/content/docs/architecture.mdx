@@ -1621,7 +1621,8 @@ decides.
    sub-technique's parent's. Only identifiers are taken: a name with a capital
    after a small letter or an underscore (`GetComputerName`, `ITaskService`,
    `SecurityCenter2`, `Win32_`), or a module or Windows program name the text
-   writes as one (`ntdll's`, `schtasks /create`, `the wmic tool`); acronyms,
+   writes as something run or called (`calls into ntdll's`, `schtasks /create`,
+   `the wmic tool`; not a target such as "a handle opened on lsass.exe"); acronyms,
    format and platform words (`HTTP`, `XML`, `MAC`, `Win32`) and words inside a
    phrase the text negates ("without going through LoadLibrary") are not. A
    word counts only where the data of one technique family (a parent and its
@@ -1629,19 +1630,23 @@ decides.
    for that family too: measured, every word is one family's but
    `InternetReadFile`, `LdrGetProcedureAddress`, `NtLoadDriver` and
    `RtlGetVersion`, which are calls of WinINet or ntdll. A sentence's word
-   counts in the same shape (`wmic.exe`, `` `wmic` ``, `cmd /c`, not "the Run
-   reg key" or "ntdll is loaded"); a call in its ANSI, wide and extended
-   spellings; and a module the card writes as what is called (`calls into
-   ntdll's …`) also by the module's own calls. An identifier written as joined
+   counts in the same shape: an identifier the card writes as an identifier, in
+   its ANSI, wide and extended spellings; a program, a module or a call of a
+   module the card writes as what is called (`calls into ntdll's …`) only where
+   the sentence writes it as something run or called (a switch, "command line",
+   or a run, call or use verb in its sentence part: "runs … through cmd.exe or
+   wmic.exe", "calls NtQueryInformationProcess"), not where it is named as an
+   object ("the kill list holds wmic.exe", "the hash table holds
+   NtUnmapViewOfSection", "the Run reg key", "ntdll is loaded"). An identifier written as joined
    words names each word, compared with the stems of the technique's name that
    the names of one technique family only hold (`BeingDebugged` under Debugger
    Evasion; "file" is in twenty families' names, so `DeleteFileW` shares
    nothing with File Deletion). None of these counts at a place the absence
-   reader reads as absent, nor anywhere in a sentence that says the behaviour
-   was not seen, run or used ("imported but never referenced", "but no request
-   was seen"): those are asked as before. A sentence that shares no other term
-   and names a procedure word only to say it is absent ("does not invoke
-   wmic", "tasklist is absent") is asked the absence question. The vendored
+   reader reads as absent ("does not invoke wmic", "not an ordinary
+   LoadLibrary/GetProcAddress pair"), nor anywhere in a sentence that says the
+   behaviour was not seen, run or used ("imported but never referenced", "but
+   no request was seen"): those are asked the does-not-describe question as
+   before, and the absence question reads only what it read before. The vendored
    ATT&CK table holds names, tactics and platforms only, so the catalogue's
    descriptions, detection text and procedure examples are not read, and the
    capa rules are downloaded beside the repository, not vendored. The words

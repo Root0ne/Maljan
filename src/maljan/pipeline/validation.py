@@ -1033,11 +1033,7 @@ def absence_claim_violation(
     the technique when asked. The platform withholds nothing on this reading.
     """
     text = str(getattr(claim, "claim", "") or "")
-    if not states_absence(text, behaviour_pattern(technique_id, attck)) and not (
-        attck is not None
-        and states_procedure_absence(text, technique_id, attck)
-        and not _shares_a_name_term(text, technique_id, attck)
-    ):
+    if not states_absence(text, behaviour_pattern(technique_id, attck)):
         return None
     tid = safe_finding_value(technique_id)
     # On a claim whose TECHNIQUE line lists other ids, NONE would take them
@@ -1180,7 +1176,9 @@ def _name_terms(technique_id: str, attck: Any) -> tuple[str, set[str], set[str]]
 # (GetComputerName, ITaskService, SecurityCenter2, Win32_), or a word of small
 # letters that is the name of a module of the vendored export catalogue (ntdll)
 # or of a Windows program every host carries (wmic), where the text writes it
-# as one (``_WRITTEN_AS_A_PROGRAM_RE``). Acronyms, format and platform words
+# as something run or called (``_run_or_called``): a program named only as
+# what is acted on ("a handle opened on lsass.exe") is the technique's target,
+# not its procedure. Acronyms, format and platform words
 # ("HTTP", "XML", "MAC", "Win32") and ordinary words are left out: they qualify
 # a procedure, they do not name one. A word inside a phrase the text negates
 # ("without going through LoadLibrary", "instead of being imported") is the
@@ -1228,19 +1226,23 @@ class ProcedureWords:
     programs: frozenset[str] = frozenset()
     exports: frozenset[str] = frozenset()
 
-    def places(self, text: str, *, any_shape: bool = False) -> list[tuple[int, int]]:
+    def places(self, text: str) -> list[tuple[int, int]]:
         """Where ``text`` names one of these, in the same shape the source writes them:
-        an identifier as an identifier, a program or module as one. With
-        ``any_shape``, every place the word is written, however: what the
-        absence question reads, where a wider reading only asks more."""
+        an identifier the card writes as an identifier; a call of a module the card
+        names, and a program or module, only where the sentence writes it as
+        something run or called (``_run_or_called``): "the kill list holds
+        wmic.exe" and "the hash table holds NtUnmapViewOfSection" name objects."""
         found: list[tuple[int, int]] = []
         for match in _PROCEDURE_WORD_RE.finditer(text):
             word = match.group(0)
             lowered = word.lower()
-            if lowered in self.identifiers or lowered in self.exports:
-                if any_shape or _PROCEDURE_SHAPE_RE.search(word):
+            if lowered in self.identifiers:
+                if _PROCEDURE_SHAPE_RE.search(word):
                     found.append(match.span())
-            elif lowered in self.programs and (any_shape or _written_as_a_program(text, match)):
+            elif lowered in self.exports:
+                if _PROCEDURE_SHAPE_RE.search(word) and _run_or_called(text, match):
+                    found.append(match.span())
+            elif lowered in self.programs and _run_or_called(text, match):
                 found.append(match.span())
         return found
 
@@ -1286,24 +1288,39 @@ def _module_exports() -> dict[str, frozenset[str]]:
     }
 
 
-# What follows a program's or a module's name where a text writes it as one:
-# its extension, a possessive, a command-line switch, or "command line" or
-# "tool" with at most a sub-command between ("lsass.exe", "ntdll's",
-# "schtasks /create", "reg query command lines", "the wmic tool"). The same
-# word in running text ("the services on the host", "the Run reg key", "ntdll
-# is loaded") is no program's name. A word alone in a code span is written as
-# a name as well.
-_WRITTEN_AS_A_PROGRAM_RE = re.compile(
-    r"\.(?:exe|dll)\b|'s\b|\s+/\w|\s+(?:[a-z]+\s+)?(?:command[\s-]lines?|tool)\b"
+# A program, a module or a module's call written as something run or called:
+# followed by a command-line switch or by "command line" or "tool" with at
+# most a sub-command between ("schtasks /create", "reg query command lines",
+# "the wmic tool"), or in a sentence part whose verb runs, calls or uses it
+# ("runs 11 commands through cmd.exe or wmic.exe", "calls into ntdll's ...",
+# "queries it through NtQueryInformationProcess"). The same word named as what
+# is held, skipped or acted on ("the kill list holds wmic.exe", "skips
+# lsass.exe", "a handle opened on lsass.exe", "ntdll is loaded") is named as an
+# object.
+_RUN_FORM_AFTER_RE = re.compile(
+    r"(?:\.(?:exe|dll))?`?(?:\s+/\w|\s+(?:[a-z]+\s+)?(?:command[\s-]lines?|tool)\b)"
 )
+_RUN_VERB_RE = re.compile(
+    r"\b(?:runs?|ran|running|execut(?:es|ed|ing|e)|spawn(?:s|ed|ing)?|launch(?:es|ed|ing)?"
+    r"|invok(?:es|ed|ing|e)|start(?:s|ed|ing)?|calls?|called|calling|through|via"
+    r"|uses?|used|using|quer(?:y|ies|ied|ying)|asks?|asked)\b"
+)
+# The verbs are read in small letters only: "the Run key" names a registry key.
+# Where a sentence part ends: a full stop, a semicolon, a colon or a line break.
+_SENTENCE_PART_END_RE = re.compile(r"[.;:!?](?=\s|$)|\n")
 
 
-def _written_as_a_program(text: str, match: re.Match[str]) -> bool:
-    """Whether the word ``match`` reads in ``text`` is written as a program's name."""
-    if _WRITTEN_AS_A_PROGRAM_RE.match(text, match.end()) is not None:
+def _run_or_called(text: str, match: re.Match[str]) -> bool:
+    """Whether the word ``match`` reads in ``text`` is written as something run or called."""
+    if _RUN_FORM_AFTER_RE.match(text, match.end()) is not None:
         return True
     start, end = match.span()
-    return text[start - 1 : start] == "`" and text[end : end + 1] == "`"
+    begin = 0
+    for stop in _SENTENCE_PART_END_RE.finditer(text, 0, start):
+        begin = stop.end()
+    after = _SENTENCE_PART_END_RE.search(text, end)
+    part = text[begin : after.start() if after else len(text)]
+    return _RUN_VERB_RE.search(part) is not None
 
 
 def _is_a_program_name(lowered: str, modules: Collection[str]) -> bool:
@@ -1336,7 +1353,7 @@ def _procedure_words_by_id() -> tuple[
                     continue
                 if _PROCEDURE_SHAPE_RE.search(word):
                     identifiers.add(lowered)
-                elif _is_a_program_name(lowered, modules) and _written_as_a_program(kept, match):
+                elif _is_a_program_name(lowered, modules) and _run_or_called(kept, match):
                     programs.add(lowered)
                     if lowered in modules:
                         called.add(lowered)
@@ -1469,13 +1486,10 @@ def _named_as_absent(text: str, start: int, end: int) -> bool:
 
 
 def _procedure_places(
-    text: str, technique_id: str, stems: Collection[str], *, any_shape: bool = False
+    text: str, technique_id: str, stems: Collection[str]
 ) -> list[tuple[int, int]]:
     """Every place ``text`` names ``technique_id`` by a procedure word or by joined words."""
-    return [
-        *procedure_words(technique_id).places(text, any_shape=any_shape),
-        *_joined_word_places(text, stems),
-    ]
+    return [*procedure_words(technique_id).places(text), *_joined_word_places(text, stems)]
 
 
 def _names_a_procedure(text: str, technique_id: str, stems: Collection[str]) -> bool:
@@ -1494,34 +1508,6 @@ def _names_a_procedure(text: str, technique_id: str, stems: Collection[str]) -> 
         not _named_as_absent(text, start, end)
         for start, end in _procedure_places(text, technique_id, stems)
     )
-
-
-@lru_cache(maxsize=4096)
-def _words_pattern(words: tuple[str, ...]) -> re.Pattern[str]:
-    return re.compile("|".join(rf"\b{re.escape(word)}\b" for word in words))
-
-
-def states_procedure_absence(text: str, technique_id: str, attck: Any = None) -> bool:
-    """Whether ``text`` names the technique's procedure words only to say they are absent.
-
-    The absence question's own reading (:func:`states_absence`), asked of the
-    places the sentence writes a procedure word or joined words of the
-    technique's name: "The sample does not invoke wmic", "tasklist is absent
-    from the decoded strings".
-    """
-    stems = _name_terms(technique_id, attck)[1] if attck is not None else set()
-    read = _read_dashes(str(text or ""))
-    words = tuple(
-        sorted(
-            {
-                read[start:end]
-                for start, end in _procedure_places(read, technique_id, stems, any_shape=True)
-            }
-        )
-    )
-    if not words:
-        return False
-    return states_absence(read, _words_pattern(words))
 
 
 def _shares_a_name_term(text: str, technique_id: str, attck: Any) -> bool:
