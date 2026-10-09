@@ -395,6 +395,27 @@ class TestTheRoundIsNotMediated:
         )
         assert note in MarkdownRenderer().render(report)
 
+    def test_the_outer_cap_covers_every_call_a_mediation_can_make(self) -> None:
+        from maljan.agents.judge_agent import MEDIATION_CALL_SPANS
+
+        caps: list[float | None] = []
+
+        async def _on_agent_loop(coro: Any, hard_timeout: float | None = None, **_kw: Any) -> Any:
+            caps.append(hard_timeout)
+            return await coro
+
+        container = _container((_no_answer(), None))
+        with (
+            patch("maljan.pipeline.nodes.detect_sycophancy", return_value=False),
+            patch("maljan.agents.base_agent.loop_limits", return_value=(100, 8)),
+            patch("maljan.agents.base_agent.run_on_agent_loop", _on_agent_loop),
+        ):
+            asyncio.run(make_negotiation_node(container)(CLAIMING_STATE))
+
+        # The fast call, its second ask, the block question and the extraction.
+        assert MEDIATION_CALL_SPANS == 4
+        assert caps == [100 * MEDIATION_CALL_SPANS + 30]
+
     def test_the_note_is_published_to_the_room(self) -> None:
         events: list[tuple[str, dict]] = []
         container = _container((_no_answer(), None))

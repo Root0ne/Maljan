@@ -443,6 +443,13 @@ def _is_not_json(answer: Any) -> bool:
 # Consensus threshold: mediator confidence must reach this to stop negotiation early
 CONSENSUS_THRESHOLD = 0.85
 
+# How many calls of the judge's own time limit one mediation can spend one
+# after another, at most: the fast call and its one second ask of an empty
+# answer, or a fast call that timed out and the tool loop after it; then the
+# question for a missing contradictions block and the extraction. The
+# negotiation node's outer cap is this many limits plus its decode headroom.
+MEDIATION_CALL_SPANS = 4
+
 # What we assume when the mediator's agreement score cannot be read at all.
 # Deliberately below CONSENSUS_THRESHOLD: an unreadable mediator must not be
 # able to end the negotiation, and must not be mistakable for a real score.

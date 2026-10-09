@@ -3520,15 +3520,20 @@ def make_negotiation_node(
             #
             # ``mediate`` budgets itself internally (the judge's own loop
             # budget for the reasoning call, then the bounded structured-output
-            # retries), so the outer cap covers both phases plus the house +30s
+            # retries), so the outer cap covers every phase plus the house +30s
             # of decode headroom rather than truncating a mediation that is
             # still working. A judge with no time limit has no outer cap: each
             # of its calls waits as long as its answer takes at the model's
             # measured pace.
             from maljan.agents.base_agent import loop_limits
+            from maljan.agents.judge_agent import MEDIATION_CALL_SPANS
 
             judge_timeout, _judge_steps = loop_limits("judge")
-            mediation_timeout = None if judge_timeout is None else float(judge_timeout) * 2 + 30
+            # Every call the mediation can make one after another
+            # (``MEDIATION_CALL_SPANS``), each within the judge's own limit.
+            mediation_timeout = (
+                None if judge_timeout is None else float(judge_timeout) * MEDIATION_CALL_SPANS + 30
+            )
             argument, is_consensus = await run_on_agent_loop(
                 judge.mediate(
                     reports=active_reports,
