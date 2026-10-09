@@ -266,3 +266,69 @@ class MergeTally:
             "indicators_merged": self.indicators_merged + max(0, int(extra_indicators)),
             "findings_merged": self.findings_merged,
         }
+
+
+def process_identity(node: Any) -> tuple[int, int, str, str]:
+    """One sandbox process: its pid, parent pid, image and command line.
+
+    A run reads one sandbox task, so two rows that agree on all four are the
+    same process read twice (the pack's call and an analyst's), and two rows
+    that differ in any of them are two processes.
+    """
+    return (
+        int(getattr(node, "pid", 0) or 0),
+        int(getattr(node, "ppid", 0) or 0),
+        str(getattr(node, "name", "") or ""),
+        str(getattr(node, "command_line", "") or ""),
+    )
+
+
+def distinct_processes(nodes: list[Any]) -> list[Any]:
+    """A process tree with each process once, at its first place.
+
+    A repeated process keeps the first row's place; what the repeat adds is a
+    set (its children, the pids it injected into), and that is unioned, so no
+    child and no injection one reading recorded is lost. The rows are copies:
+    the report's own tree is left as it was stored.
+    """
+    kept: dict[tuple[int, int, str, str], Any] = {}
+    children: dict[tuple[int, int, str, str], list[Any]] = {}
+    for node in nodes:
+        key = process_identity(node)
+        first = kept.get(key)
+        if first is None:
+            kept[key] = node.model_copy(
+                update={"children": [], "injected_into": list(node.injected_into)}
+            )
+            children[key] = list(node.children)
+            continue
+        children[key].extend(node.children)
+        first.injected_into.extend(
+            pid for pid in node.injected_into if pid not in first.injected_into
+        )
+    for key, node in kept.items():
+        node.children = distinct_processes(children[key])
+    return list(kept.values())
+
+
+def signature_identity(signature: Any) -> tuple[Any, ...]:
+    """A sandbox signature row by everything it states; the same row read twice is one."""
+    return (
+        str(getattr(signature, "name", "") or ""),
+        str(getattr(signature, "description", "") or ""),
+        int(getattr(signature, "severity", 0) or 0),
+        tuple(getattr(signature, "technique_ids", None) or ()),
+        tuple(getattr(signature, "marks", None) or ()),
+    )
+
+
+def distinct_signatures(signatures: list[Any]) -> list[Any]:
+    """``signatures`` with each row once, at its first place."""
+    seen: set[tuple[Any, ...]] = set()
+    out: list[Any] = []
+    for signature in signatures:
+        key = signature_identity(signature)
+        if key not in seen:
+            seen.add(key)
+            out.append(signature)
+    return out

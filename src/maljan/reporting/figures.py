@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from html import escape
 
+from maljan.reporting.dedupe import distinct_processes
 from maljan.reporting.defang import defang
 from maljan.reporting.models import Figure, MalwareReport, ProcessNode
 from maljan.utils.marked_cut import marked_cut
@@ -107,7 +108,7 @@ def build_process_tree(report: MalwareReport) -> Figure | None:
         for child in node.children:
             _walk(child, depth + 1)
 
-    for root in dyn.process_tree:
+    for root in distinct_processes(dyn.process_tree):
         _walk(root, 0)
     # A figure holds forty rows; the rest are counted in its legend.
     rows = every[:_TREE_ROWS]

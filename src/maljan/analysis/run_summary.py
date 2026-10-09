@@ -1138,7 +1138,9 @@ class RunSummary:
             drops = v.answers.get("retry_drops") or []
             if drops:
                 lines += ["**Items a kept validation retry left out:**", ""]
-                lines += [f"- {row.get('sentence', '')}" for row in drops]
+                from maljan.pipeline.validation import retry_drop_sentences
+
+                lines += [f"- {sentence}" for sentence in retry_drop_sentences(drops)]
                 lines.append("")
             if v.unresolved:
                 lines.append("**Still wrong after the retry:**")

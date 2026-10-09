@@ -51,6 +51,7 @@ from maljan.extractors.network_extractor import (
     url_host,
 )
 from maljan.pipeline.events import safe_finding_value
+from maljan.reporting.dedupe import distinct_processes
 from maljan.reporting.ledger_report import ANALYST_SECTION_SOURCES
 from maljan.reporting.models import (
     EmulatedStrings,
@@ -1250,7 +1251,7 @@ class ExtendedSTIXRenderer:
         #    both ends are the time the report was built — the latest the
         #    observation can have been — and one run is one observation.
         if report.dynamic is not None and report.dynamic.process_tree:
-            observables = _processes_to_observables(report.dynamic.process_tree)
+            observables = _processes_to_observables(distinct_processes(report.dynamic.process_tree))
             if observables:
                 objects.extend(observables)
                 objects.append(
@@ -3061,9 +3062,21 @@ def emulation_kwargs(
     }
 
 
-def _recovery_words(how: RecoveredValue) -> str:
-    """One tool's recovery of a value, as the IOC table states it."""
-    head = f"{how.tool}, {how.entry}" if how.entry else how.tool
+def _recovery_words(how: RecoveredValue, entries: Sequence[str] = ()) -> str:
+    """One tool's recovery of a value, as the IOC table states it.
+
+    ``entries`` are the entries that recorded this same recovery, the place
+    and all, in place of ``how.entry`` alone: the place is stated once after
+    them.
+    """
+    named = ", ".join(entries) if entries else how.entry
+    head = f"{how.tool}, {named}" if named else how.tool
+    where = _recovery_place(how)
+    return f"{head} ({', '.join(where)})" if where else head
+
+
+def _recovery_place(how: RecoveredValue) -> list[str]:
+    """Where in the file one tool's recovery of a value stands."""
     where: list[str] = []
     if how.scheme:
         where.append(f"{how.scheme} string" if how.tool == "floss" else how.scheme)
@@ -3083,7 +3096,7 @@ def _recovery_words(how: RecoveredValue) -> str:
             where.append("used at " + ", ".join(how.sites))
         if how.passed_to:
             where.extend(how.passed_to)
-    return f"{head} ({', '.join(where)})" if where else head
+    return where
 
 
 def recovered_by_words(record: EmulatedStrings, kind: str, value: str) -> str:
@@ -3103,7 +3116,14 @@ def recovered_by_words(record: EmulatedStrings, kind: str, value: str) -> str:
     if not entry:
         return ""
     listed = record.recovered_by.get(key) or [RecoveredValue(tool="floss", entry=entry)]
-    return "; ".join(_recovery_words(how) for how in listed)
+    # One tool's same recovery from two of its calls (the pack's and an
+    # analyst's) is one place with two entries, stated once.
+    places: dict[tuple[str, tuple[str, ...]], tuple[RecoveredValue, list[str]]] = {}
+    for how in listed:
+        _first, entries = places.setdefault((how.tool, tuple(_recovery_place(how))), (how, []))
+        if how.entry and how.entry not in entries:
+            entries.append(how.entry)
+    return "; ".join(_recovery_words(how, entries) for how, entries in places.values())
 
 
 _WHOLE_DIGEST_RE = re.compile(r"^[0-9a-fA-F]+$")
