@@ -69,7 +69,7 @@ from maljan.pipeline.events import (
 )
 from maljan.pipeline.evidence_summary import collect as collect_technique_sources
 from maljan.pipeline.evidence_summary import summarise, technique_evidence
-from maljan.pipeline.mediation_models import consensus_applies
+from maljan.pipeline.mediation_models import MEDIATOR_NO_ANSWER, consensus_applies
 from maljan.pipeline.outcome import (
     VERDICT_READ_FALLBACK,
     corrected_reasons,
@@ -3340,6 +3340,13 @@ _NO_CONSENSUS_MEASURED: dict[str, Any] = {
     "consensus_applicable": False,
     "confidence_history": [],
 }
+# What a round whose mediator wrote no answer writes: consensus applies and is
+# neither reached nor refused; the router reads the argument's status.
+_NOT_MEDIATED: dict[str, Any] = {
+    "is_consensus": None,
+    "consensus_applicable": True,
+    "confidence_history": [],
+}
 
 
 def _ledger_counts(state: AnalysisState, agent_names: Sequence[str], argument: Any) -> list[str]:
@@ -3513,15 +3520,20 @@ def make_negotiation_node(
             #
             # ``mediate`` budgets itself internally (the judge's own loop
             # budget for the reasoning call, then the bounded structured-output
-            # retries), so the outer cap covers both phases plus the house +30s
+            # retries), so the outer cap covers every phase plus the house +30s
             # of decode headroom rather than truncating a mediation that is
             # still working. A judge with no time limit has no outer cap: each
             # of its calls waits as long as its answer takes at the model's
             # measured pace.
             from maljan.agents.base_agent import loop_limits
+            from maljan.agents.judge_agent import MEDIATION_CALL_SPANS
 
             judge_timeout, _judge_steps = loop_limits("judge")
-            mediation_timeout = None if judge_timeout is None else float(judge_timeout) * 2 + 30
+            # Every call the mediation can make one after another
+            # (``MEDIATION_CALL_SPANS``), each within the judge's own limit.
+            mediation_timeout = (
+                None if judge_timeout is None else float(judge_timeout) * MEDIATION_CALL_SPANS + 30
+            )
             argument, is_consensus = await run_on_agent_loop(
                 judge.mediate(
                     reports=active_reports,
@@ -3565,7 +3577,9 @@ def make_negotiation_node(
                 container.event_sink,
                 speaker=ROOM_SPEAKER,
                 role="negotiator",
-                text=f"Mediator: {argument.finding}",
+                # A mediator that wrote no answer has no words: the room is
+                # told the platform's sentence saying so.
+                text=f"Mediator: {argument.finding or argument.note}",
                 round_index=iteration + 1,
                 status="complete",
                 confidence=argument.confidence_score,
@@ -3619,6 +3633,11 @@ def make_negotiation_node(
                         "confidence_history": [mean_conf],
                     }
                     if measured
+                    # A mediator that wrote no answer measured nothing while
+                    # consensus still applies: like a failed round, it is
+                    # neither agreement nor disagreement.
+                    else _NOT_MEDIATED
+                    if applies and argument.status == MEDIATOR_NO_ANSWER
                     else _NO_CONSENSUS_MEASURED
                 ),
                 "sycophancy_detected": syco,

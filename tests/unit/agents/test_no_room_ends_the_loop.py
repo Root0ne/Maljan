@@ -352,10 +352,12 @@ class TestAJudgeWithNoReasoning:
             patch.object(judge, "execute_tool_loop", AsyncMock(return_value="")),
             patch.object(judge, "_extract_mediator_verdict", extract),
         ):
-            _argument, consensus = asyncio.run(judge.mediate({"static": "r"}, []))
+            argument, consensus = asyncio.run(judge.mediate({"static": "r"}, []))
 
         extract.assert_not_called()
-        assert consensus is False
+        # No reasoning is no answer, never a disagreement that opens a revision round.
+        assert consensus is None
+        assert argument.status == "no_answer"
 
 
 class TestTheNudgeAfterTheBudgetEndedThePhase:

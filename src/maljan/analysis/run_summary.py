@@ -38,6 +38,7 @@ from maljan.analysis.corroboration import (
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
     CONTRADICTIONS_BLOCK_MIXED_NOTE,
+    MEDIATOR_NO_ANSWER,
 )
 
 # ---------------------------------------------------------------------------
@@ -68,7 +69,7 @@ class NegotiationMetrics:
         max_rounds:          Hard limit configured at startup.
         termination_reason:  Why the loop stopped (consensus / hard_limit /
                              converged / convergence / not_applicable /
-                             mediation_failed), read from the router's own
+                             mediation_failed / not_mediated), read from the router's own
                              rules (``pipeline.routing.debate_route``).
         sycophancy_events:   Number of rounds where sycophancy was detected.
         confidence_history:  Per-round mediator confidence scores.
@@ -90,8 +91,9 @@ class NegotiationMetrics:
     # it replaced (``nodes.revision_replacement_sentence``).
     revision_replacements: list[str] = field(default_factory=list)
     # The platform's sentences about the mediation rounds, once each: a
-    # mediation that gave no final ``CONTRADICTIONS:`` block when asked, and one
-    # whose block listed contradictions and also said none stands.
+    # mediation that gave no final ``CONTRADICTIONS:`` block when asked, one
+    # whose block listed contradictions and also said none stands, and one
+    # whose mediator wrote no answer.
     mediation_notes: list[str] = field(default_factory=list)
     # The lines the mediator marked [not blocking: <reason>], round by round,
     # as it wrote them: they did not stand against consensus.
@@ -1980,7 +1982,11 @@ class RunSummaryBuilder:
                     for arg in discussion_history
                     if getattr(arg, "agent_name", "") == "Mediator"
                     and getattr(arg, "note", "")
-                    in (CONTRADICTIONS_BLOCK_MISSING_NOTE, CONTRADICTIONS_BLOCK_MIXED_NOTE)
+                    and (
+                        getattr(arg, "note", "")
+                        in (CONTRADICTIONS_BLOCK_MISSING_NOTE, CONTRADICTIONS_BLOCK_MIXED_NOTE)
+                        or getattr(arg, "status", "complete") == MEDIATOR_NO_ANSWER
+                    )
                 )
             ),
             not_blocking=[

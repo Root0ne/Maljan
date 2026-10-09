@@ -95,9 +95,11 @@ from maljan.pipeline.events import emit_judge_question, safe_finding_value, scru
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
     CONTRADICTIONS_BLOCK_MIXED_NOTE,
+    MEDIATOR_NO_ANSWER,
     MediatorVerdict,
     analysts_with_claims,
     consensus_applies,
+    mediator_no_answer_note,
 )
 from maljan.pipeline.state import AgentArgument
 from maljan.pipeline.turns import with_question
@@ -419,9 +421,8 @@ VERDICT_TIMEOUT_REASON = "the judge did not answer within its budget"
 
 
 def _answer_text(answer: Any) -> str:
-    """The text of a model answer, whatever shape it arrived in."""
-    content = getattr(answer, "content", answer)
-    return str(content if content is not None else "")
+    """The text of a model answer, whatever shape it arrived in, thinking aside."""
+    return answer_text(getattr(answer, "content", answer))
 
 
 def _is_not_json(answer: Any) -> bool:
@@ -441,6 +442,13 @@ def _is_not_json(answer: Any) -> bool:
 
 # Consensus threshold: mediator confidence must reach this to stop negotiation early
 CONSENSUS_THRESHOLD = 0.85
+
+# How many calls of the judge's own time limit one mediation can spend one
+# after another, at most: the fast call and its one second ask of an empty
+# answer, or a fast call that timed out and the tool loop after it; then the
+# question for a missing contradictions block and the extraction. The
+# negotiation node's outer cap is this many limits plus its decode headroom.
+MEDIATION_CALL_SPANS = 4
 
 # What we assume when the mediator's agreement score cannot be read at all.
 # Deliberately below CONSENSUS_THRESHOLD: an unreadable mediator must not be
@@ -1621,6 +1629,12 @@ class JudgeAgent(BudgetMeter):
         # What the tool definitions of the current loop weigh with each
         # request, for the budget record and the ticks; none before a loop.
         self._tool_definition_chars: int = 0
+        # The model message the last tool loop's text was read from, the
+        # bound its call was sent with, and how a loop with no final answer
+        # of its own ended.
+        self._last_answer: Any = None
+        self._last_answer_cap: int | None = None
+        self._last_loop_ending: str = ""
 
     def _output_cap(self) -> Any:
         """The output cap this judge's model was built with, and how it was reached.
@@ -1734,7 +1748,7 @@ class JudgeAgent(BudgetMeter):
                 if marker in already:
                     continue
                 already.add(marker)
-                text = str(getattr(message, "content", "") or "").strip()
+                text = _answer_text(message).strip()
                 if not text or not text.rstrip().endswith("?"):
                     continue
                 emit_judge_question(
@@ -1862,6 +1876,13 @@ class JudgeAgent(BudgetMeter):
                 messages_pre.append(SystemMessage(content=content))
             elif role == "human":
                 messages_pre.append(HumanMessage(content=content))
+        # The model message the returned text was read from, for a caller that
+        # has to say why the text is empty (an answer cut at the output cap),
+        # the bound that call was sent with, and how the loop ended when it
+        # ended without a final answer of its own.
+        self._last_answer = None
+        self._last_answer_cap = None
+        self._last_loop_ending = ""
 
         # The job's spend meter: a loop that starts after its ceiling was
         # reached runs no tool phase, and one running ends its tool phase there.
@@ -1919,6 +1940,7 @@ class JudgeAgent(BudgetMeter):
                 # ``finish_reason: "stop"`` — so the count is the only evidence.
                 cap=self._output_cap().tokens,
             )
+            self._last_answer = response
             return answer_text(response.content)
 
         self.logger.info("JudgeAgent starting ReAct agent loop with %d tools...", len(self.tools))
@@ -2176,14 +2198,20 @@ class JudgeAgent(BudgetMeter):
                 # What is left of the loop's own time, as the analysts'
                 # salvage gets: loop and salvage together stay inside it.
                 return await self._reasoning_from_what_was_gathered(
-                    _msgs, budget.seconds_left(), settings, counted_window_tokens(room)
+                    _msgs,
+                    budget.seconds_left(),
+                    settings,
+                    counted_window_tokens(room),
+                    ended_why=why,
                 )
             # The graph's own sentence at its step limit is not the judge's
             # reasoning, and what reads the reasoning next is a model. The
             # judge wrote none; the budget record says why.
             if _msgs and is_the_graph_s_step_stop(_msgs[-1]):
                 cap = "steps"
+                self._last_loop_ending = "the tool loop stopped at its step limit with no text"
                 return ""
+            self._last_answer = _msgs[-1] if _msgs else None
             return answer_text(_msgs[-1].content) if _msgs else ""
         except ModelCallDeadline:
             # A model call's own deadline with nothing gathered: that call
@@ -2244,18 +2272,28 @@ class JudgeAgent(BudgetMeter):
             return self.llm
 
     async def _reasoning_from_what_was_gathered(
-        self, msgs: list[Any], timeout: float | None, settings: Any, window_tokens: int = 0
+        self,
+        msgs: list[Any],
+        timeout: float | None,
+        settings: Any,
+        window_tokens: int = 0,
+        *,
+        ended_why: str = "",
     ) -> str:
         """The judge's reasoning, asked for once from what its loop gathered.
 
         The analysts' salvage, for the judge: the conversation trimmed to the
         salvage budget, and one turn with no tools asking for the reasoning
         the loop did not get to write. What comes back is the model's own; a
-        salvage that fails leaves the reasoning empty, which mediation reads
-        as no agreement.
+        salvage that fails leaves the reasoning empty, which mediation records
+        as no answer with how the loop ended (``_last_loop_ending``).
         """
         if timeout is not None and timeout < 1.0:
             self.logger.warning("JudgeAgent reasoning salvage skipped: no time left.")
+            self._last_loop_ending = (
+                f"the tool loop ended ({ended_why or 'before its final answer'}) with no time "
+                "left to write its reasoning"
+            )
             return ""
         # Kept whole where the model binds its thinking to the turns before it
         # (``anthropic_history``); the tool-reply completion answers an
@@ -2280,6 +2318,10 @@ class JudgeAgent(BudgetMeter):
             bound = self._spend_admits("salvage", asked, slot=salvage_slot, deadline_s=timeout)
         except SpendCeilingStop as stop:
             self.logger.warning("JudgeAgent reasoning salvage not made: %s.", stop)
+            self._last_loop_ending = (
+                f"the tool loop ended ({ended_why or 'before its final answer'}) and the call "
+                "to write its reasoning was not admitted under the job's spend ceiling"
+            )
             return ""
         held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
         try:
@@ -2292,10 +2334,16 @@ class JudgeAgent(BudgetMeter):
             self._record_usage(response, call="reasoning salvage")
         except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves no reasoning
             self.logger.warning("JudgeAgent reasoning salvage failed (%s).", type(exc).__name__)
+            self._last_loop_ending = (
+                f"the tool loop ended ({ended_why or 'before its final answer'}) and the call "
+                f"to write its reasoning failed ({type(exc).__name__})"
+            )
             return ""
         finally:
             self._spend_release(salvage_slot)
-        return str(getattr(response, "content", "") or "")
+        self._last_answer = response
+        self._last_answer_cap = bound if held else None
+        return _answer_text(response)
 
     def drain_evidence_entries(self) -> list[LedgerEntry]:
         """Every entry the judge's tool loops gathered, handing over ownership."""
@@ -2401,6 +2449,16 @@ class JudgeAgent(BudgetMeter):
             the argument carries no confidence.
         """
         self.logger.info("Mediating %d expert reports for contradictions...", len(reports))
+        answered_by: Any = None
+        # The output bound the answer's call was sent with: what a cut is
+        # measured against. ``None`` reads the model's built cap.
+        answered_cap: int | None = None
+        not_asked = False
+        fast_answered = False
+        # A tool loop answers for itself: how it ended when it wrote no final
+        # answer, and it is not run a second time.
+        looped = False
+        loop_ending = ""
         needs_tools = self._has_explicit_dissent(isr_reports)
         identity_unanswered = not needs_tools and self._can_ask_an_identity_question(ledger_servers)
         needs_tools = needs_tools or identity_unanswered
@@ -2481,6 +2539,10 @@ class JudgeAgent(BudgetMeter):
             )
             await self._initialize_mcp_client()
             reasoning_text = await self.execute_tool_loop(prompt_messages)
+            answered_by = getattr(self, "_last_answer", None)
+            answered_cap = getattr(self, "_last_answer_cap", None)
+            loop_ending = getattr(self, "_last_loop_ending", "")
+            looped = True
         else:
             self.logger.info("Mediator: no dissent — fast path (single LLM call).")
             # Pass already-formatted content as BaseMessage list to avoid
@@ -2503,7 +2565,7 @@ class JudgeAgent(BudgetMeter):
                     "mediation", direct_messages, slot=fast_slot, deadline_s=fast_timeout
                 )
             except SpendCeilingStop as stop:
-                # Not made: mediation reads no reasoning as no agreement.
+                # Not made: the round records that the mediator wrote no answer.
                 self.logger.warning("Mediator fast path not made: %s.", stop)
                 fast_bound, direct_messages = None, []
             fast_held = output_bound_kwargs(self.llm, fast_bound) if fast_bound is not None else {}
@@ -2533,8 +2595,16 @@ class JudgeAgent(BudgetMeter):
                     for role, text in prompt_messages
                 ]
                 reasoning_text = await self.execute_tool_loop(prompt_messages)
+                answered_by = getattr(self, "_last_answer", None)
+                answered_cap = getattr(self, "_last_answer_cap", None)
+                loop_ending = getattr(self, "_last_loop_ending", "")
+                looped = True
             else:
                 reasoning_text = "" if response is None else answer_text(response.content)
+                answered_by = response
+                answered_cap = fast_bound if fast_held else None
+                not_asked = response is None
+                fast_answered = response is not None
             finally:
                 self._spend_release(fast_slot)
 
@@ -2561,6 +2631,59 @@ class JudgeAgent(BudgetMeter):
                         f"Consensus: not applicable — {len(claimants)} of {len(reports)} "
                         "analyst(s) produced claims."
                     ),
+                ),
+                None,
+            )
+
+        # A mediator that wrote no answer — an empty one, or one the output cap
+        # cut before any text — stated neither agreement nor a contradiction.
+        # An empty answer the cap did not cut is asked once more, as it was
+        # sent; a cut one never is, because the same call at the same budget
+        # would be cut again. Still without an answer, the round records that
+        # fact and why, consensus is neither reached nor refused, and the
+        # router sends the answers in force to the judge rather than reading
+        # the silence as disagreement and opening a revision round of every
+        # analyst.
+        # What became of a second ask, stated as it happened.
+        second_ask = ""
+        if not reasoning_text.strip() and fast_answered:
+            first = self._no_answer_reason(answered_by, answered_cap)
+            if self._cut_reason(answered_by, answered_cap or self._built_cap_tokens()):
+                second_ask = f"{first}; not asked again, as the same call would be cut again"
+            else:
+                self.logger.warning("Mediator wrote no answer; asking once more.")
+                again, again_cap, outcome = await self._ask_mediation_again(
+                    direct_messages, fast_timeout
+                )
+                if again is not None:
+                    answered_by, answered_cap = again, again_cap
+                    reasoning_text = answer_text(again.content)
+                    again_reason = self._no_answer_reason(answered_by, answered_cap)
+                    second_ask = f"{first}; asked once more, " + (
+                        "the answer was empty again"
+                        if again_reason == "the answer was empty"
+                        else again_reason
+                    )
+                else:
+                    second_ask = f"{first}; {outcome}"
+        if not reasoning_text.strip():
+            if looped:
+                ending = loop_ending or self._no_answer_reason(answered_by, answered_cap)
+                reason = f"{ending}; the tool loop was not run again"
+            else:
+                reason = second_ask or self._no_answer_reason(
+                    answered_by, answered_cap, not_asked=not_asked
+                )
+            self.logger.warning(
+                "Mediator wrote no answer; the round is not mediated (the round's note says why)."
+            )
+            return (
+                AgentArgument(
+                    agent_name="Mediator",
+                    finding="",
+                    confidence_score=None,
+                    status=MEDIATOR_NO_ANSWER,
+                    note=mediator_no_answer_note(reason),
                 ),
                 None,
             )
@@ -2685,6 +2808,74 @@ class JudgeAgent(BudgetMeter):
         )
         return argument, is_consensus
 
+    async def _ask_mediation_again(
+        self, messages: list[Any], timeout: float | None
+    ) -> tuple[Any, int | None, str]:
+        """The mediation's single call made once more, as it was sent.
+
+        ``(answer, the bound it was sent with, "")``; ``(None, None, what
+        happened)`` when the spend ceiling refused it or it failed.
+        """
+        from maljan.llm.context_window import output_bound_kwargs
+
+        slot = object()
+        try:
+            bound = self._spend_admits("mediation", messages, slot=slot, deadline_s=timeout)
+        except SpendCeilingStop as stop:
+            self.logger.warning("Mediator not asked once more: %s.", stop)
+            return None, None, "asking once more was refused by the job's spend ceiling"
+        held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
+        try:
+            response = await asyncio.wait_for(
+                retry_on_connection_error(
+                    lambda: self.llm.ainvoke(messages, **held),
+                    what="Mediator asked once more",
+                    log=self.logger,
+                ),
+                timeout=timeout,
+            )
+            self._record_usage(response, call="mediation")
+            return response, (bound if held else None), ""
+        except Exception as exc:  # noqa: BLE001 — a second ask that fails leaves no answer
+            self.logger.warning("Mediator asked once more failed (%s).", type(exc).__name__)
+            return None, None, f"asking once more failed ({type(exc).__name__})"
+        finally:
+            self._spend_release(slot)
+
+    def _built_cap_tokens(self) -> int | None:
+        """The output cap this judge's model was built with, or ``None`` when it cannot be read."""
+        try:
+            cap = self._output_cap().tokens
+        except Exception:  # noqa: BLE001 — a cap that cannot be read is no cap
+            return None
+        return cap if isinstance(cap, int) else None
+
+    @staticmethod
+    def _cut_reason(answer: Any, cap: int | None) -> str | None:
+        """How the output cap cut ``answer``, or ``None`` when it did not."""
+        if answer is None or not _was_cut(answer, cap):
+            return None
+        from maljan.core.truncation_ledger import completion_tokens_of
+
+        produced = completion_tokens_of(answer)
+        tokens = produced if produced is not None else cap
+        if isinstance(tokens, int):
+            return f"the answer was cut at {tokens} tokens with no text"
+        return "the answer was cut at the output cap with no text"
+
+    def _no_answer_reason(
+        self, answer: Any, sent_cap: int | None = None, *, not_asked: bool = False
+    ) -> str:
+        """Why the mediator's text is empty: not asked, cut at the bound it was sent with, or empty.
+
+        ``sent_cap`` is the output bound the call carried; without one the
+        model's built cap is what bound it.
+        """
+        if not_asked:
+            return "the call was not admitted under the job's spend ceiling"
+        cap = sent_cap or self._built_cap_tokens()
+        return self._cut_reason(answer, cap) or "the answer was empty"
+
     async def _ask_for_contradictions_block(
         self, prompt_messages: list[tuple[str, str]], reasoning_text: str
     ) -> str:
@@ -2737,7 +2928,7 @@ class JudgeAgent(BudgetMeter):
             return reasoning_text
         finally:
             self._spend_release(slot)
-        answer = str(getattr(response, "content", "") or "").strip()
+        answer = _answer_text(response).strip()
         return f"{reasoning_text.rstrip()}\n\n{answer}" if answer else reasoning_text
 
     async def give_verdict(
@@ -3480,7 +3671,7 @@ class JudgeAgent(BudgetMeter):
         belong to the round rather than to this method, and because an answer
         that ends in the text fallback has nothing to record.
         """
-        raw = str(getattr(answer, "content", answer))
+        raw = _answer_text(answer)
 
         from maljan.utils.json_cleaner import safe_parse_json
 

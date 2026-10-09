@@ -8167,6 +8167,11 @@ def _collect(parsed: Any, validators: Sequence[Validator]) -> list[Violation]:
     return found
 
 
+def _is_tool_call_block(part: Any) -> bool:
+    """Whether one block of an answer's block list is a tool call."""
+    return isinstance(part, dict) and part.get("type") in ("tool_use", "server_tool_use")
+
+
 def _with_feedback(
     messages: list[Any],
     answer: Any,
@@ -8185,12 +8190,30 @@ def _with_feedback(
     """
     from langchain_core.messages import AIMessage
 
+    from maljan.llm.answer_text import answer_text
     from maljan.pipeline.turns import with_question
 
     content = getattr(answer, "content", None)
     turns = list(messages)
+    # A block list with no text in it (thinking alone, or thinking and a tool
+    # call) holds nothing to correct, and an assistant turn of thinking alone
+    # is not a shape any request here is known to be accepted with: it is left
+    # out like a described answer, and the correction is asked at the end of
+    # the user turn before it.
+    if isinstance(content, list) and not answer_text(content).strip():
+        keep_answer = False
     if keep_answer:
-        turns.append(AIMessage(content=str(content if content is not None else answer)))
+        # A block list (a thinking model's answer on ``ChatAnthropic``) goes back
+        # as it came: its thinking block has to reach the API unchanged, and its
+        # repr would put a signature where the answer was. A tool call in it is
+        # left out, because the correction, not a tool reply, follows it.
+        turns.append(
+            AIMessage(
+                content=[part for part in content if not _is_tool_call_block(part)]
+                if isinstance(content, list)
+                else str(content if content is not None else answer)
+            )
+        )
     return with_question(turns, feedback_text(violations, closing=closing, cards=cards))
 
 
