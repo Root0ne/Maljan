@@ -123,6 +123,35 @@ class TestTheMediatorRecordsNoAnswer:
         assert model.calls == 1
         extract.assert_not_called()
 
+    def test_a_cut_is_measured_against_the_bound_the_call_was_sent_with(self) -> None:
+        # A local server cut at a spend-held bound says ``stop`` with a count
+        # equal to that bound, far below the model's built cap.
+        silent_cut = AIMessage(
+            content="",
+            response_metadata={"finish_reason": "stop"},
+            usage_metadata={"input_tokens": 10, "output_tokens": 512, "total_tokens": 522},
+        )
+        model = _Says(silent_cut)
+        judge = JudgeAgent(llm=model)  # type: ignore[arg-type]
+        with (
+            patch.object(judge, "_spend_admits", return_value=512),
+            patch(
+                "maljan.llm.context_window.output_bound_kwargs",
+                return_value={"max_tokens": 512},
+            ),
+            patch.object(judge, "_built_cap_tokens", return_value=128000),
+        ):
+            argument, _consensus = asyncio.run(
+                judge.mediate(
+                    CLAIMING_STATE["reports"], [], isr_reports=CLAIMING_STATE["isr_reports"]
+                )
+            )
+
+        assert argument.note == mediator_no_answer_note(
+            "the answer was cut at 512 tokens with no text"
+        )
+        assert model.calls == 1
+
     def test_an_empty_answer_then_an_answer_is_mediated(self) -> None:
         (argument, consensus), model, extract = _mediate(
             _empty(), AIMessage(content="CONTRADICTIONS: NONE\nagreement_confidence: 0.9")

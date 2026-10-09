@@ -2411,6 +2411,9 @@ class JudgeAgent(BudgetMeter):
         """
         self.logger.info("Mediating %d expert reports for contradictions...", len(reports))
         answered_by: Any = None
+        # The output bound the answer's call was sent with: what a cut is
+        # measured against. ``None`` reads the model's built cap.
+        answered_cap: int | None = None
         not_asked = False
         fast_answered = False
         needs_tools = self._has_explicit_dissent(isr_reports)
@@ -2550,6 +2553,7 @@ class JudgeAgent(BudgetMeter):
             else:
                 reasoning_text = "" if response is None else answer_text(response.content)
                 answered_by = response
+                answered_cap = fast_bound if fast_held else None
                 not_asked = response is None
                 fast_answered = response is not None
             finally:
@@ -2595,16 +2599,16 @@ class JudgeAgent(BudgetMeter):
         if (
             not reasoning_text.strip()
             and fast_answered
-            and self._cut_reason(answered_by, self._built_cap_tokens()) is None
+            and self._cut_reason(answered_by, answered_cap or self._built_cap_tokens()) is None
         ):
             self.logger.warning("Mediator wrote no answer; asking once more.")
             asked_again = True
-            again = await self._ask_mediation_again(direct_messages, fast_timeout)
+            again, again_cap = await self._ask_mediation_again(direct_messages, fast_timeout)
             if again is not None:
-                answered_by = again
+                answered_by, answered_cap = again, again_cap
                 reasoning_text = answer_text(again.content)
         if not reasoning_text.strip():
-            reason = self._no_answer_reason(answered_by, not_asked=not_asked)
+            reason = self._no_answer_reason(answered_by, answered_cap, not_asked=not_asked)
             if asked_again:
                 reason = f"{reason}, also when asked once more"
             self.logger.warning(
@@ -2741,8 +2745,13 @@ class JudgeAgent(BudgetMeter):
         )
         return argument, is_consensus
 
-    async def _ask_mediation_again(self, messages: list[Any], timeout: float | None) -> Any:
-        """The mediation's single call made once more, as it was sent; ``None`` when not made."""
+    async def _ask_mediation_again(
+        self, messages: list[Any], timeout: float | None
+    ) -> tuple[Any, int | None]:
+        """The mediation's single call made once more, as it was sent, and the bound it was sent with.
+
+        ``(None, None)`` when it was not made or failed.
+        """
         from maljan.llm.context_window import output_bound_kwargs
 
         slot = object()
@@ -2750,7 +2759,7 @@ class JudgeAgent(BudgetMeter):
             bound = self._spend_admits("mediation", messages, slot=slot, deadline_s=timeout)
         except SpendCeilingStop as stop:
             self.logger.warning("Mediator not asked once more: %s.", stop)
-            return None
+            return None, None
         held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
         try:
             response = await asyncio.wait_for(
@@ -2762,10 +2771,10 @@ class JudgeAgent(BudgetMeter):
                 timeout=timeout,
             )
             self._record_usage(response, call="mediation")
-            return response
+            return response, (bound if held else None)
         except Exception as exc:  # noqa: BLE001 — a second ask that fails leaves no answer
             self.logger.warning("Mediator asked once more failed (%s).", type(exc).__name__)
-            return None
+            return None, None
         finally:
             self._spend_release(slot)
 
@@ -2790,11 +2799,18 @@ class JudgeAgent(BudgetMeter):
             return f"the answer was cut at {tokens} tokens with no text"
         return "the answer was cut at the output cap with no text"
 
-    def _no_answer_reason(self, answer: Any, *, not_asked: bool = False) -> str:
-        """Why the mediator's text is empty: not asked, cut at the output cap, or empty."""
+    def _no_answer_reason(
+        self, answer: Any, sent_cap: int | None = None, *, not_asked: bool = False
+    ) -> str:
+        """Why the mediator's text is empty: not asked, cut at the bound it was sent with, or empty.
+
+        ``sent_cap`` is the output bound the call carried; without one the
+        model's built cap is what bound it.
+        """
         if not_asked:
             return "the call was not admitted under the job's spend ceiling"
-        return self._cut_reason(answer, self._built_cap_tokens()) or "the answer was empty"
+        cap = sent_cap or self._built_cap_tokens()
+        return self._cut_reason(answer, cap) or "the answer was empty"
 
     async def _ask_for_contradictions_block(
         self, prompt_messages: list[tuple[str, str]], reasoning_text: str
