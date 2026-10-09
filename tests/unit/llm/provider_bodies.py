@@ -139,10 +139,25 @@ def bodies() -> dict[str, Any]:
         "standard": lambda: _openai(None, "auto"),
         "ollama": _ollama,
     }
+    from maljan.agents.base_agent import frame_messages
+
+    # A tool loop's turn as the analysts' loop sends it: the run-state block
+    # on its newest turn, and a note on that turn's metadata (which the
+    # Anthropic provider reads and no other client sends).
+    framed = frame_messages(history[:4], run_state="sample: c\nbudget remaining: 3 model turns")
+    framed[-1] = framed[-1].model_copy(
+        update={
+            "response_metadata": {
+                **(framed[-1].response_metadata or {}),
+                "maljan_tool_loop_turn": True,
+            }
+        }
+    )
     for name, build in builders.items():
         model = build()
         out[f"{name}/plain"] = _payload(model, history)
         out[f"{name}/tools"] = _bound(model, history)
+        out[f"{name}/framed"] = _bound(model, framed)
         try:
             out[f"{name}/structured"] = _structured(model, history[:2])
         except Exception as exc:  # noqa: BLE001 — a shape this helper cannot unwrap is named

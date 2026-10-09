@@ -1,4 +1,62 @@
 {
+ "deepseek/framed": {
+  "extra_body": {
+   "max_tokens": 4096
+  },
+  "max_completion_tokens": 4096,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   },
+   {
+    "content": null,
+    "reasoning_content": "first I look",
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"a\"}",
+       "name": "lookup"
+      },
+      "id": "call_0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "answer for a\n\n=== RUN STATE (derived from the ledger; regenerated each turn) ===\nsample: c\nbudget remaining: 3 model turns\n=== END RUN STATE ===",
+    "role": "tool",
+    "tool_call_id": "call_0"
+   }
+  ],
+  "model": "m",
+  "reasoning_effort": "max",
+  "stream": false,
+  "temperature": 0.1,
+  "tools": [
+   {
+    "function": {
+     "description": "Look it up.",
+     "name": "lookup",
+     "parameters": {
+      "properties": {
+       "what": {
+        "default": "",
+        "type": "string"
+       }
+      },
+      "type": "object"
+     }
+    },
+    "type": "function"
+   }
+  ]
+ },
  "deepseek/plain": {
   "extra_body": {
    "max_tokens": 4096
@@ -166,6 +224,68 @@
   ],
   "model": "m",
   "reasoning_effort": "max",
+  "stream": false,
+  "temperature": 0.1,
+  "tools": [
+   {
+    "function": {
+     "description": "Look it up.",
+     "name": "lookup",
+     "parameters": {
+      "properties": {
+       "what": {
+        "default": "",
+        "type": "string"
+       }
+      },
+      "type": "object"
+     }
+    },
+    "type": "function"
+   }
+  ]
+ },
+ "llama/framed": {
+  "extra_body": {
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "max_tokens": 4096,
+   "n_predict": 4096,
+   "repeat_penalty": 1.1,
+   "repetition_penalty": 1.1
+  },
+  "max_completion_tokens": 4096,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"a\"}",
+       "name": "lookup"
+      },
+      "id": "call_0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "answer for a\n\n=== RUN STATE (derived from the ledger; regenerated each turn) ===\nsample: c\nbudget remaining: 3 model turns\n=== END RUN STATE ===",
+    "role": "tool",
+    "tool_call_id": "call_0"
+   }
+  ],
+  "model": "m",
   "stream": false,
   "temperature": 0.1,
   "tools": [
@@ -389,6 +509,74 @@
    }
   ]
  },
+ "ollama/framed": {
+  "format": null,
+  "keep_alive": "30m",
+  "logprobs": null,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "images": [],
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "images": [],
+    "role": "user"
+   },
+   {
+    "content": "",
+    "images": [],
+    "role": "assistant",
+    "thinking": "first I look",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": {
+        "what": "a"
+       },
+       "name": "lookup"
+      },
+      "id": "call_0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "answer for a\n\n=== RUN STATE (derived from the ledger; regenerated each turn) ===\nsample: c\nbudget remaining: 3 model turns\n=== END RUN STATE ===",
+    "images": [],
+    "role": "tool",
+    "tool_call_id": "call_0"
+   }
+  ],
+  "model": "qwen3:8b",
+  "options": {
+   "num_ctx": 32768,
+   "num_predict": 4096,
+   "temperature": 0.1
+  },
+  "stream": true,
+  "think": false,
+  "tools": [
+   {
+    "function": {
+     "description": "Look it up.",
+     "name": "lookup",
+     "parameters": {
+      "properties": {
+       "what": {
+        "default": "",
+        "type": "string"
+       }
+      },
+      "type": "object"
+     }
+    },
+    "type": "function"
+   }
+  ],
+  "top_logprobs": null
+ },
  "ollama/plain": {
   "format": null,
   "keep_alive": "30m",
@@ -606,6 +794,59 @@
    }
   ],
   "top_logprobs": null
+ },
+ "standard/framed": {
+  "max_completion_tokens": 4096,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"a\"}",
+       "name": "lookup"
+      },
+      "id": "call_0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "answer for a\n\n=== RUN STATE (derived from the ledger; regenerated each turn) ===\nsample: c\nbudget remaining: 3 model turns\n=== END RUN STATE ===",
+    "role": "tool",
+    "tool_call_id": "call_0"
+   }
+  ],
+  "model": "m",
+  "stream": false,
+  "temperature": 0.1,
+  "tools": [
+   {
+    "function": {
+     "description": "Look it up.",
+     "name": "lookup",
+     "parameters": {
+      "properties": {
+       "what": {
+        "default": "",
+        "type": "string"
+       }
+      },
+      "type": "object"
+     }
+    },
+    "type": "function"
+   }
+  ]
  },
  "standard/plain": {
   "max_completion_tokens": 4096,
