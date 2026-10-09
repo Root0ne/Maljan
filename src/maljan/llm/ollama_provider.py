@@ -196,8 +196,10 @@ def _bind_async_client_per_loop(built: Any) -> None:
     from maljan.llm.loop_clients import layout_not_recognised, loop_bound_async_client
 
     holder: Any = getattr(built, "_async_client", None)
+    import httpx
+
     original = getattr(holder, "_client", None)
-    if original is None:
+    if not isinstance(original, httpx.AsyncClient):
         layout_not_recognised(
             "ollama", "ChatOllama holds no ollama.AsyncClient with an httpx client"
         )
