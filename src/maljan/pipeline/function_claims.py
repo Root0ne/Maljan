@@ -1448,5 +1448,7 @@ def _question(
             f"claim {number} ({safe_finding_value(sentence)!r}) names {named} for {head}; "
             f"{sources}; {'; '.join(holds)}. {FUNCTION_QUESTION_ASK}"
         ),
-        path=f"claims[{index}]",
+        # The claim block, as every other check's path names it: the place
+        # the question's "claim N" names, counted from 0.
+        path=f"claims[{number - 1}]",
     )

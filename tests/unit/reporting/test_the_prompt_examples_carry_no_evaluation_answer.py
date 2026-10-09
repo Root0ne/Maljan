@@ -172,6 +172,7 @@ from maljan.pipeline.validation import (
     ungrounded_capabilities,
     unpublished_value_violations,
     validate_verdict_bundle,
+    whole_answer_after_retry_question,
 )
 from maljan.providers.base import STATIC_EVIDENCE_INSTRUCTIONS, absent_provider_fragment
 from maljan.providers.static import r2 as _r2
@@ -1359,7 +1360,11 @@ PROMPTS: dict[str, str] = {
                     ("0x40",),
                 ),
             ),
+            findings=(Finding(title="The file opens a window", detail="It names it."),),
         )
+    ),
+    "analyst question for the whole answer after a retry not placed by claim number": (
+        whole_answer_after_retry_question("the retry wrote claim 2 twice")
     ),
     "composer question about table rows no cited entry holds": " ".join(
         v.message

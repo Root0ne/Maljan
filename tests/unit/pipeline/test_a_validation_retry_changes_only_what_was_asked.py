@@ -1,11 +1,13 @@
-"""A validation retry is merged into the answer it fixes by claim number, and changes only that.
+"""A validation retry is merged into the answer it fixes by claim block, and changes only that.
 
-A claim the retry writes again under its number replaces the earlier one, a
-``WITHDRAW CLAIM`` line takes one out, a new number is added and every other
-claim stays as written. A claim the question was about that the retry neither
-wrote again nor withdrew stays too, and is the one item left to ask about.
-Where the numbers do not decide which claim is which, nothing is merged and
-the reason is given. The merge chooses versions; it never writes a word.
+A claim the retry writes again under its number replaces that block, a
+``WITHDRAW CLAIM`` line takes one out with its reason, a new number is added
+and every other claim stays as written. A claim a question was about that the
+retry neither wrote again nor withdrew stays too, and is left to ask about, as
+is a finding left unwritten beside a new title. The merged answer is the first
+answer with those changes: its disputes stay. Where the numbers do not place
+the retry beyond doubt, nothing is merged and the reason is given. The merge
+chooses versions; it never writes a word.
 
 Every address, name and sentence here is made up for the test.
 """
@@ -19,7 +21,7 @@ from typing import Any
 
 from maljan.agents.base_agent import read_claim_blocks
 from maljan.pipeline.retry_merge import (
-    flagged_claim_indexes,
+    flagged_blocks,
     merge_retry,
     numbering_unsettled,
     read_withdrawals,
@@ -55,59 +57,103 @@ MUTEX = "0x401000 creates the mutex Global\\qx7 before anything else."
 BEACON = "0x402000 beacons every 600 seconds to the configured host."
 CRYPTO = "0x403000 decrypts the configuration with the key 0x5a."
 PERSIST = "0x404000 writes the Run key value qx7svc."
+# Four blocks, the third listing two techniques: five claims.
 FIRST = (
     _block(MUTEX)
     + _block(BEACON, "T1071.001")
     + _block(CRYPTO, "T1027, T1140")
     + _block(PERSIST, "T1547.001")
 )
+FIXED_BEACON = "0x402000 beacons every 600 seconds over HTTP to the configured host."
 
 
 class TestTheRetryChangesWhatItWrites:
     def test_a_claim_written_again_replaces_the_earlier_one_and_the_rest_stay(self) -> None:
         first = _isr(FIRST)
-        fixed = "0x402000 beacons every 600 seconds over HTTP to the configured host."
-        answer = _block(fixed, "T1071.001", number=2)
-        retried = _isr(answer)
+        answer = _block(FIXED_BEACON, "T1071.001", number=2)
 
-        merge = merge_retry(first, retried, answer, flagged=[1])
+        merge = merge_retry(first, _isr(answer), answer, asked=[1])
 
         assert merge.merged is not None, merge.why
-        assert [c.claim for c in merge.merged.claims] == [MUTEX, fixed, CRYPTO, CRYPTO, PERSIST]
+        assert [c.claim for c in merge.merged.claims] == [
+            MUTEX,
+            FIXED_BEACON,
+            CRYPTO,
+            CRYPTO,
+            PERSIST,
+        ]
         assert merge.replaced == ("2",) and merge.unchanged == 3
         assert merge.unplaced == ()
 
     def test_the_merge_keeps_each_claim_as_the_answer_that_wrote_it(self) -> None:
         first = _isr(FIRST)
-        answer = _block("0x402000 beacons every 600 seconds over HTTP.", "T1071.001", number=2)
+        answer = _block(FIXED_BEACON, "T1071.001", number=2)
         retried = _isr(answer)
 
-        merged = merge_retry(first, retried, answer, flagged=[1]).merged
+        merged = merge_retry(first, retried, answer, asked=[1]).merged
 
         assert merged is not None
         assert merged.claims[0] is first.claims[0]
         assert merged.claims[1] is retried.claims[0]
         assert merged.claims[4] is first.claims[4]
 
+    def test_the_merged_answer_keeps_the_first_answer_s_disputes(self) -> None:
+        first = _isr(FIRST)
+        first.dissent_items = ["The dynamic analyst's beacon interval is not in its capture."]
+        answer = _block(FIXED_BEACON, "T1071.001", number=2)
+
+        merged = merge_retry(first, _isr(answer), answer, asked=[1]).merged
+
+        assert merged is not None
+        assert merged.dissent_items == first.dissent_items
+        assert merged.answer_text == first.answer_text
+
+    def test_headings_under_disputes_stand_as_the_answer_wrote_them_unless_moved(self) -> None:
+        first = _isr(FIRST)
+        first.note_claims_under_disputes(1)
+        fix = _block(FIXED_BEACON, "T1071.001", number=2)
+        moved = _block("0x405000 is the peer's loader, read here.", "NONE", number=5)
+
+        kept = merge_retry(first, _isr(fix), fix, asked=[1]).merged
+        written = merge_retry(first, _isr(moved), moved).merged
+
+        assert kept is not None and kept.claims_under_disputes == 1
+        assert written is not None and written.claims_under_disputes == 0
+
     def test_a_block_of_several_techniques_is_replaced_as_one(self) -> None:
         first = _isr(FIRST)
         answer = _block(CRYPTO, "T1140", number=3)
-        retried = _isr(answer)
 
-        merged = merge_retry(first, retried, answer, flagged=[2]).merged
+        merged = merge_retry(first, _isr(answer), answer, asked=[2]).merged
 
         assert merged is not None
         assert [c.technique_id for c in merged.claims] == [None, "T1071.001", "T1140", "T1547.001"]
 
-    def test_a_withdrawn_claim_is_taken_out(self) -> None:
+    def test_a_withdrawn_claim_is_taken_out_with_its_reason(self) -> None:
         first = _isr(FIRST)
         answer = "WITHDRAW CLAIM 4: the Run key is not in the evidence.\n"
 
-        merge = merge_retry(first, _isr(answer), answer, flagged=[4])
+        merge = merge_retry(first, _isr(answer), answer, asked=[3])
 
         assert merge.merged is not None, merge.why
         assert PERSIST not in [c.claim for c in merge.merged.claims]
-        assert merge.withdrawn == ("4",) and merge.unplaced == ()
+        ((kind, item, reason),) = merge.withdrawn
+        assert (kind, item, reason) == (
+            "claim",
+            first.claims[4],
+            "the Run key is not in the evidence.",
+        )
+        assert merge.unplaced == ()
+
+    def test_a_withdrawn_block_takes_every_claim_it_read(self) -> None:
+        first = _isr(FIRST)
+        answer = "withdraw claims 2-3 - superseded by the decoder claim\n"
+
+        merge = merge_retry(first, _isr(answer), answer)
+
+        assert merge.merged is not None, merge.why
+        assert [c.claim for c in merge.merged.claims] == [MUTEX, PERSIST]
+        assert [item for _kind, item, _reason in merge.withdrawn] == first.claims[1:4]
 
     def test_a_new_number_is_added_after_the_claims_it_follows(self) -> None:
         first = _isr(FIRST)
@@ -119,32 +165,46 @@ class TestTheRetryChangesWhatItWrites:
         assert merge.merged is not None, merge.why
         assert merge.merged.claims[-1].claim == new and merge.added == ("5",)
 
-    def test_an_unflagged_claim_the_retry_does_not_mention_is_no_drop(self) -> None:
+    def test_a_claim_no_question_was_about_that_the_retry_leaves_is_no_drop(self) -> None:
         first = _isr(FIRST)
-        answer = _block("0x402000 beacons every 600 seconds over HTTP.", "T1071.001", number=2)
+        answer = _block(FIXED_BEACON, "T1071.001", number=2)
 
-        merge = merge_retry(first, _isr(answer), answer, flagged=[1])
+        merge = merge_retry(first, _isr(answer), answer, asked=[1])
 
         assert merge.merged is not None
         assert merge.unplaced == ()
         assert {c.claim for c in merge.merged.claims} >= {MUTEX, CRYPTO, PERSIST}
 
-    def test_a_flagged_claim_left_as_it_was_stays_and_is_the_one_item_left(self) -> None:
+    def test_a_claim_asked_about_and_left_stays_and_is_the_one_item_left(self) -> None:
         first = _isr(FIRST)
-        answer = _block("0x402000 beacons every 600 seconds over HTTP.", "T1071.001", number=2)
+        answer = _block(FIXED_BEACON, "T1071.001", number=2)
 
-        merge = merge_retry(first, _isr(answer), answer, flagged=[1, 4], asked_about=["T1547.001"])
+        merge = merge_retry(first, _isr(answer), answer, asked=[1, 3], asked_about=["T1547.001"])
 
         assert merge.merged is not None
         assert PERSIST in [c.claim for c in merge.merged.claims]
-        ((claim, missing),) = merge.unplaced
-        assert claim is first.claims[4]
+        ((kind, claim, missing),) = merge.unplaced
+        assert kind == "claim" and claim is first.claims[4]
         assert "T1547.001" not in missing and "0x404000" in missing
+
+    def test_the_block_a_flag_names_after_a_block_of_two_techniques_is_its_own(self) -> None:
+        first = _isr(FIRST)
+        flags = [
+            Violation(code="attck.claim_does_not_describe", message="m", path="static.claims[1]"),
+            Violation(code="isr.ungrounded_technique", message="m", path="static.claims[3]"),
+        ]
+        answer = _block(FIXED_BEACON, "T1071.001", number=2)
+
+        merge = merge_retry(first, _isr(answer), answer, asked=flagged_blocks(flags))
+
+        assert merge.merged is not None and merge.why == ""
+        ((_kind, claim, _missing),) = merge.unplaced
+        assert claim.claim == PERSIST
 
 
 class TestFindingsByTitle:
-    def test_findings_are_replaced_withdrawn_added_and_kept_by_title(self) -> None:
-        first = _isr(
+    def _first(self) -> AgentISR:
+        return _isr(
             FIRST,
             [
                 Finding(title="Mutex guard", detail="first"),
@@ -152,14 +212,11 @@ class TestFindingsByTitle:
                 Finding(title="Encrypted configuration", detail="first"),
             ],
         )
-        answer = "WITHDRAW FINDING: Run key persistence\n"
-        retried = _isr(
-            answer,
-            [
-                Finding(title="mutex  GUARD", detail="retry"),
-                Finding(title="Self deletion", detail="retry"),
-            ],
-        )
+
+    def test_findings_are_replaced_withdrawn_and_kept_by_title(self) -> None:
+        first = self._first()
+        answer = 'WITHDRAW FINDING "Run key persistence": not in the evidence\n'
+        retried = _isr(answer, [Finding(title="mutex  GUARD", detail="retry")])
 
         merge = merge_retry(first, retried, answer)
 
@@ -167,17 +224,28 @@ class TestFindingsByTitle:
         assert [(f.title, f.detail) for f in merge.merged.findings] == [
             ("mutex  GUARD", "retry"),
             ("Encrypted configuration", "first"),
-            ("Self deletion", "retry"),
         ]
-        assert (merge.findings_replaced, merge.findings_withdrawn, merge.findings_added) == (
-            1,
-            1,
-            1,
-        )
-        assert len(merge.merged.claims) == len(first.claims)
+        ((kind, item, reason),) = merge.withdrawn
+        assert kind == "finding" and item is first.findings[1] and reason == "not in the evidence"
+        assert merge.unplaced == ()
+
+    def test_a_finding_left_beside_a_new_title_is_left_to_ask_about(self) -> None:
+        first = self._first()
+        answer = "Findings rewritten."
+        retried = _isr(answer, [Finding(title="Configuration encrypted at rest", detail="retry")])
+
+        merge = merge_retry(first, retried, answer)
+
+        assert merge.merged is not None, merge.why
+        assert merge.findings_added == 1
+        assert [item.title for kind, item, _m in merge.unplaced if kind == "finding"] == [
+            "Mutex guard",
+            "Run key persistence",
+            "Encrypted configuration",
+        ]
 
 
-class TestWhereTheNumbersDoNotDecide:
+class TestWhereTheNumbersDoNotPlaceTheRetry:
     def test_a_retry_block_without_a_number_merges_nothing(self) -> None:
         answer = _block("0x402000 beacons over HTTP.", "T1071.001")
 
@@ -201,24 +269,61 @@ class TestWhereTheNumbersDoNotDecide:
         assert merge.merged is None
         assert "claim 3's sentence as claim 2" in merge.why
 
+    def test_a_one_claim_retry_numbered_from_one_merges_nothing(self) -> None:
+        first = _isr(
+            _block("The loader checks for a debugger with IsDebuggerPresent.", "T1622")
+            + _block(BEACON, "T1071.001")
+            + _block("The loader injects into explorer.exe.", "T1055")
+        )
+        fix = "The loader writes its payload into explorer.exe with WriteProcessMemory."
+        answer = _block(fix, "T1055", number=1)
+
+        merge = merge_retry(first, _isr(answer), answer, asked=[2])
+
+        assert merge.merged is None
+        assert "claim 1, which no question was about" in merge.why
+
+    def test_a_claim_no_question_was_about_written_with_a_shared_value_beside_a_left_one(
+        self,
+    ) -> None:
+        answer = _block("0x401000 creates the mutex Global\\qx8.", number=1)
+
+        merge = merge_retry(_isr(FIRST), _isr(answer), answer, asked=[3])
+
+        assert merge.merged is None
+        assert "left claim 4" in merge.why
+
     def test_a_claim_sharing_no_value_with_the_one_it_replaces_merges_nothing(self) -> None:
         answer = _block("0x409999 reads the keyboard state 25 times.", number=1)
 
         merge = merge_retry(_isr(FIRST), _isr(answer), answer)
 
-        assert merge.merged is None and "states none of the values" in merge.why
+        assert merge.merged is None and "no value in common" in merge.why
 
     def test_a_withdrawal_of_a_claim_the_answer_has_not_merges_nothing(self) -> None:
         answer = "WITHDRAW CLAIM 9: gone.\n"
 
-        assert merge_retry(_isr(FIRST), _isr(answer), answer).merged is None
-
-    def test_a_claim_both_written_again_and_withdrawn_merges_nothing(self) -> None:
-        answer = _block(BEACON, number=2) + "WITHDRAW CLAIM 2: no longer held.\n"
-
         merge = merge_retry(_isr(FIRST), _isr(answer), answer)
 
+        assert merge.merged is None and "claim 9" in merge.why
+
+    def test_a_withdraw_line_not_read_exactly_merges_nothing(self) -> None:
+        answer = _block(FIXED_BEACON, number=2) + "Withdraw the mutex claim, it repeats.\n"
+
+        merge = merge_retry(_isr(FIRST), _isr(answer), answer, asked=[1])
+
+        assert merge.merged is None
+        assert merge.why == "a WITHDRAW line of the retry could not be read exactly"
+
+    def test_what_a_retry_not_merged_withdrew_is_still_named(self) -> None:
+        first = _isr(FIRST)
+        answer = _block("0x402000 beacons.", number=2) + "WITHDRAW CLAIM 4: not held.\n"
+        answer += "WITHDRAW CLAIM 2: superseded.\n"
+
+        merge = merge_retry(first, _isr(answer), answer)
+
         assert merge.merged is None and "both wrote claim 2" in merge.why
+        assert [item for _k, item, _r in merge.withdrawn] == [first.claims[1], first.claims[4]]
 
     def test_a_retry_with_nothing_to_read_merges_nothing(self) -> None:
         answer = "I have reviewed the claims."
@@ -235,29 +340,42 @@ class TestWhereTheNumbersDoNotDecide:
 
         assert merge.merged is None and merge.why.startswith("in the retry,")
 
-    def test_a_first_answer_numbered_out_of_its_order_is_not_merged(self) -> None:
+
+class TestTheAnswerBeingFixed:
+    def test_numbered_out_of_its_order_it_is_not_merged(self) -> None:
         first = _isr(_block(MUTEX, number=1) + _block(BEACON, number=3))
 
         assert numbering_unsettled(first) == (
             "the answer being fixed numbered a claim 3 where it is claim 2"
         )
 
-    def test_a_first_answer_numbered_in_its_order_is_merged(self) -> None:
+    def test_numbered_in_its_order_it_is_merged(self) -> None:
         first = _isr(_block(MUTEX, number=1) + _block(BEACON, number=2))
 
         assert numbering_unsettled(first) == ""
 
+    def test_with_no_claim_it_is_not_merged(self) -> None:
+        assert numbering_unsettled(_isr("prose")) == "the answer being fixed has no claim"
+
+    def test_with_a_block_left_unread_it_is_not_merged(self) -> None:
+        first = _isr(FIRST + "CLAIM: 0x406000 reads the clock.\nEVIDENCE: [ev_0001]\n")
+
+        assert numbering_unsettled(first).startswith("in the answer being fixed,")
+
     def test_answers_read_apart_and_put_together_are_not_merged(self) -> None:
         one, two = _isr(_block(MUTEX)), _isr(_block(BEACON) + _block(CRYPTO))
         together = AgentISR(agent_id="static", domain="static", claims=one.claims + two.claims)
+        together.note_answer_text("written")
 
-        assert numbering_unsettled(together) == "two claim blocks were read under one place"
+        assert numbering_unsettled(together) == (
+            "the answer's claim blocks are not one answer's blocks in order"
+        )
 
-    def test_answers_put_together_that_repeat_a_place_are_not_merged(self) -> None:
-        one, two = _isr(_block(MUTEX) + _block(PERSIST)), _isr(_block(BEACON) + _block(CRYPTO))
-        together = AgentISR(agent_id="static", domain="static", claims=one.claims + two.claims)
+    def test_an_answer_with_claims_set_aside_is_not_merged(self) -> None:
+        first = _isr(FIRST)
+        first.note_gate_removed(["0x407000 talks to a host the evidence never names."])
 
-        assert numbering_unsettled(together) == "the answer being fixed wrote claim 1 twice"
+        assert numbering_unsettled(first).startswith("claims of the answer being fixed")
 
     def test_claims_built_without_the_reader_are_not_merged(self) -> None:
         first = _isr(FIRST)
@@ -266,16 +384,17 @@ class TestWhereTheNumbersDoNotDecide:
             domain="static",
             claims=[c.model_copy() for c in first.claims] + [ClaimEvidence(**_FIELDS)],
         )
+        built.note_answer_text("written")
 
         assert numbering_unsettled(built) == "a claim was not read from a claim block"
 
-    def test_a_first_answer_with_no_claim_is_not_merged(self) -> None:
-        assert numbering_unsettled(_isr("prose")) == "the answer being fixed has no claim"
+    def test_an_answer_not_written_as_one_is_not_merged(self) -> None:
+        first = _isr(FIRST)
+        first.note_answer_text("")
 
-    def test_a_first_answer_with_a_block_left_unread_is_not_merged(self) -> None:
-        first = _isr(FIRST + "CLAIM: 0x406000 reads the clock.\nEVIDENCE: [ev_0001]\n")
-
-        assert numbering_unsettled(first).startswith("in the answer being fixed,")
+        assert numbering_unsettled(first) == (
+            "the answer being fixed was not written as one answer"
+        )
 
 
 class TestTheLinesItReads:
@@ -283,15 +402,33 @@ class TestTheLinesItReads:
         text = (
             "WITHDRAW CLAIM 3: not held.\n"
             "- **WITHDRAW CLAIMS 05, 7 and 9**: superseded.\n"
-            "WITHDRAW FINDING: Run key persistence\n"
-            "I withdraw claim 11 because it repeats claim 2.\n"
-            "withdraw claim 12: lower case is prose.\n"
+            "withdraw claims 10-12 because the decoder claim covers them\n"
+            "Withdraw claim 14 to 15.\n"
+            'WITHDRAW FINDING "Run key persistence": not held\n'
+            "WITHDRAW FINDING: Mutex guard\n"
         )
 
         read = read_withdrawals(text)
 
-        assert read.claims == ("3", "5", "7", "9")
-        assert read.findings == ("run key persistence",)
+        assert read.unread == 0
+        assert [(low, high) for low, high, _r in read.claims] == [
+            ("3", "3"),
+            ("5", "5"),
+            ("7", "7"),
+            ("9", "9"),
+            ("10", "12"),
+            ("14", "15"),
+        ]
+        assert read.claims[4][2] == "the decoder claim covers them"
+        assert [(t, r) for t, _w, r in read.findings] == [
+            ("run key persistence", "not held"),
+            ("mutex guard", ""),
+        ]
+
+    def test_a_withdraw_line_that_is_not_one_of_its_forms_is_counted_unread(self) -> None:
+        read = read_withdrawals("Withdraw the claim about the mutex.\nI withdraw claim 11.\n")
+
+        assert read.unread == 1 and read.claims == ()
 
     def test_a_withdraw_line_is_not_read_into_the_claim_before_it(self) -> None:
         text = _block(BEACON, number=2) + "WITHDRAW CLAIM 4: not held.\n"
@@ -300,7 +437,7 @@ class TestTheLinesItReads:
 
         assert "WITHDRAW" not in claim.claim + claim.evidence_ref
 
-    def test_a_flag_names_its_claim_by_its_path_once(self) -> None:
+    def test_a_flag_names_its_block_by_its_path_once(self) -> None:
         flags = [
             Violation(code="a", message="m", path="static.claims[5].T1041"),
             Violation(code="b", message="m", path="claims[5]"),
@@ -308,7 +445,7 @@ class TestTheLinesItReads:
             Violation(code="d", message="m"),
         ]
 
-        assert flagged_claim_indexes(flags) == [5, 2]
+        assert flagged_blocks(flags) == [5, 2]
 
 
 def _answers(count: int) -> tuple[AgentISR, AgentISR, str]:
@@ -338,43 +475,40 @@ def _peak(call: Callable[[], Any]) -> int:
         tracemalloc.stop()
 
 
+def _run(answers: tuple[AgentISR, AgentISR, str]) -> Callable[[], Any]:
+    first, retried, answer = answers
+    return lambda: merge_retry(first, retried, answer, asked=range(len(first.claims)))
+
+
 class TestAHostileRetryCostsALinearMerge:
     def test_a_retry_of_ten_thousand_claims_is_merged(self) -> None:
         first, retried, answer = _answers(10_000)
 
-        merge = merge_retry(first, retried, answer, flagged=range(10_000))
+        merge = merge_retry(first, retried, answer, asked=range(10_000))
 
         assert merge.merged is not None, merge.why
         assert len(merge.merged.claims) == 10_000 and merge.unplaced == ()
 
     def test_ten_times_the_claims_cost_at_most_ten_times_the_time(self) -> None:
-        small = _answers(1_000)
-        large = _answers(10_000)
-
-        def run(answers: tuple[AgentISR, AgentISR, str]) -> Callable[[], Any]:
-            first, retried, answer = answers
-            return lambda: merge_retry(first, retried, answer, flagged=range(len(first.claims)))
-
-        assert _seconds(run(large)) <= 10 * _seconds(run(small)) * 1.5 + 0.1
+        assert _seconds(_run(_answers(10_000))) <= 10 * _seconds(_run(_answers(1_000))) * 1.5 + 0.1
 
     def test_ten_times_the_claims_hold_at_most_ten_times_the_memory(self) -> None:
-        small = _answers(300)
-        large = _answers(3_000)
+        assert _peak(_run(_answers(3_000))) <= 10 * _peak(_run(_answers(300))) * 1.5 + 65_536
 
-        def run(answers: tuple[AgentISR, AgentISR, str]) -> Callable[[], Any]:
-            first, retried, answer = answers
-            return lambda: merge_retry(first, retried, answer, flagged=range(len(first.claims)))
+    def test_ten_thousand_withdrawn_ranges_cost_a_linear_read(self) -> None:
+        def run(count: int) -> Callable[[], Any]:
+            first = _answers(count)[0]
+            answer = "".join(f"WITHDRAW CLAIMS 1-{count}: all superseded.\n" for _ in range(count))
+            withdrawn = _isr(answer)
+            return lambda: merge_retry(first, withdrawn, answer, asked=range(count))
 
-        assert _peak(run(large)) <= 10 * _peak(run(small)) * 1.5 + 65_536
+        assert _seconds(run(10_000)) <= 10 * _seconds(run(1_000)) * 1.5 + 0.1
 
     def test_ten_thousand_unplaced_claims_cost_a_linear_search(self) -> None:
-        small = _answers(1_000)
-        large = _answers(10_000)
-
-        def run(answers: tuple[AgentISR, AgentISR, str]) -> Callable[[], Any]:
-            first, _retried, _answer = answers
+        def run(count: int) -> Callable[[], Any]:
+            first = _answers(count)[0]
             answer = "WITHDRAW CLAIM 1: gone.\n"
             withdrawn = _isr(answer)
-            return lambda: merge_retry(first, withdrawn, answer, flagged=range(len(first.claims)))
+            return lambda: merge_retry(first, withdrawn, answer, asked=range(count))
 
-        assert _seconds(run(large)) <= 10 * _seconds(run(small)) * 1.5 + 0.1
+        assert _seconds(run(10_000)) <= 10 * _seconds(run(1_000)) * 1.5 + 0.1

@@ -155,6 +155,7 @@ VALIDATION_ANSWER_KEYS: tuple[str, ...] = (
     "unparsed_answers",
     "discarded_retry_answers",
     "retry_drops",
+    "retry_withdrawals",
 )
 
 
@@ -1163,6 +1164,11 @@ class RunSummary:
                 from maljan.pipeline.validation import retry_drop_sentences
 
                 lines += [f"- {sentence}" for sentence in retry_drop_sentences(drops)]
+                lines.append("")
+            withdrawn = v.answers.get("retry_withdrawals") or []
+            if withdrawn:
+                lines += ["**Items a validation retry withdrew:**", ""]
+                lines += [f"- {row.get('sentence', '')}" for row in withdrawn]
                 lines.append("")
             if v.unresolved:
                 lines.append("**Still wrong after the retry:**")

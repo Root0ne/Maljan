@@ -1874,6 +1874,14 @@ class MarkdownRenderer:
 
                 lines.extend(_item(ctx.plain(sentence)) for sentence in retry_drop_sentences(drops))
                 lines.append("")
+            # What a retry withdrew with a WITHDRAW line, with its reason.
+            withdrawn = [
+                row for row in validation.get("retry_withdrawals") or [] if isinstance(row, dict)
+            ]
+            if withdrawn:
+                lines.extend(["**Items a validation retry withdrew:**", ""])
+                lines.extend(_item(ctx.plain(str(row.get("sentence") or ""))) for row in withdrawn)
+                lines.append("")
         if exports:
             lines.extend(["**Export decisions:**", ""])
             for row in exports:

@@ -272,7 +272,7 @@ class TestTheRetryIsShownTheAnswerAsWritten:
             "TECHNIQUE:",
             "maljan-findings",
             "WITHDRAW CLAIM",
-            "WITHDRAW FINDING:",
+            'WITHDRAW FINDING "',
         ):
             assert word in closing
 
@@ -299,6 +299,9 @@ class TestTheRetryIsShownTheAnswerAsWritten:
             "merge": {
                 "merged": False,
                 "why": "the retry wrote no claim block, finding or withdrawal",
+                "withdrawn_claims": 0,
+                "withdrawn_findings": 0,
+                "whole_answer_asked": True,
             },
         }
 

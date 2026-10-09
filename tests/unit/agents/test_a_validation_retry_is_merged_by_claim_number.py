@@ -111,11 +111,11 @@ class TestTheRetryChangesOnlyWhatItWrites:
         assert record["merge"] == {
             "merged": True,
             "replaced": ["1"],
-            "withdrawn": [],
             "added": [],
             "unchanged_blocks": 31,
+            "withdrawn_claims": 0,
             "findings_replaced": 0,
-            "findings_withdrawn": 0,
+            "withdrawn_findings": 0,
             "findings_added": 0,
             "unplaced": 0,
         }
@@ -187,8 +187,14 @@ class TestAClaimAskedAboutAndLeftIsAskedOnce:
             "missing",
             "state",
             "reason",
+            "merged",
             "sentence",
         }
+        assert row["merged"] == "true"
+        assert (
+            "merged validation retry neither wrote again nor withdrew the claim"
+            in (row["sentence"])
+        )
 
 
 class TestARetryTheNumbersDoNotPlace:
@@ -207,6 +213,9 @@ class TestARetryTheNumbersDoNotPlace:
         assert record["merge"] == {
             "merged": False,
             "why": "the retry wrote a claim block without its number",
+            "withdrawn_claims": 0,
+            "withdrawn_findings": 0,
+            "whole_answer_asked": False,
         }
 
     def test_an_answer_asked_for_whole_is_asked_as_before(self) -> None:
@@ -229,3 +238,177 @@ class TestARetryTheNumbersDoNotPlace:
         _check(analyst, first)
 
         assert analyst.questions[0].rstrip().endswith(ANALYST_FEEDBACK_CLOSING)
+
+
+def _fenced(*titles: str) -> str:
+    """A findings block carrying one finding per title."""
+    import json
+
+    body = json.dumps({"findings": [{"title": t, "technique_ids": ["T1027"]} for t in titles]})
+    return f"```maljan-findings\n{body}\n```"
+
+
+def _check_written(analyst: _Analyst, text: str) -> AgentISR:
+    """An answer read as the loop reads one: its findings block and its claims."""
+    isr = analyst._text_to_isr(analyst._capture_findings(text), 0)
+    with (
+        patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+        patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
+    ):
+        return analyst._validate_isr(isr, "evidence")
+
+
+def _withdrawn_rows(analyst: _Analyst) -> list[dict[str, str]]:
+    rows = analyst.drain_unparsed_answers()
+    return [row for row in rows if row.get("record") == "retry_withdrawn"]
+
+
+# The first block lists two techniques; the third cites an entry this run does
+# not have, and its flag's path names it as block 2.
+TWO_FIRST = _block(1, "T1027, T1140") + _block(2, "T1027") + _block(3, "T1027", cites="ev_0099")
+
+
+class TestTheFlaggedBlockIsTheOneAsked:
+    def test_after_a_block_of_two_techniques_the_fix_of_the_flagged_block_stands(self) -> None:
+        analyst = _Analyst([_block(3, "T1027", number=3)])
+
+        result = _check(analyst, TWO_FIRST)
+
+        assert len(analyst.questions) == 1
+        assert "claims[2]" in analyst.questions[0]
+        assert [c.evidence_ref for c in result.claims] == ["[ev_0001] strings"] * 4
+        assert _drop_rows(analyst) == []
+
+    def test_after_a_block_of_two_techniques_the_flagged_block_left_is_the_one_asked(
+        self,
+    ) -> None:
+        added = _block(4, "T1027", number=4)
+        analyst = _Analyst([added, "KEEP C1: the entry holds it"])
+
+        result = _check(analyst, TWO_FIRST)
+
+        assert len(analyst.questions) == 2
+        assert (
+            "C1. CLAIM 3: The file carries configuration string number 3." in (analyst.questions[1])
+        )
+        assert "C2." not in analyst.questions[1]
+        assert len(result.claims) == 5
+
+
+class TestARetryNotPlacedAsksForTheWholeAnswer:
+    def test_a_one_claim_retry_numbered_from_one_is_asked_for_the_whole_answer(self) -> None:
+        from maljan.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
+
+        partial = (
+            "CLAIM 1: The packed section is read from disk only.\n"
+            "EVIDENCE: [ev_0001] strings\nCONFIDENCE: 0.8\nTECHNIQUE: T1027\n"
+        )
+        whole = _block(1, "T1027") + _block(2, "T1027") + _block(3, "T1027")
+        analyst = _Analyst([partial, whole])
+
+        result = _check(analyst, UNGROUNDED)
+
+        assert len(analyst.questions) == 2
+        assert analyst.questions[1].startswith(WHOLE_ANSWER_AFTER_RETRY_LEAD)
+        assert analyst.questions[1].rstrip().endswith(ANALYST_FEEDBACK_CLOSING)
+        assert [c.evidence_ref for c in result.claims] == ["[ev_0001] strings"] * 3
+        record = analyst._budget_records[-1]["validation_retry"]
+        assert record["merge"]["whole_answer_asked"] is True
+        assert "claim 1, which no question was about" in record["merge"]["why"]
+
+    def test_withdrawals_stand_when_the_whole_answer_is_not_given(self) -> None:
+        partial = (
+            "CLAIM: The file carries configuration string number 3.\n"
+            "EVIDENCE: [ev_0001] strings\nCONFIDENCE: 0.8\nTECHNIQUE: T1027\n"
+            "---\n"
+            "WITHDRAW CLAIM 2: it repeats claim 1.\n"
+        )
+        analyst = _Analyst([partial])
+
+        result = _check(analyst, UNGROUNDED)
+
+        assert [c.claim[-2:] for c in result.claims] == ["1.", "3."]
+        (row,) = _withdrawn_rows(analyst)
+        assert row["reason"] == "it repeats claim 1."
+        assert "withdrew the claim" in row["sentence"]
+
+    def test_a_retry_written_whole_without_numbers_keeps_its_withdrawal_unasked(self) -> None:
+        whole = (
+            _block(1, "T1027")
+            + _block(3, "T1027")
+            + _block(4, "T1027")
+            + "WITHDRAW CLAIM 2: it repeats claim 1.\n"
+        )
+        analyst = _Analyst([whole])
+
+        result = _check(analyst, UNGROUNDED)
+
+        # Read whole as written, and the claim it withdrew is not put back to
+        # it as one it left out.
+        assert len(analyst.questions) == 1
+        assert [c.claim[-2:] for c in result.claims] == ["1.", "3.", "4."]
+        assert len(_withdrawn_rows(analyst)) == 1
+        record = analyst._budget_records[-1]["validation_retry"]
+        assert record["merge"]["whole_answer_asked"] is False
+
+
+class TestWithdrawalsAreRecorded:
+    def test_a_range_written_in_lower_case_withdraws_each_block_with_its_reason(self) -> None:
+        analyst = _Analyst(["withdraw claims 2-3 - the decoder claim covers them\n"])
+
+        result = _check(analyst, UNGROUNDED)
+
+        assert [c.claim[-2:] for c in result.claims] == ["1."]
+        rows = _withdrawn_rows(analyst)
+        assert [row["reason"] for row in rows] == ["the decoder claim covers them"] * 2
+
+    def test_the_rows_reach_the_run_summary_and_section_13(self) -> None:
+        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+        analyst = _Analyst(["WITHDRAW CLAIM 3: no entry holds it.\n"])
+        _check(analyst, UNGROUNDED)
+        metrics = validation_metrics(1, [], unparsed_answers=analyst.drain_unparsed_answers())
+        report = MalwareReport(
+            identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+            verdict="Malware",
+            run_summary={"validation": metrics},
+        )
+
+        markdown = MarkdownRenderer().render(report)
+
+        (row,) = metrics["retry_withdrawals"]
+        assert "record" not in row
+        assert "**Items a validation retry withdrew:**" in markdown
+        assert "(no entry holds it.)" in markdown
+
+
+class TestWhatTheMergeLeavesAlone:
+    def test_a_revision_round_answer_keeps_its_disputes(self) -> None:
+        analyst = _Analyst([_block(3, "T1027", number=3)])
+        isr = analyst._text_to_isr(UNGROUNDED, 1)
+        isr.dissent_items = ["The dynamic analyst's string 4 is not in its capture."]
+        with (
+            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
+        ):
+            result = analyst._validate_isr(isr, "evidence")
+
+        assert result.dissent_items == ["The dynamic analyst's string 4 is not in its capture."]
+        assert result.revision_round == 1
+
+    def test_a_renamed_finding_is_asked_about_once(self) -> None:
+        first = f"{UNGROUNDED}\n{_fenced('Strings XOR-encrypted', 'Mutex guard')}"
+        retry = f"{_block(3, 'T1027', number=3)}\n{_fenced('Strings encrypted at rest')}"
+        analyst = _Analyst([retry, "WITHDRAW F1: renamed\nKEEP F2: it stands"])
+
+        result = _check_written(analyst, first)
+
+        assert len(analyst.questions) == 2
+        assert "F1. FINDING: Strings XOR-encrypted" in analyst.questions[1]
+        assert [f.title for f in result.findings] == ["Mutex guard", "Strings encrypted at rest"]
+        rows = _drop_rows(analyst)
+        assert [(row["kind"], row["state"]) for row in rows] == [
+            ("finding", RETRY_DROP_WITHDRAWN),
+            ("finding", RETRY_DROP_KEPT),
+        ]

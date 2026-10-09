@@ -172,6 +172,16 @@ class TestTheTurn:
         ]
         assert _left(analyst) == []
 
+    def test_the_finding_names_its_claim_block_after_a_block_of_two_techniques(self) -> None:
+        two = GUARD.replace("TECHNIQUE: NONE", "TECHNIQUE: T1027, T1140")
+        analyst = _Analyst([two + WRONG])
+
+        _check(analyst, two + WRONG)
+
+        (left,) = _left(analyst)
+        assert left.path == "claims[1]"
+        assert "claim 2 (" in left.message
+
     def test_a_retry_that_drops_another_claim_keeps_the_first_answer(self) -> None:
         analyst = _Analyst([WRONG.replace("CLAIM 2", "CLAIM 1")])
 
@@ -264,7 +274,9 @@ KEPT = GUARD + SECOND_GUARD.replace("CLAIM 4", "CLAIM 2")
 
 class TestOneRuleForEveryAskedClaim:
     def _analyst(self, reply: str) -> _Analyst:
-        analyst = _Analyst([reply])
+        # A renumbered retry is not placed by claim number: the question for
+        # the whole answer follows, and the analyst answers it the same way.
+        analyst = _Analyst([reply, reply])
         analyst.pack_entries = [*analyst.pack_entries, IMPORTS]
         analyst._evidence_entries = [LISTING, IMPORTS]
         return analyst
@@ -274,8 +286,8 @@ class TestOneRuleForEveryAskedClaim:
 
         result = _check(analyst, GUARD + WRONG + LIBRARY + SECOND_GUARD)
 
-        assert len(analyst.seen_turns) == 1
-        question = str(analyst.seen_turns[-1][-1].content)
+        assert len(analyst.seen_turns) == 2
+        question = str(analyst.seen_turns[0][-1].content)
         assert FUNCTION_CLAIM_UNHELD_CODE in question and "isr.library_only_claims" in question
         assert len(result.claims) == 2
 
@@ -293,7 +305,7 @@ class TestOneRuleForEveryAskedClaim:
             ),
         )
 
-        question = str(analyst.seen_turns[-1][-1].content)
+        question = str(analyst.seen_turns[0][-1].content)
         assert FUNCTION_CLAIM_UNHELD_CODE not in question
         assert len(result.claims) == 2
 
