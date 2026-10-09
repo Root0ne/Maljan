@@ -1234,8 +1234,12 @@ class ReportComposer:
             )
             return list(await asyncio.gather(*(tasks[index] for index in range(len(plan)))))
         except BaseException:
+            # Every section ends before the job's own exception leaves:
+            # cancelled, then awaited, so none is left running on the loop.
             for task in tasks.values():
                 task.cancel()
+            with contextlib.suppress(BaseException):
+                await asyncio.gather(*tasks.values(), return_exceptions=True)
             raise
         finally:
             self._fan_out_clock = None

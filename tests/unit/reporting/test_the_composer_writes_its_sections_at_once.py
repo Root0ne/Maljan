@@ -384,6 +384,58 @@ class TestTheLeadReleasesItsGroup:
         assert any("no listener" in r.getMessage() for r in caplog.records)
 
 
+def test_a_cancelled_job_leaves_no_section_running() -> None:
+    class _Closing(_Recorder):
+        """A call that takes a moment to close its connection when cancelled."""
+
+        async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
+            try:
+                return await super().ainvoke(messages, **kwargs)
+            except asyncio.CancelledError:
+                await asyncio.sleep(0.05)
+                raise
+
+    async def _run() -> list[asyncio.Task[Any]]:
+        composer = ReportComposer(llm=_Closing(delay=5.0), per_section_timeout=30)
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            job = asyncio.create_task(composer.compose(_report(), _isr(), concurrent=True))
+            await asyncio.sleep(0.1)
+            job.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await job
+        return [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+
+    assert asyncio.run(_run()) == []
+
+
+def test_a_job_cancelled_inside_one_section_ends_every_other_before_compose_returns() -> None:
+    from maljan.core.cancellation import JobCancelled
+
+    class _CancelledInOne(_Recorder):
+        async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
+            if _section_of(messages) == "commands":
+                await asyncio.sleep(0.05)
+                raise JobCancelled("the operator cancelled the job")
+            try:
+                return await super().ainvoke(messages, **kwargs)
+            except asyncio.CancelledError:
+                await asyncio.sleep(0.05)
+                raise
+
+    async def _run() -> list[asyncio.Task[Any]]:
+        composer = ReportComposer(llm=_CancelledInOne(delay=5.0), per_section_timeout=30)
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            with pytest.raises(JobCancelled):
+                await composer.compose(_report(), _isr(), concurrent=True)
+        return [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+
+    assert asyncio.run(_run()) == []
+
+
 def test_a_model_that_does_not_cache_is_sent_no_head_note() -> None:
     from maljan.llm.anthropic_history import SHARED_HEAD
 
