@@ -104,6 +104,17 @@ class ClaimEvidence(BaseModel):
         default=None,
         description="The claim's TECHNIQUE line as written, when no technique id could be read.",
     )
+    # The note the claim's heading wrote between its number and its delimiter
+    # (``CLAIM 2 [REVISED — retracts claim 5]: …``), as written, brackets and
+    # all: the model's own words on what the claim is to the debate. Kept
+    # beside the sentence, never in it, so no check that reads the sentence
+    # and no published text carries it; left out of the serialised claim when
+    # there is none (``claim_headings.heading_note``).
+    heading_note: str | None = Field(
+        default=None,
+        description="The note the claim's heading wrote before its delimiter, as written.",
+        exclude_if=lambda value: value is None,
+    )
     # Whether that id survived validation. ``pipeline.validation`` sets this
     # ``False`` when the analyst kept an id the ATT&CK catalogue does not have,
     # after being told so and given another turn. The id itself stays exactly
@@ -397,8 +408,9 @@ class AgentISR(BaseModel):
                 tech = f" ({claim.technique_id} — {UNVERIFIED_TECHNIQUE_MARKER})"
             elif claim.technique_id and claim.kept_after_absence_question:
                 tech = f" ({claim.technique_id} — {ABSENCE_TECHNIQUE_MARKER})"
+            noted = f" {claim.heading_note}" if claim.heading_note else ""
             lines.append(
-                f"  Claim {i}: {claim.claim}{tech}"
+                f"  Claim {i}{noted}: {claim.claim}{tech}"
                 f" | Evidence: {claim.evidence_ref}"
                 f" | Confidence: {claim.confidence:.2f}"
             )

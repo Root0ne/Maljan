@@ -5,8 +5,8 @@ a round-bracketed note before the delimiter was allowed and dropped, a square
 one was no heading, and a heading needed its delimiter). Each answer in the
 repository's claim fixtures is read under that rule and under the rule in
 force. An answer with no noted heading reads the same in every field; one with
-a noted heading reads every claim it read before, the note ahead of the
-sentence, and may read more. The answers that change are listed.
+a noted heading reads every claim it read before with the same sentence, the
+note in ``heading_note``, and may read more. The answers that change are listed.
 """
 
 from __future__ import annotations
@@ -30,7 +30,6 @@ _EARLIER_HEAD_RE = re.compile(
 )
 # A heading with a note, as an answer writes it: the label, a number, a bracket.
 _NOTED = re.compile(r"^" + LINE_PREFIX + r"CLAIM(?:[ \t]*#?\d+)?[ \t]*[\[(]", re.MULTILINE)
-_NOTE_AHEAD = re.compile(r"^(\([^)\n]*\)|\[[^\]\n]*\])(?: (.*))?$", re.DOTALL)
 
 
 def _strings(value: Any, where: str) -> list[tuple[str, str]]:
@@ -89,15 +88,16 @@ def _read(text: str) -> dict[str, Any]:
 def _earlier(text: str, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     with monkeypatch.context() as patched:
         patched.setattr(claim_headings, "CLAIM_HEAD_RE", _EARLIER_HEAD_RE)
-        patched.setattr(claim_headings, "heading_text", lambda line, heading: line[heading.end() :])
+        patched.setattr(
+            claim_headings, "heading_sentence", lambda line, heading: line[heading.end() :]
+        )
+        patched.setattr(claim_headings, "heading_note", lambda heading: None)
         return _read(text)
 
 
 def _kept_with_a_note(before: dict[str, Any], now: dict[str, Any]) -> bool:
-    if before == now:
-        return True
-    note = _NOTE_AHEAD.match(str(now["claim"]))
-    return bool(note) and {**now, "claim": note.group(2) or ""} == before
+    """The same claim, with at most the heading's note beside it."""
+    return {key: value for key, value in now.items() if key != "heading_note"} == before
 
 
 def test_the_fixtures_hold_answers() -> None:

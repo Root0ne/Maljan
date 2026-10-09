@@ -382,6 +382,8 @@ _HEAD_NOTE = _seq(
 # read as words, and that whitespace adds none. Its other form, a heading
 # whose note is all its line holds, is the second accepting state
 # (``also_accept``): a heading only where the line ends, with no text after it.
+# The bracket that closes each bracket a heading's note opens with.
+_NOTE_CLOSERS = {"(": ")", "[": "]"}
 _DELIMITER = ("alt", [_one(":"), _one("—"), _one("–"), _seq(_one("-"), ("char", _SPACE))])
 _HEAD = _Automaton(
     _seq(
@@ -471,6 +473,18 @@ _NO_DISPUTE = _Automaton(
 )
 
 
+def _states_inside(opening: str) -> frozenset[int]:
+    states = _HEAD.start
+    for ch in "CLAIM " + opening + "x":
+        states = _HEAD.step(states, ch)
+    return states
+
+
+# The heading automaton's states inside an open note, by the bracket that
+# closes it: a character other than that bracket leaves them as they are.
+_NOTE_INSIDE = {_states_inside(opening): closer for opening, closer in _NOTE_CLOSERS.items()}
+
+
 class _Reading:
     """How one line reads so far, under every heading pattern; immutable, so a state can be kept."""
 
@@ -515,6 +529,25 @@ class _Reading:
         twin._section, twin._section_wait = self._section, self._section_wait
         twin._section_rest = self._section_rest
         return twin
+
+    def inside_note(self) -> str:
+        """The closing bracket awaited when only a heading's open note is read, else ``""``.
+
+        Every character but that bracket then leaves this reading as it is.
+        """
+        if (
+            self.heading
+            or self._separator
+            or self._field
+            or self._field_wait
+            or self._label
+            or self._label_rest is not None
+            or self._section
+            or self._section_wait
+            or self._section_rest is not None
+        ):
+            return ""
+        return _NOTE_INSIDE.get(self._head, "")
 
     @property
     def decided(self) -> bool:
@@ -718,7 +751,16 @@ class _Line:
     """One line: its readings, its readings as they stood at its last non-space character,
     and the hashes of its text as each reading would take it."""
 
-    __slots__ = ("continued", "decided_late", "headings", "last", "readings", "started")
+    __slots__ = (
+        "continued",
+        "decided_late",
+        "headings",
+        "last",
+        "note_close",
+        "notes",
+        "readings",
+        "started",
+    )
 
     def __init__(self, first: bool) -> None:
         self.readings: dict[str, _Reading] = {_PLAIN: _Reading()}
@@ -730,6 +772,12 @@ class _Line:
         # trimming the line's end then cannot change it.
         self.decided_late: dict[str, bool] = dict.fromkeys(self.readings, False)
         self.headings: dict[str, _Key] = {}
+        # Each reading's heading note as it arrives, bracket to bracket: the
+        # key a heading that is its note alone opens its block with, used only
+        # when the line ends as one. ``note_close`` is the closing bracket
+        # still awaited, ``""`` once it came.
+        self.notes: dict[str, _Key] = {}
+        self.note_close: dict[str, str] = {}
         # The open block of each claims machine with this line added, from its
         # first non-space character on.
         self.continued: list[_Key | None] | None = None
@@ -741,6 +789,8 @@ class _Line:
         twin.last = dict(self.last)
         twin.decided_late = dict(self.decided_late)
         twin.headings = {name: key.copy() for name, key in self.headings.items()}
+        twin.notes = {name: key.copy() for name, key in self.notes.items()}
+        twin.note_close = dict(self.note_close)
         twin.continued = (
             None
             if self.continued is None
@@ -748,6 +798,28 @@ class _Line:
         )
         twin.started = self.started
         return twin
+
+    def heading_key(self, name: str) -> _Key | None:
+        """The key a heading on this line opens its block with, under the reading ``name``."""
+        key = self.headings.get(name)
+        if key is None and self.note_close.get(name) == "":
+            return self.notes.get(name)
+        return key
+
+    def step_note(self, name: str, stepped: _Reading, ch: str) -> None:
+        """Feed the heading note of reading ``name`` with ``ch``, from its opening bracket on."""
+        closer = self.note_close.get(name)
+        if closer is None:
+            # Past the label, a bracket that keeps the heading alive opens its note.
+            if ch in _NOTE_CLOSERS and stepped._head and not stepped.heading:
+                key = _Key()
+                key.feed(ch)
+                self.notes[name] = key
+                self.note_close[name] = _NOTE_CLOSERS[ch]
+        elif closer:
+            self.notes[name].feed(ch)
+            if ch == closer:
+                self.note_close[name] = ""
 
     @property
     def decided(self) -> bool:
@@ -817,11 +889,11 @@ class _Pipeline:
             trimmed = roles.get(_TRIMMED_START, plain)
             if trimmed != plain:
                 self.machines.append(self.machines[0].fork())
-                self.machines[1].apply(trimmed, None, line.headings.get(_TRIMMED_START))
-            self.machines[0].apply(plain, None, line.headings.get(_PLAIN))
+                self.machines[1].apply(trimmed, None, line.heading_key(_TRIMMED_START))
+            self.machines[0].apply(plain, None, line.heading_key(_PLAIN))
             return
         continued = line.continued or []
-        heading = line.headings.get(_PLAIN)
+        heading = line.heading_key(_PLAIN)
         for index, machine in enumerate(self.machines):
             machine.apply(
                 plain,
@@ -845,10 +917,48 @@ class _Pipeline:
                 continued.append(key)
         self.line.continued = continued
 
+    def _skip_note(self, text: str, at: int) -> int:
+        """Past the characters of an open note before its closing bracket, read at once.
+
+        Only when every reading is inside the same open note and nothing else:
+        those characters change no reading, so they go into the hashes as one
+        piece and the bracket itself is read as any character is.
+        """
+        line = self.line
+        closers = {reading.inside_note() for reading in line.readings.values()}
+        if len(closers) != 1:
+            return at
+        closer = closers.pop()
+        if not closer or any(line.note_close.get(name) != closer for name in line.readings):
+            return at
+        end = text.find(closer, at)
+        if end < 0:
+            end = len(text)
+        if end == at:
+            return at
+        piece = text[at:end]
+        for key in _distinct(line.headings.values()):
+            key.feed(piece)
+        for name in line.readings:
+            line.notes[name].feed(piece)
+        if not piece.isspace():
+            for name, reading in line.readings.items():
+                line.last[name] = reading
+        if line.continued is not None:
+            for continuing in line.continued:
+                if continuing is not None:
+                    continuing.feed(piece)
+        return end
+
     def _feed_line(self, text: str) -> None:
         line = self.line
         at = 0
         while at < len(text) and not (line.started and line.decided):
+            if line.started and line.note_close:
+                skipped = self._skip_note(text, at)
+                if skipped > at:
+                    at = skipped
+                    continue
             ch = text[at]
             at += 1
             if not line.started and not ch.isspace():
@@ -866,6 +976,7 @@ class _Pipeline:
                     continue
                 stepped = reading.step(ch)
                 line.readings[name] = stepped
+                line.step_note(name, stepped, ch)
                 if not ch.isspace():
                     line.last[name] = stepped
                     if stepped.decided:
