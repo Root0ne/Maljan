@@ -2584,13 +2584,19 @@ class JudgeAgent(BudgetMeter):
 
         # A mediator that wrote no answer — an empty one, or one the output cap
         # cut before any text — stated neither agreement nor a contradiction.
-        # The single call is asked once more, as it was sent. Still without an
-        # answer, the round records that fact and why, consensus is neither
-        # reached nor refused, and the router sends the answers in force to the
-        # judge rather than reading the silence as disagreement and opening a
-        # revision round of every analyst.
+        # An empty answer the cap did not cut is asked once more, as it was
+        # sent; a cut one never is, because the same call at the same budget
+        # would be cut again. Still without an answer, the round records that
+        # fact and why, consensus is neither reached nor refused, and the
+        # router sends the answers in force to the judge rather than reading
+        # the silence as disagreement and opening a revision round of every
+        # analyst.
         asked_again = False
-        if not reasoning_text.strip() and fast_answered:
+        if (
+            not reasoning_text.strip()
+            and fast_answered
+            and self._cut_reason(answered_by, self._built_cap_tokens()) is None
+        ):
             self.logger.warning("Mediator wrote no answer; asking once more.")
             asked_again = True
             again = await self._ask_mediation_again(direct_messages, fast_timeout)
@@ -2763,24 +2769,32 @@ class JudgeAgent(BudgetMeter):
         finally:
             self._spend_release(slot)
 
+    def _built_cap_tokens(self) -> int | None:
+        """The output cap this judge's model was built with, or ``None`` when it cannot be read."""
+        try:
+            cap = self._output_cap().tokens
+        except Exception:  # noqa: BLE001 — a cap that cannot be read is no cap
+            return None
+        return cap if isinstance(cap, int) else None
+
+    @staticmethod
+    def _cut_reason(answer: Any, cap: int | None) -> str | None:
+        """How the output cap cut ``answer``, or ``None`` when it did not."""
+        if answer is None or not _was_cut(answer, cap):
+            return None
+        from maljan.core.truncation_ledger import completion_tokens_of
+
+        produced = completion_tokens_of(answer)
+        tokens = produced if produced is not None else cap
+        if isinstance(tokens, int):
+            return f"the answer was cut at {tokens} tokens with no text"
+        return "the answer was cut at the output cap with no text"
+
     def _no_answer_reason(self, answer: Any, *, not_asked: bool = False) -> str:
         """Why the mediator's text is empty: not asked, cut at the output cap, or empty."""
         if not_asked:
             return "the call was not admitted under the job's spend ceiling"
-        if answer is not None:
-            try:
-                cap = self._output_cap().tokens
-            except Exception:  # noqa: BLE001 — a cap that cannot be read is no cap
-                cap = None
-            if _was_cut(answer, cap if isinstance(cap, int) else None):
-                from maljan.core.truncation_ledger import completion_tokens_of
-
-                produced = completion_tokens_of(answer)
-                tokens = produced if produced is not None else cap
-                if isinstance(tokens, int):
-                    return f"the answer was cut at {tokens} tokens with no text"
-                return "the answer was cut at the output cap with no text"
-        return "the answer was empty"
+        return self._cut_reason(answer, self._built_cap_tokens()) or "the answer was empty"
 
     async def _ask_for_contradictions_block(
         self, prompt_messages: list[tuple[str, str]], reasoning_text: str

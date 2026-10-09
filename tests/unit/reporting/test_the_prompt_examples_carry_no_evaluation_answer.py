@@ -1474,9 +1474,7 @@ PROMPTS: dict[str, str] = {
     "a mediation round whose mediator wrote no answer": " ".join(
         [
             mediator_no_answer_note("the answer was empty"),
-            mediator_no_answer_note(
-                "the answer was cut at 4096 tokens with no text, also when asked once more"
-            ),
+            mediator_no_answer_note("the answer was cut at 4096 tokens with no text"),
             mediator_no_answer_note("the call was not admitted under the job's spend ceiling"),
         ]
     ),

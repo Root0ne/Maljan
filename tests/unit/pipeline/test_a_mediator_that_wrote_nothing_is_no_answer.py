@@ -112,13 +112,15 @@ class TestTheMediatorRecordsNoAnswer:
         assert model.calls == 2
 
     def test_an_answer_cut_before_any_text_says_where_it_was_cut(self) -> None:
-        (argument, consensus), _model, extract = _mediate(_cut(4096))
+        (argument, consensus), model, extract = _mediate(_cut(4096))
 
         assert consensus is None
         assert argument.status == MEDIATOR_NO_ANSWER
         assert argument.note == mediator_no_answer_note(
-            "the answer was cut at 4096 tokens with no text, also when asked once more"
+            "the answer was cut at 4096 tokens with no text"
         )
+        # The same call at the same budget would be cut again: it is not repeated.
+        assert model.calls == 1
         extract.assert_not_called()
 
     def test_an_empty_answer_then_an_answer_is_mediated(self) -> None:
