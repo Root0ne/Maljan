@@ -497,8 +497,10 @@ async def _probe_llm_anthropic(v: dict[str, Any]) -> ProbeResult:
     return _completed(t0, reached, broken, untried, f"{len(models)} models listed", models)
 
 
-def _agent_models(v: dict[str, Any], provider: str) -> dict[str, tuple[str, str | None]]:
-    """Every ``llm.agents`` entry served by ``provider``, name to (model, base_url).
+def _agent_models(
+    v: dict[str, Any], provider: str
+) -> dict[str, tuple[str, str | None, str | None]]:
+    """Every ``llm.agents`` entry served by ``provider``, name to (model, base_url, effort).
 
     An entry names its own provider; one that leaves it empty inherits the
     global ``llm.provider``. Entries are dicts when they arrive staged from
@@ -508,7 +510,8 @@ def _agent_models(v: dict[str, Any], provider: str) -> dict[str, tuple[str, str 
     The base URL comes back beside the model because an entry may point at its
     own server: asking the global one about a model the agent will look for
     somewhere else answers a different question. ``None`` means the entry
-    inherits the global endpoint.
+    inherits the global endpoint. The effort is the model's own, ``None``
+    where it inherits the provider's global one.
 
     ``run_probe`` always resolves ``core.llm.provider`` into the inputs, so the
     fallback below is only reached by a direct call; it reads the field's own
@@ -521,7 +524,7 @@ def _agent_models(v: dict[str, Any], provider: str) -> dict[str, tuple[str, str 
     if not isinstance(raw, dict):
         return {}
     global_provider = str(v.get("provider") or LLMConfig.model_fields["provider"].default)
-    out: dict[str, tuple[str, str | None]] = {}
+    out: dict[str, tuple[str, str | None, str | None]] = {}
     for name, entry in raw.items():
         if isinstance(entry, dict):
             data: dict[str, Any] = entry
@@ -537,16 +540,21 @@ def _agent_models(v: dict[str, Any], provider: str) -> dict[str, tuple[str, str 
             entry_provider = str(row.get("provider") or "") or global_provider
             model = str(row.get("model") or "")
             base_url = str(row.get("base_url") or "").strip() or None
+            effort = str(row.get("effort") or "").strip() or None
             if model and entry_provider == provider:
                 label = str(name) if position == 0 else f"{name} fallback {position}"
-                out[label] = (model, base_url)
+                out[label] = (model, base_url, effort)
     return out
 
 
 def _pairs_to_file(
     v: dict[str, Any], provider: str, base: str, expert_model: str
-) -> dict[tuple[str, str], str]:
-    """Every ``(endpoint, model)`` pair this probe will file, each one once.
+) -> dict[tuple[str, str, str | None], str]:
+    """Every ``(endpoint, model, effort)`` this probe will file, each one once.
+
+    The effort is an entry's own, ``None`` where it inherits the provider's
+    global one: two entries on one model at different efforts are two
+    questions, and each is asked at the effort its run sends.
 
     The selected provider's expert model at its own endpoint, and every
     per-agent override at *its* own endpoint — a second llama.cpp on another
@@ -564,23 +572,37 @@ def _pairs_to_file(
     resolves its own key with — so what is filed and what is looked up are one
     spelling of one address.
     """
-    pairs: dict[tuple[str, str], str] = {
-        (base, expert_model): f"expert={expert_model} @ {endpoint_label(base)}"
+    pairs: dict[tuple[str, str, str | None], str] = {
+        (base, expert_model, None): f"expert={expert_model} @ {endpoint_label(base)}"
     }
-    for name, (model, agent_base) in sorted(_agent_models(v, provider).items()):
+    for name, (model, agent_base, effort) in sorted(_agent_models(v, provider).items()):
         endpoint = endpoint_where(
             provider,
             agent_base,
             openai_base_url=v.get("base_url"),
             ollama_base_url=v.get("ollama_base_url"),
         )
-        pairs.setdefault((endpoint, model), f"{name}={model} @ {endpoint_label(endpoint)}")
+        at = f" at effort {effort}" if effort else ""
+        pairs.setdefault(
+            (endpoint, model, effort), f"{name}={model}{at} @ {endpoint_label(endpoint)}"
+        )
     return pairs
+
+
+def _with_own_effort(completion: dict[str, Any], effort: str | None) -> dict[str, Any]:
+    """``completion``, naming the model's own effort when one was asked at.
+
+    The settings route files the row under the model and that effort
+    (``filed_model``); a completion with none is filed as it always was.
+    """
+    if effort:
+        completion["effort"] = effort
+    return completion
 
 
 async def _complete_each_pair(
     provider: str,
-    pairs: dict[tuple[str, str], str],
+    pairs: dict[tuple[str, str, str | None], str],
     api_key: str,
     *,
     deadline: float,
@@ -606,11 +628,15 @@ async def _complete_each_pair(
 
     ``deadline`` is taken by the caller as the probe begins, so the seconds the
     catalogue listing spent are seconds this loop no longer has.
+
+    ``reasoning_effort`` is the provider's global effort; a pair that carries
+    its entry's own is asked at that one instead, and its completion names it
+    so the row is filed under it.
     """
     reached: list[dict[str, Any]] = []
     broken: list[str] = []
     untried: list[str] = []
-    for (endpoint, model), label in pairs.items():
+    for (endpoint, model, own_effort), label in pairs.items():
         if time.monotonic() + COMPLETION_TIMEOUT > deadline:
             untried.append(label)
             continue
@@ -621,7 +647,7 @@ async def _complete_each_pair(
             api_key=api_key,
             disable_thinking=disable_thinking,
             compat=compat,
-            reasoning_effort=reasoning_effort,
+            reasoning_effort=own_effort or reasoning_effort,
             num_ctx=num_ctx,
             keep_alive=keep_alive,
         )
@@ -629,13 +655,16 @@ async def _complete_each_pair(
             broken.append(f"{label}: {said}")
             continue
         reached.append(
-            {
-                "endpoint": endpoint,
-                "model": model,
-                "provider": provider,
-                "ok": bool(answered),
-                "detail": said,
-            }
+            _with_own_effort(
+                {
+                    "endpoint": endpoint,
+                    "model": model,
+                    "provider": provider,
+                    "ok": bool(answered),
+                    "detail": said,
+                },
+                own_effort,
+            )
         )
         if not answered:
             broken.append(f"{label}: {said}")
@@ -1263,12 +1292,8 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                 keep_alive=str(settings.llm.ollama.keep_alive) if provider == "ollama" else None,
             )
 
-        answered, said = await _ask(
-            llm_provider,
-            endpoint,
-            str(llm_model or ""),
-            getattr(agent_llm, "effort", None) if agent_llm else None,
-        )
+        own_effort = getattr(agent_llm, "effort", None) if agent_llm else None
+        answered, said = await _ask(llm_provider, endpoint, str(llm_model or ""), own_effort)
         detail = f"{detail}; {said}"
         # A call that ran out of time proves nothing either way, so the probe
         # reports it as a failure the operator can act on and files no row —
@@ -1277,13 +1302,16 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
             []
             if answered is None
             else [
-                {
-                    "endpoint": endpoint,
-                    "model": str(llm_model or ""),
-                    "provider": llm_provider,
-                    "ok": bool(answered),
-                    "detail": said,
-                }
+                _with_own_effort(
+                    {
+                        "endpoint": endpoint,
+                        "model": str(llm_model or ""),
+                        "provider": llm_provider,
+                        "ok": bool(answered),
+                        "detail": said,
+                    },
+                    own_effort,
+                )
             ]
         )
         # Each model the agent falls back to is asked the same one turn, one
@@ -1298,13 +1326,16 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
             detail = f"{detail}; fallback {position} {choice.provider}/{choice.model}: {told}"
             if reached is not None:
                 completions.append(
-                    {
-                        "endpoint": where,
-                        "model": str(choice.model),
-                        "provider": choice.provider,
-                        "ok": bool(reached),
-                        "detail": told,
-                    }
+                    _with_own_effort(
+                        {
+                            "endpoint": where,
+                            "model": str(choice.model),
+                            "provider": choice.provider,
+                            "ok": bool(reached),
+                            "detail": told,
+                        },
+                        getattr(choice, "effort", None),
+                    )
                 )
             answered = bool(answered) and bool(reached)
         return ProbeResult(

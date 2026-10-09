@@ -55,6 +55,9 @@ class ModelAssignment:
     # Where this model stands in the agent's list: 0 for the model it calls
     # first, 1 for the first it falls back to, and so on.
     position: int = 0
+    # The model's own reasoning effort (``llm.agents.<key>.effort``), or
+    # ``None`` where it inherits the provider's global one.
+    effort: str | None = None
 
     @property
     def label(self) -> str:
@@ -63,8 +66,26 @@ class ModelAssignment:
 
     @property
     def key(self) -> tuple[str, str]:
-        """What a stored probe result is filed under."""
-        return (self.endpoint, self.model)
+        """What a stored probe result is filed under.
+
+        The model's own effort is part of it when one is set (``filed_model``),
+        so a change of that effort alone finds no row and asks for a probe;
+        a model with none is filed under the pair it always was.
+        """
+        return (self.endpoint, filed_model(self.model, self.effort))
+
+
+def filed_model(model: str, effort: str | None = None) -> str:
+    """The model half of a probe row's key: the model, and its own effort when set.
+
+    A row stores ``(endpoint, model)``; a probe taken at an entry's own effort
+    is a different question from one taken at the provider's global effort, so
+    it is filed under the model with that effort beside it. ``None`` or blank
+    is the model alone, which keeps every row filed before efforts existed
+    valid for the entries that still set none.
+    """
+    level = str(effort or "").strip()
+    return f"{model} (effort {level})" if level else str(model)
 
 
 def normalised_endpoint(url: object) -> str:
@@ -187,7 +208,13 @@ def model_label(provider: object, model: object, endpoint: object = None) -> str
 
 
 def _assignment(
-    settings: object, agent: str, provider: str, model: str, base_url: str | None, position: int
+    settings: object,
+    agent: str,
+    provider: str,
+    model: str,
+    base_url: str | None,
+    position: int,
+    effort: str | None = None,
 ) -> ModelAssignment:
     return ModelAssignment(
         agent=agent,
@@ -195,6 +222,7 @@ def _assignment(
         endpoint=endpoint_for(settings, provider, base_url),
         model=model,
         position=position,
+        effort=str(effort or "").strip() or None,
     )
 
 
@@ -221,6 +249,7 @@ def assignment_chain_for(
                 str(choice.model),
                 choice.base_url,
                 position,
+                getattr(choice, "effort", None),
             )
             for position, choice in enumerate(chain)
         ]

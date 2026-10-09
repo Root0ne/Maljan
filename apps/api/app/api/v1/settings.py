@@ -642,6 +642,8 @@ async def _write_down_what_was_reached(db: AsyncSession, pairs: list[dict[str, A
     sentence; a store that could not be written is a reason to log, not a
     reason to give them an error instead of their answer.
     """
+    from maljan.core.model_assignments import filed_model
+
     from app.services.model_probes import record_probe
 
     for pair in pairs:
@@ -649,7 +651,8 @@ async def _write_down_what_was_reached(db: AsyncSession, pairs: list[dict[str, A
             await record_probe(
                 db,
                 endpoint=str(pair.get("endpoint") or ""),
-                model=str(pair.get("model") or ""),
+                # A pair asked at an entry's own effort is filed with it.
+                model=filed_model(str(pair.get("model") or ""), pair.get("effort")),
                 provider=str(pair.get("provider") or ""),
                 ok=bool(pair.get("ok")),
                 detail=str(pair.get("detail") or ""),

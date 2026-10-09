@@ -183,8 +183,9 @@ async def test_each_model_is_asked_at_the_effort_its_run_sends(monkeypatch):
             }
         },
     }
-    await probe_agent({"name": "network", "settings": staged})
+    result = await probe_agent({"name": "network", "settings": staged})
     assert asked == [("first", "high"), ("second", "max"), ("third", "")]
+    assert [c.get("effort") for c in result.details["completions"]] == ["high", None, None]
 
 
 @pytest.mark.asyncio

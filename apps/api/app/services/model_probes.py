@@ -143,9 +143,9 @@ async def unprobed_models_being_saved(
     on every save; asking about all of them would refuse a change to agent B's
     temperature because agent A carries an untested model, which is a refusal
     about something the operator did not touch. Each entry is compared with
-    the stored leaf and only the ones that differ in ``provider``, ``model`` or
-    ``base_url`` are asked about; an entry that is new is asked about, because
-    everything about it is a change.
+    the stored leaf and only the ones that differ in ``provider``, ``model``,
+    ``base_url`` or the model's own ``effort`` are asked about; an entry that
+    is new is asked about, because everything about it is a change.
 
     The settings the pairs are read against are the ones being written, so an
     operator moving an agent to a new endpoint and a new model in one save is
@@ -179,10 +179,22 @@ def _points_somewhere_new(now: Any, was: Any) -> bool:
     return _calls(now) != _calls(was)
 
 
-def _calls(entry: dict[str, Any]) -> list[tuple[Any, Any, Any]]:
-    """``(provider, model, base_url)`` for each model of an entry's list, in order."""
+def _calls(entry: dict[str, Any]) -> list[tuple[Any, Any, Any, Any]]:
+    """``(provider, model, base_url, effort)`` for each model of an entry's list, in order.
+
+    An effort that is absent, ``None`` or blank reads the same, so an entry
+    stored before the field existed is not a change.
+    """
     rows = [entry, *[row for row in (entry.get("fallbacks") or []) if isinstance(row, dict)]]
-    return [(row.get("provider"), row.get("model"), row.get("base_url")) for row in rows]
+    return [
+        (
+            row.get("provider"),
+            row.get("model"),
+            row.get("base_url"),
+            str(row.get("effort") or "").strip() or None,
+        )
+        for row in rows
+    ]
 
 
 async def unprobed_models(db: AsyncSession, settings: Any, agents: list[str]) -> list[str]:

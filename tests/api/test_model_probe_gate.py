@@ -650,3 +650,139 @@ class TestOneAddressUnderBothHalves:
         assert store.rows, "the probe filed something"
         settings = _settings(**self.CASES[provider][1])
         assert await unprobed_models(store, settings, ["static", "network"]) == []
+
+
+class TestAnEntrysOwnEffort:
+    """A per-agent effort is part of what was probed, and only when it is set.
+
+    An entry with no effort of its own is filed and looked up under the pair it
+    always was, so the rows already stored for it stay valid. An entry that
+    names one is filed under the pair and its effort, so changing only the
+    effort asks for a probe at the new level.
+    """
+
+    ENTRY = {"provider": "openai", "model": "ds", "base_url": "http://box:8080/v1"}
+
+    def _entry_settings(self, **entry: Any) -> Settings:
+        return _settings(
+            provider="openai",
+            openai={"reasoning_effort": "max"},
+            agents={"static": {**self.ENTRY, **entry}},
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_entry_without_one_is_looked_up_as_before(self) -> None:
+        rows = [_Row("http://box:8080/v1", "ds", True, "ok")]
+
+        assert await unprobed_models(_Db(rows), self._entry_settings(), ["static"]) == []
+
+    @pytest.mark.asyncio
+    async def test_a_row_taken_without_the_entry_s_effort_does_not_count(self) -> None:
+        rows = [_Row("http://box:8080/v1", "ds", True, "ok")]
+
+        refusals = await unprobed_models(_Db(rows), self._entry_settings(effort="high"), ["static"])
+
+        assert refusals and NEVER_PROBED in refusals[0]
+        assert "names model 'ds'" in refusals[0]
+
+    @pytest.mark.asyncio
+    async def test_a_row_taken_at_the_entry_s_effort_counts(self) -> None:
+        from maljan.core.model_assignments import filed_model
+
+        rows = [_Row("http://box:8080/v1", filed_model("ds", "high"), True, "ok")]
+
+        assert (
+            await unprobed_models(_Db(rows), self._entry_settings(effort="high"), ["static"]) == []
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_effort_only_change_is_asked_about_on_save(self) -> None:
+        from app.services.model_probes import AGENT_MODELS_KEY, unprobed_models_being_saved
+
+        rows = [_Row("http://box:8080/v1", "ds", True, "ok")]
+        refusals = await unprobed_models_being_saved(
+            _Db(rows),
+            self._entry_settings(effort="high"),
+            {AGENT_MODELS_KEY: {"static": {**self.ENTRY, "effort": "high"}}},
+            {AGENT_MODELS_KEY: {"static": dict(self.ENTRY)}},
+        )
+
+        assert refusals and NEVER_PROBED in refusals[0]
+
+    @pytest.mark.asyncio
+    async def test_a_stored_entry_without_the_key_is_not_a_change(self) -> None:
+        from app.services.model_probes import AGENT_MODELS_KEY, unprobed_models_being_saved
+
+        refusals = await unprobed_models_being_saved(
+            _Db([]),
+            self._entry_settings(),
+            {AGENT_MODELS_KEY: {"static": {**self.ENTRY, "effort": None}}},
+            {AGENT_MODELS_KEY: {"static": dict(self.ENTRY)}},
+        )
+
+        assert refusals == []
+
+    @pytest.mark.asyncio
+    async def test_the_provider_probe_asks_each_entry_at_its_own_effort(self, monkeypatch) -> None:
+        import json
+
+        import httpx
+
+        from app.services import settings_probes as probes
+
+        asked: list[tuple[str, Any]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "POST":
+                body = json.loads(request.content)
+                asked.append((body["model"], body.get("reasoning_effort")))
+                return httpx.Response(200, json={"choices": [{"message": {"content": "OK"}}]})
+            return httpx.Response(200, json={"data": [{"id": "qwen"}, {"id": "ds"}]})
+
+        monkeypatch.setattr(
+            probes,
+            "_client",
+            lambda *_a, **_k: httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=10),
+        )
+        result = await probes.probe_llm(
+            {
+                "provider": "openai",
+                "base_url": "http://box:8080/v1",
+                "api_key": "k",
+                "expert_model": "qwen",
+                "reasoning_effort": "max",
+                "agents": {
+                    "static": {"provider": "openai", "model": "ds", "effort": "high"},
+                    "network": {"provider": "openai", "model": "ds"},
+                },
+            }
+        )
+
+        assert result.ok, result.detail
+        assert sorted(asked) == [("ds", "high"), ("ds", "max"), ("qwen", "max")]
+        completions = (result.details or {})["completions"]
+        filed = sorted((c["model"], c.get("effort") or "") for c in completions)
+        assert filed == [("ds", ""), ("ds", "high"), ("qwen", "")]
+
+    @pytest.mark.asyncio
+    async def test_a_probe_at_the_entry_s_effort_lets_the_job_through(self) -> None:
+        from app.api.v1.settings import _write_down_what_was_reached
+
+        store = _Store()
+        await _write_down_what_was_reached(
+            store,
+            [
+                {
+                    "endpoint": "http://box:8080/v1",
+                    "model": "ds",
+                    "provider": "openai",
+                    "ok": True,
+                    "detail": "ok",
+                    "effort": "high",
+                }
+            ],
+        )
+
+        settings = self._entry_settings(effort="high")
+        assert await unprobed_models(store, settings, ["static"]) == []
+        assert await unprobed_models(store, self._entry_settings(), ["static"]) != []
