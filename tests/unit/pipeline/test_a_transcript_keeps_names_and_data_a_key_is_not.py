@@ -180,3 +180,84 @@ def test_a_piece_that_completes_no_catalogue_name_is_no_name() -> None:
 
 def test_short_stretches_of_the_alphabet_are_no_name() -> None:
     assert scrub("value ABCDEFGH/abcdefgh+0123456789") == "value ***"
+
+
+def test_a_token_glued_behind_a_word_is_masked() -> None:
+    from tests.credential_shapes import jwt
+
+    for token in (jwt(), jwt(header=b'{ "alg":"HS256"}')):
+        for text in (f"in_stack_{token}", f"x_{token}", f"name-{token} tail", f"0x1a20/v_{token}"):
+            answer = scrub(text)
+            for segment in token.split(".")[1:]:
+                assert segment not in answer, (text, answer)
+
+
+class TestHostileAnswersCostLinearWork:
+    """The hex exemption reads an answer once per scrub, in linear work and memory.
+
+    The ten-times rule: ten times the input costs at most about ten times the
+    time and the traced memory (bounds 20 and 15 leave room for noise).
+    """
+
+    @staticmethod
+    def _many_hex(count: int) -> str:
+        return json.dumps(
+            {"reads": [{"address": f"0x{i:x}", "hex": f"{i:08x}" * 6} for i in range(count)]}
+        )
+
+    @staticmethod
+    def _control(count: int) -> str:
+        return json.dumps(
+            {"reads": [{"address": f"0x{i:x}", "bytes": f"{i:08x}" * 6} for i in range(count)]}
+        )
+
+    @staticmethod
+    def _nested(depth: int) -> str:
+        return "[" * depth + json.dumps({"hex": _hex_run(48)}) + "]" * depth
+
+    @staticmethod
+    def _near(count: int) -> str:
+        return "".join(f'{{"hex": "{i:08x}{_hex_run(40)}", "x": [' for i in range(count))
+
+    @staticmethod
+    def _cost(text: str) -> tuple[float, int]:
+        import time
+        import tracemalloc
+
+        started = time.perf_counter()
+        scrub_keeping_layout(text)
+        took = time.perf_counter() - started
+        tracemalloc.start()
+        scrub_keeping_layout(text)
+        peak = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+        return took, peak
+
+    @pytest.mark.parametrize(
+        ("make", "small"), [("_many_hex", 300), ("_near", 300), ("_nested", 10_000)]
+    )
+    def test_ten_times_the_input_costs_about_ten_times(self, make: str, small: int) -> None:
+        build = getattr(self, make)
+        small_time, small_peak = self._cost(build(small))
+        large_time, large_peak = self._cost(build(small * 10))
+        assert large_time <= max(small_time, 0.01) * 20, (small_time, large_time)
+        assert large_peak <= max(small_peak, 1 << 20) * 15, (small_peak, large_peak)
+
+    def test_ten_megabytes_of_hex_fields_cost_no_more_than_the_same_without(self) -> None:
+        import time
+
+        hostile, plain = self._many_hex(120_000), self._control(120_000)
+        assert len(hostile) > 9_000_000
+        started = time.perf_counter()
+        answer = scrub_keeping_layout(hostile)
+        hostile_time = time.perf_counter() - started
+        started = time.perf_counter()
+        scrub_keeping_layout(plain)
+        plain_time = time.perf_counter() - started
+        assert answer == hostile
+        assert hostile_time <= plain_time * 1.2, (hostile_time, plain_time)
+
+    def test_deep_nesting_and_garbage_are_masked_and_finish(self) -> None:
+        run = _hex_run(48)
+        for text in (self._nested(100_000), self._near(1_000), '{"hex": "' + run + '"' * 1000):
+            assert run not in scrub_keeping_layout(text)

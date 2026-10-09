@@ -828,6 +828,8 @@ def _looks_like_a_credential(token: str, *, whole: bool = False) -> bool:
     # A key joined to other text by a slash, a bar, a plus or an ampersand is
     # still a key: ``<jwt>/name`` failed every rule anchored to the whole run.
     # ``whole`` asks only the rules that read the run as one.
+    if _glued_token(token) is not None:
+        return True
     pieces = [piece for piece in _JOINS.split(token) if piece]
     return len(pieces) > 1 and any(_looks_like_a_credential(piece) for piece in pieces)
 
@@ -1197,8 +1199,10 @@ _HEX_KEYS_IN_TEXT = ('"hex"', '\\"hex\\"')
 def _hex_fields(text: str) -> dict[str, int]:
     """The hex runs of ``text`` that are a tool's ``"hex"`` field and nothing else.
 
-    ``{run: count}``; empty unless ``text`` is one JSON document. Per call and
-    read only by the call that made it: no state outlives it.
+    ``{run: count}``; empty unless ``text`` is one JSON document. Read once per
+    scrub call, by that call alone: no state outlives it. The work is linear in
+    the text: one parse, one walk that visits each value once (by a stack, so
+    no nesting reaches Python's recursion), and one pass over its hex runs.
     """
     if not any(key in text for key in _HEX_KEYS_IN_TEXT):
         return {}
@@ -1206,62 +1210,103 @@ def _hex_fields(text: str) -> dict[str, int]:
         document = json.loads(text)
     except (ValueError, RecursionError):
         return {}
-    found: dict[str, int] = {}
-    _collect_hex_fields(document, False, found, depth=0)
-    return {
-        run: count
-        for run, count in found.items()
-        if len(re.findall(rf"(?<![0-9A-Fa-f]){run}(?![0-9A-Fa-f])", text)) == count
-    }
+    found = _collect_hex_fields(document, budget=len(text))
+    if not found:
+        return {}
+    standing: dict[str, int] = {}
+    for run in _HEX_RUN.finditer(text):
+        if run.group(0) in found:
+            standing[run.group(0)] = standing.get(run.group(0), 0) + 1
+    return {run: count for run, count in found.items() if standing.get(run) == count}
 
 
+# Every hex run of a text, whole: what a field's run is counted against.
+_HEX_RUN = re.compile(r"(?<![0-9A-Fa-f])[0-9A-Fa-f]+(?![0-9A-Fa-f])")
 # How deep the reading follows nested objects and JSON documents carried as
-# strings; past it nothing more is kept, which only masks.
+# strings; past it a branch counts as naming a credential, which only masks.
 _HEX_FIELD_DEPTH = 64
 
 
-def _collect_hex_fields(node: Any, named: bool, found: dict[str, int], *, depth: int) -> bool:
-    """Count the clean ``"hex"`` fields under ``node``, and say whether anything under
-    it names a credential.
+def _collect_hex_fields(document: Any, *, budget: int) -> dict[str, int]:
+    """The clean ``"hex"`` fields under ``document``, counted by value.
 
-    ``named`` says a key or a string value of an object around ``node`` named
-    one. A ``"hex"`` field counts when neither its object's own keys and string
-    values, nor anything below that object, nor anything ``named`` carries
-    names one. Each node is read once: the object's own field is decided after
-    its children, from what they report.
+    A ``"hex"`` field counts when neither its object's own keys and string
+    values, nor anything below that object, nor the keys and string values of
+    any object around it name a credential. Walked with an explicit stack in
+    post order, so an object's own field is decided after its children report
+    whether anything below names one. A JSON document carried as a string
+    value is parsed and walked as that value's child; no more characters are
+    parsed again in all than ``budget`` (the text's own length), and a string
+    past it is read as a string.
     """
-    if depth > _HEX_FIELD_DEPTH:
-        return True
-    if isinstance(node, str):
-        stripped = node.strip()
-        if stripped[:1] in ("{", "["):
-            try:
-                inner = json.loads(stripped)
-            except (ValueError, RecursionError):
-                return bool(_CREDENTIAL_WORD_RE.search(node))
-            return _collect_hex_fields(inner, named, found, depth=depth + 1)
-        return bool(_CREDENTIAL_WORD_RE.search(node))
-    if isinstance(node, list):
-        below = False
-        for item in node:
-            below = _collect_hex_fields(item, named, found, depth=depth + 1) or below
-        return below
-    if not isinstance(node, dict):
-        return False
-    own = any(_CREDENTIAL_WORD_RE.search(str(key)) for key in node) or any(
-        isinstance(item, str) and _CREDENTIAL_WORD_RE.search(item)
-        for key, item in node.items()
-        if key != "hex"
-    )
-    below = own
-    for key, item in node.items():
-        if key == "hex" and isinstance(item, str) and _HEX_DATA.match(item):
+    found: dict[str, int] = {}
+    # Each frame: [node, named around it, depth, children left, below, own].
+    stack: list[list[Any]] = [[document, False, 0, None, False, False]]
+    reparsed = 0
+    while stack:
+        frame = stack[-1]
+        node, named, depth, children, below, own = frame
+        if children is None:
+            if depth > _HEX_FIELD_DEPTH:
+                stack.pop()
+                _pass_up(stack, True)
+                continue
+            if isinstance(node, str):
+                stripped = node.strip()
+                inner: Any = None
+                parsed = False
+                if stripped[:1] in ("{", "[") and reparsed + len(stripped) <= budget:
+                    reparsed += len(stripped)
+                    try:
+                        inner = json.loads(stripped)
+                        parsed = True
+                    except (ValueError, RecursionError):
+                        parsed = False
+                if not parsed:
+                    stack.pop()
+                    _pass_up(stack, bool(_CREDENTIAL_WORD_RE.search(node)))
+                    continue
+                frame[3] = iter([inner])
+            elif isinstance(node, list):
+                frame[3] = iter(node)
+            elif isinstance(node, dict):
+                own = any(_CREDENTIAL_WORD_RE.search(str(key)) for key in node) or any(
+                    isinstance(item, str) and _CREDENTIAL_WORD_RE.search(item)
+                    for key, item in node.items()
+                    if key != "hex"
+                )
+                frame[4] = frame[5] = own
+                frame[3] = iter(
+                    item
+                    for key, item in node.items()
+                    if not (key == "hex" and isinstance(item, str) and _HEX_DATA.match(item))
+                )
+            else:
+                stack.pop()
+                _pass_up(stack, False)
+                continue
+            children = frame[3]
+        child = next(children, _NO_CHILD)
+        if child is not _NO_CHILD:
+            stack.append([child, named or frame[5], depth + 1, None, False, False])
             continue
-        below = _collect_hex_fields(item, named or own, found, depth=depth + 1) or below
-    value = node.get("hex")
-    if not (named or below) and isinstance(value, str) and _HEX_DATA.match(value):
-        found[value] = found.get(value, 0) + 1
-    return below
+        stack.pop()
+        if isinstance(node, dict):
+            value = node.get("hex")
+            if not (named or frame[4]) and isinstance(value, str) and _HEX_DATA.match(value):
+                found[value] = found.get(value, 0) + 1
+        _pass_up(stack, frame[4])
+    return found
+
+
+# What ``next`` answers for a frame with no child left.
+_NO_CHILD = object()
+
+
+def _pass_up(stack: list[list[Any]], below: bool) -> None:
+    """Hand a finished frame's "something below names a credential" to its parent."""
+    if stack and below:
+        stack[-1][4] = True
 
 
 def _names_only(stretch: str) -> bool:
@@ -1297,6 +1342,10 @@ def _hide_in_run(value: str) -> str:
     """The rest of ``_hide_credentials`` for a run with no padding after it."""
     if not value or _readable(value) or not _looks_like_a_credential(value):
         return value
+    # A token glued to a word in front of it (``name_<jwt>``): its head is
+    # found where it starts, wherever that is in the run.
+    for start, end in reversed(_glued_tokens(value)):
+        value = value[:start] + _REDACTED + value[end:]
     # A token inside the run: its dots end every stretch, so it is found as
     # itself first and masked with the stretches on either side of it.
     value = _JWT_INSIDE.sub(
@@ -1330,6 +1379,62 @@ _PADDING = re.compile(
 )
 # A token's shape anywhere in a run: three base64url segments with dots between.
 _JWT_INSIDE = re.compile(r"[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}")
+# A token glued to other text inside a longer run: three dot-separated
+# base64url segments whose first is the run's trailing stretch from some point
+# on. A JOSE header is a JSON object, and base64url of ``{`` begins with ``e``
+# and one of ``w``-``z``, a digit, ``-`` or ``_``; the first four characters
+# decode to three bytes, and the first being ``{`` is what ``_is_a_token``'s
+# decode would find, so each start is decided from those four alone.
+_URLSAFE_STRETCH_END = re.compile(r"[A-Za-z0-9_\-]+\Z")
+_URLSAFE_SEGMENT = re.compile(r"[A-Za-z0-9_\-]{8,}\Z")
+_URLSAFE_SEGMENT_HEAD = re.compile(r"[A-Za-z0-9_\-]{8,}(?:={1,2})?")
+
+
+def _glued_tokens(run: str) -> list[tuple[int, int]]:
+    """Where tokens stand inside ``run`` behind other text, in order. Linear in ``run``."""
+    if run.count(".") < 2:
+        return []
+    parts = run.split(".")
+    starts = [0]
+    for part in parts[:-1]:
+        starts.append(starts[-1] + len(part) + 1)
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index + 2 < len(parts):
+        head = _URLSAFE_STRETCH_END.search(parts[index])
+        tail = _URLSAFE_SEGMENT_HEAD.match(parts[index + 2])
+        if head is None or tail is None or not _URLSAFE_SEGMENT.match(parts[index + 1]):
+            index += 1
+            continue
+        stretch = head.group(0)
+        at = next(
+            (
+                offset
+                for offset in range(len(stretch) - 7)
+                if stretch[offset] == "e" and _opens_an_object(stretch[offset : offset + 4])
+            ),
+            None,
+        )
+        if at is None:
+            index += 1
+            continue
+        spans.append((starts[index] + head.start() + at, starts[index + 2] + tail.end()))
+        index += 3
+    return spans
+
+
+def _opens_an_object(four: str) -> bool:
+    """Whether four base64url characters decode to bytes that begin with ``{``."""
+    try:
+        return base64.urlsafe_b64decode(four).startswith(b"{")
+    except (ValueError, binascii.Error):
+        return False
+
+
+def _glued_token(run: str) -> tuple[int, int] | None:
+    """Where the first token stands inside ``run`` behind other text, or ``None``."""
+    spans = _glued_tokens(run)
+    return spans[0] if spans else None
 
 
 def _readable(token: str, *, path: bool = True) -> bool:
