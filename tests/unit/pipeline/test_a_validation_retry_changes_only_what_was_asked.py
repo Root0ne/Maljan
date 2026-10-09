@@ -313,7 +313,24 @@ class TestWhereTheNumbersDoNotPlaceTheRetry:
         merge = merge_retry(_isr(FIRST), _isr(answer), answer, asked=[1])
 
         assert merge.merged is None
-        assert merge.why == "a WITHDRAW line of the retry could not be read exactly"
+        assert merge.why == "a line of the retry that withdraws could not be read exactly"
+
+    def test_a_withdrawal_written_as_prose_merges_nothing(self) -> None:
+        for prose in (
+            "I withdraw claim 2.",
+            "Also, please withdraw claims 1 and 3 since they repeat.",
+        ):
+            answer = _block(FIXED_BEACON, number=2) + prose + "\n"
+
+            merge = merge_retry(_isr(FIRST), _isr(answer), answer, asked=[1])
+
+            assert merge.merged is None, prose
+            assert merge.why == "a line of the retry that withdraws could not be read exactly"
+
+    def test_a_note_that_names_a_claim_before_withdrawing_is_no_withdrawal(self) -> None:
+        answer = _block(FIXED_BEACON, number=2) + "My round-0 claim 21 was withdrawn.\n"
+
+        assert read_withdrawals(answer).unread == 0
 
     def test_what_a_retry_not_merged_withdrew_is_still_named(self) -> None:
         first = _isr(FIRST)
@@ -428,7 +445,33 @@ class TestTheLinesItReads:
     def test_a_withdraw_line_that_is_not_one_of_its_forms_is_counted_unread(self) -> None:
         read = read_withdrawals("Withdraw the claim about the mutex.\nI withdraw claim 11.\n")
 
-        assert read.unread == 1 and read.claims == ()
+        assert read.unread == 2 and read.claims == ()
+
+    def test_a_withdrawn_claim_takes_only_the_reason_of_the_lines_that_name_it(self) -> None:
+        first = _isr(FIRST)
+        answer = (
+            "WITHDRAW CLAIM 1: the mutex is the decoder's.\n"
+            "WITHDRAW CLAIM 3\n"
+            "WITHDRAW CLAIMS 3-4: covered by the beacon claim\n"
+        )
+
+        merge = merge_retry(first, _isr(answer), answer)
+
+        reasons = {item.claim: reason for _kind, item, reason in merge.withdrawn}
+        assert reasons == {
+            MUTEX: "the mutex is the decoder's.",
+            CRYPTO: "covered by the beacon claim",
+            PERSIST: "covered by the beacon claim",
+        }
+
+    def test_a_claim_only_reasonless_lines_name_has_no_reason(self) -> None:
+        first = _isr(FIRST)
+        answer = "WITHDRAW CLAIM 1: the mutex is the decoder's.\nWITHDRAW CLAIM 3\n"
+
+        merge = merge_retry(first, _isr(answer), answer)
+
+        reasons = {item.claim: reason for _kind, item, reason in merge.withdrawn}
+        assert reasons == {MUTEX: "the mutex is the decoder's.", CRYPTO: ""}
 
     def test_a_withdraw_line_is_not_read_into_the_claim_before_it(self) -> None:
         text = _block(BEACON, number=2) + "WITHDRAW CLAIM 4: not held.\n"
@@ -503,6 +546,25 @@ class TestAHostileRetryCostsALinearMerge:
             return lambda: merge_retry(first, withdrawn, answer, asked=range(count))
 
         assert _seconds(run(10_000)) <= 10 * _seconds(run(1_000)) * 1.5 + 0.1
+
+    def test_reasonless_withdraw_lines_cost_a_linear_read_in_time_and_memory(self) -> None:
+        def run(count: int) -> Callable[[], Any]:
+            first = _answers(count)[0]
+            answer = "".join(f"WITHDRAW CLAIM {n}\n" for n in range(1, count + 1))
+            withdrawn = _isr(answer)
+            return lambda: merge_retry(first, withdrawn, answer)
+
+        small, large = run(2_000), run(20_000)
+
+        assert _seconds(large) <= 10 * _seconds(small) * 1.5 + 0.1
+        assert _peak(large) <= 10 * _peak(small) * 1.5 + 65_536
+
+    def test_a_long_line_of_withdraw_words_costs_a_linear_read(self) -> None:
+        def run(size: int) -> Callable[[], Any]:
+            text = "withdraw " * size
+            return lambda: read_withdrawals(text)
+
+        assert _seconds(run(100_000)) <= 10 * _seconds(run(10_000)) * 1.5 + 0.1
 
     def test_ten_thousand_unplaced_claims_cost_a_linear_search(self) -> None:
         def run(count: int) -> Callable[[], Any]:

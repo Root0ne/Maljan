@@ -23,7 +23,7 @@ from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
 from dataclasses import dataclass, replace
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import tiktoken
@@ -7630,6 +7630,23 @@ class BaseAnalyst(BudgetMeter, ABC):
                         # What the retry withdrew is the analyst's answer.
                         *(item for _kind, item, _reason in withdrawn),
                     ],
+                )
+            if withdrawn and kept is not first_answer:
+                # The whole answer stands: a withdrawal is recorded only for
+                # an item it no longer states, so the record never says an
+                # item it publishes was withdrawn.
+                # What the kept answer states is its claims and findings: its
+                # text also carries the WITHDRAW lines, which name the item.
+                stated = SimpleNamespace(claims=kept.claims, findings=kept.findings or [])
+                gone = retry_drops(first_answer, stated)
+                stated_nowhere = {id(claim) for claim, _missing in gone.claims}
+                stated_nowhere.update(id(finding) for finding in gone.findings)
+                present = {id(c) for c in kept.claims}
+                present.update(id(f) for f in kept.findings or [])
+                withdrawn = tuple(
+                    entry
+                    for entry in withdrawn
+                    if id(entry[1]) in present or id(entry[1]) in stated_nowhere
                 )
             if withdrawn:
                 kept = BaseAnalyst._apply_withdrawals(  # type: ignore[arg-type]

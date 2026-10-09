@@ -412,3 +412,54 @@ class TestWhatTheMergeLeavesAlone:
             ("finding", RETRY_DROP_WITHDRAWN),
             ("finding", RETRY_DROP_KEPT),
         ]
+
+
+# A retry the numbers do not place (claim 2 written twice) that withdraws
+# claim 3: the whole answer is asked for.
+DOUBTED = (
+    _block(2, "T1027", number=2)
+    + _block(2, "T1027", number=2)
+    + "WITHDRAW CLAIM 3: no entry holds it.\n"
+)
+
+
+class TestTheRecordNeverContradictsTheAnswer:
+    def test_a_whole_answer_that_writes_the_withdrawn_claim_again_records_no_withdrawal(
+        self,
+    ) -> None:
+        whole = _block(1, "T1027") + _block(2, "T1027") + _block(3, "T1027")
+        analyst = _Analyst([DOUBTED, whole])
+
+        result = _check(analyst, UNGROUNDED)
+
+        assert len(analyst.questions) == 2
+        assert [c.claim[-2:] for c in result.claims] == ["1.", "2.", "3."]
+        assert _withdrawn_rows(analyst) == []
+
+    def test_a_whole_answer_that_leaves_the_withdrawn_claim_out_records_it(self) -> None:
+        whole = _block(1, "T1027") + _block(2, "T1027") + _block(4, "T1027")
+        analyst = _Analyst([DOUBTED, whole])
+
+        result = _check(analyst, UNGROUNDED)
+
+        assert len(analyst.questions) == 2
+        assert [c.claim[-2:] for c in result.claims] == ["1.", "2.", "4."]
+        (row,) = _withdrawn_rows(analyst)
+        assert row["reason"] == "no entry holds it."
+
+    def test_a_retry_read_whole_that_writes_the_withdrawn_claim_records_no_withdrawal(
+        self,
+    ) -> None:
+        whole = (
+            _block(1, "T1027")
+            + _block(2, "T1027")
+            + _block(3, "T1027")
+            + "WITHDRAW CLAIM 3: no entry holds it.\n"
+        )
+        analyst = _Analyst([whole])
+
+        result = _check(analyst, UNGROUNDED)
+
+        assert len(analyst.questions) == 1
+        assert "3." in [c.claim[-2:] for c in result.claims]
+        assert _withdrawn_rows(analyst) == []

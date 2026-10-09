@@ -77,6 +77,11 @@ _WITHDRAW_FINDING_RE = re.compile(
 # Any line that begins with the word: one the two forms above do not read
 # exactly is a doubt, never a line passed over.
 _WITHDRAW_LINE_RE = re.compile(r"^" + LINE_PREFIX + r"withdraw\b", re.IGNORECASE)
+# A withdrawal of a claim written as prose anywhere on a line ("I withdraw
+# claim 2", "please withdraw claims 1 and 3"): a doubt unless the line is one
+# of the forms above. Read with two searches, so a line costs its length.
+_WITHDRAW_WORD_RE = re.compile(r"\bwithdraw\w*+\b", re.IGNORECASE)
+_CLAIM_NUMBER_RE = re.compile(r"\bclaims?+\s*+#?\d", re.IGNORECASE)
 _NUMBER_RE = re.compile(r"\d++")
 _RANGE_SPLIT_RE = re.compile(r"(?:,|&|\band\b)", re.IGNORECASE)
 # Where a flag names the claim block it is about: ``static.claims[5].T1041``.
@@ -130,6 +135,9 @@ def read_withdrawals(text: str) -> Withdrawals:
     unread = 0
     for line in str(text or "").splitlines():
         if _WITHDRAW_LINE_RE.match(line) is None:
+            said = _WITHDRAW_WORD_RE.search(line)
+            if said is not None and _CLAIM_NUMBER_RE.search(line, said.end()) is not None:
+                unread += 1
             continue
         found = _WITHDRAW_CLAIM_RE.match(line)
         if found is not None:
@@ -311,9 +319,8 @@ def _withdrawn_items(
     """
     by_number = {block.number: index for index, block in enumerate(first_blocks)}
     doubt = ""
-    # Where each range starts and stops, over the blocks in order.
-    opens: dict[int, list[str]] = {}
-    closes: dict[int, int] = {}
+    # Each range as the blocks it covers, in the order the lines wrote them.
+    spans: list[tuple[int, int, str]] = []
     for low, high, reason in read.claims:
         if low not in by_number or high not in by_number:
             missing = low if low not in by_number else high
@@ -323,18 +330,39 @@ def _withdrawn_items(
         if start > stop:
             doubt = doubt or f"the retry withdrew claims {low} to {high}, which run backwards"
             continue
-        opens.setdefault(start, []).append(reason)
-        closes[stop + 1] = closes.get(stop + 1, 0) + 1
+        spans.append((start, stop, reason))
+    # Which blocks any range covers: one pass over a difference count.
+    count = len(first_blocks)
+    depth = [0] * (count + 1)
+    for start, stop, _reason in spans:
+        depth[start] += 1
+        depth[stop + 1] -= 1
+    # A block's reason is the first written reason of a range that covers it,
+    # and no other: each block is given one once, the next block not yet given
+    # one found by a pointer that only moves forward (path halving).
+    reason_of: list[str | None] = [None] * count
+    following = list(range(count + 1))
+
+    def _next_open(index: int) -> int:
+        while following[index] != index:
+            following[index] = following[following[index]]
+            index = following[index]
+        return index
+
+    for start, stop, reason in spans:
+        if not reason:
+            continue
+        index = _next_open(start)
+        while index <= stop:
+            reason_of[index] = reason
+            following[index] = index + 1
+            index = _next_open(index + 1)
     numbers: dict[str, str] = {}
-    open_reasons: list[str] = []
-    still_open = 0
+    covering = 0
     for index, block in enumerate(first_blocks):
-        still_open -= closes.get(index, 0)
-        for reason in opens.get(index, []):
-            open_reasons.append(reason)
-            still_open += 1
-        if still_open > 0:
-            numbers[block.number] = next((r for r in reversed(open_reasons) if r), "")
+        covering += depth[index]
+        if covering > 0:
+            numbers[block.number] = reason_of[index] or ""
     items: list[tuple[str, Any, str]] = [
         ("claim", claim, numbers[block.number])
         for block in first_blocks
@@ -384,7 +412,7 @@ def merge_retry(
         return RetryMerge(why=reason, withdrawn=tuple(withdrawn))
 
     if read.unread:
-        return _not_merged("a WITHDRAW line of the retry could not be read exactly")
+        return _not_merged("a line of the retry that withdraws could not be read exactly")
     if doubt:
         return _not_merged(doubt)
     unread = _parse_left_unread(retried)
