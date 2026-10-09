@@ -19,13 +19,35 @@ LINE_PREFIX = r"[ \t>*_#]*(?:(?:[-+]|\d+[.)])[ \t]+)?[ \t>*_#]*"
 
 # A claim's heading at the start of a line, as models number and mark it:
 # ``CLAIM:``, ``CLAIM 3:``, ``CLAIM 3 —``, ``**CLAIM 4 (REVISED):**``,
-# ``- CLAIM:``, ``1. CLAIM:``. Each one opens a block of its own, so claims
-# written one after another with no ``---`` between them are read as the
-# claims they are, not as the first one.
+# ``CLAIM 2 [REVISED — retracts claim 5]:``, ``- CLAIM:``, ``1. CLAIM:``, and a
+# heading whose note is all its line holds (``CLAIM 1 (REVISED — not
+# observed)``, fields on the lines after it). Each one opens a block of its
+# own, so claims written one after another with no ``---`` between them are
+# read as the claims they are, not as the first one. The note, in round or
+# square brackets, is the model's own words and is kept (``heading_text``); a
+# bracket is closed on its own line or the line is no heading, and a bracket
+# that never closes is given up once, so a line costs time linear in its length.
 CLAIM_HEAD_RE = re.compile(
-    r"^" + LINE_PREFIX + r"CLAIM(?:[ \t]*#?\d+)?(?:[ \t]*\([^)\n]*\))?[ \t]*(?:\*\*)?[ \t]*"
-    r"(?::|—|–|-(?=\s))[ \t]*(?:\*\*)?[ \t]*"
+    r"^" + LINE_PREFIX + r"CLAIM(?:[ \t]*#?\d+)?"
+    r"(?:[ \t]*(?P<note>\([^)\n]*\)|\[[^\]\n]*\]))?[ \t]*(?:\*\*)?[ \t]*"
+    r"(?:(?::|—|–|-(?=\s))[ \t]*(?:\*\*)?[ \t]*|(?(note)$|(?!)))"
 )
+
+
+def heading_text(line: str, heading: re.Match[str]) -> str:
+    """What a claim heading's line says after its label: the note, then the sentence.
+
+    The note before the delimiter (a revision, a retraction) is the model's
+    own words, kept as written, brackets and all, ahead of the sentence it
+    qualifies; a heading without one reads as it always did.
+    """
+    rest = line[heading.end() :]
+    note = heading.group("note")
+    if not note:
+        return rest
+    return f"{note} {rest}" if rest else note
+
+
 # The DISPUTES section's label: ``DISPUTES:`` (marks and a list marker
 # allowed before it, ``**`` before the colon), or a Markdown heading naming
 # it. Case-sensitive, and with its colon or its heading marks, so a claim's
@@ -93,7 +115,7 @@ def claims_headed(text: str) -> str:
     for line in before_disputes(text).splitlines():
         heading = CLAIM_HEAD_RE.match(line)
         if heading is not None:
-            out.extend(["---", "CLAIM: " + line[heading.end() :]])
+            out.extend(["---", "CLAIM: " + heading_text(line, heading)])
             continue
         out.append(line)
     return "\n".join(out)
@@ -125,7 +147,7 @@ def claim_blocks(text: str) -> list[tuple[int, str]]:
     line after it up to the next heading, a ``---`` separator, or the first
     line that is not a field once its field lines have begun (the prose after
     the last claim is not part of it), blank lines aside; the claim's number
-    is not part of it. Two claims under one label
+    and its heading's note are not part of it. Two claims under one label
     with different sentences or evidence are different claims, and a heading
     that holds only its label is told apart by what follows it. ``offset`` is
     where the heading line starts in ``text``.

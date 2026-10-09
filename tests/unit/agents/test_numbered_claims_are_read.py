@@ -44,7 +44,10 @@ DISPUTES: NONE
 def test_every_numbered_claim_is_read_with_its_technique() -> None:
     claims = _parse_claim_blocks(NUMBERED)
     assert [c.technique_id for c in claims] == [None, "T1218.011", "T1027", "T1053.005"]
-    assert claims[2].claim.startswith("the stored blobs are not RC4-decrypted")
+    # The heading's note is the model's own words and is kept ahead of the sentence.
+    assert claims[2].claim.startswith(
+        "(REVISED — round-0 claim withdrawn) the stored blobs are not RC4-decrypted"
+    )
     assert claims[3].claim.startswith("persistence is a COM Task Scheduler")
 
 

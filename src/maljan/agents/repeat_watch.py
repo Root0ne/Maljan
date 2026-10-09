@@ -258,11 +258,16 @@ class _Key:
 
 
 class _Automaton:
-    """A pattern compiled to states, read one character at a time; a state set is immutable."""
+    """A pattern compiled to states, read one character at a time; a state set is immutable.
+
+    A ``("mark",)`` leaf is a second accepting state (``also_accept``) that
+    leads nowhere: a path ends there or is read on past it, never both.
+    """
 
     def __init__(self, tree: Any) -> None:
         self.edges: list[list[tuple[Callable[[str], bool], int]]] = []
         self.empty: list[list[int]] = []
+        self.also_accept = -1
         start, self.accept = self._build(tree)
         self.start = self._closure({start})
 
@@ -273,6 +278,9 @@ class _Automaton:
 
     def _build(self, tree: Any) -> tuple[int, int]:
         kind = tree[0]
+        if kind == "mark":
+            self.also_accept = self._state()
+            return self.also_accept, self._state()
         if kind == "char":
             begin, end = self._state(), self._state()
             self.edges[begin].append((tree[1], end))
@@ -353,26 +361,44 @@ _LINE_PREFIX = _seq(
 )
 _STARS = _opt(_seq(_one("*"), _one("*")))
 
+# A claim heading's label and number, and its note in round or square brackets.
+_HEAD_LABEL = _seq(
+    _LINE_PREFIX,
+    _word("CLAIM"),
+    _opt(_seq(_star(_SPACE_OR_TAB), _opt(_one("#")), ("plus", ("char", _DIGIT)))),
+)
+_HEAD_NOTE = _seq(
+    _star(_SPACE_OR_TAB),
+    (
+        "alt",
+        [
+            _seq(_one("("), _star(("char", lambda c: c not in ")\n")), _one(")")),
+            _seq(_one("["), _star(("char", lambda c: c not in "]\n")), _one("]")),
+        ],
+    ),
+)
 # ``claim_headings.CLAIM_HEAD_RE`` up to its delimiter. ``-(?=\s)`` reads the
 # whitespace after the dash too: the heading's text after the delimiter is
-# read as words, and that whitespace adds none.
+# read as words, and that whitespace adds none. Its other form, a heading
+# whose note is all its line holds, is the second accepting state
+# (``also_accept``): a heading only where the line ends, with no text after it.
+_DELIMITER = ("alt", [_one(":"), _one("—"), _one("–"), _seq(_one("-"), ("char", _SPACE))])
 _HEAD = _Automaton(
     _seq(
-        _LINE_PREFIX,
-        _word("CLAIM"),
-        _opt(_seq(_star(_SPACE_OR_TAB), _opt(_one("#")), ("plus", ("char", _DIGIT)))),
-        _opt(
-            _seq(
-                _star(_SPACE_OR_TAB),
-                _one("("),
-                _star(("char", lambda c: c not in ")\n")),
-                _one(")"),
-            )
+        _HEAD_LABEL,
+        (
+            "alt",
+            [
+                _seq(_star(_SPACE_OR_TAB), _STARS, _star(_SPACE_OR_TAB), _DELIMITER),
+                _seq(
+                    _HEAD_NOTE,
+                    _star(_SPACE_OR_TAB),
+                    _STARS,
+                    _star(_SPACE_OR_TAB),
+                    ("alt", [_DELIMITER, ("mark",)]),
+                ),
+            ],
         ),
-        _star(_SPACE_OR_TAB),
-        _STARS,
-        _star(_SPACE_OR_TAB),
-        ("alt", [_one(":"), _one("—"), _one("–"), _seq(_one("-"), ("char", _SPACE))]),
     )
 )
 # ``claim_headings._SEPARATOR_RE``, read to the end of the line.
@@ -563,7 +589,7 @@ class _Reading:
             opens = False
         if opens:
             return "disputes"
-        if self.heading:
+        if self.heading or _HEAD.also_accept in self._head:
             return "heading"
         if _SEPARATOR.accept in self._separator:
             return "separator"

@@ -1888,10 +1888,15 @@ not a claim either: it is counted and asked about
 (`isr.claim_without_confidence`), where the parsers used to write 0.5.
 Every path that reads claims reads them through one reader,
 `base_agent.read_claim_blocks`: it splits an answer at every claim heading
-(`CLAIM:`, `CLAIM 3:`, `**CLAIM 4 (REVISED):**`, `CLAIM 5 -`; the rule is
+(`CLAIM:`, `CLAIM 3:`, `**CLAIM 4 (REVISED):**`, `CLAIM 2 [REVISED — retracts
+claim 5]:`, `CLAIM 5 -`, and a heading whose round- or square-bracketed note is
+its whole line, its fields on the lines after it; the rule is
 `agents/claim_headings.py`) where a block can begin, and at the model's own
 `---` lines, so claims written one after another with blank lines between them
-are each read. The static, dynamic and network analysts read it with an
+are each read. A heading's note is the model's own words (a revision, a
+retraction) and is kept verbatim, brackets and all, ahead of the claim's
+sentence; the heading's number is never part of the claim, and no number is
+given to a heading without one. The static, dynamic and network analysts read it with an
 EVIDENCE line required; the base analyst's path records a block without one as
 unsourced. Each read counts the claim headings the answer began before its
 DISPUTES section against the claims it read and the blocks that stated no
