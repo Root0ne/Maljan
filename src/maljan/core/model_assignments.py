@@ -75,6 +75,13 @@ class ModelAssignment:
         return (self.endpoint, filed_model(self.model, self.effort))
 
 
+# The width of the column a probe row's model half is stored in
+# (``model_probes.model``, ``String(200)``). A model with its own effort is
+# stored as ``filed_model`` spells it, and an entry whose spelling would not
+# fit is refused at settings validation rather than filed as nothing.
+FILED_MODEL_MAX_CHARS = 200
+
+
 def filed_model(model: str, effort: str | None = None) -> str:
     """The model half of a probe row's key: the model, and its own effort when set.
 

@@ -686,6 +686,12 @@ class TestAnEntrysOwnEffort:
             f"agent 'static' names model 'ds' at effort 'high' at http://box:8080: {NEVER_PROBED}"
         ]
 
+    def test_the_column_holds_the_widest_spelling_settings_accept(self) -> None:
+        from app.models.model_probe import ModelProbe
+        from maljan.core.model_assignments import FILED_MODEL_MAX_CHARS
+
+        assert ModelProbe.__table__.c.model.type.length == FILED_MODEL_MAX_CHARS
+
     @pytest.mark.asyncio
     async def test_an_entry_without_one_is_refused_in_the_words_it_was_before(self) -> None:
         refusals = await unprobed_models(_Db([]), self._entry_settings(), ["static"])

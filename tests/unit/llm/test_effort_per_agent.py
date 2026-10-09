@@ -85,6 +85,19 @@ class TestTheField:
         for level in ANTHROPIC_EFFORT_LEVELS:
             assert ModelChoice(provider="anthropic", model="m", effort=level).effort == level
 
+    def test_an_effort_whose_probe_record_would_not_fit_is_refused(self) -> None:
+        from maljan.core.model_assignments import FILED_MODEL_MAX_CHARS, filed_model
+
+        model = "m" * 150
+        with pytest.raises(ValidationError, match="shorten the effort"):
+            ModelChoice(provider="openai", model=model, effort="e" * 60)
+        fits = "e" * (FILED_MODEL_MAX_CHARS - len(filed_model(model, "")) - len(" (effort )"))
+        assert len(filed_model(model, fits)) == FILED_MODEL_MAX_CHARS
+        assert ModelChoice(provider="openai", model=model, effort=fits).effort == fits
+
+    def test_a_long_model_with_no_effort_is_not_measured_here(self) -> None:
+        assert ModelChoice(provider="openai", model="m" * 300).effort is None
+
     def test_an_openai_compatible_value_is_kept_as_written(self) -> None:
         assert ModelChoice(provider="openai", model="m", effort="minimal").effort == "minimal"
 

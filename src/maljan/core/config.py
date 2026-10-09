@@ -254,6 +254,18 @@ class ModelChoice(BaseModel):
                 f"effort {self.effort!r} is not one of the Anthropic levels "
                 f"({', '.join(ANTHROPIC_EFFORT_LEVELS)})."
             )
+        # A probe of this model is filed under the model and its effort
+        # together; a spelling wider than the column that holds it could never
+        # be filed, and the gate would call the model unprobed with no reason.
+        from maljan.core.model_assignments import FILED_MODEL_MAX_CHARS, filed_model
+
+        filed = filed_model(self.model, self.effort)
+        if len(filed) > FILED_MODEL_MAX_CHARS:
+            raise ValueError(
+                f"model {self.model!r} with effort {self.effort!r} is {len(filed)} characters "
+                f"as its probe record ({filed!r}); the record holds at most "
+                f"{FILED_MODEL_MAX_CHARS}, so shorten the effort."
+            )
         return self
 
     def same_call(self, other: "ModelChoice") -> bool:
