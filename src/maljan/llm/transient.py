@@ -676,9 +676,30 @@ def inside_a_retry() -> bool:
 _RETRYING_CLASSES: dict[type, type] = {}
 
 
+# The name of the call the running code is making, set by its caller
+# (:func:`as_call`): what a retry's log line and run-summary row call it.
+_CALL_LABEL: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "maljan_transient_call_label", default=""
+)
+
+
+async def as_call(label: str, awaitable: Awaitable[Any]) -> Any:
+    """Await ``awaitable`` as the call ``label`` names, for its retries' lines and rows.
+
+    The name reaches the model's own retry through the context, not the
+    request: nothing sent changes, and a model list's models read it too.
+    """
+    token = _CALL_LABEL.set(str(label))
+    try:
+        return await awaitable
+    finally:
+        _CALL_LABEL.reset(token)
+
+
 def _what(model: Any) -> str:
     name = getattr(model, "model_name", None) or getattr(model, "model", None) or ""
-    return f"model call ({name})" if name else "model call"
+    label = _CALL_LABEL.get() or "model call"
+    return f"{label} ({name})" if name else label
 
 
 def _failed_once(model: Any, exc: BaseException, prompt: Any) -> None:

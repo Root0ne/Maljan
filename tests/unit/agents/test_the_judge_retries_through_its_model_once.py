@@ -96,3 +96,67 @@ class TestNoJudgeCallIsWrappedAgain:
             asyncio.run(judge.give_verdict(reports={"static": "nothing"}, history=[]))
 
         assert len(model.asked) == DEFAULT_ATTEMPTS
+
+
+class TestARetryNamesTheCallItRetried:
+    """The judge and the mediator are both filed under ``judge``: the row says which call."""
+
+    def test_the_re_ask_s_retries_name_it(self, caplog: pytest.LogCaptureFixture) -> None:
+        from maljan.core.token_ledger import TokenLedger
+        from maljan.llm.transient import attach_retry_recorder
+
+        ledger = TokenLedger()
+        model = attach_retry_recorder(
+            _model([_status(503), "CONTRADICTIONS: NONE"]), ledger, "judge"
+        )
+        judge = JudgeAgent(llm=model)
+
+        with caplog.at_level("WARNING"):
+            asyncio.run(judge._ask_mediation_again([HumanMessage("x")], None))
+
+        (row,) = ledger.snapshot()["retries"]
+        assert row["reason"].startswith("Mediator asked once more")
+        assert any("Mediator asked once more" in record.getMessage() for record in caplog.records)
+
+    def test_the_verdict_s_retries_name_it(self) -> None:
+        from maljan.core.token_ledger import TokenLedger
+        from maljan.llm.transient import attach_retry_recorder
+
+        ledger = TokenLedger()
+        model = attach_retry_recorder(_model([]), ledger, "judge")
+        judge = JudgeAgent(llm=model)
+
+        with pytest.raises(openai.APIStatusError):
+            asyncio.run(judge.give_verdict(reports={"static": "nothing"}, history=[]))
+
+        rows = ledger.snapshot()["retries"]
+        assert len(rows) == DEFAULT_ATTEMPTS - 1
+        assert all(row["reason"].startswith("Judge verdict") for row in rows)
+
+    def test_a_call_with_no_name_is_a_model_call(self) -> None:
+        from maljan.core.token_ledger import TokenLedger
+        from maljan.llm.transient import attach_retry_recorder
+
+        ledger = TokenLedger()
+        model = attach_retry_recorder(_model([_status(503), "fine"]), ledger, "judge")
+
+        asyncio.run(model.ainvoke("hi"))
+
+        (row,) = ledger.snapshot()["retries"]
+        assert row["reason"].startswith("model call")
+
+    def test_nothing_sent_changes(self) -> None:
+        seen: list[Any] = []
+
+        class _Seen(_Scripted):
+            def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kw):
+                seen.append((messages, stop, dict(kw)))
+                return super()._generate(messages, stop, run_manager, **kw)
+
+        model = with_transient_retries(_Seen)(script=["a", "b"], asked=[])
+        from maljan.llm.transient import as_call
+
+        asyncio.run(model.ainvoke([HumanMessage("x")]))
+        asyncio.run(as_call("Judge verdict", model.ainvoke([HumanMessage("x")])))
+
+        assert seen[0] == seen[1]
