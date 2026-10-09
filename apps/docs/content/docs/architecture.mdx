@@ -1610,8 +1610,11 @@ decides.
    or adds, `WITHDRAW FINDING "<title>": <reason>` taking one out
    (`ANALYST_FEEDBACK_CLOSING_BY_NUMBER`). WITHDRAW lines are read in any case,
    with lists and ranges (`WITHDRAW CLAIMS 3, 5 and 7-9`), each block taking
-   the reason of the first line that names it with one and no other; a line
-   that withdraws a claim in any other words ("I withdraw claim 2") is a doubt. The retry is then
+   the reason of the first line that names it with one and no other; any
+   other line that holds both a claim number and a withdrawing word (withdraw,
+   retract, remove, drop, delete), in either order ("I withdraw claim 2",
+   "Claim 5 is withdrawn", "Drop claim 2"), is a doubt, a claim heading's own
+   number aside. The retry is then
    merged into the answer by block number (`retry_merge.merge_retry`): the
    merged answer is the first answer with only the retry's changes, so its
    disputes and every field the retry does not write stay; a block written
@@ -1640,8 +1643,10 @@ decides.
    is read as a whole answer always was, with the kept-retry question; the
    items its retry withdrew are not asked about again, and with no whole
    answer the first answer is kept without them. A whole answer stands as
-   written: a withdrawal is recorded only for an item it no longer states, so
-   the record never says an item it publishes was withdrawn. The doubts: a
+   written: a withdrawal is recorded only for an item it no longer states (by
+   its values, or for a claim with none, by its sentence), so the record never
+   says an item it publishes was withdrawn. A retry read whole as written that
+   both writes an item again and withdraws it is a doubt too. The doubts: a
    retry block with no number or a number written twice, a block left unread,
    a WITHDRAW line not read exactly or naming what the answer has not, a
    number both written and withdrawn, a retry with nothing to read, a retry

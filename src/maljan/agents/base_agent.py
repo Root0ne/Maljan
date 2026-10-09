@@ -60,6 +60,7 @@ from maljan.llm.context_window import (
 )
 from maljan.llm.generation_rate import ModelCallDeadline
 from maljan.llm.stream_watch import StopRule, current_rule, ended_while_streaming, watching
+from maljan.pipeline.claim_drops import values_as_written
 from maljan.pipeline.function_claims import (
     FUNCTION_CLAIM_UNHELD_CODE,
     FunctionClaimCheck,
@@ -7469,6 +7470,39 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return None
             return _parse(answer)
 
+        def _still_stated(
+            first_answer: AgentISR,
+            answer: AgentISR,
+            withdrawn: Sequence[tuple[str, Any, str]],
+        ) -> set[int]:
+            """The ids of the withdrawn items ``answer`` still states, by its claims and findings.
+
+            An item is gone when ``answer`` does not hold it and states none of
+            its values (``retry_drops`` over the claims and findings, not the
+            text, which carries the WITHDRAW lines naming it); a claim with no
+            value is gone when no claim of ``answer`` writes its sentence.
+            """
+            stated = SimpleNamespace(claims=answer.claims, findings=answer.findings or [])
+            gone = retry_drops(first_answer, stated)
+            stated_nowhere = {id(claim) for claim, _missing in gone.claims}
+            stated_nowhere.update(id(finding) for finding in gone.findings)
+            sentences = {" ".join(str(c.claim).split()) for c in answer.claims}
+            held = {id(c) for c in answer.claims}
+            held.update(id(f) for f in answer.findings or [])
+            out: set[int] = set()
+            for kind, item, _reason in withdrawn:
+                # Held by identity, it is taken out and recorded.
+                if id(item) in held or id(item) in stated_nowhere:
+                    continue
+                if (
+                    kind == "claim"
+                    and not values_as_written(str(item.claim), item.technique_id or "")
+                    and " ".join(str(item.claim).split()) not in sentences
+                ):
+                    continue
+                out.add(id(item))
+            return out
+
         def _keep(first_answer: AgentISR, retried: AgentISR) -> AgentISR:
             merge = _merged(first_answer, retried)
             answer_text = raw_answers.get(id(retried), "")
@@ -7516,6 +7550,22 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             if merge is not None:
                 withdrawn = merge.withdrawn
+                # A whole answer that both writes an item again and withdraws
+                # it is a doubt, as it is to the merge: its whole answer is
+                # asked for.
+                restated = (
+                    _still_stated(first_answer, retried, withdrawn)
+                    if written_whole and withdrawn
+                    else set()
+                )
+                if restated:
+                    written_whole = False
+                    merge = replace(
+                        merge,
+                        why=(
+                            "the retry both wrote again and withdrew an item of the answer it fixes"
+                        ),
+                    )
                 self.logger.info(
                     "Validation: the retry for '%s' is not merged by claim number (%s); %s.",
                     self.name,
@@ -7635,19 +7685,8 @@ class BaseAnalyst(BudgetMeter, ABC):
                 # The whole answer stands: a withdrawal is recorded only for
                 # an item it no longer states, so the record never says an
                 # item it publishes was withdrawn.
-                # What the kept answer states is its claims and findings: its
-                # text also carries the WITHDRAW lines, which name the item.
-                stated = SimpleNamespace(claims=kept.claims, findings=kept.findings or [])
-                gone = retry_drops(first_answer, stated)
-                stated_nowhere = {id(claim) for claim, _missing in gone.claims}
-                stated_nowhere.update(id(finding) for finding in gone.findings)
-                present = {id(c) for c in kept.claims}
-                present.update(id(f) for f in kept.findings or [])
-                withdrawn = tuple(
-                    entry
-                    for entry in withdrawn
-                    if id(entry[1]) in present or id(entry[1]) in stated_nowhere
-                )
+                stands = _still_stated(first_answer, kept, withdrawn)
+                withdrawn = tuple(entry for entry in withdrawn if id(entry[1]) not in stands)
             if withdrawn:
                 kept = BaseAnalyst._apply_withdrawals(  # type: ignore[arg-type]
                     self, kept, withdrawn, int(isr.revision_round or 0)

@@ -77,11 +77,15 @@ _WITHDRAW_FINDING_RE = re.compile(
 # Any line that begins with the word: one the two forms above do not read
 # exactly is a doubt, never a line passed over.
 _WITHDRAW_LINE_RE = re.compile(r"^" + LINE_PREFIX + r"withdraw\b", re.IGNORECASE)
-# A withdrawal of a claim written as prose anywhere on a line ("I withdraw
-# claim 2", "please withdraw claims 1 and 3"): a doubt unless the line is one
-# of the forms above. Read with two searches, so a line costs its length.
-_WITHDRAW_WORD_RE = re.compile(r"\bwithdraw\w*+\b", re.IGNORECASE)
+# A withdrawal of a claim written in other words anywhere on a line ("I
+# withdraw claim 2", "Claim 5 is withdrawn", "Retract claim 2", "Drop claim
+# 2"): a line that holds both a claim number and a withdrawing word, in either
+# order, is a doubt unless it is one of the forms above. A claim heading's own
+# "CLAIM <n>" is not that number: its note and sentence are what is read.
+# Two searches per line, so a line costs its length.
+_WITHDRAW_WORD_RE = re.compile(r"\b(?:withdraw|retract|remov|drop|delet)\w*+", re.IGNORECASE)
 _CLAIM_NUMBER_RE = re.compile(r"\bclaims?+\s*+#?\d", re.IGNORECASE)
+_HEADING_NUMBER_RE = re.compile(r"^" + LINE_PREFIX + r"CLAIM[ \t]*+#?\d*+")
 _NUMBER_RE = re.compile(r"\d++")
 _RANGE_SPLIT_RE = re.compile(r"(?:,|&|\band\b)", re.IGNORECASE)
 # Where a flag names the claim block it is about: ``static.claims[5].T1041``.
@@ -135,8 +139,9 @@ def read_withdrawals(text: str) -> Withdrawals:
     unread = 0
     for line in str(text or "").splitlines():
         if _WITHDRAW_LINE_RE.match(line) is None:
-            said = _WITHDRAW_WORD_RE.search(line)
-            if said is not None and _CLAIM_NUMBER_RE.search(line, said.end()) is not None:
+            heading = _HEADING_NUMBER_RE.match(line)
+            rest = line[heading.end() :] if heading is not None else line
+            if _WITHDRAW_WORD_RE.search(rest) and _CLAIM_NUMBER_RE.search(rest):
                 unread += 1
             continue
         found = _WITHDRAW_CLAIM_RE.match(line)

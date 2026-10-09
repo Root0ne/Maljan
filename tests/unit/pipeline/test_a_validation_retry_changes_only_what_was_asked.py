@@ -319,6 +319,12 @@ class TestWhereTheNumbersDoNotPlaceTheRetry:
         for prose in (
             "I withdraw claim 2.",
             "Also, please withdraw claims 1 and 3 since they repeat.",
+            "Claim 2 is withdrawn.",
+            "Claim 2: withdrawn, no evidence.",
+            "Retract claim 2.",
+            "Remove claim 2 - unsupported.",
+            "Drop claim 2.",
+            "CLAIM 3 (REVISED - retracts claim 2): the decoder is 0x403000.",
         ):
             answer = _block(FIXED_BEACON, number=2) + prose + "\n"
 
@@ -327,8 +333,13 @@ class TestWhereTheNumbersDoNotPlaceTheRetry:
             assert merge.merged is None, prose
             assert merge.why == "a line of the retry that withdraws could not be read exactly"
 
-    def test_a_note_that_names_a_claim_before_withdrawing_is_no_withdrawal(self) -> None:
+    def test_a_note_that_names_a_withdrawn_claim_is_a_doubt(self) -> None:
         answer = _block(FIXED_BEACON, number=2) + "My round-0 claim 21 was withdrawn.\n"
+
+        assert read_withdrawals(answer).unread == 1
+
+    def test_a_claim_heading_s_own_number_beside_a_deleting_sentence_is_no_doubt(self) -> None:
+        answer = _block("0x405000 deletes its own file after it runs.", number=5)
 
         assert read_withdrawals(answer).unread == 0
 

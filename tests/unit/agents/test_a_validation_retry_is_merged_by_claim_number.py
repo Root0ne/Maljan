@@ -447,19 +447,49 @@ class TestTheRecordNeverContradictsTheAnswer:
         (row,) = _withdrawn_rows(analyst)
         assert row["reason"] == "no entry holds it."
 
-    def test_a_retry_read_whole_that_writes_the_withdrawn_claim_records_no_withdrawal(
+    def test_a_retry_read_whole_that_writes_a_claim_and_withdraws_it_asks_for_the_whole_answer(
         self,
     ) -> None:
-        whole = (
+        from maljan.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
+
+        both = (
             _block(1, "T1027")
             + _block(2, "T1027")
             + _block(3, "T1027")
             + "WITHDRAW CLAIM 3: no entry holds it.\n"
         )
-        analyst = _Analyst([whole])
+        whole = _block(1, "T1027") + _block(2, "T1027") + _block(4, "T1027")
+        analyst = _Analyst([both, whole])
 
         result = _check(analyst, UNGROUNDED)
 
-        assert len(analyst.questions) == 1
-        assert "3." in [c.claim[-2:] for c in result.claims]
-        assert _withdrawn_rows(analyst) == []
+        assert len(analyst.questions) == 2
+        assert analyst.questions[1].startswith(WHOLE_ANSWER_AFTER_RETRY_LEAD)
+        assert [c.claim[-2:] for c in result.claims] == ["1.", "2.", "4."]
+        (row,) = _withdrawn_rows(analyst)
+        assert row["reason"] == "no entry holds it."
+        record = analyst._budget_records[-1]["validation_retry"]
+        assert record["merge"]["whole_answer_asked"] is True
+        assert record["merge"]["why"].startswith("the retry both wrote again and withdrew")
+
+    def test_a_withdrawn_claim_with_no_value_the_whole_answer_leaves_out_is_recorded(
+        self,
+    ) -> None:
+        plain = (
+            "CLAIM: The file carries plain configuration strings.\n"
+            "EVIDENCE: [ev_0001] strings\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
+        )
+        first = plain + _block(2, "T1027") + _block(3, "T1027", cites="ev_0099")
+        doubted = (
+            _block(2, "T1027", number=2)
+            + _block(2, "T1027", number=2)
+            + "WITHDRAW CLAIM 1: it says nothing the others do not.\n"
+        )
+        whole = _block(2, "T1027") + _block(3, "T1027") + _block(4, "T1027")
+        analyst = _Analyst([doubted, whole])
+
+        result = _check(analyst, first)
+
+        assert all("plain" not in c.claim for c in result.claims)
+        (row,) = _withdrawn_rows(analyst)
+        assert row["reason"] == "it says nothing the others do not."
