@@ -1062,6 +1062,17 @@ class ReportComposer:
             _Planned("communications", _C2Out, _INSTRUCTIONS["communications"], None, _c2),
         ]
 
+        if concurrent and spend_ceiling_set(getattr(self, "token_ledger", None)):
+            # Under a spend ceiling the report calls run alone, as the meter
+            # assumes (``SpendMeter.admit`` waits on its thread for calls in
+            # flight to settle, which on one event loop would hold every
+            # section), and each call is held at what the earlier sections
+            # left, exactly as written one after another.
+            logger.info(
+                "ReportComposer: the sections are written one after another: a spend ceiling "
+                "is set, and each call is held at what the sections before it left."
+            )
+            concurrent = False
         authored = 0
         if concurrent:
             # Applied in the fixed order, each section's record first, whatever

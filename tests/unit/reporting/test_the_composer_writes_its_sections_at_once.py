@@ -318,3 +318,62 @@ def test_the_head_note_rides_on_the_section_request(concurrent: bool) -> None:
         )
     heads = {str(m.content)[: m.response_metadata[SHARED_HEAD]] for m in seen}
     assert heads == {"FACTS\n\n"}
+
+
+class _Priced(_Recorder):
+    """A priced model that reports usage, so the spend ceiling settles each call."""
+
+    model_name = "priced-model"
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.caps: dict[str, list[Any]] = {}
+
+    async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
+        self.caps.setdefault(_section_of(messages), []).append(kwargs.get("max_tokens"))
+        answer = await super().ainvoke(messages, **kwargs)
+        answer.usage_metadata = {"input_tokens": 100, "output_tokens": 200, "total_tokens": 300}
+        return answer
+
+
+def _compose_under_a_ceiling(concurrent: bool) -> tuple[_Priced, ReportComposer, bool]:
+    """Compose under a spend ceiling on a thread of its own; whether it finished in time."""
+    import threading
+
+    from maljan.core.spend import SpendMeter
+    from maljan.core.token_ledger import TokenLedger
+
+    meter = SpendMeter(
+        0.05,
+        {"priced-model": {"input_usd_per_mtok": 0.0, "output_usd_per_mtok": 10.0}},
+        table={},
+    )
+    llm = _Priced(delay=0.05)
+    composer = ReportComposer(
+        llm=llm,  # type: ignore[arg-type]
+        section_max_tokens=1000,
+        per_section_timeout=30,
+        token_ledger=TokenLedger(spend=meter),
+        model_label="priced-model",
+    )
+
+    def _run() -> None:
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            asyncio.run(composer.compose(_report(), _isr(), concurrent=concurrent))
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    worker.join(20)
+    return llm, composer, not worker.is_alive()
+
+
+class TestUnderASpendCeiling:
+    def test_the_sections_finish_and_are_held_as_written_one_after_another(self) -> None:
+        sequential, first, finished_one = _compose_under_a_ceiling(False)
+        concurrent, second, finished_two = _compose_under_a_ceiling(True)
+        assert finished_one and finished_two, "the event loop is never held by an admission"
+        assert concurrent.caps == sequential.caps
+        assert sorted(concurrent.requests) == sorted(sequential.requests)
+        assert second.degradations == first.degradations

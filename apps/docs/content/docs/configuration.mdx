@@ -1846,7 +1846,10 @@ The same key decides how the report composer writes its sections. With
 and fallbacks, or the global judge model) serves concurrent requests by the
 rules above, every section is written at once, with no limit on how many run
 together; with `false`, or a reporter on Ollama or a single-slot local server,
-one after another. Either way each section is sent the request it would be
+one after another. Under a spend ceiling (`core.llm.max_spend_usd_per_job`) they are
+always written one after another: the meter holds each report call at what
+the calls before it left, and admits report calls one at a time. Either way
+each section is sent the request it would be
 sent on its own (no section reads another's answer), keeps its own retry and
 validation, and a section that fails or times out leaves the others running;
 the answers, their validation findings, the report's degradation sentences
