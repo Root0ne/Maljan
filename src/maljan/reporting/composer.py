@@ -1262,9 +1262,10 @@ class ReportComposer:
         and is left out, so its request carries no breakpoint and pays no
         cache write.
         """
-        if not _caches_once_answered(self.llm):
+        llm = getattr(self, "llm", None)
+        if llm is None or not _caches_once_answered(llm):
             return {}
-        structured = structured_output_supported_for_llm(self.llm) and not spend_ceiling_set(
+        structured = structured_output_supported_for_llm(llm) and not spend_ceiling_set(
             getattr(self, "token_ledger", None)
         )
         members: dict[str, list[int]] = {}
