@@ -404,6 +404,7 @@ class TestAFamilySpecificSectionNeedsItsFamily:
         from maljan.reporting.models import EncryptionScheme
 
         report = rich_report()
+        report.malware_category = "ransomware"
         assert report.technical_analysis is not None
         report.technical_analysis.encryption_scheme = EncryptionScheme(
             cipher="ChaCha20", per_file_key=True
@@ -415,6 +416,7 @@ class TestAFamilySpecificSectionNeedsItsFamily:
         from maljan.reporting.models import EncryptionScheme
 
         report = rich_report()
+        report.malware_category = "Ransomware / wiper"
         assert report.technical_analysis is not None
         report.technical_analysis.encryption_scheme = EncryptionScheme(
             cipher="ChaCha20", extension=".example-locked"
@@ -423,6 +425,58 @@ class TestAFamilySpecificSectionNeedsItsFamily:
         family = technical.split("### 5.9", 1)[1]
         assert "Ransomware behaviour" in family
         assert "| Extension | .example-locked |" in family
+
+    def test_a_published_data_encrypted_for_impact_names_ransomware(self) -> None:
+        from maljan.reporting.models import EncryptionScheme, TTPMapping
+
+        report = rich_report()
+        assert report.malware_category == "loader"
+        report.ttp_mappings.append(
+            TTPMapping(
+                technique_id="T1486",
+                technique_name="Data Encrypted for Impact",
+                tactic="TA0040",
+                tactic_name="Impact",
+            )
+        )
+        assert report.technical_analysis is not None
+        report.technical_analysis.encryption_scheme = EncryptionScheme(
+            cipher="ChaCha20", extension=".example-locked"
+        )
+        technical = _section(_render(report), "## 5. Technical analysis")
+        assert "### 5.9 Ransomware behaviour" in technical
+
+    def test_a_loader_s_filled_table_is_under_a_neutral_heading(self) -> None:
+        """The model filled every file field with prose for "none"; the verdict says loader."""
+        from maljan.reporting.models import EncryptionScheme
+
+        report = rich_report()
+        assert report.malware_category == "loader"
+        assert all(row.technique_id != "T1486" for row in report.ttp_mappings)
+        assert report.technical_analysis is not None
+        report.technical_analysis.encryption_scheme = EncryptionScheme(
+            cipher="RC4 on the beacon body",
+            file_marker="none, the sample encrypts no files",
+            extension="none, no encrypted-file suffix",
+            evidence_ref="ev_0008",
+        )
+        technical = _section(_render(report), "## 5. Technical analysis")
+        family = technical.split("### 5.9", 1)[1]
+        assert family.startswith(" Family-specific behaviour · _Written by the report model_")
+        assert "| Cipher | RC4 on the beacon body |" in family
+        assert "Ransomware" not in technical
+
+    def test_a_category_that_only_contains_the_letters_is_not_ransomware(self) -> None:
+        from maljan.reporting.models import EncryptionScheme
+
+        report = rich_report()
+        report.malware_category = "notransomwareloader"
+        assert report.technical_analysis is not None
+        report.technical_analysis.encryption_scheme = EncryptionScheme(
+            cipher="ChaCha20", extension=".example-locked"
+        )
+        technical = _section(_render(report), "## 5. Technical analysis")
+        assert "### 5.9 Family-specific behaviour" in technical
 
     def test_a_block_of_placeholders_is_no_content(self) -> None:
         from maljan.reporting.composer import _has_content

@@ -962,7 +962,11 @@ class MarkdownRenderer:
         )
 
         # 5.9 Family-specific behaviour.
-        family_block = _ransomware_block(ta, ctx) if ta is not None else ""
+        family_block = (
+            _ransomware_block(ta, ctx, ransomware=_states_ransomware(report))
+            if ta is not None
+            else ""
+        )
         blocks.append(
             family_block
             or _absent_subsection(
@@ -3530,7 +3534,28 @@ def _encryption_table(enc: Any, ctx: _Context) -> list[str]:
     return out
 
 
-def _ransomware_block(ta: Any, ctx: _Context) -> str:
+# The technique a ransomware verdict publishes: Data Encrypted for Impact.
+_RANSOMWARE_TECHNIQUE = "T1486"
+
+
+def _states_ransomware(report: MalwareReport) -> bool:
+    """Whether the run's own verdict says ransomware.
+
+    Two facts say it: the category the judge assessed names ransomware, or the
+    judge published Data Encrypted for Impact. What the report model wrote in
+    its encryption table does not: a loader's string cipher fills the same
+    fields, and a model filling "none" into them is still writing.
+    """
+    category = re.split(r"[^a-z]+", str(report.malware_category or "").lower())
+    if "ransomware" in category:
+        return True
+    return any(
+        str(row.technique_id).strip().upper().split(".")[0] == _RANSOMWARE_TECHNIQUE
+        for row in report.ttp_mappings
+    )
+
+
+def _ransomware_block(ta: Any, ctx: _Context, *, ransomware: bool) -> str:
     lines: list[str] = []
     spk = ta.service_process_kill
     if spk is not None and (spk.kill_list or spk.white_list or spk.mechanism):
@@ -3582,9 +3607,10 @@ def _ransomware_block(ta: Any, ctx: _Context) -> str:
             lines.append("")
     if not lines:
         return ""
-    return "\n".join(
-        [_subheading("5.9", "Ransomware behaviour", REPORT_MODEL), "", *lines]
-    ).rstrip()
+    # The heading names ransomware only when the verdict does; a loader's
+    # cipher table under it read as a ransomware finding.
+    title = "Ransomware behaviour" if ransomware else "Family-specific behaviour"
+    return "\n".join([_subheading("5.9", title, REPORT_MODEL), "", *lines]).rstrip()
 
 
 def report_title(report: MalwareReport) -> str:
