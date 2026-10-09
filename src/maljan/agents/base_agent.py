@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
@@ -60,6 +60,12 @@ from maljan.llm.context_window import (
 )
 from maljan.llm.generation_rate import ModelCallDeadline
 from maljan.llm.stream_watch import StopRule, current_rule, ended_while_streaming, watching
+from maljan.llm.transient import RETRYABLE_STATUSES as RETRYABLE_STATUSES
+from maljan.llm.transient import cause_chain as cause_chain
+from maljan.llm.transient import note_a_window_that_moved as note_a_window_that_moved
+from maljan.llm.transient import provider_fault as _provider_fault  # noqa: F401 — read from here
+from maljan.llm.transient import retry_after as _retry_after  # noqa: F401 — read from here
+from maljan.llm.transient import retry_on_connection_error as retry_on_connection_error
 from maljan.pipeline.claim_drops import values_as_written
 from maljan.pipeline.function_claims import (
     FUNCTION_CLAIM_UNHELD_CODE,
@@ -1248,190 +1254,6 @@ def nudge_turns(msgs: list) -> tuple[list, bool]:
             continue
         out.append(message)
     return out, changed
-
-
-def cause_chain(exc: BaseException, limit: int = 4) -> str:
-    """``exc``'s causes, innermost last, as one line.
-
-    ``str(APIConnectionError)`` is the words "Connection error." whatever
-    produced it: a refused socket, a TLS failure, and an httpx pool being used
-    from an event loop other than the one it was opened on all read the same.
-    The last of those is a bug in this process rather than a blip on the wire
-    — it cost a full retry on the judge's first verdict request of every run
-    and nothing in the log could tell it from a flaky server. The chain is
-    where the difference is, so the chain is what gets logged.
-    """
-    parts: list[str] = []
-    seen: set[int] = {id(exc)}
-    cause: BaseException | None = exc.__cause__ or exc.__context__
-    while cause is not None and len(parts) < limit and id(cause) not in seen:
-        parts.append(repr(cause))
-        seen.add(id(cause))
-        cause = cause.__cause__ or cause.__context__
-    return " <- ".join(parts) if parts else "no cause recorded"
-
-
-# The statuses that mean "not now" rather than "no". A provider answering any
-# of these is describing its own state, and a second attempt a couple of
-# seconds later is the difference between a thin run and a lost one. Every
-# other 4xx is a refusal about the request itself and is answered once.
-RETRYABLE_STATUSES: frozenset[int] = frozenset({408, 409, 429, 500, 502, 503, 504})
-
-# The longest delay a provider's ``Retry-After`` may impose on us. Beyond this
-# the caller's own budget is the shorter answer, so the backoff below is used
-# instead and the run degrades rather than parking on one request.
-_MAX_RETRY_AFTER_SECONDS = 30
-
-
-def _provider_fault(exc: BaseException) -> str:
-    """One bounded line about a provider failure, safe to put in a log.
-
-    The class and, for a status error, the status. Deliberately not the body:
-    a provider that quotes the offending request back has quoted a credential
-    back, and this line is written to a log file that outlives the run.
-    """
-    note_a_window_that_moved(exc)
-    status = getattr(exc, "status_code", None)
-    return f"{type(exc).__name__}" + (f" {status}" if status else "")
-
-
-def note_a_window_that_moved(exc: BaseException) -> None:
-    """Retire the learned windows when a server says a request did not fit.
-
-    The learned window is believed for a while, so a server restarted with a
-    smaller one is sized against the figure it used to serve — and the room
-    check cannot catch that, because the room check measures against the
-    believed window. The server itself says so the first time a request
-    overflows, and that sentence is the only free correction there is.
-
-    The message is read here and nowhere else it could leak: what is taken
-    from it is a yes or a no, and nothing of it is logged or stored.
-    """
-    from maljan.llm.context_window import note_provider_error
-
-    with contextlib.suppress(Exception):
-        note_provider_error(str(exc))
-
-
-def _retry_after(exc: BaseException, default: int) -> int:
-    """The provider's own ``Retry-After``, when it sent a usable one.
-
-    Both forms RFC 9110 allows: delta-seconds, and an HTTP-date, which several
-    hosted providers send on 429 and 503. Either way the answer is clamped —
-    a provider asking for an hour is asking for longer than the caller has.
-    """
-    headers = getattr(getattr(exc, "response", None), "headers", None)
-    raw = ""
-    if headers is not None:
-        with contextlib.suppress(Exception):
-            raw = str(headers.get("retry-after") or "").strip()
-    if not raw:
-        return default
-    try:
-        seconds = int(float(raw))
-    except (TypeError, ValueError):
-        seconds = _seconds_until(raw)
-    if 0 < seconds <= _MAX_RETRY_AFTER_SECONDS:
-        return seconds
-    return default
-
-
-def _seconds_until(http_date: str) -> int:
-    """An HTTP-date as seconds from now, or ``0`` when it is not one."""
-    from datetime import UTC, datetime
-    from email.utils import parsedate_to_datetime
-
-    try:
-        when = parsedate_to_datetime(http_date)
-    except (TypeError, ValueError):
-        return 0
-    if when.tzinfo is None:
-        when = when.replace(tzinfo=UTC)
-    return int((when - datetime.now(UTC)).total_seconds())
-
-
-async def retry_on_connection_error(
-    make_awaitable: Callable[[], Awaitable[Any]],
-    *,
-    attempts: int = 3,
-    what: str = "LLM call",
-    log: Any = None,
-) -> Any:
-    """Await ``make_awaitable()``, retrying only a transient connection error.
-
-    ``openai_provider`` sets ``max_retries=0`` process-wide, deliberately: the
-    SDK's own retries would storm a *stalled* request three times its 1800 s
-    timeout. The comment there says the ReAct loop's cap "is the only retry
-    policy we want" — but that retry only ever wrapped the ReAct executor, so
-    every other call in the system was left with exactly one attempt against a
-    client configured never to retry.
-
-    That is not a theoretical gap. The judge's verdict, the mediator's fast
-    path and the entire reporting layer were all single-attempt, and a local
-    llama-server dropping an idle socket during a long tool-call gap is a
-    routine event here. One blip degraded a whole run to "Suspicious", or
-    silently dropped a report section.
-
-    Narrow on purpose, preserving the original anti-storm intent: a transport
-    failure, and the handful of statuses a provider uses to say "not now".
-    Hosted endpoints answer 500 "Internal server error" and 503 "Service
-    temporarily overloaded" for a second at a time, and a single attempt
-    against them cost a live run its static analyst, its negotiation, its
-    verdict and every composer section within twelve seconds. A refusal —
-    401, 402, 403, 404, 422 and the rest of the 400 family — is answered once,
-    because asking again cannot change it. A stall surfaces as ``TimeoutError``
-    from the caller's ``wait_for`` and is never retried. Backoff is 1 s then
-    2 s, or the provider's own ``Retry-After`` when it sends one that fits
-    inside the budget.
-
-    Takes a *factory* rather than an awaitable because a coroutine cannot be
-    awaited twice.
-    """
-    from openai import APIConnectionError, APIStatusError
-
-    emit = log or logger
-    for attempt in range(attempts):
-        try:
-            return await make_awaitable()
-        except (APIConnectionError, APIStatusError) as exc:
-            status = getattr(exc, "status_code", None)
-            if isinstance(exc, APIStatusError) and status not in RETRYABLE_STATUSES:
-                raise
-            kind = f"HTTP {status}" if isinstance(exc, APIStatusError) else "connection error"
-            # The cause chain is what tells a dropped socket from this
-            # process using a pool on the wrong loop, and it is worth having
-            # for a transport failure. A status error has no such ambiguity
-            # and its chain can carry the provider's own body, which is where
-            # a credential quoted back would be — so that branch says the
-            # status and stops, rather than reporting an absence of causes as
-            # though something had named itself.
-            cause_args: tuple[str, ...] = ()
-            cause_clause = ""
-            if not isinstance(exc, APIStatusError):
-                cause_clause, cause_args = " (caused by %s)", (cause_chain(exc),)
-            if attempt >= attempts - 1:
-                emit.error(
-                    "%s: %s after %d attempts: %r" + cause_clause,
-                    what,
-                    kind,
-                    attempts,
-                    _provider_fault(exc),
-                    *cause_args,
-                )
-                raise
-            wait = _retry_after(exc, 2**attempt)
-            emit.warning(
-                "%s: %s (attempt %d/%d): %r" + cause_clause + " — retrying in %ds.",
-                what,
-                kind,
-                attempt + 1,
-                attempts,
-                _provider_fault(exc),
-                *cause_args,
-                wait,
-            )
-            await asyncio.sleep(wait)
-    raise AssertionError("unreachable")  # pragma: no cover
 
 
 def _flagged_blocks(isr: AgentISR, indexes: Sequence[int]) -> int:
@@ -4663,19 +4485,12 @@ class BaseAnalyst(BudgetMeter, ABC):
                 limit_text(max_steps),
                 len(self.tools),
             )
-            # The provider sets
-            # ``max_retries=0`` on purpose to stop the openai SDK from
-            # retry-storming a *stalled* request (3 x request_timeout).
-            # But a transient ``APIConnectionError`` — the local
-            # llama-server briefly dropping an idle socket during a long
-            # Ghidra tool-call gap — is NOT a stall, and with zero
-            # retries it aborted the entire (most-important) static
-            # analyst on a single blip (observed: static ReAct died at
-            # 86s, no watchdog hang). Retry ONLY APIConnectionError, a
-            # few times with short backoff. A genuine stall surfaces as
-            # asyncio.TimeoutError from the wait_for below and is NOT
-            # retried — the anti-storm intent is preserved.
-            from openai import APIConnectionError
+            # A provider saying "not now" — a 5xx, a 529, a 429, a dropped
+            # connection, an error event inside the stream — is asked again
+            # inside the model call itself (``maljan.llm.transient``), one
+            # request at a time: the turns and tool calls already in the
+            # conversation are never made again. A stall surfaces as a
+            # ``TimeoutError`` and is not retried.
 
             async def _until_it_answers_or_repeats() -> dict:
                 """The ReAct loop, ended early once it is only repeating itself.
@@ -4970,101 +4785,66 @@ class BaseAnalyst(BudgetMeter, ABC):
                         )
                 return finished
 
-            last_conn_exc: Exception | None = None
-            for _attempt in range(3):
-                # A replayed conversation is a fresh loop as far as the model
-                # is concerned: it is about to re-make the calls it made before
-                # the connection dropped, and counting those as repeats ends an
-                # analyst for a blip the retry exists to absorb.
-                repeats.reset()
-                try:
-                    # No clock of the loop's own with no time limit: each
-                    # model call inside it waits as long as its answer takes
-                    # at the model's measured pace.
-                    result = await asyncio.wait_for(
-                        _until_it_answers_or_repeats(),
-                        timeout=None if timeout is None else float(timeout),
-                    )
-                    msg_count = len(result.get("messages", []))
-                    self.logger.info(
-                        "ReAct loop completed: %d messages in conversation.",
-                        msg_count,
-                    )
-                    return result
-                except ModelCallDeadline:
-                    # A model call's own deadline with nothing gathered: the
-                    # call failed, which is not this loop's clock.
-                    raise
-                except TimeoutError:
-                    # The time budget itself, reached inside one turn or one
-                    # tool call longer than any the loop had seen. What was
-                    # gathered is kept and handed on rather than dropped with
-                    # the analyst; the salvage gets whatever time is left,
-                    # which may be none. Any other timeout is not this one.
-                    nonlocal time_capped, time_detail, budget_ran_out_empty
-                    # The loop's clock ended the pass after the question about
-                    # its tools — a call that blocks its thread outlives the
-                    # pass's own deadline: the first answer stands as written.
-                    if tool_ask.get("first_answer") is not None:
-                        if "followed" not in tool_ask:
-                            held = list(tool_ask.get("conversation") or [])
-                            tool_ask["dropped"] = list(latest.get("messages") or [])[
-                                len(held) + 1 :
-                            ]
-                            latest["messages"] = held
-                            tool_ask["followed"] = "no_answer"
-                            tool_ask["why"] = (
-                                "the loop's clock ran out before an answer to the question"
-                            )
-                            self.logger.warning(
-                                "%s: the loop's clock ended the pass after the question "
-                                "about its tools; its first answer stands as written.",
-                                self.name,
-                            )
-                        return dict(latest)
-                    left_now = budget.seconds_left()
-                    if left_now is None or left_now > 1.0:
-                        raise
-                    if not answers_held(recorder.entries):
-                        budget_ran_out_empty = True
-                        raise
-                    time_capped = True
-                    time_detail = (
-                        f"the loop reached its {float(timeout or 0):.0f}s budget inside a "
-                        "turn longer than any it had measured"
-                    )
-                    self.logger.warning(
-                        "%s ReAct loop reached its %s time budget mid-turn; keeping "
-                        "what it gathered.",
-                        self.name,
-                        limit_text(timeout, "s"),
-                    )
-                    return dict(latest)
-                except APIConnectionError as conn_exc:
-                    last_conn_exc = conn_exc
-                    if _attempt < 2:
-                        # The abandoned attempt's turns were answered; the
-                        # replay starts from the loop's first messages, so what
-                        # it records next is its own.
-                        self._record_turns_taken(latest, len(messages))
-                        latest.clear()
-                        latest["messages"] = list(messages)
-                        _wait = 2**_attempt
-                        self.logger.warning(
-                            "ReAct LLM connection error (attempt %d/3): %s — retrying in %ds.",
-                            _attempt + 1,
-                            conn_exc,
-                            _wait,
+            try:
+                # No clock of the loop's own with no time limit: each
+                # model call inside it waits as long as its answer takes
+                # at the model's measured pace.
+                result = await asyncio.wait_for(
+                    _until_it_answers_or_repeats(),
+                    timeout=None if timeout is None else float(timeout),
+                )
+                msg_count = len(result.get("messages", []))
+                self.logger.info(
+                    "ReAct loop completed: %d messages in conversation.",
+                    msg_count,
+                )
+                return result
+            except ModelCallDeadline:
+                # A model call's own deadline with nothing gathered: the
+                # call failed, which is not this loop's clock.
+                raise
+            except TimeoutError:
+                # The time budget itself, reached inside one turn or one
+                # tool call longer than any the loop had seen. What was
+                # gathered is kept and handed on rather than dropped with
+                # the analyst; the salvage gets whatever time is left,
+                # which may be none. Any other timeout is not this one.
+                nonlocal time_capped, time_detail, budget_ran_out_empty
+                # The loop's clock ended the pass after the question about
+                # its tools — a call that blocks its thread outlives the
+                # pass's own deadline: the first answer stands as written.
+                if tool_ask.get("first_answer") is not None:
+                    if "followed" not in tool_ask:
+                        held = list(tool_ask.get("conversation") or [])
+                        tool_ask["dropped"] = list(latest.get("messages") or [])[len(held) + 1 :]
+                        latest["messages"] = held
+                        tool_ask["followed"] = "no_answer"
+                        tool_ask["why"] = (
+                            "the loop's clock ran out before an answer to the question"
                         )
-                        await asyncio.sleep(_wait)
-                        continue
+                        self.logger.warning(
+                            "%s: the loop's clock ended the pass after the question "
+                            "about its tools; its first answer stands as written.",
+                            self.name,
+                        )
+                    return dict(latest)
+                left_now = budget.seconds_left()
+                if left_now is None or left_now > 1.0:
                     raise
-            # Unreachable: the loop always returns on success or re-raises
-            # on the final attempt. Kept as a typed fallback so mypy sees
-            # a BaseException (last_conn_exc is Exception | None).
-            raise last_conn_exc or RuntimeError(  # pragma: no cover
-                "ReAct retry loop exited without result"
-            )
+                if not answers_held(recorder.entries):
+                    budget_ran_out_empty = True
+                    raise
+                time_capped = True
+                time_detail = (
+                    f"the loop reached its {float(timeout or 0):.0f}s budget inside a "
+                    "turn longer than any it had measured"
+                )
+                self.logger.warning(
+                    "%s ReAct loop reached its %s time budget mid-turn; keeping what it gathered.",
+                    self.name,
+                    limit_text(timeout, "s"),
+                )
+                return dict(latest)
 
         # Instrument the
         # outer execute_tool_loop window so operators can correlate slow

@@ -84,8 +84,11 @@ _PROVIDER_PACKAGES = frozenset({"openai", "anthropic", "httpx", "ollama", "googl
 
 
 def _status_of(exc: BaseException) -> int | None:
-    package = (type(exc).__module__ or "").split(".", 1)[0]
-    if package not in _PROVIDER_PACKAGES:
+    # The whole class line: LangChain raises its own subclasses of the SDK's
+    # errors (a 503 from ``ChatOpenAI`` is ``langchain_openai``'s
+    # ``OpenAIAPIError``), whose own module names no provider.
+    packages = {(klass.__module__ or "").split(".", 1)[0] for klass in type(exc).__mro__}
+    if not packages & _PROVIDER_PACKAGES:
         return None
     candidates: list[Any] = [getattr(exc, "status_code", None), getattr(exc, "code", None)]
     response = getattr(exc, "response", None)
@@ -103,6 +106,12 @@ def _one(exc: BaseException) -> str | None:
         return str(exc)
     if name in _TIMEOUT_NAMES or isinstance(exc, TimeoutError):
         return "the provider timed out"
+    from maljan.llm.transient import STREAM_ERROR_KIND, transient_failure
+
+    # An error the provider sent inside a stream that had begun is the provider
+    # failing, as a 5xx is.
+    if transient_failure(exc) == STREAM_ERROR_KIND:
+        return "the provider failed inside its answer"
     status = _status_of(exc)
     if status is not None:
         if status >= 500:
@@ -161,6 +170,17 @@ MAX_RETRY_AFTER_SECONDS = 30
 
 class ModelStalled(TimeoutError):
     """A model on a list that did not answer within its turn deadline."""
+
+
+def _retries_spent(exc: BaseException) -> bool:
+    """Whether the model already asked again after ``exc`` (``maljan.llm.transient``).
+
+    Its ``Retry-After`` was honoured there; waiting on the same model once more
+    would be a second retry policy, so the list moves on.
+    """
+    from maljan.llm.transient import RETRIED_ATTRIBUTE
+
+    return bool(getattr(exc, RETRIED_ATTRIBUTE, False))
 
 
 def retry_after_seconds(exc: BaseException) -> float | None:
@@ -457,7 +477,7 @@ class FallbackChatModel(BaseChatModel):
             except Exception as exc:
                 if provider_failure(exc) is None:
                     raise
-                pause = None if waited else retry_after_seconds(exc)
+                pause = None if waited or _retries_spent(exc) else retry_after_seconds(exc)
                 if pause is not None:
                     waited = True
                     time.sleep(pause)
@@ -488,7 +508,7 @@ class FallbackChatModel(BaseChatModel):
             except Exception as exc:
                 if provider_failure(exc) is None:
                     raise
-                pause = None if waited else retry_after_seconds(exc)
+                pause = None if waited or _retries_spent(exc) else retry_after_seconds(exc)
                 if pause is not None:
                     waited = True
                     await asyncio.sleep(pause)

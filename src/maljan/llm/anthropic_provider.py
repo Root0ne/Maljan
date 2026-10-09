@@ -358,16 +358,26 @@ class AnthropicProvider:
         # the same history is completed the same way on every request.
         from maljan.llm.anthropic_history import with_preserved_thinking
         from maljan.llm.tool_replies import with_answered_tool_calls
+        from maljan.llm.transient import with_transient_retries
 
+        # A provider saying "not now" — 5xx, 529, 429, a dropped connection, or
+        # an ``overloaded_error`` event after the stream began — is asked again
+        # by the one policy the OpenAI provider's model uses
+        # (``maljan.llm.transient``). The SDK's own two retries are off for the
+        # reason they are off there: they would stack on that policy, and they
+        # never covered an error that arrived inside the stream.
         chat_class = with_answered_tool_calls(
-            with_preserved_thinking(
-                with_unforced_structured_output(
-                    with_sized_request_timeout(with_loop_bound_async_client(ChatAnthropic))
-                ),
-                str(getattr(settings, "prompt_cache_ttl", "5m") or "5m"),
+            with_transient_retries(
+                with_preserved_thinking(
+                    with_unforced_structured_output(
+                        with_sized_request_timeout(with_loop_bound_async_client(ChatAnthropic))
+                    ),
+                    str(getattr(settings, "prompt_cache_ttl", "5m") or "5m"),
+                )
             ),
             "anthropic",
         )
+        kwargs.setdefault("max_retries", 0)
         return chat_class(  # type: ignore[no-any-return]
             model_name=model,
             api_key=api_key,

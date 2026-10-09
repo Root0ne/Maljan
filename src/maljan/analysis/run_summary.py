@@ -941,7 +941,10 @@ class RunSummary:
     # Which model answered each agent's turns: ``{agent: {turns: {model:
     # count}, fallbacks: [{model, reason}]}}``. A fallback row is a turn
     # another model answered because the one before it failed as a provider,
-    # with that failure in words. ``None`` on a run that recorded no turn.
+    # with that failure in words. ``retries: [{model, reason}]`` is present
+    # only for an agent whose provider was asked again after a transient
+    # failure (``llm.transient``), one row per failed attempt. ``None`` on a
+    # run that recorded no turn.
     models: dict[str, Any] | None = None
     # The tool servers this run rested after a run of calls they did not answer:
     # ``[{server, failures, cooldown_s, reason}]`` in the order they opened.
@@ -1218,6 +1221,23 @@ class RunSummary:
             lines += ["## Model Fallbacks", ""]
             for agent, row in fallbacks:
                 lines.append(f"- `{agent}`: {row.get('reason', '')}")
+            lines.append("")
+
+        retried = [
+            (agent, row)
+            for agent, block in sorted((self.models or {}).items())
+            for row in (block.get("retries") or [])
+        ]
+        if retried:
+            lines += [
+                "## Provider Retries",
+                "",
+                f"{count_label(len(retried), 'model request')} failed at the provider "
+                f"for a moment and {'was' if len(retried) == 1 else 'were'} made again:",
+                "",
+            ]
+            for agent, row in retried:
+                lines.append(f"- `{agent}` ({row.get('model', '')}): {row.get('reason', '')}")
             lines.append("")
 
         if self.server_rests:
@@ -1770,6 +1790,12 @@ class RunSummaryBuilder:
             agent = str(row.get("agent") or "")
             block = models.setdefault(agent, {"turns": {}, "fallbacks": []})
             block["fallbacks"].append(
+                {"model": str(row.get("model") or ""), "reason": str(row.get("reason") or "")}
+            )
+        for row in snapshot.get("retries") or []:
+            agent = str(row.get("agent") or "")
+            block = models.setdefault(agent, {"turns": {}, "fallbacks": []})
+            block.setdefault("retries", []).append(
                 {"model": str(row.get("model") or ""), "reason": str(row.get("reason") or "")}
             )
         self._models = models or None

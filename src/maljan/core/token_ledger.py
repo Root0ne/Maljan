@@ -33,7 +33,7 @@ answered because the first one failed as a provider — is kept with its reason.
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 
@@ -298,6 +298,9 @@ class TokenLedger:
         self._total = _Tally()
         self._agents: dict[str, _Tally] = {}
         self._fallbacks: list[dict[str, str]] = []
+        # One row per failed attempt a provider was asked again after
+        # (``maljan.llm.transient``), filed under the call that then answered.
+        self._retries: list[dict[str, str]] = []
         self._unreported: list[dict[str, str]] = []
         # Told of every recorded call as it is recorded, with the call's own
         # figures (``call_record``): the worker commits each one to the job's
@@ -316,6 +319,7 @@ class TokenLedger:
         fallback: str = "",
         call: str = "",
         estimated: dict[str, Any] | None = None,
+        retries: Sequence[str] = (),
     ) -> None:
         """One call: its reported usage, or ``None`` when the provider reported none.
 
@@ -323,7 +327,8 @@ class TokenLedger:
         report section — and is recorded for a call that reported no usage.
         ``estimated`` is a stated estimate of a call that reported none (an
         answer ended while it streamed): it is handed to the spend meter only,
-        and the call stays one that reported no usage here.
+        and the call stays one that reported no usage here. ``retries`` are
+        the failed attempts made before this call answered, one line each.
         """
         with self._lock:
             if usage is None:
@@ -354,6 +359,8 @@ class TokenLedger:
                     tally.cost_calls += 1
             if fallback:
                 self._fallbacks.append({"agent": agent, "model": model, "reason": fallback})
+            for reason in retries:
+                self._retries.append({"agent": agent, "model": model, "reason": str(reason)})
         if self.spend is not None:
             self.spend.settle(usage, model, call, estimated=estimated)
         listener = self.on_call
@@ -386,6 +393,10 @@ class TokenLedger:
             out.pop("models", None)
             out["agents"] = {name: tally.as_dict() for name, tally in sorted(self._agents.items())}
             out["fallbacks"] = [dict(row) for row in self._fallbacks]
+            # Present only when a provider was asked again, so a run without
+            # one reads as it always did.
+            if self._retries:
+                out["retries"] = [dict(row) for row in self._retries]
             # Which calls reported no usage, one row each, present only when
             # one did: ``unreported_calls`` is their count.
             if self._unreported:
@@ -412,6 +423,7 @@ def record_response_usage(
     try:
         from maljan.llm.fallback import turn_model
         from maljan.llm.stream_watch import estimated_usage
+        from maljan.llm.transient import retries_of
 
         answered_by, fallback = turn_model(response, model)
         usage = turn_usage(response)
@@ -425,6 +437,7 @@ def record_response_usage(
             # stated estimate for the spend ceiling; the reported figures stay
             # absent.
             estimated=None if usage is not None else estimated_usage(response),
+            retries=retries_of(response),
         )
     except Exception:  # noqa: BLE001 — telemetry must never break analysis
         return

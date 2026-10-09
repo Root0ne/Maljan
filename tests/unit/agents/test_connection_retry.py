@@ -237,7 +237,9 @@ class TestATransientProviderAnswerIsRetried:
             return "ok"
 
         assert await retry_on_connection_error(_rate_limited, what="x") == "ok"
-        assert waits == [1], "the helper's own backoff, not the provider's hour"
+        assert len(waits) == 1 and 0.5 <= waits[0] <= 1.5, (
+            "the helper's own jittered backoff, not the provider's hour"
+        )
 
     @pytest.mark.asyncio
     async def test_a_retry_after_date_is_honoured_as_a_delay(
@@ -290,7 +292,7 @@ class TestATransientProviderAnswerIsRetried:
             return "ok"
 
         assert await retry_on_connection_error(_rate_limited, what="x") == "ok"
-        assert waits == [1]
+        assert len(waits) == 1 and 0.5 <= waits[0] <= 1.5
 
     def test_the_log_line_carries_no_provider_body(self) -> None:
         """A provider that quotes the request back has quoted the key back."""

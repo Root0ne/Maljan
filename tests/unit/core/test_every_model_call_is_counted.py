@@ -572,18 +572,27 @@ class TestEveryLoopEndingCountsWhatWasServed:
         assert _calls(ledger, "static") == 1 + len(llm.served)
         assert ledger.snapshot()["unreported_calls"] == 0
 
-    def test_an_attempt_abandoned_on_a_connection_error_counts_what_it_was_served(
+    def test_a_turn_asked_again_on_a_connection_error_counts_what_it_was_served(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        from maljan.llm.transient import with_transient_retries
+
         monkeypatch.setattr(asyncio, "sleep", _no_wait)
-        agent, llm, ledger = _scripted_analyst(
-            ["tool", _connection_error(), "tool", "CLAIM: x\nEVIDENCE: ev_0001"]
+        llm = with_transient_retries(_Scripted)(
+            script=["tool", _connection_error(), "tool", "CLAIM: x\nEVIDENCE: ev_0001"],
+            served=[],
         )
+        ledger = TokenLedger()
+        agent = _Analyst(llm=llm, name="static", tools=[_peek_tool()])
+        agent.token_ledger = ledger
+        agent._container = MagicMock()
+        agent._model_label = lambda: "openai/static-model"
 
         agent.execute_tool_loop([("system", "s"), ("human", "h")])
 
-        assert len(llm.served) == 3, "one turn before the drop, two in the replay"
+        assert len(llm.served) == 3, "one turn before the drop, the turn asked again, the answer"
         assert _calls(ledger, "static") == 3
+        assert len(agent.drain_evidence_entries()) == 2, "no tool call is made twice"
 
     def test_a_loop_that_raised_an_analyst_error_counts_what_it_was_served(self) -> None:
         from maljan.core.exceptions import AnalystError
