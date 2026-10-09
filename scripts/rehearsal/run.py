@@ -74,10 +74,12 @@ def _parse_expect(pairs: list[str]) -> dict[str, Any]:
 class StackClient:
     """The few API calls a rehearsal makes, with one bearer token."""
 
-    def __init__(self, api: str, timeout: float = 60.0) -> None:
+    def __init__(self, api: str, timeout: float = 60.0, transport: Any = None) -> None:
         import httpx
 
-        self._http = httpx.Client(base_url=api.rstrip("/") + "/api/v1", timeout=timeout)
+        self._http = httpx.Client(
+            base_url=api.rstrip("/") + "/api/v1", timeout=timeout, transport=transport
+        )
 
     def close(self) -> None:
         self._http.close()
