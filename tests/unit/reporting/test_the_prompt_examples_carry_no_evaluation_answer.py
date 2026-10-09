@@ -1205,6 +1205,8 @@ PROMPTS: dict[str, str] = {
         [
             run_quality_note(["a reason"], degraded=True),
             run_quality_note(["a reason", "a note"], degraded=False, informational=["a note"]),
+            run_quality_note(["a reason"], degraded=True, notes=["a claim note"]),
+            run_quality_note([], degraded=False, notes=["a claim note"]),
         ]
     ),
     "judge malware object questions": " ".join(
