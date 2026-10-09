@@ -80,6 +80,30 @@ class TestThePartialReport:
         assert "No summary was written: the run was stopped before its report stage" in markdown
         assert NOTE in markdown
 
+    def test_with_no_judge_the_verdict_is_not_assessed_and_no_judge_is_named(
+        self, container: ServiceContainer
+    ) -> None:
+        dump = partial_report(_state(), container, note=NOTE)
+        assert dump is not None
+        assert dump["verdict_not_assessed"] == "the run was stopped before its verdict stage ran"
+        markdown = MarkdownRenderer().render(MalwareReport.model_validate(dump))
+        assert (
+            "Verdict: not assessed (the run was stopped before its verdict stage ran) "
+            "_(Not assessed)_"
+        ) in markdown
+        assert "**Verdict:** not assessed (the run was stopped" in markdown
+        assert "Assessed by the judge" not in markdown
+        assert "Suspicious" not in markdown
+
+    def test_with_a_judge_the_verdict_is_the_judge_s(self, container: ServiceContainer) -> None:
+        dump = partial_report(_state(final_decision="Malware"), container, note=NOTE)
+        assert dump is not None
+        assert dump["verdict"] == "Malware"
+        assert dump["verdict_not_assessed"] is None
+        assert "Assessed by the judge" in MarkdownRenderer().render(
+            MalwareReport.model_validate(dump)
+        )
+
     def test_a_report_stopped_in_the_making_keeps_its_written_sections(
         self, container: ServiceContainer
     ) -> None:

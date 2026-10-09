@@ -39,9 +39,12 @@ if TYPE_CHECKING:
 # about it. Also written into the run summary's degradation reasons.
 NO_VERDICT_REASON = (
     "verdict not assessed: the run was stopped before its verdict stage ran, so no "
-    "verdict was reached; the verdict field holds the report's placeholder and is not "
-    "a finding about the sample"
+    "verdict was reached"
 )
+
+# What the report's ``verdict_not_assessed`` says, printed where the verdict
+# would be ("not assessed (...)"), with no judge named as its source.
+NO_VERDICT_STATEMENT = "the run was stopped before its verdict stage ran"
 
 # The run summary's and the stored report's ``final_decision`` when no judge
 # ran: the word every surface already reads as "no verdict".
@@ -311,6 +314,10 @@ def _deterministic_report(state: dict[str, Any], container: Any) -> dict[str, An
         evidence_ledger=ledger,
     )
     report = builder.build_deterministic()
+    if not judge_ran(state):
+        # The stored row says ``Unknown``; the report says "not assessed",
+        # never the schema's placeholder and never "assessed by the judge".
+        report.verdict_not_assessed = NO_VERDICT_STATEMENT
     report = MalwareReportBuilder.apply_fallback_narrative(
         report, "the run was stopped before its report stage wrote one"
     )

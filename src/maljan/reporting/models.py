@@ -1211,6 +1211,12 @@ class MalwareReport(BaseModel):
 
     # --- Verdict & severity ---
     verdict: Literal["Malware", "Suspicious", "Benign"] = "Suspicious"
+    # Why no verdict was reached at all, when none was: a run stopped before
+    # its verdict stage ran (``pipeline.stopped_run``). ``verdict`` above then
+    # holds the schema's placeholder and every surface says "not assessed"
+    # instead, with no judge named. ``None`` on every report a judge, or the
+    # pipeline standing in for a judge that did not answer, gave a verdict.
+    verdict_not_assessed: str | None = None
     # ``None`` when nothing assessed a confidence — a verdict the pipeline
     # wrote itself because the judge never answered. It is not defaulted to
     # 0.0 for the same reason ``severity`` is not defaulted to "Informational":
