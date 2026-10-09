@@ -45,6 +45,13 @@ from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOp
 from maljan.core.logger import logger
 from maljan.core.spend import LOOP_TURN_CALL, SPEND_CAP, SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import TokenLedger, record_response_usage
+from maljan.llm.answer_text import answer_text
+from maljan.llm.anthropic_history import (
+    RUN_STATE_ATTACHED,
+    TOOL_LOOP_TURN,
+    keeps_turns_as_received,
+    replays_earlier_blocks,
+)
 from maljan.llm.context_window import (
     CHARS_PER_TOKEN,
     NO_ROOM_RUN_STATE,
@@ -2905,14 +2912,28 @@ def _carries_run_state(message: Any) -> bool:
 
 
 def _with_run_state_on(message: Any, body: str) -> Any:
-    """``message`` with the block for ``body`` at its end: text appended, or a text part."""
+    """``message`` with the block for ``body`` at its end: text appended, or a text part.
+
+    The exact block attached is noted in the message's ``response_metadata``
+    (:data:`RUN_STATE_ATTACHED`), which no client sends: a provider that
+    treats the platform's block apart from the text around it
+    (``anthropic_history``) recognises it by that note, never by its markers,
+    which any text can carry.
+    """
     from maljan.pipeline.run_state import run_state_block, with_run_state_tail
 
+    block = run_state_block(body)
+    noted = {**(message.response_metadata or {}), RUN_STATE_ATTACHED: block}
     content = message.content
     if isinstance(content, list):
-        part = {"type": "text", "text": run_state_block(body)}
-        return message.model_copy(update={"content": [*content, part]})
-    return message.model_copy(update={"content": with_run_state_tail(str(content or ""), body)})
+        part = {"type": "text", "text": block}
+        return message.model_copy(update={"content": [*content, part], "response_metadata": noted})
+    return message.model_copy(
+        update={
+            "content": with_run_state_tail(str(content or ""), body),
+            "response_metadata": noted if block else message.response_metadata,
+        }
+    )
 
 
 def _without_run_state_on(message: Any) -> Any:
@@ -2921,6 +2942,9 @@ def _without_run_state_on(message: Any) -> Any:
 
     if not _carries_run_state(message):
         return message
+    if RUN_STATE_ATTACHED in (message.response_metadata or {}):
+        kept = {k: v for k, v in message.response_metadata.items() if k != RUN_STATE_ATTACHED}
+        message = message.model_copy(update={"response_metadata": kept})
     content = message.content
     if isinstance(content, list):
         last = content[-1] if content else None
@@ -3876,12 +3900,43 @@ class BaseAnalyst(BudgetMeter, ABC):
                 self.name,
                 request_chars(
                     messages,
-                    int(getattr(self, "_tool_definition_chars", 0) or 0),
+                    int(getattr(self, "_tool_definition_chars", 0) or 0)
+                    + self._replayed_run_state_chars(),
                     int(getattr(budget, "chars_per_token", CHARS_PER_TOKEN) or CHARS_PER_TOKEN),
                 ),
             )
         except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
             self.logger.debug("%s: the conversation size was not recorded (%s).", self.name, exc)
+
+    def _note_replayed_run_state(self, messages: list, sent: list) -> None:
+        """Note the block this request carries and where the earlier ones stand. Never raises."""
+        try:
+            self._replay_upto: int | None = len(messages)
+            if not replays_earlier_blocks(getattr(self, "llm", None)) or not sent:
+                return
+            block = (getattr(sent[-1], "response_metadata", None) or {}).get(RUN_STATE_ATTACHED)
+            if isinstance(block, str) and block:
+                blocks: dict[int, int] | None = getattr(self, "_replayed_blocks", None)
+                if blocks is None:
+                    blocks = {}
+                    self._replayed_blocks: dict[int, int] = blocks
+                # The separator in front of a block added to text included.
+                blocks[len(messages)] = len(block) + 2
+        except Exception as exc:  # noqa: BLE001 — a measure never costs a turn
+            self.logger.debug("%s: earlier run-state blocks not counted (%s).", self.name, exc)
+
+    def _replayed_run_state_chars(self) -> int:
+        """Characters of earlier run-state blocks the next request sends again, or ``0``.
+
+        Only where the model's provider keeps its history append-only
+        (``anthropic_history.replays_earlier_blocks``); every other provider
+        sends one block, the current one, which the messages already hold.
+        """
+        blocks = getattr(self, "_replayed_blocks", None) or {}
+        if not blocks or not replays_earlier_blocks(getattr(self, "llm", None)):
+            return 0
+        upto = getattr(self, "_replay_upto", None)
+        return sum(size for at, size in blocks.items() if upto is None or at < upto)
 
     def _forget_conversation(self) -> None:
         """Let go of this loop's size, so a finished loop stops binding the cap."""
@@ -4261,6 +4316,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                     sent = messages
             # And what the request weighs, block included, which is what the
             # next tool answer's cap is measured against.
+            # The blocks earlier turns were sent with, where the model's
+            # provider sends them again (``anthropic_history``): counted in
+            # every measure of this request, never hidden.
+            self._note_replayed_run_state(messages, sent)
             self._note_conversation(sent)
             # The spend ceiling's word on the turn about to be sent: held to
             # what the spend it may use pays for, or not sent, and then the
@@ -4288,11 +4347,32 @@ class BaseAnalyst(BudgetMeter, ABC):
                     messages,
                     ledger_entries=len(getattr(recorder, "entries", None) or []),
                 )
+            # Each turn of a tool loop says so, for a provider that caches a
+            # conversation it will send again (``anthropic_history``); the
+            # note rides the request alone, never the loop's own messages.
+            if sent:
+                last = sent[-1]
+                noted = {**(last.response_metadata or {}), TOOL_LOOP_TURN: True}
+                sent = [*sent[:-1], last.model_copy(update={"response_metadata": noted})]
             return sent
 
         return refresh
 
     def execute_tool_loop(self, prompt_messages: list) -> str:
+        """Run the tool loop (``_run_tool_loop``) and let go of its run-state copies.
+
+        The loop's turns, its nudge and its salvage continue one conversation
+        and send the earlier run-state blocks again; a call this analyst makes
+        afterwards (a debate revision, a validation retry) starts a fresh one
+        and sends none, so it is not measured with them, however the loop ended.
+        """
+        try:
+            return self._run_tool_loop(prompt_messages)
+        finally:
+            self._replayed_blocks = {}
+            self._replay_upto = None
+
+    def _run_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
 
         The loop runs against ``pinned_tools()``; ``self.tools`` keeps the
@@ -4440,6 +4520,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         # puts the current one on the latest message, every turn, and the
         # messages the loop keeps are the ones each request is built from.
         messages = without_run_state(prebuilt)
+        # This loop's run-state blocks, by the turn count of the request that
+        # carried each; earlier loops' are not this one's.
+        self._replayed_blocks = {}
+        self._replay_upto = 0
 
         # The loop's budget, readable by an ask made from inside it and
         # charged by the delegation when the callee returns.
@@ -5144,7 +5228,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
 
         final_message = msgs[-1]
-        content = str(final_message.content)
+        content = answer_text(final_message.content)
         # The first answer stands as written: the model replied KEEP to the
         # question about its tools, or nothing answered the question.
         if tool_ask.get("followed") in ("kept_first_answer", "no_answer"):
@@ -5186,7 +5270,16 @@ class BaseAnalyst(BudgetMeter, ABC):
         # after the model answers — leaves calls nothing answered, which a
         # hosted provider refuses to be sent. They go; the turn's text stays,
         # and the record says they did not run.
-        msgs, unrun = without_unanswered_calls(msgs)
+        # A provider whose model binds its thinking to the turns before it
+        # keeps the turn whole: taking a call off it would rebuild the turn the
+        # API needs back as it was received, and the tool-reply completion
+        # answers each unrun call with a reply saying it did not run.
+        kept, unrun = without_unanswered_calls(msgs)
+        # The loop is over: a turn sent after it (the nudge, the salvage)
+        # carries every block the loop's turns were sent with.
+        self._replay_upto = None
+        if not keeps_turns_as_received(getattr(self, "llm", None)):
+            msgs = kept
         if unrun:
             note = f"{unrun} tool call(s) of the last turn were not run"
             why = f"{why}; {note}" if why else note
@@ -5304,7 +5397,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             meter.admit(
                 kind=kind,
                 model=self._model_label() or _model_label(self.llm),
-                prompt_chars=sum(_message_chars(m) for m in messages) + self._definitions_sent(),
+                prompt_chars=sum(_message_chars(m) for m in messages)
+                + self._definitions_sent()
+                + self._replayed_run_state_chars(),
                 cap_tokens=self.output_cap_tokens(),
                 slot=slot,
                 holdable=accepts_output_bound(target) if holdable is None else holdable,
@@ -5583,7 +5678,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             "%s: the loop's last message was not a final report; asking once for one.",
             self.name,
         )
-        sendable, dropped = nudge_turns(msgs)
+        # Kept whole where the model binds its thinking to the turns before it
+        # (``anthropic_history``): the unparsed call is answered as not run by
+        # the tool-reply completion instead of being taken off its turn.
+        keeps_turns = keeps_turns_as_received(getattr(self, "llm", None))
+        sendable, dropped = (msgs, False) if keeps_turns else nudge_turns(msgs)
         modes: list[str] = ["invalid_tool_calls_dropped"] if dropped else []
         if dropped:
             self.logger.warning(
@@ -5633,10 +5732,22 @@ class BaseAnalyst(BudgetMeter, ABC):
             finally:
                 self._spend_release(slot)
 
+        # The same model with the loop's tools withheld is the first way asked
+        # where the turns are kept whole: the system turn and the tools stay as
+        # the loop sent them, which is what keeps its thinking valid.
+        first_withheld = self._llm_with_tools_withheld() if keeps_turns else None
         try:
-            answer = _ask_with(self.llm, f"nudge:{self.name}")
+            if first_withheld is not None:
+                answer = _ask_with(first_withheld, f"nudge-tools-none:{self.name}", loop_turns)
+                modes.append("tool_choice_none")
+            else:
+                answer = _ask_with(self.llm, f"nudge:{self.name}")
         except Exception as exc:  # noqa: BLE001 — a nudge that fails is asked one other way
             self.logger.warning("%s: the final-answer nudge failed (%s).", self.name, exc)
+            if first_withheld is not None:
+                # The withheld shape was the one asked; asking it again changes nothing.
+                self._nudge_retry_mode = "+".join(modes) or None
+                return None
             # The other shape the server accepts: the loop's own tools bound
             # and forbidden, so the transcript renders as the loop rendered
             # it and the model still has to answer in prose.
@@ -5660,7 +5771,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return None
             modes.append("tool_choice_none")
         self._nudge_retry_mode = "+".join(modes) or None
-        text = str(getattr(answer, "content", "") or "")
+        text = answer_text(getattr(answer, "content", "") or "")
         return text or None
 
     def _llm_with_tools_withheld(self) -> Any | None:
@@ -5859,8 +5970,14 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             return ""
 
-        window_budget = synthesis_budget_chars(
-            get_settings(), self.name, counted_window_tokens(self._context_budget())
+        # The earlier run-state blocks go out with the kept turns, outside the
+        # messages the trim measures, so the window holds them first.
+        window_budget = max(
+            0,
+            synthesis_budget_chars(
+                get_settings(), self.name, counted_window_tokens(self._context_budget())
+            )
+            - self._replayed_run_state_chars(),
         )
         # What the time left can hold at this model's measured pace, when both
         # of its rates are known; the window's bound applies either way.
@@ -5877,7 +5994,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         budget = window_budget if paced is None else min(window_budget, paced)
         # The same transcript rule the nudge follows: a tool call whose
         # arguments never parsed is not sent back to the server.
-        sendable, _dropped = nudge_turns(msgs)
+        keeps_turns = keeps_turns_as_received(getattr(self, "llm", None))
+        sendable, _dropped = (msgs, False) if keeps_turns else nudge_turns(msgs)
         conversation = sum(_message_chars(m) for m in sendable)
         framing = sum(_message_chars(m) for m in _framing_of(sendable))
         rates = self._rates_sentence(generation_rate, prompt_rate)
@@ -5929,14 +6047,22 @@ class BaseAnalyst(BudgetMeter, ABC):
             "budget_chars": budget,
             "sized_by": "window" if paced is None or window_budget <= paced else "pace",
         }
+        # Where the turns are kept whole, the loop's own system turn and tools
+        # go with the salvage, the tools withheld (``tool_choice`` none), so the
+        # history it re-sends is the loop's and its thinking stays valid.
+        withheld = self._llm_with_tools_withheld() if keeps_turns else None
         try:
             answer = self._invoke_llm_with_timeout(
                 self._with_current_run_state(
-                    with_question(tool_free_turns(trimmed), str(directive.content)),
+                    with_question(
+                        trimmed if withheld is not None else tool_free_turns(trimmed),
+                        str(directive.content),
+                    ),
                     None,
                     NO_LIMIT if remaining is None else remaining,
                 ),
                 remaining,
+                model=withheld,
                 what="step-cap salvage",
             )
         except Exception as exc:  # noqa: BLE001 - best-effort salvage
@@ -6085,7 +6211,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 call, timeout=None if timeout is None else float(timeout)
             )
             self._record_usage(response, call=what, held=bound if bound_kwargs else None)
-            return str(response.content)
+            return answer_text(response.content)
 
         _t0 = _time.monotonic()
         hard_timeout = hard_cap(timeout, getattr(self, "_budget_ceiling", None))

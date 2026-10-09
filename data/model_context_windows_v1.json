@@ -17,6 +17,7 @@
   "windows": {
     "claude-3": 200000,
     "claude-haiku-4": 200000,
+    "claude-haiku-5-5": 1000000,
     "claude-opus-4": 200000,
     "claude-sonnet-4": 200000,
     "deepseek-chat": 65536,
@@ -51,6 +52,10 @@
   },
   "max_output": {
     "_comment": "The maximum output each model's vendor documents, with the page it is documented on. A model is listed only when its vendor's own documentation states the figure; a model not listed that a hosted API serves takes the documented fallback. DeepSeek's Models & Pricing page writes its figure as 384K, which is 393,216 tokens.",
+    "claude-haiku-5-5": {
+      "tokens": 128000,
+      "source": "https://platform.claude.com/docs/en/models/haiku-5-5/overview"
+    },
     "deepseek-flash": {
       "tokens": 393216,
       "source": "https://api-docs.deepseek.com/quick_start/pricing"
@@ -73,7 +78,7 @@
     }
   },
   "prices": {
-    "_comment": "What a model's tokens cost, in US dollars per million, as its vendor's own page documents them, with that page. Data for the operator's spend ceiling (core.llm.max_spend_usd_per_job), never a limit of its own: a row is read only where core.llm.model_prices names no price for the model, and a model not listed has no price. A row's own figures are its price outside every window; each window is a span of the day, UTC, on the weekdays it names, with the figures the vendor charges then, and a call is priced at the window its request was sent in. DeepSeek documents peak hours of 01:00-04:00 and 06:00-10:00 UTC, Monday to Friday, at twice the off-peak rate, and every other hour as off-peak; it does not say whether a request is timed at its start or its end. It also takes Chinese public holidays out of the peak hours, which no window here names: a call made in a peak window on such a day is priced at the peak rate, above what it cost.",
+    "_comment": "What a model's tokens cost, in US dollars per million, as its vendor's own page documents them, with that page. Data for the operator's spend ceiling (core.llm.max_spend_usd_per_job), never a limit of its own: a row is read only where core.llm.model_prices names no price for the model, and a model not listed has no price. A row's own figures are its price outside every window; each window is a span of the day, UTC, on the weekdays it names, with the figures the vendor charges then, and a call is priced at the window its request was sent in. DeepSeek documents peak hours of 01:00-04:00 and 06:00-10:00 UTC, Monday to Friday, at twice the off-peak rate, and every other hour as off-peak; it does not say whether a request is timed at its start or its end. It also takes Chinese public holidays out of the peak hours, which no window here names: a call made in a peak window on such a day is priced at the peak rate, above what it cost. A row's cache_write prices are what a token written to the prompt cache costs, for five minutes or for an hour, and its tiers are the prices of a request whose prompt is over a number of tokens; Anthropic prices Claude Haiku 5.5 so, by prompt length, each request on its own.",
     "deepseek-flash": {
       "input_usd_per_mtok": 0.15,
       "cached_input_usd_per_mtok": 0.003,
@@ -187,6 +192,67 @@
           "source": "https://api-docs.deepseek.com/quick_start/pricing (peak rate, 06:00-10:00 UTC Monday to Friday)"
         }
       ]
+    },
+    "claude-haiku-5-5": {
+      "input_usd_per_mtok": 0.1,
+      "cached_input_usd_per_mtok": 0.01,
+      "cache_write_input_usd_per_mtok": 0.125,
+      "cache_write_1h_input_usd_per_mtok": 0.2,
+      "output_usd_per_mtok": 0.5,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing (Claude Haiku 5.5, for prompts up to 100,000 tokens)",
+      "tiers": [
+        {
+          "over_prompt_tokens": 100000,
+          "input_usd_per_mtok": 0.5,
+          "cached_input_usd_per_mtok": 0.05,
+          "cache_write_input_usd_per_mtok": 0.625,
+          "cache_write_1h_input_usd_per_mtok": 1.0,
+          "output_usd_per_mtok": 2.5,
+          "source": "https://platform.claude.com/docs/en/about-claude/pricing (Claude Haiku 5.5, for prompts over 100,000 tokens: a prompt counts all its input tokens, cache reads and cache writes included)"
+        }
+      ]
+    }
+  },
+  "fixed_sampling": {
+    "_comment": "The model families whose vendor documents that a non-default temperature, top_p or top_k is refused with a 400 on every request. The Anthropic provider sends no sampling parameter to a model whose id starts with one of these keys; the Anthropic Models API states no such capability, so the vendor's documentation is the fact. A model not listed is sent the temperature it is built with.",
+    "claude-fable-5": {
+      "source": "https://platform.claude.com/docs/en/build-with-claude/thinking#sampling-parameters"
+    },
+    "claude-haiku-5-5": {
+      "source": "https://platform.claude.com/docs/en/build-with-claude/thinking#sampling-parameters"
+    },
+    "claude-mythos": {
+      "source": "https://platform.claude.com/docs/en/build-with-claude/thinking#sampling-parameters"
+    },
+    "claude-opus-4-7": {
+      "source": "https://platform.claude.com/docs/en/build-with-claude/thinking#sampling-parameters"
+    },
+    "claude-opus-4-8": {
+      "source": "https://platform.claude.com/docs/en/build-with-claude/thinking#sampling-parameters"
+    },
+    "claude-opus-5": {
+      "source": "https://platform.claude.com/docs/en/build-with-claude/thinking#sampling-parameters"
+    },
+    "claude-sonnet-5": {
+      "source": "https://platform.claude.com/docs/en/build-with-claude/thinking#sampling-parameters"
+    }
+  },
+  "prefix_bound_thinking": {
+    "_comment": "The model families whose vendor documents that a thinking block is bound to everything sent before it (the system prompt, the tools and every earlier message), so a request whose history was edited is refused. The Anthropic provider keeps such a model's history append-only (earlier user turns sent again as they were sent) and checks every thinking block it sends back; a model not listed is sent its history as before.",
+    "claude-fable-5-1": {
+      "source": "https://platform.claude.com/docs/en/build-with-claude/preserved-thinking (the conversation check)"
+    },
+    "claude-haiku-5-5": {
+      "source": "https://platform.claude.com/docs/en/build-with-claude/preserved-thinking (the conversation check)"
+    },
+    "claude-mythos-5-1": {
+      "source": "https://platform.claude.com/docs/en/build-with-claude/preserved-thinking (the conversation check)"
+    },
+    "claude-opus-5-5": {
+      "source": "https://platform.claude.com/docs/en/build-with-claude/preserved-thinking (the conversation check)"
+    },
+    "claude-sonnet-5-5": {
+      "source": "https://platform.claude.com/docs/en/build-with-claude/preserved-thinking (the conversation check)"
     }
   }
 }

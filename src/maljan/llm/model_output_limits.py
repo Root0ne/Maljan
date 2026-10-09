@@ -3,9 +3,10 @@
 A derived output cap is a quarter of the model's learned window
 (``context_window.derived_reply``), and no fixed figure bounds it from above:
 the one bound besides an operator's own cap is the model's own maximum output,
-where its provider states it. Two places state it: an OpenAI-compatible model
-list entry, read from the same answer the window probe reads, and the vendored
-table's ``max_output`` rows. Nothing here asks a model to produce anything.
+where its provider states it. Three places state it: an OpenAI-compatible model
+list entry and the Anthropic Models API's model description (its
+``max_tokens``), each read from the same answer the window probe reads, and the
+vendored table's ``max_output`` rows. Nothing here asks a model to produce anything.
 Zero is always "not declared", never a limit.
 """
 
@@ -19,8 +20,10 @@ from typing import Any
 from maljan.core.logger import logger
 
 _lock = threading.Lock()
-# Learned from model list answers, keyed by the model id as asked, lower-cased.
-_learned: dict[str, int] = {}
+# Learned from the window probe's answers, keyed by the model id as asked,
+# lower-cased: the tokens, and the place they were read from in words.
+_learned: dict[str, tuple[int, str]] = {}
+_MODEL_LIST = "the endpoint's model list"
 _table: dict[str, tuple[int, str]] | None = None
 
 # The fields a model list entry states its own maximum output under: on the
@@ -56,8 +59,14 @@ def note_from_model_list(payload: Any, model: str = "") -> None:
     """Remember the maximum output a model list answer declares for ``model``."""
     tokens = output_limit_from_model_list(payload, model)
     if tokens > 0 and str(model or "").strip():
+        note_declared(model, tokens, _MODEL_LIST)
+
+
+def note_declared(model: str, tokens: int, where: str) -> None:
+    """Remember the maximum output ``where`` declared for ``model``."""
+    if int(tokens) > 0 and str(model or "").strip():
         with _lock:
-            _learned[str(model).strip().lower()] = int(tokens)
+            _learned[str(model).strip().lower()] = (int(tokens), str(where or _MODEL_LIST))
 
 
 def forget_learned() -> None:
@@ -89,9 +98,9 @@ def declared_output(model: object) -> tuple[int, str]:
     if not name:
         return 0, ""
     with _lock:
-        learned = _learned.get(name, 0)
+        learned, where = _learned.get(name, (0, ""))
     if learned > 0:
-        return learned, "the endpoint's model list"
+        return learned, where
     family = model_family(name)
     tokens, source = _table_rows().get(family, (0, ""))
     if tokens <= 0:

@@ -128,6 +128,17 @@ class AnthropicConfig(BaseModel):
     api_key: SecretStr | None = None
     expert_model: str = "claude-sonnet-4-20250514"
     judge_model: str = "claude-sonnet-4-20250514"
+    # The effort every request is sent with, as ``output_config.effort``.
+    # Empty sends nothing and leaves the model's own default (``medium`` on
+    # Claude Haiku 5.5, ``high`` on most others); a level the model does not
+    # take is refused before the job starts where the Models API said so, and
+    # is the API's 400 to answer otherwise.
+    effort: Literal["", "low", "medium", "high", "xhigh", "max"] = ""
+    # How long the prompt cache keeps a prefix each request writes: ``5m``,
+    # the API's own default, or ``1h``, which costs more to write (the
+    # vendor's price list prices both) and outlives a pause longer than five
+    # minutes between two turns of one conversation.
+    prompt_cache_ttl: Literal["5m", "1h"] = "5m"
 
 
 class OllamaConfig(BaseModel):
@@ -370,6 +381,18 @@ class ModelPriceWindow(BaseModel):
         return self
 
 
+class ModelPriceTier(BaseModel):
+    """A model's prices for a request whose prompt is over ``over_prompt_tokens``, as documented."""
+
+    over_prompt_tokens: Annotated[int, Field(ge=1)]
+    input_usd_per_mtok: Annotated[float, Field(ge=0.0)]
+    output_usd_per_mtok: Annotated[float, Field(ge=0.0)]
+    cached_input_usd_per_mtok: Annotated[float, Field(ge=0.0)] | None = None
+    cache_write_input_usd_per_mtok: Annotated[float, Field(ge=0.0)] | None = None
+    cache_write_1h_input_usd_per_mtok: Annotated[float, Field(ge=0.0)] | None = None
+    source: str = ""
+
+
 class ModelPrice(BaseModel):
     """What one model's tokens cost, in US dollars per million, as its vendor prices them.
 
@@ -379,13 +402,25 @@ class ModelPrice(BaseModel):
     a reader can check them. ``windows`` are the spans of the day the vendor
     prices otherwise (a peak or an off-peak rate); a call is priced at the
     window its request was sent in, and at these figures outside every window.
+
+    ``cache_write_input_usd_per_mtok`` is the price of an input token the
+    provider wrote to its prompt cache (Anthropic's five-minute write), and
+    ``cache_write_1h_input_usd_per_mtok`` that of one written for an hour;
+    ``None`` prices a written token as an ordinary input token (an hour's write
+    at the five-minute price where only that is given). ``tiers`` are the
+    vendor's prices for a request whose prompt is over a number of tokens, the
+    prompt counted whole, cache reads and writes included: a call is priced at
+    the tier with the largest ``over_prompt_tokens`` its prompt is over.
     """
 
     input_usd_per_mtok: Annotated[float, Field(ge=0.0)]
     output_usd_per_mtok: Annotated[float, Field(ge=0.0)]
     cached_input_usd_per_mtok: Annotated[float, Field(ge=0.0)] | None = None
+    cache_write_input_usd_per_mtok: Annotated[float, Field(ge=0.0)] | None = None
+    cache_write_1h_input_usd_per_mtok: Annotated[float, Field(ge=0.0)] | None = None
     source: str = ""
     windows: list[ModelPriceWindow] = Field(default_factory=list)
+    tiers: list[ModelPriceTier] = Field(default_factory=list)
 
 
 class LLMConfig(BaseModel):

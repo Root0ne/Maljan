@@ -196,10 +196,12 @@ class TokenUsageMetrics:
     providers reported, and the calls that reported nothing are said to have
     reported nothing. ``cost`` is present only where a provider reported one,
     over ``cost_calls`` calls; there is no price table. ``cached_input_tokens``
-    (the part of the input read from the provider's prompt cache) and
+    (the part of the input read from the provider's prompt cache),
+    ``cache_write_input_tokens`` (the part written to it) and
     ``reasoning_tokens`` (the part of the output spent reasoning) are present
-    only where a provider reported them, over ``cached_calls`` and
-    ``reasoning_calls`` calls. ``per_agent`` holds the same figures for each
+    only where a provider reported them, over ``cached_calls``,
+    ``cache_write_calls`` and ``reasoning_calls`` calls. ``per_agent`` holds the
+    same figures for each
     agent, and the models that answered it. ``unreported`` names each call that
     reported no usage — the agent, the call and the model — one row per call.
     """
@@ -211,6 +213,8 @@ class TokenUsageMetrics:
     unreported_calls: int = 0
     cached_input_tokens: int | None = None
     cached_calls: int = 0
+    cache_write_input_tokens: int | None = None
+    cache_write_calls: int = 0
     reasoning_tokens: int | None = None
     reasoning_calls: int = 0
     cost: float | None = None
@@ -279,6 +283,12 @@ def tokens_sentence(tokens: dict[str, Any] | None) -> str | None:
         )
     text += _part_clause(
         tokens, "cached_input_tokens", "cached_calls", "of the input read from the prompt cache"
+    )
+    text += _part_clause(
+        tokens,
+        "cache_write_input_tokens",
+        "cache_write_calls",
+        "of the input written to the prompt cache",
     )
     text += _part_clause(tokens, "reasoning_tokens", "reasoning_calls", "of the output reasoning")
     cost = tokens.get("cost")
@@ -1276,6 +1286,9 @@ class RunSummary:
         if tok.cached_input_tokens is not None and tok.cached_calls:
             out["cached_input_tokens"] = tok.cached_input_tokens
             out["cached_calls"] = tok.cached_calls
+        if tok.cache_write_input_tokens is not None and tok.cache_write_calls:
+            out["cache_write_input_tokens"] = tok.cache_write_input_tokens
+            out["cache_write_calls"] = tok.cache_write_calls
         if tok.reasoning_tokens is not None and tok.reasoning_calls:
             out["reasoning_tokens"] = tok.reasoning_tokens
             out["reasoning_calls"] = tok.reasoning_calls
@@ -1701,6 +1714,10 @@ class RunSummaryBuilder:
             unreported_calls=int(snapshot.get("unreported_calls", 0)),
             cached_input_tokens=_reported_part(snapshot, "cached_input_tokens", "cached_calls"),
             cached_calls=int(snapshot.get("cached_calls", 0) or 0),
+            cache_write_input_tokens=_reported_part(
+                snapshot, "cache_write_input_tokens", "cache_write_calls"
+            ),
+            cache_write_calls=int(snapshot.get("cache_write_calls", 0) or 0),
             reasoning_tokens=_reported_part(snapshot, "reasoning_tokens", "reasoning_calls"),
             reasoning_calls=int(snapshot.get("reasoning_calls", 0) or 0),
             cost=float(cost) if isinstance(cost, int | float) else None,

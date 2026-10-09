@@ -171,7 +171,14 @@ const CREDENTIAL_KEYS: Record<string, { keys: string[]; advanced: string[] }> = 
       "core.llm.openai.repetition_penalty",
     ],
   },
-  anthropic: { keys: ["core.llm.anthropic.api_key"], advanced: [] },
+  anthropic: {
+    keys: [
+      "core.llm.anthropic.api_key",
+      "core.llm.anthropic.effort",
+      "core.llm.anthropic.prompt_cache_ttl",
+    ],
+    advanced: ["core.llm.anthropic.effort", "core.llm.anthropic.prompt_cache_ttl"],
+  },
   gemini: { keys: ["core.llm.gemini.api_key"], advanced: [] },
   ollama: {
     keys: [

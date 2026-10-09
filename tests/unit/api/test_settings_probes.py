@@ -192,6 +192,41 @@ async def test_llm_probe_anthropic_ok(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_llm_probe_anthropic_asks_with_the_effort_and_takes_a_thinking_answer(monkeypatch):
+    """The turn a job asks: its effort sent, and a model that only thought has answered."""
+    sent: list[dict] = []
+
+    def handler(req: httpx.Request):
+        if req.url.path.endswith("/messages"):
+            sent.append(json.loads(req.content))
+            return httpx.Response(
+                200,
+                json={
+                    "content": [{"type": "thinking", "thinking": "", "signature": "EoB" * 20}],
+                    "stop_reason": "max_tokens",
+                },
+            )
+        return httpx.Response(200, json={"data": [{"id": "claude-haiku-5-5"}]})
+
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
+    )
+    r = await probes.probe_llm(
+        {
+            "provider": "anthropic",
+            "anthropic_api_key": "test-anthropic-key",
+            "anthropic_expert_model": "claude-haiku-5-5",
+            "anthropic_effort": "max",
+        }
+    )
+    assert r.ok
+    assert sent and all(body["output_config"] == {"effort": "max"} for body in sent)
+    assert all("temperature" not in body for body in sent)
+
+
+@pytest.mark.asyncio
 async def test_llm_probe_ollama_ok(monkeypatch):
     def handler(req: httpx.Request):
         if req.url.path.endswith("/api/generate"):
