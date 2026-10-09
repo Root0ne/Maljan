@@ -38,7 +38,22 @@ def _cut(content: Any) -> AIMessage:
 
 class TestTheCutReadsTheText:
     def test_a_cut_while_still_thinking_is_a_cut_with_no_text(self) -> None:
-        assert answer_cut_at_cap(_cut([dict(_THINKING)]), 64) is None
+        assert answer_cut_at_cap(_cut([dict(_THINKING)]), 64) == (64, "")
+
+    def test_its_question_says_the_answer_was_cut_while_reasoning(self) -> None:
+        from maljan.pipeline.validation import analyst_cut_violation
+
+        message = analyst_cut_violation(64, "").message
+        assert "while you were still reasoning" in message
+        assert "last claim was cut off" not in message
+
+    def test_an_answer_that_ended_on_its_own_is_no_cut(self) -> None:
+        ended = AIMessage(
+            content=[dict(_THINKING)],
+            response_metadata={"stop_reason": "end_turn", "finish_reason": "stop"},
+            usage_metadata={"input_tokens": 3, "output_tokens": 5, "total_tokens": 8},
+        )
+        assert answer_cut_at_cap(ended, 64) is None
 
     def test_a_cut_after_some_text_is_that_text_alone(self) -> None:
         assert answer_cut_at_cap(_cut(_thinking_first("CLAIM: it rea")), 64) == (

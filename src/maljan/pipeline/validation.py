@@ -3561,11 +3561,18 @@ def analyst_cut_violation(cap: int, text: str = "", *, chunk: str = "") -> Viola
         else ""
     )
     answer = f"answer to {chunk}" if chunk else "previous answer"
+    # An answer the limit cut while the model was still reasoning wrote none
+    # of its text, so no claim of it was cut off.
+    stopped = (
+        "before it ended, so its last claim was cut off."
+        if text
+        else "while you were still reasoning, before any of its text was written."
+    )
     return Violation(
         code=ANALYST_CUT_CODE,
         message=(
-            f"Your {answer} stopped at the output limit of {int(cap)} tokens before "
-            f"it ended, so its last claim was cut off.{size} Any reasoning you write counts "
+            f"Your {answer} stopped at the output limit of {int(cap)} tokens "
+            f"{stopped}{size} Any reasoning you write counts "
             f"against the same limit. Write the whole answer again so that it ends well inside "
             f"{int(cap)} tokens: the claims the evidence supports best, each written once, "
             "each one sentence with its EVIDENCE, CONFIDENCE and TECHNIQUE lines, and nothing "

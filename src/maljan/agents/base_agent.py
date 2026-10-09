@@ -2916,14 +2916,13 @@ def answer_cut_at_cap(response: Any, cap: int) -> tuple[int, str] | None:
     """
     from maljan.core.truncation_ledger import completion_tokens_of, hit_length_cap
 
-    # The text blocks alone: an Anthropic answer cut while it was still
-    # thinking holds a thinking block and no text, and is a cut with no text.
+    # The text blocks alone: an answer the cap cut while the model was still
+    # reasoning (an Anthropic thinking block and no text) is a cut whose text
+    # is empty, and is asked for a whole shorter answer as any cut answer is.
     text = answer_text(getattr(response, "content", ""))
-    if not text.strip():
-        return None
     produced = completion_tokens_of(response)
     if hit_length_cap(response) or (cap > 0 and produced is not None and produced >= cap):
-        return (cap or int(produced or 0), text)
+        return (cap or int(produced or 0), text if text.strip() else "")
     return None
 
 
