@@ -3,8 +3,10 @@ import { deepEqual } from "./mapEditorHelpers";
 /**
  * The model-calling roles that are no agent definition, each configured by an
  * `llm.agents` entry under its own key. Mirrors
- * `maljan.core.config.ROLE_ENTRY_KEYS`: the debate stage's mediator and the
- * function summariser. With no entry either runs on the global expert model.
+ * `maljan.core.config.ROLE_ENTRY_KEYS`, in its order, which
+ * `tests/unit/core/test_the_console_lists_every_role_entry.py` checks: the
+ * debate stage's mediator and the function summariser. With no entry either
+ * runs on the global expert model.
  */
 export interface RoleEntry {
   key: string;
