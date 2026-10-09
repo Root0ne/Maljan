@@ -38,7 +38,7 @@ from maljan.agents.run_evidence_corpus import (
     state_of,
 )
 from maljan.analysis.corroboration import corroboration_row
-from maljan.analysis.run_summary import RunSummaryBuilder, tool_asks_of
+from maljan.analysis.run_summary import RunSummaryBuilder, summary_counts_line, tool_asks_of
 from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
@@ -2117,7 +2117,7 @@ def _remember_the_published_techniques(
             return
         container.pending_memory_case = moved
         logger.info(
-            "LTM: case '%s' holds %d published technique(s) of %d claimed.",
+            "LTM: case '%s' holds %d published technique(s) of the %d claimed ones memory keeps.",
             case.sample_id,
             len(moved.technique_ids),
             len(case.technique_ids),
@@ -4852,15 +4852,9 @@ def make_judge_node(
                 run_summary_dict["verdict_reading"] = (
                     verdict_reading(bundle) if isinstance(bundle, Bundle) else VERDICT_READ_FALLBACK
                 )
-                logger.info(
-                    "RunSummary built: verdict=%s, rounds=%d, claimed techniques=%d, "
-                    "validation retries=%d, unresolved=%d",
-                    decision,
-                    summary.negotiation.rounds_completed,
-                    _technique_count,
-                    _retries,
-                    len(_unresolved),
-                )
+                # Read back from the summary as stored, so the line says what
+                # the stored summary and the report say.
+                logger.info("RunSummary built: %s", summary_counts_line(run_summary_dict))
             except Exception as exc:
                 logger.warning("RunSummary build failed (%s). Skipping.", exc)
 
@@ -4906,7 +4900,8 @@ def make_judge_node(
                         if a_report_node_follows(container):
                             container.pending_memory_case = case
                             logger.info(
-                                "LTM: case '%s' (category=%s, claimed techniques=%d) is held "
+                                "LTM: case '%s' (category=%s, claimed techniques memory keeps=%d) "
+                                "is held "
                                 "for the report node, which moves it to the published "
                                 "techniques and decides whether it is stored.",
                                 case.sample_id,
@@ -5748,6 +5743,12 @@ def make_report_node(
             _amended_report_summary = dict(report.run_summary or {})
             _amended_report_summary["validation"] = _validation_block
             report.run_summary = _amended_report_summary
+            # The report round's own retries and findings are added to the
+            # judge's: the counts the stored summary ends with.
+            logger.info(
+                "RunSummary amended by the report round: %s",
+                summary_counts_line(_amended_report_summary),
+            )
         if fp_warnings:
             _state_summary["fp_warnings"] = fp_warnings
         if _ledger:
