@@ -88,14 +88,17 @@ _WITHDRAW_LINE_RE = re.compile(r"^" + LINE_PREFIX + r"withdraw\b", re.IGNORECASE
 _WITHDRAW_WORD_RE = re.compile(r"\b(?:withdraw|retract|remov|drop|delet)\w*+", re.IGNORECASE)
 _CLAIM_NUMBER_RE = re.compile(r"\bclaims?+\s*+#?\d", re.IGNORECASE)
 # A heading that withdraws its own claim: a withdrawing word in its note
-# ("CLAIM 2 (withdrawn):") or opening its sentence ("CLAIM 2 — withdrawn: ...").
-# A sentence that opens with what the code does ("Drops a.exe to %TEMP%",
-# "Deletes its own file") describes a claim; only "withdraw" and "retract" in
-# any form, or "removed", "dropped" and "deleted" standing alone before a mark,
-# the line's end or a reason, open a withdrawal.
+# ("CLAIM 2 (withdrawn):"), "withdraw" or "retract" in any form anywhere in
+# its sentence ("CLAIM 2: This claim is withdrawn because ..."), which never
+# describe what code does, or a bare "removed", "dropped" or "deleted" opening
+# its sentence before a mark, the line's end or a reason ("CLAIM 2: [Removed]
+# as unsupported"). A sentence that opens with what the code does ("Drops a.exe
+# to %TEMP%", "Deletes its own file", "Dropped payload a.exe runs") describes a
+# claim.
+_WITHDRAW_OR_RETRACT_RE = re.compile(r"\b(?:withdraw|retract)", re.IGNORECASE)
 _WITHDRAWING_OPENER_RE = re.compile(
-    r"[ \t*_`\"']*+(?:withdraw|retract|(?:removed|dropped|deleted)\b(?=[ \t*_`\"']*+"
-    r"(?:$|[:.,;!()\[\]\-–—]|(?:because|since|due)\b)))",
+    r"[ \t*_`\"'\[(~>]*+(?:removed|dropped|deleted)\b(?=[ \t*_`\"'~]*+"
+    r"(?:$|[:.,;!()\[\]\-–—]|(?:because|since|due|as|from|for[ \t]++lack)\b))",
     re.IGNORECASE,
 )
 _NUMBER_RE = re.compile(r"\d++")
@@ -155,8 +158,11 @@ def read_withdrawals(text: str) -> Withdrawals:
             rest = line
             if heading is not None:
                 rest = line[heading.end() :]
-                if _WITHDRAW_WORD_RE.search(heading.group("note") or "") or (
-                    _WITHDRAWING_OPENER_RE.match(heading_sentence(line, heading))
+                sentence = heading_sentence(line, heading)
+                if (
+                    _WITHDRAW_WORD_RE.search(heading.group("note") or "")
+                    or _WITHDRAW_OR_RETRACT_RE.search(sentence)
+                    or _WITHDRAWING_OPENER_RE.match(sentence)
                 ):
                     unread += 1
                     continue

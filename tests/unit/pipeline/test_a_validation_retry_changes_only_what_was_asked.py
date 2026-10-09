@@ -26,7 +26,7 @@ from maljan.pipeline.retry_merge import (
     numbering_unsettled,
     read_withdrawals,
 )
-from maljan.pipeline.validation import Violation
+from maljan.pipeline.validation import Violation, retry_drop_row, retry_drop_sentences
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence, Finding
 
 _FIELDS: dict[str, Any] = {
@@ -361,13 +361,40 @@ class TestWhereTheNumbersDoNotPlaceTheRetry:
             assert merge.merged is None, head
             assert merge.why == "a line of the retry that withdraws could not be read exactly"
 
-    def test_a_heading_whose_sentence_opens_with_what_the_code_does_is_no_doubt(self) -> None:
+    def test_a_heading_sentence_that_withdraws_its_own_claim_merges_nothing(self) -> None:
         for sentence in (
-            "Deletes its own file after it runs.",
-            "Drops a.exe to %TEMP% and runs it.",
-            "Dropped payload a.exe runs at logon.",
+            "[WITHDRAWN] B 0x20.",
+            "(Withdrawn) B 0x20 is not supported.",
+            "~~B 0x20.~~ Retracted.",
+            "This claim is withdrawn because no entry holds 0x20.",
+            "I retract this: 0x20 is not held.",
+            "N/A - withdrawn",
+            "Removed as unsupported; 0x20 is not in the ledger.",
+            "Dropped from this answer: 0x20 is not held.",
         ):
-            assert read_withdrawals(_block(sentence, number=5)).unread == 0, sentence
+            answer = _block(sentence, number=2)
+
+            merge = merge_retry(_isr(FIRST), _isr(answer), answer, asked=[1])
+
+            assert read_withdrawals(answer).unread == 1, sentence
+            assert merge.merged is None, sentence
+            assert merge.why == "a line of the retry that withdraws could not be read exactly"
+
+    def test_a_heading_whose_sentence_opens_with_what_the_code_does_is_merged(self) -> None:
+        for sentence in (
+            "0x405000 drops a.exe to %TEMP% and runs it.",
+            "Drops a.exe to %TEMP% and runs it.",
+            "Deletes its own file after it runs.",
+            "Removes the Run key value qx7svc on uninstall.",
+            "Dropped payload a.exe runs at logon.",
+            "Deleted files are recovered from the shadow copy.",
+        ):
+            answer = _block(FIXED_BEACON, number=2) + _block(sentence, number=5)
+
+            merge = merge_retry(_isr(FIRST), _isr(answer), answer, asked=[1])
+
+            assert read_withdrawals(answer).unread == 0, sentence
+            assert merge.merged is not None, (sentence, merge.why)
 
     def test_a_note_that_names_a_withdrawn_claim_is_a_doubt(self) -> None:
         answer = _block(FIXED_BEACON, number=2) + "My round-0 claim 21 was withdrawn.\n"
@@ -538,6 +565,29 @@ class TestTheLinesItReads:
         assert flagged_blocks(flags) == [5, 2]
 
 
+class TestALeftItemPrintsOnceAsItsRetryLeftIt:
+    def test_rows_of_one_item_a_merged_retry_left_print_once_as_merged(self) -> None:
+        rows = [
+            retry_drop_row("static", n, "claim", MUTEX, ["0x401000"], "it stays", "", merged=True)
+            for n in (1, 2)
+        ]
+
+        (sentence,) = retry_drop_sentences(rows)
+
+        assert sentence.startswith("The static analyst's merged validation retry neither wrote")
+        assert sentence.endswith("The record holds it 2 times, from revision rounds 1, 2.")
+
+    def test_a_merged_and_a_kept_retry_s_row_of_one_item_print_apart(self) -> None:
+        rows = [
+            retry_drop_row("static", 1, "claim", MUTEX, ["0x401000"], "it stays", "", merged=True),
+            retry_drop_row("static", 2, "claim", MUTEX, ["0x401000"], "it stays", ""),
+        ]
+
+        merged, kept = retry_drop_sentences(rows)
+
+        assert "merged validation retry" in merged and "kept validation retry" in kept
+
+
 def _answers(count: int) -> tuple[AgentISR, AgentISR, str]:
     first = "".join(_block(f"0x{0x400000 + n:x} does step {n}.", "T1027") for n in range(count))
     retry = "".join(
@@ -619,6 +669,9 @@ class TestAHostileRetryCostsALinearMerge:
             lambda size: "CLAIM 1: " + "drop " * size + "claim 2",
             lambda size: "CLAIM 1 (" + "retract " * size + "):",
             lambda size: "**CLAIM 2** " + "claim 7 " * size + "withdrawn",
+            lambda size: "CLAIM 2: " + "[(~>" * size + "removed",
+            lambda size: "CLAIM 2: " + "removed " * size + "x",
+            lambda size: "CLAIM 2: " + "x " * size + "retract",
         ):
 
             def run(size: int, line: Callable[[int], str] = line) -> Callable[[], Any]:
