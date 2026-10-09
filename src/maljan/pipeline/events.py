@@ -906,17 +906,95 @@ def _is_a_catalogue_name(name: str) -> bool:
     return name in _RESOLVED_NAMES or name in _catalogue_names() or name in _algorithm_ids()
 
 
+def _module_names() -> frozenset[str]:
+    """The vendored catalogue's module names, folded to lower case; empty when unread."""
+    global _MODULES
+    if _MODULES is None:
+        try:
+            document = _read_data(_EXPORT_NAMES_FILE)
+            names = (document.get("modules") or {}).get("names") or []
+            _MODULES = frozenset(
+                str(name).lower() for name in [*names, *(document.get("dlls") or {})]
+            )
+        except Exception as exc:  # noqa: BLE001 — the shape rules still run
+            logger.warning(
+                "The module-name catalogue was not read for the scrub (%s).", type(exc).__name__
+            )
+            _MODULES = frozenset()
+    return _MODULES
+
+
+# What a tool or a decompiler writes that the length rule read as a key, each by
+# its exact form: an address or a decimal number (a list of them joined by
+# ``/`` is one run), a name Ghidra gives a stack or a local variable
+# (``in_stack_ffffffffffffffc8``), and a stretch of a base64 alphabet itself
+# (the table a decoder is built from). None is a key's form: a key is not a
+# number, a decompiler's variable or the alphabet it is written in.
+_MODULES: frozenset[str] | None = None
+_NUMBER_PIECE = re.compile(r"\A(?:0[xX][0-9A-Fa-f]{1,16}|[0-9]{1,10})\Z")
+_DECOMPILER_NAME = re.compile(r"\A(?:in_stack|local|param|[a-z]{1,3}Stack)_[0-9a-f]{1,16}\Z")
+# A stretch of an alphabet is that table only at a key's own length floor: a
+# short piece of a key is a stretch of its alphabet too.
+_ALPHABET_SLICE_FLOOR = 24
+_BASE64_ALPHABETS = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+)
+
+
+def _is_a_written_name(token: str) -> bool:
+    """Whether ``token`` is a name the scrub keeps by its exact form or a catalogue."""
+    return bool(
+        _is_a_catalogue_name(token)
+        or token.lower() in _module_names()
+        or _DECOMPILER_NAME.match(token)
+        or (len(token) >= _ALPHABET_SLICE_FLOOR and any(token in a for a in _BASE64_ALPHABETS))
+    )
+
+
+def _completes_a_name(piece: str, named: str) -> str:
+    """The catalogue name ``piece`` completes after a head of ``named``, or ``""``.
+
+    How a list abbreviates a name it repeats: ``FindFirstFileA/W`` for the A
+    and W forms, ``NtQueryInformationProcess/Thread`` for the process and the
+    thread form. The completion must itself be a catalogue name.
+    """
+    if not named or not piece[:1].isupper():
+        return ""
+    for end in range(len(named) - 1, 0, -1):
+        whole = named[:end] + piece
+        if _is_a_catalogue_name(whole):
+            return whole
+    return ""
+
+
 def _is_api_name(token: str) -> bool:
     """Whether ``token`` is a Windows function name or a hash-algorithm id, alone or
     several joined by ``/``, ``|``, ``+`` or ``&``.
 
     A module in front of a name (``kernel32.dll!Name``) is split off by the
-    value run itself, so the name is asked alone.
+    value run itself, so the name is asked alone. In a list, a piece may also
+    be a module name the catalogue lists (in any case), an address or a number,
+    a decompiler's variable name, or an abbreviation that completes the name
+    before it to a catalogue name (``FindFirstFileA/W``).
     """
-    if _is_a_catalogue_name(token):
+    if _is_a_written_name(token):
         return True
     pieces = [piece for piece in _JOINS.split(token) if piece]
-    return len(pieces) > 1 and all(_is_a_catalogue_name(piece) for piece in pieces)
+    if len(pieces) < 2:
+        return False
+    named = ""
+    for piece in pieces:
+        if _is_a_catalogue_name(piece):
+            named = piece
+            continue
+        if _is_a_written_name(piece) or _NUMBER_PIECE.match(piece):
+            continue
+        completed = _completes_a_name(piece, named)
+        if not completed:
+            return False
+        named = completed
+    return True
 
 
 def remember_resolved_names(answer: Any) -> None:
@@ -1063,6 +1141,10 @@ def _hide_credentials(found: re.Match[str]) -> str:
         found.string[max(0, found.start() - 40) : found.start()]
     ):
         return value
+    if _HEX_FIELD_BEFORE_RE.search(
+        found.string[max(0, found.start() - 12) : found.start()]
+    ) and _HEX_DATA.match(value):
+        return value
     if _looks_like_a_credential(value, whole=True):
         return _REDACTED
     head = ""
@@ -1082,6 +1164,12 @@ def _hide_credentials(found: re.Match[str]) -> str:
     if not value:
         return f"{_hide_in_run(head)}{_REDACTED}" if head else _REDACTED
     return _hide_in_run(value)
+
+
+# Bytes a tool states as hex under its own ``hex`` field (a memory read, a
+# byte range): data the tool read, which the length rule took for a key.
+_HEX_FIELD_BEFORE_RE = re.compile(r"(?i)(?<![A-Za-z0-9_])hex\\?[\"']?\s*[:=]\s*\\?[\"']?\Z")
+_HEX_DATA = re.compile(r"\A(?:[0-9A-Fa-f]{2})+\Z")
 
 
 def _names_only(stretch: str) -> bool:

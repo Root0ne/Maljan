@@ -2144,6 +2144,25 @@ A name travels alone, or joined to other such names by `/`, `|`, `+` or `&`. A
 module in front of a name (`kernel32.dll!Name`) is split off at the `!`, so the
 module and the name are read apart.
 
+What a tool or a model writes beside those names travels as written too, each
+by its exact form:
+
+- in a list joined by `/`, `|`, `+` or `&`: a module name the export-name
+  catalogue lists, in any case (`kernel32/WinINet/SHELL32`), an address or a
+  decimal number (`0x1a20/0x1a28`, a list of process ids), and an
+  abbreviation that completes the name before it to a catalogue name
+  (`FindFirstFileA/W`, `NtQueryInformationProcess/Thread`);
+- a decompiler's stack or local variable name (`in_stack_ffffffffffffff10`,
+  `uStack_…`, `local_…`, `param_…` followed by hex);
+- a stretch of 24 or more characters of the standard or URL-safe base64
+  alphabet itself, the table a decoder is built from;
+- an even-length run of hex digits under a tool's own `hex` field
+  (`"hex": "0011…"`), the bytes a memory or byte-range read returned. A long
+  hex run anywhere else is still read as a key.
+
+A piece that is none of these keeps the whole run a key, so a key inside such
+a list is still masked with its stretch.
+
 A key is still a key:
 
 - after a module and a `!`;
