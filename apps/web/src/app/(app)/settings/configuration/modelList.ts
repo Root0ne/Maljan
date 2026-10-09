@@ -46,6 +46,22 @@ export function withProvider<T extends ModelChoice>(choice: T, provider: string)
   return next;
 }
 
+/** An agent entry with `next` merged in. Its effort is kept unless the
+ *  provider in force changes: a blank provider is the global one, so naming
+ *  the global provider explicitly keeps an effort chosen for it. */
+export function mergeEntry<T extends ModelChoice>(
+  base: T,
+  next: Partial<T>,
+  globalProvider: string | null,
+): T {
+  const merged: T = { ...base, ...next };
+  if (next.provider === undefined) return merged;
+  const was = base.provider || globalProvider || "";
+  const now = next.provider || globalProvider || "";
+  if (was !== now) delete merged.effort;
+  return merged;
+}
+
 /** How the effort field is drawn, from what the backend served for the
  *  provider and model on screen. */
 export type EffortField =

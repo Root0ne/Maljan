@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   effortField,
+  mergeEntry,
   storedChoice,
   withProvider,
 } from "@/app/(app)/settings/configuration/modelList";
@@ -90,5 +91,35 @@ describe("a stored model choice and its effort", () => {
     const row = { provider: "anthropic", model: "m", effort: "low" };
     expect(withProvider(row, "ollama")).toEqual({ provider: "ollama", model: "m" });
     expect(withProvider(row, "anthropic")).toEqual(row);
+  });
+});
+
+describe("an agent entry's effort as the editor stages it", () => {
+  const entry = { provider: "", model: "m", effort: "high" };
+
+  it("keeps the effort when the global provider is named explicitly", () => {
+    expect(mergeEntry(entry, { provider: "anthropic" }, "anthropic")).toEqual({
+      provider: "anthropic",
+      model: "m",
+      effort: "high",
+    });
+  });
+
+  it("drops the effort when the provider in force changes", () => {
+    expect(mergeEntry(entry, { provider: "openai" }, "anthropic")).toEqual({
+      provider: "openai",
+      model: "m",
+    });
+    expect(
+      mergeEntry({ provider: "anthropic", model: "m", effort: "low" }, { provider: "" }, "openai"),
+    ).toEqual({ provider: "", model: "m" });
+  });
+
+  it("keeps it across an edit that names no provider", () => {
+    expect(mergeEntry(entry, { model: "n" }, "anthropic")).toEqual({
+      provider: "",
+      model: "n",
+      effort: "high",
+    });
   });
 });

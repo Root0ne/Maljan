@@ -10,6 +10,7 @@ import {
   hasEndpoint,
   moveChoice,
   storedChoice,
+  mergeEntry,
   withProvider,
   type ModelChoice,
 } from "./modelList";
@@ -450,11 +451,9 @@ export function AgentDetail({
    *  blank for the same reason temperature is. */
   const putLlm = (key: string, next: Partial<AgentLLMOverride>) => {
     const base: AgentLLMOverride = llmAgents[key] ?? { provider: "", model: "" };
-    let merged: AgentLLMOverride = { ...base, ...next };
-    // An effort belongs to the provider it was chosen for.
-    if (next.provider !== undefined) {
-      merged = withProvider({ ...merged, provider: base.provider }, next.provider);
-    }
+    // An effort belongs to the provider it was chosen for, which for an
+    // entry with a blank provider is the global one.
+    const merged: AgentLLMOverride = mergeEntry(base, next, llmGlobal.providerValue);
     if (!merged.provider && !merged.model) {
       setLlmError(null);
       const map = { ...llmAgents };
