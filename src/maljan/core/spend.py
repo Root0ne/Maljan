@@ -7,8 +7,12 @@ take the job past it by that measure.
 
 **What a call costs.** The cost a provider reports in its answer, where it
 reports one. Otherwise the usage it reported — the input tokens it read from
-its prompt cache, the other input tokens, and the output tokens — at the
-prices of the model that answered *in force when the request was sent*.
+its prompt cache, those it wrote to it, the other input tokens, and the output
+tokens — at the prices of the model that answered *in force when the request
+was sent*, and at the vendor's prices for a prompt of its length where the
+vendor prices a long prompt otherwise (a row's ``tiers``: Anthropic prices
+Claude Haiku 5.5 higher for a prompt over 100,000 tokens, the prompt counted
+whole, cache reads and writes included).
 Prices come from the operator's ``llm.model_prices`` first, then from a
 ``prices`` row of the vendored model table, which carries a vendor's
 documented prices as data, with the page they were read from. A row may carry
@@ -26,7 +30,9 @@ adds nothing here either.
 
 **Before a call** (:meth:`SpendMeter.admit`). A call is admitted with its
 output cap held to what the spend it may use pays for at its model's output
-price, after its prompt priced as uncached input, both at the highest rate in
+price, after its prompt priced as uncached input (or as written to the prompt
+cache, where that costs more), both at the price tier of its prompt's length
+and at the highest rate in
 force between now and the call's deadline (a call sent across a window's edge
 is never settled above what it reserved). It is refused only when that does
 not pay for the smallest answer the call can give: for a tool-loop turn the
@@ -365,9 +371,18 @@ class PriceWindow:
 
 
 class Price:
-    """One model's prices per million tokens, where they were read, and their time windows."""
+    """One model's prices per million tokens, where they were read, its windows and its tiers."""
 
-    __slots__ = ("cached_input", "input", "output", "source", "windows")
+    __slots__ = (
+        "cache_write",
+        "cache_write_1h",
+        "cached_input",
+        "input",
+        "output",
+        "source",
+        "tiers",
+        "windows",
+    )
 
     def __init__(
         self,
@@ -376,12 +391,42 @@ class Price:
         cached_input: float | None = None,
         source: str = "",
         windows: tuple[PriceWindow, ...] = (),
+        *,
+        cache_write: float | None = None,
+        cache_write_1h: float | None = None,
+        tiers: tuple[tuple[int, Price], ...] = (),
     ) -> None:
         self.input = float(input)
         self.output = float(output)
         self.cached_input = None if cached_input is None else float(cached_input)
         self.source = str(source or "")
         self.windows = tuple(windows)
+        self.cache_write = None if cache_write is None else float(cache_write)
+        self.cache_write_1h = None if cache_write_1h is None else float(cache_write_1h)
+        # ``(over this many prompt tokens, the prices then)``, smallest first.
+        self.tiers = tuple(sorted(tiers, key=lambda tier: tier[0]))
+
+    def for_prompt(self, prompt_tokens: int) -> Price:
+        """The prices of a request whose prompt is ``prompt_tokens``: its tier's, else these."""
+        found: Price = self
+        for over, price in self.tiers:
+            if int(prompt_tokens) > over:
+                found = price
+        return found
+
+    def for_admission(self, prompt_tokens: int, hour_writes: bool = False) -> Price:
+        """The prices a call is admitted at: its prompt's tier, every prompt token at its dearest.
+
+        A prompt token is uncached input, or written to the prompt cache where
+        a write costs more; which one it will be is not known before the call.
+        An hour's write is counted only where the deployment asks for one
+        (``hour_writes``): no request writes for an hour otherwise.
+        """
+        tier = self.for_prompt(prompt_tokens)
+        dearest = max(tier.input, tier.written, tier.written_1h if hour_writes else 0.0)
+        if dearest == tier.input and tier is self:
+            return self
+        return Price(dearest, tier.output, tier.cached_input, tier.source, tier.windows)
 
     def at(self, when: datetime) -> Price:
         """The prices in force at ``when`` (UTC): the first window covering it, else these."""
@@ -406,13 +451,34 @@ class Price:
         """The price of a cached input token (an input token's where none is given)."""
         return self.input if self.cached_input is None else self.cached_input
 
+    @property
+    def written(self) -> float:
+        """The price of an input token written to the prompt cache (an input token's by default)."""
+        return self.input if self.cache_write is None else self.cache_write
+
+    @property
+    def written_1h(self) -> float:
+        """The price of an input token written to the prompt cache for an hour."""
+        return self.written if self.cache_write_1h is None else self.cache_write_1h
+
     def cost(self, usage: Mapping[str, Any]) -> float:
-        """What one call's reported usage costs at these prices."""
+        """What one call's reported usage costs at these prices, at its prompt's tier."""
         total_in = int(usage.get("input_tokens") or 0)
+        price = self.for_prompt(total_in)
         cached = min(total_in, int(usage.get("cached_input_tokens") or 0))
+        written = min(total_in - cached, int(usage.get("cache_write_input_tokens") or 0))
+        written_1h = min(written, int(usage.get("cache_write_1h_input_tokens") or 0))
         out = int(usage.get("output_tokens") or 0)
+        if not written:
+            return (
+                (total_in - cached) * price.input + cached * price.cached + out * price.output
+            ) / MILLION
         return (
-            (total_in - cached) * self.input + cached * self.cached + out * self.output
+            (total_in - cached - written) * price.input
+            + cached * price.cached
+            + (written - written_1h) * price.written
+            + written_1h * price.written_1h
+            + out * price.output
         ) / MILLION
 
 
@@ -455,13 +521,40 @@ def _price_from(row: Any, source: str = "") -> Price | None:
             logger.debug("a price window that is not one was left out: %r", window)
             continue
         windows.append(found)
+    tiers: list[tuple[int, Price]] = []
+    for tier in read.get("tiers") or []:
+        found_tier = _tier_from(tier, said)
+        if found_tier is None:
+            logger.debug("a price tier that is not one was left out: %r", tier)
+            continue
+        tiers.append(found_tier)
     return Price(
         given_in,
         given_out,
         _number(read.get("cached_input_usd_per_mtok")),
         said,
         tuple(windows),
+        cache_write=_number(read.get("cache_write_input_usd_per_mtok")),
+        cache_write_1h=_number(read.get("cache_write_1h_input_usd_per_mtok")),
+        tiers=tuple(tiers),
     )
+
+
+def _tier_from(row: Any, parent_source: str) -> tuple[int, Price] | None:
+    """``(over this many prompt tokens, the prices then)`` from a tier row, or ``None``."""
+    read = row.model_dump() if hasattr(row, "model_dump") else row
+    if not isinstance(read, Mapping):
+        return None
+    over = read.get("over_prompt_tokens")
+    if isinstance(over, bool) or not isinstance(over, int) or over <= 0:
+        return None
+    price = _price_from(
+        {k: v for k, v in read.items() if k not in ("windows", "tiers")},
+        f"{parent_source} (prompts over {over:,} tokens)",
+    )
+    if price is None:
+        return None
+    return over, price
 
 
 _table: dict[str, Price] | None = None
@@ -566,8 +659,12 @@ class SpendMeter:
         *,
         table: Mapping[str, Price] | None = None,
         clock: Callable[[], datetime] | None = None,
+        hour_writes: bool = False,
     ) -> None:
         self.ceiling_usd = None if ceiling_usd is None else float(ceiling_usd)
+        # Whether a request may write the prompt cache for an hour (the
+        # Anthropic provider's ``prompt_cache_ttl``), which admission prices.
+        self.hour_writes = bool(hour_writes)
         self._lock = threading.Lock()
         # Woken whenever a reservation goes, for a call waiting on one.
         self._drained = threading.Condition(self._lock)
@@ -643,9 +740,11 @@ class SpendMeter:
     @classmethod
     def from_settings(cls, cfg: Any) -> SpendMeter:
         llm = getattr(cfg, "llm", None)
+        anthropic = getattr(llm, "anthropic", None)
         return cls(
             getattr(llm, "max_spend_usd_per_job", None),
             getattr(llm, "model_prices", None) or {},
+            hour_writes=str(getattr(anthropic, "prompt_cache_ttl", "") or "") == "1h",
         )
 
     # ── Prices ────────────────────────────────────────────────────────────
@@ -943,7 +1042,9 @@ class SpendMeter:
         price = self.price_now(model)
         if price is None:
             return None
-        return price.cost({"input_tokens": int(prompt_tokens), "output_tokens": int(output_tokens)})
+        return price.for_admission(int(prompt_tokens), self.hour_writes).cost(
+            {"input_tokens": int(prompt_tokens), "output_tokens": int(output_tokens)}
+        )
 
     # ── The reserve for the verdict and the report ───────────────────────
 
@@ -1084,9 +1185,9 @@ class SpendMeter:
             row_price = self.price_of(model)
             if row_price is None:
                 continue
-            price = row_price.at(now)
             name = _clean(model)
             prompt, prompt_said = self._tail_prompt_locked(kind, int(allowed))
+            price = row_price.at(now).for_admission(prompt, self.hour_writes)
             answer, answer_said = self._planned_answer_locked(kind, name, int(cap))
             if not answer:
                 continue
@@ -1237,11 +1338,15 @@ class SpendMeter:
             return f"tail:{kind}"
         return "loop" if kind in LOOP_KINDS else "single"
 
-    def _admission_price(self, model: str, now: datetime, deadline_s: float | None) -> Price | None:
+    def _admission_price(
+        self, model: str, now: datetime, deadline_s: float | None, prompt_tokens: int = 0
+    ) -> Price | None:
         row = self.price_of(model)
         if row is None:
             return None
-        return row.highest_over(now, _default_deadline() if deadline_s is None else deadline_s)
+        return row.highest_over(
+            now, _default_deadline() if deadline_s is None else deadline_s
+        ).for_admission(prompt_tokens, self.hour_writes)
 
     def preview(
         self,
@@ -1262,13 +1367,14 @@ class SpendMeter:
         from maljan.llm.context_window import CHARS_PER_TOKEN
 
         now = self._clock()
-        price = self._admission_price(model, now, deadline_s)
+        prompt_tokens = -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+        price = self._admission_price(model, now, deadline_s, prompt_tokens)
         with self._lock:
             decision = self._decide_locked(
                 kind=kind,
                 name=_clean(model) or "the model",
                 price=price,
-                prompt_tokens=-(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN),
+                prompt_tokens=prompt_tokens,
                 cap=max(0, int(cap_tokens or 0)),
                 slot=object(),
                 holdable=holdable,
@@ -1338,7 +1444,7 @@ class SpendMeter:
         noted = False
         while True:
             now = self._clock()
-            price = self._admission_price(model, now, deadline_s)
+            price = self._admission_price(model, now, deadline_s, prompt_tokens)
             # Latched here as well, so a call admitted after the ceiling was
             # reached is read against the latch.
             self.reached()
@@ -1520,7 +1626,9 @@ class SpendMeter:
                     "holdable": True,
                     "deadline": latest["deadline"],
                 }
-            price = self._admission_price(str(row["model"]), now, row["deadline"])
+            price = self._admission_price(
+                str(row["model"]), now, row["deadline"], int(row["prompt"])
+            )
             decision = self._decide_locked(
                 kind=kind,
                 name=_clean(str(row["model"])) or "the model",

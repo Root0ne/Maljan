@@ -33,6 +33,8 @@ def _client(handler: Any) -> httpx.Client:
 # these, so the list covers the shapes rather than the exact spellings: the
 # chat and legacy completion endpoints, the Responses API, both embedding
 # endpoints, Ollama's and Anthropic's and Gemini's own generation paths.
+MODEL_5_5 = "claude-haiku-5-5"
+
 FORBIDDEN = (
     "completion",
     "/chat",
@@ -102,11 +104,23 @@ def _sent_by_await(call: Any) -> list[httpx.Request]:
     return seen
 
 
+def _a_model_description(request: httpx.Request) -> bool:
+    """A GET for one model's description on the Anthropic Models API."""
+    return (
+        request.method == "GET"
+        and str(request.url).startswith(cw.ANTHROPIC_API_ROOT + cw.ANTHROPIC_MODEL_PATH)
+        and "/" not in request.url.path[len(cw.ANTHROPIC_MODEL_PATH) :]
+    )
+
+
 def _nothing_but_metadata(sent: list[httpx.Request], where: Any) -> None:
     """Every recorded request is a GET, or the one named POST, on a listed path."""
     for request in sent:
         url = str(request.url).lower()
         path = request.url.path
+        if _a_model_description(request):
+            assert not any(word in url for word in FORBIDDEN), (where, str(request.url))
+            continue
         assert path.endswith(cw.PROBE_PATHS), (where, str(request.url))
         assert not any(word in url for word in FORBIDDEN), (where, str(request.url))
         if request.method != "GET":
@@ -190,8 +204,17 @@ class TestTheProbeCanReachNothingThatGenerates:
     ]
 
     def test_every_request_the_module_can_plan_is_a_metadata_path(self) -> None:
-        """A plan is the configured address plus one of four fixed suffixes."""
+        """A plan is the configured address plus one of four fixed suffixes.
+
+        The one exception is the Anthropic Models API, whose plan is a GET for
+        the named model's description and nothing else.
+        """
         for provider, endpoint, model in self.MATRIX:
+            if provider == "anthropic":
+                (ask,) = cw.probe_plan(provider, endpoint, model)
+                assert ask.method == "GET"
+                assert ask.url == f"{cw.ANTHROPIC_API_ROOT}{cw.ANTHROPIC_MODEL_PATH}{model}"
+                continue
             for ask in cw.probe_plan(provider, endpoint, model):
                 assert ask.url.endswith(cw.PROBE_PATHS), (provider, endpoint, ask.url)
                 suffix = next(p for p in cw.PROBE_PATHS if ask.url.endswith(p))
@@ -203,6 +226,22 @@ class TestTheProbeCanReachNothingThatGenerates:
     def test_no_planned_path_is_one_a_model_answers_on(self) -> None:
         for path in cw.PROBE_PATHS:
             assert not any(word in path.lower() for word in FORBIDDEN), path
+
+    def test_the_anthropic_probe_asks_only_with_a_key_and_only_for_the_model(self) -> None:
+        keyless = _sent_by(
+            lambda: cw.probe_window("anthropic", endpoint="the Anthropic API", model=MODEL_5_5)
+        )
+        assert keyless == []
+        sent = _sent_by(
+            lambda: cw.probe_window(
+                "anthropic", endpoint="the Anthropic API", model=MODEL_5_5, api_key="k"
+            )
+        )
+        assert [str(r.url) for r in sent] == [f"https://api.anthropic.com/v1/models/{MODEL_5_5}"]
+        assert sent[0].headers["x-api-key"] == "k"
+        assert sent[0].headers["anthropic-version"] == cw.ANTHROPIC_VERSION
+        assert "authorization" not in sent[0].headers
+        _nothing_but_metadata(sent, "anthropic")
 
     def test_the_real_probe_sends_nothing_but_metadata_requests(self) -> None:
         """The whole of what ``probe_window`` puts on a wire, recorded.
