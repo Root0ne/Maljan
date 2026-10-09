@@ -573,9 +573,52 @@ class TestTheEarlierBlocksAreCounted:
         assert counted[0] == 0 and 0 < counted[1] < counted[2]
         # Each step adds the one block the request before it carried.
         assert counted[2] - counted[1] > 100
-        # After the loop every copy is an earlier one, and the spend measure counts them.
-        after = agent._replayed_run_state_chars()
-        assert after > counted[2]
+
+    def test_the_nudge_counts_every_copy_and_a_later_revision_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The loop's follow-up continues its conversation; a revision starts a fresh one."""
+        from maljan.agents import base_agent
+
+        def answer(body: dict[str, Any]) -> dict[str, Any]:
+            done = _results(body)
+            if _calls_allowed(body) and done < 2:
+                call = {"type": "tool_use", "id": f"toolu_{done}", "name": "lookup", "input": {}}
+                return message([_thinking(done), call], stop="tool_use", usage=USAGE)
+            said = REPORT if (body.get("tool_choice") or {}).get("type") == "none" else "prose"
+            return message(
+                [_thinking(50 + len(body["messages"])), {"type": "text", "text": said}],
+                stop="end_turn",
+                usage=USAGE,
+            )
+
+        wire = Wire(answer)
+        install(monkeypatch, wire)
+        monkeypatch.setattr(base_agent, "loop_limits", lambda *_a, **_k: (None, 20))
+        agent = _Analyst(llm=_model(), name="static")
+        agent.run_state_block = "sample: c"
+        agent.tools = [_lookup()]
+        admitted: list[tuple[str, int]] = []
+
+        def _admits(kind: str, _messages: list[Any], **_kwargs: Any) -> None:
+            admitted.append((kind, agent._replayed_run_state_chars()))
+
+        monkeypatch.setattr(agent, "_spend_admits", _admits)
+        agent.execute_tool_loop([("system", "You are a static analyst."), ("human", "Analyse.")])
+        assert wire.refused == []
+        turns = [chars for kind, chars in admitted if kind == "loop turn"]
+        nudges = [chars for kind, chars in admitted if kind == "final-answer nudge"]
+        assert turns[0] == 0 and 0 < turns[1] < turns[-1]
+        # The nudge sends every block the loop's turns carried again.
+        assert nudges and nudges[0] > turns[-1]
+
+        # A revision afterwards is a conversation of its own: nothing earlier is sent.
+        assert agent._replayed_run_state_chars() == 0
+        sent_before = len(wire.bodies)
+        agent.ask_the_model([HumanMessage(content="Revise your answer.")], what="revision")
+        assert len(wire.bodies) == sent_before + 1
+        assert RUN_STATE_BEGIN not in json.dumps(wire.bodies[-1]["messages"], ensure_ascii=False)
+        assert admitted[-1] == ("revision", 0)
 
         seen: dict[str, Any] = {}
 
@@ -583,9 +626,25 @@ class TestTheEarlierBlocksAreCounted:
             def admit(self, **kwargs: Any) -> None:
                 seen.update(kwargs)
 
+        monkeypatch.setattr(agent, "_spend_admits", BaseAnalyst._spend_admits.__get__(agent))
         monkeypatch.setattr(agent, "_spend_meter", lambda: _Meter())
-        agent._spend_admits("final-answer nudge", [HumanMessage(content="x")])
-        assert seen["prompt_chars"] == 1 + agent._definitions_sent() + after
+        agent._spend_admits("revision", [HumanMessage(content="x")])
+        assert seen["prompt_chars"] == 1 + agent._definitions_sent()
+
+    def test_a_loop_that_raises_leaves_no_copies_behind(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        agent = _Analyst(llm=_model(), name="static")
+        agent._replayed_blocks = {3: 400}
+        agent._replay_upto = None
+
+        def _fails(_prompt: list[Any]) -> str:
+            raise TimeoutError("the loop's clock ran out")
+
+        monkeypatch.setattr(agent, "_run_tool_loop", _fails)
+        with pytest.raises(TimeoutError):
+            agent.execute_tool_loop([("human", "Analyse.")])
+        assert agent._replayed_run_state_chars() == 0
 
     def test_a_provider_that_sends_one_block_counts_none(
         self, monkeypatch: pytest.MonkeyPatch

@@ -160,3 +160,27 @@ class TestTheBudgetIsMeasuredAsTheServerSeesIt:
             )
         kept = _trim_for_synthesis(msgs, 16_000)
         assert len(kept) < len(msgs), "a transcript of empty-content messages was left whole"
+
+
+class TestTheEarlierRunStateCopiesShareTheWindow:
+    """A prefix-bound provider sends the kept turns' run-state blocks beside the messages."""
+
+    def _sent_chars(self, replayed: int) -> int:
+        from maljan.agents.base_agent import _message_chars
+
+        a = _Analyst()
+        a._replayed_run_state_chars = lambda: replayed  # type: ignore[method-assign]
+        a._force_final_synthesis(_conversation(19, 6000), timeout=1500, elapsed=109.5)
+        return sum(_message_chars(m) for m in a.seen_messages)
+
+    def test_the_trim_leaves_room_for_them(self) -> None:
+        from maljan.agents.base_agent import _SYNTHESIS_DIRECTIVE, synthesis_budget_chars
+        from maljan.core.config import get_settings
+
+        window = synthesis_budget_chars(get_settings(), "static", 0)
+        replayed = window // 2
+        without = self._sent_chars(0)
+        with_copies = self._sent_chars(replayed)
+        assert with_copies < without
+        # The directive is appended after the trim; everything else fits beside the copies.
+        assert with_copies + replayed <= window + len(_SYNTHESIS_DIRECTIVE) + 100

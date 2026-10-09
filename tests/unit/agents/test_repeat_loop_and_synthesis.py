@@ -210,7 +210,7 @@ class TestTheGuardEndsTheLoop:
 
         from maljan.agents import base_agent
 
-        source = inspect.getsource(base_agent.BaseAnalyst.execute_tool_loop)
+        source = inspect.getsource(base_agent.BaseAnalyst._run_tool_loop)
 
         assert "if repeats.ending_the_loop():" in source
         assert "ended_early = repeats.ending_the_loop()" in source

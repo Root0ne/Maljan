@@ -4359,6 +4359,20 @@ class BaseAnalyst(BudgetMeter, ABC):
         return refresh
 
     def execute_tool_loop(self, prompt_messages: list) -> str:
+        """Run the tool loop (``_run_tool_loop``) and let go of its run-state copies.
+
+        The loop's turns, its nudge and its salvage continue one conversation
+        and send the earlier run-state blocks again; a call this analyst makes
+        afterwards (a debate revision, a validation retry) starts a fresh one
+        and sends none, so it is not measured with them, however the loop ended.
+        """
+        try:
+            return self._run_tool_loop(prompt_messages)
+        finally:
+            self._replayed_blocks = {}
+            self._replay_upto = None
+
+    def _run_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
 
         The loop runs against ``pinned_tools()``; ``self.tools`` keeps the
@@ -5956,8 +5970,14 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             return ""
 
-        window_budget = synthesis_budget_chars(
-            get_settings(), self.name, counted_window_tokens(self._context_budget())
+        # The earlier run-state blocks go out with the kept turns, outside the
+        # messages the trim measures, so the window holds them first.
+        window_budget = max(
+            0,
+            synthesis_budget_chars(
+                get_settings(), self.name, counted_window_tokens(self._context_budget())
+            )
+            - self._replayed_run_state_chars(),
         )
         # What the time left can hold at this model's measured pace, when both
         # of its rates are known; the window's bound applies either way.
