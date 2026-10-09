@@ -289,7 +289,14 @@ class MarkdownRenderer:
                 f"  \n_Unresolved on the verdict: `{row['code']}`: {_one_line(_finding_text(row))}_"
             )
 
-        if report.overall_confidence is None:
+        if report.verdict_not_assessed:
+            # No judge ran: there is no verdict to carry a confidence, and the
+            # banner says what happened instead of naming a judge.
+            lines.append(
+                "\n> **[NO VERDICT]** No verdict and no confidence were assessed: "
+                f"{_one_line(report.verdict_not_assessed)}, so no judge ran."
+            )
+        elif report.overall_confidence is None:
             lines.append(
                 "\n> **[NO CONFIDENCE ASSESSED]** This verdict carries no "
                 "confidence: the judge assessed none, or never answered at all. "
@@ -2092,12 +2099,23 @@ class MarkdownRenderer:
     def _appendix_method(self, report: MalwareReport, ctx: _Context) -> str:
         summary = report.run_summary or {}
         lines = [_appendix_heading("D", "Methodology", REFERENCE), ""]
-        lines.append(
-            "This report was produced by an automated team of language-model analysts "
-            "working over tool servers. The analysts' claims were negotiated, a judge "
-            "stated the verdict and the STIX bundle, and a report model wrote the "
-            "assessed prose. Every tool call is in Appendix A. " + CUT_CELL_SENTENCE
-        )
+        if report.verdict_not_assessed:
+            # Said as it happened: the run stopped before its verdict stage, so
+            # no judge stated a verdict or a bundle and no report model wrote.
+            lines.append(
+                "This report was produced by an automated team of language-model analysts "
+                "working over tool servers, and is partial: "
+                f"{_one_line(report.verdict_not_assessed)}, so no judge stated a verdict "
+                "or a STIX bundle. What the run had produced when it stopped is shown. "
+                "Every tool call is in Appendix A. " + CUT_CELL_SENTENCE
+            )
+        else:
+            lines.append(
+                "This report was produced by an automated team of language-model analysts "
+                "working over tool servers. The analysts' claims were negotiated, a judge "
+                "stated the verdict and the STIX bundle, and a report model wrote the "
+                "assessed prose. Every tool call is in Appendix A. " + CUT_CELL_SENTENCE
+            )
         lines.append("")
         profile = summary.get("profile") or {}
         analysts = ", ".join(profile.get("analysts") or [])

@@ -97,6 +97,15 @@ class TestThePartialReport:
         assert "**Verdict:** not assessed (the run was stopped" in markdown
         assert "Assessed by the judge" not in markdown
         assert "Suspicious" not in markdown
+        # Every sentence about the verdict states that no judge ran.
+        assert (
+            "**[NO VERDICT]** No verdict and no confidence were assessed: the run was stopped "
+            "before its verdict stage ran, so no judge ran."
+        ) in markdown
+        assert "NO CONFIDENCE ASSESSED" not in markdown
+        assert "a judge stated the verdict" not in markdown
+        assert "so no judge stated a verdict or a STIX bundle" in markdown
+        assert "the judge assessed none" not in markdown
 
     def test_with_a_judge_the_verdict_is_the_judge_s(self, container: ServiceContainer) -> None:
         dump = partial_report(_state(final_decision="Malware"), container, note=NOTE)
@@ -127,7 +136,10 @@ class TestThePartialReport:
         assert "claims_not_discussed" in kept["run_summary"]
         assert "claims_not_discussed" not in (in_progress.run_summary or {})
         markdown = MarkdownRenderer().render(MalwareReport.model_validate(kept))
-        assert "the extended STIX export (the stored bundle is the judge's own)" in markdown
+        assert (
+            "the extended STIX export (the stored bundle is the judge's own when the judge "
+            "ran, and there is none when it did not)"
+        ) in markdown
 
     def test_a_report_stopped_inside_the_narrative_says_the_run_stopped(
         self, container: ServiceContainer

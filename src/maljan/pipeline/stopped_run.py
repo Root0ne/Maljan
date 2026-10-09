@@ -329,7 +329,8 @@ def _deterministic_report(state: dict[str, Any], container: Any) -> dict[str, An
 # built on the kept report (``_close_kept_report``); the steps named here
 # depend on the export, which the stopped run did not store.
 _CLOSING_STEPS_NOT_RUN = (
-    "the extended STIX export (the stored bundle is the judge's own), the IOC table's "
+    "the extended STIX export (the stored bundle is the judge's own when the judge ran, "
+    "and there is none when it did not), the IOC table's "
     "publish states read after it, the detection rules, the FP linter, the published "
     "marks on the corroboration record and the exported bundle's size; the claim-coverage "
     "section and the figures were built on the report as kept"
