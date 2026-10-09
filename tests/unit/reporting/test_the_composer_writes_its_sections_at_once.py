@@ -410,6 +410,61 @@ def test_a_cancelled_job_leaves_no_section_running() -> None:
     assert asyncio.run(_run()) == []
 
 
+class TestAStoppedComposeKeepsWhatItWrote:
+    """A run stopped inside the composer keeps the sections already written in ``report``.
+
+    The stopped run's partial report is read from the report being built
+    (``pipeline.stopped_run.partial_report``), so every section that answered
+    before the stop is applied to it, in the fixed order, and only the ones
+    still running are lost.
+    """
+
+    _FAST = frozenset({"introduction", "commands", "communications"})
+
+    class _Mixed(_Recorder):
+        def __init__(self, fast: frozenset[str]) -> None:
+            super().__init__()
+            self.fast = fast
+
+        async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
+            self.delay = 0.0 if _section_of(messages) in self.fast else 5.0
+            return await super().ainvoke(messages, **kwargs)
+
+    def _stopped(self, concurrent: bool, fast: frozenset[str]) -> MalwareReport:
+        report = _report()
+
+        async def _run() -> None:
+            composer = ReportComposer(llm=self._Mixed(fast), per_section_timeout=30)
+            with patch(
+                "maljan.reporting.composer.structured_output_supported_for_llm",
+                return_value=False,
+            ):
+                job = asyncio.create_task(composer.compose(report, _isr(), concurrent=concurrent))
+                await asyncio.sleep(0.3)
+                job.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await job
+
+        asyncio.run(_run())
+        return report
+
+    def test_sections_at_once_keep_every_section_that_answered_before_the_stop(self) -> None:
+        report = self._stopped(True, self._FAST)
+        assert report.intro_background == _ANSWERS["introduction"]["text"]
+        assert report.technical_analysis is not None
+        assert [c.name for c in report.technical_analysis.commands] == ["dispatch"]
+        assert report.technical_analysis.execution_flow == []
+        assert [c.name for c in report.c2_channels] == ["Update"]
+
+    def test_sections_one_after_another_keep_the_ones_written_before_the_stop(self) -> None:
+        fast = frozenset({"introduction", "execution_flow"})
+        report = self._stopped(False, fast)
+        assert report.intro_background
+        assert report.technical_analysis is not None
+        assert report.technical_analysis.execution_flow
+        assert report.technical_analysis.commands == []
+
+
 def test_a_job_cancelled_inside_one_section_ends_every_other_before_compose_returns() -> None:
     from maljan.core.cancellation import JobCancelled
 
@@ -437,10 +492,12 @@ def test_a_job_cancelled_inside_one_section_ends_every_other_before_compose_retu
 
 
 class TestAgainstTheSequentialBase:
-    """The sections written at once send and write what d92a76fc did one after another.
+    """The sections written at once send and write what cb04d3ad did one after another.
 
     ``tests/fixtures/composer_requests_before_concurrency.json`` was captured
-    from that commit's tree by ``scripts/goldens/capture_composer_requests.py``,
+    from that commit's tree by ``scripts/goldens/capture_composer_requests.py``
+    (its request bodies, Markdown and HTML are those of d92a76fc too; only the
+    report's JSON took the stopped-run fields added between them),
     with a shared head (pack facts and run state) on every request.
     """
 

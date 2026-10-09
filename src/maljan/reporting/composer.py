@@ -863,6 +863,9 @@ class ReportComposer:
         # their names, set per ``compose`` call (:meth:`_head_groups`).
         self._head_groups_found: dict[int, str] = {}
         self._noted_sections: set[str] = set()
+        # The sections written at once that answered before a stop, by plan
+        # index, set by :meth:`_author_at_once` when the round is stopped.
+        self._written_before_stop: dict[int, tuple[BaseModel | None, _SectionRecord]] = {}
 
     async def compose(
         self,
@@ -1101,19 +1104,35 @@ class ReportComposer:
         if at_once is not None and at_once <= 1:
             concurrent = False
         authored = 0
-        if concurrent:
-            # Applied in the fixed order, each section's record first, whatever
-            # order the answers came back in.
-            written = await self._author_at_once(plan, report, isr_reports, at_once=at_once)
-            for planned, (answer, record) in zip(plan, written, strict=True):
-                self._settle(record)
-                authored += planned.apply(answer)
-        else:
-            for planned in plan:
-                authored += planned.apply(await self._author_one(planned, report, isr_reports))
-
-        if _has_content(ta):
-            report.technical_analysis = ta
+        try:
+            if concurrent:
+                # Applied in the fixed order, each section's record first,
+                # whatever order the answers came back in.
+                self._written_before_stop = {}
+                try:
+                    written = await self._author_at_once(plan, report, isr_reports, at_once=at_once)
+                except BaseException:
+                    # A run stopped here (the job timeout, a cancel, a worker
+                    # shutdown) keeps every section that answered before the
+                    # stop, in the fixed order: its partial report is read
+                    # from ``report`` (``pipeline.stopped_run``).
+                    for index, planned in enumerate(plan):
+                        done = self._written_before_stop.get(index)
+                        if done is not None:
+                            self._settle(done[1])
+                            planned.apply(done[0])
+                    raise
+                for planned, (answer, record) in zip(plan, written, strict=True):
+                    self._settle(record)
+                    authored += planned.apply(answer)
+            else:
+                for planned in plan:
+                    authored += planned.apply(await self._author_one(planned, report, isr_reports))
+        finally:
+            # On the report whatever ended the round, so a stopped run's
+            # partial report carries the subsections already written.
+            if _has_content(ta):
+                report.technical_analysis = ta
         logger.info("ReportComposer: authored %d professional section(s).", authored)
 
     async def _author_one(
@@ -1234,6 +1253,12 @@ class ReportComposer:
             )
             return list(await asyncio.gather(*(tasks[index] for index in range(len(plan)))))
         except BaseException:
+            # What answered before the stop, kept for ``compose`` to apply.
+            self._written_before_stop = {
+                index: task.result()
+                for index, task in tasks.items()
+                if task.done() and not task.cancelled() and task.exception() is None
+            }
             # Every section ends before the job's own exception leaves:
             # cancelled, then awaited, so none is left running on the loop.
             for task in tasks.values():
