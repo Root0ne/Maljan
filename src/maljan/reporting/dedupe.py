@@ -288,9 +288,48 @@ def distinct_processes(nodes: list[Any]) -> list[Any]:
 
     A repeated process keeps the first row's place; what the repeat adds is a
     set (its children, the pids it injected into), and that is unioned, so no
-    child and no injection one reading recorded is lost. The rows are copies:
-    the report's own tree is left as it was stored.
+    child and no injection one reading recorded is lost. A root that is also a
+    child in another root's tree (a reading that lacked its parent) is that
+    child, and joins it there. The rows are copies: the report's own tree is
+    left as it was stored.
     """
+    roots = _distinct_level(nodes)
+    while True:
+        for index, root in enumerate(roots):
+            key = process_identity(root)
+            others = [other for other in roots if other is not root]
+            below = next(
+                (
+                    node
+                    for other in others
+                    for node in _descendants(other)
+                    if process_identity(node) == key
+                ),
+                None,
+            )
+            if below is None:
+                continue
+            below.children = _distinct_level([*below.children, *root.children])
+            below.injected_into.extend(
+                pid for pid in root.injected_into if pid not in below.injected_into
+            )
+            del roots[index]
+            break
+        else:
+            return roots
+
+
+def _descendants(node: Any) -> list[Any]:
+    """Every process below ``node``, depth first."""
+    out: list[Any] = []
+    for child in node.children:
+        out.append(child)
+        out.extend(_descendants(child))
+    return out
+
+
+def _distinct_level(nodes: list[Any]) -> list[Any]:
+    """``nodes`` with each identity once at this level, every level below likewise."""
     kept: dict[tuple[int, int, str, str], Any] = {}
     children: dict[tuple[int, int, str, str], list[Any]] = {}
     for node in nodes:
@@ -307,7 +346,7 @@ def distinct_processes(nodes: list[Any]) -> list[Any]:
             pid for pid in node.injected_into if pid not in first.injected_into
         )
     for key, node in kept.items():
-        node.children = distinct_processes(children[key])
+        node.children = _distinct_level(children[key])
     return list(kept.values())
 
 

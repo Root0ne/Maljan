@@ -142,6 +142,39 @@ class TestAStoredReport:
         assert len(report.dynamic.process_tree) == 4
         assert report.dynamic.process_tree[0].children == []
 
+    def test_a_root_one_reading_held_and_a_child_another_held_is_one_process(self) -> None:
+        """A reading that lacked the parent made the child a root of its own."""
+        child = ProcessNode(
+            pid=411,
+            ppid=410,
+            name="C:\\example\\child.exe",
+            command_line="child.exe",
+            injected_into=[520],
+            children=[ProcessNode(pid=412, ppid=411, name="C:\\example\\grand.exe")],
+        )
+        parent = ProcessNode(
+            pid=410,
+            ppid=12,
+            name="C:\\example\\host.exe",
+            command_line="host.exe a",
+            children=[child.model_copy(update={"children": [], "injected_into": []})],
+        )
+        for stored in ([parent, child], [child, parent]):
+            roots = distinct_processes(stored)
+            assert _tree_lines(roots) == [(410, 12), (411, 410), (412, 411)], stored
+            assert roots[0].children[0].injected_into == [520]
+        report = rich_report()
+        assert report.dynamic is not None
+        report.dynamic.process_tree = [parent, child]
+        markdown = MarkdownRenderer().render(report)
+        tree = markdown.split("### Process tree", 1)[1].split("```", 2)[1]
+        pids = [
+            line.split("pid=", 1)[1].split(" ", 1)[0]
+            for line in tree.splitlines()
+            if "pid=" in line
+        ]
+        assert pids == ["410", "411", "412"]
+
     def test_the_export_carries_each_process_once(self) -> None:
         bundle = ExtendedSTIXRenderer().render(_doubled_report())
         processes = [obj for obj in bundle.objects if getattr(obj, "type", "") == "process"]
