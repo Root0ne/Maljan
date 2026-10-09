@@ -298,12 +298,14 @@ class TestTheCachedHeadIsWrittenFirst:
 
 @pytest.mark.parametrize("concurrent", [False, True])
 def test_the_head_note_rides_on_the_section_request(concurrent: bool) -> None:
-    """The shared head's length is noted on the request, for the provider that caches it."""
+    """On a caching model's manual path every section shares the head, noted on its request."""
     from maljan.llm.anthropic_history import SHARED_HEAD
 
     seen: list[BaseMessage] = []
 
     class _Keeps(_Recorder):
+        _llm_type = "anthropic-chat"
+
         async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
             seen.append(messages[1])
             return await super().ainvoke(messages, **kwargs)
@@ -318,6 +320,22 @@ def test_the_head_note_rides_on_the_section_request(concurrent: bool) -> None:
         )
     heads = {str(m.content)[: m.response_metadata[SHARED_HEAD]] for m in seen}
     assert heads == {"FACTS\n\n"}
+
+
+def test_a_model_that_does_not_cache_is_sent_no_head_note() -> None:
+    from maljan.llm.anthropic_history import SHARED_HEAD
+
+    seen: list[BaseMessage] = []
+
+    class _Keeps(_Recorder):
+        async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
+            seen.append(messages[1])
+            return await super().ainvoke(messages, **kwargs)
+
+    composer = ReportComposer(llm=_Keeps(), per_section_timeout=30)
+    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False):
+        asyncio.run(composer.compose(_report(), _isr(), facts_block="FACTS", concurrent=True))
+    assert seen and not any(SHARED_HEAD in m.response_metadata for m in seen)
 
 
 class _Priced(_Recorder):

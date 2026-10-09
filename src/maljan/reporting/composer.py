@@ -845,6 +845,10 @@ class ReportComposer:
         # each section's start may only extend it. ``None`` while they run one
         # after another, where each section starts the clock anew.
         self._fan_out_clock: float | None = None
+        # The sections whose requests share a cacheable head, by group, and
+        # their names, set per ``compose`` call (:meth:`_head_groups`).
+        self._head_groups_found: dict[int, str] = {}
+        self._noted_sections: set[str] = set()
 
     async def compose(
         self,
@@ -1065,6 +1069,10 @@ class ReportComposer:
             _Planned("communications", _C2Out, _INSTRUCTIONS["communications"], None, _c2),
         ]
 
+        # The sections whose requests share one cacheable head, noted on the
+        # request so the provider caches it once (``SHARED_HEAD``).
+        self._head_groups_found = self._head_groups(plan, report, isr_reports)
+        self._noted_sections = {plan[index].section for index in self._head_groups_found}
         if concurrent and spend_ceiling_set(getattr(self, "token_ledger", None)):
             # Under a spend ceiling the report calls run alone, as the meter
             # assumes (``SpendMeter.admit`` waits on its thread for calls in
@@ -1140,17 +1148,23 @@ class ReportComposer:
         :class:`_SectionRecord` until :meth:`compose` applies it in order.
 
         On a model whose provider makes a cached prefix readable only once an
-        answer to the request that wrote it has begun (Anthropic), the first
-        section with evidence is sent alone, and the rest are sent once its
-        answer has begun — its first streamed piece, or its end — so they read
-        the shared head it cached instead of each writing it again.
+        answer to the request that wrote it has begun (Anthropic), each group
+        of sections whose requests share their whole prefix up to the end of
+        the head (:meth:`_head_groups`) sends its first section alone, and the
+        rest of the group once that answer has begun — its first streamed
+        piece, or its end — so they read the head it cached instead of each
+        writing it again. A section in no group is sent at once.
         """
 
         async def _one(
-            planned: _Planned, begun: asyncio.Event | None = None
+            planned: _Planned,
+            begun: asyncio.Event | None = None,
+            after: asyncio.Event | None = None,
         ) -> tuple[BaseModel | None, _SectionRecord]:
             record = _SectionRecord()
             _SECTION_RECORD.set(record)
+            if after is not None:
+                await after.wait()
             async with slots if slots is not None else contextlib.nullcontext():
                 if begun is None:
                     return (
@@ -1168,27 +1182,33 @@ class ReportComposer:
         # is in, so its wait is measured only while the server serves it.
         slots = asyncio.Semaphore(at_once) if at_once is not None and at_once > 0 else None
 
-        lead = (
-            self._lead_section(plan, report, isr_reports)
-            if _caches_once_answered(self.llm)
-            else None
-        )
+        # Each group's lead, and the event its answer beginning sets.
+        groups: dict[int, str] = dict(getattr(self, "_head_groups_found", None) or {})
+        leads: dict[str, int] = {}
+        for index in sorted(groups):
+            leads.setdefault(groups[index], index)
+        begun_of = {key: asyncio.Event() for key in leads}
+        if leads:
+            _listen_for_the_first_piece(self.llm)
         tasks: dict[int, asyncio.Task[tuple[BaseModel | None, _SectionRecord]]] = {}
         self._fan_out_clock = time.monotonic()
         try:
-            if lead is not None:
-                _listen_for_the_first_piece(self.llm)
-                begun = asyncio.Event()
-                tasks[lead] = asyncio.create_task(_one(plan[lead], begun))
+            for key, index in leads.items():
                 logger.info(
-                    "ReportComposer: section '%s' is sent first; the others follow once its "
-                    "answer has begun, so they read the head it caches.",
-                    plan[lead].section,
+                    "ReportComposer: section '%s' is sent before the %d other(s) whose requests "
+                    "share its prefix; they follow once its answer has begun, so they read the "
+                    "head it caches.",
+                    plan[index].section,
+                    sum(1 for other in groups.values() if other == key) - 1,
                 )
-                await begun.wait()
             for index, planned in enumerate(plan):
-                if index not in tasks:
+                group = groups.get(index)
+                if group is None:
                     tasks[index] = asyncio.create_task(_one(planned))
+                elif leads[group] == index:
+                    tasks[index] = asyncio.create_task(_one(planned, begun=begun_of[group]))
+                else:
+                    tasks[index] = asyncio.create_task(_one(planned, after=begun_of[group]))
             logger.info(
                 "ReportComposer: %d section(s) are written at once%s.",
                 len(plan),
@@ -1202,18 +1222,39 @@ class ReportComposer:
         finally:
             self._fan_out_clock = None
 
-    @staticmethod
-    def _lead_section(
+    def _head_groups(
+        self,
         plan: Sequence[_Planned],
         report: MalwareReport,
         isr_reports: dict[str, Any] | None,
-    ) -> int | None:
-        """The first section with evidence to write from, or ``None``."""
+    ) -> dict[int, str]:
+        """The sections whose requests share one cacheable prefix, by group: ``{index: key}``.
+
+        Only on a model whose provider caches at a breakpoint
+        (:data:`_CACHES_ONCE_ANSWERED`), and only for sections with evidence.
+        A provider's prefix is its tools, then the system prompt, then the
+        messages: on the structured path each section sends its own schema as
+        a tool, so only sections answering with the same schema (the prose
+        subsections) share a prefix; on the manual path no section sends a
+        tool, and every section shares one. A group of one shares nothing
+        and is left out, so its request carries no breakpoint and pays no
+        cache write.
+        """
+        if not _caches_once_answered(self.llm):
+            return {}
+        structured = structured_output_supported_for_llm(self.llm) and not spend_ceiling_set(
+            getattr(self, "token_ledger", None)
+        )
+        members: dict[str, list[int]] = {}
         for index, planned in enumerate(plan):
             bundle = bundle_for(planned.section, report, report.technical_evidence, isr_reports)
-            if not is_empty(bundle):
-                return index
-        return None
+            if is_empty(bundle):
+                continue
+            key = planned.schema.__name__ if structured else ""
+            members.setdefault(key, []).append(index)
+        return {
+            index: key for key, indexes in members.items() if len(indexes) > 1 for index in indexes
+        }
 
     def _settle(self, record: _SectionRecord) -> None:
         """Apply what one section said, as it would have been said written on its own."""
@@ -1302,11 +1343,15 @@ class ReportComposer:
         human = "\n\n".join(
             [*head, instruction, contract, _bundle_text(section, bundle, entries, item_chars)]
         )
-        # How much of the text is the head every section repeats, noted on
-        # the request for a provider that caches a prefix only at a
-        # breakpoint (``anthropic_history.SHARED_HEAD``); no request body
-        # carries the note itself.
-        shared = len("\n\n".join(head)) + len("\n\n") if head else 0
+        # How much of the text is the head the other sections of its group
+        # repeat, noted on the request for a provider that caches a prefix
+        # only at a breakpoint (``anthropic_history.SHARED_HEAD``); no request
+        # body carries the note itself.
+        shared = (
+            len("\n\n".join(head)) + len("\n\n")
+            if head and section in (getattr(self, "_noted_sections", None) or ())
+            else 0
+        )
         messages = [
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=human, response_metadata={SHARED_HEAD: shared})

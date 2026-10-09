@@ -1,11 +1,16 @@
-"""On Claude, the head every composer section repeats is one cached prefix.
+"""On Claude, the head the composer's sections repeat is cached once per shared prefix.
 
-Each section's first user turn goes out as two text blocks: the shared head
-with a cache breakpoint, then the rest. Joined, the two are the turn's text
-character for character, so the model reads what it read before. The first
-section with evidence is sent alone, and the others follow once its answer
-has begun: Anthropic makes a cached prefix readable only from then on
-(https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+Anthropic's prefix is the tools, then the system prompt, then the messages.
+On the manual path no section sends a tool, so every section shares one
+prefix up to the end of its head; on the structured path each section sends
+its own schema as a tool, so only the sections answering with one schema (the
+seven prose subsections) share one. A section of such a group sends its first
+user turn as two text blocks — the head with a cache breakpoint, then the
+rest, joined the turn's text character for character — and the group's first
+section is sent alone, the others once its answer has begun: Anthropic makes
+a cached prefix readable only from then on
+(https://platform.claude.com/docs/en/build-with-claude/prompt-caching). A
+section that shares its prefix with no other is sent as it was, at once.
 """
 
 from __future__ import annotations
@@ -49,9 +54,12 @@ def _section(body: dict[str, Any]) -> str:
 
 
 def _reply(body: dict[str, Any]) -> dict[str, Any]:
-    said = json.dumps(_answer(_section(body))) if _LEAD in _text_of(body) else "{}"
-    text = {"type": "text", "text": said}
-    return message([text], stop="end_turn", usage=USAGE)
+    answer = _answer(_section(body)) if _LEAD in _text_of(body) else {}
+    if body.get("tools"):
+        name = body["tools"][0]["name"]
+        call = {"type": "tool_use", "id": "toolu_1", "name": name, "input": answer}
+        return message([call], stop="tool_use", usage=USAGE)
+    return message([{"type": "text", "text": json.dumps(answer)}], stop="end_turn", usage=USAGE)
 
 
 @pytest.fixture
@@ -75,6 +83,57 @@ def _compose(model: Any) -> None:
         asyncio.run(composer.compose(_report(), _isr(), facts_block=FACTS, concurrent=True))
 
 
+def _prefix(body: dict[str, Any]) -> str:
+    """The body's tools, system and cached head block, or ``""`` where no head is marked."""
+    content = body["messages"][0]["content"]
+    if isinstance(content, str) or "cache_control" not in content[0]:
+        return ""
+    return json.dumps([body.get("tools"), body.get("system"), content[0]], sort_keys=True)
+
+
+PROSE = (
+    "packing_obfuscation",
+    "string_resolution",
+    "discovery",
+    "persistence_detail",
+    "evasion_antiforensics",
+    "command_and_control",
+    "payloads",
+)
+
+
+class TestOnTheStructuredPath:
+    """Each section sends its schema as a tool: only the prose subsections share a prefix."""
+
+    def _bodies(self, wire: Wire) -> list[dict[str, Any]]:
+        # What an ``anthropic`` provider's settings answer (``registry``).
+        composer = ReportComposer(llm=_model(), per_section_timeout=60)
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=True
+        ):
+            asyncio.run(composer.compose(_report(), _isr(), facts_block=FACTS, concurrent=True))
+        # A section whose structured answer does not parse is asked again by
+        # the manual path, with no tool; those requests are not the ones here.
+        return [b for b in wire.bodies if len(b["messages"]) == 1 and b.get("tools")]
+
+    def test_the_prose_sections_share_one_cached_prefix_and_no_other_is_marked(
+        self, wire: Wire
+    ) -> None:
+        firsts = self._bodies(wire)
+        by_section = {_section(b): b for b in firsts}
+        assert set(by_section) == set(COMPOSED_SECTIONS)
+        prose = {_prefix(by_section[name]) for name in PROSE}
+        assert len(prose) == 1 and "" not in prose, "one byte-identical prefix"
+        for name in set(COMPOSED_SECTIONS) - set(PROSE):
+            assert isinstance(by_section[name]["messages"][0]["content"], str), name
+
+    def test_only_the_prose_group_waits_for_its_lead(self, wire: Wire) -> None:
+        order = [_section(b) for b in self._bodies(wire)]
+        first_prose = min(order.index(name) for name in PROSE)
+        assert order[first_prose] == "packing_obfuscation"
+        assert order.index("introduction") < order.index("string_resolution")
+
+
 class TestTheHeadIsCachedOnce:
     def test_every_section_sends_the_head_as_one_cached_block(self, wire: Wire) -> None:
         _compose(_model())
@@ -89,7 +148,9 @@ class TestTheHeadIsCachedOnce:
         assert heads == {FACTS + "\n\n"}, "one prefix, the same on every section"
         assert len({json.dumps(b.get("system"), sort_keys=True) for b in wire.bodies}) == 1
 
-    def test_the_lead_section_is_sent_before_the_others(self, wire: Wire) -> None:
+    def test_on_the_manual_path_the_lead_section_is_sent_before_the_others(
+        self, wire: Wire
+    ) -> None:
         _compose(_model())
         assert _section(wire.bodies[0]) == "introduction"
         assert [_section(b) for b in wire.bodies[1:]].count("introduction") <= 1

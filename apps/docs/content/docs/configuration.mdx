@@ -1861,23 +1861,30 @@ and its flagged sentences are applied in the sections' fixed order, so the
 report reads exactly as one written section by section. A section's wait is
 sized from the pace measured when it starts and, while sections run at once,
 sized again from the pace measured since before it ends, never shorter. On
-Claude, the first section with evidence is sent alone and the rest follow once
-its answer has begun, because Anthropic makes the cached shared head readable
-only from then on (see *The composer's shared head is one cached prefix*
-below). The report node logs which way it ran and why (`report_node: the
+Claude, within each group of sections whose requests share one prefix, the
+first is sent alone and the rest of the group follow once its answer has
+begun, because Anthropic makes a cached prefix readable only from then on
+(see *The composer's shared head is cached once per shared prefix* below);
+every other section is sent at once. The report node logs which way it ran and why (`report_node: the
 composer's sections run at once: …`). The narrative round still runs before
 the sections: its answer sizes their waits where the reporter's pace was not
 measured earlier in the job.
 
-### The composer's shared head is one cached prefix
+### The composer's shared head is cached once per shared prefix
 
 Every composer section's prompt opens with the same head: the run-state
-block, the triage pack and the techniques the report publishes. On the
-`anthropic` provider that head is sent as its own text block with a cache
-breakpoint (`llm.anthropic.prompt_cache_ttl`), and the rest of the section's
-prompt as a second block; joined, the two are the prompt's text character for
-character. Every section after the first reads the cached prefix instead of
-writing it again. On DeepSeek and other OpenAI-compatible endpoints prefix
+block, the triage pack and the techniques the report publishes. Anthropic
+caches a prefix in the order tools, system prompt, messages, so only requests
+identical up to the end of the head can share a cache entry. On the
+structured path, the default on the `anthropic` provider, each section sends
+its own answer schema as a tool: only the seven prose subsections, which
+answer with one schema, share a prefix. On the manual path (no tool) every
+section shares one. For each such group, the head is sent as its own text
+block with a cache breakpoint (`llm.anthropic.prompt_cache_ttl`) and the rest
+of the prompt as a second block; joined, the two are the prompt's text
+character for character. The group's first section writes the entry and the
+others read it. A section that shares its prefix with no other is sent as
+before, with no breakpoint, and pays no cache write. On DeepSeek and other OpenAI-compatible endpoints prefix
 caching is automatic and the request is unchanged: the head is already the
 same leading text on every section.
 
