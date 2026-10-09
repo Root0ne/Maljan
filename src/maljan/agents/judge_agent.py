@@ -419,9 +419,8 @@ VERDICT_TIMEOUT_REASON = "the judge did not answer within its budget"
 
 
 def _answer_text(answer: Any) -> str:
-    """The text of a model answer, whatever shape it arrived in."""
-    content = getattr(answer, "content", answer)
-    return str(content if content is not None else "")
+    """The text of a model answer, whatever shape it arrived in, thinking aside."""
+    return answer_text(getattr(answer, "content", answer))
 
 
 def _is_not_json(answer: Any) -> bool:
@@ -1734,7 +1733,7 @@ class JudgeAgent(BudgetMeter):
                 if marker in already:
                     continue
                 already.add(marker)
-                text = str(getattr(message, "content", "") or "").strip()
+                text = _answer_text(message).strip()
                 if not text or not text.rstrip().endswith("?"):
                     continue
                 emit_judge_question(
@@ -2295,7 +2294,7 @@ class JudgeAgent(BudgetMeter):
             return ""
         finally:
             self._spend_release(salvage_slot)
-        return str(getattr(response, "content", "") or "")
+        return _answer_text(response)
 
     def drain_evidence_entries(self) -> list[LedgerEntry]:
         """Every entry the judge's tool loops gathered, handing over ownership."""
@@ -2737,7 +2736,7 @@ class JudgeAgent(BudgetMeter):
             return reasoning_text
         finally:
             self._spend_release(slot)
-        answer = str(getattr(response, "content", "") or "").strip()
+        answer = _answer_text(response).strip()
         return f"{reasoning_text.rstrip()}\n\n{answer}" if answer else reasoning_text
 
     async def give_verdict(
@@ -3480,7 +3479,7 @@ class JudgeAgent(BudgetMeter):
         belong to the round rather than to this method, and because an answer
         that ends in the text fallback has nothing to record.
         """
-        raw = str(getattr(answer, "content", answer))
+        raw = _answer_text(answer)
 
         from maljan.utils.json_cleaner import safe_parse_json
 
