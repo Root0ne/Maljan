@@ -83,3 +83,29 @@ def test_a_provider_must_be_named(client: TestClient) -> None:
     with _with_overrides({}):
         r = client.get("/api/v1/settings/effort-options")
     assert r.status_code == 422
+
+
+def test_an_unauthenticated_request_is_refused() -> None:
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1")
+    app.dependency_overrides[get_db] = lambda: AsyncMock()
+    with TestClient(app) as bare:
+        r = bare.get(
+            "/api/v1/settings/effort-options", params={"provider": "anthropic", "model": "m"}
+        )
+    assert r.status_code in (401, 403)
+
+
+def test_a_user_who_is_not_an_admin_is_refused() -> None:
+    from app.deps import require_active_user
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1")
+    app.dependency_overrides[get_db] = lambda: AsyncMock()
+    app.dependency_overrides[require_active_user] = lambda: MagicMock(role="analyst")
+    with TestClient(app) as analyst:
+        r = analyst.get(
+            "/api/v1/settings/effort-options", params={"provider": "anthropic", "model": "m"}
+        )
+    assert r.status_code == 403
+    assert "Admin role required" in r.text
