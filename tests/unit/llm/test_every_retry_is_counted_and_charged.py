@@ -1,4 +1,4 @@
-"""Every retry is a row of the run summary.
+"""Every retry is a row of the run summary, and every failed attempt is charged as billed.
 
 A retry used to be written only on the answer that followed it, so the retries
 of a call that was then lost (the analyst the change exists to save), or handed
@@ -7,14 +7,24 @@ recorder to each model it builds; a retry is a row of the job's token ledger
 the moment it is decided. A model built outside a job keeps its retries on the
 answer, or on the error given up on, and the analyst records those when it
 loses the call.
+
+A failed attempt is charged to the spend ceiling as a provider bills it: a
+failure before any of the answer arrived generated nothing and costs nothing;
+a failure after pieces streamed costs the usage the error carries, or a stated
+estimate of the prompt and the pieces.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
+import threading
+from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from unittest.mock import MagicMock
 
+import anthropic
 import httpx
 import openai
 import pytest
@@ -25,16 +35,22 @@ from langchain_core.tools import StructuredTool
 
 from maljan.agents.base_agent import BaseAnalyst
 from maljan.analysis.run_summary import RunSummaryBuilder
+from maljan.core.config import Settings
 from maljan.core.exceptions import AnalystError
 from maljan.core.token_ledger import TokenLedger
 from maljan.llm.fallback import FallbackChatModel
+from maljan.llm.generation_rate import note_pieces
 from maljan.llm.transient import (
+    FAILED_ATTEMPT_CALL,
+    PIECES_ATTRIBUTE,
     RETRIES_KEY,
     attach_retry_recorder,
     retries_of,
     retry_on_connection_error,
     with_transient_retries,
 )
+
+from .anthropic_wire import message, streamed
 
 USAGE = {"input_tokens": 3, "output_tokens": 1, "total_tokens": 4}
 _REQUEST = httpx.Request("POST", "http://127.0.0.1:8080/v1")
@@ -45,6 +61,14 @@ def _status(status: int) -> Exception:
     return openai.APIStatusError(f"Error code: {status}", response=response, body=None)
 
 
+def _streamed_then_failed(pieces: int, body: Any = None) -> Exception:
+    failure = anthropic.APIStatusError(
+        "Error code: 200", response=httpx.Response(200, request=_REQUEST), body=body
+    )
+    note_pieces(failure, pieces)
+    return failure
+
+
 @pytest.fixture(autouse=True)
 def _no_real_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _instant(_seconds: float) -> None:
@@ -52,6 +76,19 @@ def _no_real_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(asyncio, "sleep", _instant)
     monkeypatch.setattr("maljan.llm.transient.time.sleep", lambda _s: None)
+
+
+class _Spend:
+    """A spend meter that keeps what it was asked to settle."""
+
+    def __init__(self) -> None:
+        self.settled: list[tuple[Any, str, str, Any]] = []
+
+    def settle(self, usage: Any, model: str, call: str = "", *, estimated: Any = None) -> None:
+        self.settled.append((usage, model, call, estimated))
+
+    def failed_attempts(self) -> list[tuple[Any, str, str, Any]]:
+        return [row for row in self.settled if row[2] == FAILED_ATTEMPT_CALL]
 
 
 class _Scripted(BaseChatModel):
@@ -205,3 +242,171 @@ class TestAPolicyAroundTheModelWritesThroughItsRecorder:
             await retry_on_connection_error(lambda: llm.ainvoke("hi"), what="Judge verdict")
 
         assert len(_rows(ledger)) == 2
+
+
+class TestAFailedAttemptIsChargedAsBilled:
+    @pytest.mark.asyncio
+    async def test_a_failure_before_any_piece_is_charged_nothing(self) -> None:
+        spend = _Spend()
+        ledger = TokenLedger(spend=spend)
+        llm = attach_retry_recorder(_model([_status(503), "fine"]), ledger, "static")
+
+        await llm.ainvoke("hi")
+
+        assert spend.failed_attempts() == []
+
+    @pytest.mark.asyncio
+    async def test_a_failure_after_pieces_is_charged_a_stated_estimate(self) -> None:
+        spend = _Spend()
+        ledger = TokenLedger(spend=spend)
+        llm = attach_retry_recorder(
+            _model([_streamed_then_failed(12, {"type": "error", "error": {"type": "api_error"}})]),
+            ledger,
+            "static",
+        )
+        llm.script.append("fine")
+
+        await llm.ainvoke("x" * 400)
+
+        ((usage, model, _call, estimated),) = spend.failed_attempts()
+        assert usage is None
+        assert model == "scripted"
+        assert estimated["output_tokens"] == 12
+        assert estimated["input_tokens"] > 0
+        assert "estimated" in estimated["source"]
+
+    @pytest.mark.asyncio
+    async def test_the_usage_an_error_carries_is_charged_as_reported(self) -> None:
+        spend = _Spend()
+        ledger = TokenLedger(spend=spend)
+        body = {
+            "type": "error",
+            "error": {"type": "overloaded_error"},
+            "usage": {"input_tokens": 50, "output_tokens": 7},
+        }
+        llm = attach_retry_recorder(
+            _model([_streamed_then_failed(3, body), "fine"]), ledger, "static"
+        )
+
+        await llm.ainvoke("hi")
+
+        ((usage, _model_name, _call, estimated),) = spend.failed_attempts()
+        assert usage == {"input_tokens": 50, "output_tokens": 7}
+        assert estimated is None
+
+    @pytest.mark.asyncio
+    async def test_the_last_attempt_of_a_lost_call_is_charged_too(self) -> None:
+        spend = _Spend()
+        ledger = TokenLedger(spend=spend)
+        failures = [_streamed_then_failed(5, {"error": {"type": "api_error"}}) for _ in range(3)]
+        llm = attach_retry_recorder(_model(failures), ledger, "static")
+
+        with pytest.raises(anthropic.APIStatusError):
+            await llm.ainvoke("hi")
+
+        assert len(spend.failed_attempts()) == 3
+
+
+# ---------------------------------------------------------------------------
+# On the wire: the pieces an Anthropic stream carried before its error event
+
+
+class _Scripts(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *args: Any) -> None:  # noqa: D102 — quiet
+        return
+
+    def do_POST(self) -> None:  # noqa: N802
+        length = int(self.headers.get("content-length") or 0)
+        if length:
+            self.rfile.read(length)
+        script: list[bytes] = self.server.script  # type: ignore[attr-defined]
+        data = script.pop(0)
+        self.send_response(200)
+        self.send_header("content-type", "text/event-stream")
+        self.send_header("content-length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+@pytest.fixture
+def server() -> Iterator[ThreadingHTTPServer]:
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Scripts)
+    httpd.daemon_threads = True
+    httpd.script = []  # type: ignore[attr-defined]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield httpd
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(10)
+
+
+def _event(kind: str, data: dict[str, Any]) -> str:
+    return f"event: {kind}\ndata: {json.dumps({'type': kind, **data})}\n\n"
+
+
+def _answer(text: str) -> dict[str, Any]:
+    return message(
+        [{"type": "text", "text": text}],
+        stop="end_turn",
+        usage={"input_tokens": 3, "output_tokens": 1},
+    )
+
+
+def _text_then_overloaded() -> bytes:
+    opening = {**_answer(""), "content": [], "stop_reason": None}
+    parts = [
+        _event("message_start", {"message": opening}),
+        _event("content_block_start", {"index": 0, "content_block": {"type": "text", "text": ""}}),
+    ]
+    for word in ("CLAIM:", " it", " reads", " the"):
+        parts.append(
+            _event(
+                "content_block_delta",
+                {"index": 0, "delta": {"type": "text_delta", "text": word}},
+            )
+        )
+    error = {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}
+    parts.append(f"event: error\ndata: {json.dumps(error)}\n\n")
+    return "".join(parts).encode()
+
+
+def test_an_anthropic_stream_cut_by_an_error_is_charged_its_pieces(
+    server: ThreadingHTTPServer,
+) -> None:
+    from maljan.llm.anthropic_provider import AnthropicProvider
+
+    server.script = [  # type: ignore[attr-defined]
+        _text_then_overloaded(),
+        streamed(_answer("answered")),
+    ]
+    host, port = server.server_address[:2]
+    settings = Settings(_env_file=None, llm={"anthropic": {"api_key": "test-value"}})
+    model = AnthropicProvider(settings).build_model(
+        "claude-haiku-5-5", 0.0, base_url=f"http://{host}:{port}", max_tokens=64, streaming=True
+    )
+    spend = _Spend()
+    ledger = TokenLedger(spend=spend)
+    attach_retry_recorder(model, ledger, "static")
+
+    answer = asyncio.run(model.ainvoke("hello"))
+
+    assert "answered" in str(answer.content)
+    assert len(_rows(ledger)) == 1
+    ((usage, _model_name, _call, estimated),) = spend.failed_attempts()
+    assert usage is None
+    assert estimated["output_tokens"] >= 2, "the text pieces that streamed before the error"
+
+
+def test_the_pieces_are_kept_on_the_error() -> None:
+    failure = RuntimeError("x")
+    note_pieces(failure, 4)
+    note_pieces(failure, 2)
+    assert getattr(failure, PIECES_ATTRIBUTE) == 4
+    untouched = RuntimeError("y")
+    note_pieces(untouched, 0)
+    assert not hasattr(untouched, PIECES_ATTRIBUTE)

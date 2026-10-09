@@ -36,6 +36,7 @@ reading rate is known and nothing is sized from one.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import queue
 import threading
 import time
@@ -1032,6 +1033,18 @@ def _ended_by_the_watch(result: Any) -> bool:
     )
 
 
+def note_pieces(exc: BaseException, pieces: int) -> None:
+    """Put on ``exc`` how many generated pieces its call streamed before it failed.
+
+    The spend ceiling charges a failed attempt by them (``llm.transient``): a
+    provider bills what it generated whether or not the answer completed.
+    """
+    if pieces <= 0:
+        return
+    with contextlib.suppress(Exception):
+        exc.maljan_pieces = max(int(getattr(exc, "maljan_pieces", 0) or 0), int(pieces))  # type: ignore[attr-defined]
+
+
 def _deadline_members(base: Any) -> dict[str, Any]:
     """The four ways a call is made, each held to its :class:`_CallDeadline`."""
     members: dict[str, Any] = {}
@@ -1082,7 +1095,8 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                                 raise deadline.silence_ended(loop.time(), exc) from exc
                             raise
                         break
-            except BaseException:
+            except BaseException as exc:
+                note_pieces(exc, deadline.progress.pieces)
                 if not task.done():
                     task.cancel()
                     await asyncio.wait({task})
@@ -1156,7 +1170,8 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                 # its pieces are the call's only measurement.
                 deadline.record_unfinished()
                 raise
-            except BaseException:
+            except BaseException as exc:
+                note_pieces(exc, deadline.progress.pieces)
                 deadline.record_unfinished()
                 raise
             finally:
@@ -1206,6 +1221,7 @@ def _deadline_members(base: Any) -> dict[str, Any]:
             if "error" in outcome:
                 deadline.record_unfinished()
                 error = outcome["error"]
+                note_pieces(error, deadline.progress.pieces)
                 if deadline.progress.pieces > 0 and _transport_read_timeout(error):
                     raise deadline.silence_ended(time.monotonic(), error) from error
                 raise error
@@ -1285,7 +1301,8 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                 # As on the async path: closed before its end.
                 deadline.record_unfinished()
                 raise
-            except BaseException:
+            except BaseException as exc:
+                note_pieces(exc, deadline.progress.pieces)
                 deadline.record_unfinished()
                 raise
             finally:

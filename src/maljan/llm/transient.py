@@ -383,8 +383,9 @@ class RetryRecorder(BaseCallbackHandler):
     Attached to a model's callbacks where the job builds it
     (:func:`attach_retry_recorder`), so every retry of that model is a row the
     moment it is decided — whether the call is then answered, handed to the
-    next model of a list, or lost. It takes no part in the call's own
-    callbacks.
+    next model of a list, or lost — and every failed attempt is charged to the
+    spend ceiling as the provider bills it. It takes no part in the call's
+    own callbacks.
     """
 
     ignore_llm = True
@@ -408,10 +409,74 @@ class RetryRecorder(BaseCallbackHandler):
             with contextlib.suppress(Exception):
                 add(agent=self.agent, model=self.model, reason=reason)
 
+    def charge_failed(self, exc: BaseException, prompt: Any) -> None:
+        """Charge one failed attempt to the spend ceiling as the provider bills it.
+
+        A failure before any piece of the answer arrived (a 5xx, a refused
+        connection) generated nothing and is charged nothing. A failure after
+        pieces streamed is charged the usage the error carries where it carries
+        one, and otherwise a stated estimate: the prompt at
+        ``CHARS_PER_TOKEN`` characters a token, priced as uncached input, and
+        the pieces that streamed as output.
+        """
+        spend = getattr(self.ledger, "spend", None)
+        settle = getattr(spend, "settle", None)
+        if not callable(settle):
+            return
+        with contextlib.suppress(Exception):
+            usage = _usage_carried(exc)
+            if usage is not None:
+                settle(usage, self.model, FAILED_ATTEMPT_CALL)
+                return
+            pieces = int(getattr(exc, PIECES_ATTRIBUTE, 0) or 0)
+            if pieces <= 0:
+                return
+            from maljan.llm.context_window import CHARS_PER_TOKEN
+
+            estimate = {
+                "input_tokens": -(-max(0, _prompt_chars(prompt)) // CHARS_PER_TOKEN),
+                "output_tokens": pieces,
+                "source": FAILED_ATTEMPT_ESTIMATE,
+            }
+            settle(None, self.model, FAILED_ATTEMPT_CALL, estimated=estimate)
+
+
+# What the spend meter names a failed attempt's charge, and how its estimate
+# is stated.
+FAILED_ATTEMPT_CALL = "failed attempt"
+FAILED_ATTEMPT_ESTIMATE = (
+    "estimated: the attempt failed after its answer began, before the provider reported usage"
+)
+
+# Set on an exception a model call raised after some of its answer streamed:
+# how many generated pieces arrived (``generation_rate``).
+PIECES_ATTRIBUTE = "maljan_pieces"
 
 # Set on an exception the policy gave up on, where no recorder took the rows:
 # the retries made before it, one line each, for whoever records the loss.
 RETRIES_ATTRIBUTE = "maljan_retries"
+
+
+def _usage_carried(exc: BaseException) -> dict[str, int] | None:
+    """The usage a provider put on its error, where it put one."""
+    body = getattr(exc, "body", None)
+    for layer in (body, body.get("error") if isinstance(body, dict) else None):
+        usage = layer.get("usage") if isinstance(layer, dict) else None
+        if isinstance(usage, dict) and ("input_tokens" in usage or "output_tokens" in usage):
+            return {
+                "input_tokens": max(0, int(usage.get("input_tokens") or 0)),
+                "output_tokens": max(0, int(usage.get("output_tokens") or 0)),
+            }
+    return None
+
+
+def _prompt_chars(prompt: Any) -> int:
+    from maljan.llm.generation_rate import _content_chars
+
+    to_messages = getattr(prompt, "to_messages", None)
+    if callable(to_messages):
+        prompt = to_messages()
+    return _content_chars(prompt)
 
 
 def recorder_of(model: Any) -> RetryRecorder | None:
@@ -599,10 +664,11 @@ def _what(model: Any) -> str:
 
 
 def _failed_once(model: Any, exc: BaseException, prompt: Any) -> None:
-    """One failed request of ``model``, named to a policy around it."""
+    """One failed request of ``model``: charged as billed, and named to a policy around it."""
     recorder = recorder_of(model)
     if recorder is None:
         return
+    recorder.charge_failed(exc, prompt)
     asked = _ASKED.get()
     if asked is not None and recorder not in asked:
         asked.append(recorder)
@@ -615,7 +681,7 @@ def with_transient_retries(chat_class: Any) -> Any:
     loop through the bound model, a structured-output chain, a model list
     asking one of its models — so the retry sits there and a whole request is
     made again, never a part of one. A call made inside the policy already is
-    made once.
+    made once. Every failed request is charged as the provider bills it.
     Anything that is not a class is returned as it is.
     """
     if not isinstance(chat_class, type):
