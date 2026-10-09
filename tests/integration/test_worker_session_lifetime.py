@@ -376,14 +376,19 @@ async def test_a_cancelled_run_still_flushes_its_feed(redis_stub: MagicMock) -> 
         _mock_mode(),
         patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_cancelled_pipeline)),
         patch.object(worker_module, "_stop_event_feed", _record_stop),
-        pytest.raises(asyncio.CancelledError),
     ):
-        await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
+        result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
     api_config._settings = None
 
     assert flushed == [str(job.id)]
-    # A cancellation is not a failure: nothing marked the row failed.
-    assert [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "failed"] == []
+    # Nobody stopped the job and its task was not cancelled: the row says a
+    # cancellation reached the pipeline, not that the worker shut down.
+    assert result["status"] == "failed"
+    [failed] = [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "failed"]
+    assert failed["error_message"].startswith(
+        "Stopped by a cancellation inside the pipeline that neither the operator, the job "
+        "timeout nor a worker shutdown made"
+    )
 
 
 @pytest.mark.asyncio
@@ -510,19 +515,7 @@ async def test_the_claim_is_dropped_when_the_run_is_cancelled(redis_stub: MagicM
     sample = fake_sample(job.sample_id)
     factory = SessionFactory(rows_for(job, sample))
 
-    async def _cancelled(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        raise asyncio.CancelledError
-
-    from app import config as api_config
-
-    api_config._settings = None
-    with (
-        _mock_mode(),
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_cancelled)),
-        pytest.raises(asyncio.CancelledError),
-    ):
-        await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
-    api_config._settings = None
+    await _shut_down_mid_run(factory, redis_stub, job)
 
     assert _released(redis_stub) == [job_owner_key(str(job.id))]
     assert str(job.id) not in _OWNED_JOBS
@@ -615,65 +608,74 @@ async def test_a_cancel_request_writes_its_row_even_between_two_polls(
     assert_every_session_has_ended(factory)
 
 
-@pytest.mark.asyncio
-async def test_a_shutdown_cancellation_writes_no_row(redis_stub: MagicMock) -> None:
-    """Nobody asked, so nothing is claimed.
+async def _shut_down_mid_run(factory: SessionFactory, redis: MagicMock, job: Any) -> None:
+    """What arq does on SIGTERM: cancel the job's own task while its pipeline runs."""
+    running = asyncio.Event()
 
-    arq cancels the task on its own job timeout and on SIGTERM. The process is
-    going away, writing a row on the way out races its own teardown, and the
-    heartbeat dies with it — so the periodic sweep repairs the row within ten
-    minutes, and the ``CancelledError`` travels on untouched.
+    async def _long_pipeline(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        running.set()
+        await asyncio.sleep(3600)
+        return _pipeline_result()
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        _mock_mode(),
+        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_long_pipeline)),
+    ):
+        task = asyncio.create_task(
+            run_analysis({"redis": redis, "db_session": factory}, str(job.id))
+        )
+        await running.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    api_config._settings = None
+
+
+@pytest.mark.asyncio
+async def test_a_shutdown_cancellation_is_recorded_as_a_stop_not_a_cancel(
+    redis_stub: MagicMock,
+) -> None:
+    """Nobody asked, so no cancel is claimed; the row says the worker stopped it.
+
+    arq cancels the task on SIGTERM. What the run produced is kept and the row
+    is marked failed with the stop's reason on a session of its own, and the
+    ``CancelledError`` travels on so the shutdown is not held.
     """
     job = fake_job()
     sample = fake_sample(job.sample_id)
     factory = SessionFactory(rows_for(job, sample))
     redis_stub.get = AsyncMock(return_value=None)
 
-    async def _cancelled(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        raise asyncio.CancelledError
-
-    from app import config as api_config
-
-    api_config._settings = None
-    with (
-        _mock_mode(),
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_cancelled)),
-        pytest.raises(asyncio.CancelledError),
-    ):
-        await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
-    api_config._settings = None
+    await _shut_down_mid_run(factory, redis_stub, job)
 
     assert [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "cancelled"] == []
-    assert [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "failed"] == []
+    [failed] = [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "failed"]
+    assert failed["error_message"].startswith("Stopped because the worker running it shut down")
+    assert_every_session_has_ended(factory)
 
 
 @pytest.mark.asyncio
 async def test_a_redis_that_cannot_answer_is_read_as_a_shutdown(
     redis_stub: MagicMock,
 ) -> None:
-    """The run is going down either way; the sweep repairs what nobody claimed."""
+    """The run is going down either way, and it is recorded as the worker's stop."""
     job = fake_job()
     sample = fake_sample(job.sample_id)
     factory = SessionFactory(rows_for(job, sample))
     redis_stub.get = AsyncMock(side_effect=ConnectionError("queue unreachable"))
 
-    async def _cancelled(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        raise asyncio.CancelledError
+    await _shut_down_mid_run(factory, redis_stub, job)
 
-    from app import config as api_config
-
-    api_config._settings = None
-    with (
-        _mock_mode(),
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_cancelled)),
-        pytest.raises(asyncio.CancelledError),
-    ):
-        await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
-    api_config._settings = None
-
-    assert updates_to(factory, "analysis_jobs") == [
-        u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "running"
+    assert [u.get("status") for u in updates_to(factory, "analysis_jobs")] == [
+        "running",
+        "failed",
     ]
+    assert updates_to(factory, "analysis_jobs")[-1]["error_message"].startswith(
+        "Stopped because the worker running it shut down"
+    )
 
 
 @pytest.mark.asyncio

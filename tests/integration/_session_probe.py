@@ -202,3 +202,37 @@ def rows_for(job: Any, sample: Any) -> Any:
         return result
 
     return answer
+
+
+class JobRow:
+    """One ``analysis_jobs`` row whose ``UPDATE``\\s are applied with their WHERE clause.
+
+    The recording factory above keeps an update's values whether or not its
+    WHERE clause would have matched, which is the difference between "the
+    worker asked for this" and "the row says this". Handed to
+    ``SessionFactory(on_execute=...)``, this evaluates each update's WHERE
+    clause against the row with SQLAlchemy's own in-Python evaluator — the one
+    ``synchronize_session="evaluate"`` uses — and applies the values only when
+    it matches, so a test can ask what the row ends up saying.
+    """
+
+    def __init__(self, job: Any) -> None:
+        from app.models.job import AnalysisJob
+
+        self.row = AnalysisJob()
+        self.row.id = job.id
+        self.row.status = job.status
+        self.row.error_message = job.error_message
+        self.row.completed_at = None
+
+    def __call__(self, record: Recorded, statement: Any) -> None:
+        if not getattr(statement, "is_update", False) or statement.table.name != "analysis_jobs":
+            return
+        from sqlalchemy.orm.evaluator import _EvaluatorCompiler
+
+        from app.models.job import AnalysisJob
+
+        matches = _EvaluatorCompiler(AnalysisJob).process(statement.whereclause)
+        if matches(self.row):
+            for column, value in values_of(statement).items():
+                setattr(self.row, column, value)

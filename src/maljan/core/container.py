@@ -472,6 +472,20 @@ class ServiceContainer:
 
         self._token_ledger = TokenLedger(spend=SpendMeter.from_settings(config))
         self._plan_the_verdict_and_report(self._token_ledger.spend)
+        # Each call, as it is recorded, on the job's event feed: the durable
+        # trail of what the run spent, kept call by call by the worker.
+        if event_sink is not None:
+            from maljan.pipeline.events import MODEL_USAGE, emit
+
+            self._token_ledger.on_call = lambda row: emit(event_sink, MODEL_USAGE, row)
+
+        # What the report node has built so far, while it is still building
+        # it: the deterministic report, then the narrative on it, with the
+        # composer writing its sections into the same object as each one is
+        # written. A run stopped part-way through its report keeps this as its
+        # partial report (``pipeline.stopped_run``). ``None`` until the report
+        # node has built one.
+        self.report_in_progress: Any = None
 
         # Per-run generation rate of each model, read off every call's answer
         # by a meter attached where the model is built. The judge and the

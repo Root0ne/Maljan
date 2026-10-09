@@ -1124,8 +1124,8 @@ These waits have no upper bound of their own. A server that stays connected
 but stops generating, or a call left running on a single-slot llama.cpp
 server after its loop gave up on it, is held for the whole derived time — at
 3.8 tokens a second 32,768 tokens take about 12,900 s — where 1,800 s used to
-release it. The last resort is the analysis job's own arq timeout, 8 hours
-(`job_timeout` in `apps/api/app/worker/analysis_worker.py`). A composer section is its answer and the one retry its validation
+release it. The last resort is the job timeout, `core.job_timeout`, which is
+empty — no limit — unless you set one (see "The job timeout" below). A composer section is its answer and the one retry its validation
 allows, so its wait holds two calls of its output cap: at 3.8 tokens a second
 a budget of 8,192 needs 2 × 8,192 / 3.8 × 1.5 ≈ 6,467 s; an operator's budget
 of 900 with the reporter's `disable_thinking` on needs 2 × 900 / 3.8 × 1.5 ≈
@@ -1182,8 +1182,8 @@ maps, then the deployment's values.
 A loop with no limit ends when its model answers, or at one of the stops that
 are not a count: the repeat guard (a model re-asking for answers it already
 has), the conversation's room (a tool answer that no longer fits the window),
-and the job's spend ceiling below. The arq job timeout is the last resort. A
-loop with no time limit has no clock of its own. Every model request still has
+and the job's spend ceiling below. The job timeout below, when you set one, is
+the last resort. A loop with no time limit has no clock of its own. Every model request still has
 a whole-call deadline Maljan enforces itself: the request timeout sized in the
 section above (its output cap at the model's measured pace, prompt read
 included), or the client's own timeout — `PROVIDER_REQUEST_TIMEOUT_SECONDS`,
@@ -1487,6 +1487,61 @@ what it did not draw, a drafted YARA or Suricata rule says in a comment how
 many published indicators it does not match on, and the STIX export carries
 every process root.
 
+### The job timeout
+
+`core.job_timeout` (Agents → Limits, "Seconds per job") is how long one
+analysis job may run before the worker stops it. It is empty by default, and
+empty is no limit: a job ends when its pipeline does, when you cancel it, or
+when its worker shuts down. arq imposes no deadline of its own on the analysis
+worker.
+
+When a change takes effect: the value is read from the job's own settings when
+the job starts. A value you save applies to every job started after it, with
+no worker restart; a job already running keeps the value it started with.
+
+What it measures: the time since the worker started the job — its database
+reads, the sample download and the pipeline all count — on one monotonic
+clock, the same one the stop note's "N s into the run" is read from. The
+worker checks it on the same 15-second poll it reads the cancel flag on, which
+runs while the pipeline runs, so a job is stopped within one poll of its limit
+(at the pipeline's first poll if setup alone took longer). Storing a finished
+run's report after the pipeline returns is not interrupted.
+
+A job that is stopped — by the job timeout, by your cancel, or by its worker
+shutting down — keeps what it produced:
+
+- **The run summary**, as of the stop: the judge's when the judge ran,
+  otherwise one built from the run's state, with the token usage per agent and
+  model, the spend, the validation record and the stage rollup read at the
+  stop, so the report stage's calls after the judge are counted.
+- **A partial report**, served by the usual report endpoints: the report the
+  report node built, or the one it was building (the deterministic report, the
+  narrative if that round ended, and every composer section already written),
+  or the deterministic report built from the state when the run stopped before
+  its report stage. A stage that did not run is not filled in: no summary is
+  written and the report says why, and with no judge no verdict is reached —
+  the stored verdict is `Unknown` and the report says its verdict field is a
+  placeholder. The report's `incomplete_reason` and its degradation reasons
+  say why the run stopped, how far into it and where.
+- **The job status**: `failed` for the job timeout and a worker shutdown,
+  `cancelled` for your cancel, with `error_message` giving the same reason.
+
+On a worker shutdown, keeping the stopped run is held to a 10 s grace (it
+measured about 0.1 s of work on a 342-entry ledger and a 2.1 MB report, plus
+one commit). The compose file gives the analysis worker a `stop_grace_period`
+of 110 s, the sum of its shutdown bounds (pipeline stop 10 s, keeping the
+stopped run 10 s, teardown 60 s, two connections 10 s each, exit guard 10 s),
+so `docker stop` does not kill it before the stop is recorded. A deployment
+that runs the worker some other way should give it the same grace.
+
+What a node that was still running had gathered is not in the state yet and is
+not in the partial report; its tool calls and messages are in the run's feed.
+
+The orphan sweep never marks a live job failed, however long it runs: it reads
+the per-job owner heartbeat (refreshed every 30 s, 90 s life), never the job's
+age. arq's own in-progress claim on the job is refreshed with the heartbeat, so
+a killed worker's claim expires within 90 s instead of lingering.
+
 ### The evidence budget
 
 `reporting.evidence_budget_bytes` (512 KiB by default) is how many bytes of
@@ -1523,9 +1578,24 @@ Turn it off on a deployment whose browsers are on a thin link; every finished
 message is unaffected.
 
 `events.retention_days` (30) is how long a finished run's feed stays in
-`job_events` before the worker's nightly sweep removes it. The feed is what
-makes a failed or cancelled run readable at all — no report is written for
-one — and is what a reader wants while a run is fresh. The transcript, the
+`job_events` before the worker's nightly sweep removes it. The feed is the
+moment-by-moment record of a run, and what a reader wants while a run is
+fresh; a stopped run also keeps a partial report (see "The job timeout").
+
+Each model call's usage is in it as a `model_usage` event (agent, model, call
+and the figures the provider reported), so what a run spent is known even when
+its worker was killed before the run summary was built. What is guaranteed:
+the row is committed as soon as the worker's loop runs the publish, normally
+milliseconds after the call is recorded, not with the next batch; a worker
+killed inside that window loses that one call's row. It is a record, not
+progress, so it is kept off the live socket and the 1,000-entry replay stream
+and read back through `GET /jobs/{id}/events`. It lives exactly as long as the
+rest of the feed: `events.retention_days` (30) after the run. The run summary,
+which a completed or stopped run stores with its report, keeps the totals for
+good; the `model_usage` rows matter for a run whose worker died before it
+stored one, and are gone with its feed after that period.
+
+The transcript, the
 agent findings and the evidence ledger are kept by the report and the job and
 are not touched by the sweep, so shortening this does not shorten how long a
 finished analysis is readable.

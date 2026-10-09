@@ -359,6 +359,15 @@ services:
         condition: service_healthy
     command: >
       uv run arq app.worker.analysis_worker.WorkerSettings
+    # How long ``docker stop`` waits after SIGTERM before it kills the worker:
+    # the sum of the worker's own shutdown bounds (``shutdown_budget_seconds``
+    # in analysis_worker.py, held to this value by a test) — the pipeline's
+    # stop grace, keeping the stopped run (its partial report and run summary;
+    # measured at about 0.1 s of work on run 7's 342-entry ledger and 2.1 MB
+    # report, plus one commit), the job teardown, the two connections and the
+    # exit guard: 10 + 10 + 60 + 2 × 10 + 10. Docker's default of 10 s killed
+    # the worker before the stop could be recorded.
+    stop_grace_period: 110s
 
   # -────────────────────────────────────────────
   # Enrichment worker — ARQ, the post-verdict reputation lookups

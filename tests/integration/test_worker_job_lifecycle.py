@@ -765,12 +765,13 @@ async def test_worker_removes_private_sample_copies_after_pipeline_failure(
 
 def test_worker_settings_sanity() -> None:
     """Verify ARQ worker tuning values are production-ready."""
+    from datetime import timedelta
+
     assert WorkerSettings.max_jobs == 1
-    # 2026-07-13: bumped 3600 -> 28800 (8h) for the deep-analysis restore.
-    # Full-depth static runs one ReAct loop PER CHUNK (~8-10 chunks), so a
-    # realistic-slow cold-cache run is ~2-4h; the outer ARQ ceiling must sit
-    # above the inner per-loop safety nets so it never kills a progressing run.
-    assert WorkerSettings.job_timeout == 28800
+    # No deadline arq can reach: a job's limit is ``core.job_timeout``, empty
+    # by default, which the run enforces itself so a stopped job keeps what it
+    # produced (``test_the_job_timeout_is_a_setting``).
+    assert WorkerSettings.job_timeout == timedelta.max.total_seconds()
     assert WorkerSettings.max_tries == 1
 
 
