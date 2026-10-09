@@ -159,6 +159,35 @@ async def test_every_model_the_agent_falls_back_to_is_asked_and_filed(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_each_model_is_asked_at_the_effort_its_run_sends(monkeypatch):
+    asked: list[tuple[str, str]] = []
+
+    async def _answered(
+        provider: str, *, endpoint: str, model: str, api_key: str = "", **body: Any
+    ):
+        asked.append((model, body.get("reasoning_effort")))
+        return (True, f"{model!r} answered")
+
+    monkeypatch.setattr(settings_probes, "complete_one_turn", _answered)
+    staged = {
+        "llm.openai.reasoning_effort": "max",
+        "llm.agents": {
+            "network": {
+                "provider": "openai",
+                "model": "first",
+                "effort": "high",
+                "fallbacks": [
+                    {"provider": "openai", "model": "second"},
+                    {"provider": "ollama", "model": "third"},
+                ],
+            }
+        },
+    }
+    await probe_agent({"name": "network", "settings": staged})
+    assert asked == [("first", "high"), ("second", "max"), ("third", "")]
+
+
+@pytest.mark.asyncio
 async def test_an_unknown_agent_is_a_legible_failure_not_a_stack_trace():
     result = await probe_agent({"name": "ghost", "settings": {}})
     assert result.ok is False and "ghost" in result.detail

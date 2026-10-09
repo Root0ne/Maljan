@@ -372,6 +372,26 @@ export interface ContextWindow {
   remedy: string;
 }
 
+/**
+ * What a per-agent effort field may offer for one provider and model.
+ * Mirrors `EffortOptionsResponse` in `apps/api/app/schemas/settings.py`.
+ *
+ * `takes_effort` false: the provider sends no reasoning effort and the field
+ * is not drawn. `levels` is the list to choose from, or `null` where each
+ * endpoint names its own levels and the value is typed as written.
+ * `global_key`/`global_value` are the provider-wide setting a blank field
+ * inherits.
+ */
+export interface EffortOptions {
+  provider: string;
+  model: string;
+  takes_effort: boolean;
+  levels: string[] | null;
+  levels_source: "models_api" | "settings" | "none";
+  global_key: string | null;
+  global_value: string | null;
+}
+
 export interface ProbeResult {
   ok: boolean;
   latency_ms: number;

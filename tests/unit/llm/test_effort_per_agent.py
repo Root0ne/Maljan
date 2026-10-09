@@ -371,6 +371,14 @@ class TestTheBuildLine:
 
 
 class TestTheChoices:
+    def test_the_catalogue_says_an_entry_may_name_one(self) -> None:
+        from maljan.core.settings_catalog import core_catalog
+
+        entry = next(e for e in core_catalog() if e.path == "llm.agents")
+        assert "effort" in entry.description
+        assert "llm.anthropic.effort" in entry.description
+        assert "llm.openai.reasoning_effort" in entry.description
+
     def test_anthropic_offers_the_settings_levels_until_the_model_is_described(self) -> None:
         from maljan.llm.effort import effort_options
 

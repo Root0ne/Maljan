@@ -1232,7 +1232,12 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
             settings, llm_provider, getattr(agent_llm, "base_url", None) if agent_llm else None
         )
 
-        async def _ask(provider: str, where: str, model: str) -> tuple[bool | None, str]:
+        async def _ask(
+            provider: str, where: str, model: str, own_effort: str | None = None
+        ) -> tuple[bool | None, str]:
+            from maljan.llm.effort import effort_in_force
+
+            effort, _ = effort_in_force(settings, provider, own_effort)
             return await complete_one_turn(
                 provider,
                 endpoint=where,
@@ -1248,13 +1253,9 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                     else bool(settings.llm.openai.disable_thinking)
                 ),
                 compat=str(settings.llm.openai.compat or "auto"),
-                reasoning_effort=(
-                    str(settings.llm.openai.reasoning_effort or "")
-                    if provider == "openai"
-                    else str(getattr(settings.llm.anthropic, "effort", "") or "")
-                    if provider == "anthropic"
-                    else ""
-                ),
+                # The model's own effort (``llm.agents.<key>.effort``), else
+                # the provider's global one, as the run sends it.
+                reasoning_effort=effort or "",
                 # Ollama loads a model at the window and for the keep-alive the
                 # request names; asked the way the job asks, the probe leaves
                 # loaded the instance the job's first call will find.
@@ -1262,7 +1263,12 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                 keep_alive=str(settings.llm.ollama.keep_alive) if provider == "ollama" else None,
             )
 
-        answered, said = await _ask(llm_provider, endpoint, str(llm_model or ""))
+        answered, said = await _ask(
+            llm_provider,
+            endpoint,
+            str(llm_model or ""),
+            getattr(agent_llm, "effort", None) if agent_llm else None,
+        )
         detail = f"{detail}; {said}"
         # A call that ran out of time proves nothing either way, so the probe
         # reports it as a failure the operator can act on and files no row —
@@ -1286,7 +1292,9 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
         # reaches it. The agent passes only when every model on its list did.
         for position, choice in enumerate(getattr(agent_llm, "fallbacks", None) or [], 1):
             where = endpoint_for(settings, choice.provider, choice.base_url)
-            reached, told = await _ask(choice.provider, where, str(choice.model))
+            reached, told = await _ask(
+                choice.provider, where, str(choice.model), getattr(choice, "effort", None)
+            )
             detail = f"{detail}; fallback {position} {choice.provider}/{choice.model}: {told}"
             if reached is not None:
                 completions.append(

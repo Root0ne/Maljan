@@ -29,6 +29,7 @@ from app.schemas.settings import (
     ConditionValidateRequest,
     ConditionValidateResponse,
     ContextWindowResponse,
+    EffortOptionsResponse,
     ExportResponse,
     GroupDTO,
     ImportRequest,
@@ -148,6 +149,29 @@ async def get_context_window(
     settings = candidate_settings({}, stored)
     await end_read_transaction(db)
     return ContextWindowResponse(**await context_window_facts(settings))
+
+
+@router.get("/effort-options", response_model=EffortOptionsResponse)
+async def get_effort_options(
+    provider: str = Query(..., min_length=1, max_length=64),
+    model: str = Query("", max_length=256),
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> EffortOptionsResponse:
+    """The reasoning-effort levels a per-agent entry may name for one provider and model.
+
+    Read-only and free: the levels come from the settings' own list and, for
+    an Anthropic model the window probe has described, from what the Models
+    API said it takes. No request leaves the process. The console's agent
+    editor draws its effort field from this answer rather than from a list
+    of its own.
+    """
+    from maljan.llm.effort import effort_options
+
+    stored = await SettingsService(db).load_overrides()
+    settings = candidate_settings({}, stored)
+    await end_read_transaction(db)
+    return EffortOptionsResponse(**effort_options(settings, provider, model))
 
 
 async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
