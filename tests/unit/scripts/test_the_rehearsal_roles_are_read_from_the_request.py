@@ -287,6 +287,26 @@ class TestTheJudgeAndTheReport:
         assert json.loads(reply.text) == {"flags": []}
         assert reply.note == {"section": "cli_flags", "content": False, "deliberately_empty": True}
 
+    @pytest.mark.parametrize(
+        ("section", "key", "value"),
+        [
+            ("host_identifiers", "identifiers", "Global\\RehearsalMutex"),
+            ("commands", "commands", "cmd.exe /c whoami"),
+            ("cli_flags", "flags", "--install"),
+        ],
+    )
+    def test_a_list_section_carries_the_sample_s_own_value(
+        self, section: str, key: str, value: str
+    ) -> None:
+        schema = composer.SECTION_SCHEMAS[section]
+        contract = composer.section_contract(section, schema)
+        evidence = composer._bundle_text(section, {}, None).splitlines()[0]
+        user = f"[ev_0005] strings: 11 of 11 runs recorded\n{contract}\n\n{evidence}"
+        reply = Brain().answer(_request(composer._SYSTEM, user))[1]
+        (row,) = json.loads(reply.text)[key]
+        assert value in json.dumps(row).replace("\\\\", "\\")
+        assert reply.note["content"] is True and reply.note["deliberately_empty"] is False
+
     def test_a_structured_request_is_answered_through_its_schema_tool(self) -> None:
         tool = {"name": "NarrativeOutput", "description": "", "schema": {"properties": {}}}
         reply = _as_schema_call(_request("x", "y", tools=[tool]), '{"executive_summary": "s"}')

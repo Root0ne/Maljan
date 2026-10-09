@@ -22,6 +22,11 @@ if str(_ROOT) not in sys.path:
 SAMPLE_NAME = "sample_1.exe"
 # The one network value the sample holds, so the report has an indicator to carry.
 SAMPLE_URL = "http://rehearsal.example.net/beacon"
+# The values that give the report's list sections something to hold: a host
+# identifier, an operator command and a command-line flag.
+SAMPLE_MUTEX = "Global\\RehearsalMutex"
+SAMPLE_COMMAND = "cmd.exe /c whoami"
+SAMPLE_FLAG = "--install"
 
 
 def sample_bytes() -> bytes:
@@ -37,6 +42,14 @@ def sample_bytes() -> bytes:
         },
     )
     image.put("data", 0x10, SAMPLE_URL.encode("ascii") + b"\x00")
+    offset = 0x60
+    for value in (SAMPLE_MUTEX, SAMPLE_COMMAND, SAMPLE_FLAG):
+        image.put("data", offset, value.encode("ascii") + b"\x00")
+        offset += 0x40
+    # The first two words of SHA-256's initial hash, as the published constant
+    # scan finds them, so the encryption section has a fact to read.
+    sha256_iv = (0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A)
+    image.put("rdata", 0x300, b"".join(v.to_bytes(4, "little") for v in sha256_iv))
     return image.build()
 
 

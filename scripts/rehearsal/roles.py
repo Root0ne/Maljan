@@ -686,12 +686,17 @@ class Brain:
         )
         if template is None:
             return json.dumps({"text": grounded.sentence}), True
+        listed = _sample_values(section, facts)
+        if listed is not None:
+            return json.dumps(listed), True
         answer = _fill(template, grounded, section)
         return json.dumps(answer), _has_content(answer)
 
     @staticmethod
     def deliberately_empty(section: str, request: wire.Request) -> bool:
         """Whether the script leaves ``section`` empty on purpose: the sample has nothing for it."""
+        if section in _SAMPLE_LISTS:
+            return _strings_entry(_facts(request)) == ""
         if section in _EMPTY_LISTS or section in _EMPTY_OBJECTS:
             return True
         if section in _VALUE_LISTS:
@@ -942,6 +947,47 @@ def _entry_holding(value: str, evidence: str) -> str:
 _VALUE_LISTS = {"configuration", "communications"}
 # The sections whose items no rehearsal value fills: written empty.
 _EMPTY_LISTS = {"host_identifiers", "commands", "cli_flags"}
+# The list sections the rehearsal sample holds a value for: its mutex name, its
+# operator command and its command-line flag, each cited to the strings entry
+# that read them out of the file.
+_SAMPLE_LISTS = {"host_identifiers", "commands", "cli_flags"}
+
+
+def _strings_entry(facts: _Facts) -> str:
+    """The id of the pack's strings entry, which holds the sample's strings whole."""
+    for ident, tool, _body in facts.lines:
+        if tool.strip() == "strings":
+            return ident
+    return ""
+
+
+def _sample_values(section: str, facts: _Facts) -> dict[str, Any] | None:
+    """A list section written from the values the rehearsal sample carries, or ``None``."""
+    from scripts.rehearsal.sample import SAMPLE_COMMAND, SAMPLE_FLAG, SAMPLE_MUTEX
+
+    entry = _strings_entry(facts)
+    if section not in _SAMPLE_LISTS or not entry:
+        return None
+    if section == "host_identifiers":
+        row = {"kind": "String", "value": SAMPLE_MUTEX, "purpose": "", "evidence_refs": [entry]}
+        return {"identifiers": [row]}
+    if section == "commands":
+        name = SAMPLE_COMMAND.rsplit(" ", 1)[-1]
+        row = {
+            "id": SAMPLE_COMMAND,
+            "name": name,
+            "description": f"The file holds the command line {SAMPLE_COMMAND} [{entry}].",
+            "evidence_refs": [entry],
+        }
+        return {"commands": [row]}
+    row = {
+        "flag": SAMPLE_FLAG,
+        "description": f"The file holds the flag {SAMPLE_FLAG} [{entry}].",
+        "evidence_ref": entry,
+    }
+    return {"flags": [row]}
+
+
 # The sections answered with every field empty: nothing in a rehearsal supports them.
 _EMPTY_OBJECTS = {"encryption_scheme", "ransom_note"}
 # Fields with a fixed word in a value list.
