@@ -333,6 +333,42 @@ class TestWhereTheNumbersDoNotPlaceTheRetry:
             assert merge.merged is None, prose
             assert merge.why == "a line of the retry that withdraws could not be read exactly"
 
+    def test_an_upper_case_claim_line_that_withdraws_merges_nothing(self) -> None:
+        for prose in (
+            "CLAIM 2 is withdrawn.",
+            "CLAIMS 2 and 3 are withdrawn.",
+            "**CLAIM 2** withdrawn",
+            "- CLAIM 2 removed",
+        ):
+            answer = _block(FIXED_BEACON, number=2) + prose + "\n"
+
+            merge = merge_retry(_isr(FIRST), _isr(answer), answer, asked=[1])
+
+            assert read_withdrawals(answer).unread == 1, prose
+            assert merge.merged is None, prose
+            assert merge.why == "a line of the retry that withdraws could not be read exactly"
+
+    def test_a_heading_that_withdraws_its_own_claim_merges_nothing(self) -> None:
+        for head in ("CLAIM 2 (withdrawn):", "CLAIM 2 [dropped]:", "CLAIM 2 — withdrawn:"):
+            answer = (
+                f"{head} 0x402000 beacons every 600 seconds.\n"
+                "EVIDENCE: [ev_0001]\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
+            )
+
+            merge = merge_retry(_isr(FIRST), _isr(answer), answer, asked=[1])
+
+            assert read_withdrawals(answer).unread == 1, head
+            assert merge.merged is None, head
+            assert merge.why == "a line of the retry that withdraws could not be read exactly"
+
+    def test_a_heading_whose_sentence_opens_with_what_the_code_does_is_no_doubt(self) -> None:
+        for sentence in (
+            "Deletes its own file after it runs.",
+            "Drops a.exe to %TEMP% and runs it.",
+            "Dropped payload a.exe runs at logon.",
+        ):
+            assert read_withdrawals(_block(sentence, number=5)).unread == 0, sentence
+
     def test_a_note_that_names_a_withdrawn_claim_is_a_doubt(self) -> None:
         answer = _block(FIXED_BEACON, number=2) + "My round-0 claim 21 was withdrawn.\n"
 
@@ -576,6 +612,23 @@ class TestAHostileRetryCostsALinearMerge:
             return lambda: read_withdrawals(text)
 
         assert _seconds(run(100_000)) <= 10 * _seconds(run(10_000)) * 1.5 + 0.1
+
+    def test_long_lines_that_do_not_open_with_the_word_cost_a_linear_read(self) -> None:
+        for line in (
+            lambda size: "x " + "removed claim " * size,
+            lambda size: "CLAIM 1: " + "drop " * size + "claim 2",
+            lambda size: "CLAIM 1 (" + "retract " * size + "):",
+            lambda size: "**CLAIM 2** " + "claim 7 " * size + "withdrawn",
+        ):
+
+            def run(size: int, line: Callable[[int], str] = line) -> Callable[[], Any]:
+                text = line(size)
+                return lambda: read_withdrawals(text)
+
+            small, large = run(10_000), run(100_000)
+
+            assert _seconds(large) <= 10 * _seconds(small) * 1.5 + 0.1
+            assert _peak(large) <= 10 * _peak(small) * 1.5 + 65_536
 
     def test_ten_thousand_unplaced_claims_cost_a_linear_search(self) -> None:
         def run(count: int) -> Callable[[], Any]:

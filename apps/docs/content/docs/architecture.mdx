@@ -1613,8 +1613,12 @@ decides.
    the reason of the first line that names it with one and no other; any
    other line that holds both a claim number and a withdrawing word (withdraw,
    retract, remove, drop, delete), in either order ("I withdraw claim 2",
-   "Claim 5 is withdrawn", "Drop claim 2"), is a doubt, a claim heading's own
-   number aside. The retry is then
+   "Claim 5 is withdrawn", "CLAIM 2 is withdrawn", "Drop claim 2"), is a
+   doubt, the own number of a line the reader reads as a claim heading aside.
+   A heading that withdraws its own claim is a doubt too: a withdrawing word
+   in its note (`CLAIM 2 (withdrawn):`) or opening its sentence (`CLAIM 2 —
+   withdrawn:`; "removed", "dropped" and "deleted" only before a mark, the
+   line's end or a reason, so "Drops a.exe" describes a claim). The retry is then
    merged into the answer by block number (`retry_merge.merge_retry`): the
    merged answer is the first answer with only the retry's changes, so its
    disputes and every field the retry does not write stay; a block written

@@ -52,7 +52,7 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
-from maljan.agents.claim_headings import LINE_PREFIX
+from maljan.agents.claim_headings import CLAIM_HEAD_RE, LINE_PREFIX, heading_sentence
 from maljan.pipeline.claim_drops import claim_values, dropped_claims
 
 _MARKS = r"[ \t*_`]"
@@ -81,11 +81,23 @@ _WITHDRAW_LINE_RE = re.compile(r"^" + LINE_PREFIX + r"withdraw\b", re.IGNORECASE
 # withdraw claim 2", "Claim 5 is withdrawn", "Retract claim 2", "Drop claim
 # 2"): a line that holds both a claim number and a withdrawing word, in either
 # order, is a doubt unless it is one of the forms above. A claim heading's own
-# "CLAIM <n>" is not that number: its note and sentence are what is read.
-# Two searches per line, so a line costs its length.
+# "CLAIM <n>", on a line the reader reads as a heading, is not that number: the
+# rest of the line is what is read. Any other line is read whole, so
+# "CLAIM 2 is withdrawn." is a doubt. Two searches per line, so a line costs
+# its length.
 _WITHDRAW_WORD_RE = re.compile(r"\b(?:withdraw|retract|remov|drop|delet)\w*+", re.IGNORECASE)
 _CLAIM_NUMBER_RE = re.compile(r"\bclaims?+\s*+#?\d", re.IGNORECASE)
-_HEADING_NUMBER_RE = re.compile(r"^" + LINE_PREFIX + r"CLAIM[ \t]*+#?\d*+")
+# A heading that withdraws its own claim: a withdrawing word in its note
+# ("CLAIM 2 (withdrawn):") or opening its sentence ("CLAIM 2 — withdrawn: ...").
+# A sentence that opens with what the code does ("Drops a.exe to %TEMP%",
+# "Deletes its own file") describes a claim; only "withdraw" and "retract" in
+# any form, or "removed", "dropped" and "deleted" standing alone before a mark,
+# the line's end or a reason, open a withdrawal.
+_WITHDRAWING_OPENER_RE = re.compile(
+    r"[ \t*_`\"']*+(?:withdraw|retract|(?:removed|dropped|deleted)\b(?=[ \t*_`\"']*+"
+    r"(?:$|[:.,;!()\[\]\-–—]|(?:because|since|due)\b)))",
+    re.IGNORECASE,
+)
 _NUMBER_RE = re.compile(r"\d++")
 _RANGE_SPLIT_RE = re.compile(r"(?:,|&|\band\b)", re.IGNORECASE)
 # Where a flag names the claim block it is about: ``static.claims[5].T1041``.
@@ -139,8 +151,15 @@ def read_withdrawals(text: str) -> Withdrawals:
     unread = 0
     for line in str(text or "").splitlines():
         if _WITHDRAW_LINE_RE.match(line) is None:
-            heading = _HEADING_NUMBER_RE.match(line)
-            rest = line[heading.end() :] if heading is not None else line
+            heading = CLAIM_HEAD_RE.match(line)
+            rest = line
+            if heading is not None:
+                rest = line[heading.end() :]
+                if _WITHDRAW_WORD_RE.search(heading.group("note") or "") or (
+                    _WITHDRAWING_OPENER_RE.match(heading_sentence(line, heading))
+                ):
+                    unread += 1
+                    continue
             if _WITHDRAW_WORD_RE.search(rest) and _CLAIM_NUMBER_RE.search(rest):
                 unread += 1
             continue
