@@ -15,6 +15,8 @@ out, and where it did not, every block goes back as it came.
 
 from __future__ import annotations
 
+import json
+import threading
 from typing import Any
 
 import pytest
@@ -86,13 +88,6 @@ def _lookup() -> StructuredTool:
     )
 
 
-@pytest.fixture(autouse=True)
-def _fresh() -> Any:
-    anthropic_history.forget()
-    yield
-    anthropic_history.forget()
-
-
 @pytest.fixture
 def wire(monkeypatch: pytest.MonkeyPatch) -> Wire:
     found = Wire(_answer)
@@ -136,7 +131,7 @@ class TestTheStandInChecksWhatTheApiChecks:
     def test_an_edited_prefix_is_refused_when_nothing_keeps_it_valid(
         self, wire: Wire, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(anthropic_history, "prepared", lambda payload: payload)
+        monkeypatch.setattr(anthropic_history, "prepared", lambda payload, _memory: payload)
         model = _model()
         history = _two_rounds(model)
         edited = [*history]
@@ -189,7 +184,7 @@ class TestEachEditMaljanMakes:
     def test_a_block_this_process_never_received_is_sent_as_it_is(self, wire: Wire) -> None:
         model = _model()
         history = _two_rounds(model)
-        anthropic_history.forget()
+        anthropic_history.memory_of(model).clear()
         model.bind_tools([_lookup()]).invoke(with_question(history, "And now."))
         assert _sent_thinking(wire.bodies[-1]) == [_thinking(0), _thinking(1)]
 
@@ -242,3 +237,82 @@ class TestTheAnalystsLoopAgainstTheCheck:
         assert len(wire.bodies) == 3
         assert wire.refused == []
         assert _sent_thinking(wire.bodies[-1]) == [_thinking(0), _thinking(1)]
+
+
+def _job_of(body: dict[str, Any]) -> str:
+    return "job-A" if "job-A" in json.dumps(body["messages"][-1]) else "job-B"
+
+
+class TestTwoJobsAtOnce:
+    def test_nothing_of_one_job_reaches_the_other_s_requests(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two jobs in one worker, the same task and tools, each on its own models.
+
+        Each job's run-state block names the job and so do its thinking
+        blocks; every request either job sends holds only its own, though the
+        two conversations are otherwise the same text.
+        """
+        from maljan.agents import base_agent
+
+        monkeypatch.setattr(base_agent, "loop_limits", lambda *_a, **_k: (None, 20))
+
+        def answer(body: dict[str, Any]) -> dict[str, Any]:
+            job = _job_of(body)
+            done = sum(
+                1
+                for m in body["messages"]
+                if m["role"] == "user" and isinstance(m["content"], list)
+                for b in m["content"]
+                if b.get("type") == "tool_result"
+            )
+            block = {"type": "thinking", "thinking": "", "signature": f"{job}-sig-{done}"}
+            if done < 2:
+                call = {"type": "tool_use", "id": f"toolu_{done}", "name": "lookup", "input": {}}
+                return message([block, call], stop="tool_use", usage=USAGE)
+            return message([block, {"type": "text", "text": REPORT}], stop="end_turn", usage=USAGE)
+
+        wire = Wire(answer)
+        install(monkeypatch, wire)
+
+        class _Analyst(BaseAnalyst):
+            def analyze(self, data: str) -> str:  # pragma: no cover - unused
+                return ""
+
+            def revise(self, *args: Any, **kwargs: Any) -> str:  # pragma: no cover - unused
+                return ""
+
+        def run(job: str) -> None:
+            agent = _Analyst(llm=_model(), name="static")
+            agent.run_state_block = f"sample: {job}"
+            agent.tools = [_lookup()]
+            agent.execute_tool_loop([("system", "You are a static analyst."), ("human", "Go.")])
+
+        threads = [threading.Thread(target=run, args=(job,)) for job in ("job-A", "job-B")]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+        assert wire.refused == []
+        assert sorted(_job_of(body) for body in wire.bodies) == ["job-A"] * 3 + ["job-B"] * 3
+        for body in wire.bodies:
+            own = _job_of(body)
+            other = "job-B" if own == "job-A" else "job-A"
+            assert other not in json.dumps(body), own
+            # Its own earlier blocks went back, so the memory was used.
+        last_of = {_job_of(b): b for b in wire.bodies}
+        for job, body in last_of.items():
+            assert [b["signature"] for b in _sent_thinking(body)] == [
+                f"{job}-sig-0",
+                f"{job}-sig-1",
+            ]
+
+    def test_a_model_s_memory_is_its_own(self) -> None:
+        first, second = _model(), _model()
+        assert anthropic_history.memory_of(first) is anthropic_history.memory_of(first)
+        assert anthropic_history.memory_of(first) is not anthropic_history.memory_of(second)
+        assert not any(
+            isinstance(value, dict | list) and value
+            for name, value in vars(anthropic_history).items()
+            if not name.startswith("__") and name != "_PRESERVED_CLASSES"
+        )

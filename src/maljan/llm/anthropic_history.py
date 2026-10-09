@@ -36,6 +36,13 @@ handled here, on the request as the client built it:
 
 The conversation the caller keeps is never touched; only the request is.
 Nothing here adds words a model or an operator did not write.
+
+**What is remembered stays with the model object that sent it.** Both
+memories live on the chat model (:func:`memory_of`), which a job's service
+container builds for its own agents and drops when the job ends; nothing is
+held at module level. A request of one job can only be completed from what
+that job's own model sent, so no text, run-state block or thinking block of
+one job reaches another job's request, however many jobs one worker runs.
 """
 
 from __future__ import annotations
@@ -57,33 +64,59 @@ MEMORY_ENTRIES = 20_000
 
 _THINKING_KINDS = ("thinking", "redacted_thinking")
 
-_lock = threading.Lock()
-# signature digest -> digest of the request prefix the block was produced after.
-_produced_after: OrderedDict[str, str] = OrderedDict()
-# digest of a user-turn part as it reads without its run-state block -> the part
-# as it was sent, block and all.
-_sent_with_block: OrderedDict[str, Any] = OrderedDict()
+# Where a chat model keeps its memory, in its own ``__dict__``.
+_MEMORY_ATTR = "_maljan_preserved_thinking"
+
+
+class Memory:
+    """What one chat model sent and received, for its own later requests only."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        # signature digest -> digest of the request prefix the block was written after.
+        self.produced_after: OrderedDict[str, str] = OrderedDict()
+        # digest of a user-turn part as it reads without its run-state block ->
+        # the part as it was sent, block and all.
+        self.sent_with_block: OrderedDict[str, Any] = OrderedDict()
+
+    def clear(self) -> None:
+        with self.lock:
+            self.produced_after.clear()
+            self.sent_with_block.clear()
+
+    def remember(self, which: OrderedDict[str, Any], key: str, value: Any) -> None:
+        with self.lock:
+            which[key] = value
+            which.move_to_end(key)
+            while len(which) > MEMORY_ENTRIES:
+                which.popitem(last=False)
+
+    def get(self, which: OrderedDict[str, Any], key: str) -> Any:
+        with self.lock:
+            return which.get(key)
+
+
+_memory_lock = threading.Lock()
+
+
+def memory_of(model: Any) -> Memory:
+    """The memory ``model`` keeps for its own requests, made on first use."""
+    held = getattr(model, "__dict__", {}).get(_MEMORY_ATTR)
+    if isinstance(held, Memory):
+        return held
+    with _memory_lock:
+        held = model.__dict__.get(_MEMORY_ATTR)
+        if not isinstance(held, Memory):
+            held = Memory()
+            model.__dict__[_MEMORY_ATTR] = held
+    return held
+
 
 # The prefix digest of the request a call is about to send, handed from the
 # request hook to the code that reads the answer. A one-element list, so a
 # hook running in a copied context (the deadline wrapper runs the call in a
 # task of its own) still writes where the caller reads.
 _PENDING: ContextVar[list[str] | None] = ContextVar("maljan_anthropic_pending", default=None)
-
-
-def forget() -> None:
-    """Drop both memories — for a test."""
-    with _lock:
-        _produced_after.clear()
-        _sent_with_block.clear()
-
-
-def _remember(memory: OrderedDict[str, Any], key: str, value: Any) -> None:
-    with _lock:
-        memory[key] = value
-        memory.move_to_end(key)
-        while len(memory) > MEMORY_ENTRIES:
-            memory.popitem(last=False)
 
 
 def _without_markers(value: Any) -> Any:
@@ -171,7 +204,7 @@ def _list_tail_block(message: dict[str, Any]) -> bool:
     )
 
 
-def _note_blocks_sent(messages: list[Any]) -> None:
+def _note_blocks_sent(memory: Memory, messages: list[Any]) -> None:
     """Remember each user-turn part that carries a run-state block, as it is sent."""
     for message in messages:
         if not (isinstance(message, dict) and message.get("role") == "user"):
@@ -179,15 +212,15 @@ def _note_blocks_sent(messages: list[Any]) -> None:
         parts = _parts(message)
         if _list_tail_block(message) and len(parts) > 1:
             # A block sent as a part of its own belongs to the part before it.
-            _remember(_sent_with_block, _digest(("after", parts[-2])), parts[-1])
+            memory.remember(memory.sent_with_block, _digest(("after", parts[-2])), parts[-1])
             parts = parts[:-1]
         for part in parts:
             bare, had = _bare(part)
             if had:
-                _remember(_sent_with_block, _digest(bare), part)
+                memory.remember(memory.sent_with_block, _digest(bare), part)
 
 
-def _restore_blocks(messages: list[Any]) -> tuple[list[Any], int]:
+def _restore_blocks(memory: Memory, messages: list[Any]) -> tuple[list[Any], int]:
     """Every earlier user turn with the run-state block it was sent with put back."""
     restored = 0
     out: list[Any] = []
@@ -204,7 +237,7 @@ def _restore_blocks(messages: list[Any]) -> tuple[list[Any], int]:
         new_parts: list[Any] = []
         for part in parts:
             _bare_part, had = _bare(part)
-            sent = None if had else _sent_with_block.get(_digest(part))
+            sent = None if had else memory.get(memory.sent_with_block, _digest(part))
             if sent is not None:
                 new_parts.append(sent)
                 changed = True
@@ -215,7 +248,7 @@ def _restore_blocks(messages: list[Any]) -> tuple[list[Any], int]:
             and new_parts
             and not _list_tail_block({"content": new_parts})
         ):
-            tail = _sent_with_block.get(_digest(("after", new_parts[-1])))
+            tail = memory.get(memory.sent_with_block, _digest(("after", new_parts[-1])))
             if tail is not None:
                 new_parts.append(tail)
                 changed = True
@@ -230,7 +263,9 @@ def _restore_blocks(messages: list[Any]) -> tuple[list[Any], int]:
 # ── Thinking blocks ───────────────────────────────────────────────────────
 
 
-def _drop_stale_thinking(payload: dict[str, Any], messages: list[Any]) -> tuple[list[Any], int]:
+def _drop_stale_thinking(
+    memory: Memory, payload: dict[str, Any], messages: list[Any]
+) -> tuple[list[Any], int]:
     """``messages`` without the first stale thinking block and every one after it."""
     out: list[Any] = []
     dropping = False
@@ -245,8 +280,7 @@ def _drop_stale_thinking(payload: dict[str, Any], messages: list[Any]) -> tuple[
         if thinking and not dropping:
             prefix = _prefix_digest(payload, out)
             for block in thinking:
-                with _lock:
-                    produced = _produced_after.get(_signature_key(block))
+                produced = memory.get(memory.produced_after, _signature_key(block))
                 if produced is not None and produced != prefix:
                     dropping = True
                     break
@@ -261,7 +295,7 @@ def _drop_stale_thinking(payload: dict[str, Any], messages: list[Any]) -> tuple[
     return out, dropped
 
 
-def prepared(payload: dict[str, Any]) -> dict[str, Any]:
+def prepared(payload: dict[str, Any], memory: Memory) -> dict[str, Any]:
     """The request ``payload`` with its history kept valid for the thinking blocks it replays.
 
     Run-state blocks put back where they were sent, stale thinking blocks
@@ -273,9 +307,9 @@ def prepared(payload: dict[str, Any]) -> dict[str, Any]:
         messages = payload.get("messages")
         if not isinstance(messages, list):
             return payload
-        messages, restored = _restore_blocks(messages)
-        messages, dropped = _drop_stale_thinking(payload, messages)
-        _note_blocks_sent(messages)
+        messages, restored = _restore_blocks(memory, messages)
+        messages, dropped = _drop_stale_thinking(memory, payload, messages)
+        _note_blocks_sent(memory, messages)
         if restored or dropped:
             payload = {**payload, "messages": messages}
         if restored:
@@ -304,7 +338,7 @@ def prepared(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def note_answer(result: Any, prefix: str) -> None:
+def note_answer(result: Any, prefix: str, memory: Memory) -> None:
     """Remember each thinking block an answer carries with the prefix it was written after."""
     if not prefix:
         return
@@ -318,7 +352,7 @@ def note_answer(result: Any, prefix: str) -> None:
                 if isinstance(block, dict) and block.get("type") in _THINKING_KINDS:
                     key = _signature_key(block)
                     if key:
-                        _remember(_produced_after, key, prefix)
+                        memory.remember(memory.produced_after, key, prefix)
     except Exception as exc:  # noqa: BLE001 — an answer not remembered is one not checked
         logger.debug("anthropic provider: thinking blocks not noted (%s).", exc)
 
@@ -342,7 +376,7 @@ def with_preserved_thinking(chat_class: Any) -> Any:
 
     def _get_request_payload(self: Any, input_: Any, *, stop: Any = None, **kwargs: Any) -> Any:
         payload = base._get_request_payload(self, input_, stop=stop, **kwargs)
-        return prepared(payload) if isinstance(payload, dict) else payload
+        return prepared(payload, memory_of(self)) if isinstance(payload, dict) else payload
 
     def _generate_with_cache(self: Any, *args: Any, **kwargs: Any) -> Any:
         holder: list[str] = []
@@ -351,7 +385,7 @@ def with_preserved_thinking(chat_class: Any) -> Any:
             result = base._generate_with_cache(self, *args, **kwargs)
         finally:
             _PENDING.reset(token)
-        note_answer(result, holder[0] if holder else "")
+        note_answer(result, holder[0] if holder else "", memory_of(self))
         return result
 
     async def _agenerate_with_cache(self: Any, *args: Any, **kwargs: Any) -> Any:
@@ -361,7 +395,7 @@ def with_preserved_thinking(chat_class: Any) -> Any:
             result = await base._agenerate_with_cache(self, *args, **kwargs)
         finally:
             _PENDING.reset(token)
-        note_answer(result, holder[0] if holder else "")
+        note_answer(result, holder[0] if holder else "", memory_of(self))
         return result
 
     preserved = type(

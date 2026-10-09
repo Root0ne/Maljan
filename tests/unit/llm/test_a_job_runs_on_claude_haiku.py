@@ -34,7 +34,6 @@ from pydantic import BaseModel
 from maljan.agents.base_agent import BaseAnalyst
 from maljan.core.config import Settings
 from maljan.core.token_ledger import turn_usage
-from maljan.llm import anthropic_history
 from maljan.llm.anthropic_provider import AnthropicProvider
 
 from .anthropic_wire import MODEL, Wire, install, message
@@ -118,13 +117,6 @@ def _settings(**anthropic: Any) -> Settings:
             },
         },
     )
-
-
-@pytest.fixture(autouse=True)
-def _fresh() -> Any:
-    anthropic_history.forget()
-    yield
-    anthropic_history.forget()
 
 
 def _no_sampling(body: dict[str, Any]) -> None:
