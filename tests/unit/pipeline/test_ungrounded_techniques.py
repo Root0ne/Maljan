@@ -379,7 +379,7 @@ class TestWhatTheJudgeIsTold:
         assert ungrounded_technique_note(None) == ""
         assert ungrounded_technique_note({"static": [{"code": "isr.empty_evidence"}]}) == ""
 
-    def test_the_judge_node_folds_it_into_the_degradation_reasons(self) -> None:
+    def test_the_judge_node_reads_it_from_the_validation_findings(self) -> None:
         import inspect
 
         from maljan.pipeline import nodes

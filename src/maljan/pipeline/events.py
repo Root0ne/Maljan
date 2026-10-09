@@ -366,6 +366,10 @@ def claims_to_payload(claims: Any, limit: int = 12) -> list[dict[str, Any]]:
                     "technique_id": getattr(claim, "technique_id", None),
                 }
             )
+            # The heading's note, where the debate is read; only when there is one.
+            note = getattr(claim, "heading_note", None)
+            if note:
+                out[-1]["heading_note"] = marked_cut(str(note), 300)
         except Exception:  # noqa: BLE001 — one malformed claim must not drop the rest
             continue
     return out

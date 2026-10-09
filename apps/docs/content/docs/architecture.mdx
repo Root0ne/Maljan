@@ -1888,10 +1888,20 @@ not a claim either: it is counted and asked about
 (`isr.claim_without_confidence`), where the parsers used to write 0.5.
 Every path that reads claims reads them through one reader,
 `base_agent.read_claim_blocks`: it splits an answer at every claim heading
-(`CLAIM:`, `CLAIM 3:`, `**CLAIM 4 (REVISED):**`, `CLAIM 5 -`; the rule is
+(`CLAIM:`, `CLAIM 3:`, `**CLAIM 4 (REVISED):**`, `CLAIM 2 [REVISED — retracts
+claim 5]:`, `CLAIM 5 -`, and a heading whose round- or square-bracketed note is
+its whole line, its fields on the lines after it; the rule is
 `agents/claim_headings.py`) where a block can begin, and at the model's own
 `---` lines, so claims written one after another with blank lines between them
-are each read. The static, dynamic and network analysts read it with an
+are each read. A note written before a heading's delimiter is the model's own
+words on what the claim is to the debate (a revision, a retraction): it is kept
+verbatim, brackets and all, in the claim's `heading_note` (left out of a claim
+that has none), shown in the judge's listing of the analyst's claims and in the
+claim events, and never put in the claim's sentence, which every check and the
+published report and STIX read as before. A heading that is its note alone has
+that note as its sentence, and its block's key in the repeated-claims check
+starts with it. The heading's number is never part of the claim, and no number
+is given to a heading without one. The static, dynamic and network analysts read it with an
 EVIDENCE line required; the base analyst's path records a block without one as
 unsourced. Each read counts the claim headings the answer began before its
 DISPUTES section against the claims it read and the blocks that stated no
@@ -1952,7 +1962,12 @@ and a failed required tool still degrade the run. The judge's RUN QUALITY
 paragraph (`nodes.run_quality_note`) says a run that is not degraded is not,
 and adds only the sentences that fit its limitations: that a missing tool is an
 absence of evidence when a reason other than such a note is listed, and that a
-note on part of an answer leaves the claims it read standing when one is. A TECHNIQUE line is one
+note on part of an answer leaves the claims it read standing when one is. The
+techniques an analyst kept citing no evidence (`isr.ungrounded_technique`) are
+stated in the same paragraph as a fact about claims, after the run's own
+reasons, and are not a degradation reason: they say nothing about what the run
+could examine, the judge's technique question decides each, and the
+validation findings list each claim. A TECHNIQUE line is one
 id, a list of ids separated by commas, "and" or slashes (read as one claim per id, each
 with the claim's sentence, evidence and confidence, and each checked as a
 technique), or `NONE` or a dash for none; a closing block separator (`· ---`)

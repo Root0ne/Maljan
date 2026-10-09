@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 from maljan.agents.claim_headings import (
     LINE_PREFIX,
-    claims_headed,
+    claims_headed_with_notes,
     count_claims_after_disputes,
     count_claims_begun,
 )
@@ -1518,6 +1518,34 @@ _BLOCK_TECHNIQUE_LINE_RE = re.compile(
 )
 
 
+def _blocks_with_notes(
+    headed: str, notes: Sequence[tuple[int, str | None]]
+) -> list[tuple[str, str | None]]:
+    """The blocks ``_BLOCK_SPLIT_RE`` splits ``headed`` into, each with its heading's note.
+
+    The blocks are the ones ``_BLOCK_SPLIT_RE.split`` gives. A heading's
+    ``CLAIM:`` line opens the block it starts in, after the ``---`` written
+    before it, so the block holding a heading's offset is that heading's.
+    """
+    spans: list[tuple[int, int]] = []
+    start = 0
+    for match in _BLOCK_SPLIT_RE.finditer(headed):
+        spans.append((start, match.start()))
+        start = match.end()
+    spans.append((start, len(headed)))
+    out: list[tuple[str, str | None]] = []
+    pending = iter(notes)
+    upcoming = next(pending, None)
+    for begin, end in spans:
+        note: str | None = None
+        while upcoming is not None and upcoming[0] < end:
+            if upcoming[0] >= begin:
+                note = upcoming[1]
+            upcoming = next(pending, None)
+        out.append((headed[begin:end], note))
+    return out
+
+
 def _field_tail(block: str) -> str:
     """The part of a block its fields are read from: from the first line-start label on."""
     start = _TAIL_START_RE.search(block)
@@ -1860,7 +1888,8 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
     # that sat between ``CLAIM:`` and ``EVIDENCE:`` would leave the claim
     # marker with nothing after it, and the next line would slide up into the
     # claim. A block whose claim is nothing but scaffolding is dropped below.
-    for raw_block in _BLOCK_SPLIT_RE.split(claims_headed(text or "")):
+    headed, notes = claims_headed_with_notes(text or "")
+    for raw_block, note in _blocks_with_notes(headed, notes):
         block = raw_block.strip()
         if not block or "CLAIM:" not in block:
             continue
@@ -1914,6 +1943,7 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
                 confidence=confidence,
                 technique_id=technique_id,
                 technique_line=technique_line,
+                heading_note=note,
             )
             # The block it was read from, so blocks are counted as written.
             read_claim.note_block(blocks_read)
