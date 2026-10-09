@@ -1256,6 +1256,23 @@ def nudge_turns(msgs: list) -> tuple[list, bool]:
     return out, changed
 
 
+def _drained_ids_of(agent: Any) -> list[str] | None:
+    """The ids ``agent`` handed over at this job's earlier drains, emptied when the job changed.
+
+    ``None`` for an agent that keeps no such list (a duck-typed one borrowing a
+    method), which then cites what it always could.
+    """
+    held = getattr(agent, "_drained_ids", None)
+    if not isinstance(held, list):
+        return None
+    job_key = getattr(agent, "_job_key", None)
+    job = str(job_key()) if callable(job_key) else ""
+    if getattr(agent, "_drained_ids_job", "") != job:
+        agent._drained_ids_job = job
+        held.clear()
+    return held
+
+
 def _flagged_blocks(isr: AgentISR, indexes: Sequence[int]) -> int:
     """How many claim blocks of ``isr`` the claims at ``indexes`` are in, each block once."""
     blocks = claim_block_indexes(isr.claims)
@@ -3353,6 +3370,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         # once at the end. The node drains it — reading without clearing is how
         # a revision that made no calls re-emits the analysis round's.
         self._evidence_entries: list[LedgerEntry] = []
+        # The ids of the entries this agent handed over at earlier drains of
+        # the job named by ``_drained_ids_job``: a revision cites the entries
+        # its own earlier rounds produced, and the drain that wrote them to the
+        # job's ledger leaves only their ids here. Dropped when the job changes.
+        self._drained_ids_job = ""
+        self._drained_ids: list[str] = []
         # The calls the earlier chunks of a chunked analysis made, set while a
         # later chunk's loop runs: its repeat guard is seeded with them.
         self._prior_chunk_calls: list[LedgerEntry] = []
@@ -5692,6 +5715,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         entries = self._evidence_entries
         self._evidence_entries = []
+        # The ids stay with the agent: the entries are the job's ledger's now,
+        # and a later round of this agent may still cite them.
+        held = _drained_ids_of(self)
+        if held is not None:
+            held.extend(str(entry.id) for entry in entries if getattr(entry, "id", ""))
         return entries
 
     def get_last_tool_evidence(self) -> list[CapturedToolOutput]:
@@ -6737,14 +6765,21 @@ class BaseAnalyst(BudgetMeter, ABC):
             return isr
 
         # What this analyst may cite: its own ledger as it stands when the
-        # answer is checked, and the triage pack's entries, which every agent
-        # was shown. It decides whether a technique claim that cites nothing
-        # is a violation: an analyst with neither has nothing to cite.
+        # answer is checked, the entries its own earlier rounds of this job
+        # produced (handed to the job's ledger at their drain, and a revision
+        # still rests on them), and the triage pack's entries, which every
+        # agent was shown. Another analyst's entries are not among them. It
+        # decides whether a technique claim that cites nothing is a violation:
+        # an analyst with none has nothing to cite.
         ledger_ids = [
             str(getattr(entry, "id", ""))
             for entry in (getattr(self, "_evidence_entries", None) or [])
             if getattr(entry, "id", "")
         ]
+        current = set(ledger_ids)
+        ledger_ids.extend(
+            dict.fromkeys(i for i in (_drained_ids_of(self) or []) if i not in current)
+        )
         ledger_ids.extend(
             str(i) for i in (getattr(self, "pack_ledger_ids", None) or []) if str(i).strip()
         )
