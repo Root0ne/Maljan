@@ -137,7 +137,7 @@ class TestTheAnthropicMessagesApi:
         system = [
             {
                 "type": "text",
-                "text": "The standing rules of the analysis. " * 400,
+                "text": "The standing rules of the analysis. " * 600,
                 "cache_control": {"type": "ephemeral", "ttl": "1h"},
             }
         ]
@@ -155,6 +155,28 @@ class TestTheAnthropicMessagesApi:
         assert first.usage.cache_read_input_tokens == 0
         assert second.usage.cache_read_input_tokens == first.usage.cache_creation_input_tokens
         assert second.usage.cache_creation_input_tokens == 0
+
+    @pytest.mark.parametrize(("model", "cached"), [(HAIKU, False), ("claude-sonnet-4-5", True)])
+    def test_a_prefix_shorter_than_the_model_s_minimum_is_not_cached(
+        self, model: str, cached: bool
+    ) -> None:
+        system = [
+            {
+                "type": "text",
+                "text": "Rules. " * 1200,  # about 2,100 tokens: past 1,024, short of 4,096
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        server, _ = _stub(wire.Reply(text="ok"))
+        try:
+            client = _anthropic(server)
+            client.messages.create(model=model, max_tokens=10, system=system, messages=USER)
+            second = client.messages.create(
+                model=model, max_tokens=10, system=system, messages=USER
+            )
+        finally:
+            server.stop()
+        assert (second.usage.cache_read_input_tokens > 0) is cached
 
     def test_a_thinking_block_replayed_whole_is_taken_and_a_changed_one_refused(self) -> None:
         import anthropic

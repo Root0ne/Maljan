@@ -33,6 +33,25 @@ _DESCRIPTIONS = _HERE / "model_descriptions"
 DEFAULT_WINDOW = 200_000
 DEFAULT_OUTPUT = 64_000
 
+# The shortest prompt prefix each family caches, in tokens, longest prefix
+# first, from the vendors' own pages: Anthropic's prompt-caching page
+# (https://platform.claude.com/docs/en/build-with-claude/prompt-caching,
+# "Cache limitations") gives 4,096 for Claude Opus 4.5 and Haiku 4.5, 2,048
+# for the Haiku 3 family and 1,024 for the other Claude models; DeepSeek's
+# context-caching page caches in 64-token units; OpenAI's caches from 1,024.
+# Claude Haiku 5.5's figure is in neither the page as recorded nor its stored
+# Models API answer; it is taken as its line's latest documented one, 4,096.
+MIN_CACHEABLE: dict[str, int] = {
+    "claude-haiku-5": 4096,
+    "claude-haiku-4-5": 4096,
+    "claude-opus-4-5": 4096,
+    "claude-3-haiku": 2048,
+    "claude-3-5-haiku": 2048,
+    "claude-": 1024,
+    "deepseek": 64,
+    "": 1024,
+}
+
 
 @dataclass
 class ModelFacts:
@@ -45,6 +64,7 @@ class ModelFacts:
     fixed_sampling: bool = False
     prefix_bound: bool = False
     slots: int = 1
+    min_cacheable: int = 1024
     # Effort levels the description says the model takes; ``None`` states nothing.
     effort_levels: tuple[str, ...] | None = None
     thinking_types: dict[str, bool] = field(default_factory=dict)
@@ -82,6 +102,9 @@ def facts_for(model: str, *, window: int | None = None, slots: int = 1) -> Model
     name = str(model or "").strip().lower()
     table = _table()
     facts = ModelFacts(id=name, slots=slots)
+    facts.min_cacheable = MIN_CACHEABLE[
+        max((k for k in MIN_CACHEABLE if name.startswith(k)), key=len)
+    ]
     windows = table.get("windows") or {}
     key = _longest_prefix(name, windows)
     if key:

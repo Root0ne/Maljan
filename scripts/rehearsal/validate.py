@@ -42,8 +42,6 @@ from scripts.rehearsal.models import ModelFacts
 
 BINDING_BETA = "thinking-binding-controls-2026-08-01"
 MAX_BREAKPOINTS = 4
-# The shortest prefix a cache entry is written for, in tokens.
-MIN_CACHEABLE = 1024
 _SAMPLING = ("temperature", "top_p", "top_k")
 
 
@@ -354,7 +352,9 @@ class PromptCache:
     _held: dict[str, str] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
-    def anthropic(self, body: dict[str, Any], output_tokens: int, reasoning: int) -> wire.Usage:
+    def anthropic(
+        self, body: dict[str, Any], output_tokens: int, reasoning: int, floor: int = 1024
+    ) -> wire.Usage:
         """Reads at the longest cached breakpoint; writes up to the last breakpoint."""
         total = wire.tokens_of(json.dumps(_trimmed(body), ensure_ascii=False, sort_keys=True))
         read = written = 0
@@ -374,10 +374,10 @@ class PromptCache:
                     break
             if prefixes:
                 last = _size(prefixes[-1][1])
-                if last >= MIN_CACHEABLE and prefixes[-1][0] not in self._held:
+                if last >= floor and prefixes[-1][0] not in self._held:
                     written = max(0, last - read)
                 for digest, prefix in prefixes:
-                    if _size(prefix) >= MIN_CACHEABLE:
+                    if _size(prefix) >= floor:
                         self._held[digest] = lifetime
         read = min(read, total)
         written = min(written, total - read)
@@ -390,7 +390,9 @@ class PromptCache:
             reasoning_tokens=reasoning,
         )
 
-    def openai(self, body: dict[str, Any], output_tokens: int, reasoning: int) -> wire.Usage:
+    def openai(
+        self, body: dict[str, Any], output_tokens: int, reasoning: int, floor: int = 1024
+    ) -> wire.Usage:
         """Automatic caching: the longest earlier prefix at a message boundary is read."""
         messages = list(body.get("messages") or [])
         head = {"tools": body.get("tools")}
@@ -406,7 +408,7 @@ class PromptCache:
                     read = min(total, _size(prefix))
                     break
             for digest, prefix in digests:
-                if _size(prefix) >= MIN_CACHEABLE:
+                if _size(prefix) >= floor:
                     self._held[digest] = "auto"
         return wire.Usage(
             input_tokens=total - read,

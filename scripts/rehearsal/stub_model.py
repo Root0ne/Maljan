@@ -187,9 +187,13 @@ def build_app(state: StubState) -> Any:
             reply.redacted_data = state.signer.redacted(prefix) if reply.redacted else ""
             if reply.thinking or reply.redacted:
                 state.signer.thought_tool_ids.update(c.id for c in wire.calls_with_ids(reply))
-            usage = state.cache.anthropic(body, reply.output_tokens, reply.thinking_tokens)
+            usage = state.cache.anthropic(
+                body, reply.output_tokens, reply.thinking_tokens, facts.min_cacheable
+            )
         else:
-            usage = state.cache.openai(body, reply.output_tokens, reply.thinking_tokens)
+            usage = state.cache.openai(
+                body, reply.output_tokens, reply.thinking_tokens, facts.min_cacheable
+            )
         entry.update(
             status=200,
             stop=reply.stop_reason(),
