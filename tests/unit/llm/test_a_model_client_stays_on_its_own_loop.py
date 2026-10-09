@@ -470,6 +470,21 @@ class TestTheGeminiModel:
         assert server.requests == 3  # type: ignore[attr-defined]
 
 
+def test_the_loop_bound_client_refuses_an_attribute_write(server: ThreadingHTTPServer) -> None:
+    import httpx2
+
+    from maljan.llm.loop_clients import loop_bound_async_client
+
+    client = loop_bound_async_client(lambda: httpx2.AsyncClient(base_url=_url(server)))
+    with pytest.raises(AttributeError, match="read-only"):
+        client.timeout = 5.0
+    with pytest.raises(AttributeError, match="read-only"):
+        client.headers = {"x-other": "1"}
+    # What a read returns is the template's own, so mutating it reaches requests.
+    client.headers["x-added"] = "1"
+    assert client.build_request("GET", "/").headers["x-added"] == "1"
+
+
 def test_a_gemini_client_laid_out_otherwise_is_named_in_one_warning(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

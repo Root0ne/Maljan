@@ -174,6 +174,18 @@ def _routing_class(base: type) -> type:
                 raise AttributeError(name)
             return getattr(self._loop_bound_template, name)
 
+        def __setattr__(self: Any, name: str, value: Any) -> None:
+            # Read-only past its own slots: a write here would reach neither
+            # the template every request is built on nor the per-loop clients,
+            # and be ignored without a word. Mutating what a read returns (the
+            # template's headers, its cookie jar) reaches every request.
+            if not name.startswith("_loop_bound_"):
+                raise AttributeError(
+                    f"{type(self).__name__} is read-only: {name!r} is set on the client "
+                    "it was built from, before it is made loop-bound"
+                )
+            object.__setattr__(self, name, value)
+
         def build_request(self: Any, *args: Any, **kwargs: Any) -> Any:
             return self._loop_bound_template.build_request(*args, **kwargs)
 
@@ -200,6 +212,7 @@ def _routing_class(base: type) -> type:
             (base,),
             {
                 "__getattr__": __getattr__,
+                "__setattr__": __setattr__,
                 "build_request": build_request,
                 "send": send,
                 "is_closed": property(is_closed),
@@ -236,7 +249,8 @@ def loop_bound_async_client(build: Callable[[], Any], *, template: Any = None) -
     once for the client every request is built on (unless ``template`` is that
     client already) and once per event loop the result sends on. The result is
     an instance of the same flavour's ``AsyncClient``, so an SDK that checks
-    for one takes it, and SDKs only build, send and close through it.
+    for one takes it, and SDKs only build, send and close through it. It is
+    read-only: setting an attribute on it raises ``AttributeError``.
     """
     template = build() if template is None else template
     routing = _routing_class(_client_base(template))
