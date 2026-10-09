@@ -682,8 +682,35 @@ class TestAnEntrysOwnEffort:
 
         refusals = await unprobed_models(_Db(rows), self._entry_settings(effort="high"), ["static"])
 
-        assert refusals and NEVER_PROBED in refusals[0]
-        assert "names model 'ds'" in refusals[0]
+        assert refusals == [
+            f"agent 'static' names model 'ds' at effort 'high' at http://box:8080: {NEVER_PROBED}"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_an_entry_without_one_is_refused_in_the_words_it_was_before(self) -> None:
+        refusals = await unprobed_models(_Db([]), self._entry_settings(), ["static"])
+
+        assert refusals == [f"agent 'static' names model 'ds' at http://box:8080: {NEVER_PROBED}"]
+
+    @pytest.mark.asyncio
+    async def test_a_fallback_s_effort_is_named_in_its_refusal(self) -> None:
+        settings = _settings(
+            provider="openai",
+            agents={
+                "static": {
+                    **self.ENTRY,
+                    "fallbacks": [{**self.ENTRY, "model": "pro", "effort": "low"}],
+                }
+            },
+        )
+        rows = [_Row("http://box:8080/v1", "ds", True, "ok")]
+
+        refusals = await unprobed_models(_Db(rows), settings, ["static"])
+
+        assert refusals == [
+            f"agent 'static' falls back to model 'pro' at effort 'low' at http://box:8080: "
+            f"{NEVER_PROBED}"
+        ]
 
     @pytest.mark.asyncio
     async def test_a_row_taken_at_the_entry_s_effort_counts(self) -> None:

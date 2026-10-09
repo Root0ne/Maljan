@@ -121,8 +121,12 @@ def _sentence(assignment: ModelAssignment, detail: str) -> str:
     # A fallback is gated exactly as the first model is, and the sentence
     # says which one it is, so an operator knows which entry of the list to fix.
     names = "falls back to" if getattr(assignment, "position", 0) else "names"
+    # An entry's own effort is part of what was looked for, so a passing probe
+    # of the same model at another effort does not read as a contradiction.
+    effort = getattr(assignment, "effort", None)
+    at_effort = f" at effort {effort!r}" if effort else ""
     return (
-        f"agent {assignment.agent!r} {names} model {assignment.model!r} at "
+        f"agent {assignment.agent!r} {names} model {assignment.model!r}{at_effort} at "
         f"{endpoint_label(assignment.endpoint)}: {detail}"
     )
 
