@@ -112,10 +112,27 @@ class TestThePartialReport:
         in_progress.degradation_reasons = []
         in_progress.intro_background = "the introduction the composer wrote"
         container.report_in_progress = in_progress
+        in_progress.executive_summary = "the narrative's summary"
+        container.report_in_progress = in_progress
         kept = partial_report(_state(final_decision="Malware"), container, note=NOTE)
         assert kept is not None
         assert kept["intro_background"] == "the introduction the composer wrote"
         assert kept["degradation_reasons"] == [NOTE]
+
+    def test_a_report_stopped_inside_the_narrative_says_the_run_stopped(
+        self, container: ServiceContainer
+    ) -> None:
+        held = MalwareReport.model_validate(partial_report(_state(), container, note=NOTE))
+        held.degradation_reasons = []
+        held.verdict_not_assessed = None
+        container.report_in_progress = held
+        kept = partial_report(_state(final_decision="Malware"), container, note=NOTE)
+        markdown = MarkdownRenderer().render(MalwareReport.model_validate(kept))
+        assert (
+            "No summary was written: the run was stopped before the report's narrative "
+            "round answered."
+        ) in markdown
+        assert "the report model wrote none" not in markdown
 
     def test_a_returned_report_is_kept_as_it_was(self, container: ServiceContainer) -> None:
         state = _state(malware_report={"verdict": "Benign", "degradation_reasons": ["x"]})

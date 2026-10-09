@@ -214,6 +214,7 @@ async def test_a_report_stopped_in_the_making_keeps_its_written_sections(
         self.container.report_in_progress = {
             "verdict": "Malware",
             "intro_background": "the introduction the composer wrote",
+            "executive_summary": "the narrative's summary",
             "degradation_reasons": [],
         }
         _spend(self)

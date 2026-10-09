@@ -324,6 +324,31 @@ def _deterministic_report(state: dict[str, Any], container: Any) -> dict[str, An
     return _report_dump(report)
 
 
+def _say_why_no_summary(report: dict[str, Any]) -> None:
+    """Record that the run stopped before the narrative answered, when it did.
+
+    The report node holds its report before the narrative round and again
+    after it. Held before, it has no summary and no reason for none, and the
+    renderer would say the report model wrote none — when the model was
+    stopped before it could answer. A summary written, or a reason already
+    recorded (the round ended without one), is left as it is.
+    """
+    from maljan.reporting.builder import NO_SUMMARY_REASON
+
+    reasons = report.get("degradation_reasons")
+    reasons = list(reasons) if isinstance(reasons, list) else []
+    if str(report.get("executive_summary") or "").strip():
+        return
+    if any(str(reason).startswith(NO_SUMMARY_REASON) for reason in reasons):
+        return
+    reasons.append(f"{NO_SUMMARY_REASON}: {NARRATIVE_STOPPED}")
+    report["degradation_reasons"] = reasons
+
+
+# Why a report taken from inside the report stage has no summary.
+NARRATIVE_STOPPED = "the run was stopped before the report's narrative round answered"
+
+
 def partial_report(state: dict[str, Any], container: Any, *, note: str) -> dict[str, Any] | None:
     """The stopped run's report, marked partial with ``note``, or ``None``.
 
@@ -336,6 +361,8 @@ def partial_report(state: dict[str, Any], container: Any, *, note: str) -> dict[
         report = dict(state["malware_report"])
     if report is None:
         report = _report_dump(getattr(container, "report_in_progress", None))
+        if report is not None:
+            _say_why_no_summary(report)
     if report is None:
         try:
             report = _deterministic_report(state, container)
