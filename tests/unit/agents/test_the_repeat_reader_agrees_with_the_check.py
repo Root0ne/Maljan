@@ -382,7 +382,7 @@ def test_the_automata_are_built_from_the_patterns_the_check_reads() -> None:
     prefix = "[ \\t>*_#]*(?:(?:[-+]|\\d+[.)])[ \\t]+)?[ \\t>*_#]*"
     assert claim_headings.LINE_PREFIX == prefix
     assert claim_headings.CLAIM_HEAD_RE.pattern == (
-        "^" + prefix + "CLAIM(?:[ \\t]*#?\\d+)?"
+        "^" + prefix + "CLAIM(?:[ \\t]*#?(?P<number>\\d+))?"
         "(?:[ \\t]*(?P<note>\\([^)\\n]*\\)|\\[[^\\]\\n]*\\]))?[ \\t]*(?:\\*\\*)?[ \\t]*"
         "(?:(?P<delim>:|\u2014|\u2013|-(?=\\s))[ \\t]*(?:\\*\\*)?[ \\t]*|(?(note)$|(?!)))"
     )

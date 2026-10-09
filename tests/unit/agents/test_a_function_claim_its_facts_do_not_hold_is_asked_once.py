@@ -161,7 +161,7 @@ class TestTheTurn:
         assert left.asked and '"SleepEx"' in left.message
 
     def test_a_withdrawal_stands_with_one_claim_block_fewer(self) -> None:
-        analyst = _Analyst([GUARD])
+        analyst = _Analyst(["WITHDRAW CLAIM 2: SleepEx is not among its function's facts."])
 
         result = _check(analyst)
 

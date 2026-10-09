@@ -30,7 +30,7 @@ LINE_PREFIX = r"[ \t>*_#]*(?:(?:[-+]|\d+[.)])[ \t]+)?[ \t>*_#]*"
 # bracket is closed on its own line or the line is no heading, and a bracket
 # that never closes is given up once, so a line costs time linear in its length.
 CLAIM_HEAD_RE = re.compile(
-    r"^" + LINE_PREFIX + r"CLAIM(?:[ \t]*#?\d+)?"
+    r"^" + LINE_PREFIX + r"CLAIM(?:[ \t]*#?(?P<number>\d+))?"
     r"(?:[ \t]*(?P<note>\([^)\n]*\)|\[[^\]\n]*\]))?[ \t]*(?:\*\*)?[ \t]*"
     r"(?:(?P<delim>:|—|–|-(?=\s))[ \t]*(?:\*\*)?[ \t]*|(?(note)$|(?!)))"
 )
@@ -41,6 +41,18 @@ def heading_sentence(line: str, heading: re.Match[str]) -> str:
     if heading.group("delim") is None:
         return heading.group("note") or ""
     return line[heading.end() :]
+
+
+def heading_number(heading: re.Match[str]) -> str | None:
+    """The number a heading writes after ``CLAIM`` (``CLAIM 7:``), leading zeros aside, or ``None``.
+
+    Kept as the digits written, never converted: the number names a claim, it
+    is not a quantity, and digits of any length compare as written.
+    """
+    digits = heading.groupdict().get("number")
+    if digits is None:
+        return None
+    return digits.lstrip("0") or "0"
 
 
 def heading_note(heading: re.Match[str]) -> str | None:
@@ -120,21 +132,23 @@ def claims_headed(text: str) -> str:
     return claims_headed_with_notes(text)[0]
 
 
-def claims_headed_with_notes(text: str) -> tuple[str, list[tuple[int, str | None]]]:
+def claims_headed_with_notes(
+    text: str,
+) -> tuple[str, list[tuple[int, str | None, str | None]]]:
     """:func:`claims_headed`, and where each heading's ``CLAIM:`` line starts with its note.
 
-    One ``(offset, note)`` per heading, in order: ``offset`` is where its
-    ``CLAIM:`` line starts in the text returned, and ``note`` is
-    :func:`heading_note`.
+    One ``(offset, note, number)`` per heading, in order: ``offset`` is where
+    its ``CLAIM:`` line starts in the text returned, ``note`` is
+    :func:`heading_note` and ``number`` is :func:`heading_number`.
     """
     out: list[str] = []
-    notes: list[tuple[int, str | None]] = []
+    notes: list[tuple[int, str | None, str | None]] = []
     at = 0
     for line in before_disputes(text).splitlines():
         heading = CLAIM_HEAD_RE.match(line)
         if heading is not None:
             written = "CLAIM: " + heading_sentence(line, heading)
-            notes.append((at + len("---\n"), heading_note(heading)))
+            notes.append((at + len("---\n"), heading_note(heading), heading_number(heading)))
             out.extend(["---", written])
             at += len("---\n") + len(written) + 1
             continue

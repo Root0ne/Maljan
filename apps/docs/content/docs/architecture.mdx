@@ -1000,7 +1000,8 @@ Two producers use it:
   read no claim), unless it was cut at the output cap, which is described
   rather than repeated. The analyst's closing line
   (`ANALYST_FEEDBACK_CLOSING`) names the block format the parser reads in place
-  of "the same format". The retry's text is logged at debug, and its claim
+  of "the same format"; when the retry is merged by claim number it asks for
+  the claims changed alone (`ANALYST_FEEDBACK_CLOSING_BY_NUMBER`, below). The retry's text is logged at debug, and its claim
   count beside the first answer's, with which one was kept, goes on the loop's
   budget record (`validation_retry`). A retry's findings block travels on the
   retry's own ISR: findings and artifacts follow the answer that is kept, and a
@@ -1594,6 +1595,40 @@ decides.
    and in the report's section 13 (`validation.retry_drop_row`): every value
    masked as model text in the record is, in the case the claim wrote it,
    and the sentence defanged after the mask.
+   **A retry changes only what it writes** (`pipeline.retry_merge`). When the
+   answer being fixed numbers each claim block by its place in it (written
+   `CLAIM 3:` or unnumbered, counted from 1; `retry_merge.numbering_unsettled`)
+   and no whole answer is asked for (a cut or repeating answer, a chunk's cut),
+   the retry is asked to write again only the claims it changes, under their
+   numbers, a new claim under a number the answer did not use, `WITHDRAW CLAIM
+   <number>: <reason>` to take one out, and its findings block with only the
+   findings it changes or adds, `WITHDRAW FINDING: <title>` taking one out
+   (`ANALYST_FEEDBACK_CLOSING_BY_NUMBER`). The retry is then merged into the
+   answer by claim number (`retry_merge.merge_retry`): a block written again
+   replaces the block of that number, every claim its TECHNIQUE line reads at
+   once; a withdrawn one is out; a new number is added after the answer's
+   claims; every other claim, flagged or not, stays as written, and a finding
+   is replaced, withdrawn, added or kept by its title the same way. The number
+   is the identity because it is what the code tracks of a claim across both
+   answers: the block the reader read it from (`ClaimEvidence.block`), the
+   number its heading wrote (`ClaimEvidence.number`), the "claim N" the
+   platform's questions name, and the claim a flag's path names. The merge
+   chooses which version of each claim stands and writes no word. A claim the
+   question was about (by its flag's path) that the retry neither wrote again
+   nor withdrew stays as written and is the one item put to the analyst, in
+   one question (`validation.retry_unplaced_question`) read and recorded in
+   `run_summary.validation.retry_drops` as above; a claim nobody asked about
+   that the retry does not mention is no drop. Where the numbers do not
+   decide which claim is which, nothing is merged and the retry is read as the
+   analyst's whole answer, with the kept-retry question as before: a retry
+   block with no number or a number written twice, a block left unread, a
+   withdrawal of a number the answer has not or of one the retry also wrote,
+   a retry with nothing to read, a retry cut at the output cap, and a retry
+   that numbered its claims afresh, shown by a sentence written as written
+   under another number of the answer, or by a claim sharing none of the
+   values (`claim_drops.claim_values`) of the claim whose number it took.
+   The loop's record says which (`validation_retry.merge`: what the merge did,
+   or why it merged nothing).
    **A claim that does not describe its technique**
    (`attck.claim_does_not_describe`). A claim whose sentence shares no term
    with the technique it carries — no capability term listing the id, no word

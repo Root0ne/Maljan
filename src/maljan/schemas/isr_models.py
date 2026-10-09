@@ -162,6 +162,22 @@ class ClaimEvidence(BaseModel):
         """Record the ordinal of the block this claim was read from."""
         self._block = int(ordinal)
 
+    # The number the claim's heading wrote (``CLAIM 7:`` is ``"7"``), as
+    # digits, or ``None`` for a heading that wrote none and a claim built any
+    # other way (``claim_headings.heading_number``). Recorded where the claim
+    # is read, never serialised: a validation retry names the claims it
+    # changes by it (``pipeline.retry_merge``).
+    _number: str | None = PrivateAttr(default=None)
+
+    @property
+    def number(self) -> str | None:
+        """The number this claim's heading wrote, or ``None``."""
+        return self._number
+
+    def note_number(self, number: str | None) -> None:
+        """Record the number this claim's heading wrote."""
+        self._number = None if number is None else str(number)
+
 
 class Artifact(BaseModel):
     """One concrete thing an analyst established, in the shape it has.

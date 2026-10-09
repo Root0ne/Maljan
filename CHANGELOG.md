@@ -1091,6 +1091,7 @@ change landed on `main`.
 
 ### Changed
 
+- **An analyst's validation retry changes only the claims it writes, merged into the answer it fixes by claim number (`pipeline.retry_merge`).** Where the answer being fixed numbers each claim block by its place and no whole answer is asked for, the retry is asked for the claims it changes under their numbers, `WITHDRAW CLAIM <number>` and `WITHDRAW FINDING: <title>` lines, and new claims under new numbers; a block written again replaces its number's block, every other claim and finding stays as written and is no drop, and only a claim the question was about that the retry neither wrote again nor withdrew is put to the analyst once, recorded in `run_summary.validation.retry_drops` as before; where the numbers do not decide (a block without a number, a number written twice, an unread block, a retry cut at the cap, a sentence moved to another number or a claim sharing no value with the one it replaces) nothing is merged and the retry is read whole as before, with the reason on the loop's `validation_retry` record.
 - **Captures are read by Maljan's own pcap/pcapng reader (`maljan.analysis.capture_reader`) instead of the GPL-2.0 scapy**; `tests/unit/analysis/test_pcap_reader_parity.py` pins every answer against the old one and names each difference and its reason.
 - **The documentation site is built with Fumadocs.** The pages are MDX under
   `apps/docs/content/docs/` and the images under `apps/docs/public/assets/`;

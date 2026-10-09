@@ -52,6 +52,7 @@ from maljan.pipeline.events import (
     safe_finding_value,
     unparsed_answer_kept_sentence,
 )
+from maljan.pipeline.retry_merge import folded_title
 from maljan.schemas.evidence import answer_not_shown, entry_ids_in
 from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
 from maljan.schemas.stix_pattern import read_comparisons
@@ -98,6 +99,21 @@ ANALYST_FEEDBACK_CLOSING = (
     "separated by a line of three dashes (---), then your fenced maljan-findings block if "
     "your answer had one. Only CLAIM blocks are read as claims: a claim written another "
     "way, or left out, is not in the answer."
+)
+# The closing when the answer being fixed numbers each claim by its place in
+# it (``retry_merge.numbering_unsettled``): the retry changes only what it
+# writes, and is merged into that answer by claim number
+# (``retry_merge.merge_retry``).
+ANALYST_FEEDBACK_CLOSING_BY_NUMBER = (
+    "Fix them by writing again only the claims you change. Your claims are numbered in the "
+    "order you wrote them, counted from 1: write each claim you change under its number "
+    "(CLAIM 7:) as its own block of CLAIM, EVIDENCE:, CONFIDENCE: and TECHNIQUE: lines, the "
+    "blocks separated by a line of three dashes (---), and a new claim under a number your "
+    "answer did not use. A claim you do not write again stays in your answer as you wrote "
+    "it. To take a claim out, write a line WITHDRAW CLAIM <number>: <reason>. Your fenced "
+    "maljan-findings block is kept the same way by each finding's title: write it with only "
+    "the findings you change or add, and a line WITHDRAW FINDING: <title> takes one out. "
+    "Only CLAIM blocks are read as claims."
 )
 
 
@@ -8646,8 +8662,7 @@ class RetryDrops:
         return rows
 
 
-def _folded_title(value: Any) -> str:
-    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).split())
+_folded_title = folded_title
 
 
 def retry_drops(
@@ -8704,6 +8719,29 @@ def retry_drop_question(drops: RetryDrops) -> str:
     return (
         "Your retry stands as your answer, and it no longer states these items of your first "
         "answer:\n"
+        + "\n".join(lines)
+        + "\nFor each item, write one line: KEEP <label>: <reason> to keep it in your answer "
+        "as your first answer wrote it, or WITHDRAW <label>: <reason> to leave it out. Write "
+        "nothing else."
+    )
+
+
+def retry_unplaced_question(drops: RetryDrops) -> str:
+    """The one question about the claims a merged retry was asked to fix and left as they were.
+
+    Each claim is named with its number in the answer being fixed; the answer
+    is read as :func:`retry_drop_question`'s is (:func:`read_retry_drop_answers`).
+    """
+    lines = []
+    for label, _kind, item, _missing in drops.labelled():
+        block = getattr(item, "block", None)
+        number = f" {int(block) + 1}" if block is not None else ""
+        technique = str(getattr(item, "technique_id", "") or "")
+        on_line = f", TECHNIQUE {safe_finding_value(technique)}" if technique else ""
+        lines.append(f"{label}. CLAIM{number}: {safe_finding_value(item.claim)}{on_line}")
+    return (
+        "Your retry neither wrote again nor withdrew these claims you were asked to fix, so "
+        "they stand as your first answer wrote them:\n"
         + "\n".join(lines)
         + "\nFor each item, write one line: KEEP <label>: <reason> to keep it in your answer "
         "as your first answer wrote it, or WITHDRAW <label>: <reason> to leave it out. Write "

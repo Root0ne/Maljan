@@ -68,6 +68,12 @@ from maljan.pipeline.function_claims import (
     function_facts,
     listed_functions,
 )
+from maljan.pipeline.retry_merge import (
+    RetryMerge,
+    flagged_claim_indexes,
+    merge_retry,
+    read_withdrawals,
+)
 from maljan.pipeline.run_state import NO_LIMIT, NoLimit, budget_line
 from maljan.pipeline.turns import with_question
 from maljan.pipeline.validation import (
@@ -85,6 +91,7 @@ from maljan.pipeline.validation import (
     RETRY_DROPPED_CODE,
     VALIDITY_CODE,
     ClaimsRepeated,
+    RetryDrops,
     ValidationTally,
     Violation,
     analyst_cut_violation,
@@ -106,6 +113,7 @@ from maljan.pipeline.validation import (
     retry_drop_question,
     retry_drop_row,
     retry_drops,
+    retry_unplaced_question,
     retry_with_feedback_sync,
     undescribed_decompiles,
     unparsed_answer_rows,
@@ -1526,9 +1534,9 @@ _BLOCK_TECHNIQUE_LINE_RE = re.compile(
 
 
 def _blocks_with_notes(
-    headed: str, notes: Sequence[tuple[int, str | None]]
-) -> list[tuple[str, str | None]]:
-    """The blocks ``_BLOCK_SPLIT_RE`` splits ``headed`` into, each with its heading's note.
+    headed: str, notes: Sequence[tuple[int, str | None, str | None]]
+) -> list[tuple[str, str | None, str | None]]:
+    """The blocks ``_BLOCK_SPLIT_RE`` splits ``headed`` into, each with its heading's note and number.
 
     The blocks are the ones ``_BLOCK_SPLIT_RE.split`` gives. A heading's
     ``CLAIM:`` line opens the block it starts in, after the ``---`` written
@@ -1540,16 +1548,17 @@ def _blocks_with_notes(
         spans.append((start, match.start()))
         start = match.end()
     spans.append((start, len(headed)))
-    out: list[tuple[str, str | None]] = []
+    out: list[tuple[str, str | None, str | None]] = []
     pending = iter(notes)
     upcoming = next(pending, None)
     for begin, end in spans:
         note: str | None = None
+        number: str | None = None
         while upcoming is not None and upcoming[0] < end:
             if upcoming[0] >= begin:
-                note = upcoming[1]
+                note, number = upcoming[1], upcoming[2]
             upcoming = next(pending, None)
-        out.append((headed[begin:end], note))
+        out.append((headed[begin:end], note, number))
     return out
 
 
@@ -1896,7 +1905,7 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
     # marker with nothing after it, and the next line would slide up into the
     # claim. A block whose claim is nothing but scaffolding is dropped below.
     headed, notes = claims_headed_with_notes(text or "")
-    for raw_block, note in _blocks_with_notes(headed, notes):
+    for raw_block, note, number in _blocks_with_notes(headed, notes):
         block = raw_block.strip()
         if not block or "CLAIM:" not in block:
             continue
@@ -1952,8 +1961,10 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
                 technique_line=technique_line,
                 heading_note=note,
             )
-            # The block it was read from, so blocks are counted as written.
+            # The block it was read from, so blocks are counted as written,
+            # and the number its heading wrote, which names it to a retry.
             read_claim.note_block(blocks_read)
+            read_claim.note_number(number)
             claims.append(read_claim)
         blocks_read += 1
     return ClaimRead(
@@ -7241,13 +7252,23 @@ class BaseAnalyst(BudgetMeter, ABC):
         loop_cuts = cuts.get(id(isr)) or []
         # Measured with the turn that carries every question of this retry,
         # not the framed conversation alone: fourteen questions are not free.
+        from maljan.pipeline.retry_merge import numbering_unsettled
         from maljan.pipeline.validation import (
             ANALYST_FEEDBACK_CLOSING,
+            ANALYST_FEEDBACK_CLOSING_BY_NUMBER,
             feedback_text,
             gate_removed_note,
         )
 
-        closing = ANALYST_FEEDBACK_CLOSING
+        # A retry that is not asked for a whole answer changes only the claims
+        # it writes, by their numbers, when the answer it fixes numbers each
+        # claim by its place in it; otherwise it is the analyst's whole answer.
+        merge_why = (
+            "a whole answer was asked for"
+            if only_cut or loop_cuts or _repeated(isr) is not None
+            else numbering_unsettled(isr)
+        )
+        closing = ANALYST_FEEDBACK_CLOSING if merge_why else ANALYST_FEEDBACK_CLOSING_BY_NUMBER
         if isr.gate_removed and isr.answer_text:
             closing = f"{gate_removed_note(isr.gate_removed)}\n{closing}"
         sent = with_question(messages, feedback_text(initial, closing=closing))
@@ -7350,9 +7371,80 @@ class BaseAnalyst(BudgetMeter, ABC):
             ended_by[id(parsed)] = bool(getattr(self, "_last_answer_ended", False))
             self._last_answer_ended = False
             raw_answers[id(parsed)] = text
+            # Asked to write only what it changes, a retry that withdraws or
+            # writes findings and no claim block is that answer, not prose.
+            if not merge_why and not parsed.claims and parsed.unparsed_answer:
+                withdrawals = read_withdrawals(text)
+                if parsed.findings or withdrawals.claims or withdrawals.findings:
+                    parsed.note_parse(
+                        blocks_without_confidence=parsed.blocks_without_confidence,
+                        confidence_unreadable=parsed.confidence_unreadable,
+                    )
+                    parsed.status = None
+                    parsed.status_reason = None
             return parsed
 
+        # What the retry was asked about, as sent: the claims a merged retry
+        # was asked to fix are named by the flags' paths.
+        shown: list[Violation] = []
+
+        def _merged(first_answer: AgentISR, retried: AgentISR) -> RetryMerge | None:
+            """The retry merged into the answer it fixes, or ``None`` when it is not merged."""
+            if merge_why or retried is first_answer:
+                return None
+            if cuts.get(id(retried)):
+                return RetryMerge(why="the retry ended at the output cap")
+            return merge_retry(
+                first_answer,
+                retried,
+                raw_answers.get(id(retried), ""),
+                flagged=flagged_claim_indexes(shown),
+                asked_about=[v.subject for v in shown if v.subject],
+            )
+
         def _keep(first_answer: AgentISR, retried: AgentISR) -> AgentISR:
+            merge = _merged(first_answer, retried)
+            if merge is not None and merge.merged is not None:
+                self.logger.info(
+                    "Validation: the retry for '%s' is merged into its first answer by claim "
+                    "number: %d claim block(s) written again, %d withdrawn, %d added, %d "
+                    "unchanged; %d finding(s) written again, %d withdrawn, %d added.",
+                    self.name,
+                    len(merge.replaced),
+                    len(merge.withdrawn),
+                    len(merge.added),
+                    merge.unchanged,
+                    merge.findings_replaced,
+                    merge.findings_withdrawn,
+                    merge.findings_added,
+                )
+                BaseAnalyst._note_on_last_loop(  # type: ignore[arg-type]
+                    self,
+                    "validation_retry",
+                    {
+                        "first_claims": len(first_answer.claims),
+                        "retry_claims": len(retried.claims),
+                        "first_findings": len(first_answer.findings or []),
+                        "retry_findings": len(retried.findings or []),
+                        "kept": "merged",
+                        "merge": merge.record(),
+                    },
+                )
+                return BaseAnalyst._settle_unplaced_claims(  # type: ignore[arg-type]
+                    self,
+                    merge.merged,
+                    merge.unplaced,
+                    raw_answers.get(id(retried), ""),
+                    messages,
+                    left,
+                )
+            if merge is not None:
+                self.logger.info(
+                    "Validation: the retry for '%s' is not merged by claim number (%s); it is "
+                    "read as the analyst's whole answer.",
+                    self.name,
+                    merge.why,
+                )
             kept = _choose(first_answer, retried)
             self.logger.info(
                 "Validation: the retry for '%s' answered %d claim(s), the first answer %d; "
@@ -7374,6 +7466,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     "first_findings": len(first_answer.findings or []),
                     "retry_findings": len(retried.findings or []),
                     "kept": "retry" if kept is retried else "first",
+                    **({"merge": merge.record()} if merge is not None else {}),
                 },
             )
             if kept is first_answer and retried is not first_answer:
@@ -7545,12 +7638,17 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         try:
             tally = ValidationTally()
+
+            def _fed_back(violations: Sequence[Violation]) -> None:
+                shown.extend(violations)
+                tally.count(violations)
+
             revised, violations, retries = retry_with_feedback_sync(
                 _run,
                 messages,
                 [_validator],
                 parse=_parse,
-                on_feedback=tally.count,
+                on_feedback=_fed_back,
                 sink=self._event_sink(),
                 agent=str(self.name),
                 stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
@@ -7673,7 +7771,6 @@ class BaseAnalyst(BudgetMeter, ABC):
         drops = retry_drops(first_answer, retried, answer, asked_about, set_aside)
         if not drops:
             return retried
-        labelled = drops.labelled()
         self.logger.warning(
             "Validation: the kept retry for '%s' no longer states %d claim(s) and %d "
             "finding(s) of the first answer; asking once whether to keep each.",
@@ -7681,6 +7778,101 @@ class BaseAnalyst(BudgetMeter, ABC):
             len(drops.claims),
             len(drops.findings),
         )
+        said = (
+            f"The kept retry no longer states {len(drops.claims)} claim(s) and "
+            f"{len(drops.findings)} finding(s) of the first answer; each is named to the "
+            "analyst once, to keep or withdraw with a reason."
+        )
+        withdrawn = BaseAnalyst._ask_retry_drops(  # type: ignore[arg-type]
+            self,
+            drops,
+            retry_drop_question(drops),
+            said,
+            answer,
+            messages,
+            left,
+            int(retried.revision_round or 0),
+        )
+        restored_claims: list[ClaimEvidence] = []
+        restored_findings: list[Finding] = []
+        for _label, kind, item, _missing in drops.labelled():
+            if id(item) in withdrawn:
+                continue
+            if kind == "claim":
+                restored_claims.append(item)
+            else:
+                restored_findings.append(item)
+        if not restored_claims and not restored_findings:
+            return retried
+        return retried.model_copy(
+            update={
+                "claims": [*retried.claims, *restored_claims],
+                "findings": [*(retried.findings or []), *restored_findings],
+            }
+        )
+
+    def _settle_unplaced_claims(
+        self,
+        merged: AgentISR,
+        unplaced: Sequence[tuple[Any, tuple[str, ...]]],
+        answer: str,
+        messages: list[Any],
+        left: float | None,
+    ) -> AgentISR:
+        """The merged answer, with the claims the retry was asked to fix and left settled.
+
+        Each claim the retry was asked about that it neither wrote again nor
+        withdrew stands in the merged answer as first written; the analyst is
+        asked once whether to keep or withdraw each, and each it withdraws is
+        taken out. Every one is recorded with its state and the analyst's
+        reason (``validation.retry_drops``), as a kept retry's drops are.
+        """
+        drops = RetryDrops(claims=tuple(unplaced))
+        if not drops:
+            return merged
+        self.logger.warning(
+            "Validation: the merged retry for '%s' neither wrote again nor withdrew %d "
+            "claim(s) it was asked to fix; asking once whether to keep each.",
+            self.name,
+            len(drops.claims),
+        )
+        said = (
+            f"The retry neither wrote again nor withdrew {len(drops.claims)} claim(s) it was "
+            "asked to fix; each is named to the analyst once, to keep or withdraw with a reason."
+        )
+        withdrawn = BaseAnalyst._ask_retry_drops(  # type: ignore[arg-type]
+            self,
+            drops,
+            retry_unplaced_question(drops),
+            said,
+            answer,
+            messages,
+            left,
+            int(merged.revision_round or 0),
+        )
+        if not withdrawn:
+            return merged
+        return merged.model_copy(
+            update={"claims": [c for c in merged.claims if id(c) not in withdrawn]}
+        )
+
+    def _ask_retry_drops(
+        self,
+        drops: RetryDrops,
+        question: str,
+        said: str,
+        answer: str,
+        messages: list[Any],
+        left: float | None,
+        revision_round: int,
+    ) -> set[int]:
+        """Ask once about ``drops``, record every item, and return the ids of the items withdrawn.
+
+        The question follows the retry as the analyst wrote it. Each item is
+        recorded (``retry_drop_row``) as kept, withdrawn or not answered, with
+        the analyst's reason; an item not answered is not withdrawn.
+        """
+        labelled = drops.labelled()
         from maljan.pipeline.events import (
             VALIDATION_RESOLVED,
             VALIDATION_RETRIED,
@@ -7689,11 +7881,6 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
 
         stage = str(getattr(self, "pipeline_stage", "") or "analysis")
-        said = (
-            f"The kept retry no longer states {len(drops.claims)} claim(s) and "
-            f"{len(drops.findings)} finding(s) of the first answer; each is named to the "
-            "analyst once, to keep or withdraw with a reason."
-        )
         emit_validation_feedback(
             self._event_sink(),
             stage=stage,
@@ -7710,7 +7897,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             turns = [
                 *messages,
                 AIMessage(content=str(answer or "")),
-                HumanMessage(content=retry_drop_question(drops)),
+                HumanMessage(content=question),
             ]
             reply = self._invoke_llm_with_timeout(
                 frame_messages(turns, run_state=str(getattr(self, "run_state_block", "") or "")),
@@ -7743,21 +7930,17 @@ class BaseAnalyst(BudgetMeter, ABC):
         self.validation_fed_back[RETRY_DROPPED_CODE] = (
             self.validation_fed_back.get(RETRY_DROPPED_CODE, 0) + 1
         )
-        restored_claims: list[ClaimEvidence] = []
-        restored_findings: list[Finding] = []
+        withdrawn: set[int] = set()
         for label, kind, item, missing in labelled:
             decision, reason = decided.get(label, ("", ""))
             if decision == "WITHDRAW":
                 state = RETRY_DROP_WITHDRAWN
+                withdrawn.add(id(item))
             else:
                 state = RETRY_DROP_KEPT if decision == "KEEP" else RETRY_DROP_NOT_ANSWERED
-                if kind == "claim":
-                    restored_claims.append(item)
-                else:
-                    restored_findings.append(item)
             text = str(item.claim if kind == "claim" else item.title)
             row = retry_drop_row(
-                str(self.name), int(retried.revision_round or 0), kind, text, missing, state, reason
+                str(self.name), int(revision_round), kind, text, missing, state, reason
             )
             self.logger.info("%s", row["sentence"])
             kept_rows = getattr(self, "validation_unparsed_answers", None)
@@ -7765,14 +7948,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 kept_rows = []
                 self.validation_unparsed_answers = kept_rows
             kept_rows.append(row)
-        if not restored_claims and not restored_findings:
-            return retried
-        return retried.model_copy(
-            update={
-                "claims": [*retried.claims, *restored_claims],
-                "findings": [*(retried.findings or []), *restored_findings],
-            }
-        )
+        return withdrawn
 
     def _keep_discarded_retry(self, answer: str, revision_round: int, why: str) -> None:
         """Keep a retry answer the first answer was kept over, for the run record, once."""
