@@ -1081,7 +1081,14 @@ Appendix B prints it as `narrative:round`. The worker log prints one line per se
 section's wait ("Output budget of `composer:section`: 393216 tokens — the
 model's declared maximum output of 393216 (the vendored table's
 'deepseek-flash' row, from …)"). A fixed budget dropped a live report's
-section when the model's answer outgrew it.
+section when the model's answer outgrew it. The run summary keeps one
+`composer:section` row, the wait last sized: written one after another, that
+is the last section's, sized from the pace measured over the sections before
+it; written at once, every section is sized before any has answered, so the
+row is the last section's wait at the pace measured before the sections began
+(or a later re-sizing of a wait still running). The row describes the wait
+that section got; it is read off wall-clock rates and was never the same
+between two runs, and nothing in the report body reads it.
 
 So each of those calls waits `max(configured, derived)`. Where the model's reading rate is
 measured and the call gives its prompt size (a composer section, the verdict),
@@ -1840,6 +1847,53 @@ one node, because a parallel stage of two agents is two nodes), or the mode of
 the stages it revises. `run_summary.profile.analyst_mode` carries `mode`,
 `setting` and `reason`, and `stages`: `{stage, round, mode, from}` per
 analysis stage (`round: analysis`) and per debate (`round: revision`).
+
+The same key decides how the report composer writes its sections, asked of
+every model the reporter may call (its agent entry and fallbacks, or the
+global judge model). `false` writes them one after another. Otherwise each
+model serves what its server can: a hosted API every section at once, with no
+limit; a server whose `/props` reported its slot count that many at a time,
+whatever the key says (one slot is one after another); Ollama, a local server
+with no slot count, or a host that does not resolve, one after another. The
+smallest of them holds, since any model of the list may answer. A section
+waiting for a slot has not started its wait: its wait starts when it is
+served. Under a spend ceiling (`core.llm.max_spend_usd_per_job`) they are
+always written one after another: the meter holds each report call at what
+the calls before it left, and admits report calls one at a time. Either way
+each section is sent the request it would be
+sent on its own (no section reads another's answer), keeps its own retry and
+validation, and a section that fails or times out leaves the others running;
+the answers, their validation findings, the report's degradation sentences
+and its flagged sentences are applied in the sections' fixed order, so the
+report reads exactly as one written section by section. A section's wait is
+sized from the pace measured when it starts and, while sections run at once,
+sized again from the pace measured since before it ends, never shorter. On
+Claude, within each group of sections whose requests share one prefix, the
+first is sent alone and the rest of the group follow once its answer has
+begun, because Anthropic makes a cached prefix readable only from then on
+(see *The composer's shared head is cached once per shared prefix* below);
+every other section is sent at once. The report node logs which way it ran and why (`report_node: the
+composer's sections run at once: …`). The narrative round still runs before
+the sections: its answer sizes their waits where the reporter's pace was not
+measured earlier in the job.
+
+### The composer's shared head is cached once per shared prefix
+
+Every composer section's prompt opens with the same head: the run-state
+block, the triage pack and the techniques the report publishes. Anthropic
+caches a prefix in the order tools, system prompt, messages, so only requests
+identical up to the end of the head can share a cache entry. On the
+structured path, the default on the `anthropic` provider, each section sends
+its own answer schema as a tool: only the seven prose subsections, which
+answer with one schema, share a prefix. On the manual path (no tool) every
+section shares one. For each such group, the head is sent as its own text
+block with a cache breakpoint (`llm.anthropic.prompt_cache_ttl`) and the rest
+of the prompt as a second block; joined, the two are the prompt's text
+character for character. The group's first section writes the entry and the
+others read it. A section that shares its prefix with no other is sent as
+before, with no breakpoint, and pays no cache write. On DeepSeek and other OpenAI-compatible endpoints prefix
+caching is automatic and the request is unchanged: the head is already the
+same leading text on every section.
 
 A stored `true` or `false` (a JSON boolean) keeps its meaning. Stages used to
 be written with `sequential` whether or not anybody chose it; the database

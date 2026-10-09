@@ -19,12 +19,17 @@ no evidence, leave it empty — never invent** (the renderer states absence).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
-from collections.abc import Sequence
-from dataclasses import replace
+import time
+from collections.abc import Awaitable, Callable, Iterator, Sequence
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
+from dataclasses import field as dataclass_field
 from types import UnionType
 from typing import Any, Literal, Union, get_args, get_origin
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
@@ -43,6 +48,7 @@ from maljan.core.spend import (
     spend_release,
 )
 from maljan.core.token_ledger import structured_answer
+from maljan.llm.anthropic_history import SHARED_HEAD
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
     KEPT_WITH_A_FINDING,
@@ -637,6 +643,141 @@ def _reached_the_cap(answer: Any, cap: int) -> bool:
     return bool(cap > 0 and produced is not None and produced >= cap)
 
 
+# ---------------------------------------------------------------------------
+# Sections written at once
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _SectionRecord:
+    """What one section tells the report while the sections run at once, kept for its turn.
+
+    Its validation tally, its degradation sentences and its flagged sentences
+    are applied in the sections' fixed order (:meth:`ReportComposer._settle`),
+    so a report whose sections were written at once carries them exactly as a
+    report written section by section does.
+    """
+
+    tally: ValidationTally = dataclass_field(default_factory=ValidationTally)
+    # ``("degradation", sentence, True)`` or ``("flagged", violations, asked)``,
+    # in the order the section said them.
+    effects: list[tuple[str, Any, bool]] = dataclass_field(default_factory=list)
+
+
+# The record of the section a task writes; ``None`` writes straight to the
+# composer and the report, as a section written on its own does.
+_SECTION_RECORD: ContextVar[_SectionRecord | None] = ContextVar(
+    "maljan_composer_section", default=None
+)
+
+# What to call once the lead section's answer has begun; ``None`` outside the
+# lead section's task.
+_FIRST_PIECE: ContextVar[Callable[[], None] | None] = ContextVar(
+    "maljan_composer_first_piece", default=None
+)
+
+# The chat model types whose provider makes a cached prefix readable only once
+# an answer to the request that wrote it has begun: concurrent requests sent
+# before that each write the prefix again (Anthropic's prompt caching page,
+# https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+_CACHES_ONCE_ANSWERED = frozenset({"anthropic-chat"})
+
+
+@dataclass(frozen=True)
+class _Planned:
+    """One section of the report: what it is asked, and where its answer goes."""
+
+    section: str
+    schema: type[BaseModel]
+    instruction: str
+    validators: list[Validator] | None
+    # Puts the answer on the report; returns 1 when it authored the section.
+    apply: Callable[[BaseModel | None], int]
+
+
+class _FirstPiece(BaseCallbackHandler):
+    """Says that the lead section's answer has begun: its first streamed piece, or its end.
+
+    Attached to the reporter's models; silent in every call but the lead
+    section's, whose task names what to call (:func:`_on_first_piece`).
+    """
+
+    run_inline = True
+
+    def _said(self) -> None:
+        said = _FIRST_PIECE.get()
+        if said is not None:
+            said()
+
+    def on_llm_new_token(self, token: Any, **kwargs: Any) -> None:  # type: ignore[override]
+        self._said()
+
+    def on_llm_end(self, response: Any, **kwargs: Any) -> None:
+        self._said()
+
+    def on_llm_error(self, error: BaseException, **kwargs: Any) -> None:
+        self._said()
+
+
+@contextlib.contextmanager
+def _on_first_piece(begun: asyncio.Event) -> Iterator[None]:
+    """Within this block, the lead answer's first piece sets ``begun``, from any thread."""
+    loop = asyncio.get_running_loop()
+
+    def _said() -> None:
+        with contextlib.suppress(RuntimeError):  # a loop already closed has nobody waiting
+            loop.call_soon_threadsafe(begun.set)
+
+    token = _FIRST_PIECE.set(_said)
+    try:
+        yield
+    finally:
+        _FIRST_PIECE.reset(token)
+
+
+def _models_of(llm: Any) -> list[Any]:
+    """The models a reporter's list calls, or the one model it is."""
+    models = getattr(llm, "models", None)
+    return list(models) if isinstance(models, list) and models else [llm]
+
+
+def _caches_once_answered(llm: Any) -> bool:
+    """Whether a model the reporter calls caches a prefix only once an answer to it has begun."""
+    for model in _models_of(llm):
+        try:
+            kind = model._llm_type
+        except Exception:  # noqa: BLE001 — a model that names no type is not one of them
+            continue
+        if kind in _CACHES_ONCE_ANSWERED:
+            return True
+    return False
+
+
+def _listen_for_the_first_piece(llm: Any) -> bool:
+    """Attach :class:`_FirstPiece` to each model the reporter calls, once; whether all took it.
+
+    A model whose callbacks are a manager is given the listener as a handler.
+    Never raises: a model that takes none leaves its group to be released
+    when the lead section ends or fails.
+    """
+    from langchain_core.callbacks import BaseCallbackManager
+
+    heard = True
+    for model in _models_of(llm):
+        try:
+            existing = getattr(model, "callbacks", None)
+            if isinstance(existing, BaseCallbackManager):
+                if not any(isinstance(cb, _FirstPiece) for cb in existing.handlers):
+                    existing.add_handler(_FirstPiece(), inherit=True)
+                continue
+            listed = list(existing or [])
+            if not any(isinstance(cb, _FirstPiece) for cb in listed):
+                object.__setattr__(model, "callbacks", [*listed, _FirstPiece()])
+        except Exception:  # noqa: BLE001 — unheard, released when the lead section ends
+            heard = False
+    return heard
+
+
 class ReportComposer:
     """Authors the professional spine section-by-section. Async; per-section
     timeout + deterministic skip. Never raises to the caller."""
@@ -714,6 +855,17 @@ class ReportComposer:
         # saying so; the keys an answer invented used to take the whole
         # section with them.
         self.degradations: list[str] = []
+        # When the model list's clock ends while the sections run at once:
+        # each section's start may only extend it. ``None`` while they run one
+        # after another, where each section starts the clock anew.
+        self._fan_out_clock: float | None = None
+        # The sections whose requests share a cacheable head, by group, and
+        # their names, set per ``compose`` call (:meth:`_head_groups`).
+        self._head_groups_found: dict[int, str] = {}
+        self._noted_sections: set[str] = set()
+        # The sections written at once that answered before a stop, by plan
+        # index, set by :meth:`_author_at_once` when the round is stopped.
+        self._written_before_stop: dict[int, tuple[BaseModel | None, _SectionRecord]] = {}
 
     async def compose(
         self,
@@ -724,6 +876,9 @@ class ReportComposer:
         citable_ids: Sequence[str] | None = None,
         evidence: EntryTexts | None = None,
         items: ItemIndex | None = None,
+        *,
+        concurrent: bool = False,
+        at_once: int | None = None,
     ) -> None:
         """Fill report.intro_background / technical_analysis / c2_channels.
 
@@ -740,9 +895,16 @@ class ReportComposer:
         quotes is shown with the entries that hold it, so a section is never
         left to call a claim unsupported that an entry it was not shown
         supports.
+
+        ``concurrent`` writes the sections at once (:meth:`_author_at_once`),
+        at most ``at_once`` of them in flight — a local server's reported slot
+        count; ``None`` is no limit, ``1`` one after another; otherwise they
+        are written one after another. No section's request
+        reads another section's answer or anything a section's answer
+        changes, so both send the same requests, and the answers are applied
+        in the same fixed order either way.
         """
         ta = report.technical_analysis or TechnicalAnalysis()
-        authored = 0
         # Where the sentences a check leaves standing are recorded, to be
         # marked where they stand.
         self._report = report
@@ -762,19 +924,12 @@ class ReportComposer:
         # a conclusion cannot be the first place "command-and-control" appears.
         self._grounding = CapabilityGrounding.from_report(report, isr_reports)
 
-        # 1. Introduction / background.
-        intro = await self._author(
-            "introduction", report, isr_reports, _IntroOut, _INSTRUCTIONS["introduction"]
-        )
-        if intro and isinstance(intro, _IntroOut) and intro.text.strip():
-            report.intro_background = intro.text.strip()
-            authored += 1
-
         # The entries this run recorded, and which of them a sandbox wrote: an
         # execution step marked observed has to cite one of the second, and a
         # configuration value said to be decrypted one of the first.
         # A sandbox item id (``proc:84``, ``net:3``) the run's report holds is
         # cited as an entry is, checked against the run's section index.
+        # Read before the first section: no section's answer changes them.
         known_ids = [row.id for row in report.evidence_index]
         sandbox_ids = sandbox_entry_ids(report)
         observed_item = sandbox_item_observation(report, self._items)
@@ -787,135 +942,381 @@ class ReportComposer:
         # a step or that section's prose stating persistence is asked once.
         saw_no_persistence = sandbox_saw_no_persistence(report)
 
+        # 1. Introduction / background.
+        def _intro(out: BaseModel | None) -> int:
+            if out and isinstance(out, _IntroOut) and out.text.strip():
+                report.intro_background = out.text.strip()
+                return 1
+            return 0
+
         # 2. The execution flow, entry to steady state.
-        flow = await self._author(
-            "execution_flow",
-            report,
-            isr_reports,
-            _FlowOut,
-            _INSTRUCTIONS["execution_flow"],
-            validators=[
-                lambda p: flow_voice_violations(
-                    p,
-                    sandbox_ids,
-                    tools=entry_tools,
-                    flow_fact=flow_fact,
-                    observed_item=observed_item,
-                ),
-                lambda p: persistence_not_observed_violations(
-                    p, saw_no_persistence, section="execution_flow"
-                ),
-            ],
-        )
-        if flow and isinstance(flow, _FlowOut) and flow.steps:
-            ta.execution_flow = list(flow.steps)
-            authored += 1
+        def _flow(out: BaseModel | None) -> int:
+            if out and isinstance(out, _FlowOut) and out.steps:
+                ta.execution_flow = list(out.steps)
+                return 1
+            return 0
 
         # 3. Free-prose technical subsections (only when evidence exists).
-        for section, title in _PROSE_SECTIONS.items():
-            out = await self._author(
-                section,
-                report,
-                isr_reports,
-                _ProseOut,
-                _INSTRUCTIONS["prose"].format(title=title),
-                validators=(
-                    [
-                        lambda p: persistence_not_observed_violations(
-                            p, saw_no_persistence, section="persistence_detail"
-                        )
-                    ]
-                    if section == "persistence_detail"
-                    else None
-                ),
-            )
-            if out and isinstance(out, _ProseOut) and out.body.strip():
-                sub = TechnicalSubsection(
-                    title=title, body=out.body.strip(), evidence_refs=list(out.evidence_refs)
-                )
-                setattr(ta, section, sub)
-                authored += 1
+        def _prose(section: str, title: str) -> Callable[[BaseModel | None], int]:
+            def _apply(out: BaseModel | None) -> int:
+                if out and isinstance(out, _ProseOut) and out.body.strip():
+                    sub = TechnicalSubsection(
+                        title=title, body=out.body.strip(), evidence_refs=list(out.evidence_refs)
+                    )
+                    setattr(ta, section, sub)
+                    return 1
+                return 0
+
+            return _apply
 
         # 4. Structured extractions (configuration, commands, crypto, CLI
         # flags, ransom note).
-        config = await self._author(
-            "configuration",
-            report,
-            isr_reports,
-            _ConfigOut,
-            _INSTRUCTIONS["configuration"],
-            validators=[
-                lambda p: configuration_citation_violations(p, known_ids, self._items),
-                lambda p: stated_value_violations(p, self._entries),
-            ],
-        )
-        if config and isinstance(config, _ConfigOut) and config.items:
-            ta.configuration = list(config.items)
-            authored += 1
+        def _config(out: BaseModel | None) -> int:
+            if out and isinstance(out, _ConfigOut) and out.items:
+                ta.configuration = list(out.items)
+                return 1
+            return 0
 
-        identifiers = await self._author(
-            "host_identifiers",
-            report,
-            isr_reports,
-            _HostIdentifiersOut,
-            _INSTRUCTIONS["host_identifiers"],
-            validators=[
-                lambda p: identifier_citation_violations(p, known_ids, self._items),
-                lambda p: stated_value_violations(p, self._entries),
-            ],
-        )
-        if identifiers and isinstance(identifiers, _HostIdentifiersOut) and identifiers.identifiers:
-            # All of them: the section holds what the model writes.
-            ta.host_identifiers = list(identifiers.identifiers)
-            authored += 1
+        def _identifiers(out: BaseModel | None) -> int:
+            if out and isinstance(out, _HostIdentifiersOut) and out.identifiers:
+                # All of them: the section holds what the model writes.
+                ta.host_identifiers = list(out.identifiers)
+                return 1
+            return 0
 
-        commands = await self._author(
-            "commands",
-            report,
-            isr_reports,
-            _CommandsOut,
-            _INSTRUCTIONS["commands"],
-        )
-        if commands and isinstance(commands, _CommandsOut) and commands.commands:
-            ta.commands = list(commands.commands)
-            authored += 1
+        def _commands(out: BaseModel | None) -> int:
+            if out and isinstance(out, _CommandsOut) and out.commands:
+                ta.commands = list(out.commands)
+                return 1
+            return 0
 
-        enc = await self._author(
-            "encryption_scheme",
-            report,
-            isr_reports,
-            EncryptionScheme,
-            _INSTRUCTIONS["encryption_scheme"],
-        )
-        if enc and isinstance(enc, EncryptionScheme) and _has_content(enc):
-            ta.encryption_scheme = enc
-            authored += 1
+        def _encryption(out: BaseModel | None) -> int:
+            if out and isinstance(out, EncryptionScheme) and _has_content(out):
+                ta.encryption_scheme = out
+                return 1
+            return 0
 
-        cli = await self._author(
-            "cli_flags", report, isr_reports, _CliFlagsOut, _INSTRUCTIONS["cli_flags"]
-        )
-        if cli and isinstance(cli, _CliFlagsOut) and cli.flags:
-            ta.cli_flags = list(cli.flags)
-            authored += 1
+        def _cli(out: BaseModel | None) -> int:
+            if out and isinstance(out, _CliFlagsOut) and out.flags:
+                ta.cli_flags = list(out.flags)
+                return 1
+            return 0
 
-        note = await self._author(
-            "ransom_note", report, isr_reports, RansomNote, _INSTRUCTIONS["ransom_note"]
-        )
-        if note and isinstance(note, RansomNote) and _has_content(note):
-            ta.ransom_note = note
-            authored += 1
+        def _note(out: BaseModel | None) -> int:
+            if out and isinstance(out, RansomNote) and _has_content(out):
+                ta.ransom_note = out
+                return 1
+            return 0
 
         # 5. Communications / C2 channels.
-        c2 = await self._author(
-            "communications", report, isr_reports, _C2Out, _INSTRUCTIONS["communications"]
-        )
-        if c2 and isinstance(c2, _C2Out) and c2.channels:
-            report.c2_channels = list(c2.channels)
-            authored += 1
+        def _c2(out: BaseModel | None) -> int:
+            if out and isinstance(out, _C2Out) and out.channels:
+                report.c2_channels = list(out.channels)
+                return 1
+            return 0
 
-        if _has_content(ta):
-            report.technical_analysis = ta
+        plan: list[_Planned] = [
+            _Planned("introduction", _IntroOut, _INSTRUCTIONS["introduction"], None, _intro),
+            _Planned(
+                "execution_flow",
+                _FlowOut,
+                _INSTRUCTIONS["execution_flow"],
+                [
+                    lambda p: flow_voice_violations(
+                        p,
+                        sandbox_ids,
+                        tools=entry_tools,
+                        flow_fact=flow_fact,
+                        observed_item=observed_item,
+                    ),
+                    lambda p: persistence_not_observed_violations(
+                        p, saw_no_persistence, section="execution_flow"
+                    ),
+                ],
+                _flow,
+            ),
+            *(
+                _Planned(
+                    section,
+                    _ProseOut,
+                    _INSTRUCTIONS["prose"].format(title=title),
+                    (
+                        [
+                            lambda p: persistence_not_observed_violations(
+                                p, saw_no_persistence, section="persistence_detail"
+                            )
+                        ]
+                        if section == "persistence_detail"
+                        else None
+                    ),
+                    _prose(section, title),
+                )
+                for section, title in _PROSE_SECTIONS.items()
+            ),
+            _Planned(
+                "configuration",
+                _ConfigOut,
+                _INSTRUCTIONS["configuration"],
+                [
+                    lambda p: configuration_citation_violations(p, known_ids, self._items),
+                    lambda p: stated_value_violations(p, self._entries),
+                ],
+                _config,
+            ),
+            _Planned(
+                "host_identifiers",
+                _HostIdentifiersOut,
+                _INSTRUCTIONS["host_identifiers"],
+                [
+                    lambda p: identifier_citation_violations(p, known_ids, self._items),
+                    lambda p: stated_value_violations(p, self._entries),
+                ],
+                _identifiers,
+            ),
+            _Planned("commands", _CommandsOut, _INSTRUCTIONS["commands"], None, _commands),
+            _Planned(
+                "encryption_scheme",
+                EncryptionScheme,
+                _INSTRUCTIONS["encryption_scheme"],
+                None,
+                _encryption,
+            ),
+            _Planned("cli_flags", _CliFlagsOut, _INSTRUCTIONS["cli_flags"], None, _cli),
+            _Planned("ransom_note", RansomNote, _INSTRUCTIONS["ransom_note"], None, _note),
+            _Planned("communications", _C2Out, _INSTRUCTIONS["communications"], None, _c2),
+        ]
+
+        # The sections whose requests share one cacheable head, noted on the
+        # request so the provider caches it once (``SHARED_HEAD``).
+        self._head_groups_found = self._head_groups(plan, report, isr_reports)
+        self._noted_sections = {plan[index].section for index in self._head_groups_found}
+        if concurrent and spend_ceiling_set(getattr(self, "token_ledger", None)):
+            # Under a spend ceiling the report calls run alone, as the meter
+            # assumes (``SpendMeter.admit`` waits on its thread for calls in
+            # flight to settle, which on one event loop would hold every
+            # section), and each call is held at what the earlier sections
+            # left, exactly as written one after another.
+            logger.info(
+                "ReportComposer: the sections are written one after another: a spend ceiling "
+                "is set, and each call is held at what the sections before it left."
+            )
+            concurrent = False
+        if at_once is not None and at_once <= 1:
+            concurrent = False
+        authored = 0
+        try:
+            if concurrent:
+                # Applied in the fixed order, each section's record first,
+                # whatever order the answers came back in.
+                self._written_before_stop = {}
+                try:
+                    written = await self._author_at_once(plan, report, isr_reports, at_once=at_once)
+                except BaseException:
+                    # A run stopped here (the job timeout, a cancel, a worker
+                    # shutdown) keeps every section that answered before the
+                    # stop, in the fixed order: its partial report is read
+                    # from ``report`` (``pipeline.stopped_run``).
+                    for index, planned in enumerate(plan):
+                        done = self._written_before_stop.get(index)
+                        if done is not None:
+                            self._settle(done[1])
+                            planned.apply(done[0])
+                    raise
+                for planned, (answer, record) in zip(plan, written, strict=True):
+                    self._settle(record)
+                    authored += planned.apply(answer)
+            else:
+                for planned in plan:
+                    authored += planned.apply(await self._author_one(planned, report, isr_reports))
+        finally:
+            # On the report whatever ended the round, so a stopped run's
+            # partial report carries the subsections already written.
+            if _has_content(ta):
+                report.technical_analysis = ta
         logger.info("ReportComposer: authored %d professional section(s).", authored)
+
+    async def _author_one(
+        self,
+        planned: _Planned,
+        report: MalwareReport,
+        isr_reports: dict[str, Any] | None,
+        *,
+        resize: bool = False,
+    ) -> BaseModel | None:
+        """One section's answer, or ``None``: a section that fails costs only itself."""
+        try:
+            return await self._author(
+                planned.section,
+                report,
+                isr_reports,
+                planned.schema,
+                planned.instruction,
+                validators=planned.validators,
+                **({"resize": True} if resize else {}),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("ReportComposer: section '%s' failed (%s); SKIPPED.", planned.section, exc)
+            self._note_degradation(
+                f"report section '{planned.section}' is missing: the round failed "
+                f"({type(exc).__name__})"
+            )
+            return None
+
+    async def _author_at_once(
+        self,
+        plan: Sequence[_Planned],
+        report: MalwareReport,
+        isr_reports: dict[str, Any] | None,
+        *,
+        at_once: int | None = None,
+    ) -> list[tuple[BaseModel | None, _SectionRecord]]:
+        """Every section written at once; each answer with its record, in ``plan`` order.
+
+        No limit on how many run together, but ``at_once``: the slot count a
+        local server reported, so no section waits in the server's queue. A
+        section's wait starts when it holds a slot, so time spent waiting for
+        one never counts against it. A section's retries and validation
+        stay its own, and a section that fails or times out leaves the others
+        running. Each section keeps what it would tell the report in its own
+        :class:`_SectionRecord` until :meth:`compose` applies it in order.
+
+        On a model whose provider makes a cached prefix readable only once an
+        answer to the request that wrote it has begun (Anthropic), each group
+        of sections whose requests share their whole prefix up to the end of
+        the head (:meth:`_head_groups`) sends its first section alone, and the
+        rest of the group once that answer has begun — its first streamed
+        piece, or its end — so they read the head it cached instead of each
+        writing it again. A section in no group is sent at once.
+        """
+
+        async def _one(
+            planned: _Planned,
+            begun: asyncio.Event | None = None,
+            after: asyncio.Event | None = None,
+        ) -> tuple[BaseModel | None, _SectionRecord]:
+            record = _SectionRecord()
+            _SECTION_RECORD.set(record)
+            if after is not None:
+                await after.wait()
+            async with slots if slots is not None else contextlib.nullcontext():
+                if begun is None:
+                    return (
+                        await self._author_one(planned, report, isr_reports, resize=True),
+                        record,
+                    )
+                try:
+                    with _on_first_piece(begun):
+                        answer = await self._author_one(planned, report, isr_reports, resize=True)
+                finally:
+                    begun.set()
+                return answer, record
+
+        # Held from the moment a section's prompt is built until its answer
+        # is in, so its wait is measured only while the server serves it.
+        slots = asyncio.Semaphore(at_once) if at_once is not None and at_once > 0 else None
+
+        # Each group's lead, and the event its answer beginning sets.
+        groups: dict[int, str] = dict(getattr(self, "_head_groups_found", None) or {})
+        leads: dict[str, int] = {}
+        for index in sorted(groups):
+            leads.setdefault(groups[index], index)
+        begun_of = {key: asyncio.Event() for key in leads}
+        if leads and not _listen_for_the_first_piece(self.llm):
+            logger.info(
+                "ReportComposer: no listener could be attached to the reporter's model; the "
+                "sections that share a head follow once their group's first section has "
+                "answered, failed or been cancelled."
+            )
+        tasks: dict[int, asyncio.Task[tuple[BaseModel | None, _SectionRecord]]] = {}
+        self._fan_out_clock = time.monotonic()
+        try:
+            for key, index in leads.items():
+                logger.info(
+                    "ReportComposer: section '%s' is sent before the %d other(s) whose requests "
+                    "share its prefix; they follow once its answer has begun, so they read the "
+                    "head it caches.",
+                    plan[index].section,
+                    sum(1 for other in groups.values() if other == key) - 1,
+                )
+            for index, planned in enumerate(plan):
+                group = groups.get(index)
+                if group is None:
+                    tasks[index] = asyncio.create_task(_one(planned))
+                elif leads[group] == index:
+                    tasks[index] = asyncio.create_task(_one(planned, begun=begun_of[group]))
+                else:
+                    tasks[index] = asyncio.create_task(_one(planned, after=begun_of[group]))
+            logger.info(
+                "ReportComposer: %d section(s) are written at once%s.",
+                len(plan),
+                "" if slots is None else f", at most {at_once} in flight (the server's slots)",
+            )
+            return list(await asyncio.gather(*(tasks[index] for index in range(len(plan)))))
+        except BaseException:
+            # What answered before the stop, kept for ``compose`` to apply.
+            self._written_before_stop = {
+                index: task.result()
+                for index, task in tasks.items()
+                if task.done() and not task.cancelled() and task.exception() is None
+            }
+            # Every section ends before the job's own exception leaves:
+            # cancelled, then awaited, so none is left running on the loop.
+            for task in tasks.values():
+                task.cancel()
+            with contextlib.suppress(BaseException):
+                await asyncio.gather(*tasks.values(), return_exceptions=True)
+            raise
+        finally:
+            self._fan_out_clock = None
+
+    def _head_groups(
+        self,
+        plan: Sequence[_Planned],
+        report: MalwareReport,
+        isr_reports: dict[str, Any] | None,
+    ) -> dict[int, str]:
+        """The sections whose requests share one cacheable prefix, by group: ``{index: key}``.
+
+        Only on a model whose provider caches at a breakpoint
+        (:data:`_CACHES_ONCE_ANSWERED`), and only for sections with evidence.
+        A provider's prefix is its tools, then the system prompt, then the
+        messages: on the structured path each section sends its own schema as
+        a tool, so only sections answering with the same schema (the prose
+        subsections) share a prefix; on the manual path no section sends a
+        tool, and every section shares one. A group of one shares nothing
+        and is left out, so its request carries no breakpoint and pays no
+        cache write.
+        """
+        llm = getattr(self, "llm", None)
+        if llm is None or not _caches_once_answered(llm):
+            return {}
+        structured = structured_output_supported_for_llm(llm) and not spend_ceiling_set(
+            getattr(self, "token_ledger", None)
+        )
+        members: dict[str, list[int]] = {}
+        for index, planned in enumerate(plan):
+            bundle = bundle_for(planned.section, report, report.technical_evidence, isr_reports)
+            if is_empty(bundle):
+                continue
+            key = planned.schema.__name__ if structured else ""
+            members.setdefault(key, []).append(index)
+        return {
+            index: key for key, indexes in members.items() if len(indexes) > 1 for index in indexes
+        }
+
+    def _settle(self, record: _SectionRecord) -> None:
+        """Apply what one section said, as it would have been said written on its own."""
+        self.validation_tally.merge(record.tally)
+        for kind, what, asked in record.effects:
+            if kind == "degradation":
+                self._note_degradation(what)
+            else:
+                record_flagged_statements(getattr(self, "_report", None), what, asked=asked)
+
+    def _tally(self) -> ValidationTally:
+        """Where a section's validation is counted: its own record, or the composer's."""
+        record = _SECTION_RECORD.get()
+        return self.validation_tally if record is None else record.tally
 
     async def _author(
         self,
@@ -925,6 +1326,7 @@ class ReportComposer:
         schema: type[BaseModel],
         instruction: str,
         validators: list[Validator] | None = None,
+        resize: bool = False,
     ) -> BaseModel | None:
         """Author one section from its isolated bundle. Skips empty bundles;
         structured-output → manual-parse → None; hard per-section timeout.
@@ -932,6 +1334,10 @@ class ReportComposer:
         ``validators`` are the section's own checks beyond its schema and the
         capability grounding every section gets; what they find is shown to the
         model once and, if it survives, recorded beside the section.
+
+        ``resize`` sizes the wait again from the pace measured so far before it
+        ends a section (:meth:`_waited`): with the sections written at once,
+        every wait is sized before any section has answered.
         """
         bundle = bundle_for(section, report, report.technical_evidence, isr_reports)
         if is_empty(bundle):
@@ -985,16 +1391,31 @@ class ReportComposer:
         human = "\n\n".join(
             [*head, instruction, contract, _bundle_text(section, bundle, entries, item_chars)]
         )
+        # How much of the text is the head the other sections of its group
+        # repeat, noted on the request for a provider that caches a prefix
+        # only at a breakpoint (``anthropic_history.SHARED_HEAD``); no request
+        # body carries the note itself.
+        shared = (
+            len("\n\n".join(head)) + len("\n\n")
+            if head and section in (getattr(self, "_noted_sections", None) or ())
+            else 0
+        )
         messages = [
             SystemMessage(content=_SYSTEM),
-            HumanMessage(content=human),
+            HumanMessage(content=human, response_metadata={SHARED_HEAD: shared})
+            if shared
+            else HumanMessage(content=human),
         ]
-        timeout = self._section_timeout(sum(len(str(message.content)) for message in messages))
+        prompt_size = sum(len(str(message.content)) for message in messages)
+        timeout = self._section_timeout(prompt_size)
         self._start_the_section_clock(timeout)
+        wait = [timeout]
         try:
-            return await asyncio.wait_for(
+            return await self._waited(
                 self._invoke(messages, schema, section=section, validators=validators or []),
-                timeout=timeout,
+                wait,
+                prompt_size,
+                resize=resize,
             )
         except SpendCeilingStop as stop:
             logger.warning("ReportComposer: section '%s' is not written: %s.", section, stop)
@@ -1003,7 +1424,7 @@ class ReportComposer:
         except TimeoutError:
             logger.warning("ReportComposer: section '%s' timed out; skipping.", section)
             self._note_degradation(
-                f"report section '{section}' is missing: it did not answer within {int(timeout)}s"
+                f"report section '{section}' is missing: it did not answer within {int(wait[0])}s"
             )
             return None
         except Exception as exc:  # noqa: BLE001
@@ -1015,6 +1436,44 @@ class ReportComposer:
                 f"report section '{section}' is missing: the round failed ({type(exc).__name__})"
             )
             return None
+
+    async def _waited(
+        self,
+        call: Awaitable[BaseModel | None],
+        wait: list[float],
+        prompt_chars: int,
+        *,
+        resize: bool,
+    ) -> BaseModel | None:
+        """``call``'s answer within ``wait[0]`` seconds, or :class:`TimeoutError`.
+
+        With ``resize``, a wait that runs out is sized again from the pace
+        measured since (:meth:`_section_timeout`) and kept running while the
+        new wait is longer; it is never shortened. ``wait[0]`` holds the wait
+        that applied when the call ended.
+        """
+        if not resize:
+            return await asyncio.wait_for(call, timeout=wait[0])
+        task = asyncio.ensure_future(call)
+        loop = asyncio.get_running_loop()
+        began = loop.time()
+        try:
+            while True:
+                done, _pending = await asyncio.wait(
+                    {task}, timeout=max(0.0, began + wait[0] - loop.time())
+                )
+                if done:
+                    return task.result()
+                longer = self._section_timeout(prompt_chars)
+                if longer <= wait[0]:
+                    raise TimeoutError
+                wait[0] = longer
+                self._start_the_section_clock(began + longer - loop.time())
+        finally:
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
 
     def _item_chars(self, prompt_chars: int, answers: int) -> int | None:
         """How many characters of each claim and tool answer this section may show, or ``None``.
@@ -1116,8 +1575,23 @@ class ReportComposer:
             from maljan.llm.fallback import _configured_share
 
             share = _configured_share()
-        if share > 0:
-            enter(float(seconds), float(share))
+        if share <= 0:
+            return
+        fan_out = getattr(self, "_fan_out_clock", None)
+        if fan_out is not None:
+            # The sections share one model list. Written at once, each keeps
+            # a clock of its own where the list offers one, so no section's
+            # first-model deadline outlasts its own wait; otherwise the
+            # shared clock may only be extended, never cut short for others.
+            own = getattr(getattr(self, "llm", None), "enter_task_loop", None)
+            if callable(own):
+                own(float(seconds), float(share))
+                return
+            ends = time.monotonic() + float(seconds)
+            if ends <= fan_out:
+                return
+            self._fan_out_clock = ends
+        enter(float(seconds), float(share))
 
     def _cap_said(self, answer: Any) -> str:
         """The limit a call sent with no held cap ran to, in words."""
@@ -1235,7 +1709,7 @@ class ReportComposer:
                 ]
                 for extra in validators or []:
                     found.extend(extra(answer))
-                self.validation_tally.count(found)
+                self._tally().count(found)
                 self._record_ungrounded(section or schema.__name__, found, asked=False)
                 return result
         except Exception as exc:  # noqa: BLE001
@@ -1417,7 +1891,7 @@ class ReportComposer:
 
         def _on_feedback(found: Sequence[Violation]) -> None:
             shown.extend(found)
-            self.validation_tally.count(found)
+            self._tally().count(found)
 
         payload, violations, retries = await retry_with_feedback(
             _run,
@@ -1428,8 +1902,8 @@ class ReportComposer:
             drop_answer_for=frozenset({SECTION_CUT_CODE}),
             can_retry=_fits,
         )
-        self.validation_tally.retries += retries
-        self.validation_tally.count(violations)
+        self._tally().retries += retries
+        self._tally().count(violations)
         if declined:
             # Logged at info so the skip is still traceable, and never as an
             # error a reader would go chasing.
@@ -1514,7 +1988,15 @@ class ReportComposer:
         return schema.model_validate(payload)
 
     def _note_degradation(self, reason: str) -> None:
-        """One sentence about what this report lost, once."""
+        """One sentence about what this report lost, once.
+
+        Inside a section written at once it is kept for that section's turn
+        (:meth:`_settle`), so the sentences stand in the sections' order.
+        """
+        record = _SECTION_RECORD.get()
+        if record is not None:
+            record.effects.append(("degradation", reason, True))
+            return
         if reason not in self.degradations:
             self.degradations.append(reason)
 
@@ -1534,7 +2016,11 @@ class ReportComposer:
             section,
             ", ".join(v.path for v in violations),
         )
-        self.validation_tally.record_unresolved(f"composer:{section}", violations, asked=asked)
+        self._tally().record_unresolved(f"composer:{section}", violations, asked=asked)
+        record = _SECTION_RECORD.get()
+        if record is not None:
+            record.effects.append(("flagged", list(violations), asked))
+            return
         record_flagged_statements(getattr(self, "_report", None), violations, asked=asked)
 
 
