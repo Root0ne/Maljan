@@ -63,7 +63,10 @@ class TestTheArithmetic:
     def test_the_vendored_table_prices_what_the_operator_did_not(self) -> None:
         rows = table_prices()
         assert "deepseek-flash" in rows and "deepseek-v4-pro" in rows
-        assert all("api-docs.deepseek.com" in row.source for row in rows.values())
+        vendor_pages = {"deepseek": "api-docs.deepseek.com", "claude": "platform.claude.com/docs"}
+        for name, row in rows.items():
+            page = next(page for prefix, page in vendor_pages.items() if name.startswith(prefix))
+            assert f"https://{page}" in row.source, name
         meter = SpendMeter(1.0)
         price = meter.price_of("openai/deepseek-flash @ https://api.deepseek.com")
         assert price is not None and price.source == rows["deepseek-flash"].source

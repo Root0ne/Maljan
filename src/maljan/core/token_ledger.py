@@ -16,13 +16,14 @@ provider gave; where it gave none, the report says so. The same rule holds for
 cost: there is no price table here, and a cost appears only where the provider
 reported one. Recording never raises — telemetry must not break analysis.
 
-Two parts of a call are recorded where the provider reports them, and only
-there: the input tokens it read from its prompt cache, and the output tokens
-its model spent reasoning. Both are parts of the input and output counts, not
-additions to them — a provider that bills cached input at its own rate, or
-counts reasoning inside the output, is read off the same figures. A call that
-did not report a part is not counted as a zero for it: each part carries the
-number of calls that reported it.
+Three parts of a call are recorded where the provider reports them, and only
+there: the input tokens it read from its prompt cache, the input tokens it
+wrote to it (Anthropic's ``cache_creation_input_tokens``), and the output
+tokens its model spent reasoning. Each is a part of the input or output count,
+not an addition to it — a provider that bills cached or cache-written input at
+its own rate, or counts reasoning inside the output, is read off the same
+figures. A call that did not report a part is not counted as a zero for it:
+each part carries the number of calls that reported it.
 
 Every call also says which model answered it, so the ledger is where a run's
 per-agent model count comes from, and a fallback — a turn another model
@@ -91,6 +92,28 @@ def _cached_input_of(usage: dict[str, Any], raw: dict[str, Any]) -> int | None:
     return _count(raw.get("prompt_cache_hit_tokens"))
 
 
+def _cache_writes_of(usage: dict[str, Any]) -> tuple[int, int] | None:
+    """``(input tokens written to the prompt cache, of them for an hour)``, or ``None`` unreported.
+
+    LangChain's ``input_token_details`` as langchain-anthropic fills it from
+    Anthropic's usage: ``cache_creation`` (``cache_creation_input_tokens``),
+    or, where Anthropic splits the writes by lifetime, its
+    ``ephemeral_5m_input_tokens`` and ``ephemeral_1h_input_tokens`` with
+    ``cache_creation`` set to zero so the two are not counted twice. No other
+    provider reports a cache write.
+    """
+    details = usage.get("input_token_details")
+    if not isinstance(details, dict):
+        return None
+    whole = _count(details.get("cache_creation"))
+    five = _count(details.get("ephemeral_5m_input_tokens"))
+    hour = _count(details.get("ephemeral_1h_input_tokens"))
+    if whole is None and five is None and hour is None:
+        return None
+    split = (five or 0) + (hour or 0)
+    return max(whole or 0, split), min(hour or 0, max(whole or 0, split))
+
+
 def _reasoning_of(usage: dict[str, Any], raw: dict[str, Any]) -> int | None:
     """The output tokens the model spent reasoning, or ``None`` unreported.
 
@@ -111,9 +134,10 @@ def _reasoning_of(usage: dict[str, Any], raw: dict[str, Any]) -> int | None:
 def turn_usage(response: Any) -> dict[str, Any] | None:
     """One answer's reported usage, or ``None``.
 
-    ``{input_tokens, output_tokens[, cached_input_tokens][, reasoning_tokens][, cost]
-    [, sent_at]}``: the optional keys are there only when the provider reported
-    them (``sent_at`` when the client stamped the request's send time). ``None``
+    ``{input_tokens, output_tokens[, cached_input_tokens][, cache_write_input_tokens
+    [, cache_write_1h_input_tokens]][, reasoning_tokens][, cost][, sent_at]}``: the
+    optional keys are there only when the provider reported them (``sent_at``
+    when the client stamped the request's send time). ``None``
     is the provider having reported nothing, which the caller says in words
     rather than as a zero.
     """
@@ -128,6 +152,13 @@ def turn_usage(response: Any) -> dict[str, Any] | None:
     cached = _cached_input_of(usage, raw)
     if cached is not None:
         out["cached_input_tokens"] = min(cached, out["input_tokens"])
+    writes = _cache_writes_of(usage)
+    if writes is not None:
+        room = out["input_tokens"] - out.get("cached_input_tokens", 0)
+        written = min(writes[0], room)
+        out["cache_write_input_tokens"] = written
+        if writes[1]:
+            out["cache_write_1h_input_tokens"] = min(writes[1], written)
     reasoning = _reasoning_of(usage, raw)
     if reasoning is not None:
         out["reasoning_tokens"] = min(reasoning, out["output_tokens"])
@@ -148,6 +179,8 @@ class _Tally:
     """One agent's calls: the reported figures, and the calls that reported none."""
 
     __slots__ = (
+        "cache_write_calls",
+        "cache_write_input_tokens",
         "cached_calls",
         "cached_input_tokens",
         "calls",
@@ -168,6 +201,8 @@ class _Tally:
         self.output_tokens = 0
         self.cached_input_tokens = 0
         self.cached_calls = 0
+        self.cache_write_input_tokens = 0
+        self.cache_write_calls = 0
         self.reasoning_tokens = 0
         self.reasoning_calls = 0
         self.cost = 0.0
@@ -189,6 +224,14 @@ class _Tally:
                     "cached_calls": self.cached_calls,
                 }
                 if self.cached_calls
+                else {}
+            ),
+            **(
+                {
+                    "cache_write_input_tokens": self.cache_write_input_tokens,
+                    "cache_write_calls": self.cache_write_calls,
+                }
+                if self.cache_write_calls
                 else {}
             ),
             **(
@@ -256,6 +299,9 @@ class TokenLedger:
                 if "cached_input_tokens" in usage:
                     tally.cached_input_tokens += int(usage["cached_input_tokens"] or 0)
                     tally.cached_calls += 1
+                if "cache_write_input_tokens" in usage:
+                    tally.cache_write_input_tokens += int(usage["cache_write_input_tokens"] or 0)
+                    tally.cache_write_calls += 1
                 if "reasoning_tokens" in usage:
                     tally.reasoning_tokens += int(usage["reasoning_tokens"] or 0)
                     tally.reasoning_calls += 1

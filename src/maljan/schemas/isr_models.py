@@ -104,6 +104,17 @@ class ClaimEvidence(BaseModel):
         default=None,
         description="The claim's TECHNIQUE line as written, when no technique id could be read.",
     )
+    # The note the claim's heading wrote between its number and its delimiter
+    # (``CLAIM 2 [REVISED — retracts claim 5]: …``), as written, brackets and
+    # all: the model's own words on what the claim is to the debate. Kept
+    # beside the sentence, never in it, so no check that reads the sentence
+    # and no published text carries it; left out of the serialised claim when
+    # there is none (``claim_headings.heading_note``).
+    heading_note: str | None = Field(
+        default=None,
+        description="The note the claim's heading wrote before its delimiter, as written.",
+        exclude_if=lambda value: value is None,
+    )
     # Whether that id survived validation. ``pipeline.validation`` sets this
     # ``False`` when the analyst kept an id the ATT&CK catalogue does not have,
     # after being told so and given another turn. The id itself stays exactly
@@ -150,6 +161,22 @@ class ClaimEvidence(BaseModel):
     def note_block(self, ordinal: int) -> None:
         """Record the ordinal of the block this claim was read from."""
         self._block = int(ordinal)
+
+    # The number the claim's heading wrote (``CLAIM 7:`` is ``"7"``), as
+    # digits, or ``None`` for a heading that wrote none and a claim built any
+    # other way (``claim_headings.heading_number``). Recorded where the claim
+    # is read, never serialised: a validation retry names the claims it
+    # changes by it (``pipeline.retry_merge``).
+    _number: str | None = PrivateAttr(default=None)
+
+    @property
+    def number(self) -> str | None:
+        """The number this claim's heading wrote, or ``None``."""
+        return self._number
+
+    def note_number(self, number: str | None) -> None:
+        """Record the number this claim's heading wrote."""
+        self._number = None if number is None else str(number)
 
 
 class Artifact(BaseModel):
@@ -397,8 +424,9 @@ class AgentISR(BaseModel):
                 tech = f" ({claim.technique_id} — {UNVERIFIED_TECHNIQUE_MARKER})"
             elif claim.technique_id and claim.kept_after_absence_question:
                 tech = f" ({claim.technique_id} — {ABSENCE_TECHNIQUE_MARKER})"
+            noted = f" {claim.heading_note}" if claim.heading_note else ""
             lines.append(
-                f"  Claim {i}: {claim.claim}{tech}"
+                f"  Claim {i}{noted}: {claim.claim}{tech}"
                 f" | Evidence: {claim.evidence_ref}"
                 f" | Confidence: {claim.confidence:.2f}"
             )

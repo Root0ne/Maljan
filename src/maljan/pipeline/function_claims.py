@@ -163,6 +163,64 @@ _QUOTED_INSIDE = re.compile(r'"([^"\n]+)"|\'([^\'\n]+)\'|“([^”\n]+)”')
 # A JSON escape a value may be written with; a value of escapes and marks alone
 # spells no letter or digit, and no text can be said to hold or lack it.
 _ESCAPE = re.compile(r"\\(?:u[0-9a-fA-F]{4}|.)")
+# A run of letters and digits: what a whole value's words are, in a text and
+# in the value alike (``_WholeTexts``).
+_RUN_RE = re.compile(r"[a-z0-9]+")
+# The letters a two-character escape is written with (``whole_value_in``
+# reads a value written straight after one as starting there).
+_ESCAPED_RUN_RE = re.compile(r"\\[nrtbf]([a-z0-9]+)")
+
+
+class _WholeTexts:
+    """The run's texts a value is looked for in as a whole value (``whole_value_in``),
+    each text on its own, so no value is read across two texts.
+
+    A text that holds a value as a whole value holds each run of letters and
+    digits the value writes as a whole run of its own (a boundary of a whole
+    value is never a letter or a digit; a run that starts after an escape is
+    indexed from after the escape's letter too). The texts are indexed by their
+    runs once, when a value first needs more than an exact match, and a value
+    is read only in the texts, among those asked about, that hold its rarest
+    run: the reading is ``whole_value_in``'s, its cost the texts that could
+    hold the value.
+    """
+
+    def __init__(self, texts: Iterable[str] = ()) -> None:
+        self.texts = tuple(sorted(set(texts)))
+        self._runs: dict[str, list[int]] | None = None
+
+    def _index(self) -> dict[str, list[int]]:
+        if self._runs is None:
+            runs: dict[str, list[int]] = {}
+            for at, text in enumerate(self.texts):
+                found = set(_RUN_RE.findall(text))
+                if "\\" in text:
+                    found.update(_ESCAPED_RUN_RE.findall(text))
+                for run in found:
+                    runs.setdefault(run, []).append(at)
+            self._runs = runs
+        return self._runs
+
+    def holds(self, value: str, within: Collection[str]) -> bool:
+        """Whether one of ``within`` (texts of these, lower-cased) holds ``value`` as a
+        whole value."""
+        from maljan.agents._indicator_denylists import whole_value_in
+
+        lowered = value.lower()
+        if lowered in within:
+            return True
+        wanted = set(_RUN_RE.findall(lowered))
+        if not wanted:
+            return any(whole_value_in(lowered, text) for text in within)
+        index = self._index()
+        postings = [index.get(run) for run in wanted]
+        if any(posting is None for posting in postings):
+            return False
+        rarest = min((p for p in postings if p is not None), key=len)
+        return any(
+            self.texts[at] in within and whole_value_in(lowered, self.texts[at]) for at in rarest
+        )
+
 
 _CATALOGUE_LOWER: frozenset[str] | None = None
 
@@ -287,7 +345,11 @@ class _Held:
 
 @dataclass(frozen=True)
 class _Reach:
-    """What the functions reachable from one listed function hold, read once per function."""
+    """What the functions reachable from one listed function hold, read once per function.
+
+    ``lookup`` is the run's texts, read for a value held as a whole value
+    inside one of ``texts`` (``_WholeTexts``).
+    """
 
     functions: frozenset[int]
     whole: bool
@@ -295,6 +357,14 @@ class _Reach:
     unnamed: bool
     names: frozenset[str]
     texts: frozenset[str]
+    lookup: _WholeTexts | None = None
+
+    def holds_text(self, text: str) -> bool:
+        """Whether one of the texts is ``text``, or holds it as a whole value
+        (``whole_value_in``), as a listing's text is read."""
+        if text in self.texts:
+            return True
+        return self.lookup is not None and self.lookup.holds(text, self.texts)
 
 
 @dataclass(frozen=True)
@@ -324,7 +394,7 @@ class _Reached:
         return any(key in part.names for part in self.parts)
 
     def holds_text(self, text: str) -> bool:
-        return any(text in part.texts for part in self.parts)
+        return any(part.holds_text(text) for part in self.parts)
 
     def count(self) -> int:
         """How many distinct functions the claim's functions reach, read only for a question."""
@@ -363,6 +433,9 @@ class FunctionFacts:
     strings: EntryTexts = field(default_factory=EntryTexts)
     # The index rows' strings, each whole, lower-cased.
     index_strings: frozenset[str] = frozenset()
+    # Every text of the rows, the placed values and the index strings, read
+    # for a value held as a whole value inside one of them (``_WholeTexts``).
+    text_lookup: _WholeTexts = field(default_factory=_WholeTexts)
     # Each listed function's reach, read once: the cost is the analyst's
     # listings times the graph, whatever the number of claims.
     reaches: dict[int, _Reach] = field(default_factory=dict)
@@ -453,6 +526,7 @@ class FunctionFacts:
             or any(read.unnamed for read in taken),
             names=frozenset(names),
             texts=frozenset(texts),
+            lookup=self.text_lookup,
         )
 
     def offset(self, address: int | None) -> int | None:
@@ -628,6 +702,13 @@ def function_facts(
                 held.texts.append(value.lower())
     strings = EntryTexts.from_ledger(sources)
     facts.index_strings = frozenset(text.lower() for text in index_strings)
+    facts.text_lookup = _WholeTexts(
+        [
+            *facts.index_strings,
+            *(text for held in facts.held_by_row.values() for text in held.texts),
+            *(text for held in facts.placed.values() for text in held.texts),
+        ]
+    )
     facts.strings = strings
     facts.known_names = _catalogue_lower() | frozenset(run_names)
     return facts
@@ -888,11 +969,51 @@ class _Clauses:
         return _in_a_negated_object(self.text[start:begin], begin - start)
 
 
+# A routine's name written as what a function is, not as a call it makes. The
+# sentence's own grammar says so, and only in a closed set of forms:
+# - right after the name, "-like", "-style" or "-equivalent", or a noun naming
+#   a copy of the routine: "implementation", "reimplementation", "clone",
+#   "replacement", "equivalent", "substitute" ("an atoi implementation", "a
+#   strdup clone");
+# - right before it, "reimplements", or "implements" with "its own" or "their
+#   own" between ("reimplements strdup", "implements its own GetProcAddress").
+# Every other place is read as a call: a plain "implements" ("implements
+# CreateProcessW-based spawning"), a copula or a likeness ("is a VirtualAlloc
+# helper", "acts as a WinExec launcher"), an article ("a ReadProcessMemory of
+# its own PEB"), and a name followed by "-based", "-driven" or "-backed".
+_DESCRIBED_AFTER = re.compile(
+    r"`?(?:-(?:like|style|equivalent)\b"
+    r"|\s+(?:re-?implementations?|implementations?|clones?|replacements?|equivalents?"
+    r"|substitutes?)\b)",
+    re.IGNORECASE,
+)
+_DESCRIBED_BEFORE = re.compile(
+    r"\b(?:re-?implement(?:s|ed|ing)?\s+(?:(?:its|their)\s+own\s+)?"
+    r"|implement(?:s|ed|ing)?\s+(?:its|their)\s+own\s+)`?\Z",
+    re.IGNORECASE,
+)
+_A_CALL_AFTER = re.compile(r"`?-(?:based|driven|backed)\b", re.IGNORECASE)
+# How far before a name its describing words are read: past the longest form.
+_DESCRIBED_REACH = 40
+
+
+def _described(text: str, start: int, end: int) -> bool:
+    """Whether the routine name at ``text[start:end]`` is written as what the code is
+    (the forms above), not as a call it makes."""
+    if _A_CALL_AFTER.match(text, end):
+        return False
+    if _DESCRIBED_AFTER.match(text, end):
+        return True
+    return _DESCRIBED_BEFORE.search(text[max(start - _DESCRIBED_REACH, 0) : start]) is not None
+
+
 def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, int, bool]]:
     """``(value, where, is an API name)`` of every name and string a sentence claims.
 
-    Each name is read once, at its first place: whether a statement of absence
-    holds it is asked there, within the clause that holds it (``_Clauses``).
+    Each name is read once, at its first place it is claimed: whether a
+    statement of absence holds it is asked there, within the clause that holds
+    it (``_Clauses``). A place that writes the name as what the code is or
+    does (``_described``) claims no call, and no string either.
     """
     spans = {m.group(0).strip("`").strip() for m in _CODE_SPAN_RE.finditer(text)}
     clauses = _Clauses(text)
@@ -900,6 +1021,7 @@ def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, in
 
     found: list[tuple[str, int, bool]] = []
     seen: set[str] = set()
+    described: set[str] = set()
     for match in _IDENTIFIER.finditer(text):
         token = match.group(0)
         if token in seen or len(token) < 3 or _GENERIC_FUNCTION_NAME.fullmatch(token):
@@ -908,9 +1030,13 @@ def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, in
             continue
         if not (re.search(r"[A-Z]", token[1:]) or _named_alone(spans, token)):
             continue
+        if _described(text, match.start(), match.end()):
+            described.add(token)
+            continue
         seen.add(token)
         if not negated(match.start(), match.end()):
             found.append((token, match.start(), True))
+    seen |= described
     keys = {_api_key(value) for value, _at, _api in found}
     for match in _QUOTED_SPAN_RE.finditer(text):
         if match.group(1) is not None:
@@ -999,9 +1125,12 @@ class FunctionClaimCheck:
 def _held(value: str, api: bool, listings: Sequence[_Held], reached: _Reached) -> bool:
     """Whether the listings or the reachable functions' facts hold ``value``.
 
-    The facts are looked up by membership: an API key in their names, a string
-    as one of their whole texts. Only a listing's text is searched, for the
-    value as a whole value inside it.
+    An API key is looked up in their names. A string is looked for as a whole
+    value (``whole_value_in``) inside a listing's text and inside each text of
+    the reachable functions' rows and placed values, one rule for all of them:
+    a decoded command line holds the quoted group name it passes, and a URL
+    the host it names; a value that is only part of a longer token is held by
+    none.
     """
     from maljan.agents._indicator_denylists import whole_value_in
     from maljan.utils.written_forms import written_forms
@@ -1022,10 +1151,12 @@ def _held(value: str, api: bool, listings: Sequence[_Held], reached: _Reached) -
 
 def _a_sample_string(value: str, facts: FunctionFacts) -> bool:
     """Whether a strings source of the run holds ``value`` as data: one of the index rows'
-    strings as a whole, or a strings tool's answer holding it as a whole value."""
+    strings, or a strings tool's answer, holding it as a whole value."""
     from maljan.utils.written_forms import written_forms
 
-    if any(form in facts.index_strings for form in written_forms(value.lower())):
+    if any(
+        facts.text_lookup.holds(form, facts.index_strings) for form in written_forms(value.lower())
+    ):
         return True
     strings = facts.strings
     return any(strings.holds(ref, value) for ref in strings.may_hold(value))
@@ -1317,5 +1448,7 @@ def _question(
             f"claim {number} ({safe_finding_value(sentence)!r}) names {named} for {head}; "
             f"{sources}; {'; '.join(holds)}. {FUNCTION_QUESTION_ASK}"
         ),
-        path=f"claims[{index}]",
+        # The claim block, as every other check's path names it: the place
+        # the question's "claim N" names, counted from 0.
+        path=f"claims[{number - 1}]",
     )

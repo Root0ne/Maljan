@@ -38,7 +38,7 @@ from maljan.agents.run_evidence_corpus import (
     state_of,
 )
 from maljan.analysis.corroboration import corroboration_row
-from maljan.analysis.run_summary import RunSummaryBuilder, tool_asks_of
+from maljan.analysis.run_summary import RunSummaryBuilder, summary_counts_line, tool_asks_of
 from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
@@ -2117,7 +2117,7 @@ def _remember_the_published_techniques(
             return
         container.pending_memory_case = moved
         logger.info(
-            "LTM: case '%s' holds %d published technique(s) of %d claimed.",
+            "LTM: case '%s' holds %d published technique(s) of the %d claimed ones memory keeps.",
             case.sample_id,
             len(moved.technique_ids),
             len(case.technique_ids),
@@ -2263,10 +2263,17 @@ RUN_QUALITY_ANSWER_NOTE = (
     "A note on part of an analyst's answer leaves the claims it read standing; "
     "weigh those as written."
 )
+# What leads the facts about claims that are not limits of the run, when the
+# run has limits of its own listed first.
+RUN_QUALITY_CLAIM_NOTES = "Also noted about the claims, not about the run:"
 
 
 def run_quality_note(
-    reasons: Sequence[str], *, degraded: bool, informational: Sequence[str] = ()
+    reasons: Sequence[str],
+    *,
+    degraded: bool,
+    informational: Sequence[str] = (),
+    notes: Sequence[str] = (),
 ) -> str:
     """The RUN QUALITY paragraph the judge reads, or ``""`` when the run recorded nothing.
 
@@ -2274,22 +2281,30 @@ def run_quality_note(
     limitations are, and only the sentences that fit them: the missing-tool
     sentence when a reason other than a note on an answer is listed, the
     answer-note sentence when such a note is.
+
+    ``notes`` are facts about claims the judge weighs that are not limits of
+    the run (technique claims citing nothing): stated to the judge as they
+    are, after the run's own reasons, and never as a cause of degradation.
     """
+    noted_claims = "; ".join(str(note) for note in notes if note).rstrip(". ")
     if not reasons:
-        return ""
+        return f"RUN QUALITY — {noted_claims}." if noted_claims else ""
     sentences = "; ".join(reason_sentence(r) for r in reasons).rstrip(". ")
     if degraded:
-        return (
+        parts = [
             f"RUN QUALITY — this analysis is degraded because {sentences}. "
             "Weigh your confidence accordingly: a verdict drawn from thin "
             "evidence should say so in its numbers, not only in its prose."
-        )
-    noted = {str(reason) for reason in informational}
-    parts = [f"RUN QUALITY — {sentences}."]
-    if any(str(reason) not in noted for reason in reasons):
-        parts.append(RUN_QUALITY_ABSENT_TOOL)
-    if any(str(reason) in noted for reason in reasons):
-        parts.append(RUN_QUALITY_ANSWER_NOTE)
+        ]
+    else:
+        noted = {str(reason) for reason in informational}
+        parts = [f"RUN QUALITY — {sentences}."]
+        if any(str(reason) not in noted for reason in reasons):
+            parts.append(RUN_QUALITY_ABSENT_TOOL)
+        if any(str(reason) in noted for reason in reasons):
+            parts.append(RUN_QUALITY_ANSWER_NOTE)
+    if noted_claims:
+        parts.append(f"{RUN_QUALITY_CLAIM_NOTES} {noted_claims}.")
     return " ".join(parts)
 
 
@@ -4529,10 +4544,12 @@ def make_judge_node(
                 _degradation_reasons.append(unparsed_answers_reason(_prose_analysts))
             # Technique claims the analyst kept after being asked to cite the
             # entry it read them from. A live run put sixteen of these in front
-            # of the judge, which read them as sixteen techniques.
+            # of the judge, which read them as sixteen techniques. The note is
+            # the judge's input, a fact about claims rather than about what the
+            # run could examine: it is not a degradation reason, and the
+            # validation findings show each such claim to a reader whether or
+            # not the judge then keeps the technique.
             _ungrounded_note = ungrounded_technique_note(state.get("validation_findings"))
-            if _ungrounded_note:
-                _degradation_reasons.append(_ungrounded_note)
             # A run whose grounding could not search its own whole record says
             # so as a run fact. Every absence it stated is a note, and an
             # operator reading the verdict should know that before reading the
@@ -4579,7 +4596,10 @@ def make_judge_node(
             # capped and told the judge nothing at all. The pack's tokens are
             # rendered as sentences here and stay tokens in the run summary.
             degradation_note = run_quality_note(
-                _degradation_reasons, degraded=_degraded_mode, informational=_informational
+                _degradation_reasons,
+                degraded=_degraded_mode,
+                informational=_informational,
+                notes=[_ungrounded_note] if _ungrounded_note else (),
             )
 
             verdict = await judge.give_verdict(
@@ -4832,15 +4852,9 @@ def make_judge_node(
                 run_summary_dict["verdict_reading"] = (
                     verdict_reading(bundle) if isinstance(bundle, Bundle) else VERDICT_READ_FALLBACK
                 )
-                logger.info(
-                    "RunSummary built: verdict=%s, rounds=%d, claimed techniques=%d, "
-                    "validation retries=%d, unresolved=%d",
-                    decision,
-                    summary.negotiation.rounds_completed,
-                    _technique_count,
-                    _retries,
-                    len(_unresolved),
-                )
+                # Read back from the summary as stored, so the line says what
+                # the stored summary and the report say.
+                logger.info("RunSummary built: %s", summary_counts_line(run_summary_dict))
             except Exception as exc:
                 logger.warning("RunSummary build failed (%s). Skipping.", exc)
 
@@ -4886,7 +4900,8 @@ def make_judge_node(
                         if a_report_node_follows(container):
                             container.pending_memory_case = case
                             logger.info(
-                                "LTM: case '%s' (category=%s, claimed techniques=%d) is held "
+                                "LTM: case '%s' (category=%s, claimed techniques memory keeps=%d) "
+                                "is held "
                                 "for the report node, which moves it to the published "
                                 "techniques and decides whether it is stored.",
                                 case.sample_id,
@@ -5728,6 +5743,12 @@ def make_report_node(
             _amended_report_summary = dict(report.run_summary or {})
             _amended_report_summary["validation"] = _validation_block
             report.run_summary = _amended_report_summary
+            # The report round's own retries and findings are added to the
+            # judge's: the counts the stored summary ends with.
+            logger.info(
+                "RunSummary amended by the report round: %s",
+                summary_counts_line(_amended_report_summary),
+            )
         if fp_warnings:
             _state_summary["fp_warnings"] = fp_warnings
         if _ledger:

@@ -16,6 +16,8 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from maljan.agents.function_map import INDEX_NOT_KEPT, function_artefacts
 from maljan.pipeline import function_claims as fc
 from maljan.pipeline.function_claims import (
@@ -500,6 +502,176 @@ class TestWhatASentenceNames:
             'It splits on `"\\r\\n"`, compares "update-channel" and `"/files/"`, and `x+0x88`.'
         )
         assert strings == ["update-channel", "/files/"]
+
+
+class TestAStringHeldAsAWholeValue:
+    """A reachable function's decoded and plain strings hold a value as a listing does:
+    as a whole value inside one of them, at its boundaries, never as a slice of a token."""
+
+    COMMAND = 'cmd /c net group "ops team" /domain'
+    URL = "https://c2.example.test/live/"
+
+    def _rows(self, helper_decoded: list[str]) -> LedgerEntry:
+        return _index(
+            [
+                _row(MAIN, imports=["CreateMutexW"], decoded=["update-channel"], callees=[HELPER]),
+                _row(HELPER, decoded=helper_decoded, callers=[MAIN]),
+                _row(OTHER, decoded=["update"]),
+            ]
+        )
+
+    def test_a_quoted_value_inside_a_reachable_function_s_command_line_holds(self) -> None:
+        floss = LedgerEntry(id="ev_0006", agent="pipeline", tool="floss", output=self.COMMAND)
+        found = _check(
+            f'{MAIN_VA} runs a group query naming "ops team".',
+            index=self._rows([self.COMMAND]),
+            pack=[floss],
+        )
+        assert found.violations == [] and found.checked == 1
+
+    def test_a_host_inside_a_decoded_url_holds(self) -> None:
+        floss = LedgerEntry(id="ev_0006", agent="pipeline", tool="floss", output=self.URL)
+        found = _check(
+            f'{MAIN_VA} builds its server list from "c2.example.test".',
+            index=self._rows([self.URL]),
+            pack=[floss],
+        )
+        assert found.violations == [] and found.checked == 1
+
+    def test_a_value_that_is_only_part_of_a_longer_token_is_not_held(self) -> None:
+        found = _check(f'{MAIN_VA} compares the reply with "update".', index=self._rows([]))
+        (violation,) = found.violations
+        assert '"update"' in violation.message
+
+    def test_an_index_string_holding_the_value_whole_makes_it_a_sample_string(self) -> None:
+        index = _index(
+            [
+                _row(MAIN, imports=["CreateMutexW"], callees=[HELPER]),
+                _row(HELPER, callers=[MAIN]),
+                _row(OTHER, decoded=[self.COMMAND]),
+            ]
+        )
+        found = _check(f'{MAIN_VA} names the group "ops team".', index=index)
+        (violation,) = found.violations
+        assert '"ops team"' in violation.message
+        assert found.not_checked == []
+
+
+class TestTheWholeValueLookup:
+    """The lookup over the run's texts reads exactly as ``whole_value_in`` over each."""
+
+    TEXTS = (
+        'cmd /c net group "ops team" /domain',
+        "https://c2.example.test/live/",
+        "update-channel",
+        '{"line": "first\\nsecond value"}',
+        "alpha",
+        "beta gamma",
+    )
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "ops team",
+            "c2.example.test",
+            "live",
+            "update",
+            "update-channel",
+            "second value",
+            "alpha beta",
+            "gamma",
+            "/domain",
+            '"ops team"',
+            "net group",
+            "team",
+        ],
+    )
+    def test_the_lookup_agrees_with_whole_value_in(self, value: str) -> None:
+        from maljan.agents._indicator_denylists import whole_value_in
+
+        lookup = fc._WholeTexts(self.TEXTS)
+        within = frozenset(self.TEXTS)
+        expected = any(whole_value_in(value, text) for text in self.TEXTS)
+        assert lookup.holds(value, within) is expected
+
+    def test_a_text_outside_the_reach_holds_nothing_for_it(self) -> None:
+        lookup = fc._WholeTexts(self.TEXTS)
+        assert lookup.holds("ops team", frozenset(self.TEXTS))
+        assert not lookup.holds("ops team", frozenset({"alpha"}))
+
+    def test_no_value_is_read_across_two_texts(self) -> None:
+        lookup = fc._WholeTexts(self.TEXTS)
+        assert not lookup.holds("alpha beta", frozenset(self.TEXTS))
+
+
+class TestARoutineNameWrittenAsWhatTheCodeIs:
+    """A routine's name the sentence's grammar writes as a copy of the routine is no
+    claimed call; every other place it is written is read as before."""
+
+    @pytest.mark.parametrize(
+        ("sentence", "name"),
+        [
+            ("It splits the reply with a `strtok`-style tokeniser.", "strtok"),
+            ("0x2a10 is a CreateFileW-like helper over the native call.", "CreateFileW"),
+            ("0x2a10 is an `atoi` implementation for the type field.", "atoi"),
+            (
+                "The resolver implements its own GetProcAddress by walking exports.",
+                "GetProcAddress",
+            ),
+            ("0x2a10 reimplements lstrlenW over the wide buffer.", "lstrlenW"),
+            ("0x2a10 is a `memcpy` replacement over the decoded blob.", "memcpy"),
+            ("0x2a10 is a `memcpy`-equivalent over the decoded blob.", "memcpy"),
+        ],
+    )
+    def test_a_description_names_no_call(self, sentence: str, name: str) -> None:
+        apis, strings = named_values(sentence)
+        assert name not in apis and name not in strings
+
+    @pytest.mark.parametrize(
+        ("sentence", "name"),
+        [
+            ("It calls `atoi` on the next field.", "atoi"),
+            ("The type comes from a call to `atoi` on the field.", "atoi"),
+            ("It then does a ReadProcessMemory of its own PEB.", "ReadProcessMemory"),
+            ("0x2d10 is a CreateProcessW wrapper with three pipes.", "CreateProcessW"),
+            ("The gate makes a `CreateMutexW`-shaped slot call.", "CreateMutexW"),
+            ("0x2a10 is a direct CreateFileW on the path.", "CreateFileW"),
+            # An article alone does not say it, and neither does a name used as a verb.
+            ("The dispatcher takes a decimal `atoi` of the next field.", "atoi"),
+            ("It decodes both blobs and `memcpy`s each into the array.", "memcpy"),
+            ("The type comes from `atoi` (0x2c80) of the next field.", "atoi"),
+            # A copula, a likeness or a role noun after the name: read as a call.
+            ("The next step is a VirtualProtect on the decoded page.", "VirtualProtect"),
+            ("0x2a10 is a single VirtualAlloc of 0x10000 bytes.", "VirtualAlloc"),
+            ("0x2a10 is a thin CreateFileW shim over the path.", "CreateFileW"),
+            ("0x2a10 acts as a CreateRemoteThread launcher for the payload.", "CreateRemoteThread"),
+            ("0x2a10 is an InternetOpenW caller that sets the agent.", "InternetOpenW"),
+            ("0x2a10 is a VirtualAlloc helper used by the loader.", "VirtualAlloc"),
+            ("0x2a10 is a direct-syscall NtAllocateVirtualMemory.", "NtAllocateVirtualMemory"),
+            ("The stage works as a WinExec launcher.", "WinExec"),
+            ("Each request is a HttpSendRequestA with the body.", "HttpSendRequestA"),
+            ("0x2a10 is a hand-rolled `atoi` for the type field.", "atoi"),
+            ("The copy loop works like `memcpy` over the decoded blob.", "memcpy"),
+            # A plain "implements", and a name followed by -based or -driven.
+            ("0x2a10 implements CreateProcessW-based spawning of the payload.", "CreateProcessW"),
+            ("The loader implements GetProcAddress resolution through the PEB.", "GetProcAddress"),
+            ("0x2a10 runs a VirtualAlloc-driven allocator for the stage.", "VirtualAlloc"),
+            ("0x2a10 reimplements a CreateFileW-backed writer.", "CreateFileW"),
+        ],
+    )
+    def test_any_other_place_is_read_as_a_call(self, sentence: str, name: str) -> None:
+        apis, _strings = named_values(sentence)
+        assert name in apis
+
+    def test_a_described_name_is_not_asked_and_a_called_one_is(self) -> None:
+        assert not _check(f"{MAIN_VA} is an `atoi` implementation for the type.").violations
+        found = _check(f"{MAIN_VA} calls `atoi` on the type field.")
+        (violation,) = found.violations
+        assert '"atoi"' in violation.message
+
+    def test_a_later_call_after_a_description_is_still_read(self) -> None:
+        apis, _strings = named_values("0x2a10 is an `atoi` implementation; 0x2b00 calls `atoi`.")
+        assert apis == ["atoi"]
 
 
 class TestWhenTheFactIsAbsent:

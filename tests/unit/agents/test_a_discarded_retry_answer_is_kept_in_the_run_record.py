@@ -80,7 +80,9 @@ def test_a_retry_with_no_claim_block_is_kept_once_whole() -> None:
 
 def test_a_retry_with_claims_the_first_answer_is_kept_over_is_kept_whole() -> None:
     retry = _block(1, "T1055") + "And nothing else holds. " * 20
-    analyst = _Analyst([retry])
+    # Not placed by claim number, the retry is followed by the question for the
+    # whole answer, which the analyst answers the same way.
+    analyst = _Analyst([retry, retry])
 
     _check(analyst)
 
@@ -93,7 +95,7 @@ def test_a_retry_with_claims_the_first_answer_is_kept_over_is_kept_whole() -> No
 
 
 def test_a_retry_with_fewer_blocks_is_kept_whole() -> None:
-    analyst = _Analyst([SHORT_RETRY])
+    analyst = _Analyst([SHORT_RETRY, SHORT_RETRY])
 
     _check(analyst)
 
@@ -111,7 +113,7 @@ def test_a_retry_that_is_kept_leaves_no_discarded_row() -> None:
 
 
 def test_the_stored_summary_carries_both_kinds_of_kept_answer() -> None:
-    analyst = _Analyst([SHORT_RETRY])
+    analyst = _Analyst([SHORT_RETRY, SHORT_RETRY])
     _check(analyst)
     rows = analyst.drain_unparsed_answers()
     unparsed = {"agent": "network", "round": "1", "answer": "prose no claim was read from"}

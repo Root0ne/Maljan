@@ -155,6 +155,7 @@ VALIDATION_ANSWER_KEYS: tuple[str, ...] = (
     "unparsed_answers",
     "discarded_retry_answers",
     "retry_drops",
+    "retry_withdrawals",
 )
 
 
@@ -163,6 +164,28 @@ def unresolved_total(rows: list[dict[str, str]]) -> int:
     from maljan.pipeline.validation import unresolved_total as total
 
     return total(rows)
+
+
+def summary_counts_line(summary: Any) -> str:
+    """The stored summary's headline counts, each read from the field it is stored in.
+
+    The verdict (``final_decision``), the negotiation rounds, the techniques
+    an analyst claimed (``corroboration`` rows with a ``claimed_by``), the
+    feedback retries and the unresolved findings (``validation``). A log line
+    built from these says what the stored summary and the report say.
+    """
+    stored = dict(summary or {})
+    negotiation = stored.get("negotiation") or {}
+    validation = stored.get("validation") or {}
+    corroborated = stored.get("corroboration") or {}
+    claimed = sum(1 for row in corroborated.values() if corroboration_row(row)["claimed_by"])
+    return (
+        f"verdict={stored.get('final_decision')}, "
+        f"rounds={int(negotiation.get('rounds_completed') or 0)}, "
+        f"claimed techniques={claimed}, "
+        f"validation retries={int(validation.get('retries') or 0)}, "
+        f"unresolved={unresolved_total(list(validation.get('unresolved') or []))}"
+    )
 
 
 @dataclass
@@ -196,10 +219,12 @@ class TokenUsageMetrics:
     providers reported, and the calls that reported nothing are said to have
     reported nothing. ``cost`` is present only where a provider reported one,
     over ``cost_calls`` calls; there is no price table. ``cached_input_tokens``
-    (the part of the input read from the provider's prompt cache) and
+    (the part of the input read from the provider's prompt cache),
+    ``cache_write_input_tokens`` (the part written to it) and
     ``reasoning_tokens`` (the part of the output spent reasoning) are present
-    only where a provider reported them, over ``cached_calls`` and
-    ``reasoning_calls`` calls. ``per_agent`` holds the same figures for each
+    only where a provider reported them, over ``cached_calls``,
+    ``cache_write_calls`` and ``reasoning_calls`` calls. ``per_agent`` holds the
+    same figures for each
     agent, and the models that answered it. ``unreported`` names each call that
     reported no usage — the agent, the call and the model — one row per call.
     """
@@ -211,6 +236,8 @@ class TokenUsageMetrics:
     unreported_calls: int = 0
     cached_input_tokens: int | None = None
     cached_calls: int = 0
+    cache_write_input_tokens: int | None = None
+    cache_write_calls: int = 0
     reasoning_tokens: int | None = None
     reasoning_calls: int = 0
     cost: float | None = None
@@ -279,6 +306,12 @@ def tokens_sentence(tokens: dict[str, Any] | None) -> str | None:
         )
     text += _part_clause(
         tokens, "cached_input_tokens", "cached_calls", "of the input read from the prompt cache"
+    )
+    text += _part_clause(
+        tokens,
+        "cache_write_input_tokens",
+        "cache_write_calls",
+        "of the input written to the prompt cache",
     )
     text += _part_clause(tokens, "reasoning_tokens", "reasoning_calls", "of the output reasoning")
     cost = tokens.get("cost")
@@ -1128,7 +1161,14 @@ class RunSummary:
             drops = v.answers.get("retry_drops") or []
             if drops:
                 lines += ["**Items a kept validation retry left out:**", ""]
-                lines += [f"- {row.get('sentence', '')}" for row in drops]
+                from maljan.pipeline.validation import retry_drop_sentences
+
+                lines += [f"- {sentence}" for sentence in retry_drop_sentences(drops)]
+                lines.append("")
+            withdrawn = v.answers.get("retry_withdrawals") or []
+            if withdrawn:
+                lines += ["**Items a validation retry withdrew:**", ""]
+                lines += [f"- {row.get('sentence', '')}" for row in withdrawn]
                 lines.append("")
             if v.unresolved:
                 lines.append("**Still wrong after the retry:**")
@@ -1276,6 +1316,9 @@ class RunSummary:
         if tok.cached_input_tokens is not None and tok.cached_calls:
             out["cached_input_tokens"] = tok.cached_input_tokens
             out["cached_calls"] = tok.cached_calls
+        if tok.cache_write_input_tokens is not None and tok.cache_write_calls:
+            out["cache_write_input_tokens"] = tok.cache_write_input_tokens
+            out["cache_write_calls"] = tok.cache_write_calls
         if tok.reasoning_tokens is not None and tok.reasoning_calls:
             out["reasoning_tokens"] = tok.reasoning_tokens
             out["reasoning_calls"] = tok.reasoning_calls
@@ -1701,6 +1744,10 @@ class RunSummaryBuilder:
             unreported_calls=int(snapshot.get("unreported_calls", 0)),
             cached_input_tokens=_reported_part(snapshot, "cached_input_tokens", "cached_calls"),
             cached_calls=int(snapshot.get("cached_calls", 0) or 0),
+            cache_write_input_tokens=_reported_part(
+                snapshot, "cache_write_input_tokens", "cache_write_calls"
+            ),
+            cache_write_calls=int(snapshot.get("cache_write_calls", 0) or 0),
             reasoning_tokens=_reported_part(snapshot, "reasoning_tokens", "reasoning_calls"),
             reasoning_calls=int(snapshot.get("reasoning_calls", 0) or 0),
             cost=float(cost) if isinstance(cost, int | float) else None,

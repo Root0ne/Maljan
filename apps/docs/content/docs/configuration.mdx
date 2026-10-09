@@ -2144,6 +2144,48 @@ A name travels alone, or joined to other such names by `/`, `|`, `+` or `&`. A
 module in front of a name (`kernel32.dll!Name`) is split off at the `!`, so the
 module and the name are read apart.
 
+What a tool or a model writes beside those names travels as written too, each
+by its exact form:
+
+- in a list joined by `/`, `|`, `+` or `&`: a module name the export-name
+  catalogue lists, in any case (`kernel32/WinINet/SHELL32`), an address or a
+  decimal number of at most eight digits (`0x1a20/0x1a28`, a list of process
+  ids), and an
+  abbreviation that completes the name before it to a catalogue name
+  (`FindFirstFileA/W`, `NtQueryInformationProcess/Thread`);
+- a stretch of 24 or more characters of the standard or URL-safe base64
+  alphabet itself, the table a decoder is built from, when it is the whole run
+  or the whole stretch: beside other pieces it is read as before, so a key
+  next to it is masked with it.
+
+Hex is read as it always was: a run with eleven or more hex digits in a row is
+never one of these forms. A hex dump is masked in the events wherever it
+stands, a tool's own `"hex"` field (the bytes a memory or byte-range read
+returned) included, and so is a digest inside a list or a name that ends in
+long hex (a decompiler's `in_stack_…` variable); a digest alone travels, as
+before.
+
+A piece that is none of these keeps the whole run a key, so a key inside such
+a list is still masked with its stretch.
+
+A run that a character outside base64 splits (`hello.<key>`, `name@<key>`)
+is also read stretch by stretch for two shapes no length alone decides: a
+vendor prefix with a key's body after it, and a lowercase key body (24 or more
+lowercase letters and digits with at least one digit and four letters past
+`f`, so no hex run is one). Either opens the run to the rules above, and the
+key's stretch is masked; a separator line, a dump's file name or a scanner's
+label behind a dot is read as before. A token behind other text in one run
+(`x_<token>`) is masked when its header opens with a quoted key (`{"`), so a
+dotted name whose head merely decodes to `{` is no token.
+
+The events and the stored transcript stay stricter than the report on
+purpose: they mask every credential shape above and every configured value,
+while report text (finding rows and the run record) masks the configured
+values and a URL's credentials only, and keeps a credential-shaped string the
+evidence holds as the evidence wrote it. Some names still read as keys in the
+events (a family-name list with a digit or an all-capitals piece, a long
+identifier no catalogue lists, a hex dump); that is the accepted cost.
+
 A key is still a key:
 
 - after a module and a `!`;

@@ -45,6 +45,12 @@ HEADINGS = [
     "CLAIM: ",
     "CLAIM 3: ",
     "**CLAIM 4 (REVISED):** ",
+    "CLAIM 2 [REVISED — retracts claim 5]: ",
+    "CLAIM [NEW] — ",
+    "CLAIM 6 (REVISED — not observed)\n",
+    "**CLAIM 7 [KEPT]** \n",
+    "CLAIM 8 [",
+    "CLAIM 9 (a) ",
     "- CLAIM: ",
     "1. CLAIM — ",
     "CLAIM - ",
@@ -115,6 +121,16 @@ VARIED = [
     " " * 300 + "CLAIM: it reads a file",
     "> * # " * 60 + "CLAIM 7: it reads a file",
     "CLAIM (" + "a:b - c " * 80 + "): it reads a file",
+    "CLAIM [" + "a:b - c ( " * 80 + "]: it reads a file",
+    "CLAIM 3 [" + "a:b - c " * 80 + "]",
+    "CLAIM 3 (" + "a:b - c " * 80 + ")  ** ",
+    "CLAIM 4 [" + "a:b - c " * 80,
+    # Headings that are their note alone, the same fields under each: the
+    # note is what tells the claims apart.
+    "CLAIM 1 (REVISED — the first)\nEVIDENCE: [ev_0002]\nCONFIDENCE: 0.7\nTECHNIQUE: NONE",
+    "CLAIM 2 (REVISED — the second)\nEVIDENCE: [ev_0002]\nCONFIDENCE: 0.7\nTECHNIQUE: NONE",
+    "**CLAIM 3 [Kept  — The  First]**  \nEVIDENCE: [ev_0002]\nCONFIDENCE: 0.7",
+    "CLAIM 4 [" + "a ( b " * 60 + "]\nEVIDENCE: [ev_0002]",
     "DISPUTES:" + " " * 120 + "NONE" + " ." * 40,
     "DISPUTES: " + "*_` " * 30 + "n/a" + "..." * 20,
     "# * DISPUTES" + " " * 50,
@@ -366,8 +382,9 @@ def test_the_automata_are_built_from_the_patterns_the_check_reads() -> None:
     prefix = "[ \\t>*_#]*(?:(?:[-+]|\\d+[.)])[ \\t]+)?[ \\t>*_#]*"
     assert claim_headings.LINE_PREFIX == prefix
     assert claim_headings.CLAIM_HEAD_RE.pattern == (
-        "^" + prefix + "CLAIM(?:[ \\t]*#?\\d+)?(?:[ \\t]*\\([^)\\n]*\\))?[ \\t]*(?:\\*\\*)?"
-        "[ \\t]*(?::|\u2014|\u2013|-(?=\\s))[ \\t]*(?:\\*\\*)?[ \\t]*"
+        "^" + prefix + "CLAIM(?:[ \\t]*#?(?P<number>\\d+))?"
+        "(?:[ \\t]*(?P<note>\\([^)\\n]*\\)|\\[[^\\]\\n]*\\]))?[ \\t]*(?:\\*\\*)?[ \\t]*"
+        "(?:(?P<delim>:|\u2014|\u2013|-(?=\\s))[ \\t]*(?:\\*\\*)?[ \\t]*|(?(note)$|(?!)))"
     )
     assert claim_headings._SEPARATOR_RE.pattern == "^[ \\t]*-{3,}[ \\t]*$"
     assert claim_headings._FIELD_LABEL_RE.pattern == (

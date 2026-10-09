@@ -128,6 +128,7 @@ from maljan.pipeline.run_state import NO_LIMIT, budget_line
 from maljan.pipeline.validation import (
     _UNPARSED_ANSWER_MESSAGE,
     ANALYST_FEEDBACK_CLOSING,
+    ANALYST_FEEDBACK_CLOSING_BY_NUMBER,
     FUNCTION_CHECK_HEAD,
     FUNCTION_CHECK_NOT_ASKED_HEAD,
     ITEM_NOT_IN_RUN,
@@ -162,6 +163,7 @@ from maljan.pipeline.validation import (
     recommendation_technique_violations,
     repeated_item_violations,
     retry_drop_question,
+    retry_unplaced_question,
     section_cut_violation,
     stated_value_violations,
     technique_line_violation,
@@ -170,6 +172,7 @@ from maljan.pipeline.validation import (
     ungrounded_capabilities,
     unpublished_value_violations,
     validate_verdict_bundle,
+    whole_answer_after_retry_question,
 )
 from maljan.providers.base import STATIC_EVIDENCE_INSTRUCTIONS, absent_provider_fragment
 from maljan.providers.static import r2 as _r2
@@ -1205,6 +1208,8 @@ PROMPTS: dict[str, str] = {
         [
             run_quality_note(["a reason"], degraded=True),
             run_quality_note(["a reason", "a note"], degraded=False, informational=["a note"]),
+            run_quality_note(["a reason"], degraded=True, notes=["a claim note"]),
+            run_quality_note([], degraded=False, notes=["a claim note"]),
         ]
     ),
     "judge malware object questions": " ".join(
@@ -1264,6 +1269,7 @@ PROMPTS: dict[str, str] = {
         f"{ANALYST_CLAIMS_HEADING} {CLAIMS_IN_FORCE_HEADING}"
     ),
     "analyst retry closing line": ANALYST_FEEDBACK_CLOSING,
+    "analyst retry closing line by claim number": ANALYST_FEEDBACK_CLOSING_BY_NUMBER,
     "judge technique question": " ".join(
         [
             TECHNIQUE_QUESTION_SYSTEM,
@@ -1340,6 +1346,25 @@ PROMPTS: dict[str, str] = {
             ),
             findings=(Finding(title="The file opens a window", detail="It names it."),),
         )
+    ),
+    "analyst question about a claim a merged retry left as it was": retry_unplaced_question(
+        RetryDrops(
+            claims=(
+                (
+                    ClaimEvidence(
+                        claim="The file opens a window.",
+                        evidence_ref="[ev_0001]",
+                        confidence=0.9,
+                        technique_id="T1001",
+                    ),
+                    ("0x40",),
+                ),
+            ),
+            findings=(Finding(title="The file opens a window", detail="It names it."),),
+        )
+    ),
+    "analyst question for the whole answer after a retry not placed by claim number": (
+        whole_answer_after_retry_question("the retry wrote claim 2 twice")
     ),
     "composer question about table rows no cited entry holds": " ".join(
         v.message
@@ -1690,6 +1715,22 @@ PROMPTS: dict[str, str] = {
             _r2._open_first("/srv/samples/r2-work/x.exe"),
         ]
     ),
+    "an r2 function tool at an address radare2 has not analysed, before and after af": " ".join(
+        str((_r2.r2_error_reply(tool, reply, analysed=analysed) or {})["error"]["remediation"])
+        for tool, reply, analysed in (
+            (
+                "decompile_function",
+                "<log>\n[ERROR] Cannot find function in 0x401000\n</log>",
+                False,
+            ),
+            (
+                "disassemble_function",
+                "<log>\n[ERROR] Cannot find function at 0x401000\n</log>",
+                True,
+            ),
+        )
+    ),
+    "the line an r2 answer carries when the adapter ran af first": _r2.af_ran_note("0x401000"),
     "the function map block": _function_map_text(),
     "the function index as the pack, the run state and the map say it": _function_index_text(),
     "a tool answer the conversation had no room for, as told and as recorded": " ".join(

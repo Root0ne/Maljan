@@ -15,7 +15,7 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -91,6 +91,47 @@ _R2_FAILURE_LEVELS = frozenset({"ERROR", "FATAL"})
 _R2_LOG_LINE = re.compile(r"\[(?P<level>[A-Z]+)\]\s*\S.*")
 
 
+# radare2's words for a function tool called at an address its analysis holds no
+# function at, with the address as radare2 resolved it (always hex, so it is
+# safe to hand back to radare2 in a command).
+_R2_NO_FUNCTION = re.compile(
+    r"\[ERROR\] Cannot find function (?:in|at) (?P<address>0x[0-9a-fA-F]+)"
+)
+# The tools that read one function radare2 has analysed, and the tool that runs
+# a radare2 command (offered only by an r2mcp started with ``-r``).
+_R2_FUNCTION_TOOLS = frozenset({"decompile_function", "disassemble_function"})
+_R2_RUN_COMMAND = "run_command"
+_R2_NO_FUNCTION_NO_AF = (
+    "radare2 has no function at {address}: its analysis did not define one there, and this "
+    "server offers no call that analyses one address (`af @ {address}` runs through "
+    "`run_command`, which r2mcp offers only when started with -r). Call `analyze` with a level "
+    "above the one this file was analysed at (1 adds the targets of calls, 2 runs aaa), then "
+    "call this tool again, or call `disassemble` with this address to read its instructions "
+    "without a function"
+)
+_R2_NO_FUNCTION_AFTER_AF = (
+    "radare2 defined no function at {address} even after `af @ {address}` was run through "
+    "`run_command`; call `disassemble` with this address to read its instructions without a "
+    "function"
+)
+
+
+def af_ran_note(address: str) -> str:
+    """The line an answer carries when the adapter analysed its function first."""
+    return (
+        f"[platform] radare2 had no function at {address}; the platform ran `af @ {address}` "
+        "through run_command before this answer."
+    )
+
+
+def _unanalysed_address(tool: str, logged: str) -> str | None:
+    """The address a function tool found no function at, from radare2's own error."""
+    if tool not in _R2_FUNCTION_TOOLS:
+        return None
+    match = _R2_NO_FUNCTION.search(logged)
+    return match.group("address") if match else None
+
+
 def _r2_logged_error(text: str) -> str | None:
     """radare2's own error lines, when ``text`` is only a log envelope of them."""
     envelope = _R2_LOG_ENVELOPE.fullmatch(text)
@@ -106,7 +147,12 @@ def _r2_logged_error(text: str) -> str | None:
 
 
 def r2_error_reply(
-    tool: str, reply: Any, *, tried: str | None = None, readable: str | None = None
+    tool: str,
+    reply: Any,
+    *,
+    tried: str | None = None,
+    readable: str | None = None,
+    analysed: bool = False,
 ) -> dict[str, Any] | None:
     """The structured failure for one r2mcp reply that is an error, else ``None``.
 
@@ -120,6 +166,10 @@ def r2_error_reply(
     path radare2 can open for this sample (the provider's mirror): a failed
     open names both in its remediation, and an open-first refusal names the
     readable one.
+
+    A function tool radare2 answers with "Cannot find function" is told which
+    call analyses that address; ``analysed`` says the adapter already ran
+    ``af`` there, and the remediation then names what is left.
     """
     marker = _open_first_marker(reply)
     if marker is not None:
@@ -129,7 +179,11 @@ def r2_error_reply(
     text = reply.strip()
     logged = _r2_logged_error(text)
     if logged is not None:
-        return tool_error(TOOL_FAILED, logged, tool=tool)
+        address = _unanalysed_address(tool, logged)
+        if address is None:
+            return tool_error(TOOL_FAILED, logged, tool=tool)
+        told = _R2_NO_FUNCTION_AFTER_AF if analysed else _R2_NO_FUNCTION_NO_AF
+        return tool_error(TOOL_FAILED, logged, tool=tool, remediation=told.format(address=address))
     if not text or "\n" in text:
         return None
     for pattern, code, remediation in _R2_ERROR_REPLIES:
@@ -140,6 +194,12 @@ def r2_error_reply(
                 remediation = _open_failed(tried, readable)
             return tool_error(code, text, tool=tool, remediation=remediation)
     return None
+
+
+def _failure_message(failure: dict[str, Any] | None) -> str:
+    """The message of a structured failure, or ``""``."""
+    error = (failure or {}).get("error")
+    return str(error.get("message") or "") if isinstance(error, dict) else ""
 
 
 def _open_first(readable: str | None) -> str:
@@ -165,7 +225,11 @@ def _open_first_marker(reply: Any) -> str | None:
     return message if _R2_OPEN_FIRST_ERROR.fullmatch(message.strip()) else None
 
 
-def _reading_error_replies(tool: Any, readable: Callable[[], str | None] | None = None) -> Any:
+def _reading_error_replies(
+    tool: Any,
+    readable: Callable[[], str | None] | None = None,
+    run_command: Callable[..., Awaitable[Any]] | None = None,
+) -> Any:
     """``tool``, rebuilt so an r2mcp error reply comes back as the structured failure.
 
     The ledger's rule for a returned error (``schemas.evidence.build_entry``)
@@ -174,6 +238,13 @@ def _reading_error_replies(tool: Any, readable: Callable[[], str | None] | None 
     can open for this sample, which a failed open's remediation names beside
     the path it tried. A tool that cannot be rebuilt faithfully is returned as
     it is.
+
+    ``run_command`` is the server's own ``run_command`` when it offers one. A
+    function tool radare2 answers with "Cannot find function" at an address
+    then has the function there analysed (``af @ <address>``, the address as
+    radare2 printed it) and is called once more with the same arguments; its
+    second reply is the answer. Without it the failure says which call
+    analyses the address.
     """
     from langchain_core.tools import StructuredTool
 
@@ -192,6 +263,27 @@ def _reading_error_replies(tool: Any, readable: Callable[[], str | None] | None 
             tried=str(tried) if tried else None,
             readable=readable() if readable is not None else None,
         )
+        address = _unanalysed_address(name, _failure_message(failure))
+        if address is not None and run_command is not None:
+            try:
+                await run_command(command=f"af @ {address}")
+            except Exception as exc:  # noqa: BLE001 — the first failure stands, as it was
+                logger.warning("r2: af at %s did not run (%s).", address, exc)
+            else:
+                logger.info(
+                    "r2: %s at %s found no function; ran af there and called again.", name, address
+                )
+                reply = await coroutine(**kwargs)
+                failure = r2_error_reply(
+                    name,
+                    reply,
+                    readable=readable() if readable is not None else None,
+                    analysed=True,
+                )
+                if failure is None and isinstance(reply, str):
+                    # The entry says what produced the answer: the adapter's
+                    # own analysis, not a call the model made.
+                    reply = f"{reply.rstrip()}\n\n{af_ran_note(address)}\n"
         return json.dumps(failure) if failure is not None else reply
 
     try:
@@ -402,7 +494,17 @@ class R2StaticProvider(GenericMCPStaticProvider):
         self.tools = self.get_tools()
 
     def get_tools(self) -> list[BaseTool]:
-        return [_reading_error_replies(tool, self._held_path) for tool in super().get_tools()]
+        tools = super().get_tools()
+        runner = next((t for t in tools if t.name == _R2_RUN_COMMAND), None)
+        run_command = getattr(runner, "coroutine", None)
+        return [
+            _reading_error_replies(
+                tool,
+                self._held_path,
+                run_command if tool.name in _R2_FUNCTION_TOOLS else None,
+            )
+            for tool in tools
+        ]
 
     def pin_sample(self, path: str | None) -> None:
         """The mirror this provider's session opens, set by the analyst node; ``None`` clears it."""

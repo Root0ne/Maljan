@@ -50,6 +50,7 @@ from maljan.analysis.run_summary import (
     tokens_sentence,
 )
 from maljan.core.logger import logger
+from maljan.reporting.dedupe import distinct_processes, distinct_signatures
 from maljan.reporting.defang import ProseDefanger, defang
 from maljan.reporting.judge_reasons import (
     JUDGE_REASON_WIDTH,
@@ -642,7 +643,7 @@ class MarkdownRenderer:
                 measured.extend(["", *table])
         evasive = [
             sig
-            for sig in (dynamic.sandbox_signatures if dynamic else [])
+            for sig in distinct_signatures(dynamic.sandbox_signatures if dynamic else [])
             if _names_any(sig.name + " " + sig.description, _EVASION_WORDS)
         ]
         if evasive:
@@ -789,7 +790,9 @@ class MarkdownRenderer:
         # 5.5 Discovery.
         measured = []
         commands = [
-            node for node in _spawned(dynamic.process_tree if dynamic else []) if node.command_line
+            node
+            for node in _spawned(distinct_processes(dynamic.process_tree if dynamic else []))
+            if node.command_line
         ]
         if commands:
             measured.extend([f"_{OBSERVED}:_ commands the sample started", ""])
@@ -962,7 +965,11 @@ class MarkdownRenderer:
         )
 
         # 5.9 Family-specific behaviour.
-        family_block = _ransomware_block(ta, ctx) if ta is not None else ""
+        family_block = (
+            _ransomware_block(ta, ctx, ransomware=_states_ransomware(report))
+            if ta is not None
+            else ""
+        )
         blocks.append(
             family_block
             or _absent_subsection(
@@ -1006,7 +1013,7 @@ class MarkdownRenderer:
         if dyn.process_tree:
             tree = [
                 line
-                for root in dyn.process_tree
+                for root in distinct_processes(dyn.process_tree)
                 for line in _process_tree_lines(root, 0, ctx.plain)
             ]
             lines.extend([_plain_heading("Process tree"), "", *_fenced("\n".join(tree)), ""])
@@ -1081,7 +1088,8 @@ class MarkdownRenderer:
             lines.extend(_left_out(len(dyn.notable_apis), 20, "notable APIs"))
             lines.append("")
 
-        if dyn.sandbox_signatures:
+        signatures = distinct_signatures(dyn.sandbox_signatures)
+        if signatures:
             lines.extend(
                 [
                     _plain_heading("Sandbox signatures"),
@@ -1090,8 +1098,8 @@ class MarkdownRenderer:
                     _divider(4),
                 ]
             )
-            lines.extend(_signature_row(sig) for sig in dyn.sandbox_signatures[:30])
-            lines.extend(_left_out(len(dyn.sandbox_signatures), 30, "sandbox signatures"))
+            lines.extend(_signature_row(sig) for sig in signatures[:30])
+            lines.extend(_left_out(len(signatures), 30, "sandbox signatures"))
             lines.append("")
 
         if len(lines) <= 4:
@@ -1862,7 +1870,17 @@ class MarkdownRenderer:
             drops = [row for row in validation.get("retry_drops") or [] if isinstance(row, dict)]
             if drops:
                 lines.extend(["**Items a kept validation retry left out:**", ""])
-                lines.extend(_item(ctx.plain(str(row.get("sentence") or ""))) for row in drops)
+                from maljan.pipeline.validation import retry_drop_sentences
+
+                lines.extend(_item(ctx.plain(sentence)) for sentence in retry_drop_sentences(drops))
+                lines.append("")
+            # What a retry withdrew with a WITHDRAW line, with its reason.
+            withdrawn = [
+                row for row in validation.get("retry_withdrawals") or [] if isinstance(row, dict)
+            ]
+            if withdrawn:
+                lines.extend(["**Items a validation retry withdrew:**", ""])
+                lines.extend(_item(ctx.plain(str(row.get("sentence") or ""))) for row in withdrawn)
                 lines.append("")
         if exports:
             lines.extend(["**Export decisions:**", ""])
@@ -3530,7 +3548,27 @@ def _encryption_table(enc: Any, ctx: _Context) -> list[str]:
     return out
 
 
-def _ransomware_block(ta: Any, ctx: _Context) -> str:
+# The technique a ransomware verdict publishes: Data Encrypted for Impact.
+_RANSOMWARE_TECHNIQUE = "T1486"
+
+
+def _states_ransomware(report: MalwareReport) -> bool:
+    """Whether the run's own verdict says ransomware: the report publishes Data
+    Encrypted for Impact.
+
+    The judge's category is free text ("loader (delivers ransomware)", "loader,
+    not ransomware") and says nothing a word in it can be read for. What the
+    report model wrote in its encryption table does not say it either: a
+    loader's string cipher fills the same fields, and a model filling "none"
+    into them is still writing.
+    """
+    return any(
+        str(row.technique_id).strip().upper().split(".")[0] == _RANSOMWARE_TECHNIQUE
+        for row in report.ttp_mappings
+    )
+
+
+def _ransomware_block(ta: Any, ctx: _Context, *, ransomware: bool) -> str:
     lines: list[str] = []
     spk = ta.service_process_kill
     if spk is not None and (spk.kill_list or spk.white_list or spk.mechanism):
@@ -3582,9 +3620,10 @@ def _ransomware_block(ta: Any, ctx: _Context) -> str:
             lines.append("")
     if not lines:
         return ""
-    return "\n".join(
-        [_subheading("5.9", "Ransomware behaviour", REPORT_MODEL), "", *lines]
-    ).rstrip()
+    # The heading names ransomware only when the verdict does; a loader's
+    # cipher table under it read as a ransomware finding.
+    title = "Ransomware behaviour" if ransomware else "Family-specific behaviour"
+    return "\n".join([_subheading("5.9", title, REPORT_MODEL), "", *lines]).rstrip()
 
 
 def report_title(report: MalwareReport) -> str:
@@ -3642,7 +3681,12 @@ def _reputation_line(report: MalwareReport) -> str:
     if not entries:
         return "no reputation lookup in this run"
     ids = {row.id for row in entries}
-    where = ", ".join(f"{row.tool}, {row.id}" for row in entries)
+    # Each tool named once before its entries: four lookups of one sample are
+    # four ids, not four repetitions of the tool's name.
+    by_tool: dict[str, list[str]] = {}
+    for lookup in entries:
+        by_tool.setdefault(lookup.tool, []).append(lookup.id)
+    where = ", ".join(f"{tool}, {', '.join(named)}" for tool, named in by_tool.items())
     rows: dict[str, str] = {}
     for section in report.sections:
         if not ids.intersection(section.evidence_ids) or section.kind != "kv":

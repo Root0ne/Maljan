@@ -84,6 +84,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -482,6 +483,16 @@ PROBE_PATHS: tuple[str, ...] = (
     TGI_INFO_PATH,
 )
 
+# The Anthropic Models API, the one vendor API that describes a model it
+# serves: ``GET /v1/models/{model_id}`` answers ``max_input_tokens`` (the
+# window), ``max_tokens`` (the largest output cap a request may name) and the
+# model's ``capabilities``, for free and without generating anything. It is
+# asked only with a key, because it answers nothing without one.
+ANTHROPIC_API_ROOT = "https://api.anthropic.com"
+ANTHROPIC_MODEL_PATH = "/v1/models/"
+ANTHROPIC_VERSION = "2023-06-01"
+ANTHROPIC_MODELS_API = "the Anthropic Models API"
+
 # A probe is on the path of a settings save and of a job's first tool attach,
 # so it is short. A metadata endpoint that has not answered in two seconds is
 # one the fallback answers for.
@@ -522,6 +533,8 @@ class Ask:
     body: dict[str, Any] | None
     read: Callable[[Any, str], int]
     what: str
+    # How the request authenticates: a bearer key, or Anthropic's own headers.
+    auth: str = "bearer"
 
 
 def _root_of(endpoint: object) -> str:
@@ -669,6 +682,21 @@ def _num_ctx_in(parameters: Any) -> int:
     return 0
 
 
+def window_from_anthropic_model(payload: Any, model: str = "") -> int:
+    """The Anthropic Models API's description of one model: its ``max_input_tokens``.
+
+    The path names the model, so the answer describes it whatever id it
+    carries: an alias comes back as the snapshot it resolves to.
+    """
+    del model
+    if not isinstance(payload, dict) or payload.get("type", "model") != "model":
+        return 0
+    value = payload.get("max_input_tokens")
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return 0
+    return value
+
+
 def window_from_tgi_info(payload: Any, _model: str = "") -> int:
     """Text Generation Inference's ``/info``: ``max_total_tokens``."""
     if not isinstance(payload, dict):
@@ -685,6 +713,20 @@ def probe_plan(provider: str, endpoint: object, model: str = "") -> tuple[Ask, .
     with nothing to ask is an empty plan, and the table answers for it.
     """
     root = _root_of(endpoint)
+    if provider == "anthropic":
+        name = str(model or "").strip()
+        if not name:
+            return ()
+        return (
+            Ask(
+                "GET",
+                f"{ANTHROPIC_API_ROOT}{ANTHROPIC_MODEL_PATH}{quote(name, safe='')}",
+                None,
+                window_from_anthropic_model,
+                ANTHROPIC_MODELS_API,
+                auth="anthropic",
+            ),
+        )
     if provider == "ollama":
         base = root or "http://localhost:11434"
         return (
@@ -711,8 +753,15 @@ def probe_plan(provider: str, endpoint: object, model: str = "") -> tuple[Ask, .
     )
 
 
-def _headers(api_key: str) -> dict[str, str]:
+def _headers(api_key: str, auth: str = "bearer") -> dict[str, str]:
+    if auth == "anthropic":
+        return {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION} if api_key else {}
     return {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+
+def _answers_without_a_key(provider: str, api_key: str) -> bool:
+    """Whether ``provider``'s metadata path can answer this probe: the Anthropic one needs a key."""
+    return provider != "anthropic" or bool(api_key)
 
 
 def _body_within_bounds(answer: httpx.Response, what: str) -> bytes | None:
@@ -798,6 +847,13 @@ def _window_in(ask: Ask, body: bytes | None, model: str) -> tuple[int, str]:
             note_from_model_list(payload, model)
         except Exception:  # noqa: BLE001 — a limit nobody states is not one
             logger.debug("context window: no output limit read from %s", ask.what)
+    if ask.read is window_from_anthropic_model:
+        try:
+            from maljan.llm.model_capabilities import note_model_description
+
+            note_model_description(payload, model, ask.what)
+        except Exception:  # noqa: BLE001 — a description nobody reads is not a window
+            logger.debug("context window: no model description kept from %s", ask.what)
     believed = believable(reported)
     if believed > 0 or not isinstance(reported, int) or reported <= 0:
         return believed, ""
@@ -855,7 +911,7 @@ def probe_window(
     thread, before its first tool answer. Never raises.
     """
     plan = probe_plan(provider, endpoint, model)
-    if not plan:
+    if not plan or not _answers_without_a_key(provider, api_key):
         return None
     refused = ""
     deadline = time.monotonic() + PROBE_BUDGET_SECONDS
@@ -885,7 +941,7 @@ async def aprobe_window(
 ) -> WindowFact | None:
     """The same question on the caller's loop, for the settings probe."""
     plan = probe_plan(provider, endpoint, model)
-    if not plan:
+    if not plan or not _answers_without_a_key(provider, api_key):
         return None
     refused = ""
     deadline = time.monotonic() + PROBE_BUDGET_SECONDS
@@ -941,7 +997,7 @@ def _send(client: httpx.Client, ask: Ask, api_key: str, deadline: float) -> http
     request = client.build_request(
         ask.method,
         ask.url,
-        headers=_headers(api_key),
+        headers=_headers(api_key, ask.auth),
         json=ask.body if ask.method == "POST" else None,
         timeout=_left(deadline),
     )
@@ -954,7 +1010,7 @@ async def _asend(
     request = client.build_request(
         ask.method,
         ask.url,
-        headers=_headers(api_key),
+        headers=_headers(api_key, ask.auth),
         json=ask.body if ask.method == "POST" else None,
         timeout=_left(deadline),
     )

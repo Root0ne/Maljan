@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from maljan.analysis.technique_ids import api_capability_hits, sigma_technique_ids
 from maljan.core.logger import logger
+from maljan.reporting.dedupe import distinct_signatures, process_identity
 from maljan.reporting.models import (
     DynamicBehavior,
     ExportRow,
@@ -549,6 +550,9 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
     dynamic = DynamicBehavior()
     seen = False
 
+    # Every call reads the same sandbox task: the pack's call and an analyst's
+    # answer the same processes and signatures, and each is one row.
+    processes: list[ProcessNode] = []
     for _entry, data in _payloads(ledger, "sandbox_processes"):
         nodes = [
             ProcessNode(
@@ -562,7 +566,8 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
         ]
         if nodes:
             seen = True
-            dynamic.process_tree.extend(_as_tree(nodes))
+            processes.extend(nodes)
+    dynamic.process_tree = _as_tree(_once(processes, process_identity))
 
     for _entry, data in _payloads(ledger, "sandbox_signatures"):
         for row in data.get("signatures") or []:
@@ -576,6 +581,8 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
                     severity=_int(row.get("severity")),
                 )
             )
+
+    dynamic.sandbox_signatures = distinct_signatures(dynamic.sandbox_signatures)
 
     for _entry, data in _payloads(ledger, "sandbox_registry_ops"):
         for row in data.get("registry") or []:

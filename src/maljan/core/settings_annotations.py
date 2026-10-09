@@ -219,9 +219,10 @@ ANNOTATIONS: dict[str, Annotation] = {
             "the platform's prompt estimate (characters over three), nothing is sent that "
             "could pass it by that measure. Empty, the default, is no ceiling. A call counts "
             "what it was charged: the cost its provider reported with the answer, else its "
-            "reported usage (cached input, input and output tokens) at the rates in force "
-            "when it was sent, from llm.model_prices first, then the vendored model table, "
-            "time windows such as peak hours included. Before each call its output cap is "
+            "reported usage (cached, cache-written and other input tokens, and output tokens) at "
+            "the rates in force when it was sent, from llm.model_prices first, then the "
+            "vendored model table, time windows such as peak hours and a vendor's prices for "
+            "a long prompt included. Before each call its output cap is "
             "held to what the spend it may use pays for; it is refused only when that is "
             "below the smallest answer it can give (the largest this job has measured of "
             "its model, else its own cap). Calls in flight reserve their worst case, and "
@@ -241,10 +242,13 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Per-model prices for the spend ceiling, keyed by the model name the provider "
             "serves (for example deepseek-v4-pro): input_usd_per_mtok, "
             "output_usd_per_mtok, and optionally cached_input_usd_per_mtok (a cached "
-            "input token costs an input token without it), source, and windows: spans of "
-            "the day in UTC (utc_from, utc_to, optional days mon to sun) with their own "
-            "prices and source, for a vendor's peak or off-peak rate; a call is priced at "
-            "the window it was sent in. Empty by default; "
+            "input token costs an input token without it), cache_write_input_usd_per_mtok "
+            "and cache_write_1h_input_usd_per_mtok (a token written to the prompt cache for "
+            "five minutes or an hour; an input token's price without them), source, windows: "
+            "spans of the day in UTC (utc_from, utc_to, optional days mon to sun) with their "
+            "own prices and source, for a vendor's peak or off-peak rate; a call is priced at "
+            "the window it was sent in, and tiers: prices for a request whose prompt, cache "
+            "reads and writes included, is over over_prompt_tokens. Empty by default; "
             "the vendored model table's documented prices answer for a model not named "
             "here, and a model neither names has no price."
         ),
@@ -283,7 +287,7 @@ ANNOTATIONS: dict[str, Annotation] = {
         "title": "Anthropic expert model",
         "description": (
             "Model used for analyst LLM calls when llm.provider is anthropic, e.g. "
-            "claude-sonnet-4-20250514."
+            "claude-haiku-5-5."
         ),
         "probe": "llm",
         "subgroup": "Anthropic",
@@ -293,6 +297,30 @@ ANNOTATIONS: dict[str, Annotation] = {
         "description": ("Model used for the judge verdict call when llm.provider is anthropic."),
         "probe": "llm",
         "subgroup": "Anthropic",
+    },
+    "llm.anthropic.effort": {
+        "title": "Anthropic effort",
+        "description": (
+            "Sent as output_config.effort on every Anthropic request when set: low, medium, "
+            "high, xhigh or max, from cheapest to deepest. Empty sends nothing and leaves the "
+            "model's own default (medium on Claude Haiku 5.5). A level the Anthropic Models "
+            "API says the model does not take refuses the job before it starts; the "
+            "connection test asks with it."
+        ),
+        "probe": "llm",
+        "subgroup": "Anthropic",
+        "advanced": True,
+    },
+    "llm.anthropic.prompt_cache_ttl": {
+        "title": "Anthropic prompt cache lifetime",
+        "description": (
+            "How long the prompt cache keeps the prefix each Anthropic request writes: 5m, "
+            "the API's default, or 1h, which costs more to write and outlives a longer pause "
+            "between two turns of one conversation. Every request asks for the cache; the "
+            "run summary counts the tokens written to it and read from it."
+        ),
+        "subgroup": "Anthropic",
+        "advanced": True,
     },
     "llm.expert_max_tokens": {
         "title": "Analyst max output tokens",

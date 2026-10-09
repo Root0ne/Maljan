@@ -16,7 +16,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from maljan.agents.base_agent import BaseAnalyst
-from maljan.pipeline.validation import ANALYST_FEEDBACK_CLOSING, FEEDBACK_PREAMBLE
+from maljan.pipeline.validation import (
+    ANALYST_FEEDBACK_CLOSING,
+    ANALYST_FEEDBACK_CLOSING_BY_NUMBER,
+    FEEDBACK_PREAMBLE,
+)
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 
@@ -260,7 +264,16 @@ class TestTheRetryIsShownTheAnswerAsWritten:
         analyst.safe_analyze_isr("raw data")
 
         closing = str(analyst.seen_turns[0][-1].content).splitlines()[-1]
-        for word in ("CLAIM:", "EVIDENCE:", "CONFIDENCE:", "TECHNIQUE:", "maljan-findings"):
+        assert closing == ANALYST_FEEDBACK_CLOSING_BY_NUMBER
+        for word in (
+            "CLAIM 7:",
+            "EVIDENCE:",
+            "CONFIDENCE:",
+            "TECHNIQUE:",
+            "maljan-findings",
+            "WITHDRAW CLAIM",
+            'WITHDRAW FINDING "',
+        ):
             assert word in closing
 
     def test_a_retry_that_answers_in_blocks_keeps_its_claims(self) -> None:
@@ -283,6 +296,13 @@ class TestTheRetryIsShownTheAnswerAsWritten:
             "first_findings": 0,
             "retry_findings": 0,
             "kept": "first",
+            "merge": {
+                "merged": False,
+                "why": "the retry wrote no claim block, finding or withdrawal",
+                "withdrawn_claims": 0,
+                "withdrawn_findings": 0,
+                "whole_answer_asked": True,
+            },
         }
 
     def test_an_answer_with_no_text_of_its_own_is_shown_as_its_summary(self) -> None:
@@ -336,7 +356,16 @@ class TestFindingsFollowTheKeptAnswer:
 
     def test_a_later_drain_after_a_discarded_retry_keeps_the_first_findings(self) -> None:
         written = f"{_BLOCK_ANSWER}\n{_fenced('first finding')}"
-        analyst = _WrittenAnalyst(written, [f"prose only\n{_fenced('retry finding')}"])
+        # A retry with no claim number is read whole; it loses a claim, so the
+        # first answer is kept.
+        retry = (
+            "CLAIM: allocates memory in another process\n"
+            "EVIDENCE: API call: VirtualAllocEx @ 0x401234\n"
+            "CONFIDENCE: 0.8\n"
+            "TECHNIQUE: T1055\n"
+            f"{_fenced('retry finding')}"
+        )
+        analyst = _WrittenAnalyst(written, [retry])
 
         result = analyst._drain_findings(analyst.safe_analyze_isr("raw data"))
 

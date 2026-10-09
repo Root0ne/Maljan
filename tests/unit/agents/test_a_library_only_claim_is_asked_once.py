@@ -194,11 +194,13 @@ def _check(analyst: _Analyst, first: str = BEHAVIOUR + LIBRARIES) -> AgentISR:
 
 class TestTheValidationTurn:
     def test_a_merge_that_folds_them_away_stands(self) -> None:
-        analyst = _Analyst([MERGED])
+        # Not placed by claim number, the fold is followed by the question for
+        # the whole answer, which the analyst answers with the fold again.
+        analyst = _Analyst([MERGED, MERGED])
 
         result = _check(analyst)
 
-        (turns,) = analyst.seen_turns
+        turns = analyst.seen_turns[0]
         assert LIBRARY_ONLY_CLAIMS_CODE in str(turns[-1].content)
         assert [c.claim for c in result.claims] == [
             "The sample exits when the event already exists, after CreateEventW and GetLastError."

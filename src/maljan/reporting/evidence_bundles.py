@@ -21,6 +21,7 @@ from collections.abc import Callable
 from typing import Any
 
 from maljan.analysis.sandbox_sections import ITEMS_TOOL, SECTIONS_TOOL, ItemIndex
+from maljan.reporting.dedupe import distinct_processes
 from maljan.reporting.models import MalwareReport
 from maljan.schemas.sandbox_report import SAMPLE_TREE_KEY
 
@@ -358,7 +359,7 @@ def bundle_for(
         dynamic = report.dynamic
         sandbox_ids = set(sandbox_entry_ids(report))
         tree: list[str] = []
-        for root in dynamic.process_tree if dynamic else []:
+        for root in distinct_processes(dynamic.process_tree if dynamic else []):
             tree.extend(_process_lines(root, 0))
         return {
             "claims": all_claims,

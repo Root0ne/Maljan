@@ -153,7 +153,9 @@ async def complete_one_turn(
 
     ``disable_thinking``, ``compat`` and ``reasoning_effort`` are the
     OpenAI-compatible settings that decide the request body's shape, carried in
-    so that the turn asked here is the turn an agent would ask. ``num_ctx`` and ``keep_alive`` are
+    so that the turn asked here is the turn an agent would ask;
+    ``reasoning_effort`` is also Anthropic's ``llm.anthropic.effort``, sent as
+    ``output_config.effort``. ``num_ctx`` and ``keep_alive`` are
     Ollama's: the server loads a model at the context size the request names
     and keeps it for the time the request names, so a probe asked without them
     leaves the model loaded at the server's own default and the job's first
@@ -288,7 +290,19 @@ def _said_something(provider: str, answer: httpx.Response) -> bool:
         content = payload.get("content")
         if not isinstance(content, list) or not content:
             return False
-        return any(str(part.get("text") or "").strip() or part.get("name") for part in content)
+        # A thinking block counts, for the reason reasoning text counts above:
+        # a model that thinks by default may spend the probe's eight tokens
+        # thinking, and its block, with its signature, is the model speaking.
+        # On Claude Haiku 5.5 the block's text is empty by default and its
+        # signature carries the thinking.
+        return any(
+            str(part.get("text") or "").strip()
+            or part.get("name")
+            or (part.get("type") == "thinking" and str(part.get("signature") or "").strip())
+            or (part.get("type") == "redacted_thinking" and part.get("data"))
+            for part in content
+            if isinstance(part, dict)
+        )
     if provider == "gemini":
         candidates = payload.get("candidates")
         if not isinstance(candidates, list) or not candidates:
@@ -388,14 +402,20 @@ def _completion_request(
             body,
         )
     if provider == "anthropic":
+        anthropic_body: dict[str, Any] = {
+            "model": model,
+            "max_tokens": COMPLETION_MAX_TOKENS,
+            "messages": [{"role": "user", "content": COMPLETION_PROMPT}],
+        }
+        # The effort a job's every request carries (``llm.anthropic.effort``),
+        # so a level the model does not take fails here, before a job.
+        effort = str(reasoning_effort or "").strip()
+        if effort:
+            anthropic_body["output_config"] = {"effort": effort}
         return (
             "https://api.anthropic.com/v1/messages",
             {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION},
-            {
-                "model": model,
-                "max_tokens": COMPLETION_MAX_TOKENS,
-                "messages": [{"role": "user", "content": COMPLETION_PROMPT}],
-            },
+            anthropic_body,
         )
     if provider == "gemini":
         return (
@@ -468,7 +488,11 @@ async def _probe_llm_anthropic(v: dict[str, Any]) -> ProbeResult:
     # and not another.
     pairs = _pairs_to_file(v, "anthropic", endpoint_where("anthropic"), str(model))
     reached, broken, untried = await _complete_each_pair(
-        "anthropic", pairs, str(v.get("anthropic_api_key") or ""), deadline=deadline
+        "anthropic",
+        pairs,
+        str(v.get("anthropic_api_key") or ""),
+        deadline=deadline,
+        reasoning_effort=str(v.get("anthropic_effort") or ""),
     )
     return _completed(t0, reached, broken, untried, f"{len(models)} models listed", models)
 
@@ -1225,7 +1249,11 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                 ),
                 compat=str(settings.llm.openai.compat or "auto"),
                 reasoning_effort=(
-                    str(settings.llm.openai.reasoning_effort or "") if provider == "openai" else ""
+                    str(settings.llm.openai.reasoning_effort or "")
+                    if provider == "openai"
+                    else str(getattr(settings.llm.anthropic, "effort", "") or "")
+                    if provider == "anthropic"
+                    else ""
                 ),
                 # Ollama loads a model at the window and for the keep-alive the
                 # request names; asked the way the job asks, the probe leaves
@@ -1588,6 +1616,9 @@ _INPUTS: dict[str, dict[str, str]] = {
         "core.llm.anthropic.api_key": "anthropic_api_key",
         "core.llm.anthropic.expert_model": "anthropic_expert_model",
         "core.llm.anthropic.judge_model": "anthropic_judge_model",
+        # The effort every Anthropic request carries; a probe without it asks a
+        # question no agent asks.
+        "core.llm.anthropic.effort": "anthropic_effort",
         "core.llm.ollama.base_url": "ollama_base_url",
         "core.llm.ollama.expert_model": "ollama_expert_model",
         "core.llm.ollama.judge_model": "ollama_judge_model",
