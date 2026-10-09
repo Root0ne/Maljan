@@ -369,14 +369,13 @@ def gate_expected(values: dict[str, dict[str, Any]], changes: dict[str, Any]) ->
             return entry.get("model"), entry.get("effort") or effort
         return expert, effort
 
-    for group, agent in (("static", "static"), ("judge", "judge"), ("reporter", "reporter")):
-        model, its_effort = own(agent)
+    # The mediator reads its own ``llm.agents.mediator`` entry and, with none,
+    # the expert model; a judge entry does not move it.
+    for group in ("static", "judge", "reporter", "mediator"):
+        model, its_effort = own(group)
         if model:
             expected[f"model.{group}"] = model
         expected[f"effort.{group}"] = its_effort
-    if expert:
-        expected["model.mediator"] = expert
-    expected["effort.mediator"] = effort
     cap = _value(values, "core.llm.judge_max_tokens", 0)
     if cap:
         expected["max_tokens.judge"] = cap

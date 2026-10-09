@@ -113,6 +113,28 @@ class TestTheGateChangesOnlyTheEndpoints:
         assert expected["settings.llm.openai.base_url"] == f"{STUB}/v1"
         assert expected["settings.llm.openai.expert_model"] == "deepseek-v4-flash"
 
+    def test_the_mediator_runs_on_the_expert_model_unless_it_has_an_entry(self) -> None:
+        values = _values()
+        expected = gate_expected(values, gate_changes(values, STUB))
+        assert expected["model.mediator"] == "deepseek-v4-flash"
+        assert expected["effort.mediator"] == "high"
+
+    def test_the_mediator_s_own_entry_is_what_its_calls_must_carry(self) -> None:
+        agents = _values()["core.llm.agents"]["value"]
+        agents["mediator"] = {
+            "provider": "openai",
+            "model": "deepseek-v4-pro",
+            "base_url": "https://api.deepseek.com",
+            "effort": "low",
+        }
+        values = _values(**{"core.llm.agents": {"value": agents, "source": "ui"}})
+        changes = gate_changes(values, STUB)
+        assert changes["core.llm.agents"]["mediator"]["base_url"] == f"{STUB}/v1"
+        expected = gate_expected(values, changes)
+        assert expected["model.mediator"] == "deepseek-v4-pro"
+        assert expected["effort.mediator"] == "low"
+        assert expected["model.judge"] == "deepseek-v4-pro" and expected["effort.judge"] == "max"
+
     def test_no_third_party_is_reached_and_no_token_is_touched(self) -> None:
         values = _values(
             **{
