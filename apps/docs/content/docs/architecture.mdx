@@ -1603,7 +1603,8 @@ decides.
    forms compared whole, so "deobfuscates" and "decoded" share one with
    Deobfuscate/Decode Files or Information while "stated", "computer" and
    "officer" share none with State, Compute or Office), no tactic
-   as a category phrase — is asked once to keep the technique only if the
+   as a category phrase, no procedure word of the technique — is asked once
+   to keep the technique only if the
    sample does it, and then to say what it does. Decided only where the
    catalogue gives the id's name, and not asked of an absence claim or a
    platform mismatch, which get their own question. The answer stands; a kept
@@ -1613,6 +1614,26 @@ decides.
    technique id) it asks 18, three of them true claims whose sentences used
    none of the technique's words (Ingress Tool Transfer on "downloads and
    writes a file", Native API on "the raw syscall() entry point").
+   A technique's procedure words (`validation.procedure_words`) are the
+   commands, calls and artefacts the vendored data that ties an id to its
+   procedures writes for it: the technique card's requirements and indicators
+   and the API catalogue's rule for the id (not its import lists), plus a
+   sub-technique's parent's. Only words in the shape a procedure's name has
+   are taken: a name with a capital after a small letter (`GetComputerName`,
+   `WinINet`), a digit or an underscore (`SecurityCenter2`), an acronym of
+   three capitals or more (`WQL`), or a module or Windows program name the
+   text writes as one (`ntdll's`, `schtasks /create`, `the wmic tool`); a call
+   is matched in its ANSI, wide and extended spellings, and a module also by
+   its exported names in the vendored export catalogue. A word the data
+   writes for more than three techniques (`API`, `HTTP`, `DNS`, `DLL`, `COM`)
+   names none of them. An identifier written as joined words names each word,
+   compared with the stems of the technique's name that at most three
+   vendored names share (`BeingDebugged` under Debugger Evasion, while
+   `DeleteFileW` shares only "file" with File Deletion). The vendored ATT&CK
+   table holds names, tactics and platforms only, so the catalogue's
+   descriptions, detection text and procedure examples are not read, and the
+   capa rules are downloaded beside the repository, not vendored. The words
+   are built once per technique.
    A sub-technique whose sentence shares terms with it only through what
    every sub-technique of its parent shares (the parent's name and capability
    terms, its tactic) is asked the same question, naming the sibling, when

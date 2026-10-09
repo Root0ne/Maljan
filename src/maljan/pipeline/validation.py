@@ -24,8 +24,9 @@ import bisect
 import ipaddress
 import json
 import re
-from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from functools import cache, lru_cache
 from typing import Any, get_args, get_origin
 
 from pydantic import ValidationError
@@ -1159,6 +1160,219 @@ def _name_terms(technique_id: str, attck: Any) -> tuple[str, set[str], set[str]]
     return name, stems, forms
 
 
+# The procedure words of a technique: the identifiers the vendored data that
+# ties an id to its commands, calls and artefacts writes for it. Two sources
+# carry such words: the technique cards' requirements and indicators
+# (``data/attck_technique_cards.json``) and the API catalogue's rule for each
+# technique it maps (``data/api_attck_map_v1.json``). The vendored ATT&CK table
+# holds a technique's name, tactics and platforms only: no description, no
+# detection text, no procedure examples, no data sources; the capa rules are
+# downloaded beside the repository, not vendored. The API catalogue's import
+# lists are not read: an import list names what a program imports, and a
+# sentence that lists resolved imports names them whatever it claims.
+#
+# A word is taken only in the shape a procedure's name has: a name with a
+# capital after a small letter (GetComputerName, WinINet), a digit or an
+# underscore (SecurityCenter2, Win32_), an acronym of three or more capitals
+# (WQL, LSASS), or a word of small letters that is the name of a module of the
+# vendored export catalogue (ntdll) or of a Windows program every host carries
+# (wmic), where the text writes it as one (``_WRITTEN_AS_A_PROGRAM_RE``).
+# Ordinary words are left out: the cards are written in plain English whose
+# words name no technique of their own.
+_PROCEDURE_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
+_PROCEDURE_SHAPE_RE = re.compile(r"[a-z][A-Z]|[0-9_]")
+# A word the vendored data writes for more techniques than this names none of
+# them: it is what a family of techniques share ("API", "HTTP", "DNS", "DLL",
+# "COM"). Measured on the cards and rules themselves
+# (``procedure_word_counts``).
+PROCEDURE_WORD_MAX_TECHNIQUES = 3
+# The spellings of a call a procedure word names: the word, its ANSI and wide
+# forms and its extended ones (``HttpSendRequest`` is written
+# ``HttpSendRequestA``, ``RegQueryValueEx`` ``RegQueryValueExW``).
+_CALL_SPELLINGS = ("", "a", "w", "ex", "exa", "exw")
+
+
+@dataclass(frozen=True)
+class ProcedureWords:
+    """One technique's procedure words, as a sentence's words are compared with them.
+
+    ``acronyms`` compare as written; ``lowered`` holds every other word in its
+    call spellings, lower-cased; ``exports`` is the lower-cased exported names
+    (in the shape a function name has) of each module the words name, from the
+    vendored export catalogue.
+    """
+
+    acronyms: frozenset[str] = frozenset()
+    lowered: frozenset[str] = frozenset()
+    exports: frozenset[str] = frozenset()
+
+    def named_in(self, words: Iterable[str]) -> bool:
+        """Whether any of ``words`` (a sentence's) is one of these."""
+        for word in words:
+            if word in self.acronyms:
+                return True
+            lowered = word.lower()
+            if lowered in self.lowered or lowered in self.exports:
+                return True
+        return False
+
+
+def _procedure_sources() -> dict[str, list[str]]:
+    """The texts the vendored data writes for each technique id: its card's requirements
+    and indicators, and the API catalogue's rule for it."""
+    from maljan.core.paths import resolve_data
+    from maljan.memory.technique_cards import load_cards
+    from maljan.tools.knowledge import DEFAULT_API_ATTCK_MAP
+
+    texts: dict[str, list[str]] = {}
+    for technique_id, card in load_cards().items():
+        texts.setdefault(technique_id, []).extend([*card.requires, *card.indicators])
+    try:
+        document = json.loads(resolve_data(DEFAULT_API_ATTCK_MAP).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("validation: the API catalogue could not be read (%s).", exc)
+        document = {}
+    for row in document.get("techniques") or []:
+        technique_id = str(row.get("technique_id") or "").strip().upper()
+        if technique_id and row.get("rule"):
+            texts.setdefault(technique_id, []).append(str(row["rule"]))
+    return texts
+
+
+@lru_cache(maxsize=1)
+def _module_exports() -> dict[str, frozenset[str]]:
+    """Each module of the vendored export catalogue by its bare name, with its exported
+    names in a function name's shape, lower-cased; ``{}`` when it cannot be read."""
+    from maljan.tools.api_hashes import load_export_names
+
+    try:
+        dlls = load_export_names().get("dlls") or {}
+    except (OSError, ValueError) as exc:
+        logger.warning("validation: the export catalogue could not be read (%s).", exc)
+        return {}
+    return {
+        str(dll).lower().rsplit(".", 1)[0]: frozenset(
+            str(name).lower() for name in names if re.search(r"[a-z][A-Z]", str(name))
+        )
+        for dll, names in dlls.items()
+    }
+
+
+# What follows a program's or a module's name where the text writes it as one:
+# its extension, a possessive, a command-line switch, or "command line" or
+# "tool" with at most a sub-command between ("lsass.exe", "ntdll's",
+# "schtasks /create", "reg query command lines", "the wmic tool"). The same
+# word in running text ("the services on the host", "the OS version") is no
+# program's name.
+_WRITTEN_AS_A_PROGRAM_RE = re.compile(
+    r"\.(?:exe|dll)\b|'s\b|\s+/\w|\s+(?:[a-z]+\s+)?(?:command[\s-]lines?|tool)\b"
+)
+
+
+def _procedure_shaped(text: str, match: re.Match[str], modules: Collection[str]) -> bool:
+    """Whether the word ``match`` reads in ``text`` has the shape of a procedure's name
+    (see above)."""
+    word = match.group(0)
+    if len(word) < 3:
+        return False
+    if _PROCEDURE_SHAPE_RE.search(word) or (word.isupper() and word.isalpha()):
+        return True
+    lowered = word.lower()
+    if lowered not in modules and f"{lowered}.exe" not in _COMMON_EXECUTABLES:
+        return False
+    return _WRITTEN_AS_A_PROGRAM_RE.match(text, match.end()) is not None
+
+
+@lru_cache(maxsize=1)
+def _procedure_words_by_id() -> tuple[dict[str, frozenset[str]], dict[str, int]]:
+    """Every technique's procedure-shaped words as written, and how many techniques each
+    word (lower-cased) is written for. Read once."""
+    modules = _module_exports()
+    words: dict[str, frozenset[str]] = {}
+    for technique_id, texts in _procedure_sources().items():
+        words[technique_id] = frozenset(
+            match.group(0)
+            for text in texts
+            for match in _PROCEDURE_WORD_RE.finditer(text)
+            if _procedure_shaped(text, match, modules)
+        )
+    counts: dict[str, int] = {}
+    for written in words.values():
+        for lowered in {word.lower() for word in written}:
+            counts[lowered] = counts.get(lowered, 0) + 1
+    return words, counts
+
+
+def procedure_word_counts() -> dict[str, int]:
+    """How many techniques the vendored data writes each procedure-shaped word for."""
+    return dict(_procedure_words_by_id()[1])
+
+
+@cache
+def procedure_words(technique_id: str) -> ProcedureWords:
+    """The procedure words a claim may name ``technique_id`` by, built once per id.
+
+    The id's own words and, for a sub-technique, its parent's (as the name check
+    reads the parent's name), each written for at most
+    ``PROCEDURE_WORD_MAX_TECHNIQUES`` techniques.
+    """
+    words, counts = _procedure_words_by_id()
+    tid = str(technique_id or "").strip().upper()
+    ids = [tid, tid.split(".")[0]] if "." in tid else [tid]
+    distinctive = {
+        word
+        for one in ids
+        for word in words.get(one, ())
+        if counts.get(word.lower(), 0) <= PROCEDURE_WORD_MAX_TECHNIQUES
+    }
+    acronyms = frozenset(word for word in distinctive if word.isupper() and word.isalpha())
+    lowered = frozenset(
+        word.lower() + spelling for word in distinctive - acronyms for spelling in _CALL_SPELLINGS
+    )
+    modules = _module_exports() if distinctive else {}
+    exports = frozenset(
+        name for word in distinctive for name in modules.get(word.lower(), frozenset())
+    )
+    return ProcedureWords(acronyms=acronyms, lowered=lowered, exports=exports)
+
+
+# An identifier written as joined words names each of them ("BeingDebugged"
+# writes "Being" and "Debugged"). Each is compared with the stems of the
+# technique's name that name few techniques: a stem more than
+# ``PROCEDURE_WORD_MAX_TECHNIQUES`` vendored names share ("file", "process",
+# "system") is what a call's name is made of, not a technique's term.
+_JOINED_WORD_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
+_JOINED_IDENTIFIER_RE = re.compile(r"[a-z][A-Z]")
+
+
+@lru_cache(maxsize=1)
+def _name_stem_counts() -> dict[str, int]:
+    """How many vendored technique names each name stem is in. Read once."""
+    from maljan.memory.attck_loader import technique_names
+
+    counts: dict[str, int] = {}
+    for name in technique_names().values():
+        for stem in _name_stems(name):
+            counts[stem] = counts.get(stem, 0) + 1
+    return counts
+
+
+def _joined_words_share(text: str, stems: Collection[str]) -> bool:
+    """Whether an identifier ``text`` writes as joined words writes one of ``stems`` that
+    names few techniques (see above)."""
+    counts = _name_stem_counts()
+    distinctive = {stem for stem in stems if counts.get(stem, 0) <= PROCEDURE_WORD_MAX_TECHNIQUES}
+    if not distinctive:
+        return False
+    return any(
+        _stem(part) in distinctive
+        for word in _PROCEDURE_WORD_RE.findall(text)
+        if _JOINED_IDENTIFIER_RE.search(word)
+        for part in _JOINED_WORD_RE.findall(word)
+        if len(part) >= 3
+    )
+
+
 def claim_does_not_describe_violation(
     claim: Any, technique_id: str, attck: Any, *, path: str = "", listed: bool = False
 ) -> Violation | None:
@@ -1169,8 +1383,15 @@ def claim_does_not_describe_violation(
     catalogue name and its tactics as a category phrase. The catalogue name is
     compared word by word, each word with its common endings off
     (:func:`_stem`), so a claim that writes "obfuscation" shares a term with
-    "Obfuscated Files or Information". Only a sentence that shares none of them
-    is asked about, once: "accesses the PEB to bypass sandboxing" under OS
+    "Obfuscated Files or Information". A sentence that names one of the
+    technique's procedure words (:func:`procedure_words`: the commands, calls
+    and artefacts the vendored cards and API catalogue write for it, such as
+    ``wmic`` for Windows Management Instrumentation or ``SecurityCenter2`` for
+    Security Software Discovery) shares a term with it too, and so does an
+    identifier whose joined words write a stem of the name few techniques'
+    names share ("BeingDebugged" under Debugger Evasion). Only a sentence
+    that shares none of them is asked about, once: "accesses the PEB to bypass
+    sandboxing" under OS
     Credential Dumping. What the analyst answers stands, and a technique kept
     after the question is published as the analyst stated it. Nothing is
     decided without the catalogue's name for the id.
@@ -1189,10 +1410,15 @@ def claim_does_not_describe_violation(
         else "give that behaviour's technique or write TECHNIQUE: NONE"
     )
     pattern = behaviour_pattern(technique_id, attck)
-    if (pattern is not None and pattern.search(text)) or any(
-        _stem(word) in stems or word.lower() in forms
-        for word in re.findall(r"[A-Za-z0-9]+", text)
-        if len(word) >= 3
+    if (
+        (pattern is not None and pattern.search(text))
+        or any(
+            _stem(word) in stems or word.lower() in forms
+            for word in re.findall(r"[A-Za-z0-9]+", text)
+            if len(word) >= 3
+        )
+        or procedure_words(technique_id).named_in(_PROCEDURE_WORD_RE.findall(text))
+        or _joined_words_share(text, stems)
     ):
         named = sibling_named_instead(text, technique_id)
         if named is None:

@@ -576,6 +576,11 @@ def technique_label(technique_id: str) -> str:
     return f"{tid} {entry.name}" if entry is not None and entry.name else tid
 
 
+def technique_names() -> dict[str, str]:
+    """Every vendored technique's name, by id."""
+    return {tid: entry.name for tid, entry in _technique_table()[0].items()}
+
+
 def sub_technique_entries(parent_id: str) -> list[VendoredTechnique]:
     """The vendored rows of every sub-technique under ``parent_id``, in id order."""
     parent = (parent_id or "").strip().upper().split(".")[0]
