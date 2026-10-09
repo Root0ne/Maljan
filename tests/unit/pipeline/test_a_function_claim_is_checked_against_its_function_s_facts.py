@@ -652,6 +652,11 @@ class TestARoutineNameWrittenAsWhatTheCodeIs:
             ("Each request is a HttpSendRequestA with the body.", "HttpSendRequestA"),
             ("0x2a10 is a hand-rolled `atoi` for the type field.", "atoi"),
             ("The copy loop works like `memcpy` over the decoded blob.", "memcpy"),
+            # A plain "implements", and a name followed by -based or -driven.
+            ("0x2a10 implements CreateProcessW-based spawning of the payload.", "CreateProcessW"),
+            ("The loader implements GetProcAddress resolution through the PEB.", "GetProcAddress"),
+            ("0x2a10 runs a VirtualAlloc-driven allocator for the stage.", "VirtualAlloc"),
+            ("0x2a10 reimplements a CreateFileW-backed writer.", "CreateFileW"),
         ],
     )
     def test_any_other_place_is_read_as_a_call(self, sentence: str, name: str) -> None:

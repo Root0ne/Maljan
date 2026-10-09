@@ -975,12 +975,12 @@ class _Clauses:
 #   a copy of the routine: "implementation", "reimplementation", "clone",
 #   "replacement", "equivalent", "substitute" ("an atoi implementation", "a
 #   strdup clone");
-# - right before it, "implements" or "reimplements", with "its own" or "their
-#   own" allowed between ("implements its own GetProcAddress").
-# Every other place is read as a call: a copula or a likeness ("is a
-# VirtualAlloc helper", "acts as a WinExec launcher") is followed by a role as
-# often as by a copy, and an article alone ("a ReadProcessMemory of its own
-# PEB") writes a call.
+# - right before it, "reimplements", or "implements" with "its own" or "their
+#   own" between ("reimplements strdup", "implements its own GetProcAddress").
+# Every other place is read as a call: a plain "implements" ("implements
+# CreateProcessW-based spawning"), a copula or a likeness ("is a VirtualAlloc
+# helper", "acts as a WinExec launcher"), an article ("a ReadProcessMemory of
+# its own PEB"), and a name followed by "-based", "-driven" or "-backed".
 _DESCRIBED_AFTER = re.compile(
     r"`?(?:-(?:like|style|equivalent)\b"
     r"|\s+(?:re-?implementations?|implementations?|clones?|replacements?|equivalents?"
@@ -988,9 +988,11 @@ _DESCRIBED_AFTER = re.compile(
     re.IGNORECASE,
 )
 _DESCRIBED_BEFORE = re.compile(
-    r"\b(?:re-?)?implement(?:s|ed|ing)?\s+(?:(?:its|their)\s+own\s+)?`?\Z",
+    r"\b(?:re-?implement(?:s|ed|ing)?\s+(?:(?:its|their)\s+own\s+)?"
+    r"|implement(?:s|ed|ing)?\s+(?:its|their)\s+own\s+)`?\Z",
     re.IGNORECASE,
 )
+_A_CALL_AFTER = re.compile(r"`?-(?:based|driven|backed)\b", re.IGNORECASE)
 # How far before a name its describing words are read: past the longest form.
 _DESCRIBED_REACH = 40
 
@@ -998,6 +1000,8 @@ _DESCRIBED_REACH = 40
 def _described(text: str, start: int, end: int) -> bool:
     """Whether the routine name at ``text[start:end]`` is written as what the code is
     (the forms above), not as a call it makes."""
+    if _A_CALL_AFTER.match(text, end):
+        return False
     if _DESCRIBED_AFTER.match(text, end):
         return True
     return _DESCRIBED_BEFORE.search(text[max(start - _DESCRIBED_REACH, 0) : start]) is not None
