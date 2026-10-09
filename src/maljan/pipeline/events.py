@@ -25,9 +25,8 @@ from __future__ import annotations
 
 import base64
 import binascii
-import json
 import re
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from maljan.core.logger import logger
@@ -931,15 +930,17 @@ def _module_names() -> frozenset[str]:
     return _MODULES
 
 
-# What a tool or a decompiler writes that the length rule read as a key, each by
-# its exact form: an address or a decimal number (a list of them joined by
-# ``/`` is one run), a name Ghidra gives a stack or a local variable
-# (``in_stack_ffffffffffffffc8``), and a stretch of a base64 alphabet itself
-# (the table a decoder is built from). None is a key's form: a key is not a
-# number, a decompiler's variable or the alphabet it is written in.
+# What a tool writes that the length rule read as a key, each by its exact
+# form: an address or a decimal number (a list of them joined by ``/`` is one
+# run) and a stretch of a base64 alphabet itself (the table a decoder is built
+# from). None is a key's form: a key is not a short number or the alphabet it
+# is written in.
 _MODULES: frozenset[str] | None = None
-_NUMBER_PIECE = re.compile(r"\A(?:0[xX][0-9A-Fa-f]{1,16}|[0-9]{1,10})\Z")
-_DECOMPILER_NAME = re.compile(r"\A(?:in_stack|local|param|[a-z]{1,3}Stack)_[0-9a-f]{1,16}\Z")
+_NUMBER_PIECE = re.compile(r"\A(?:0[xX][0-9A-Fa-f]{1,10}|[0-9]{1,10})\Z")
+# Hex is read as the base rules read it: a run holding more hex digits in a row
+# than a number above (eleven or more) is never one of these forms, so a hex
+# dump, a digest in a list or a name ending in long hex is masked as before.
+_LONG_HEX = re.compile(r"[0-9A-Fa-f]{11}")
 # A stretch of an alphabet is that table only at a key's own length floor: a
 # short piece of a key is a stretch of its alphabet too.
 _ALPHABET_SLICE_FLOOR = 24
@@ -950,11 +951,10 @@ _BASE64_ALPHABETS = (
 
 
 def _is_a_written_name(token: str) -> bool:
-    """Whether ``token`` is a module name, a decompiler's variable name or a stretch
-    of a base64 alphabet: what the scrub keeps by its exact form beside the catalogue."""
+    """Whether ``token`` is a module name or a stretch of a base64 alphabet: what the
+    scrub keeps by its exact form beside the catalogue."""
     return bool(
         token.lower() in _module_names()
-        or _DECOMPILER_NAME.match(token)
         or (len(token) >= _ALPHABET_SLICE_FLOOR and any(token in a for a in _BASE64_ALPHABETS))
     )
 
@@ -982,8 +982,9 @@ def _is_api_name(token: str) -> bool:
     A module in front of a name (``kernel32.dll!Name``) is split off by the
     value run itself, so the name is asked alone. In a list, a piece may also
     be a module name the catalogue lists (in any case), an address or a number,
-    a decompiler's variable name, or an abbreviation that completes the name
-    before it to a catalogue name (``FindFirstFileA/W``).
+    or an abbreviation that completes the name before it to a catalogue name
+    (``FindFirstFileA/W``). A run with eleven hex digits in a row is left to the
+    rules as they were.
     """
     # The catalogue first, alone and over every piece, as before the exact
     # forms existed: those are asked only of a run long enough to be read as a
@@ -994,6 +995,8 @@ def _is_api_name(token: str) -> bool:
     if len(pieces) > 1 and all(_is_a_catalogue_name(piece) for piece in pieces):
         return True
     if len(token) < _ALPHABET_SLICE_FLOOR:
+        return False
+    if _LONG_HEX.search(token):
         return False
     if len(pieces) < 2:
         return _is_a_written_name(token)
@@ -1125,7 +1128,7 @@ def _is_a_family_name(run: str) -> bool:
     )
 
 
-def _hide_credentials(found: re.Match[str], hex_fields: Mapping[str, int] | None = None) -> str:
+def _hide_credentials(found: re.Match[str]) -> str:
     """One value run, with every key in it masked together with the base64 around it.
 
     In this order:
@@ -1155,8 +1158,6 @@ def _hide_credentials(found: re.Match[str], hex_fields: Mapping[str, int] | None
         found.string[max(0, found.start() - 40) : found.start()]
     ):
         return value
-    if hex_fields and value in hex_fields:
-        return value
     if _looks_like_a_credential(value, whole=True):
         return _REDACTED
     head = ""
@@ -1176,143 +1177,6 @@ def _hide_credentials(found: re.Match[str], hex_fields: Mapping[str, int] | None
     if not value:
         return f"{_hide_in_run(head)}{_REDACTED}" if head else _REDACTED
     return _hide_in_run(value)
-
-
-# Bytes a tool states as hex under its own ``hex`` field (a memory read, a
-# byte range): data the tool read, which the length rule took for a key. Kept
-# only where the text parses as JSON (``json.loads``, nothing read by a pattern)
-# and the run is the string value of a real ``"hex"`` key, in an object with no
-# credential or key-material word in any of its keys or string values and none
-# in the key of any object or list around it (``{"token": {"hex": "…"}}``,
-# ``{"hex": "…", "kind": "api_key"}``). A JSON document carried as a string
-# value of another is read the same way, as part of it. Every place the run
-# stands in the text must be such a field: a run that also stands anywhere else
-# (a second copy in prose, a key repeated with another value) is masked.
-_HEX_DATA = re.compile(r"\A(?:[0-9A-Fa-f]{2})+\Z")
-# The words a credential or key material is named by. ``iv`` and ``pwd`` only as
-# a whole word: as letters inside another word they name nothing. The scrub's
-# own mark counts too: a value an earlier pass masked was read as a credential.
-_CREDENTIAL_WORD_RE = re.compile(
-    r"(?i)api|auth|bearer|cookie|credential|hmac|key|mnemonic|nonce|passphrase|passwd"
-    r"|password|priv|salt|secret|seed|session|signing|token"
-    r"|(?<![a-z])(?:iv|pwd)(?![a-z])|\*\*\*"
-)
-# The key a hex field is read under, as it stands in JSON text, plain or escaped
-# once: a text without it is not parsed at all.
-_HEX_KEYS_IN_TEXT = ('"hex"', '\\"hex\\"')
-
-
-def _hex_fields(text: str) -> dict[str, int]:
-    """The hex runs of ``text`` that are a tool's ``"hex"`` field and nothing else.
-
-    ``{run: count}``; empty unless ``text`` is one JSON document. Read once per
-    scrub call, by that call alone: no state outlives it. The work is linear in
-    the text: one parse, one walk that visits each value once (by a stack, so
-    no nesting reaches Python's recursion), and one pass over its hex runs.
-    """
-    if not any(key in text for key in _HEX_KEYS_IN_TEXT):
-        return {}
-    try:
-        document = json.loads(text)
-    except (ValueError, RecursionError):
-        return {}
-    found = _collect_hex_fields(document, budget=len(text))
-    if not found:
-        return {}
-    standing: dict[str, int] = {}
-    for run in _HEX_RUN.finditer(text):
-        if run.group(0) in found:
-            standing[run.group(0)] = standing.get(run.group(0), 0) + 1
-    return {run: count for run, count in found.items() if standing.get(run) == count}
-
-
-# Every hex run of a text, whole: what a field's run is counted against.
-_HEX_RUN = re.compile(r"(?<![0-9A-Fa-f])[0-9A-Fa-f]+(?![0-9A-Fa-f])")
-# How deep the reading follows nested objects and JSON documents carried as
-# strings; past it a branch counts as naming a credential, which only masks.
-_HEX_FIELD_DEPTH = 64
-
-
-def _collect_hex_fields(document: Any, *, budget: int) -> dict[str, int]:
-    """The clean ``"hex"`` fields under ``document``, counted by value.
-
-    A ``"hex"`` field counts when neither its object's own keys and string
-    values, nor anything below that object, nor the keys and string values of
-    any object around it name a credential. Walked with an explicit stack in
-    post order, so an object's own field is decided after its children report
-    whether anything below names one. A JSON document carried as a string
-    value is parsed and walked as that value's child; no more characters are
-    parsed again in all than ``budget`` (the text's own length), and a string
-    past it is read as a string.
-    """
-    found: dict[str, int] = {}
-    # Each frame: [node, named around it, depth, children left, below, own].
-    stack: list[list[Any]] = [[document, False, 0, None, False, False]]
-    reparsed = 0
-    while stack:
-        frame = stack[-1]
-        node, named, depth, children, below, own = frame
-        if children is None:
-            if depth > _HEX_FIELD_DEPTH:
-                stack.pop()
-                _pass_up(stack, True)
-                continue
-            if isinstance(node, str):
-                stripped = node.strip()
-                inner: Any = None
-                parsed = False
-                if stripped[:1] in ("{", "[") and reparsed + len(stripped) <= budget:
-                    reparsed += len(stripped)
-                    try:
-                        inner = json.loads(stripped)
-                        parsed = True
-                    except (ValueError, RecursionError):
-                        parsed = False
-                if not parsed:
-                    stack.pop()
-                    _pass_up(stack, bool(_CREDENTIAL_WORD_RE.search(node)))
-                    continue
-                frame[3] = iter([inner])
-            elif isinstance(node, list):
-                frame[3] = iter(node)
-            elif isinstance(node, dict):
-                own = any(_CREDENTIAL_WORD_RE.search(str(key)) for key in node) or any(
-                    isinstance(item, str) and _CREDENTIAL_WORD_RE.search(item)
-                    for key, item in node.items()
-                    if key != "hex"
-                )
-                frame[4] = frame[5] = own
-                frame[3] = iter(
-                    item
-                    for key, item in node.items()
-                    if not (key == "hex" and isinstance(item, str) and _HEX_DATA.match(item))
-                )
-            else:
-                stack.pop()
-                _pass_up(stack, False)
-                continue
-            children = frame[3]
-        child = next(children, _NO_CHILD)
-        if child is not _NO_CHILD:
-            stack.append([child, named or frame[5], depth + 1, None, False, False])
-            continue
-        stack.pop()
-        if isinstance(node, dict):
-            value = node.get("hex")
-            if not (named or frame[4]) and isinstance(value, str) and _HEX_DATA.match(value):
-                found[value] = found.get(value, 0) + 1
-        _pass_up(stack, frame[4])
-    return found
-
-
-# What ``next`` answers for a frame with no child left.
-_NO_CHILD = object()
-
-
-def _pass_up(stack: list[list[Any]], below: bool) -> None:
-    """Hand a finished frame's "something below names a credential" to its parent."""
-    if stack and below:
-        stack[-1][4] = True
 
 
 def _names_only(stretch: str) -> bool:
@@ -1394,8 +1258,8 @@ def _dotted_triples(run: str) -> list[tuple[int, int]]:
     """Every place three base64url segments of 8 or more stand joined by dots, in order.
 
     The first is the stretch a dot-separated part ends with, the second a whole
-    part, the third the stretch the next part begins with (and its ``=``
-    padding): a token's shape. One pass over the parts, linear in ``run``.
+    part, the third the stretch the next part begins with: a token's shape, as
+    the pattern it replaces found it. One pass over the parts, linear in ``run``.
     """
     if run.count(".") < 2:
         return []
@@ -1417,13 +1281,10 @@ def _dotted_triples(run: str) -> list[tuple[int, int]]:
         ):
             index += 1
             continue
-        padded = tail_end
-        while padded < len(tail) and padded - tail_end < 2 and tail[padded] == "=":
-            padded += 1
-        spans.append((starts[index] + head_start, starts[index + 2] + padded))
+        spans.append((starts[index] + head_start, starts[index + 2] + tail_end))
         # The third part's own end can start the next token only when the
         # token did not take the whole of it.
-        index += 2 if padded < len(tail) else 3
+        index += 2 if tail_end < len(tail) else 3
     return spans
 
 
@@ -1519,8 +1380,7 @@ def scrub(text: Any) -> str:
     with the key, the URL and the host path all inside it, and a rule anchored
     to the start of a word found none of them.
     """
-    line = " ".join(str(text or "").split())
-    return _scrub_line(line, _hex_fields(line))
+    return _scrub_line(" ".join(str(text or "").split()))
 
 
 def remember_secret_values(values: Iterable[str], *, scope: str = "job") -> None:
@@ -1601,7 +1461,7 @@ def _mask_configured_values(line: str) -> str:
 _SCRUB_PASSES = 4
 
 
-def _scrub_line(line: str, hex_fields: Mapping[str, int] | None = None) -> str:
+def _scrub_line(line: str) -> str:
     """The passes over text that is already one line, repeated until they change nothing.
 
     Once is not always enough: a path cut to its last segment can leave a
@@ -1611,7 +1471,7 @@ def _scrub_line(line: str, hex_fields: Mapping[str, int] | None = None) -> str:
     producer already scrubbed without changing a character of it.
     """
     for _ in range(_SCRUB_PASSES):
-        scrubbed = _scrub_once(line, hex_fields)
+        scrubbed = _scrub_once(line)
         if scrubbed == line:
             break
         line = scrubbed
@@ -1665,19 +1525,12 @@ def _scheme_and_secret(found: re.Match[str]) -> str:
     return f"{scheme} {_REDACTED}"
 
 
-def _scrub_once(line: str, hex_fields: Mapping[str, int] | None = None) -> str:
-    """The configured secrets by value, then the four passes, once.
-
-    ``hex_fields`` are the runs of the whole text that are a tool's own hex
-    field (:func:`_hex_fields`), read before any pass changed the text.
-    """
+def _scrub_once(line: str) -> str:
+    """The configured secrets by value, then the four passes, once."""
     line = _mask_configured_values(line)
     line = _SCHEME_AND_SECRET.sub(_scheme_and_secret, line)
     line = _URL_RUN.sub(_shorten_url, line)
-    if hex_fields:
-        line = _VALUE_RUN.sub(lambda found: _hide_credentials(found, hex_fields), line)
-    else:
-        line = _VALUE_RUN.sub(_hide_credentials, line)
+    line = _VALUE_RUN.sub(_hide_credentials, line)
     return _PATH_RUN.sub(_shorten_path, line)
 
 
@@ -1841,9 +1694,7 @@ def scrub_keeping_layout(text: Any) -> str:
     and code blocks in it. Every rule is applied to each line on its own,
     which is exactly what ``scrub`` does to the single line it makes.
     """
-    whole = str(text or "")
-    fields = _hex_fields(whole)
-    return "\n".join(_scrub_line(line, fields) for line in whole.splitlines())
+    return "\n".join(_scrub_line(line) for line in str(text or "").splitlines())
 
 
 def describe_exception(exc: BaseException) -> str:

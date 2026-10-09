@@ -2152,27 +2152,15 @@ by its exact form:
   decimal number (`0x1a20/0x1a28`, a list of process ids), and an
   abbreviation that completes the name before it to a catalogue name
   (`FindFirstFileA/W`, `NtQueryInformationProcess/Thread`);
-- a decompiler's stack or local variable name (`in_stack_ffffffffffffff10`,
-  `uStack_…`, `local_…`, `param_…` followed by hex);
 - a stretch of 24 or more characters of the standard or URL-safe base64
-  alphabet itself, the table a decoder is built from;
-- an even-length run of hex digits that is the string value of a `"hex"` key
-  in a JSON document, the bytes a memory or byte-range read returned. The text
-  (the whole field the scrub is given) must parse as JSON with Python's own
-  parser, and a JSON document carried as a string value inside it is read the
-  same way; no pattern over the text decides it, so text that only looks like
-  JSON, an escaped fragment, a repeated key or a quote or brace inside a string
-  value never grants it. The object that holds the field must name no
-  credential or key material anywhere in its keys, its string values or
-  anything below it, and no object or list around it may name one in its own
-  keys or string values. The words are `api`, `auth`, `bearer`, `cookie`,
-  `credential`, `hmac`, `key`, `mnemonic`, `nonce`, `passphrase`, `passwd`,
-  `password`, `priv`, `salt`, `secret`, `seed`, `session`, `signing`, `token`,
-  `iv` and `pwd` as whole words, and the scrub's own `***`. Every place the run
-  stands in the text must be such a field: a second copy anywhere else masks it.
-  A configured value is masked by value before this is read. A prose label
-  (`hex: …`, `secret hex = …`) is no such field, and a long hex run anywhere
-  else is still read as a key.
+  alphabet itself, the table a decoder is built from.
+
+Hex is read as it always was: a run with eleven or more hex digits in a row is
+never one of these forms. A hex dump is masked in the events wherever it
+stands, a tool's own `"hex"` field (the bytes a memory or byte-range read
+returned) included, and so is a digest inside a list or a name that ends in
+long hex (a decompiler's `in_stack_…` variable); a digest alone travels, as
+before.
 
 A piece that is none of these keeps the whole run a key, so a key inside such
 a list is still masked with its stretch.
@@ -2183,7 +2171,7 @@ while report text (finding rows and the run record) masks the configured
 values and a URL's credentials only, and keeps a credential-shaped string the
 evidence holds as the evidence wrote it. Some names still read as keys in the
 events (a family-name list with a digit or an all-capitals piece, a long
-identifier no catalogue lists); that is the accepted cost.
+identifier no catalogue lists, a hex dump); that is the accepted cost.
 
 A key is still a key:
 

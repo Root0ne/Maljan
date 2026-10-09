@@ -1,11 +1,14 @@
-"""The event scrub masks credentials, not the names and data a tool or a model wrote.
+"""The event scrub masks credentials, not the names a tool or a model wrote.
 
 A run's transcript printed ``***`` where the report printed a list of module
 names, a function name abbreviated in a list, a list of addresses or process
-ids, a decompiler's stack variable, a memory read's hex under its own ``hex``
-field and the base64 alphabet a decoder is built from: the length rule read
-each as a key. Each is kept by its exact form or by the vendored catalogue,
-and every credential shape is still masked, alone and inside each such list.
+ids and the base64 alphabet a decoder is built from: the length rule read each
+as a key. Each is kept by its exact form or by the vendored catalogue, and
+every credential shape is still masked, alone and inside each such list.
+
+Hex is masked as it always was: a run with eleven or more hex digits in a row
+is never one of the kept forms, so a hex dump (a tool's ``"hex"`` field among
+them), a digest inside a list and a name ending in long hex read as before.
 """
 
 from __future__ import annotations
@@ -25,8 +28,6 @@ KEPT = (
     "FindFirstFileA/W+FindNextFileA/W walk the folder",
     "slots 0x1a20/0x1a28/0x1a30/0x1a38/0x1a40 hold the pointers",
     "flow pids 1111/2222/3333/4444/5555 are not the sample's",
-    "undefined8 in_stack_ffffffffffffff10; ulonglong uStack_ffffffffffffff28;",
-    '{"address": "0x401000", "hex": "00112233445566778899aabbccddeeff0011223344556677"}',
     'alphabet "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/" decodes',
 )
 
@@ -59,118 +60,40 @@ def test_every_key_shape_inside_a_list_of_names_is_masked() -> None:
             assert key not in scrub(text), (key, text)
 
 
-def test_a_key_under_a_hex_field_is_masked_when_it_is_not_hex() -> None:
-    for key in _every_key_shape():
-        assert key not in scrub(f'{{"hex": "{key}"}}'), key
-
-
 def _hex_run(length: int) -> str:
     """A hex run of ``length`` digits, built at call time."""
     return "".join("0123456789abcdef"[(index * 7 + 3) % 16] for index in range(length))
 
 
-@pytest.mark.parametrize("length", [30, 48, 50])
-def test_a_hex_run_after_a_label_or_a_credential_word_is_masked(length: int) -> None:
+@pytest.mark.parametrize("length", [24, 30, 48, 50, 96])
+def test_a_hex_run_is_masked_wherever_it_stands(length: int) -> None:
+    """No context keeps a hex run of a key's length: not a tool's hex field, a list,
+    a module list, an address list or a decompiler's name."""
     run = _hex_run(length)
     for text in (
-        f"secret hex = {run}",
-        f"key hex: {run}",
-        f"hex: {run}",
-        f"hex={run}",
-        f'{{"api key hex": "{run}"}}',
-        f'{{"token": {{"hex": "{run}"}}}}',
-        f'{{"secret": "x", "hex": "{run}"}}',
-    ):
-        assert run not in scrub(text), text
-        assert run not in scrub_keeping_layout(text), text
-
-
-@pytest.mark.parametrize("length", [30, 48, 50])
-def test_a_credential_word_anywhere_in_the_object_or_its_keys_keeps_the_run_a_key(
-    length: int,
-) -> None:
-    run = _hex_run(length)
-    far = "x" * 120
-    texts = [
-        f'{{"hex": "{run}", "kind": "api_key"}}',
-        f'{{"label": "signing", "{far}": 1, "hex": "{run}"}}',
-        f'{{"api_token_{far}": {{"meta": 1, "hex": "{run}"}}}}',
-        f'{{"outer": {{"session": {{"meta": {{"n": 1}}, "hex": "{run}"}}}}}}',
-        f'{{"hex": "{run}", "meta": {{"note": "an iv"}}}}',
-    ]
-    texts += [
-        f'{{"{name}": {{"hex": "{run}"}}}}'
-        for name in ("hmac", "seed", "salt", "private", "nonce", "iv", "mnemonic")
-    ]
-    for text in texts:
-        assert run not in scrub(text), text
-        assert run not in scrub_keeping_layout(text), text
-
-
-@pytest.mark.parametrize("length", [30, 48, 50])
-def test_a_tool_s_hex_field_in_a_list_of_reads_is_kept(length: int) -> None:
-    run = _hex_run(length)
-    text = (
-        f'{{"reads": [{{"address": "0x401000", "hex": "{run}"}}, '
-        f'{{"address": "0x401100", "hex": "{run}"}}], "archive": "derived.bin"}}'
-    )
-    assert scrub(text) == text
-
-
-@pytest.mark.parametrize("length", [30, 48, 50])
-def test_a_tool_s_own_hex_field_is_kept(length: int) -> None:
-    run = _hex_run(length)
-    for text in (
-        f'{{"address": "0x401000", "size": {length // 2}, "hex": "{run}"}}',
+        run,
+        f'{{"address": "0x401000", "hex": "{run}"}}',
         json.dumps({"tool": "read_memory", "output": json.dumps({"hex": run})}),
-    ):
-        assert scrub(text) == text, text
-        assert scrub_keeping_layout(text) == text, text
-
-
-@pytest.mark.parametrize("length", [30, 48, 50])
-def test_text_that_only_looks_like_a_hex_field_is_masked(length: int) -> None:
-    """The exemption is granted by a JSON parse, never by a pattern over the text."""
-    run = _hex_run(length)
-    for text in (
-        '{\\"hex\\": \\"' + run + '\\"}',
-        f'the answer was {{"hex": "{run}"}} and more',
-        f'{{"hex": "{run}"',
-        f'{{"hex": "{run}", "hex": "00"}}',
-        f'{{"hex": "{run}", "note": "copied {run}"}}',
-        json.dumps({"note": '}{"hex": "' + run + '"', "kind": "x"}),
-        json.dumps({"a": '"hex": "' + run + '"'}),
-        json.dumps({"hex": [run]}),
-        json.dumps({"kind": "api_key", "data": {"hex": run}}),
-        json.dumps({"data": {"hex": run, "list": ["a signing pair"]}}),
-        f'{{"hex": "{run}"}}\n{{"key": "{run}"}}',
+        f"imports kernel32/{run}/user32",
+        f"slots 0x1a20/{run}/0x1a28",
+        f"pids 1111/{run}",
+        f"FindFirstFileA/{run}",
+        f"undefined8 in_stack_{run};",
+        f"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef/{run}",
     ):
         assert run not in scrub(text), text
         assert run not in scrub_keeping_layout(text), text
 
 
-def test_a_configured_hex_value_under_a_hex_field_is_masked() -> None:
-    run = _hex_run(48)
-    ev.remember_secret_values([run], scope="job")
-    assert run not in scrub(json.dumps({"hex": run}))
-    assert run not in scrub_keeping_layout(json.dumps({"hex": run}))
+def test_a_digest_in_a_list_is_read_as_before() -> None:
+    """A digest alone travels, as it always did; inside a module list it is masked as before."""
+    digest = _hex_run(64)
+    assert scrub(digest) == digest
+    assert digest not in scrub(f"kernel32/{digest}/user32")
+    assert digest not in scrub(f"0x1a20/{digest}")
 
 
-def test_concurrent_scrubs_do_not_read_each_other_s_text() -> None:
-    """No state of one call is read by another: each thread gets its own answer."""
-    from concurrent.futures import ThreadPoolExecutor
-
-    run = _hex_run(48)
-    kept = json.dumps({"address": "0x401000", "hex": run})
-    masked = f'{{"hex": "{run}", "note": "copied {run}"}}'
-    texts = [kept, masked] * 400
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        answers = list(pool.map(scrub, texts))
-    for text, answer in zip(texts, answers, strict=True):
-        assert (answer == text) is (text == kept), (text, answer)
-
-
-def test_a_long_hex_run_with_no_hex_field_is_still_a_key() -> None:
+def test_a_long_hex_run_alone_is_still_a_key() -> None:
     assert scrub("value " + "d" * 48) == "value ***"
 
 
@@ -193,7 +116,7 @@ def test_a_token_glued_behind_a_word_is_masked() -> None:
 
 
 class TestHostileAnswersCostLinearWork:
-    """The hex exemption reads an answer once per scrub, in linear work and memory.
+    """A large answer with many hex fields, deep nesting or near-JSON costs linear work.
 
     The ten-times rule: ten times the input costs at most about ten times the
     time and the traced memory (bounds 20 and 15 leave room for noise).
@@ -203,12 +126,6 @@ class TestHostileAnswersCostLinearWork:
     def _many_hex(count: int) -> str:
         return json.dumps(
             {"reads": [{"address": f"0x{i:x}", "hex": f"{i:08x}" * 6} for i in range(count)]}
-        )
-
-    @staticmethod
-    def _control(count: int) -> str:
-        return json.dumps(
-            {"reads": [{"address": f"0x{i:x}", "bytes": f"{i:08x}" * 6} for i in range(count)]}
         )
 
     @staticmethod
@@ -243,20 +160,6 @@ class TestHostileAnswersCostLinearWork:
         assert large_time <= max(small_time, 0.01) * 20, (small_time, large_time)
         assert large_peak <= max(small_peak, 1 << 20) * 15, (small_peak, large_peak)
 
-    def test_ten_megabytes_of_hex_fields_cost_no_more_than_the_same_without(self) -> None:
-        import time
-
-        hostile, plain = self._many_hex(120_000), self._control(120_000)
-        assert len(hostile) > 9_000_000
-        started = time.perf_counter()
-        answer = scrub_keeping_layout(hostile)
-        hostile_time = time.perf_counter() - started
-        started = time.perf_counter()
-        scrub_keeping_layout(plain)
-        plain_time = time.perf_counter() - started
-        assert answer == hostile
-        assert hostile_time <= plain_time * 1.2, (hostile_time, plain_time)
-
     def test_deep_nesting_and_garbage_are_masked_and_finish(self) -> None:
         run = _hex_run(48)
         for text in (self._nested(100_000), self._near(1_000), '{"hex": "' + run + '"' * 1000):
@@ -273,7 +176,7 @@ _REDOS_UNITS = {
     "header-shaped runs with dots": "e" * 50 + ".aaaaaaaa.aaaaaaaa",
     "header heads with dots": "eyJ.",
     "backslashes": "\\\\",
-    "hex keys": '{"hex":"00",',
+    "hex keys": '{"hex":"00112233445566778899aabbccdd",',
 }
 
 
