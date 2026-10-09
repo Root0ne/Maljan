@@ -1618,19 +1618,31 @@ decides.
    commands, calls and artefacts the vendored data that ties an id to its
    procedures writes for it: the technique card's requirements and indicators
    and the API catalogue's rule for the id (not its import lists), plus a
-   sub-technique's parent's. Only words in the shape a procedure's name has
-   are taken: a name with a capital after a small letter (`GetComputerName`,
-   `WinINet`), a digit or an underscore (`SecurityCenter2`), an acronym of
-   three capitals or more (`WQL`), or a module or Windows program name the
-   text writes as one (`ntdll's`, `schtasks /create`, `the wmic tool`); a call
-   is matched in its ANSI, wide and extended spellings, and a module also by
-   its exported names in the vendored export catalogue. A word the data
-   writes for more than three techniques (`API`, `HTTP`, `DNS`, `DLL`, `COM`)
-   names none of them. An identifier written as joined words names each word,
-   compared with the stems of the technique's name that at most three
-   vendored names share (`BeingDebugged` under Debugger Evasion, while
-   `DeleteFileW` shares only "file" with File Deletion). The vendored ATT&CK
-   table holds names, tactics and platforms only, so the catalogue's
+   sub-technique's parent's. Only identifiers are taken: a name with a capital
+   after a small letter or an underscore (`GetComputerName`, `ITaskService`,
+   `SecurityCenter2`, `Win32_`), or a module or Windows program name the text
+   writes as one (`ntdll's`, `schtasks /create`, `the wmic tool`); acronyms,
+   format and platform words (`HTTP`, `XML`, `MAC`, `Win32`) and words inside a
+   phrase the text negates ("without going through LoadLibrary") are not. A
+   word counts only where the data of one technique family (a parent and its
+   sub-techniques) writes it, a call of a module a family's data names counted
+   for that family too: measured, every word is one family's but
+   `InternetReadFile`, `LdrGetProcedureAddress`, `NtLoadDriver` and
+   `RtlGetVersion`, which are calls of WinINet or ntdll. A sentence's word
+   counts in the same shape (`wmic.exe`, `` `wmic` ``, `cmd /c`, not "the Run
+   reg key" or "ntdll is loaded"); a call in its ANSI, wide and extended
+   spellings; and a module the card writes as what is called (`calls into
+   ntdll's …`) also by the module's own calls. An identifier written as joined
+   words names each word, compared with the stems of the technique's name that
+   the names of one technique family only hold (`BeingDebugged` under Debugger
+   Evasion; "file" is in twenty families' names, so `DeleteFileW` shares
+   nothing with File Deletion). None of these counts at a place the absence
+   reader reads as absent, nor anywhere in a sentence that says the behaviour
+   was not seen, run or used ("imported but never referenced", "but no request
+   was seen"): those are asked as before. A sentence that shares no other term
+   and names a procedure word only to say it is absent ("does not invoke
+   wmic", "tasklist is absent") is asked the absence question. The vendored
+   ATT&CK table holds names, tactics and platforms only, so the catalogue's
    descriptions, detection text and procedure examples are not read, and the
    capa rules are downloaded beside the repository, not vendored. The words
    are built once per technique.

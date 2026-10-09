@@ -1033,7 +1033,11 @@ def absence_claim_violation(
     the technique when asked. The platform withholds nothing on this reading.
     """
     text = str(getattr(claim, "claim", "") or "")
-    if not states_absence(text, behaviour_pattern(technique_id, attck)):
+    if not states_absence(text, behaviour_pattern(technique_id, attck)) and not (
+        attck is not None
+        and states_procedure_absence(text, technique_id, attck)
+        and not _shares_a_name_term(text, technique_id, attck)
+    ):
         return None
     tid = safe_finding_value(technique_id)
     # On a claim whose TECHNIQUE line lists other ids, NONE would take them
@@ -1171,50 +1175,74 @@ def _name_terms(technique_id: str, attck: Any) -> tuple[str, set[str], set[str]]
 # lists are not read: an import list names what a program imports, and a
 # sentence that lists resolved imports names them whatever it claims.
 #
-# A word is taken only in the shape a procedure's name has: a name with a
-# capital after a small letter (GetComputerName, WinINet), a digit or an
-# underscore (SecurityCenter2, Win32_), an acronym of three or more capitals
-# (WQL, LSASS), or a word of small letters that is the name of a module of the
-# vendored export catalogue (ntdll) or of a Windows program every host carries
-# (wmic), where the text writes it as one (``_WRITTEN_AS_A_PROGRAM_RE``).
-# Ordinary words are left out: the cards are written in plain English whose
-# words name no technique of their own.
+# A word is taken only where it names a call, a class or an artefact: an
+# identifier with a capital after a small letter or an underscore
+# (GetComputerName, ITaskService, SecurityCenter2, Win32_), or a word of small
+# letters that is the name of a module of the vendored export catalogue (ntdll)
+# or of a Windows program every host carries (wmic), where the text writes it
+# as one (``_WRITTEN_AS_A_PROGRAM_RE``). Acronyms, format and platform words
+# ("HTTP", "XML", "MAC", "Win32") and ordinary words are left out: they qualify
+# a procedure, they do not name one. A word inside a phrase the text negates
+# ("without going through LoadLibrary", "instead of being imported") is the
+# opposite of the technique and is left out too.
 _PROCEDURE_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
-_PROCEDURE_SHAPE_RE = re.compile(r"[a-z][A-Z]|[0-9_]")
-# A word the vendored data writes for more techniques than this names none of
-# them: it is what a family of techniques share ("API", "HTTP", "DNS", "DLL",
-# "COM"). Measured on the cards and rules themselves
-# (``procedure_word_counts``).
-PROCEDURE_WORD_MAX_TECHNIQUES = 3
+_PROCEDURE_SHAPE_RE = re.compile(r"[a-z][A-Z]|_")
+# A phrase of a card or rule that says what the technique is not: from a
+# negating word to the end of its clause.
+_NEGATED_PHRASE_RE = re.compile(r"\b(?:without|instead\s+of|not|never)\b[^,;.()]*", re.IGNORECASE)
+# A word names a technique when the vendored data writes it for one technique
+# family only: a parent technique and its sub-techniques. A word written for
+# two families or more is what they share. ``procedure_word_families`` gives
+# the measured count of every word; a test pins where the cut falls.
+PROCEDURE_WORD_MAX_FAMILIES = 1
 # The spellings of a call a procedure word names: the word, its ANSI and wide
 # forms and its extended ones (``HttpSendRequest`` is written
 # ``HttpSendRequestA``, ``RegQueryValueEx`` ``RegQueryValueExW``).
 _CALL_SPELLINGS = ("", "a", "w", "ex", "exa", "exw")
+# What makes a sentence a statement of capability only: a negation that says
+# the behaviour was not seen, run or used ("but no request was seen",
+# "imported but never referenced", "firing at run time not observed"). A
+# procedure word in such a sentence names what the sample could do, so it
+# shares no term with the technique on its own and the sentence is asked as
+# before.
+_NOT_SEEN_RE = re.compile(
+    r"\b(?:no|not|never|nothing)\b(?:\s+[\w-]+){0,3}?\s+(?:seen|observed|exercised|invoked"
+    r"|executed|called|referenced|used|fired|triggered|sent|performed)\b"
+    r"|\b(?:is|are|was|were)\s+(?:not|never)\s+(?:read|run|made)\b|\bunobserved\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
 class ProcedureWords:
     """One technique's procedure words, as a sentence's words are compared with them.
 
-    ``acronyms`` compare as written; ``lowered`` holds every other word in its
-    call spellings, lower-cased; ``exports`` is the lower-cased exported names
-    (in the shape a function name has) of each module the words name, from the
-    vendored export catalogue.
+    ``identifiers`` holds its identifiers in their call spellings, lower-cased;
+    ``programs`` its program and module names, lower-cased; ``exports`` the
+    lower-cased exported names (in the shape a function name has) of each
+    module the text writes as what is called (``calls into ntdll's ...``),
+    from the vendored export catalogue.
     """
 
-    acronyms: frozenset[str] = frozenset()
-    lowered: frozenset[str] = frozenset()
+    identifiers: frozenset[str] = frozenset()
+    programs: frozenset[str] = frozenset()
     exports: frozenset[str] = frozenset()
 
-    def named_in(self, words: Iterable[str]) -> bool:
-        """Whether any of ``words`` (a sentence's) is one of these."""
-        for word in words:
-            if word in self.acronyms:
-                return True
+    def places(self, text: str, *, any_shape: bool = False) -> list[tuple[int, int]]:
+        """Where ``text`` names one of these, in the same shape the source writes them:
+        an identifier as an identifier, a program or module as one. With
+        ``any_shape``, every place the word is written, however: what the
+        absence question reads, where a wider reading only asks more."""
+        found: list[tuple[int, int]] = []
+        for match in _PROCEDURE_WORD_RE.finditer(text):
+            word = match.group(0)
             lowered = word.lower()
-            if lowered in self.lowered or lowered in self.exports:
-                return True
-        return False
+            if lowered in self.identifiers or lowered in self.exports:
+                if any_shape or _PROCEDURE_SHAPE_RE.search(word):
+                    found.append(match.span())
+            elif lowered in self.programs and (any_shape or _written_as_a_program(text, match)):
+                found.append(match.span())
+        return found
 
 
 def _procedure_sources() -> dict[str, list[str]]:
@@ -1258,54 +1286,90 @@ def _module_exports() -> dict[str, frozenset[str]]:
     }
 
 
-# What follows a program's or a module's name where the text writes it as one:
+# What follows a program's or a module's name where a text writes it as one:
 # its extension, a possessive, a command-line switch, or "command line" or
 # "tool" with at most a sub-command between ("lsass.exe", "ntdll's",
 # "schtasks /create", "reg query command lines", "the wmic tool"). The same
-# word in running text ("the services on the host", "the OS version") is no
-# program's name.
+# word in running text ("the services on the host", "the Run reg key", "ntdll
+# is loaded") is no program's name. A word alone in a code span is written as
+# a name as well.
 _WRITTEN_AS_A_PROGRAM_RE = re.compile(
     r"\.(?:exe|dll)\b|'s\b|\s+/\w|\s+(?:[a-z]+\s+)?(?:command[\s-]lines?|tool)\b"
 )
 
 
-def _procedure_shaped(text: str, match: re.Match[str], modules: Collection[str]) -> bool:
-    """Whether the word ``match`` reads in ``text`` has the shape of a procedure's name
-    (see above)."""
-    word = match.group(0)
-    if len(word) < 3:
-        return False
-    if _PROCEDURE_SHAPE_RE.search(word) or (word.isupper() and word.isalpha()):
+def _written_as_a_program(text: str, match: re.Match[str]) -> bool:
+    """Whether the word ``match`` reads in ``text`` is written as a program's name."""
+    if _WRITTEN_AS_A_PROGRAM_RE.match(text, match.end()) is not None:
         return True
-    lowered = word.lower()
-    if lowered not in modules and f"{lowered}.exe" not in _COMMON_EXECUTABLES:
-        return False
-    return _WRITTEN_AS_A_PROGRAM_RE.match(text, match.end()) is not None
+    start, end = match.span()
+    return text[start - 1 : start] == "`" and text[end : end + 1] == "`"
+
+
+def _is_a_program_name(lowered: str, modules: Collection[str]) -> bool:
+    return lowered in modules or f"{lowered}.exe" in _COMMON_EXECUTABLES
+
+
+def _family(technique_id: str) -> str:
+    return str(technique_id or "").strip().upper().split(".")[0]
 
 
 @lru_cache(maxsize=1)
-def _procedure_words_by_id() -> tuple[dict[str, frozenset[str]], dict[str, int]]:
-    """Every technique's procedure-shaped words as written, and how many techniques each
-    word (lower-cased) is written for. Read once."""
+def _procedure_words_by_id() -> tuple[
+    dict[str, tuple[frozenset[str], frozenset[str], frozenset[str]]], dict[str, int]
+]:
+    """Every technique's identifiers, program names and called modules as the vendored
+    data writes them (lower-cased), and how many technique families each word is
+    written for. Read once."""
     modules = _module_exports()
-    words: dict[str, frozenset[str]] = {}
+    words: dict[str, tuple[frozenset[str], frozenset[str], frozenset[str]]] = {}
     for technique_id, texts in _procedure_sources().items():
-        words[technique_id] = frozenset(
-            match.group(0)
-            for text in texts
-            for match in _PROCEDURE_WORD_RE.finditer(text)
-            if _procedure_shaped(text, match, modules)
-        )
-    counts: dict[str, int] = {}
-    for written in words.values():
-        for lowered in {word.lower() for word in written}:
-            counts[lowered] = counts.get(lowered, 0) + 1
-    return words, counts
+        identifiers: set[str] = set()
+        programs: set[str] = set()
+        called: set[str] = set()
+        for text in texts:
+            kept = _NEGATED_PHRASE_RE.sub(lambda m: " " * len(m.group(0)), text)
+            for match in _PROCEDURE_WORD_RE.finditer(kept):
+                word = match.group(0)
+                lowered = word.lower()
+                if len(word) < 3:
+                    continue
+                if _PROCEDURE_SHAPE_RE.search(word):
+                    identifiers.add(lowered)
+                elif _is_a_program_name(lowered, modules) and _written_as_a_program(kept, match):
+                    programs.add(lowered)
+                    if lowered in modules:
+                        called.add(lowered)
+        words[technique_id] = (frozenset(identifiers), frozenset(programs), frozenset(called))
+    families: dict[str, set[str]] = {}
+    for technique_id, entry in words.items():
+        for word in entry[0] | entry[1]:
+            families.setdefault(word, set()).add(_family(technique_id))
+    # A call of a module a family's data names is that family's word too: the
+    # rule "speaking HTTP through the WinINet stack" covers InternetReadFile,
+    # which another card writes for Ingress Tool Transfer, so neither family
+    # owns it.
+    named_modules: dict[str, set[str]] = {}
+    for technique_id, entry in words.items():
+        for module in (entry[0] | entry[1]) & modules.keys():
+            named_modules.setdefault(module, set()).add(_family(technique_id))
+    for module, owners in named_modules.items():
+        exported = modules[module]
+        for word, found in families.items():
+            if any(word + spelling in exported for spelling in _CALL_SPELLINGS):
+                found |= owners
+    for module, owners in named_modules.items():
+        for name in modules[module]:
+            families.setdefault(name, set()).update(owners)
+    return words, {word: len(found) for word, found in families.items()}
 
 
-def procedure_word_counts() -> dict[str, int]:
-    """How many techniques the vendored data writes each procedure-shaped word for."""
-    return dict(_procedure_words_by_id()[1])
+def procedure_word_families() -> dict[str, int]:
+    """How many technique families the vendored data writes each of its procedure words
+    for, a call of a module a family names counted for that family too."""
+    words, families = _procedure_words_by_id()
+    written = {word for entry in words.values() for word in entry[0] | entry[1]}
+    return {word: count for word, count in families.items() if word in written}
 
 
 @cache
@@ -1314,62 +1378,162 @@ def procedure_words(technique_id: str) -> ProcedureWords:
 
     The id's own words and, for a sub-technique, its parent's (as the name check
     reads the parent's name), each written for at most
-    ``PROCEDURE_WORD_MAX_TECHNIQUES`` techniques.
+    ``PROCEDURE_WORD_MAX_FAMILIES`` technique families.
     """
-    words, counts = _procedure_words_by_id()
+    words, families = _procedure_words_by_id()
     tid = str(technique_id or "").strip().upper()
-    ids = [tid, tid.split(".")[0]] if "." in tid else [tid]
-    distinctive = {
-        word
-        for one in ids
-        for word in words.get(one, ())
-        if counts.get(word.lower(), 0) <= PROCEDURE_WORD_MAX_TECHNIQUES
-    }
-    acronyms = frozenset(word for word in distinctive if word.isupper() and word.isalpha())
-    lowered = frozenset(
-        word.lower() + spelling for word in distinctive - acronyms for spelling in _CALL_SPELLINGS
+    ids = [tid, _family(tid)] if "." in tid else [tid]
+    identifiers: set[str] = set()
+    programs: set[str] = set()
+    called: set[str] = set()
+    for one in ids:
+        own_identifiers, own_programs, own_called = words.get(one, (frozenset(),) * 3)
+        identifiers |= {
+            w for w in own_identifiers if families.get(w, 0) <= PROCEDURE_WORD_MAX_FAMILIES
+        }
+        kept = {w for w in own_programs if families.get(w, 0) <= PROCEDURE_WORD_MAX_FAMILIES}
+        programs |= kept
+        called |= own_called & kept
+    modules = _module_exports() if called else {}
+    return ProcedureWords(
+        identifiers=frozenset(w + s for w in identifiers for s in _CALL_SPELLINGS),
+        programs=frozenset(programs),
+        exports=frozenset(
+            name
+            for module in called
+            for name in modules.get(module, ())
+            if families.get(name, 0) <= PROCEDURE_WORD_MAX_FAMILIES
+            and not any(
+                name.endswith(spelling)
+                and families.get(name[: len(name) - len(spelling)], 0) > PROCEDURE_WORD_MAX_FAMILIES
+                for spelling in _CALL_SPELLINGS
+                if spelling
+            )
+        ),
     )
-    modules = _module_exports() if distinctive else {}
-    exports = frozenset(
-        name for word in distinctive for name in modules.get(word.lower(), frozenset())
-    )
-    return ProcedureWords(acronyms=acronyms, lowered=lowered, exports=exports)
 
 
 # An identifier written as joined words names each of them ("BeingDebugged"
 # writes "Being" and "Debugged"). Each is compared with the stems of the
-# technique's name that name few techniques: a stem more than
-# ``PROCEDURE_WORD_MAX_TECHNIQUES`` vendored names share ("file", "process",
-# "system") is what a call's name is made of, not a technique's term.
+# technique's name that the vendored names of one technique family only hold:
+# a stem the names of several families share ("file", "process", "system") is
+# what a call's name is made of, not a technique's term. Measured on the name
+# table itself (``name_stem_families``).
+NAME_STEM_MAX_FAMILIES = 1
 _JOINED_WORD_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
 _JOINED_IDENTIFIER_RE = re.compile(r"[a-z][A-Z]")
 
 
 @lru_cache(maxsize=1)
-def _name_stem_counts() -> dict[str, int]:
-    """How many vendored technique names each name stem is in. Read once."""
+def _name_stem_families() -> dict[str, int]:
+    """How many technique families' vendored names each name stem is in. Read once."""
     from maljan.memory.attck_loader import technique_names
 
-    counts: dict[str, int] = {}
-    for name in technique_names().values():
+    families: dict[str, set[str]] = {}
+    for technique_id, name in technique_names().items():
         for stem in _name_stems(name):
-            counts[stem] = counts.get(stem, 0) + 1
-    return counts
+            families.setdefault(stem, set()).add(_family(technique_id))
+    return {stem: len(found) for stem, found in families.items()}
 
 
-def _joined_words_share(text: str, stems: Collection[str]) -> bool:
-    """Whether an identifier ``text`` writes as joined words writes one of ``stems`` that
-    names few techniques (see above)."""
-    counts = _name_stem_counts()
-    distinctive = {stem for stem in stems if counts.get(stem, 0) <= PROCEDURE_WORD_MAX_TECHNIQUES}
+def name_stem_families() -> dict[str, int]:
+    """How many technique families' vendored names each name stem is in."""
+    return dict(_name_stem_families())
+
+
+def _joined_word_places(text: str, stems: Collection[str]) -> list[tuple[int, int]]:
+    """Where an identifier of joined words writes one of ``stems`` that the names of one
+    technique family only hold (see above)."""
+    families = _name_stem_families()
+    distinctive = {s for s in stems if families.get(s, 0) <= NAME_STEM_MAX_FAMILIES}
     if not distinctive:
+        return []
+    return [
+        match.span()
+        for match in _PROCEDURE_WORD_RE.finditer(text)
+        if _JOINED_IDENTIFIER_RE.search(match.group(0))
+        and any(
+            _stem(part) in distinctive
+            for part in _JOINED_WORD_RE.findall(match.group(0))
+            if len(part) >= 3
+        )
+    ]
+
+
+def _named_as_absent(text: str, start: int, end: int) -> bool:
+    """Whether the mention at ``text[start:end]`` is named to say it is absent, as the
+    absence question reads a mention (:func:`states_absence`)."""
+    return (
+        _is_negated(text, start, end) and _governed_absence(text, start)
+    ) or _absent_by_its_own_statement(text, start, end)
+
+
+def _procedure_places(
+    text: str, technique_id: str, stems: Collection[str], *, any_shape: bool = False
+) -> list[tuple[int, int]]:
+    """Every place ``text`` names ``technique_id`` by a procedure word or by joined words."""
+    return [
+        *procedure_words(technique_id).places(text, any_shape=any_shape),
+        *_joined_word_places(text, stems),
+    ]
+
+
+def _names_a_procedure(text: str, technique_id: str, stems: Collection[str]) -> bool:
+    """Whether ``text`` names the technique by one of its procedure words or joined words
+    in a statement that the sample does it.
+
+    A sentence that says the behaviour was not seen (``_NOT_SEEN_RE``) names a
+    capability only, and a mention named to say it is absent asserts nothing:
+    neither counts, and such a sentence is asked as it was before these words
+    were read.
+    """
+    text = _read_dashes(text)
+    if _NOT_SEEN_RE.search(text):
         return False
     return any(
-        _stem(part) in distinctive
-        for word in _PROCEDURE_WORD_RE.findall(text)
-        if _JOINED_IDENTIFIER_RE.search(word)
-        for part in _JOINED_WORD_RE.findall(word)
-        if len(part) >= 3
+        not _named_as_absent(text, start, end)
+        for start, end in _procedure_places(text, technique_id, stems)
+    )
+
+
+@lru_cache(maxsize=4096)
+def _words_pattern(words: tuple[str, ...]) -> re.Pattern[str]:
+    return re.compile("|".join(rf"\b{re.escape(word)}\b" for word in words))
+
+
+def states_procedure_absence(text: str, technique_id: str, attck: Any = None) -> bool:
+    """Whether ``text`` names the technique's procedure words only to say they are absent.
+
+    The absence question's own reading (:func:`states_absence`), asked of the
+    places the sentence writes a procedure word or joined words of the
+    technique's name: "The sample does not invoke wmic", "tasklist is absent
+    from the decoded strings".
+    """
+    stems = _name_terms(technique_id, attck)[1] if attck is not None else set()
+    read = _read_dashes(str(text or ""))
+    words = tuple(
+        sorted(
+            {
+                read[start:end]
+                for start, end in _procedure_places(read, technique_id, stems, any_shape=True)
+            }
+        )
+    )
+    if not words:
+        return False
+    return states_absence(read, _words_pattern(words))
+
+
+def _shares_a_name_term(text: str, technique_id: str, attck: Any) -> bool:
+    """Whether ``text`` shares a term with the technique's capability terms, catalogue
+    name or tactic phrase: the reading the does-not-describe question had before
+    procedure words were read."""
+    _name, stems, forms = _name_terms(technique_id, attck)
+    pattern = behaviour_pattern(technique_id, attck)
+    return (pattern is not None and pattern.search(text) is not None) or any(
+        _stem(word) in stems or word.lower() in forms
+        for word in re.findall(r"[A-Za-z0-9]+", text)
+        if len(word) >= 3
     )
 
 
@@ -1384,14 +1548,14 @@ def claim_does_not_describe_violation(
     compared word by word, each word with its common endings off
     (:func:`_stem`), so a claim that writes "obfuscation" shares a term with
     "Obfuscated Files or Information". A sentence that names one of the
-    technique's procedure words (:func:`procedure_words`: the commands, calls
+    technique's procedure words (:func:`procedure_words`: the calls, classes
     and artefacts the vendored cards and API catalogue write for it, such as
     ``wmic`` for Windows Management Instrumentation or ``SecurityCenter2`` for
-    Security Software Discovery) shares a term with it too, and so does an
-    identifier whose joined words write a stem of the name few techniques'
-    names share ("BeingDebugged" under Debugger Evasion). Only a sentence
-    that shares none of them is asked about, once: "accesses the PEB to bypass
-    sandboxing" under OS
+    Security Software Discovery) as something the sample does shares a term
+    with it too, and so does an identifier whose joined words write a stem of
+    the name one technique family's names hold ("BeingDebugged" under Debugger
+    Evasion) (:func:`_names_a_procedure`). Only a sentence that shares none of
+    them is asked about, once: "accesses the PEB to bypass sandboxing" under OS
     Credential Dumping. What the analyst answers stands, and a technique kept
     after the question is published as the analyst stated it. Nothing is
     decided without the catalogue's name for the id.
@@ -1409,16 +1573,8 @@ def claim_does_not_describe_violation(
         if listed
         else "give that behaviour's technique or write TECHNIQUE: NONE"
     )
-    pattern = behaviour_pattern(technique_id, attck)
-    if (
-        (pattern is not None and pattern.search(text))
-        or any(
-            _stem(word) in stems or word.lower() in forms
-            for word in re.findall(r"[A-Za-z0-9]+", text)
-            if len(word) >= 3
-        )
-        or procedure_words(technique_id).named_in(_PROCEDURE_WORD_RE.findall(text))
-        or _joined_words_share(text, stems)
+    if _shares_a_name_term(text, technique_id, attck) or _names_a_procedure(
+        text, technique_id, stems
     ):
         named = sibling_named_instead(text, technique_id)
         if named is None:
