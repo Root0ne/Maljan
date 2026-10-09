@@ -8,11 +8,11 @@ Two uses, both with no model and no network:
   OpenAI client would send them) and digests of the composed report, its
   Markdown and its HTML are written to
   ``tests/fixtures/composer_requests_before_concurrency.json``. The fixture in
-  the repository was captured from d92a76fc, the last commit that wrote the
+  the repository was captured from cb04d3ad, the last commit that wrote the
   sections one after another; the test of the same name holds the current
   code, writing them at once, to it. Recapture it from that commit's tree::
 
-      git archive d92a76fc src data | tar -x -C /path/to/base
+      git archive cb04d3ad src data | tar -x -C /path/to/base
       PYTHONPATH=/path/to/base/src python scripts/goldens/capture_composer_requests.py
 
 * **Stored runs** (``--replay RUN_DIR ... --out DIR``). Each run's
