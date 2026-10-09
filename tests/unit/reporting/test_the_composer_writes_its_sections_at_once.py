@@ -377,3 +377,49 @@ class TestUnderASpendCeiling:
         assert concurrent.caps == sequential.caps
         assert sorted(concurrent.requests) == sorted(sequential.requests)
         assert second.degradations == first.degradations
+
+
+class _Slots(_Recorder):
+    """A local server that serves ``slots`` requests at a time and queues the rest."""
+
+    def __init__(self, slots: int, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.slots = slots
+        self._served: asyncio.Semaphore | None = None
+        self.queued = 0
+
+    async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
+        if self._served is None:
+            self._served = asyncio.Semaphore(self.slots)
+        if self._served.locked():
+            self.queued += 1
+        async with self._served:
+            return await super().ainvoke(messages, **kwargs)
+
+
+class TestALocalServerIsGivenWhatItServes:
+    @pytest.mark.parametrize("slots", [1, 2])
+    def test_every_section_is_written_on_a_server_of_few_slots(self, slots: int) -> None:
+        # One call takes 0.1 s and a section at most two calls: a wait of
+        # 0.35 s holds a section served at once, never one queued behind
+        # sixteen.
+        llm = _Slots(slots, delay=0.1)
+        report = _report()
+        composer = ReportComposer(llm=llm, per_section_timeout=0.35)  # type: ignore[arg-type]
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            asyncio.run(composer.compose(report, _isr(), concurrent=True, at_once=slots))
+        assert not [r for r in composer.degradations if "did not answer within" in r]
+        assert set(llm.sections) == set(COMPOSED_SECTIONS)
+        assert llm.most_in_flight <= slots
+        assert llm.queued == 0, "nothing waits in the server's queue"
+
+    def test_without_the_slot_count_the_queued_sections_would_time_out(self) -> None:
+        llm = _Slots(2, delay=0.1)
+        composer = ReportComposer(llm=llm, per_section_timeout=0.35)  # type: ignore[arg-type]
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            asyncio.run(composer.compose(_report(), _isr(), concurrent=True))
+        assert [r for r in composer.degradations if "did not answer within" in r]

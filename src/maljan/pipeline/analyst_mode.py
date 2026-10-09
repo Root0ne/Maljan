@@ -231,28 +231,77 @@ def resolve_analyst_mode(settings: Any, agents: list[str], *, probe: bool = True
     )
 
 
-def resolve_reporter_mode(settings: Any, *, probe: bool = True) -> AnalystMode:
-    """Whether the report composer writes its sections at once, decided as the analysts' mode is.
+@dataclass(frozen=True)
+class ReporterMode:
+    """How many report sections the composer writes at once, and why.
 
-    ``llm.parallel_analysts`` as set, or for ``auto`` the reporter's own
-    models — its agent entry and its fallbacks, or the global judge model —
-    each asked whether its endpoint serves concurrent requests, exactly as
-    an analyst's is. Never raises; blocking, as :func:`resolve_analyst_mode`.
+    ``at_once`` is ``None`` for no limit (a hosted API), a server's reported
+    slot count for a local server that reported more than one, and ``1`` for
+    one after another.
+    """
+
+    at_once: int | None
+    setting: str
+    reason: str
+
+    @property
+    def parallel(self) -> bool:
+        return self.at_once != 1
+
+
+def resolve_reporter_mode(settings: Any, *, probe: bool = True) -> ReporterMode:
+    """How many report sections run at once: as many as the reporter's models can serve.
+
+    ``llm.parallel_analysts`` ``false`` writes them one after another. Else
+    each of the reporter's own models — its agent entry and its fallbacks, or
+    the global judge model — is asked what an analyst's is asked
+    (:func:`_serves_concurrently`): a server that reported its ``/props`` slot
+    count serves that many at once, whatever the setting says (one slot is one
+    after another); one taken to serve one request at a time (Ollama, a local
+    server with no slot count, a host that does not resolve) serves one; a
+    hosted API serves every section at once. The smallest of them holds, since
+    any model of the list may answer. Never raises; blocking, as
+    :func:`resolve_analyst_mode`.
     """
     explicit, setting = _setting_of(settings)
-    if explicit is not None:
-        return AnalystMode(explicit, setting, f"{SETTING} is {setting}")
+    if explicit is False:
+        return ReporterMode(1, setting, f"{SETTING} is {setting}")
     try:
         from maljan.core.config import REPORTER_AGENT_KEY
         from maljan.core.model_assignments import assignment_chain_for
 
         assignments = assignment_chain_for(settings, REPORTER_AGENT_KEY, role="judge")
     except Exception as exc:  # noqa: BLE001 — a mode is never worth a lost report
-        return AnalystMode(
-            False, setting, f"{SETTING} is auto and the reporter's models could not be read ({exc})"
+        return ReporterMode(
+            1,
+            setting,
+            f"{SETTING} is {setting} and the reporter's models could not be read ({exc})",
         )
-    return _auto_mode(
-        settings, setting, assignments, probe=probe, nobody="the reporter names no model"
+    seen: dict[tuple[str, str, str], Any] = {}
+    for assignment in assignments:
+        seen.setdefault(
+            (str(assignment.provider), str(assignment.endpoint), str(assignment.model)), assignment
+        )
+    if not seen:
+        return ReporterMode(1, setting, f"{SETTING} is {setting} and the reporter names no model")
+    from maljan.llm.context_window import reported_slots
+
+    limits: list[int] = []
+    said: list[str] = []
+    for assignment in seen.values():
+        concurrent, why = _serves_concurrently(settings, assignment, probe=probe)
+        slots = (
+            reported_slots(str(assignment.endpoint or "")) if assignment.provider == "openai" else 0
+        )
+        if slots > 0:
+            limits.append(slots)
+            if f"{slots} slot" not in why and "one slot" not in why:
+                why += f", whose /props reports {slots} slot(s)"
+        elif not concurrent:
+            limits.append(1)
+        said.append(why)
+    return ReporterMode(
+        min(limits) if limits else None, setting, f"{SETTING} is {setting} and " + "; ".join(said)
     )
 
 

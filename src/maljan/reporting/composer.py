@@ -857,6 +857,7 @@ class ReportComposer:
         items: ItemIndex | None = None,
         *,
         concurrent: bool = False,
+        at_once: int | None = None,
     ) -> None:
         """Fill report.intro_background / technical_analysis / c2_channels.
 
@@ -874,8 +875,10 @@ class ReportComposer:
         left to call a claim unsupported that an entry it was not shown
         supports.
 
-        ``concurrent`` writes every section at once (:meth:`_author_at_once`);
-        otherwise they are written one after another. No section's request
+        ``concurrent`` writes the sections at once (:meth:`_author_at_once`),
+        at most ``at_once`` of them in flight — a local server's reported slot
+        count; ``None`` is no limit, ``1`` one after another; otherwise they
+        are written one after another. No section's request
         reads another section's answer or anything a section's answer
         changes, so both send the same requests, and the answers are applied
         in the same fixed order either way.
@@ -1073,11 +1076,13 @@ class ReportComposer:
                 "is set, and each call is held at what the sections before it left."
             )
             concurrent = False
+        if at_once is not None and at_once <= 1:
+            concurrent = False
         authored = 0
         if concurrent:
             # Applied in the fixed order, each section's record first, whatever
             # order the answers came back in.
-            written = await self._author_at_once(plan, report, isr_reports)
+            written = await self._author_at_once(plan, report, isr_reports, at_once=at_once)
             for planned, (answer, record) in zip(plan, written, strict=True):
                 self._settle(record)
                 authored += planned.apply(answer)
@@ -1121,10 +1126,15 @@ class ReportComposer:
         plan: Sequence[_Planned],
         report: MalwareReport,
         isr_reports: dict[str, Any] | None,
+        *,
+        at_once: int | None = None,
     ) -> list[tuple[BaseModel | None, _SectionRecord]]:
         """Every section written at once; each answer with its record, in ``plan`` order.
 
-        No limit on how many run together. A section's retries and validation
+        No limit on how many run together, but ``at_once``: the slot count a
+        local server reported, so no section waits in the server's queue. A
+        section's wait starts when it holds a slot, so time spent waiting for
+        one never counts against it. A section's retries and validation
         stay its own, and a section that fails or times out leaves the others
         running. Each section keeps what it would tell the report in its own
         :class:`_SectionRecord` until :meth:`compose` applies it in order.
@@ -1141,14 +1151,22 @@ class ReportComposer:
         ) -> tuple[BaseModel | None, _SectionRecord]:
             record = _SectionRecord()
             _SECTION_RECORD.set(record)
-            if begun is None:
-                return await self._author_one(planned, report, isr_reports, resize=True), record
-            try:
-                with _on_first_piece(begun):
-                    answer = await self._author_one(planned, report, isr_reports, resize=True)
-            finally:
-                begun.set()
-            return answer, record
+            async with slots if slots is not None else contextlib.nullcontext():
+                if begun is None:
+                    return (
+                        await self._author_one(planned, report, isr_reports, resize=True),
+                        record,
+                    )
+                try:
+                    with _on_first_piece(begun):
+                        answer = await self._author_one(planned, report, isr_reports, resize=True)
+                finally:
+                    begun.set()
+                return answer, record
+
+        # Held from the moment a section's prompt is built until its answer
+        # is in, so its wait is measured only while the server serves it.
+        slots = asyncio.Semaphore(at_once) if at_once is not None and at_once > 0 else None
 
         lead = (
             self._lead_section(plan, report, isr_reports)
@@ -1171,7 +1189,11 @@ class ReportComposer:
             for index, planned in enumerate(plan):
                 if index not in tasks:
                     tasks[index] = asyncio.create_task(_one(planned))
-            logger.info("ReportComposer: %d section(s) are written at once.", len(plan))
+            logger.info(
+                "ReportComposer: %d section(s) are written at once%s.",
+                len(plan),
+                "" if slots is None else f", at most {at_once} in flight (the server's slots)",
+            )
             return list(await asyncio.gather(*(tasks[index] for index in range(len(plan)))))
         except BaseException:
             for task in tasks.values():

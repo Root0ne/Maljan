@@ -1,4 +1,4 @@
-"""The composer's sections run at once exactly where the analysts would.
+"""The composer's sections run at once as far as the reporter's server serves them.
 
 ``llm.parallel_analysts`` already says whether a job's models serve concurrent
 requests: ``true``/``false`` as set, ``auto`` decided from each model's
@@ -43,17 +43,37 @@ def _slots(endpoint: str, count: int) -> None:
 
 
 class TestTheReporterMode:
-    @pytest.mark.parametrize(("value", "parallel"), [(True, True), (False, False)])
-    def test_an_explicit_value_is_used_as_set(self, value: bool, parallel: bool) -> None:
+    def test_false_runs_them_one_after_another_on_a_hosted_api(self) -> None:
         mode = resolve_reporter_mode(
-            _settings(parallel_analysts=value, provider="ollama"), probe=False
+            _settings(parallel_analysts=False, openai={"base_url": HOSTED}), probe=False
         )
-        assert mode.parallel is parallel
-        assert mode.reason == f"llm.parallel_analysts is {'true' if value else 'false'}"
+        assert mode.at_once == 1 and mode.parallel is False
+        assert mode.reason == "llm.parallel_analysts is false"
+
+    def test_true_on_a_hosted_api_runs_every_section_at_once(self) -> None:
+        mode = resolve_reporter_mode(
+            _settings(parallel_analysts=True, openai={"base_url": HOSTED}), probe=False
+        )
+        assert mode.at_once is None and mode.parallel is True
+
+    def test_true_never_takes_a_single_slot_server_past_its_one_slot(self) -> None:
+        _slots(LOCAL, 1)
+        mode = resolve_reporter_mode(
+            _settings(parallel_analysts=True, openai={"base_url": LOCAL}), probe=False
+        )
+        assert mode.at_once == 1
+        assert "reports one slot" in mode.reason
+
+    def test_true_on_ollama_runs_them_one_after_another(self) -> None:
+        mode = resolve_reporter_mode(
+            _settings(parallel_analysts=True, provider="ollama"), probe=False
+        )
+        assert mode.at_once == 1
 
     def test_auto_on_a_hosted_api_runs_the_sections_at_once(self) -> None:
         mode = resolve_reporter_mode(_settings(openai={"base_url": HOSTED}), probe=False)
         assert mode.parallel is True
+        assert mode.at_once is None
         assert "api.deepseek.com resolves only to public addresses" in mode.reason
 
     def test_auto_on_a_single_slot_local_server_runs_them_one_after_another(self) -> None:
@@ -62,10 +82,11 @@ class TestTheReporterMode:
         assert mode.parallel is False
         assert "reports one slot" in mode.reason
 
-    def test_auto_on_a_multi_slot_local_server_runs_them_at_once(self) -> None:
+    def test_auto_on_a_multi_slot_local_server_runs_as_many_as_it_has_slots(self) -> None:
         _slots(LOCAL, 4)
         mode = resolve_reporter_mode(_settings(openai={"base_url": LOCAL}), probe=False)
         assert mode.parallel is True
+        assert mode.at_once == 4
 
     def test_auto_on_ollama_runs_them_one_after_another(self) -> None:
         mode = resolve_reporter_mode(_settings(provider="ollama"), probe=False)
@@ -96,17 +117,27 @@ class _Composer:
         self.llm = None
         self.validation_tally = ValidationTally()
         self.degradations: list[str] = []
-        self.asked: list[bool] = []
+        self.asked: list[tuple[bool, Any]] = []
 
     async def compose(self, report: Any, isr_reports: Any = None, **kwargs: Any) -> None:
-        self.asked.append(kwargs["concurrent"])
+        self.asked.append((kwargs["concurrent"], kwargs["at_once"]))
 
 
 class TestTheReportNodeAsks:
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("setting", [True, False])
-    async def test_the_node_passes_the_reporter_s_mode_to_the_composer(self, setting: bool) -> None:
+    @pytest.mark.parametrize("at_once", [None, 1, 2])
+    async def test_the_node_passes_the_reporter_s_mode_to_the_composer(
+        self, at_once: int | None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from unittest.mock import MagicMock
+
+        from maljan.pipeline.analyst_mode import ReporterMode
+
+        monkeypatch.setattr(
+            analyst_mode_module,
+            "resolve_reporter_mode",
+            lambda settings: ReporterMode(at_once, "auto", "a stated reason"),
+        )
 
         from maljan.pipeline.nodes import make_report_node
         from tests.stages import paper_profile
@@ -119,7 +150,7 @@ class TestTheReportNodeAsks:
         fake.agent_role.side_effect = lambda n: n
         fake.is_mock = False
         fake.config.reporting.enabled = True
-        fake.config.llm.parallel_analysts = setting
+        fake.config.llm.parallel_analysts = "auto"
         fake.config.negotiation.max_iterations = 3
         fake.active_profile.return_value = paper_profile(["static"], parallel=False)
         fake.get_narrative_agent.return_value = None
@@ -129,4 +160,4 @@ class TestTheReportNodeAsks:
 
         await make_report_node(fake, stage=stage, announces=False)(_state())  # type: ignore[arg-type]
 
-        assert composer.asked == [setting]
+        assert composer.asked == [(at_once != 1, at_once)]
