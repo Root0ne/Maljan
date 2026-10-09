@@ -118,6 +118,18 @@ def _check_headers_anthropic(headers: dict[str, str], key: str | None) -> None:
         raise ApiError(400, "anthropic-version: header is required")
 
 
+def check_credentials(api: str, request: wire.Request, key: str | None) -> None:
+    """The credential check each API makes before it reads anything else."""
+    if api == "anthropic":
+        _check_headers_anthropic(request.headers, key)
+        return
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer ") or not auth[7:].strip():
+        raise ApiError(401, "You didn't provide an API key.")
+    if key is not None and auth[7:].strip() != key:
+        raise ApiError(401, "Incorrect API key provided.")
+
+
 def _check_size(request: wire.Request, facts: ModelFacts) -> None:
     cap = request.max_tokens
     if cap is not None and cap > facts.max_output:

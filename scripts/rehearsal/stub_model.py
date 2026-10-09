@@ -90,7 +90,7 @@ class StubState:
             entry["n"] = len(self.log) + 1
             self.log.append(entry)
             model = str(entry.get("model") or "")
-            if model and model not in self.served:
+            if model and entry.get("status") == 200 and model not in self.served:
                 self.served.append(model)
 
 
@@ -152,6 +152,19 @@ def build_app(state: StubState) -> Any:
         )
         facts = state.facts(request.model)
         entry = _entry(request, role_of(request))
+        try:
+            validate.check_credentials(api, request, state.api_key)
+        except validate.ApiError as refusal:
+            entry.update(status=refusal.status, refused=refusal.message, stop="error")
+            entry.update(input_tokens=0, output_tokens=0)
+            state.record(entry)
+            return _error(api, refusal.status, refusal.message)
+        if not facts.known and request.model not in state.served:
+            # An id the API does not serve is a 404, before anything is read.
+            entry.update(status=404, refused=f"model: {request.model}", stop="error")
+            entry.update(input_tokens=0, output_tokens=0)
+            state.record(entry)
+            return _error(api, 404, f"model: {request.model}")
         if state.dump_dir is not None:
             state.dump_dir.mkdir(parents=True, exist_ok=True)
             (state.dump_dir / f"{len(state.log) + 1:04d}-{entry['role']}.json").write_text(
@@ -296,7 +309,7 @@ class StubServer:
     Port 0, the default, takes a free port; ``root`` says which.
     """
 
-    def __init__(self, state: StubState, port: int = 0) -> None:
+    def __init__(self, state: StubState, port: int = 0, host: str = LOOPBACK) -> None:
         import socket
 
         import uvicorn
@@ -304,7 +317,8 @@ class StubServer:
         self.state = state
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((LOOPBACK, port))
+        sock.bind((host, port))
+        self.host = host
         self._socket = sock
         self.port = int(sock.getsockname()[1])
         config = uvicorn.Config(
@@ -317,7 +331,7 @@ class StubServer:
 
     @property
     def root(self) -> str:
-        return f"http://{LOOPBACK}:{self.port}"
+        return f"http://{self.host}:{self.port}"
 
     def start(self) -> StubServer:
         self._thread.start()

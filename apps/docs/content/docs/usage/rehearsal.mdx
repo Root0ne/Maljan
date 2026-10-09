@@ -55,9 +55,24 @@ REHEARSAL_LOGIN=... python scripts/rehearsal/run.py --api http://127.0.0.1:8000 
   --email operator@example.org --restore rehearsal-results/settings-snapshot.json
 ```
 
-The stub runs on a free loopback port. The stack's worker must be able to reach
-`127.0.0.1` on the host, so a worker inside a container needs host networking,
-or a stub it can reach (`--stub-url`). A job the wait gives up on
+The gate refuses to start while any job is queued or running, because such a
+job would pick up the stub's endpoints. Through the API it sees only the jobs
+of the account it signs in with. `--redis-url` (default: `REDIS_URL`) lets it
+read the stack's queue as well, which covers every account's jobs.
+
+The stub runs on a free port on `127.0.0.1`. A worker inside a Docker container
+reaches the host on its bridge gateway instead. For that, `--stub-host` binds
+the stub to that address, for example `--stub-host 172.17.0.1`. Plain http is
+taken there, and for the Anthropic base URL too, only for these addresses:
+
+- loopback;
+- `localhost`;
+- `host.docker.internal` and `gateway.docker.internal`;
+- an IPv4 address in Docker's default bridge pool, 172.17.0.0 to
+  172.31.255.255.
+
+Any other address needs https. A model the stub has no facts for, and that the
+configuration does not name, is answered 404, as the real API answers. A job the wait gives up on
 (`--timeout`) is cancelled. `--job-timeout` gives the worker's job timeout,
 and a run that finishes within 20% of it fails.
 

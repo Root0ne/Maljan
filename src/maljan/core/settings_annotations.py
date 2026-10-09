@@ -321,8 +321,9 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Sends every Anthropic request — a job's calls, the Models API question and the "
             "connection test — to this address instead of the Anthropic API: a proxy, or the "
             "loopback stub a rehearsal runs against. The API key is sent to this address with "
-            "every request. https is required unless the host is this machine; written without "
-            "/v1, with no user name, query or fragment. Leave empty to use the Anthropic API."
+            "every request. https is required unless the host is this machine: loopback, or the "
+            "Docker host gateway (host.docker.internal, 172.17.0.0-172.31.255.255); written "
+            "without /v1, with no user name, query or fragment. Leave empty for the Anthropic API."
         ),
         "probe": "llm",
         "subgroup": "Anthropic",

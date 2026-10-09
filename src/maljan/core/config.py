@@ -136,16 +136,32 @@ EFFORT_SETTING_OF_PROVIDER: dict[str, str] = {
 }
 
 
-def _is_loopback_host(host: str) -> bool:
-    """Whether ``host`` names this machine: ``localhost`` or a loopback address."""
+# The names Docker gives the host a container runs on.
+_DOCKER_HOST_NAMES = frozenset({"host.docker.internal", "gateway.docker.internal"})
+
+
+def _is_this_host(host: str) -> bool:
+    """Whether ``host`` is this machine as a local worker or a containerised one reaches it.
+
+    ``localhost`` and loopback addresses; Docker's names for the host
+    (``host.docker.internal``, ``gateway.docker.internal``); and an IPv4
+    address of Docker's default bridge address pool, 172.17.0.0 to
+    172.31.255.255, where a container finds the host's bridge gateway. Any
+    other address is another machine, and a key sent there goes over https.
+    """
     import ipaddress
 
-    if host == "localhost" or host.endswith(".localhost"):
+    if host in ("localhost",) or host.endswith(".localhost") or host in _DOCKER_HOST_NAMES:
         return True
     try:
-        return ipaddress.ip_address(host.strip("[]")).is_loopback
+        address = ipaddress.ip_address(host.strip("[]"))
     except ValueError:
         return False
+    if address.is_loopback:
+        return True
+    if not isinstance(address, ipaddress.IPv4Address):
+        return False
+    return ipaddress.IPv4Address("172.17.0.0") <= address <= ipaddress.IPv4Address("172.31.255.255")
 
 
 class AnthropicConfig(BaseModel):
@@ -215,10 +231,11 @@ class AnthropicConfig(BaseModel):
             raise ValueError(
                 "the Anthropic base URL is written without /v1: the client adds /v1/messages"
             )
-        if scheme == "http" and not _is_loopback_host(host):
+        if scheme == "http" and not _is_this_host(host):
             raise ValueError(
                 "the Anthropic base URL must use https: the API key is sent to it, and only "
-                "an address on this machine may take it over plain http"
+                "this machine (loopback, or the Docker host gateway a containerised worker "
+                "reaches it on) may take it over plain http"
             )
         shown_host = f"[{host}]" if ":" in host else host
         authority = f"{shown_host}:{port}" if port else shown_host

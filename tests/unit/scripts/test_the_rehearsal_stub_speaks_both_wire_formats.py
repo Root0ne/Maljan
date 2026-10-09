@@ -593,6 +593,29 @@ class TestTheOpenAiChatCompletionsApi:
             server.stop()
 
 
+class TestAnUnknownModel:
+    def test_is_a_404_on_both_wires_and_a_served_one_is_answered(self) -> None:
+        import anthropic
+        import openai
+
+        server, _ = _stub(wire.Reply(text="ok"), served=["operator-model"])
+        try:
+            with pytest.raises(anthropic.NotFoundError):
+                _anthropic(server).messages.create(
+                    model="no-such-model", max_tokens=5, messages=USER
+                )
+            with pytest.raises(openai.NotFoundError):
+                _openai(server).chat.completions.create(
+                    model="no-such-model", messages=[{"role": "user", "content": "x"}]
+                )
+            served = _openai(server).chat.completions.create(
+                model="operator-model", messages=[{"role": "user", "content": "x"}]
+            )
+        finally:
+            server.stop()
+        assert served.choices[0].message.content == "ok"
+
+
 class TestThePace:
     def test_an_answer_takes_its_first_token_time_and_its_tokens_at_the_rate(self) -> None:
         text = "x" * 400  # 100 tokens at four characters a token
@@ -600,7 +623,7 @@ class TestThePace:
         try:
             started = time.monotonic()
             _openai(server, retries=0).chat.completions.create(
-                model="m", messages=[{"role": "user", "content": "a"}]
+                model="deepseek-v4-flash", messages=[{"role": "user", "content": "a"}]
             )
             elapsed = time.monotonic() - started
         finally:
@@ -613,7 +636,9 @@ class TestThePace:
         try:
             started = time.monotonic()
             answer = _openai(server, retries=0).chat.completions.create(
-                model="m", messages=[{"role": "user", "content": "a"}], stream=stream
+                model="deepseek-v4-flash",
+                messages=[{"role": "user", "content": "a"}],
+                stream=stream,
             )
             if stream:
                 list(answer)

@@ -76,6 +76,7 @@ from scripts.rehearsal.sample import sample_bytes  # noqa: E402
 from scripts.rehearsal.stub_model import Pace, StubServer, StubState  # noqa: E402
 
 TERMINAL = {"completed", "failed", "cancelled", "canceled"}
+ACTIVE = ("pending", "queued", "running")
 SNAPSHOT_NAME = "settings-snapshot.json"
 # Providers the stub cannot stand in for: a rehearsal that would send one of
 # their calls to the real service is refused rather than run.
@@ -153,6 +154,15 @@ class StackClient:
 
     def cancel(self, job_id: str) -> None:
         self._http.delete(f"/jobs/{job_id}")
+
+    def active_jobs(self) -> list[str]:
+        """The ids of this account's jobs that are queued or running."""
+        found: list[str] = []
+        for status in ACTIVE:
+            answer = self._http.get("/jobs", params={"status": status, "page_size": 100})
+            answer.raise_for_status()
+            found += [str(j.get("id")) for j in answer.json().get("items") or []]
+        return found
 
     def job(self, job_id: str) -> dict[str, Any]:
         answer = self._http.get(f"/jobs/{job_id}")
@@ -417,6 +427,45 @@ def restore_snapshot(client: StackClient, saved: dict[str, dict[str, Any]]) -> l
     return failed
 
 
+def queued_elsewhere(redis_url: str) -> int:
+    """How many jobs the stack's queue holds or runs, every account's, read from its Redis.
+
+    The API lists only the caller's own jobs; the arq queue and its in-progress
+    keys are the whole stack's.
+    """
+    import redis
+
+    client = redis.Redis.from_url(redis_url, socket_timeout=5)
+    try:
+        waiting = int(client.zcard("arq:queue") or 0)
+        running = sum(1 for _ in client.scan_iter("arq:in-progress:*"))
+    finally:
+        client.close()
+    return waiting + running
+
+
+def refuse_while_jobs_run(client: StackClient, redis_url: str) -> None:
+    """Refuse to point the stack at the stub while any job could pick the stub's endpoints up."""
+    mine = client.active_jobs()
+    if mine:
+        raise SystemExit(
+            f"{len(mine)} job(s) of this account are queued or running; a rehearsal would "
+            "change the endpoints under them"
+        )
+    if redis_url:
+        others = queued_elsewhere(redis_url)
+        if others:
+            raise SystemExit(
+                f"the stack's queue holds or runs {others} job(s); a rehearsal would change "
+                "the endpoints under them"
+            )
+    else:
+        print(
+            "only this account's jobs were checked; name --redis-url to check every account's",
+            flush=True,
+        )
+
+
 def _sigterm_is_interrupt() -> None:
     def handler(_signum: int, _frame: Any) -> None:
         raise KeyboardInterrupt
@@ -532,7 +581,7 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             window=args.window,
             slots=args.slots,
         )
-        server = StubServer(state, args.stub_port).start()
+        server = StubServer(state, args.stub_port, host=args.stub_host).start()
     stub_root = args.stub_url.rstrip("/") if args.stub_url else server.root  # type: ignore[union-attr]
     client = StackClient(args.api)
     guard = SettingsGuard(client, Path(args.out) / SNAPSHOT_NAME)
@@ -543,6 +592,7 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
         values = client.values()
         expected = _parse_expect(args.expect)
         if args.configure:
+            refuse_while_jobs_run(client, args.redis_url)
             if args.configure == "gate":
                 changes = gate_changes(values, stub_root)
                 expected = {**gate_expected(values, changes), **expected}
@@ -557,6 +607,11 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             if not probe["ok"]:
                 raise SystemExit(
                     f"the connection test failed, nothing was changed: {probe['detail']}"
+                )
+            if server is not None:
+                # The stub answers the models the run will name, and 404s any other.
+                server.state.served.extend(
+                    str(v) for k, v in expected.items() if k.startswith("model.") and v
                 )
             guard.keep(values, list(changes))
             applied = client.save(changes)
@@ -688,6 +743,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--login-env", default="REHEARSAL_LOGIN")
     parser.add_argument("--stub-url", default="", help="a stub already running; else one starts")
     parser.add_argument("--stub-port", type=int, default=0, help="0 takes a free port")
+    parser.add_argument(
+        "--stub-host",
+        default="127.0.0.1",
+        help="the address the stub binds: loopback, or the Docker bridge gateway a containerised "
+        "worker reaches the host on (172.17.0.0 to 172.31.255.255)",
+    )
+    parser.add_argument(
+        "--redis-url",
+        default=os.environ.get("REDIS_URL", ""),
+        help="the stack's Redis, to check every account's jobs before the gate starts",
+    )
     parser.add_argument(
         "--configure",
         choices=["gate", "harness"],

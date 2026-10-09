@@ -110,6 +110,9 @@ class TestARefusedAddress:
             ("ftp://proxy.local", "http:// or https://"),
             ("https://", "host"),
             ("http://proxy.example.org", "https"),
+            ("http://192.168.1.5:8765", "https"),
+            ("http://172.32.0.1:8765", "https"),
+            ("http://172.16.0.1:8765", "https"),
             ("https://user:pw@proxy.example.org", "user name"),
             ("https://proxy.example.org?x=1", "query"),
             ("https://proxy.example.org#x", "fragment"),
@@ -131,6 +134,9 @@ class TestARefusedAddress:
             "http://127.0.0.1:8765",
             "http://localhost:8765",
             "http://[::1]:8765",
+            "http://host.docker.internal:8765",
+            "http://172.17.0.1:8765",
+            "http://172.31.255.1:8765",
         ],
     )
     def test_https_or_a_loopback_address_is_taken(self, value: str) -> None:

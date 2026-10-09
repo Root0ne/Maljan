@@ -65,6 +65,9 @@ class ModelFacts:
     prefix_bound: bool = False
     slots: int = 1
     min_cacheable: int = 1024
+    # Whether a vendor documents the model: a stored description or a row of
+    # the vendored table. An id nothing documents is answered 404.
+    known: bool = False
     # Effort levels the description says the model takes; ``None`` states nothing.
     effort_levels: tuple[str, ...] | None = None
     thinking_types: dict[str, bool] = field(default_factory=dict)
@@ -115,8 +118,19 @@ def facts_for(model: str, *, window: int | None = None, slots: int = 1) -> Model
         facts.max_output = int(outputs[key].get("tokens") or DEFAULT_OUTPUT)
     facts.fixed_sampling = bool(_longest_prefix(name, table.get("fixed_sampling") or {}))
     facts.prefix_bound = bool(_longest_prefix(name, table.get("prefix_bound_thinking") or {}))
+    facts.known = any(
+        _longest_prefix(name, table.get(section) or {})
+        for section in (
+            "windows",
+            "max_output",
+            "prices",
+            "fixed_sampling",
+            "prefix_bound_thinking",
+        )
+    )
     described = _description(name)
     if described is not None:
+        facts.known = True
         facts.description = described
         facts.window = int(described.get("max_input_tokens") or facts.window)
         facts.max_output = int(described.get("max_tokens") or facts.max_output)

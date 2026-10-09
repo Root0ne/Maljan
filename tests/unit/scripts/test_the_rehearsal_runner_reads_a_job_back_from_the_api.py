@@ -157,6 +157,7 @@ class _Api:
         self.probe_ok = probe_ok
         self.seen: list[str] = []
         self.status = "completed"
+        self.active: dict[str, list[str]] = {}
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path.removeprefix("/api/v1")
@@ -178,6 +179,10 @@ class _Api:
             return httpx.Response(200, json={"ok": self.probe_ok, "latency_ms": 1, "detail": "x"})
         if path == "/samples/upload":
             return httpx.Response(201, json={"id": "33333333-3333-3333-3333-333333333333"})
+        if path == "/jobs" and request.method == "GET":
+            wanted = request.url.params.get("status")
+            items = [{"id": j, "status": wanted} for j in self.active.get(wanted, [])]
+            return httpx.Response(200, json={"items": items, "total": len(items)})
         if path == "/jobs" and request.method == "POST":
             return httpx.Response(201, json={"id": JOB, "status": "queued"})
         if path == f"/jobs/{JOB}" and request.method == "DELETE":
@@ -309,6 +314,8 @@ def _args(tmp_path: Path, **extra: Any) -> Any:
         "repeat": 1,
         "timeout": 5.0,
         "job_timeout": None,
+        "stub_host": "127.0.0.1",
+        "redis_url": "",
     }
     base.update(extra)
     return SimpleNamespace(**base)
@@ -362,3 +369,13 @@ def test_results_are_written_and_a_failed_check_exits_non_zero(tmp_path: Path) -
     summary: dict[str, Any] = json.loads((tmp_path / "summary.json").read_text())
     assert summary == {"runs": 1, "passed": False, "identical": True, "differences": []}
     assert write_results([], tmp_path) == 1
+
+
+def test_the_gate_refuses_to_start_while_a_job_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api = _Api(_values())
+    api.active = {"running": ["44444444-4444-4444-4444-444444444444"]}
+    with pytest.raises(SystemExit, match="queued or running"):
+        _run_with(api, _args(tmp_path), monkeypatch)
+    assert not any(c.startswith("PATCH") or c.startswith("POST /settings") for c in api.seen)

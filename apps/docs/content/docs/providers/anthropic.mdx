@@ -13,7 +13,7 @@ Claude Haiku 5.5 (`claude-haiku-5-5`) included.
 | :-- | :-- | :-- |
 | `core.llm.provider` | `openai` | Set to `anthropic`. |
 | `core.llm.anthropic.api_key` | — | Required; the provider refuses to build a model without it. Stored encrypted. |
-| `core.llm.anthropic.base_url` | empty | Where every Anthropic request goes — a job's calls, the Models API question and the connection test — written without `/v1`: a proxy, or the loopback stub of a [rehearsal](/usage/rehearsal/). **The API key is sent to this address** with every request, so `https` is required unless the host is this machine; a user name, a query, a fragment or a `/v1` ending is refused on save. Empty is the Anthropic API. |
+| `core.llm.anthropic.base_url` | empty | Where every Anthropic request goes — a job's calls, the Models API question and the connection test — written without `/v1`: a proxy, or the loopback stub of a [rehearsal](/usage/rehearsal/). **The API key is sent to this address** with every request, so `https` is required unless the host is this machine (loopback, or the Docker host gateway a containerised worker reaches it on: `host.docker.internal`, `gateway.docker.internal`, 172.17.0.0 to 172.31.255.255); a user name, a query, a fragment or a `/v1` ending is refused on save. Empty is the Anthropic API. |
 | `core.llm.anthropic.expert_model` | `claude-sonnet-4-20250514` | The analysts' model. Name the model you run, such as `claude-haiku-5-5`. |
 | `core.llm.anthropic.judge_model` | `claude-sonnet-4-20250514` | The judge's model. |
 | `core.llm.anthropic.effort` | empty | Sent as `output_config.effort` on every request: `low`, `medium`, `high`, `xhigh` or `max`. Empty sends nothing and keeps the model's own default (`medium` on Claude Haiku 5.5). |
