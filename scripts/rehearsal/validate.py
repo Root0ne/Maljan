@@ -73,6 +73,9 @@ class Signer:
 
     def __init__(self) -> None:
         self._key = secrets.token_bytes(32)
+        # The ids of the tool calls the stub wrote after a thinking block: a
+        # turn carrying one must come back with its thinking block in front.
+        self.thought_tool_ids: set[str] = set()
 
     def sign(self, prefix: Any, thinking: str) -> str:
         mac = hmac.new(self._key, _canonical(prefix) + b"\x00" + thinking.encode(), "sha256")
@@ -234,6 +237,7 @@ def check_anthropic(
     _check_sampling_and_effort(body, facts)
     messages = list(body.get("messages") or [])
     _check_tool_pairs_anthropic(messages)
+    _check_thinking_kept(messages, signer)
     binding = ((body.get("thinking") or {}).get("block_binding") or {}).get(
         "prefix_mismatch_behavior"
     )
@@ -255,6 +259,36 @@ def check_anthropic(
                 400, f"messages.{index}.content.{n}: Invalid `signature` in `thinking` block"
             )
     return dropped
+
+
+def _check_thinking_kept(messages: list[dict[str, Any]], signer: Signer) -> None:
+    """The assistant turn a tool loop continues starts with the thinking block it was written with.
+
+    The rule the API holds a thinking model's tool loop to: the last assistant
+    turn, whose tool calls the request answers, must lead with its thinking
+    (or redacted thinking) block. Held only for a turn whose calls the stub
+    itself wrote after a thinking block, so a model that answered without
+    thinking is not refused.
+    """
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if message.get("role") != "assistant":
+            continue
+        blocks = _blocks(message)
+        uses = {b.get("id") for b in blocks if b.get("type") == "tool_use"}
+        if not uses & signer.thought_tool_ids:
+            return
+        first = str(blocks[0].get("type")) if blocks else "nothing"
+        if first not in ("thinking", "redacted_thinking"):
+            raise ApiError(
+                400,
+                f"messages.{index}.content.0.type: Expected `thinking` or `redacted_thinking`, "
+                f"but found `{first}`. When `thinking` is enabled, a final `assistant` message "
+                "must start with a thinking block (preceeding the lastmost set of `tool_use` and "
+                "`tool_result` blocks). We recommend you include thinking blocks from previous "
+                "turns.",
+            )
+        return
 
 
 def check_openai(

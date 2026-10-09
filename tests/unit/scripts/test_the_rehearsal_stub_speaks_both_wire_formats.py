@@ -189,6 +189,32 @@ class TestTheAnthropicMessagesApi:
             server.stop()
         assert dropped.content
 
+    def test_a_tool_turn_sent_back_without_its_thinking_block_is_refused(self) -> None:
+        import anthropic
+
+        call = wire.ToolCall("pe_info", {"path": "/x/sample_1.exe"})
+        server, _ = _stub(wire.Reply(thinking="plan", tool_calls=[call]))
+        try:
+            client = _anthropic(server)
+            first = client.messages.create(model=HAIKU, max_tokens=100, tools=[TOOL], messages=USER)
+            turn = [block.model_dump(exclude_none=True) for block in first.content]
+            use = next(block for block in turn if block["type"] == "tool_use")
+            answer = {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": use["id"], "content": "[ev_0026]"}
+                ],
+            }
+            kept = [*USER, {"role": "assistant", "content": turn}, answer]
+            client.messages.create(model=HAIKU, max_tokens=100, tools=[TOOL], messages=kept)
+            stripped = [*USER, {"role": "assistant", "content": [use]}, answer]
+            with pytest.raises(
+                anthropic.BadRequestError, match="Expected `thinking` or `redacted_thinking`"
+            ):
+                client.messages.create(model=HAIKU, max_tokens=100, tools=[TOOL], messages=stripped)
+        finally:
+            server.stop()
+
     def test_a_redacted_block_replays_as_received(self) -> None:
         server, _ = _stub(wire.Reply(text="answer", thinking="weighing", redacted=True))
         try:

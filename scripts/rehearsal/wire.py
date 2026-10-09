@@ -356,6 +356,11 @@ def new_id(prefix: str) -> str:
     return f"{prefix}{uuid.uuid4().hex[:24]}"
 
 
+def calls_with_ids(reply: Reply, prefix: str = "toolu_") -> list[ToolCall]:
+    """The reply's tool calls, each given an id now if it has none."""
+    return _calls_with_ids(reply, prefix)
+
+
 def _calls_with_ids(reply: Reply, prefix: str) -> list[ToolCall]:
     for call in reply.tool_calls:
         if not call.id:
