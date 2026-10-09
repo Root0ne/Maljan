@@ -33,6 +33,8 @@ import pytest
 
 from maljan.core.config import Settings
 
+from .anthropic_wire import message, streamed
+
 # ---------------------------------------------------------------------------
 # The stub server
 
@@ -47,21 +49,31 @@ class _Handler(BaseHTTPRequestHandler):
         super().setup()
         self.server.opened += 1  # type: ignore[attr-defined]
 
-    def _answer(self) -> dict[str, Any]:
+    def _answer(self, body: dict[str, Any]) -> tuple[str, bytes]:
+        """The content type and bytes the API this path belongs to answers with."""
         path = self.path.split("?", 1)[0]
         if path.endswith("/messages"):
-            return {
-                "id": "msg_1",
-                "type": "message",
-                "role": "assistant",
-                "model": "claude-haiku-5-5",
-                "content": [{"type": "text", "text": "answered"}],
-                "stop_reason": "end_turn",
-                "stop_sequence": None,
-                "usage": {"input_tokens": 3, "output_tokens": 1},
-            }
+            tools = body.get("tools") or []
+            content: list[dict[str, Any]] = [{"type": "text", "text": "answered"}]
+            if tools:
+                content = [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": tools[0]["name"],
+                        "input": {"summary": "answered"},
+                    }
+                ]
+            answer = message(
+                content,
+                stop="tool_use" if tools else "end_turn",
+                usage={"input_tokens": 3, "output_tokens": 1},
+            )
+            if body.get("stream"):
+                return "text/event-stream", streamed(answer)
+            return "application/json", json.dumps(answer).encode()
         if path.endswith("/chat/completions"):
-            return {
+            answer = {
                 "id": "c1",
                 "object": "chat.completion",
                 "created": 1,
@@ -75,22 +87,53 @@ class _Handler(BaseHTTPRequestHandler):
                 ],
                 "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
             }
-        return {"answered": True}
+            return "application/json", json.dumps(answer).encode()
+        if path.endswith("/api/chat"):
+            line = {
+                "model": "m",
+                "created_at": "2026-01-01T00:00:00Z",
+                "message": {"role": "assistant", "content": "answered"},
+                "done": True,
+                "done_reason": "stop",
+                "prompt_eval_count": 3,
+                "eval_count": 1,
+            }
+            return "application/x-ndjson", (json.dumps(line) + "\n").encode()
+        if ":generateContent" in path:
+            answer = {
+                "candidates": [
+                    {
+                        "content": {"role": "model", "parts": [{"text": "answered"}]},
+                        "finishReason": "STOP",
+                    }
+                ],
+                "usageMetadata": {
+                    "promptTokenCount": 3,
+                    "candidatesTokenCount": 1,
+                    "totalTokenCount": 4,
+                },
+            }
+            return "application/json", json.dumps(answer).encode()
+        return "application/json", json.dumps({"answered": True}).encode()
 
     def _reply(self) -> None:
         length = int(self.headers.get("content-length") or 0)
-        if length:
-            self.rfile.read(length)
+        raw = self.rfile.read(length) if length else b""
+        try:
+            body = json.loads(raw) if raw else {}
+        except ValueError:
+            body = {}
         self.server.requests += 1  # type: ignore[attr-defined]
         self.server.cookies.append(self.headers.get("cookie"))  # type: ignore[attr-defined]
-        body = json.dumps(self._answer()).encode()
+        self.server.targets.append(self.path)  # type: ignore[attr-defined]
+        kind, data = self._answer(body if isinstance(body, dict) else {})
         self.send_response(200)
         # As a CDN in front of a hosted API sets one, to be sent back.
         self.send_header("set-cookie", "__cf_bm=abc; Path=/")
-        self.send_header("content-type", "application/json")
-        self.send_header("content-length", str(len(body)))
+        self.send_header("content-type", kind)
+        self.send_header("content-length", str(len(data)))
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(data)
 
     do_POST = _reply  # noqa: N815
     do_GET = _reply  # noqa: N815
@@ -103,6 +146,7 @@ def server() -> Iterator[ThreadingHTTPServer]:
     httpd.opened = 0  # type: ignore[attr-defined]
     httpd.requests = 0  # type: ignore[attr-defined]
     httpd.cookies = []  # type: ignore[attr-defined]
+    httpd.targets = []  # type: ignore[attr-defined]
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
@@ -320,20 +364,41 @@ class TestTheOpenAIModel:
         assert _socket_count() <= before
 
 
+def _ollama(base_url: str) -> Any:
+    from maljan.llm.ollama_provider import OllamaProvider
+
+    settings = Settings(_env_file=None, llm={"ollama": {"base_url": base_url}})
+    return OllamaProvider(settings).build_model("m", 0.0)
+
+
 class TestTheOllamaModel:
-    def test_one_model_reaches_its_server_from_two_running_loops(
+    def test_one_model_answers_on_two_running_loops(
         self, server: ThreadingHTTPServer, agent_loop: _LoopThread
     ) -> None:
-        from maljan.llm.ollama_provider import OllamaProvider
+        model = _ollama(_url(server))
 
-        settings = Settings(_env_file=None, llm={"ollama": {"base_url": _url(server)}})
-        model = OllamaProvider(settings).build_model("m", 0.0)
-        client = model._async_client._client
+        async def call() -> str:
+            return str((await model.ainvoke("hello")).content)
 
-        async def call() -> int:
-            return (await client.request("POST", "/api/chat", json={"model": "m"})).status_code
+        assert _on_both(agent_loop, call) == ["answered"] * 3
 
-        assert _on_both(agent_loop, call) == [200] * 3
+    def test_a_proxy_named_in_the_environment_is_still_used(
+        self,
+        server: ThreadingHTTPServer,
+        agent_loop: _LoopThread,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # The stub stands as the proxy; the Ollama host itself does not resolve.
+        for name in ("NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy", "HTTPS_PROXY"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("HTTP_PROXY", _url(server))
+        model = _ollama("http://ollama.invalid:11434")
+
+        async def call() -> str:
+            return str((await model.ainvoke("hello")).content)
+
+        assert _on_both(agent_loop, call) == ["answered"] * 3
+        assert server.targets == ["http://ollama.invalid:11434/api/chat"] * 3  # type: ignore[attr-defined]
 
 
 class TestTheGeminiModel:

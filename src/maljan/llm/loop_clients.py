@@ -9,16 +9,13 @@ other fails inside httpcore with "bound to a different event loop". The SDKs'
 own retry hid it by opening a fresh connection; with the retries spent, or on a
 client that sends one attempt, the call failed.
 
-Every provider's async client goes through one of the two adapters here, which
-hold one real client (or transport) per running loop, built on that loop the
-first time it sends there:
-
-* :func:`loop_bound_async_client` for an ``httpx``/``httpx2`` client handed to
-  an SDK (Anthropic, OpenAI, Gemini). Requests are still built by one client
-  built exactly as before, so every request is byte-for-byte what it was; only
-  the sending is routed to the client the running loop owns.
-* :class:`LoopBoundTransport` for a client that is built inside a library and
-  takes a transport (Ollama).
+Every provider's async httpx client goes through :func:`loop_bound_async_client`
+(Anthropic, OpenAI-compatible, Ollama, Gemini), which holds one real client per
+running loop, built on that loop the first time it sends there by the same
+builder the library used. Requests are still built by one client built as
+before (the template), all of them share its cookie jar, and only the sending
+is routed to the client the running loop owns, so headers, cookies, timeouts
+and proxies are what they were.
 
 A loop's client is closed on that loop when the loop shuts its asynchronous
 generators down, which ``asyncio.run`` and every ``asyncio.Runner`` do before
@@ -243,46 +240,23 @@ def shared_loop_bound_async_client(key: Hashable, build: Callable[[], Any]) -> A
         return client
 
 
-class LoopBoundTransport:
-    """An async transport that sends on a transport of the running loop's own.
+_UNRECOGNISED: set[str] = set()
 
-    Made a subclass of the given flavour's ``AsyncBaseTransport`` by
-    :func:`loop_bound_transport`, so a client that checks takes it.
+
+def layout_not_recognised(provider: str, reason: str) -> None:
+    """Say once per provider that its async client is left one per model.
+
+    For a library whose client could not be found where it is looked for: the
+    model still works, but a model awaited on two event loops can cross them.
     """
-
-    def __init__(self, build: Callable[[], Any]) -> None:
-        self._transports: PerLoop[Any] = PerLoop(build, lambda t: t.aclose())
-
-    async def handle_async_request(self, request: Any) -> Any:
-        transport = await self._transports.get()
-        return await transport.handle_async_request(request)
-
-    async def aclose(self) -> None:
-        await self._transports.aclose()
-
-    # A model's fields are copied with it (``model_copy``); a copy sends
-    # through the same per-loop transports, which is what makes it safe.
-    def __copy__(self) -> LoopBoundTransport:
-        return self
-
-    def __deepcopy__(self, memo: dict[int, Any]) -> LoopBoundTransport:
-        return self
-
-    async def __aenter__(self) -> Any:
-        return self
-
-    async def __aexit__(self, *exc: Any) -> None:
-        await self.aclose()
-
-
-_TRANSPORT_CLASSES: dict[type, type] = {}
-
-
-def loop_bound_transport(base: type, build: Callable[[], Any]) -> Any:
-    """A :class:`LoopBoundTransport` that is also a ``base`` (an ``AsyncBaseTransport``)."""
-    with _ROUTING_LOCK:
-        cls = _TRANSPORT_CLASSES.get(base)
-        if cls is None:
-            cls = type(f"LoopBound{base.__name__}", (LoopBoundTransport, base), {})
-            _TRANSPORT_CLASSES[base] = cls
-    return cls(build)
+    with _SHARED_LOCK:
+        if provider in _UNRECOGNISED:
+            return
+        _UNRECOGNISED.add(provider)
+    logger.warning(
+        "%s provider: the async client is left one per model, so a model awaited on two "
+        "event loops can reuse a connection across them; the library's client layout is "
+        "not the one expected (%s).",
+        provider,
+        reason,
+    )
