@@ -1707,6 +1707,7 @@ PROMPTS: dict[str, str] = {
             ),
         )
     ),
+    "the line an r2 answer carries when the adapter ran af first": _r2.af_ran_note("0x401000"),
     "the function map block": _function_map_text(),
     "the function index as the pack, the run state and the map say it": _function_index_text(),
     "a tool answer the conversation had no room for, as told and as recorded": " ".join(

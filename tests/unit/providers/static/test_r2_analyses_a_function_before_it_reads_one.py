@@ -103,9 +103,29 @@ def test_the_function_is_analysed_and_the_call_answered() -> None:
         server = _Server()
         tool = _wrapped(server, name)
         reply = asyncio.run(tool.ainvoke({"address": "0x401a20", "page_size": 200}))
-        assert reply == LISTING
+        assert reply == f"{LISTING.rstrip()}\n\n{r2.af_ran_note('0x401a20')}\n"
         assert server.commands == ["af @ 0x401a20"]
         assert [read["page_size"] for read in server.reads] == [200, 200]
+
+
+def test_the_entry_says_the_adapter_ran_af() -> None:
+    from maljan.schemas.evidence import build_entry
+
+    server = _Server()
+    tool = _wrapped(server, "decompile_function")
+    reply = asyncio.run(tool.ainvoke({"address": "0x401a20"}))
+    entry = build_entry(
+        entry_id="ev_0001",
+        seq=1,
+        agent="static_r2",
+        tool="decompile_function",
+        args={"address": "0x401a20"},
+        server=None,
+        output=reply,
+    )
+    assert entry.ok is True
+    assert entry.output.startswith(LISTING.rstrip())
+    assert "the platform ran `af @ 0x401a20` through run_command" in entry.output
 
 
 def test_one_retry_and_then_the_failure_says_af_ran() -> None:

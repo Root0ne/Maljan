@@ -116,6 +116,14 @@ _R2_NO_FUNCTION_AFTER_AF = (
 )
 
 
+def af_ran_note(address: str) -> str:
+    """The line an answer carries when the adapter analysed its function first."""
+    return (
+        f"[platform] radare2 had no function at {address}; the platform ran `af @ {address}` "
+        "through run_command before this answer."
+    )
+
+
 def _unanalysed_address(tool: str, logged: str) -> str | None:
     """The address a function tool found no function at, from radare2's own error."""
     if tool not in _R2_FUNCTION_TOOLS:
@@ -272,6 +280,10 @@ def _reading_error_replies(
                     readable=readable() if readable is not None else None,
                     analysed=True,
                 )
+                if failure is None and isinstance(reply, str):
+                    # The entry says what produced the answer: the adapter's
+                    # own analysis, not a call the model made.
+                    reply = f"{reply.rstrip()}\n\n{af_ran_note(address)}\n"
         return json.dumps(failure) if failure is not None else reply
 
     try:
