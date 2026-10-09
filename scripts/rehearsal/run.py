@@ -312,7 +312,11 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
                 "max_tokens.judge": args.judge_max_tokens,
                 **expected,
             }
-        params = {"loop_steps": brain.loop_steps, "slow_seconds": brain.slow_seconds}
+        params = {
+            "loop_steps": brain.loop_steps,
+            "slow_seconds": brain.slow_seconds,
+            "job_timeout_s": args.job_timeout,
+        }
         for _ in range(args.repeat):
             _reset_stub(args.stub_url, server)
             started = time.monotonic()
@@ -353,7 +357,7 @@ def run_in_process(args: argparse.Namespace) -> list[RunRecord]:
             first_token_seconds=args.first_token_seconds,
             loop_steps=args.loop_steps,
             slow_seconds=args.slow_seconds,
-            job_timeout_s=args.timeout,
+            job_timeout_s=args.job_timeout or args.timeout,
             effort=args.effort,
             judge_max_tokens=args.judge_max_tokens,
         )
@@ -417,6 +421,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--loop-steps", type=int, default=None)
     parser.add_argument("--slow-seconds", type=float, default=None)
     parser.add_argument("--timeout", type=float, default=3600.0, help="seconds to wait per job")
+    parser.add_argument(
+        "--job-timeout",
+        type=float,
+        default=None,
+        help="the worker's job timeout, to report how far inside it a run finished",
+    )
     args = parser.parse_args(argv)
     if args.repeat < 1:
         parser.error("--repeat is at least 1")

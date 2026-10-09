@@ -7,6 +7,7 @@ checks:
 
 * the job completed;
 * every stage that started finished, and none failed;
+* every analyst answered: none failed or was lost to an error;
 * every one of the composer's sections is written, or explicitly accounted
   for: marked not written by a degradation reason, answered empty by the
   model, or never asked because its evidence was empty — never lost between
@@ -397,9 +398,24 @@ def _check_scenario(record: RunRecord) -> Check:
     return Check(name, ok, detail)
 
 
+def _check_analysts(record: RunRecord) -> Check:
+    """Every analyst the run started answered: none failed and none was lost to an error."""
+    failed = [str(a) for a in record.run_summary.get("failed_analysts") or []]
+    stats = record.run_summary.get("agent_stats") or []
+    named = [str(s.get("agent_id")) for s in stats if isinstance(s, dict)]
+    if failed:
+        return Check("every analyst answered", False, f"failed: {', '.join(failed)}")
+    return Check(
+        "every analyst answered",
+        True,
+        f"{len(named)} analyst(s): {', '.join(named)}" if named else "no analyst failed",
+    )
+
+
 CHECKS = (
     _check_job,
     _check_stages,
+    _check_analysts,
     _check_sections,
     _check_narrative,
     _check_tokens,
@@ -488,8 +504,11 @@ def observations(record: RunRecord) -> dict[str, Any]:
     validation = record.run_summary.get("validation") or {}
     roles = Counter(str(e.get("role")) for e in record.stub_log)
     busy = sorted((str(e.get("role")), int(e.get("output_tokens") or 0)) for e in record.stub_log)
+    deadline = record.scenario_params.get("job_timeout_s")
     return {
         "elapsed_s": round(record.elapsed_s, 2),
+        # How far inside the job's deadline the run finished, where one is known.
+        "deadline_margin_s": round(float(deadline) - record.elapsed_s, 2) if deadline else None,
         "model_calls_by_role": dict(sorted(roles.items())),
         "faulted_calls": sum(1 for e in record.stub_log if e.get("fault")),
         "output_tokens": sum(tokens for _role, tokens in busy),

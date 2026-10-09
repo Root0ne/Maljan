@@ -103,6 +103,11 @@ class TestEachCheckFailsOnItsOwnFact:
         events = [{"type": "stage_started", "stage": "analysis"}]
         assert _failed(_record(events=events)) == ["every stage started and finished"]
 
+    def test_an_analyst_lost_to_an_error(self) -> None:
+        record = _record()
+        record.run_summary["failed_analysts"] = ["static"]
+        assert _failed(record) == ["every analyst answered"]
+
     def test_a_section_answered_and_then_lost(self) -> None:
         record = _record()
         record.stub_log.append(_log(5, "composer", section="configuration", content=True))

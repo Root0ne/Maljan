@@ -197,6 +197,10 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
         events=events,
         stub_log=log,
         expected=expected_for(rehearsal),
-        scenario_params={"loop_steps": brain.loop_steps, "slow_seconds": brain.slow_seconds},
+        scenario_params={
+            "loop_steps": brain.loop_steps,
+            "slow_seconds": brain.slow_seconds,
+            "job_timeout_s": rehearsal.job_timeout_s,
+        },
         elapsed_s=elapsed,
     )
