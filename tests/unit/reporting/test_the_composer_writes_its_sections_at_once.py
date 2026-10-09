@@ -322,6 +322,68 @@ def test_the_head_note_rides_on_the_section_request(concurrent: bool) -> None:
     assert heads == {"FACTS\n\n"}
 
 
+class TestTheLeadReleasesItsGroup:
+    def test_a_lead_section_that_fails_still_releases_the_others(self) -> None:
+        class _LeadFails(_Recorder):
+            _llm_type = "anthropic-chat"
+
+        llm = _LeadFails(delay=0.01, failing=frozenset({"introduction"}))
+        composer, report = _compose(llm, concurrent=True)
+        assert report.intro_background == ""
+        assert set(llm.sections) == set(COMPOSED_SECTIONS)
+        assert any("'introduction'" in reason for reason in composer.degradations)
+
+    def test_the_first_call_ending_releases_the_others_before_the_lead_s_retry(self) -> None:
+        """A listener attached to the model hears the lead's first answer end."""
+        from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+
+        followers: list[float] = []
+        retry_ended: list[float] = []
+
+        class _Heard(GenericFakeChatModel):
+            async def _agenerate(self, messages: Any, *args: Any, **kwargs: Any) -> Any:
+                from langchain_core.outputs import ChatGeneration, ChatResult
+
+                section = _section_of(messages)
+                if section != "introduction":
+                    followers.append(time.monotonic())
+                    text = json.dumps(_answer(section))
+                elif len(messages) == 2:
+                    # The lead's first answer breaks its schema: it is asked again.
+                    text = "not an object"
+                else:
+                    await asyncio.sleep(0.3)
+                    retry_ended.append(time.monotonic())
+                    text = json.dumps(_answer(section))
+                return ChatResult(generations=[ChatGeneration(message=AIMessage(content=text))])
+
+            @property
+            def _llm_type(self) -> str:
+                return "anthropic-chat"
+
+        llm = _Heard(messages=iter([]))
+        _composer, report = _compose(llm, concurrent=True)
+        assert any(type(cb).__name__ == "_FirstPiece" for cb in llm.callbacks or [])
+        assert report.intro_background and retry_ended
+        assert min(followers) < retry_ended[0] - 0.2, "released when the first call ended"
+
+    def test_a_model_that_takes_no_listener_is_said_in_the_log(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        class _Closed(_Recorder):
+            _llm_type = "anthropic-chat"
+
+            @property
+            def callbacks(self) -> None:
+                return None
+
+        with caplog.at_level(logging.INFO, logger="maljan"):
+            _compose(_Closed(), concurrent=True)
+        assert any("no listener" in r.getMessage() for r in caplog.records)
+
+
 def test_a_model_that_does_not_cache_is_sent_no_head_note() -> None:
     from maljan.llm.anthropic_history import SHARED_HEAD
 

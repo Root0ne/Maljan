@@ -753,15 +753,29 @@ def _caches_once_answered(llm: Any) -> bool:
     return False
 
 
-def _listen_for_the_first_piece(llm: Any) -> None:
-    """Attach :class:`_FirstPiece` to each model the reporter calls, once. Never raises."""
+def _listen_for_the_first_piece(llm: Any) -> bool:
+    """Attach :class:`_FirstPiece` to each model the reporter calls, once; whether all took it.
+
+    A model whose callbacks are a manager is given the listener as a handler.
+    Never raises: a model that takes none leaves its group to be released
+    when the lead section ends or fails.
+    """
+    from langchain_core.callbacks import BaseCallbackManager
+
+    heard = True
     for model in _models_of(llm):
         try:
-            existing = list(getattr(model, "callbacks", None) or [])
-            if not any(isinstance(cb, _FirstPiece) for cb in existing):
-                object.__setattr__(model, "callbacks", [*existing, _FirstPiece()])
-        except Exception:  # noqa: BLE001 — unheard, the rest wait for the lead section's end
-            continue
+            existing = getattr(model, "callbacks", None)
+            if isinstance(existing, BaseCallbackManager):
+                if not any(isinstance(cb, _FirstPiece) for cb in existing.handlers):
+                    existing.add_handler(_FirstPiece(), inherit=True)
+                continue
+            listed = list(existing or [])
+            if not any(isinstance(cb, _FirstPiece) for cb in listed):
+                object.__setattr__(model, "callbacks", [*listed, _FirstPiece()])
+        except Exception:  # noqa: BLE001 — unheard, released when the lead section ends
+            heard = False
+    return heard
 
 
 class ReportComposer:
@@ -1188,8 +1202,12 @@ class ReportComposer:
         for index in sorted(groups):
             leads.setdefault(groups[index], index)
         begun_of = {key: asyncio.Event() for key in leads}
-        if leads:
-            _listen_for_the_first_piece(self.llm)
+        if leads and not _listen_for_the_first_piece(self.llm):
+            logger.info(
+                "ReportComposer: no listener could be attached to the reporter's model; the "
+                "sections that share a head follow once their group's first section has "
+                "answered, failed or been cancelled."
+            )
         tasks: dict[int, asyncio.Task[tuple[BaseModel | None, _SectionRecord]]] = {}
         self._fan_out_clock = time.monotonic()
         try:
