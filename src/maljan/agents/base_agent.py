@@ -180,7 +180,7 @@ def is_the_graph_s_step_stop(message: Any) -> bool:
     return (
         getattr(message, "type", "") == "ai"
         and not getattr(message, "tool_calls", None)
-        and bool(_RECURSION_STOP_RE.search(str(getattr(message, "content", "") or "")))
+        and bool(_RECURSION_STOP_RE.search(answer_text(getattr(message, "content", ""))))
     )
 
 
@@ -2916,7 +2916,9 @@ def answer_cut_at_cap(response: Any, cap: int) -> tuple[int, str] | None:
     """
     from maljan.core.truncation_ledger import completion_tokens_of, hit_length_cap
 
-    text = str(getattr(response, "content", "") or "")
+    # The text blocks alone: an Anthropic answer cut while it was still
+    # thinking holds a thinking block and no text, and is a cut with no text.
+    text = answer_text(getattr(response, "content", ""))
     if not text.strip():
         return None
     produced = completion_tokens_of(response)
@@ -3241,7 +3243,7 @@ class BudgetMeter:
                     sink,
                     stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
                     agent=str(self.name),
-                    text_delta=scrub(str(getattr(message, "content", "") or "")),
+                    text_delta=scrub(answer_text(getattr(message, "content", ""))),
                     model=model,
                     tokens=turn_usage(message),
                 )
@@ -5314,7 +5316,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         if any(getattr(message, "tool_calls", None) for message in conversation):
             return None
         last = conversation[-1] if conversation else None
-        if not is_model_turn(last) or not str(getattr(last, "content", "") or "").strip():
+        if not is_model_turn(last) or not answer_text(getattr(last, "content", "")).strip():
             return None
         names = [str(getattr(tool, "name", "") or "") for tool in tools or ()]
         if not any(names):
@@ -7161,7 +7163,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         def _parse(answer: Any) -> AgentISR:
             if isinstance(answer, _PriorAnswer):
                 return answer.isr
-            text = str(getattr(answer, "content", answer))
+            # Its text blocks, not the repr of an Anthropic block list.
+            text = answer_text(getattr(answer, "content", answer))
             self.logger.debug(
                 "%s: the validation retry answered %d character(s):\n%s",
                 self.name,
@@ -7943,7 +7946,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 what="kept-retry drops question",
             )
             decided = read_retry_drop_answers(
-                str(getattr(reply, "content", reply) or ""), [row[0] for row in labelled]
+                answer_text(getattr(reply, "content", reply)), [row[0] for row in labelled]
             )
         except Exception as exc:  # noqa: BLE001 — unanswered, the first answer's items stay
             self.logger.warning(
