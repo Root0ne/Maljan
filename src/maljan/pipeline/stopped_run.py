@@ -321,7 +321,63 @@ def _deterministic_report(state: dict[str, Any], container: Any) -> dict[str, An
     report = MalwareReportBuilder.apply_fallback_narrative(
         report, "the run was stopped before its report stage wrote one"
     )
-    return _report_dump(report)
+    return _close_kept_report(report, state, NO_REPORT_STAGE)
+
+
+# What a kept report says about the report stage's closing steps, which need
+# no model and are not in it. The claim-coverage section and the figures are
+# built on the kept report (``_close_kept_report``); the steps named here
+# depend on the export, which the stopped run did not store.
+_CLOSING_STEPS_NOT_RUN = (
+    "the extended STIX export (the stored bundle is the judge's own), the IOC table's "
+    "publish states read after it, the detection rules, the FP linter, the published "
+    "marks on the corroboration record and the exported bundle's size; the claim-coverage "
+    "section and the figures were built on the report as kept"
+)
+NO_REPORT_STAGE = (
+    "report stage not run: the run was stopped before its report stage, so these are not "
+    "in this report: " + _CLOSING_STEPS_NOT_RUN
+)
+REPORT_STAGE_STOPPED = (
+    "report stage stopped part-way: the run was stopped before the report stage's closing "
+    "steps, so these are not in this report: " + _CLOSING_STEPS_NOT_RUN
+)
+
+
+def _close_kept_report(report: Any, state: dict[str, Any], said: str) -> dict[str, Any] | None:
+    """The kept report with the closing steps that need nothing else run on it, and ``said``.
+
+    The claim-coverage section and the figures are read off the report itself
+    (as the report node reads them once the body is written), on a copy, so
+    the object the report node was writing is not touched. Each is
+    best-effort, as it is in the report node. The steps that need the export
+    are named in ``said`` instead of run.
+    """
+    try:
+        report = report.model_copy(deep=True)
+    except Exception as exc:  # noqa: BLE001 — the report as it is, then
+        logger.debug("stopped run: the kept report was not copied (%s).", type(exc).__name__)
+    try:
+        from maljan.reporting.claim_coverage import claims_not_discussed
+
+        report.claims_not_discussed = claims_not_discussed(report, state.get("isr_reports"))
+        report.run_summary = {
+            **(report.run_summary or {}),
+            "claims_not_discussed": len(report.claims_not_discussed),
+        }
+    except Exception as exc:  # noqa: BLE001 — a coverage read never costs the report
+        logger.debug("stopped run: the claim coverage was not read (%s).", type(exc).__name__)
+    try:
+        from maljan.reporting.figures import build_figures
+
+        report.figures = build_figures(report)
+    except Exception as exc:  # noqa: BLE001 — a figure never costs the report
+        logger.debug("stopped run: the figures were not built (%s).", type(exc).__name__)
+    dump = _report_dump(report)
+    if dump is not None:
+        reasons = dump.get("degradation_reasons")
+        dump["degradation_reasons"] = [*(reasons if isinstance(reasons, list) else []), said]
+    return dump
 
 
 def _say_why_no_summary(report: dict[str, Any]) -> None:
@@ -360,7 +416,12 @@ def partial_report(state: dict[str, Any], container: Any, *, note: str) -> dict[
     if isinstance(state.get("malware_report"), dict) and state["malware_report"]:
         report = dict(state["malware_report"])
     if report is None:
-        report = _report_dump(getattr(container, "report_in_progress", None))
+        held = getattr(container, "report_in_progress", None)
+        report = (
+            _close_kept_report(held, state, REPORT_STAGE_STOPPED)
+            if hasattr(held, "model_dump")
+            else _report_dump(held)
+        )
         if report is not None:
             _say_why_no_summary(report)
     if report is None:

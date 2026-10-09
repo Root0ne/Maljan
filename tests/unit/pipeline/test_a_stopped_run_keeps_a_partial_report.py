@@ -19,7 +19,9 @@ import pytest
 from maljan.core.config import Settings
 from maljan.core.container import ServiceContainer
 from maljan.pipeline.stopped_run import (
+    NO_REPORT_STAGE,
     NO_VERDICT_REASON,
+    REPORT_STAGE_STOPPED,
     partial_report,
     stopped_run_summary,
     stopped_state,
@@ -73,6 +75,7 @@ class TestThePartialReport:
         assert report.degraded_mode is True
         assert report.degradation_reasons[-1] == NOTE
         assert NO_VERDICT_REASON in report.degradation_reasons
+        assert NO_REPORT_STAGE in report.degradation_reasons
         assert report.overall_confidence is None
         assert report.executive_summary == ""
         assert report.key_findings == []
@@ -113,11 +116,18 @@ class TestThePartialReport:
         in_progress.intro_background = "the introduction the composer wrote"
         container.report_in_progress = in_progress
         in_progress.executive_summary = "the narrative's summary"
+        in_progress.run_summary = {}
         container.report_in_progress = in_progress
         kept = partial_report(_state(final_decision="Malware"), container, note=NOTE)
         assert kept is not None
         assert kept["intro_background"] == "the introduction the composer wrote"
-        assert kept["degradation_reasons"] == [NOTE]
+        assert kept["degradation_reasons"] == [REPORT_STAGE_STOPPED, NOTE]
+        # The closing steps that need nothing else ran on a copy; the object the
+        # report node was writing is untouched.
+        assert "claims_not_discussed" in kept["run_summary"]
+        assert "claims_not_discussed" not in (in_progress.run_summary or {})
+        markdown = MarkdownRenderer().render(MalwareReport.model_validate(kept))
+        assert "the extended STIX export (the stored bundle is the judge's own)" in markdown
 
     def test_a_report_stopped_inside_the_narrative_says_the_run_stopped(
         self, container: ServiceContainer
