@@ -25,6 +25,7 @@ from scripts.rehearsal.run import (
     gate_changes,
     gate_expected,
     harness_changes,
+    profile_stages,
     record_from_stack,
     restore_snapshot,
     third_party_off,
@@ -89,7 +90,10 @@ class TestTheGateChangesOnlyTheEndpoints:
                 "core.llm.agents": {"value": {}, "source": "default"},
             }
         )
-        assert gate_changes(values, STUB) == {"core.llm.anthropic.base_url": STUB}
+        assert gate_changes(values, STUB) == {
+            "core.llm.anthropic.base_url": STUB,
+            "core.llm.max_spend_usd_per_job": 1_000_000.0,
+        }
 
     @pytest.mark.parametrize("provider", ["gemini", "ollama"])
     def test_a_provider_the_stub_cannot_stand_in_for_is_refused(self, provider: str) -> None:
@@ -147,6 +151,18 @@ class TestTheGateChangesOnlyTheEndpoints:
         assert changes["core.sandbox.provider"] == "mock"
         assert not any(key.endswith("api_key") for key in changes)
         assert "core.static.provider" not in changes and "core.memory.backend" not in changes
+
+
+def test_the_profile_s_stages_are_read_from_the_stack_s_settings() -> None:
+    stages = profile_stages(_values())
+    assert list(stages) == ["triage_pack", "analysis", "debate", "verdict", "report"]
+    assert stages["analysis"] == ["static", "dynamic", "network"]
+
+
+def test_the_gate_sets_a_ceiling_only_where_none_is_set() -> None:
+    assert gate_changes(_values(), STUB)["core.llm.max_spend_usd_per_job"] == 1_000_000.0
+    held = _values(**{"core.llm.max_spend_usd_per_job": {"value": 50.0, "source": "ui"}})
+    assert "core.llm.max_spend_usd_per_job" not in gate_changes(held, STUB)
 
 
 class _Api:
@@ -379,3 +395,13 @@ def test_the_gate_refuses_to_start_while_a_job_runs(
     with pytest.raises(SystemExit, match="queued or running"):
         _run_with(api, _args(tmp_path), monkeypatch)
     assert not any(c.startswith("PATCH") or c.startswith("POST /settings") for c in api.seen)
+
+
+def test_without_configure_the_connection_test_is_still_asked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api = _Api(_values())
+    records = _run_with(api, _args(tmp_path, configure=None, stub_port=8765), monkeypatch)
+    assert "POST /settings/test/llm" in api.seen
+    assert records[0].probe["ok"] is True
+    assert list(records[0].required_stages)[0] == "triage_pack"

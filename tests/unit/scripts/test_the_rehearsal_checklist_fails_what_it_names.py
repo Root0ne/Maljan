@@ -304,6 +304,14 @@ class TestTheHolesAGreenRunCouldHide:
         record.run_summary["spend"]["spent_usd"] *= 2
         assert _failed(record) == ["tokens and spend as the provider reported them"]
 
+    def test_a_run_summary_with_no_spend(self) -> None:
+        record = _record()
+        del record.run_summary["spend"]
+        assert _failed(record) == ["tokens and spend as the provider reported them"]
+
+    def test_stages_not_known_from_the_settings(self) -> None:
+        assert "every stage of the profile ran" in _failed(_record(required_stages={}))
+
     def test_a_model_with_no_price(self) -> None:
         record = _record()
         for entry in record.stub_log:

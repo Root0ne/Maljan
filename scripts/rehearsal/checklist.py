@@ -274,12 +274,8 @@ def _check_probe(record: RunRecord) -> Check:
 
 
 def _required(record: RunRecord) -> dict[str, list[str]]:
-    if record.required_stages:
-        return record.required_stages
-    return {
-        str(s.get("key")): [str(a) for a in s.get("agents") or []]
-        for s in record.run_summary.get("stages") or []
-    }
+    """The profile's stages as the settings in force name them; never read off the run itself."""
+    return record.required_stages
 
 
 def _check_stages(record: RunRecord) -> Check:
@@ -289,7 +285,7 @@ def _check_stages(record: RunRecord) -> Check:
     finished = [e.get("stage") for e in record.events if e.get("type") == "stage_finished"]
     problems = []
     if not required:
-        problems.append("no stage is known to be required")
+        problems.append("the profile's stages are not known from the settings in force")
     for key in required:
         row = stages.get(key)
         if row is None:
@@ -430,6 +426,8 @@ def _check_tokens(record: RunRecord) -> Check:
         if abs(spent - usd) > 1e-6 + 0.005 * max(usd, spent):
             problems.append(f"spend {spent:.6f} USD, the usage priced comes to {usd:.6f} USD")
         spent_said = f", spend {spent:.6f} USD"
+    else:
+        problems.append("the run summary carries no spend to compare with the usage priced")
     detail = "; ".join(problems) or (
         f"{calls} calls, {sent} input and {got} output tokens, {usd:.6f} USD priced{spent_said}"
     )

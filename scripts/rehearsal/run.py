@@ -275,6 +275,10 @@ def gate_changes(values: dict[str, dict[str, Any]], stub_root: str) -> dict[str,
             is_local_endpoint(paid)
         ):
             changes["core.llm.parallel_analysts"] = "true"
+    if _value(values, "core.llm.max_spend_usd_per_job") is None:
+        # A ceiling no rehearsal reaches, so the run summary carries the spend
+        # the checklist prices the usage against.
+        changes["core.llm.max_spend_usd_per_job"] = 1_000_000.0
     changes.update(third_party_off(values))
     return changes
 
@@ -365,6 +369,31 @@ def gate_expected(values: dict[str, dict[str, Any]], changes: dict[str, Any]) ->
             continue
         expected[f"settings.{name}"] = value
     return expected
+
+
+def profile_stages(values: dict[str, dict[str, Any]]) -> dict[str, list[str]]:
+    """The stages of the profile the stack's settings name, each with its agents; empty unknown.
+
+    Read from the settings in force, built the way the worker builds a job's,
+    never from what the run reports about itself. A masked secret is left out:
+    it plays no part in the profile.
+    """
+    from maljan.agents.composition import active_profile
+    from maljan.core.settings_overrides import build_settings
+
+    core = {
+        key.removeprefix("core."): row.get("value")
+        for key, row in values.items()
+        if key.startswith("core.")
+        and isinstance(row, dict)
+        and row.get("value") is not None
+        and row.get("value") != "**********"
+    }
+    try:
+        profile = active_profile(build_settings(core))
+    except Exception:  # noqa: BLE001 — stages nobody can read are not required silently
+        return {}
+    return {str(stage.key): [str(a) for a in stage.agents] for stage in profile.stages}
 
 
 def harness_changes(provider: str, stub_root: str) -> dict[str, Any]:
@@ -493,6 +522,7 @@ def record_from_stack(
     *,
     api: str = "",
     probe: dict[str, Any] | None = None,
+    required_stages: dict[str, list[str]] | None = None,
 ) -> RunRecord:
     """A run's record, read back from the API the way the console reads it."""
     from scripts.rehearsal.inprocess import claims_from_events, empty_evidence_sections
@@ -527,6 +557,7 @@ def record_from_stack(
         stub_log=stub_log,
         expected=expected,
         empty_evidence_sections=empty,
+        required_stages=dict(required_stages or {}),
         probe=dict(probe or {}),
         scenario_params=scenario_params,
         elapsed_s=elapsed,
@@ -621,6 +652,11 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             "slow_seconds": brain.slow_seconds,
             "job_timeout_s": _job_timeout(args, values),
         }
+        if not args.configure:
+            # The connection test over the stack's stored settings, as the console's button asks it.
+            answer = client.probe_models({})
+            probe = {"ok": bool(answer.get("ok")), "detail": str(answer.get("detail") or "")}
+        stages = profile_stages(values)
         api = str(_value(values, "core.llm.provider", args.provider))
         for _ in range(args.repeat):
             _reset_stub(args.stub_url, server)
@@ -641,7 +677,8 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
                     params,
                     elapsed,
                     api=api,
-                    probe=probe if args.configure else {"ok": True, "detail": "not asked"},
+                    probe=probe,
+                    required_stages=stages,
                 )
             )
     finally:
