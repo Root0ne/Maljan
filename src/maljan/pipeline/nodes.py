@@ -5546,6 +5546,19 @@ def make_report_node(
                 getattr(container.config.reporting, "composer_per_section_timeout", None),
                 container,
             )
+            # The sections run at once where the reporter's models serve
+            # concurrent requests, decided as the analysts' mode is
+            # (``llm.parallel_analysts``); a single-slot local server writes
+            # them one after another. Resolving a name is a network round
+            # trip, so it runs on a thread.
+            from maljan.pipeline.analyst_mode import resolve_reporter_mode
+
+            _reporter_mode = await asyncio.to_thread(resolve_reporter_mode, container.config)
+            logger.info(
+                "report_node: the composer's sections run %s: %s.",
+                "at once" if _reporter_mode.parallel else "one after another",
+                _reporter_mode.reason,
+            )
             try:
                 await composer.compose(
                     report,
@@ -5555,6 +5568,7 @@ def make_report_node(
                     citable_ids=ledger_ids(state),
                     items=_items,
                     evidence=_entry_texts,
+                    concurrent=_reporter_mode.parallel,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(

@@ -226,13 +226,47 @@ def resolve_analyst_mode(settings: Any, agents: list[str], *, probe: bool = True
         return AnalystMode(
             False, setting, f"{SETTING} is auto and the analysts' models could not be read ({exc})"
         )
+    return _auto_mode(
+        settings, setting, assignments, probe=probe, nobody="no analyst names a model"
+    )
+
+
+def resolve_reporter_mode(settings: Any, *, probe: bool = True) -> AnalystMode:
+    """Whether the report composer writes its sections at once, decided as the analysts' mode is.
+
+    ``llm.parallel_analysts`` as set, or for ``auto`` the reporter's own
+    models — its agent entry and its fallbacks, or the global judge model —
+    each asked whether its endpoint serves concurrent requests, exactly as
+    an analyst's is. Never raises; blocking, as :func:`resolve_analyst_mode`.
+    """
+    explicit, setting = _setting_of(settings)
+    if explicit is not None:
+        return AnalystMode(explicit, setting, f"{SETTING} is {setting}")
+    try:
+        from maljan.core.config import REPORTER_AGENT_KEY
+        from maljan.core.model_assignments import assignment_chain_for
+
+        assignments = assignment_chain_for(settings, REPORTER_AGENT_KEY, role="judge")
+    except Exception as exc:  # noqa: BLE001 — a mode is never worth a lost report
+        return AnalystMode(
+            False, setting, f"{SETTING} is auto and the reporter's models could not be read ({exc})"
+        )
+    return _auto_mode(
+        settings, setting, assignments, probe=probe, nobody="the reporter names no model"
+    )
+
+
+def _auto_mode(
+    settings: Any, setting: str, assignments: list[Any], *, probe: bool, nobody: str
+) -> AnalystMode:
+    """``auto`` over ``assignments``: parallel only where every model serves concurrent requests."""
     seen: dict[tuple[str, str, str], Any] = {}
     for assignment in assignments:
         seen.setdefault(
             (str(assignment.provider), str(assignment.endpoint), str(assignment.model)), assignment
         )
     if not seen:
-        return AnalystMode(False, setting, f"{SETTING} is auto and no analyst names a model")
+        return AnalystMode(False, setting, f"{SETTING} is auto and {nobody}")
     said: list[str] = []
     for assignment in seen.values():
         concurrent, why = _serves_concurrently(settings, assignment, probe=probe)
