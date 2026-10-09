@@ -163,6 +163,9 @@ _QUOTED_INSIDE = re.compile(r'"([^"\n]+)"|\'([^\'\n]+)\'|“([^”\n]+)”')
 # A JSON escape a value may be written with; a value of escapes and marks alone
 # spells no letter or digit, and no text can be said to hold or lack it.
 _ESCAPE = re.compile(r"\\(?:u[0-9a-fA-F]{4}|.)")
+# What a reach's texts are joined by: a character no value or text holds, and
+# a boundary to ``whole_value_in``, so no value is read across two texts.
+_SEPARATOR = "\x00"
 
 _CATALOGUE_LOWER: frozenset[str] | None = None
 
@@ -287,7 +290,11 @@ class _Held:
 
 @dataclass(frozen=True)
 class _Reach:
-    """What the functions reachable from one listed function hold, read once per function."""
+    """What the functions reachable from one listed function hold, read once per function.
+
+    ``haystack`` is ``texts`` joined once by a character no value holds, so a
+    string is looked for as a whole value inside any of them in one pass.
+    """
 
     functions: frozenset[int]
     whole: bool
@@ -295,6 +302,14 @@ class _Reach:
     unnamed: bool
     names: frozenset[str]
     texts: frozenset[str]
+    haystack: str = ""
+
+    def holds_text(self, text: str) -> bool:
+        """Whether one of the texts is ``text``, or holds it as a whole value
+        (``whole_value_in``), as a listing's text is read."""
+        from maljan.agents._indicator_denylists import whole_value_in
+
+        return text in self.texts or whole_value_in(text, self.haystack)
 
 
 @dataclass(frozen=True)
@@ -324,7 +339,7 @@ class _Reached:
         return any(key in part.names for part in self.parts)
 
     def holds_text(self, text: str) -> bool:
-        return any(text in part.texts for part in self.parts)
+        return any(part.holds_text(text) for part in self.parts)
 
     def count(self) -> int:
         """How many distinct functions the claim's functions reach, read only for a question."""
@@ -361,8 +376,10 @@ class FunctionFacts:
     # The sample strings as data: the strings tools' answers, FLOSS's, the blob
     # decoder's, and the index rows' strings.
     strings: EntryTexts = field(default_factory=EntryTexts)
-    # The index rows' strings, each whole, lower-cased.
+    # The index rows' strings, each whole, lower-cased, and joined once
+    # (``_SEPARATOR``) for a whole value inside any of them.
     index_strings: frozenset[str] = frozenset()
+    index_haystack: str = ""
     # Each listed function's reach, read once: the cost is the analyst's
     # listings times the graph, whatever the number of claims.
     reaches: dict[int, _Reach] = field(default_factory=dict)
@@ -453,6 +470,7 @@ class FunctionFacts:
             or any(read.unnamed for read in taken),
             names=frozenset(names),
             texts=frozenset(texts),
+            haystack=_SEPARATOR.join(sorted(texts)),
         )
 
     def offset(self, address: int | None) -> int | None:
@@ -628,6 +646,7 @@ def function_facts(
                 held.texts.append(value.lower())
     strings = EntryTexts.from_ledger(sources)
     facts.index_strings = frozenset(text.lower() for text in index_strings)
+    facts.index_haystack = _SEPARATOR.join(sorted(facts.index_strings))
     facts.strings = strings
     facts.known_names = _catalogue_lower() | frozenset(run_names)
     return facts
@@ -888,11 +907,65 @@ class _Clauses:
         return _in_a_negated_object(self.text[start:begin], begin - start)
 
 
+# A routine's name written as what a function is or does, not as a call it
+# makes. The sentence's own grammar says so, and only in these forms:
+# - right after the name, "-like", "-style" or "-equivalent", or a noun naming
+#   a copy of the routine ("an atoi implementation", "a strdup clone");
+_DESCRIBED_AFTER = re.compile(
+    r"`?(?:-(?:like|style|equivalent)\b"
+    r"|\s+(?:re-?implementations?|implementations?|clones?|replacements?|equivalents?"
+    r"|substitutes?)\b)",
+    re.IGNORECASE,
+)
+# - right before it, a verb saying the code is its own copy of the routine
+#   ("reimplements strdup", "implements its own GetProcAddress", "inlines
+#   memcpy"), a likeness ("works like", "acts as", "similar to", "equivalent
+#   of"), or a copula with an indefinite article and at most one word between
+#   ("is an atoi", "is a hand-rolled atoi");
+_DESCRIBED_BEFORE = re.compile(
+    r"(?:\b(?:re-?implement(?:s|ed|ing)?|implement(?:s|ed|ing)?|inlin(?:es|ed|ing|e)"
+    r"|mimic(?:s|ked|king)?|emulat(?:es|ed|ing|e))\s+(?:(?:an?|its|their)\s+)?(?:own\s+)?"
+    r"|\b(?:works?|act(?:s|ing)?|behaves?|functions?|operates?)\s+(?:like|as)\s+(?:an?\s+)?"
+    r"|\b(?:similar|equivalent|analogous|identical)\s+(?:to|of)\s+(?:an?\s+)?"
+    r"|\b(?:is|are|was|were)\s+an?\s+(?:(?P<word>[a-z][\w-]*)\s+)?"
+    r")`?\Z",
+    re.IGNORECASE,
+)
+# - and in none of those when what follows the name, or the word before it,
+#   says the call itself: "is a CreateProcessW wrapper", "is a
+#   CreateMutexW-shaped slot call", "is a direct VirtualAlloc".
+_A_CALL_AFTER = re.compile(
+    r"`?(?:-(?:shaped|typed)\b|\s*(?:\(|(?:calls?|imports?|slots?|pointers?|thunks?|stubs?"
+    r"|wrappers?|address(?:es)?|names?|hash(?:es)?|resolution|lookups?)\b))",
+    re.IGNORECASE,
+)
+_CALL_WORDS = frozenset({"call", "direct", "indirect", "imported", "resolved", "dynamic"})
+# How far before a name its describing words are read: past the longest form.
+_DESCRIBED_REACH = 64
+
+
+def _described(text: str, start: int, end: int) -> bool:
+    """Whether the routine name at ``text[start:end]`` is written as what the code is or does
+    (the forms above), not as a call it makes.
+
+    An indefinite article alone does not say it: "a ReadProcessMemory of its
+    own PEB" is a call, written as "a decimal atoi of the next field" is.
+    """
+    if _DESCRIBED_AFTER.match(text, end):
+        return True
+    before = _DESCRIBED_BEFORE.search(text[max(start - _DESCRIBED_REACH, 0) : start])
+    if before is None or _A_CALL_AFTER.match(text, end):
+        return False
+    return str(before.group("word") or "").lower() not in _CALL_WORDS
+
+
 def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, int, bool]]:
     """``(value, where, is an API name)`` of every name and string a sentence claims.
 
-    Each name is read once, at its first place: whether a statement of absence
-    holds it is asked there, within the clause that holds it (``_Clauses``).
+    Each name is read once, at its first place it is claimed: whether a
+    statement of absence holds it is asked there, within the clause that holds
+    it (``_Clauses``). A place that writes the name as what the code is or
+    does (``_described``) claims no call, and no string either.
     """
     spans = {m.group(0).strip("`").strip() for m in _CODE_SPAN_RE.finditer(text)}
     clauses = _Clauses(text)
@@ -900,6 +973,7 @@ def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, in
 
     found: list[tuple[str, int, bool]] = []
     seen: set[str] = set()
+    described: set[str] = set()
     for match in _IDENTIFIER.finditer(text):
         token = match.group(0)
         if token in seen or len(token) < 3 or _GENERIC_FUNCTION_NAME.fullmatch(token):
@@ -908,9 +982,13 @@ def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, in
             continue
         if not (re.search(r"[A-Z]", token[1:]) or _named_alone(spans, token)):
             continue
+        if _described(text, match.start(), match.end()):
+            described.add(token)
+            continue
         seen.add(token)
         if not negated(match.start(), match.end()):
             found.append((token, match.start(), True))
+    seen |= described
     keys = {_api_key(value) for value, _at, _api in found}
     for match in _QUOTED_SPAN_RE.finditer(text):
         if match.group(1) is not None:
@@ -999,9 +1077,12 @@ class FunctionClaimCheck:
 def _held(value: str, api: bool, listings: Sequence[_Held], reached: _Reached) -> bool:
     """Whether the listings or the reachable functions' facts hold ``value``.
 
-    The facts are looked up by membership: an API key in their names, a string
-    as one of their whole texts. Only a listing's text is searched, for the
-    value as a whole value inside it.
+    An API key is looked up in their names. A string is looked for as a whole
+    value (``whole_value_in``) inside a listing's text and inside each text of
+    the reachable functions' rows and placed values, one rule for all of them:
+    a decoded command line holds the quoted group name it passes, and a URL
+    the host it names; a value that is only part of a longer token is held by
+    none.
     """
     from maljan.agents._indicator_denylists import whole_value_in
     from maljan.utils.written_forms import written_forms
@@ -1022,10 +1103,14 @@ def _held(value: str, api: bool, listings: Sequence[_Held], reached: _Reached) -
 
 def _a_sample_string(value: str, facts: FunctionFacts) -> bool:
     """Whether a strings source of the run holds ``value`` as data: one of the index rows'
-    strings as a whole, or a strings tool's answer holding it as a whole value."""
+    strings, or a strings tool's answer, holding it as a whole value."""
+    from maljan.agents._indicator_denylists import whole_value_in
     from maljan.utils.written_forms import written_forms
 
-    if any(form in facts.index_strings for form in written_forms(value.lower())):
+    if any(
+        form in facts.index_strings or whole_value_in(form, facts.index_haystack)
+        for form in written_forms(value.lower())
+    ):
         return True
     strings = facts.strings
     return any(strings.holds(ref, value) for ref in strings.may_hold(value))

@@ -2151,9 +2151,20 @@ turn, each once, and what the analyst answers stands.
     index's rows; a quoted phrase none holds (a capa rule's name, a paraphrase)
     is recorded as not checked. A name or a value inside a statement of absence
     ("does not use X", read by the absence question's own reader) is no claimed
-    one. Each name is read once, at its first place, and the absence reader
-    reads only the sentence holding it. The model is asked to write nothing
-    new; the claim format is unchanged.
+    one. Nor is a name the sentence's grammar writes as what the code is or
+    does: followed by `-like`, `-style` or `-equivalent` or by
+    `implementation`, `clone`, `replacement`, `equivalent` or `substitute`;
+    or preceded by `implements` / `reimplements` (`its own`), `inlines`,
+    `mimics`, `emulates`, `works like` / `acts as` / `behaves like`,
+    `similar to` / `equivalent of`, or `is a` / `is an` with at most one word
+    between ("is a hand-rolled atoi"), unless what follows says the call
+    itself (`call`, `wrapper`, `slot`, `-shaped`, a parenthesis) or the word
+    between does (`direct`, `resolved`). An article alone does not say it ("a
+    ReadProcessMemory of its own PEB" is a call), nor does a name used as a
+    verb ("`memcpy`s each"); those are read as calls. Each name is read once,
+    at its first place it is claimed, and the absence reader reads only the
+    sentence holding it. The model is asked to write nothing new; the claim
+    format is unchanged.
   - *Whose a value is.* A value is the function's the claim names last before
     it in its own sentence (an abbreviation's dot, or a dot inside a token or a
     number, ends no sentence). When the claim names no function at all, every
@@ -2174,8 +2185,13 @@ turn, each once, and what the analyst answers stands.
     decoded-string answers put inside any of them. Nothing else excuses a
     value. API names are compared without regard to case, a module in front
     read off, the ANSI and wide spellings read as one name as the API
-    catalogue compares them; strings by the citation check's whole-value
-    reading.
+    catalogue compares them; strings by one whole-value reading in every
+    source (`whole_value_in`): a value inside a listing's text, inside any
+    decoded or plain string, capa rule or placed value of the reachable rows,
+    or inside an index row's string (which makes it a sample string), held at
+    its own boundaries, so a decoded command line holds the quoted group name
+    it passes and a URL the host it names, and a value that is only part of a
+    longer token is held by none.
   - *The question.* One per claim block, naming every value held nowhere:
     "claim n names X for function F [ev_…]; neither its listing nor its index
     row [ev_…] holds X, and no function reachable from F through its call
