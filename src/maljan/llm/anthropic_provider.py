@@ -217,6 +217,68 @@ def with_unforced_structured_output(chat_class: Any) -> Any:
     return unforced
 
 
+_LOOP_BOUND_CLASSES: dict[type, type] = {}
+
+
+def with_loop_bound_async_client(chat_class: Any) -> Any:
+    """``chat_class`` whose async client never sends on a connection of another event loop.
+
+    ``ChatAnthropic`` takes its async httpx client from a process-wide
+    ``lru_cache`` keyed on the endpoint, so every model built for the API —
+    the analysts' on the agent loop, the reporter's and the composer's on the
+    worker's — shared one pool, and the first request the reporter sent on a
+    connection the analysts had opened failed with "bound to a different event
+    loop". The client is built by the same function, uncached, once per event
+    loop (``maljan.llm.loop_clients``), and shared per endpoint as before; the
+    SDK client and every request it builds are unchanged.
+    """
+    if not isinstance(chat_class, type) or "_async_client" not in dir(chat_class):
+        return chat_class
+    cached = _LOOP_BOUND_CLASSES.get(chat_class)
+    if cached is not None:
+        return cached
+
+    from functools import cached_property
+
+    def _async_client(self: Any) -> Any:
+        import anthropic
+        from langchain_anthropic import chat_models
+
+        from maljan.llm.loop_clients import (
+            loop_bound_async_client,
+            shared_loop_bound_async_client,
+        )
+
+        client_params = self._client_params
+        http_params: dict[str, Any] = {"base_url": client_params["base_url"]}
+        if "timeout" in client_params:
+            http_params["timeout"] = client_params["timeout"]
+        if self.anthropic_proxy:
+            http_params["anthropic_proxy"] = self.anthropic_proxy
+        cached_build = chat_models._get_default_async_httpx_client
+        build = getattr(cached_build, "__wrapped__", cached_build)
+
+        def make() -> Any:
+            return build(**http_params)
+
+        try:
+            key = (build, tuple(sorted(http_params.items())))
+            hash(key)
+        except TypeError:
+            http_client = loop_bound_async_client(make)
+        else:
+            http_client = shared_loop_bound_async_client(key, make)
+        return anthropic.AsyncClient(**client_params, http_client=http_client)
+
+    prop = cached_property(_async_client)
+    prop.__set_name__(chat_class, "_async_client")
+    bound = type(chat_class.__name__, (chat_class,), {"_async_client": prop})
+    bound.__module__ = __name__
+    bound.__qualname__ = chat_class.__qualname__
+    _LOOP_BOUND_CLASSES[chat_class] = bound
+    return bound
+
+
 @register_provider("anthropic")
 class AnthropicProvider:
     """Builds LangChain ChatAnthropic instances."""
@@ -299,7 +361,9 @@ class AnthropicProvider:
 
         chat_class = with_answered_tool_calls(
             with_preserved_thinking(
-                with_unforced_structured_output(with_sized_request_timeout(ChatAnthropic)),
+                with_unforced_structured_output(
+                    with_sized_request_timeout(with_loop_bound_async_client(ChatAnthropic))
+                ),
                 str(getattr(settings, "prompt_cache_ttl", "5m") or "5m"),
             ),
             "anthropic",

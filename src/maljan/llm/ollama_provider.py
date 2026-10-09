@@ -181,6 +181,23 @@ def with_watched_streams(chat_class: Any) -> Any:
     return watched_class
 
 
+# What ``httpx.AsyncClient`` hands its own default transport; a client built
+# with one of these named builds it with that value, and so does each loop's.
+_TRANSPORT_SETTINGS = ("verify", "cert", "trust_env", "http1", "http2", "limits")
+
+
+def _loop_bound_transport(client_kwargs: dict[str, Any]) -> Any:
+    """The transport ``httpx.AsyncClient(**client_kwargs)`` would build, one per event loop."""
+    import httpx
+
+    from maljan.llm.loop_clients import loop_bound_transport
+
+    settings = {k: client_kwargs[k] for k in _TRANSPORT_SETTINGS if k in client_kwargs}
+    return loop_bound_transport(
+        httpx.AsyncBaseTransport, lambda: httpx.AsyncHTTPTransport(**settings)
+    )
+
+
 @register_provider("ollama")
 class OllamaProvider:
     """Builds LangChain ChatOllama instances for local models."""
@@ -227,6 +244,17 @@ class OllamaProvider:
 
         client_kwargs = dict(kwargs.pop("client_kwargs", None) or {})
         client_kwargs.setdefault("timeout", PROVIDER_REQUEST_TIMEOUT_SECONDS)
+
+        # The async client's connections are opened per event loop and never
+        # used on another (``maljan.llm.loop_clients``): one model is awaited
+        # on the agent loop and on the worker's own, and a pooled connection
+        # reused across the two fails with "bound to a different event loop".
+        # A transport the caller names is left as it is.
+        if "transport" not in client_kwargs:
+            async_kwargs = dict(kwargs.pop("async_client_kwargs", None) or {})
+            if "transport" not in async_kwargs:
+                async_kwargs["transport"] = _loop_bound_transport({**client_kwargs, **async_kwargs})
+            kwargs["async_client_kwargs"] = async_kwargs
 
         # Every request held to a whole-call deadline sized for its answer
         # (``generation_rate.with_sized_request_timeout``): the client's
