@@ -387,6 +387,9 @@ export interface EffortOptions {
   model: string;
   takes_effort: boolean;
   levels: string[] | null;
+  /** Offered levels the Models API's description said nothing about: the
+   *  run sends them and the API answers, so they are offered and marked. */
+  undescribed_levels: string[];
   levels_source: "models_api" | "settings" | "none";
   global_key: string | null;
   global_value: string | null;

@@ -56,6 +56,7 @@ def test_anthropic_offers_its_levels_and_the_global_value(client: TestClient) ->
     assert body["takes_effort"] is True
     assert body["levels"] == list(ANTHROPIC_EFFORT_LEVELS)
     assert body["levels_source"] == "settings"
+    assert body["undescribed_levels"] == []
     assert body["global_key"] == "core.llm.anthropic.effort"
     assert body["global_value"] == "max"
 

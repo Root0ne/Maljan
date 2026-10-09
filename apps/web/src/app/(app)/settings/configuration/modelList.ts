@@ -62,7 +62,12 @@ export function effortField(options: EffortOptions | null, value: string): Effor
   }
   const choices = [
     { value: "", label: `Inherit (${inherited})` },
-    ...options.levels.map((level) => ({ value: level, label: level })),
+    ...options.levels.map((level) => ({
+      value: level,
+      label: (options.undescribed_levels ?? []).includes(level)
+        ? `${level} (not described for this model)`
+        : level,
+    })),
   ];
   if (value && !options.levels.includes(value)) {
     choices.push({ value, label: `${value} (not offered for this model)` });

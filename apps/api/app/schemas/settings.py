@@ -156,12 +156,15 @@ class EffortOptionsResponse(BaseModel):
     Anthropic Models API described the model, ``settings`` when the list is
     the setting's own, ``none`` otherwise. ``global_key``/``global_value``
     are the provider-wide setting an unset field inherits.
+    ``undescribed_levels`` are offered levels the Models API's description
+    said nothing about; the run sends them and the API answers.
     """
 
     provider: str
     model: str
     takes_effort: bool
     levels: list[str] | None
+    undescribed_levels: list[str] = []
     levels_source: str
     global_key: str | None = None
     global_value: str | None = None

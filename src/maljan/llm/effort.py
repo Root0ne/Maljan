@@ -66,7 +66,9 @@ def effort_options(settings: Any, provider: str, model: str) -> dict[str, Any]:
     OpenAI-compatible provider), and empty where none may be set.
     ``levels_source`` is ``models_api`` when the Anthropic Models API
     described the model, ``settings`` when the list is the setting's own, and
-    ``none`` otherwise.
+    ``none`` otherwise. ``undescribed_levels`` are the offered levels the
+    description named nothing about: the build sends them, because only a
+    level the Models API refuses is refused, so they are offered and marked.
     """
     provider = str(provider or "")
     path = EFFORT_SETTING_OF_PROVIDER.get(provider)
@@ -76,14 +78,16 @@ def effort_options(settings: Any, provider: str, model: str) -> dict[str, Any]:
             "model": model,
             "takes_effort": False,
             "levels": [],
+            "undescribed_levels": [],
             "levels_source": "none",
             "global_key": None,
             "global_value": None,
         }
     levels: list[str] | None
+    undescribed: list[str] = []
     source = "none"
     if provider == "anthropic":
-        levels, source = _anthropic_levels(model)
+        levels, undescribed, source = _anthropic_levels(model)
     else:
         levels = None
     return {
@@ -91,22 +95,27 @@ def effort_options(settings: Any, provider: str, model: str) -> dict[str, Any]:
         "model": model,
         "takes_effort": True,
         "levels": levels,
+        "undescribed_levels": undescribed,
         "levels_source": source,
         "global_key": f"core.{path}",
         "global_value": global_effort(settings, provider),
     }
 
 
-def _anthropic_levels(model: str) -> tuple[list[str], str]:
-    """The levels the Models API said the model takes, or the setting's own list.
+def _anthropic_levels(model: str) -> tuple[list[str], list[str], str]:
+    """The levels a build would send, those the description left out, and the source.
 
     A description that names no level at all says nothing about levels, so
-    the setting's list stands; once it names any, only the levels it says the
-    model takes are offered.
+    the setting's list stands. Once it names any, a level it refuses is left
+    out — the build refuses it too — and a level it says nothing about is
+    offered and listed as undescribed, because the build sends it and the
+    API answers.
     """
     from maljan.llm.model_capabilities import takes_effort
 
     said = {level: takes_effort(model, level) for level in ANTHROPIC_EFFORT_LEVELS}
     if all(answer is None for answer in said.values()):
-        return list(ANTHROPIC_EFFORT_LEVELS), "settings"
-    return [level for level, answer in said.items() if answer is True], "models_api"
+        return list(ANTHROPIC_EFFORT_LEVELS), [], "settings"
+    offered = [level for level, answer in said.items() if answer is not False]
+    undescribed = [level for level, answer in said.items() if answer is None]
+    return offered, undescribed, "models_api"

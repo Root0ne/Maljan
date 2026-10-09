@@ -13,6 +13,7 @@ function options(over: Partial<EffortOptions>): EffortOptions {
     model: "claude-haiku-5-5",
     takes_effort: true,
     levels: ["low", "medium", "high"],
+    undescribed_levels: [],
     levels_source: "models_api",
     global_key: "core.llm.anthropic.effort",
     global_value: "max",
@@ -27,6 +28,16 @@ describe("a per-agent effort field", () => {
     if (field.kind !== "select") return;
     expect(field.choices.map((c) => c.value)).toEqual(["", "low", "medium", "high"]);
     expect(field.choices[0]!.label).toBe("Inherit (max)");
+  });
+
+  it("marks a level the model's description said nothing about", () => {
+    const field = effortField(options({ undescribed_levels: ["medium"] }), "");
+    expect(field.kind === "select" && field.choices.map((c) => c.label)).toEqual([
+      "Inherit (max)",
+      "low",
+      "medium (not described for this model)",
+      "high",
+    ]);
   });
 
   it("names the provider's default when no global value is set", () => {

@@ -477,8 +477,22 @@ class TestTheChoices:
             "test",
         )
         options = effort_options(_anthropic_settings(), "anthropic", MODEL)
-        assert options["levels"] == ["low", "medium", "high"]
+        assert options["levels"] == ["low", "medium", "high", "xhigh"]
+        assert options["undescribed_levels"] == ["xhigh"]
         assert options["levels_source"] == "models_api"
+
+    def test_a_level_the_description_leaves_out_is_one_the_build_accepts(self) -> None:
+        from maljan.llm.effort import effort_options
+
+        model_capabilities.note_model_description(
+            {"capabilities": {"effort": {"low": {"supported": True}, "high": {"supported": True}}}},
+            MODEL,
+            "test",
+        )
+        options = effort_options(_anthropic_settings(), "anthropic", MODEL)
+        assert "medium" in options["levels"] and "medium" in options["undescribed_levels"]
+        assert model_capabilities.takes_effort(MODEL, "medium") is None
+        AnthropicProvider(_anthropic_settings(effort="medium")).build_model(MODEL, 0.1)
 
     def test_a_model_the_api_says_takes_none_offers_none(self) -> None:
         from maljan.llm.effort import effort_options
