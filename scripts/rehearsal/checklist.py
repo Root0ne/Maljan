@@ -63,6 +63,35 @@ SECTION_PLACES: dict[str, tuple[str, ...]] = {
 }
 COMPOSED: tuple[str, ...] = tuple(SECTION_PLACES)
 
+# What the rehearsal sample's report holds, measured on the default profile:
+# the sections it writes with content, the two the stub leaves empty because
+# the sample holds nothing for them, and the four whose evidence the product's
+# own bundling finds empty. A section may be excused only from its own list,
+# and in a run with no fault every section of the first list is written.
+WRITTEN_SECTIONS = frozenset(
+    {
+        "introduction",
+        "execution_flow",
+        "string_resolution",
+        "command_and_control",
+        "payloads",
+        "configuration",
+        "host_identifiers",
+        "commands",
+        "cli_flags",
+        "communications",
+    }
+)
+EMPTY_ON_PURPOSE = frozenset({"encryption_scheme", "ransom_note"})
+EVIDENCE_EMPTY = frozenset(
+    {"packing_obfuscation", "discovery", "persistence_detail", "evasion_antiforensics"}
+)
+# The scenarios with no fault in the model's answers: every section of
+# ``WRITTEN_SECTIONS`` is written in them, never marked.
+CLEAN_SCENARIOS = frozenset(
+    {"normal", "cross_loop", "long_loop", "slow_model", "redacted_thinking"}
+)
+
 # The stub's roles, by the agent whose model, effort and budget they spend.
 ROLE_GROUPS: dict[str, set[str]] = {
     "static": {"analyst", "revision"},
@@ -169,10 +198,19 @@ def section_statuses(record: RunRecord) -> dict[str, str]:
             statuses[section] = "written"
         elif any(f"'{section}'" in r or f"{section} section" in r for r in reasons):
             statuses[section] = "marked not written"
-        elif not mine and record.empty_evidence_sections is not None and section in empty:
+        elif not mine and section in empty and section in EVIDENCE_EMPTY:
             statuses[section] = "not asked: the product finds its evidence empty"
-        elif mine and mine[-1].get("status") == 200 and mine[-1].get("deliberately_empty"):
+        elif not mine and section in empty:
+            statuses[section] = "LOST: excused as evidence-empty, but the sample's report has some"
+        elif (
+            mine
+            and mine[-1].get("status") == 200
+            and mine[-1].get("deliberately_empty")
+            and section in EMPTY_ON_PURPOSE
+        ):
             statuses[section] = "answered empty on purpose: the sample holds nothing for it"
+        elif mine and mine[-1].get("deliberately_empty"):
+            statuses[section] = "LOST: left empty, but the sample holds a value for it"
         elif not mine:
             statuses[section] = "LOST: never asked, and nothing says why"
         else:
@@ -296,6 +334,12 @@ def _check_analysts(record: RunRecord) -> Check:
 def _check_sections(record: RunRecord) -> Check:
     statuses = section_statuses(record)
     lost = [f"{s} ({status})" for s, status in statuses.items() if status.startswith("LOST")]
+    if record.scenario in CLEAN_SCENARIOS:
+        lost += [
+            f"{s} (not written in a run with no fault: {statuses[s]})"
+            for s in sorted(WRITTEN_SECTIONS)
+            if statuses[s] != "written"
+        ]
     counts = Counter(status.split(":")[0] for status in statuses.values())
     detail = ", ".join(f"{n} {status}" for status, n in sorted(counts.items()))
     if lost:

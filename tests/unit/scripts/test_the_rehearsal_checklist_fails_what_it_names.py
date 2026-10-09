@@ -207,12 +207,38 @@ class TestTheHolesAGreenRunCouldHide:
 
     def test_a_section_left_empty_is_accepted_only_when_the_script_meant_it(self) -> None:
         record = _record()
-        record.malware_report["technical_analysis"].pop("cli_flags")
-        entry = next(e for e in record.stub_log if e.get("section") == "cli_flags")
+        record.malware_report["technical_analysis"].pop("ransom_note")
+        entry = next(e for e in record.stub_log if e.get("section") == "ransom_note")
         entry.update(content=False, deliberately_empty=True)
         assert _failed(record) == []
         entry["deliberately_empty"] = False
         assert _failed(record) == ["every report section written or accounted for"]
+
+    def test_a_section_the_sample_fills_cannot_be_left_empty_on_purpose(self) -> None:
+        record = _record()
+        record.malware_report["technical_analysis"].pop("cli_flags")
+        entry = next(e for e in record.stub_log if e.get("section") == "cli_flags")
+        entry.update(content=False, deliberately_empty=True)
+        assert section_statuses(record)["cli_flags"].startswith("LOST: left empty")
+        assert _failed(record) == ["every report section written or accounted for"]
+
+    def test_the_reviewer_s_all_excused_record_fails(self) -> None:
+        record = _record()
+        record.malware_report["technical_analysis"] = {}
+        record.malware_report["intro_background"] = ""
+        record.malware_report["c2_channels"] = []
+        record.stub_log = [e for e in record.stub_log if e["role"] != "composer"]
+        record.empty_evidence_sections = list(COMPOSED)
+        statuses = section_statuses(record)
+        assert sum(s.startswith("not asked") for s in statuses.values()) == 4
+        assert "every report section written or accounted for" in _failed(record)
+
+    def test_a_section_the_report_should_write_cannot_be_excused_as_evidence_empty(self) -> None:
+        record = _record()
+        record.malware_report["technical_analysis"].pop("payloads")
+        record.stub_log = [e for e in record.stub_log if e.get("section") != "payloads"]
+        record.empty_evidence_sections = ["payloads"]
+        assert section_statuses(record)["payloads"].startswith("LOST: excused as evidence-empty")
 
     def test_a_degradation_marks_a_section_not_written(self) -> None:
         record = _record()
@@ -221,6 +247,9 @@ class TestTheHolesAGreenRunCouldHide:
             "report section 'payloads' is not written: cut"
         ]
         assert section_statuses(record)["payloads"] == "marked not written"
+        assert "every report section written or accounted for" in _failed(record)
+        record.scenario = "cut_at_cap"
+        assert "every report section written or accounted for" not in _failed(record)
 
     def test_an_analyst_with_no_claim(self) -> None:
         record = _record()
