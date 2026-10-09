@@ -3,26 +3,34 @@
 A run is described by one plain record (:class:`RunRecord`), built the same
 way from the running stack (``scripts/rehearsal/run.py``) or from an in-process
 pipeline (``scripts/rehearsal/inprocess.py``), so both are judged by the same
-checks:
+checks. Every check fails closed: what it cannot confirm is a failure, never a
+pass.
 
-* the job completed;
-* every stage that started finished, and none failed;
-* every analyst answered: none failed or was lost to an error;
-* every one of the composer's sections is written, or explicitly accounted
-  for: marked not written by a degradation reason, answered empty by the
-  model, or never asked because its evidence was empty — never lost between
-  an answer and the report;
-* the narrative is written or marked;
-* the run summary is present and its token totals are the provider-reported
-  usage, call for call;
+* the job completed (``deadline_hit``: it ended at its deadline as a failed
+  job with the reason said);
+* the model refused no request — a 400 here is a 400 the paid API would send;
+* every model call was one the stub recognised: none answered as ``other``,
+  every composer request naming its section;
+* the product's own connection test passed against the stub;
+* every stage of the profile in force started, ran and finished, none failed;
+* every analyst the profile names answered with at least one claim in force;
+* each of the composer's sixteen sections is written, or marked not written
+  by a degradation reason, or excused by the product itself (its own bundling
+  finds the section's evidence empty) or by the script (a section the stub
+  leaves empty on purpose because the sample holds nothing for it);
+* the narrative came from a model answer;
+* the run summary's token totals are the provider-reported usage call for
+  call, no call is unreported, and its spend equals that usage priced from
+  the vendored table;
 * the STIX bundles and the markdown are rendered;
-* no claim of an answer in force is missing from the report;
-* the settings in force are the ones configured (model per role, effort,
-  output caps, step and time limits, any settings-snapshot key);
-* the verdict was stated by the judge;
+* no claim is lost: every claim the stub's analysts wrote is in an answer in
+  force or recorded as dropped, and every claim in force is discussed in the
+  report's body (by its label or its words), not only listed as undiscussed;
+* the settings in force are the ones configured (refused when nothing is
+  configured to compare);
+* the judge stated the verdict;
+* the run finished inside its deadline by a margin;
 * the scenario's fault really happened, so a fault run cannot pass vacuously.
-
-Each check is a :class:`Check` with a sentence saying what was found.
 """
 
 from __future__ import annotations
@@ -31,9 +39,10 @@ import json
 import re
 from collections import Counter
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
-# Every section the composer writes, and where the stored report holds it.
+# Every section the composer writes, in its order, and where the stored report holds it.
 SECTION_PLACES: dict[str, tuple[str, ...]] = {
     "introduction": ("intro_background",),
     "execution_flow": ("technical_analysis", "execution_flow"),
@@ -52,18 +61,32 @@ SECTION_PLACES: dict[str, tuple[str, ...]] = {
     "ransom_note": ("technical_analysis", "ransom_note"),
     "communications": ("c2_channels",),
 }
+COMPOSED: tuple[str, ...] = tuple(SECTION_PLACES)
 
-# The stub's roles, by the agent whose budget and model they spend.
-ROLE_AGENTS: dict[str, str] = {
-    "mediator": "mediator",
-    "judge": "judge",
-    "technique_question": "judge",
-    "narrative": "reporter",
-    "composer": "reporter",
+# The stub's roles, by the agent whose model, effort and budget they spend.
+ROLE_GROUPS: dict[str, set[str]] = {
+    "static": {"analyst", "revision"},
+    "analyst": {"analyst", "revision"},
+    "judge": {"judge", "technique_question"},
+    "mediator": {"mediator", "mediator_extract"},
+    "reporter": {"narrative", "composer"},
 }
 
-# Stages a default profile runs, in order.
-DEFAULT_STAGES = ("triage_pack", "analysis", "debate", "verdict", "report")
+# The report fields the report models write: the body a claim is discussed in.
+BODY_FIELDS = (
+    "executive_summary",
+    "key_findings",
+    "capabilities_narrative",
+    "defensive_recommendations",
+    "intro_background",
+    "technical_analysis",
+    "c2_channels",
+)
+
+# The share of a run's deadline it must finish inside.
+DEADLINE_MARGIN_SHARE = 0.2
+# Faults whose answer never reached the client whole: no usage is owed for them.
+_UNBILLED = {"stream_error"}
 
 
 @dataclass
@@ -79,6 +102,7 @@ class RunRecord:
 
     scenario: str
     job_status: str
+    api: str = ""
     job_error: str = ""
     verdict: str = ""
     run_summary: dict[str, Any] = field(default_factory=dict)
@@ -91,6 +115,12 @@ class RunRecord:
     stub_log: list[dict[str, Any]] = field(default_factory=list)
     expected: dict[str, Any] = field(default_factory=dict)
     scenario_params: dict[str, Any] = field(default_factory=dict)
+    # The profile's stages, each with the agents it names; empty reads the run summary's.
+    required_stages: dict[str, list[str]] = field(default_factory=dict)
+    # The sections the product's own bundling finds empty; ``None`` when not known.
+    empty_evidence_sections: list[str] | None = None
+    # The connection test's outcome, where the run asked one.
+    probe: dict[str, Any] = field(default_factory=dict)
     elapsed_s: float = 0.0
 
 
@@ -120,33 +150,50 @@ def _degradations(record: RunRecord) -> list[str]:
     return [str(r) for r in reasons]
 
 
+def _answered(record: RunRecord) -> list[dict[str, Any]]:
+    return [e for e in record.stub_log if e.get("status") == 200]
+
+
 def section_statuses(record: RunRecord) -> dict[str, str]:
-    """Each composer section's status: written, marked, answered empty, not asked, or lost."""
+    """Each composer section's status; any status starting ``LOST`` fails the run."""
     reasons = _degradations(record)
     asked: dict[str, list[dict[str, Any]]] = {}
     for entry in record.stub_log:
         if entry.get("role") == "composer" and entry.get("section"):
             asked.setdefault(str(entry["section"]), []).append(entry)
+    empty = set(record.empty_evidence_sections or [])
     statuses: dict[str, str] = {}
     for section, place in SECTION_PLACES.items():
+        mine = asked.get(section, [])
         if _has_content(_get(record.malware_report, place)):
             statuses[section] = "written"
         elif any(f"'{section}'" in r or f"{section} section" in r for r in reasons):
             statuses[section] = "marked not written"
-        elif not record.stub_log:
-            statuses[section] = "not written (no stub log to say why)"
-        elif section not in asked:
-            statuses[section] = "not asked (no evidence for it)"
+        elif not mine and record.empty_evidence_sections is not None and section in empty:
+            statuses[section] = "not asked: the product finds its evidence empty"
+        elif mine and mine[-1].get("status") == 200 and mine[-1].get("deliberately_empty"):
+            statuses[section] = "answered empty on purpose: the sample holds nothing for it"
+        elif not mine:
+            statuses[section] = "LOST: never asked, and nothing says why"
         else:
-            last = asked[section][-1]
-            if last.get("status") == 200 and last.get("content") is False:
-                statuses[section] = "answered empty"
-            else:
-                statuses[section] = "lost"
+            statuses[section] = "LOST: asked and answered, missing from the report unmarked"
     return statuses
 
 
+# ----------------------------------------------------------------------- checks
+
+
 def _check_job(record: RunRecord) -> Check:
+    if record.scenario == "deadline_hit":
+        said = record.job_error.lower()
+        ok = record.job_status == "failed" and (
+            "deadline" in said or "timeout" in said or "timed out" in said
+        )
+        return Check(
+            "job ended at its deadline as a failed job",
+            ok,
+            f"job status {record.job_status}: {record.job_error or 'no reason given'}",
+        )
     ok = record.job_status == "completed"
     detail = f"job status {record.job_status}"
     if record.job_error:
@@ -154,78 +201,195 @@ def _check_job(record: RunRecord) -> Check:
     return Check("job completed", ok, detail)
 
 
+def _check_refusals(record: RunRecord) -> Check:
+    refused = [e for e in record.stub_log if e.get("refused")]
+    if not record.stub_log:
+        return Check("the model refused no request", False, "no model call was logged")
+    if refused:
+        rows = "; ".join(
+            f"call {e.get('n')} ({e.get('role')}): {e['refused']}" for e in refused[:5]
+        )
+        return Check("the model refused no request", False, f"{len(refused)} refused: {rows}")
+    return Check("the model refused no request", True, f"{len(record.stub_log)} calls taken")
+
+
+def _check_recognised(record: RunRecord) -> Check:
+    other = [e for e in record.stub_log if e.get("role") == "other"]
+    unnamed = [e for e in record.stub_log if e.get("role") == "composer" and not e.get("section")]
+    problems = []
+    if other:
+        problems.append(
+            f"{len(other)} call(s) no role script recognised (calls {[e['n'] for e in other][:8]})"
+        )
+    if unnamed:
+        problems.append(f"{len(unnamed)} composer call(s) naming no section")
+    roles = Counter(str(e.get("role")) for e in record.stub_log)
+    detail = "; ".join(problems) or ", ".join(f"{n} {r}" for r, n in sorted(roles.items()))
+    return Check("every model call recognised", not problems, detail)
+
+
+def _check_probe(record: RunRecord) -> Check:
+    if not record.probe:
+        return Check("the connection test passed", False, "no connection test was run")
+    ok = bool(record.probe.get("ok"))
+    return Check("the connection test passed", ok, str(record.probe.get("detail") or "")[:300])
+
+
+def _required(record: RunRecord) -> dict[str, list[str]]:
+    if record.required_stages:
+        return record.required_stages
+    return {
+        str(s.get("key")): [str(a) for a in s.get("agents") or []]
+        for s in record.run_summary.get("stages") or []
+    }
+
+
 def _check_stages(record: RunRecord) -> Check:
+    required = _required(record)
+    stages = {str(s.get("key")): s for s in record.run_summary.get("stages") or []}
     started = [e.get("stage") for e in record.events if e.get("type") == "stage_started"]
     finished = [e.get("stage") for e in record.events if e.get("type") == "stage_finished"]
-    stages = record.run_summary.get("stages") or []
-    failed = [s.get("key") for s in stages if s.get("failure")]
-    unfinished = [s for s in started if s not in finished]
     problems = []
-    if not started:
-        problems.append("no stage_started event")
-    if unfinished:
-        problems.append(f"started and never finished: {', '.join(map(str, unfinished))}")
-    if failed:
-        problems.append(f"failed: {', '.join(map(str, failed))}")
-    if not stages:
-        problems.append("the run summary lists no stage")
-    ran = [
-        f"{s.get('key')}{'' if s.get('ran') else ' (skipped: ' + str(s.get('reason')) + ')'}"
-        for s in stages
+    if not required:
+        problems.append("no stage is known to be required")
+    for key in required:
+        row = stages.get(key)
+        if row is None:
+            problems.append(f"{key}: not in the run summary")
+        elif not row.get("ran"):
+            problems.append(f"{key}: skipped ({row.get('reason') or 'no reason'})")
+        elif row.get("failure"):
+            problems.append(f"{key}: failed")
+        elif key not in started or key not in finished:
+            problems.append(f"{key}: no stage_started/stage_finished pair")
+    detail = "; ".join(problems) or f"{len(required)} stages ran: {', '.join(required)}"
+    return Check("every stage of the profile ran", not problems, detail)
+
+
+def _check_analysts(record: RunRecord) -> Check:
+    required = _required(record)
+    stages = {str(s.get("key")): s for s in record.run_summary.get("stages") or []}
+    analysts = [
+        agent
+        for key, agents in required.items()
+        if (stages.get(key) or {}).get("kind", "analysis") == "analysis" and key not in ("debate",)
+        for agent in agents
+        if agent not in ("judge", "reporter")
     ]
-    detail = "; ".join(problems) if problems else f"{len(stages)} stages: {', '.join(ran)}"
-    return Check("every stage started and finished", not problems, detail)
+    failed = {str(a) for a in record.run_summary.get("failed_analysts") or []}
+    problems = []
+    if not analysts:
+        problems.append("the profile names no analyst")
+    for agent in analysts:
+        if agent in failed:
+            problems.append(f"{agent}: failed")
+        elif agent not in record.claims_in_force:
+            problems.append(f"{agent}: never answered")
+        elif not record.claims_in_force[agent]:
+            problems.append(f"{agent}: answered with no claim")
+    detail = "; ".join(problems) or ", ".join(
+        f"{a} ({len(record.claims_in_force[a])} claims)" for a in analysts
+    )
+    return Check("every analyst answered", not problems, detail)
 
 
 def _check_sections(record: RunRecord) -> Check:
     statuses = section_statuses(record)
-    lost = [s for s, status in statuses.items() if status == "lost"]
-    counts = Counter(statuses.values())
+    lost = [f"{s} ({status})" for s, status in statuses.items() if status.startswith("LOST")]
+    counts = Counter(status.split(":")[0] for status in statuses.values())
     detail = ", ".join(f"{n} {status}" for status, n in sorted(counts.items()))
     if lost:
-        detail = f"lost between answer and report: {', '.join(lost)}; {detail}"
+        detail = f"{'; '.join(lost)} — {detail}"
     return Check("every report section written or accounted for", not lost, detail)
 
 
 def _check_narrative(record: RunRecord) -> Check:
     summary = str(record.malware_report.get("executive_summary") or "").strip()
-    if summary:
-        return Check("narrative written or marked", True, f"{len(summary)} characters")
+    calls = [e for e in record.stub_log if e.get("role") == "narrative"]
     marked = [r for r in _degradations(record) if "narrative" in r.lower()]
+    problems = []
+    if not summary:
+        problems.append("no executive summary")
     if marked:
-        return Check("narrative written or marked", True, f"marked: {marked[0]}")
-    return Check("narrative written or marked", False, "no executive summary and no mark")
+        problems.append(f"degraded: {marked[0]}")
+    if not calls:
+        problems.append("the narrative model was never asked")
+    else:
+        last = calls[-1]
+        if last.get("status") != 200 or not (last.get("text_chars") or last.get("tool_calls")):
+            problems.append("the narrative model's last answer was not a written answer")
+    detail = "; ".join(problems) or f"written by the model, {len(summary)} characters"
+    return Check("narrative written by the model", not problems, detail)
+
+
+def _price_rows() -> dict[str, Any]:
+    from maljan.core.spend import table_prices
+
+    return table_prices()
+
+
+def priced_usage(record: RunRecord) -> tuple[float, list[str]]:
+    """What the stub's reported usage costs at the vendored prices, and the models unpriced."""
+    rows = _price_rows()
+    total = 0.0
+    unpriced: list[str] = []
+    for entry in _answered(record):
+        if entry.get("fault") in _UNBILLED:
+            continue
+        model = str(entry.get("model") or "").lower()
+        price = rows.get(model)
+        if price is None:
+            if model not in unpriced:
+                unpriced.append(model)
+            continue
+        when = datetime.fromtimestamp(float(entry.get("at") or 0), tz=UTC)
+        usage = {
+            "input_tokens": int(entry.get("input_tokens") or 0),
+            "cached_input_tokens": int(entry.get("cache_read_tokens") or 0),
+            "cache_write_input_tokens": int(entry.get("cache_write_5m_tokens") or 0)
+            + int(entry.get("cache_write_1h_tokens") or 0),
+            "cache_write_1h_input_tokens": int(entry.get("cache_write_1h_tokens") or 0),
+            "output_tokens": int(entry.get("output_tokens") or 0),
+        }
+        total += price.at(when).cost(usage)
+    return total, unpriced
 
 
 def _check_tokens(record: RunRecord) -> Check:
     summary = record.run_summary
     tokens = summary.get("tokens") or {}
     if not summary or not tokens:
-        return Check("run summary and token totals", False, "no run summary or no token totals")
+        return Check("tokens and spend as the provider reported them", False, "no token totals")
     calls = int(tokens.get("llm_calls") or 0)
+    unreported = int(tokens.get("unreported_calls") or 0)
     sent = int(tokens.get("input_tokens") or 0)
     got = int(tokens.get("output_tokens") or 0)
+    billed = [e for e in _answered(record) if e.get("fault") not in _UNBILLED]
     problems = []
-    if calls <= 0 or sent <= 0 or got <= 0:
-        problems.append(f"empty totals ({calls} calls, {sent} in, {got} out)")
-    answered = [e for e in record.stub_log if e.get("status") == 200]
-    if record.stub_log:
-        unreported = int(tokens.get("unreported_calls") or 0)
-        if calls + unreported != len(answered):
-            problems.append(
-                f"{calls} calls counted (+{unreported} unreported), the model answered "
-                f"{len(answered)}"
-            )
-        elif not unreported:
-            stub_in = sum(int(e.get("input_tokens") or 0) for e in answered)
-            stub_out = sum(int(e.get("output_tokens") or 0) for e in answered)
-            if (sent, got) != (stub_in, stub_out):
-                problems.append(
-                    f"totals {sent} in / {got} out, the provider reported "
-                    f"{stub_in} in / {stub_out} out"
-                )
-    detail = "; ".join(problems) or f"{calls} calls, {sent} input and {got} output tokens"
-    return Check("run summary and token totals", not problems, detail)
+    if unreported:
+        problems.append(f"{unreported} call(s) unreported")
+    if calls != len(billed):
+        problems.append(f"{calls} calls counted, the model answered {len(billed)}")
+    stub_in = sum(int(e.get("input_tokens") or 0) for e in billed)
+    stub_out = sum(int(e.get("output_tokens") or 0) for e in billed)
+    if (sent, got) != (stub_in, stub_out):
+        problems.append(
+            f"totals {sent} in / {got} out, the provider reported {stub_in} in / {stub_out} out"
+        )
+    usd, unpriced = priced_usage(record)
+    if unpriced:
+        problems.append(f"no vendored price for {', '.join(unpriced)}")
+    spend = summary.get("spend")
+    spent_said = ""
+    if isinstance(spend, dict) and spend.get("spent_usd") is not None:
+        spent = float(spend.get("spent_usd") or 0.0)
+        if abs(spent - usd) > 1e-6 + 0.005 * max(usd, spent):
+            problems.append(f"spend {spent:.6f} USD, the usage priced comes to {usd:.6f} USD")
+        spent_said = f", spend {spent:.6f} USD"
+    detail = "; ".join(problems) or (
+        f"{calls} calls, {sent} input and {got} output tokens, {usd:.6f} USD priced{spent_said}"
+    )
+    return Check("tokens and spend as the provider reported them", not problems, detail)
 
 
 def _check_rendered(record: RunRecord) -> Check:
@@ -251,56 +415,77 @@ def _normal(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip().rstrip(".").lower()
 
 
+def _body_text(record: RunRecord) -> str:
+    return _normal(
+        json.dumps(
+            {k: record.malware_report.get(k) for k in BODY_FIELDS}, ensure_ascii=False, default=str
+        )
+    )
+
+
+def _dropped_text(record: RunRecord) -> str:
+    negotiation = record.run_summary.get("negotiation") or {}
+    validation = record.run_summary.get("validation") or {}
+    rows = [str(r) for r in negotiation.get("dropped_claims") or []]
+    rows += [json.dumps(r, ensure_ascii=False) for r in validation.get("retry_drops") or []]
+    return _normal(" ".join(rows))
+
+
 def _check_claims(record: RunRecord) -> Check:
     if not record.claims_in_force:
         return Check("no claim lost on the way to the report", False, "no answer in force")
-    held = _normal(json.dumps(record.malware_report, ensure_ascii=False))
-    held += " " + _normal(record.markdown)
-    missing = []
+    problems = []
+    in_force = {_normal(c) for claims in record.claims_in_force.values() for c in claims}
+    dropped = _dropped_text(record)
+    for entry in _answered(record):
+        if entry.get("answer") not in ("final", "revision"):
+            continue
+        for claim in entry.get("claims") or []:
+            text = _normal(claim)
+            if text and text not in in_force and text not in dropped:
+                problems.append(
+                    f"written by the model, then neither in force nor dropped: {claim[:70]}"
+                )
+    body = _body_text(record)
     total = 0
     for agent, claims in record.claims_in_force.items():
-        for claim in claims:
+        for number, claim in enumerate(claims, 1):
             total += 1
-            text = _normal(claim)
-            escaped = _normal(json.dumps(claim, ensure_ascii=False)[1:-1])
-            if text and text not in held and escaped not in held:
-                missing.append(f"{agent}: {claim[:80]}")
-    detail = f"all {total} claims are in the report" if not missing else "; ".join(missing)
-    return Check("no claim lost on the way to the report", not missing, detail)
-
-
-def _roles_of(agent: str) -> set[str]:
-    if agent in ("judge", "reporter", "mediator"):
-        return {role for role, owner in ROLE_AGENTS.items() if owner == agent}
-    return {"analyst", "revision"}
+            label = f"{agent} claim {number}"
+            if label in body or (_normal(claim) and _normal(claim) in body):
+                continue
+            problems.append(f"not discussed in the report's body: [{label}] {claim[:70]}")
+    detail = "; ".join(dict.fromkeys(problems)) or (
+        f"all {total} claims in force are discussed in the report's body"
+    )
+    return Check("no claim lost on the way to the report", not problems, detail)
 
 
 def _check_settings(record: RunRecord) -> Check:
     expected = record.expected or {}
     if not expected:
-        return Check("settings in force as configured", True, "nothing configured to compare")
+        return Check("settings in force as configured", False, "nothing configured to compare")
     problems = []
     seen = []
-    log = [e for e in record.stub_log if e.get("status") == 200]
+    log = _answered(record)
     for key, want in sorted(expected.items()):
-        if key.startswith("model."):
-            roles = _roles_of(key.split(".", 1)[1])
-            models = {e.get("model") for e in log if e.get("role") in roles}
-            if models != {want}:
-                problems.append(f"{key}: expected {want}, the model was asked as {sorted(models)}")
+        group, _, name = key.partition(".")
+        if group in ("model", "effort", "max_tokens") and name:
+            roles = ROLE_GROUPS.get(name, set())
+            field_name = {"model": "model", "effort": "effort", "max_tokens": "max_tokens"}[group]
+            found = {e.get(field_name) for e in log if e.get("role") in roles}
+            if not found:
+                problems.append(f"{key}: no {name} call was made")
+            elif found != {want}:
+                problems.append(
+                    f"{key}: expected {want!r}, requests carried {sorted(found, key=str)}"
+                )
             else:
                 seen.append(key)
         elif key == "effort":
             efforts = {e.get("effort") for e in log}
             if efforts != {want}:
                 problems.append(f"effort: expected {want!r}, requests carried {sorted(efforts)}")
-            else:
-                seen.append(key)
-        elif key.startswith("max_tokens."):
-            roles = _roles_of(key.split(".", 1)[1])
-            caps = {e.get("max_tokens") for e in log if e.get("role") in roles}
-            if caps != {want}:
-                problems.append(f"{key}: expected {want}, requests carried {sorted(caps, key=str)}")
             else:
                 seen.append(key)
         elif key in ("max_steps", "timeout_s"):
@@ -311,13 +496,11 @@ def _check_settings(record: RunRecord) -> Check:
                 problems.append(f"{key}: expected {want}, the run's budget says {values}")
             else:
                 seen.append(key)
-        elif key.startswith("settings."):
+        elif group == "settings" and name:
             snapshot = record.run_summary.get("settings_snapshot")
             if not isinstance(snapshot, dict):
                 problems.append(f"{key}: the run summary carries no settings snapshot")
-                continue
-            name = key.split(".", 1)[1]
-            if snapshot.get(name) != want:
+            elif snapshot.get(name) != want:
                 problems.append(f"{key}: expected {want!r}, the run used {snapshot.get(name)!r}")
             else:
                 seen.append(key)
@@ -336,15 +519,35 @@ def _check_verdict(record: RunRecord) -> Check:
     )
 
 
+def _check_deadline(record: RunRecord) -> Check:
+    deadline = record.scenario_params.get("job_timeout_s")
+    if not deadline:
+        return Check("finished inside its deadline", True, "no deadline configured")
+    margin = float(deadline) - record.elapsed_s
+    ok = margin >= DEADLINE_MARGIN_SHARE * float(deadline)
+    return Check(
+        "finished inside its deadline",
+        ok,
+        f"{record.elapsed_s:.1f}s of a {float(deadline):.0f}s deadline, margin {margin:.1f}s "
+        f"(at least {DEADLINE_MARGIN_SHARE:.0%} required)",
+    )
+
+
 def _check_scenario(record: RunRecord) -> Check:
-    """The fault the scenario names really reached the pipeline, and the run went on."""
+    """The fault the scenario names really reached the pipeline."""
+    from scripts.rehearsal.roles import SCENARIO_WIRES
+
     log = record.stub_log
     scenario = record.scenario
     name = f"the {scenario} scenario happened"
     if not log:
-        return Check(name, scenario == "normal", "no stub log")
+        return Check(name, False, "no stub log")
     faulted = [e for e in log if e.get("fault")]
     roles = Counter(str(e.get("role")) for e in log)
+    wires = SCENARIO_WIRES.get(scenario)
+    if wires is not None and record.api and record.api not in wires:
+        ok = not faulted
+        return Check(name, ok, f"not applicable to the {record.api} wire: run as normal")
     if scenario in ("normal", "cross_loop"):
         problems = []
         if faulted:
@@ -353,14 +556,22 @@ def _check_scenario(record: RunRecord) -> Check:
             analyst_last = max(
                 (e["n"] for e in log if e.get("role") in ("analyst", "revision")), default=0
             )
-            report_calls = [e for e in log if e.get("role") in ("narrative", "composer")]
-            late = [e for e in report_calls if e["n"] > analyst_last and e.get("status") == 200]
+            late = [
+                e
+                for e in log
+                if e.get("role") in ("narrative", "composer")
+                and e["n"] > analyst_last
+                and e.get("status") == 200
+            ]
             if not late:
                 problems.append("no report-stage call answered after the analysts' calls")
         detail = "; ".join(problems) or f"{len(log)} calls: " + ", ".join(
             f"{n} {role}" for role, n in sorted(roles.items())
         )
         return Check(name, not problems, detail)
+    if scenario == "redacted_thinking":
+        thought = [e for e in log if e.get("status") == 200 and e.get("redacted")]
+        return Check(name, bool(thought), f"{len(thought)} answers carried redacted thinking")
     if scenario == "long_loop":
         steps = [
             int((row or {}).get("steps_used") or 0)
@@ -369,51 +580,27 @@ def _check_scenario(record: RunRecord) -> Check:
         want = int(record.scenario_params.get("loop_steps") or 0)
         ok = bool(steps) and (not want or max(steps) >= want)
         return Check(name, ok, f"analyst loop steps {steps}, asked for {want or 'many'}")
-    if scenario == "slow_model":
+    if scenario in ("slow_model", "deadline_hit"):
         delay = float(record.scenario_params.get("slow_seconds") or 0)
-        floor = delay * len([e for e in log if e.get("status") == 200])
-        ok = record.elapsed_s >= floor * 0.9
-        return Check(name, ok, f"{record.elapsed_s:.1f}s elapsed, at least {floor:.1f}s expected")
+        slow = [e for e in log if float(e.get("delay") or 0) >= delay > 0]
+        ok = delay > 0 and len(slow) == len(log) and record.elapsed_s >= delay
+        return Check(
+            name,
+            ok,
+            f"{len(slow)} of {len(log)} calls waited {delay:.1f}s; {record.elapsed_s:.1f}s elapsed",
+        )
     if not faulted:
         return Check(name, False, "no call was faulted")
     hit = sorted({str(e.get("role")) for e in faulted})
-    answered_later = sorted(
-        {
-            str(e.get("role"))
-            for e in log
-            if e.get("status") == 200 and not e.get("fault") and str(e.get("role")) in hit
-        }
-    )
-    # A server error is retried by the client, so every role it hit must be
-    # answered afterwards. Any other fault is the model's answer, which the
-    # pipeline asks again or records; the other checks say which.
-    unanswered = sorted(set(hit) - set(answered_later))
-    ok = not unanswered if scenario == "server_error_once" else True
-    detail = (
-        f"faulted the first call of {', '.join(hit)}; answered afterwards: "
-        f"{', '.join(answered_later) or 'none'}"
-    )
-    if unanswered and scenario == "server_error_once":
-        detail += f"; never answered after the error: {', '.join(unanswered)}"
-    return Check(name, ok, detail)
-
-
-def _check_analysts(record: RunRecord) -> Check:
-    """Every analyst the run started answered: none failed and none was lost to an error."""
-    failed = [str(a) for a in record.run_summary.get("failed_analysts") or []]
-    stats = record.run_summary.get("agent_stats") or []
-    named = [str(s.get("agent_id")) for s in stats if isinstance(s, dict)]
-    if failed:
-        return Check("every analyst answered", False, f"failed: {', '.join(failed)}")
-    return Check(
-        "every analyst answered",
-        True,
-        f"{len(named)} analyst(s): {', '.join(named)}" if named else "no analyst failed",
-    )
+    detail = f"{len(faulted)} faulted first calls of {', '.join(hit)}"
+    return Check(name, True, detail)
 
 
 CHECKS = (
     _check_job,
+    _check_refusals,
+    _check_recognised,
+    _check_probe,
     _check_stages,
     _check_analysts,
     _check_sections,
@@ -423,13 +610,17 @@ CHECKS = (
     _check_claims,
     _check_settings,
     _check_verdict,
+    _check_deadline,
     _check_scenario,
 )
+# What a run whose deadline fired is held to: it has no report to check.
+DEADLINE_CHECKS = (_check_job, _check_refusals, _check_recognised, _check_probe, _check_scenario)
 
 
 def check_run(record: RunRecord) -> list[Check]:
     """Every check of the checklist over one run."""
-    return [check(record) for check in CHECKS]
+    checks = DEADLINE_CHECKS if record.scenario == "deadline_hit" else CHECKS
+    return [check(record) for check in checks]
 
 
 def signature(record: RunRecord, checks: list[Check]) -> dict[str, Any]:
@@ -475,7 +666,7 @@ def as_markdown(record: RunRecord, checks: list[Check]) -> str:
     """One run's result as a short markdown page."""
     passed = all(c.ok for c in checks)
     lines = [
-        f"# Rehearsal: {record.scenario}",
+        f"# Rehearsal: {record.scenario} ({record.api or 'unknown wire'})",
         "",
         f"Result: **{'PASS' if passed else 'FAIL'}** — verdict {record.verdict or 'none'}, "
         f"{record.elapsed_s:.1f}s, {len(record.stub_log)} model calls.",
@@ -495,7 +686,7 @@ def as_markdown(record: RunRecord, checks: list[Check]) -> str:
 
 
 def observations(record: RunRecord) -> dict[str, Any]:
-    """What a run did that no check judges: rounds, retries, degradations, calls and time.
+    """What a run did that no check judges: rounds, retries, degradations, calls, cost, time.
 
     These are the numbers a change meant to save time or calls moves, so two
     rehearsals before and after it can be compared.
@@ -503,15 +694,24 @@ def observations(record: RunRecord) -> dict[str, Any]:
     negotiation = record.run_summary.get("negotiation") or {}
     validation = record.run_summary.get("validation") or {}
     roles = Counter(str(e.get("role")) for e in record.stub_log)
-    busy = sorted((str(e.get("role")), int(e.get("output_tokens") or 0)) for e in record.stub_log)
     deadline = record.scenario_params.get("job_timeout_s")
+    try:
+        usd, _unpriced = priced_usage(record)
+    except Exception:  # noqa: BLE001 — an observation never fails a run
+        usd = None
     return {
         "elapsed_s": round(record.elapsed_s, 2),
-        # How far inside the job's deadline the run finished, where one is known.
         "deadline_margin_s": round(float(deadline) - record.elapsed_s, 2) if deadline else None,
         "model_calls_by_role": dict(sorted(roles.items())),
         "faulted_calls": sum(1 for e in record.stub_log if e.get("fault")),
-        "output_tokens": sum(tokens for _role, tokens in busy),
+        "refused_calls": sum(1 for e in record.stub_log if e.get("refused")),
+        "output_tokens": sum(int(e.get("output_tokens") or 0) for e in record.stub_log),
+        "cache_read_tokens": sum(int(e.get("cache_read_tokens") or 0) for e in record.stub_log),
+        "cache_write_tokens": sum(
+            int(e.get("cache_write_5m_tokens") or 0) + int(e.get("cache_write_1h_tokens") or 0)
+            for e in record.stub_log
+        ),
+        "usd_priced": None if usd is None else round(usd, 6),
         "negotiation_rounds": negotiation.get("rounds_completed"),
         "termination_reason": negotiation.get("termination_reason"),
         "validation_retries": validation.get("retries"),
@@ -524,6 +724,7 @@ def as_json(record: RunRecord, checks: list[Check]) -> dict[str, Any]:
     """One run's result as JSON: the checks, the signature, what it did, the stub's call log."""
     return {
         "scenario": record.scenario,
+        "api": record.api,
         "passed": all(c.ok for c in checks),
         "verdict": record.verdict,
         "elapsed_s": round(record.elapsed_s, 2),
