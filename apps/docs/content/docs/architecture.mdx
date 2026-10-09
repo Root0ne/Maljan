@@ -1615,7 +1615,7 @@ decides.
    none of the technique's words (Ingress Tool Transfer on "downloads and
    writes a file", Native API on "the raw syscall() entry point").
    A technique's procedure words (`validation.procedure_words`) are the
-   commands, calls and artefacts the vendored data that ties an id to its
+   calls, classes and artefacts the vendored data that ties an id to its
    procedures writes for it: the technique card's requirements and indicators
    and the API catalogue's rule for the id (not its import lists), plus a
    sub-technique's parent's. Only identifiers are taken: a name with a capital
@@ -2163,20 +2163,17 @@ turn, each once, and what the analyst answers stands.
     index's rows; a quoted phrase none holds (a capa rule's name, a paraphrase)
     is recorded as not checked. A name or a value inside a statement of absence
     ("does not use X", read by the absence question's own reader) is no claimed
-    one. Nor is a name the sentence's grammar writes as what the code is or
-    does: followed by `-like`, `-style` or `-equivalent` or by
-    `implementation`, `clone`, `replacement`, `equivalent` or `substitute`;
-    or preceded by `implements` / `reimplements` (`its own`), `inlines`,
-    `mimics`, `emulates`, `works like` / `acts as` / `behaves like`,
-    `similar to` / `equivalent of`, or `is a` / `is an` with at most one word
-    between ("is a hand-rolled atoi"), unless what follows says the call
-    itself (`call`, `wrapper`, `slot`, `-shaped`, a parenthesis) or the word
-    between does (`direct`, `resolved`). An article alone does not say it ("a
-    ReadProcessMemory of its own PEB" is a call), nor does a name used as a
-    verb ("`memcpy`s each"); those are read as calls. Each name is read once,
-    at its first place it is claimed, and the absence reader reads only the
-    sentence holding it. The model is asked to write nothing new; the claim
-    format is unchanged.
+    one. Nor is a name the sentence's grammar writes as a copy of the
+    routine, in a closed set of forms: followed by `-like`, `-style` or
+    `-equivalent` or by `implementation`, `reimplementation`, `clone`,
+    `replacement`, `equivalent` or `substitute`, or preceded by `implements` /
+    `reimplements` (`its own` allowed between). Every other place is read as a
+    call: a copula or a likeness ("is a VirtualAlloc helper", "acts as a
+    WinExec launcher", "is a hand-rolled atoi"), an article ("a
+    ReadProcessMemory of its own PEB") and a name used as a verb ("`memcpy`s
+    each"). Each name is read once, at its first place it is claimed, and the
+    absence reader reads only the sentence holding it. The model is asked to
+    write nothing new; the claim format is unchanged.
   - *Whose a value is.* A value is the function's the claim names last before
     it in its own sentence (an abbreviation's dot, or a dot inside a token or a
     number, ends no sentence). When the claim names no function at all, every
@@ -2203,7 +2200,9 @@ turn, each once, and what the analyst answers stands.
     or inside an index row's string (which makes it a sample string), held at
     its own boundaries, so a decoded command line holds the quoted group name
     it passes and a URL the host it names, and a value that is only part of a
-    longer token is held by none.
+    longer token is held by none. The run's texts are indexed once by their
+    runs of letters and digits, and a value is read only in the texts holding
+    its rarest run.
   - *The question.* One per claim block, naming every value held nowhere:
     "claim n names X for function F [ev_…]; neither its listing nor its index
     row [ev_…] holds X, and no function reachable from F through its call

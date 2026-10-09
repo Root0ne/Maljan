@@ -163,9 +163,64 @@ _QUOTED_INSIDE = re.compile(r'"([^"\n]+)"|\'([^\'\n]+)\'|“([^”\n]+)”')
 # A JSON escape a value may be written with; a value of escapes and marks alone
 # spells no letter or digit, and no text can be said to hold or lack it.
 _ESCAPE = re.compile(r"\\(?:u[0-9a-fA-F]{4}|.)")
-# What a reach's texts are joined by: a character no value or text holds, and
-# a boundary to ``whole_value_in``, so no value is read across two texts.
-_SEPARATOR = "\x00"
+# A run of letters and digits: what a whole value's words are, in a text and
+# in the value alike (``_WholeTexts``).
+_RUN_RE = re.compile(r"[a-z0-9]+")
+# The letters a two-character escape is written with (``whole_value_in``
+# reads a value written straight after one as starting there).
+_ESCAPED_RUN_RE = re.compile(r"\\[nrtbf]([a-z0-9]+)")
+
+
+class _WholeTexts:
+    """The run's texts a value is looked for in as a whole value (``whole_value_in``),
+    each text on its own, so no value is read across two texts.
+
+    A text that holds a value as a whole value holds each run of letters and
+    digits the value writes as a whole run of its own (a boundary of a whole
+    value is never a letter or a digit; a run that starts after an escape is
+    indexed from after the escape's letter too). The texts are indexed by their
+    runs once, when a value first needs more than an exact match, and a value
+    is read only in the texts, among those asked about, that hold its rarest
+    run: the reading is ``whole_value_in``'s, its cost the texts that could
+    hold the value.
+    """
+
+    def __init__(self, texts: Iterable[str] = ()) -> None:
+        self.texts = tuple(sorted(set(texts)))
+        self._runs: dict[str, list[int]] | None = None
+
+    def _index(self) -> dict[str, list[int]]:
+        if self._runs is None:
+            runs: dict[str, list[int]] = {}
+            for at, text in enumerate(self.texts):
+                found = set(_RUN_RE.findall(text))
+                if "\\" in text:
+                    found.update(_ESCAPED_RUN_RE.findall(text))
+                for run in found:
+                    runs.setdefault(run, []).append(at)
+            self._runs = runs
+        return self._runs
+
+    def holds(self, value: str, within: Collection[str]) -> bool:
+        """Whether one of ``within`` (texts of these, lower-cased) holds ``value`` as a
+        whole value."""
+        from maljan.agents._indicator_denylists import whole_value_in
+
+        lowered = value.lower()
+        if lowered in within:
+            return True
+        wanted = set(_RUN_RE.findall(lowered))
+        if not wanted:
+            return any(whole_value_in(lowered, text) for text in within)
+        index = self._index()
+        postings = [index.get(run) for run in wanted]
+        if any(posting is None for posting in postings):
+            return False
+        rarest = min((p for p in postings if p is not None), key=len)
+        return any(
+            self.texts[at] in within and whole_value_in(lowered, self.texts[at]) for at in rarest
+        )
+
 
 _CATALOGUE_LOWER: frozenset[str] | None = None
 
@@ -292,8 +347,8 @@ class _Held:
 class _Reach:
     """What the functions reachable from one listed function hold, read once per function.
 
-    ``haystack`` is ``texts`` joined once by a character no value holds, so a
-    string is looked for as a whole value inside any of them in one pass.
+    ``lookup`` is the run's texts, read for a value held as a whole value
+    inside one of ``texts`` (``_WholeTexts``).
     """
 
     functions: frozenset[int]
@@ -302,14 +357,14 @@ class _Reach:
     unnamed: bool
     names: frozenset[str]
     texts: frozenset[str]
-    haystack: str = ""
+    lookup: _WholeTexts | None = None
 
     def holds_text(self, text: str) -> bool:
         """Whether one of the texts is ``text``, or holds it as a whole value
         (``whole_value_in``), as a listing's text is read."""
-        from maljan.agents._indicator_denylists import whole_value_in
-
-        return text in self.texts or whole_value_in(text, self.haystack)
+        if text in self.texts:
+            return True
+        return self.lookup is not None and self.lookup.holds(text, self.texts)
 
 
 @dataclass(frozen=True)
@@ -376,10 +431,11 @@ class FunctionFacts:
     # The sample strings as data: the strings tools' answers, FLOSS's, the blob
     # decoder's, and the index rows' strings.
     strings: EntryTexts = field(default_factory=EntryTexts)
-    # The index rows' strings, each whole, lower-cased, and joined once
-    # (``_SEPARATOR``) for a whole value inside any of them.
+    # The index rows' strings, each whole, lower-cased.
     index_strings: frozenset[str] = frozenset()
-    index_haystack: str = ""
+    # Every text of the rows, the placed values and the index strings, read
+    # for a value held as a whole value inside one of them (``_WholeTexts``).
+    text_lookup: _WholeTexts = field(default_factory=_WholeTexts)
     # Each listed function's reach, read once: the cost is the analyst's
     # listings times the graph, whatever the number of claims.
     reaches: dict[int, _Reach] = field(default_factory=dict)
@@ -470,7 +526,7 @@ class FunctionFacts:
             or any(read.unnamed for read in taken),
             names=frozenset(names),
             texts=frozenset(texts),
-            haystack=_SEPARATOR.join(sorted(texts)),
+            lookup=self.text_lookup,
         )
 
     def offset(self, address: int | None) -> int | None:
@@ -646,7 +702,13 @@ def function_facts(
                 held.texts.append(value.lower())
     strings = EntryTexts.from_ledger(sources)
     facts.index_strings = frozenset(text.lower() for text in index_strings)
-    facts.index_haystack = _SEPARATOR.join(sorted(facts.index_strings))
+    facts.text_lookup = _WholeTexts(
+        [
+            *facts.index_strings,
+            *(text for held in facts.held_by_row.values() for text in held.texts),
+            *(text for held in facts.placed.values() for text in held.texts),
+        ]
+    )
     facts.strings = strings
     facts.known_names = _catalogue_lower() | frozenset(run_names)
     return facts
@@ -907,56 +969,38 @@ class _Clauses:
         return _in_a_negated_object(self.text[start:begin], begin - start)
 
 
-# A routine's name written as what a function is or does, not as a call it
-# makes. The sentence's own grammar says so, and only in these forms:
+# A routine's name written as what a function is, not as a call it makes. The
+# sentence's own grammar says so, and only in a closed set of forms:
 # - right after the name, "-like", "-style" or "-equivalent", or a noun naming
-#   a copy of the routine ("an atoi implementation", "a strdup clone");
+#   a copy of the routine: "implementation", "reimplementation", "clone",
+#   "replacement", "equivalent", "substitute" ("an atoi implementation", "a
+#   strdup clone");
+# - right before it, "implements" or "reimplements", with "its own" or "their
+#   own" allowed between ("implements its own GetProcAddress").
+# Every other place is read as a call: a copula or a likeness ("is a
+# VirtualAlloc helper", "acts as a WinExec launcher") is followed by a role as
+# often as by a copy, and an article alone ("a ReadProcessMemory of its own
+# PEB") writes a call.
 _DESCRIBED_AFTER = re.compile(
     r"`?(?:-(?:like|style|equivalent)\b"
     r"|\s+(?:re-?implementations?|implementations?|clones?|replacements?|equivalents?"
     r"|substitutes?)\b)",
     re.IGNORECASE,
 )
-# - right before it, a verb saying the code is its own copy of the routine
-#   ("reimplements strdup", "implements its own GetProcAddress", "inlines
-#   memcpy"), a likeness ("works like", "acts as", "similar to", "equivalent
-#   of"), or a copula with an indefinite article and at most one word between
-#   ("is an atoi", "is a hand-rolled atoi");
 _DESCRIBED_BEFORE = re.compile(
-    r"(?:\b(?:re-?implement(?:s|ed|ing)?|implement(?:s|ed|ing)?|inlin(?:es|ed|ing|e)"
-    r"|mimic(?:s|ked|king)?|emulat(?:es|ed|ing|e))\s+(?:(?:an?|its|their)\s+)?(?:own\s+)?"
-    r"|\b(?:works?|act(?:s|ing)?|behaves?|functions?|operates?)\s+(?:like|as)\s+(?:an?\s+)?"
-    r"|\b(?:similar|equivalent|analogous|identical)\s+(?:to|of)\s+(?:an?\s+)?"
-    r"|\b(?:is|are|was|were)\s+an?\s+(?:(?P<word>[a-z][\w-]*)\s+)?"
-    r")`?\Z",
+    r"\b(?:re-?)?implement(?:s|ed|ing)?\s+(?:(?:its|their)\s+own\s+)?`?\Z",
     re.IGNORECASE,
 )
-# - and in none of those when what follows the name, or the word before it,
-#   says the call itself: "is a CreateProcessW wrapper", "is a
-#   CreateMutexW-shaped slot call", "is a direct VirtualAlloc".
-_A_CALL_AFTER = re.compile(
-    r"`?(?:-(?:shaped|typed)\b|\s*(?:\(|(?:calls?|imports?|slots?|pointers?|thunks?|stubs?"
-    r"|wrappers?|address(?:es)?|names?|hash(?:es)?|resolution|lookups?)\b))",
-    re.IGNORECASE,
-)
-_CALL_WORDS = frozenset({"call", "direct", "indirect", "imported", "resolved", "dynamic"})
 # How far before a name its describing words are read: past the longest form.
-_DESCRIBED_REACH = 64
+_DESCRIBED_REACH = 40
 
 
 def _described(text: str, start: int, end: int) -> bool:
-    """Whether the routine name at ``text[start:end]`` is written as what the code is or does
-    (the forms above), not as a call it makes.
-
-    An indefinite article alone does not say it: "a ReadProcessMemory of its
-    own PEB" is a call, written as "a decimal atoi of the next field" is.
-    """
+    """Whether the routine name at ``text[start:end]`` is written as what the code is
+    (the forms above), not as a call it makes."""
     if _DESCRIBED_AFTER.match(text, end):
         return True
-    before = _DESCRIBED_BEFORE.search(text[max(start - _DESCRIBED_REACH, 0) : start])
-    if before is None or _A_CALL_AFTER.match(text, end):
-        return False
-    return str(before.group("word") or "").lower() not in _CALL_WORDS
+    return _DESCRIBED_BEFORE.search(text[max(start - _DESCRIBED_REACH, 0) : start]) is not None
 
 
 def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, int, bool]]:
@@ -1104,12 +1148,10 @@ def _held(value: str, api: bool, listings: Sequence[_Held], reached: _Reached) -
 def _a_sample_string(value: str, facts: FunctionFacts) -> bool:
     """Whether a strings source of the run holds ``value`` as data: one of the index rows'
     strings, or a strings tool's answer, holding it as a whole value."""
-    from maljan.agents._indicator_denylists import whole_value_in
     from maljan.utils.written_forms import written_forms
 
     if any(
-        form in facts.index_strings or whole_value_in(form, facts.index_haystack)
-        for form in written_forms(value.lower())
+        facts.text_lookup.holds(form, facts.index_strings) for form in written_forms(value.lower())
     ):
         return True
     strings = facts.strings

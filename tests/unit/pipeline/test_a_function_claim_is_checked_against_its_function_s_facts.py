@@ -557,8 +557,55 @@ class TestAStringHeldAsAWholeValue:
         assert found.not_checked == []
 
 
+class TestTheWholeValueLookup:
+    """The lookup over the run's texts reads exactly as ``whole_value_in`` over each."""
+
+    TEXTS = (
+        'cmd /c net group "ops team" /domain',
+        "https://c2.example.test/live/",
+        "update-channel",
+        '{"line": "first\\nsecond value"}',
+        "alpha",
+        "beta gamma",
+    )
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "ops team",
+            "c2.example.test",
+            "live",
+            "update",
+            "update-channel",
+            "second value",
+            "alpha beta",
+            "gamma",
+            "/domain",
+            '"ops team"',
+            "net group",
+            "team",
+        ],
+    )
+    def test_the_lookup_agrees_with_whole_value_in(self, value: str) -> None:
+        from maljan.agents._indicator_denylists import whole_value_in
+
+        lookup = fc._WholeTexts(self.TEXTS)
+        within = frozenset(self.TEXTS)
+        expected = any(whole_value_in(value, text) for text in self.TEXTS)
+        assert lookup.holds(value, within) is expected
+
+    def test_a_text_outside_the_reach_holds_nothing_for_it(self) -> None:
+        lookup = fc._WholeTexts(self.TEXTS)
+        assert lookup.holds("ops team", frozenset(self.TEXTS))
+        assert not lookup.holds("ops team", frozenset({"alpha"}))
+
+    def test_no_value_is_read_across_two_texts(self) -> None:
+        lookup = fc._WholeTexts(self.TEXTS)
+        assert not lookup.holds("alpha beta", frozenset(self.TEXTS))
+
+
 class TestARoutineNameWrittenAsWhatTheCodeIs:
-    """A routine's name the sentence's grammar writes as what the code is or does is no
+    """A routine's name the sentence's grammar writes as a copy of the routine is no
     claimed call; every other place it is written is read as before."""
 
     @pytest.mark.parametrize(
@@ -572,9 +619,8 @@ class TestARoutineNameWrittenAsWhatTheCodeIs:
                 "GetProcAddress",
             ),
             ("0x2a10 reimplements lstrlenW over the wide buffer.", "lstrlenW"),
-            ("The copy loop works like `memcpy` over the decoded blob.", "memcpy"),
-            ("0x2a10 is an `atoi` for the type field.", "atoi"),
-            ("0x2a10 is a hand-rolled `atoi` for the type field.", "atoi"),
+            ("0x2a10 is a `memcpy` replacement over the decoded blob.", "memcpy"),
+            ("0x2a10 is a `memcpy`-equivalent over the decoded blob.", "memcpy"),
         ],
     )
     def test_a_description_names_no_call(self, sentence: str, name: str) -> None:
@@ -594,6 +640,18 @@ class TestARoutineNameWrittenAsWhatTheCodeIs:
             ("The dispatcher takes a decimal `atoi` of the next field.", "atoi"),
             ("It decodes both blobs and `memcpy`s each into the array.", "memcpy"),
             ("The type comes from `atoi` (0x2c80) of the next field.", "atoi"),
+            # A copula, a likeness or a role noun after the name: read as a call.
+            ("The next step is a VirtualProtect on the decoded page.", "VirtualProtect"),
+            ("0x2a10 is a single VirtualAlloc of 0x10000 bytes.", "VirtualAlloc"),
+            ("0x2a10 is a thin CreateFileW shim over the path.", "CreateFileW"),
+            ("0x2a10 acts as a CreateRemoteThread launcher for the payload.", "CreateRemoteThread"),
+            ("0x2a10 is an InternetOpenW caller that sets the agent.", "InternetOpenW"),
+            ("0x2a10 is a VirtualAlloc helper used by the loader.", "VirtualAlloc"),
+            ("0x2a10 is a direct-syscall NtAllocateVirtualMemory.", "NtAllocateVirtualMemory"),
+            ("The stage works as a WinExec launcher.", "WinExec"),
+            ("Each request is a HttpSendRequestA with the body.", "HttpSendRequestA"),
+            ("0x2a10 is a hand-rolled `atoi` for the type field.", "atoi"),
+            ("The copy loop works like `memcpy` over the decoded blob.", "memcpy"),
         ],
     )
     def test_any_other_place_is_read_as_a_call(self, sentence: str, name: str) -> None:
@@ -601,7 +659,7 @@ class TestARoutineNameWrittenAsWhatTheCodeIs:
         assert name in apis
 
     def test_a_described_name_is_not_asked_and_a_called_one_is(self) -> None:
-        assert not _check(f"{MAIN_VA} is a hand-rolled `atoi` for the type.").violations
+        assert not _check(f"{MAIN_VA} is an `atoi` implementation for the type.").violations
         found = _check(f"{MAIN_VA} calls `atoi` on the type field.")
         (violation,) = found.violations
         assert '"atoi"' in violation.message
