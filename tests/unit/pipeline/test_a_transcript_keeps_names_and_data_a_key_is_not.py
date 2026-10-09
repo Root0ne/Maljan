@@ -251,13 +251,17 @@ _SPAN_UNITS = {
 
 @pytest.mark.parametrize("unit", list(_SPAN_UNITS.values()), ids=list(_SPAN_UNITS))
 def test_dotted_runs_cost_ten_times_a_tenth(unit: str) -> None:
+    """Best of three at each size, so a busy machine does not decide the ratio."""
     import time
 
     took = []
     for size in (100_000, 1_000_000):
         text = unit * (size // len(unit))
-        started = time.perf_counter()
-        scrub(text)
-        scrub_keeping_layout(text)
-        took.append(time.perf_counter() - started)
+        best = float("inf")
+        for _ in range(3):
+            started = time.perf_counter()
+            scrub(text)
+            scrub_keeping_layout(text)
+            best = min(best, time.perf_counter() - started)
+        took.append(best)
     assert took[1] <= max(took[0], 0.01) * 12, took
