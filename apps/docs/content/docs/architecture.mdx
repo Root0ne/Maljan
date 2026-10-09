@@ -4427,7 +4427,13 @@ is assembled from what the run gathered rather than recomputed beside it:
   in records it — the model decides what goes in and the platform copies no
   string in), the commands (`CommandRow{id, name, description,
   evidence_refs}`) and the C2 channels, which now carry their endpoints and
-  citations; the conclusion is no longer asked for. Every section's contract
+  citations; the conclusion is no longer asked for. No section's prompt reads
+  another section's answer or anything one changes, so the sections are
+  written at once where `llm.parallel_analysts` lets the reporter's models
+  serve concurrent requests and one after another where it does not, with the
+  same requests either way; each section's answer, findings, degradation
+  sentences and flagged sentences are applied in the fixed section order
+  (`ReportComposer._author_at_once`, `_settle`). Every section's contract
   (`composer.section_contract`) says that a list item is written only with a
   value and never with nulls, and that a value is a JSON string, numbers
   included: a configuration section whose items carried `"value": null` —
