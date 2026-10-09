@@ -725,10 +725,13 @@ def probe_plan(provider: str, endpoint: object, model: str = "") -> tuple[Ask, .
         name = str(model or "").strip()
         if not name:
             return ()
+        # A configured address (``llm.anthropic.base_url``) is asked in place
+        # of the vendor's; the vendor's own name is no address.
+        anthropic_root = root if "://" in root else ANTHROPIC_API_ROOT
         return (
             Ask(
                 "GET",
-                f"{ANTHROPIC_API_ROOT}{ANTHROPIC_MODEL_PATH}{quote(name, safe='')}",
+                f"{anthropic_root}{ANTHROPIC_MODEL_PATH}{quote(name, safe='')}",
                 None,
                 window_from_anthropic_model,
                 ANTHROPIC_MODELS_API,

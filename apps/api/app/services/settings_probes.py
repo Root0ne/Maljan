@@ -412,8 +412,11 @@ def _completion_request(
         effort = str(reasoning_effort or "").strip()
         if effort:
             anthropic_body["output_config"] = {"effort": effort}
+        # A configured address (``llm.anthropic.base_url``) is asked where a
+        # job would send; the vendor's own name is no address.
+        root = base if "://" in base else "https://api.anthropic.com"
         return (
-            "https://api.anthropic.com/v1/messages",
+            f"{root}/v1/messages",
             {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION},
             anthropic_body,
         )
@@ -478,15 +481,17 @@ async def _probe_llm_anthropic(v: dict[str, Any]) -> ProbeResult:
         "x-api-key": str(v.get("anthropic_api_key") or ""),
         "anthropic-version": ANTHROPIC_VERSION,
     }
-    ok, detail, r = await _get("https://api.anthropic.com/v1/models", headers)
+    endpoint = endpoint_where("anthropic", anthropic_base_url=v.get("anthropic_base_url"))
+    root = endpoint if "://" in endpoint else "https://api.anthropic.com"
+    ok, detail, r = await _get(f"{root}/v1/models", headers)
     if not ok or r is None:
-        return ProbeResult(False, _ms(t0), _listing_failed("https://api.anthropic.com", detail))
+        return ProbeResult(False, _ms(t0), _listing_failed(root, detail))
     models = [m.get("id", "") for m in r.json().get("data", [])]
     model = v.get("anthropic_expert_model") or (models[0] if models else "")
     # Anthropic has one endpoint, so a per-agent entry differs only in its
     # model; each is still asked, because the key may be refused for one model
     # and not another.
-    pairs = _pairs_to_file(v, "anthropic", endpoint_where("anthropic"), str(model))
+    pairs = _pairs_to_file(v, "anthropic", endpoint, str(model))
     reached, broken, untried = await _complete_each_pair(
         "anthropic",
         pairs,
@@ -581,6 +586,7 @@ def _pairs_to_file(
             agent_base,
             openai_base_url=v.get("base_url"),
             ollama_base_url=v.get("ollama_base_url"),
+            anthropic_base_url=v.get("anthropic_base_url"),
         )
         at = f" at effort {effort}" if effort else ""
         pairs.setdefault(
@@ -1685,6 +1691,8 @@ _INPUTS: dict[str, dict[str, str]] = {
         "core.llm.openai.disable_thinking": "disable_thinking",
         "core.llm.openai.reasoning_effort": "reasoning_effort",
         "core.llm.anthropic.api_key": "anthropic_api_key",
+        # Where a job's Anthropic calls go, so the probe asks the same place.
+        "core.llm.anthropic.base_url": "anthropic_base_url",
         "core.llm.anthropic.expert_model": "anthropic_expert_model",
         "core.llm.anthropic.judge_model": "anthropic_judge_model",
         # The effort every Anthropic request carries; a probe without it asks a

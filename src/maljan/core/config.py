@@ -140,6 +140,11 @@ class AnthropicConfig(BaseModel):
     """Anthropic-specific model selection."""
 
     api_key: SecretStr | None = None
+    # Where every Anthropic request goes: a job's calls, the Models API
+    # question and the settings probe. ``None``, the default, is the Anthropic
+    # API itself. An address here is a proxy, or the loopback stub a rehearsal
+    # runs against, written without ``/v1`` (the client adds the path).
+    base_url: str | None = None
     expert_model: str = "claude-sonnet-4-20250514"
     judge_model: str = "claude-sonnet-4-20250514"
     # The effort every request is sent with, as ``output_config.effort``.
@@ -153,6 +158,14 @@ class AnthropicConfig(BaseModel):
     # vendor's price list prices both) and outlives a pause longer than five
     # minutes between two turns of one conversation.
     prompt_cache_ttl: Literal["5m", "1h"] = "5m"
+
+    @field_validator("base_url", mode="before")
+    @classmethod
+    def _a_blank_address_is_none(cls, value: Any) -> Any:
+        """A cleared field in the console is no address, not an empty one."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 class OllamaConfig(BaseModel):

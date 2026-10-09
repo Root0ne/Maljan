@@ -315,6 +315,18 @@ ANNOTATIONS: dict[str, Annotation] = {
         "probe": "llm",
         "subgroup": "Anthropic",
     },
+    "llm.anthropic.base_url": {
+        "title": "Anthropic base URL",
+        "description": (
+            "Sends every Anthropic request — a job's calls, the Models API question and the "
+            "connection test — to this address instead of the Anthropic API: a proxy, or the "
+            "loopback stub a rehearsal runs against. Written without /v1. Leave empty to use "
+            "the Anthropic API."
+        ),
+        "probe": "llm",
+        "subgroup": "Anthropic",
+        "advanced": True,
+    },
     "llm.anthropic.expert_model": {
         "title": "Anthropic expert model",
         "description": (
