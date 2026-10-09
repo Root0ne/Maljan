@@ -421,14 +421,10 @@ class RetryRecorder(BaseCallbackHandler):
         said to overstate, where none is measured), and the pieces that
         streamed as output.
         """
-        spend = getattr(self.ledger, "spend", None)
-        settle = getattr(spend, "settle", None)
-        if not callable(settle):
-            return
         with contextlib.suppress(Exception):
             usage = _usage_carried(exc)
             if usage is not None:
-                settle(usage, self.model, FAILED_ATTEMPT_CALL)
+                self._charge(usage, None)
                 return
             pieces = int(getattr(exc, PIECES_ATTRIBUTE, 0) or 0)
             if pieces <= 0:
@@ -444,7 +440,23 @@ class RetryRecorder(BaseCallbackHandler):
                 # priced at the share the job measured, where it measured one.
                 AT_CACHED_SHARE: True,
             }
-            settle(None, self.model, FAILED_ATTEMPT_CALL, estimated=estimate)
+            self._charge(None, estimate)
+
+    def _charge(self, usage: dict[str, int] | None, estimated: dict[str, Any] | None) -> None:
+        """Settle one failed attempt, through the ledger so its record is kept with the calls."""
+        charge = getattr(self.ledger, "charge_failed_attempt", None)
+        if callable(charge):
+            charge(
+                usage,
+                agent=self.agent,
+                model=self.model,
+                call=FAILED_ATTEMPT_CALL,
+                estimated=estimated,
+            )
+            return
+        settle = getattr(getattr(self.ledger, "spend", None), "settle", None)
+        if callable(settle):
+            settle(usage, self.model, FAILED_ATTEMPT_CALL, estimated=estimated)
 
 
 # What the spend meter names a failed attempt's charge, and how its estimate

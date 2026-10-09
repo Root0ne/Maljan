@@ -307,6 +307,68 @@ class TestAFailedAttemptIsChargedAsBilled:
         assert len(spend.failed_attempts()) == 3
 
 
+class TestTheyReachThePerCallRecord:
+    """The worker commits every record ``on_call`` hands it, so a killed worker keeps them."""
+
+    @pytest.mark.asyncio
+    async def test_a_retry_and_a_failed_attempt_s_estimate_are_records(self) -> None:
+        records: list[dict[str, Any]] = []
+        ledger = TokenLedger(spend=_Spend())
+        ledger.on_call = records.append
+        failure = _streamed_then_failed(9, {"type": "error", "error": {"type": "api_error"}})
+        llm = attach_retry_recorder(_model([failure, "fine"]), ledger, "static")
+
+        await llm.ainvoke("x" * 400)
+
+        calls = [row["call"] for row in records]
+        assert calls == [FAILED_ATTEMPT_CALL, "retry"]
+        failed, retry = records
+        assert failed["agent"] == "static" and failed["reported"] is False
+        assert failed["estimated"]["output_tokens"] == 9
+        assert failed["estimated"]["input_tokens"] > 0
+        assert retry["agent"] == "static" and retry["reason"]
+
+    @pytest.mark.asyncio
+    async def test_the_usage_an_error_carries_is_a_reported_record(self) -> None:
+        records: list[dict[str, Any]] = []
+        ledger = TokenLedger(spend=_Spend())
+        ledger.on_call = records.append
+        body = {
+            "error": {"type": "overloaded_error"},
+            "usage": {"input_tokens": 50, "output_tokens": 7},
+        }
+        llm = attach_retry_recorder(
+            _model([_streamed_then_failed(3, body), "fine"]), ledger, "static"
+        )
+
+        await llm.ainvoke("hi")
+
+        (failed,) = [row for row in records if row["call"] == FAILED_ATTEMPT_CALL]
+        assert failed["reported"] is True
+        assert (failed["input_tokens"], failed["output_tokens"]) == (50, 7)
+        assert "estimated" not in failed
+
+    @pytest.mark.asyncio
+    async def test_with_no_spend_ceiling_the_records_are_still_kept(self) -> None:
+        records: list[dict[str, Any]] = []
+        ledger = TokenLedger()
+        ledger.on_call = records.append
+        failure = _streamed_then_failed(4, {"error": {"type": "api_error"}})
+        llm = attach_retry_recorder(_model([failure, "fine"]), ledger, "static")
+
+        await llm.ainvoke("hi")
+
+        assert [row["call"] for row in records] == [FAILED_ATTEMPT_CALL, "retry"]
+
+    def test_a_record_of_a_failed_attempt_moves_no_call_count(self) -> None:
+        ledger = TokenLedger()
+        ledger.charge_failed_attempt(
+            {"input_tokens": 5, "output_tokens": 1}, agent="static", model="m", call="x"
+        )
+        ledger.add_retry(agent="static", model="m", reason="r")
+        assert ledger.calls == 0
+
+
 # ---------------------------------------------------------------------------
 # On the wire: the pieces an Anthropic stream carried before its error event
 

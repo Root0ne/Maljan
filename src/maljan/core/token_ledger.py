@@ -287,6 +287,10 @@ def call_record(
     return row
 
 
+# The ``call`` of a record that is a retry of a model request, not a call.
+RETRY_RECORD = "retry"
+
+
 class TokenLedger:
     """Thread-safe tally of what one run's model calls spent, per agent and per model."""
 
@@ -363,10 +367,14 @@ class TokenLedger:
                 self._retries.append({"agent": agent, "model": model, "reason": str(reason)})
         if self.spend is not None:
             self.spend.settle(usage, model, call, estimated=estimated)
+        self._tell(call_record(usage, agent=agent, model=model, call=call))
+
+    def _tell(self, row: dict[str, Any]) -> None:
+        """Hand one record to the listener (``on_call``), where one listens. Never raises."""
         listener = self.on_call
         if listener is not None:
             try:
-                listener(call_record(usage, agent=agent, model=model, call=call))
+                listener(row)
             except Exception:  # noqa: BLE001 — recording never raises
                 pass
 
@@ -375,10 +383,48 @@ class TokenLedger:
 
         Written when the retry is decided, so a call that is then lost, or
         handed to the next model of a list, is counted as one that answers is.
-        Not a call: no call count moves.
+        Not a call: no call count moves. Handed to the listener as a record of
+        its own (``call`` is :data:`RETRY_RECORD`), so a worker that is killed
+        afterwards keeps it.
         """
         with self._lock:
             self._retries.append({"agent": agent, "model": model, "reason": str(reason)})
+        self._tell(
+            {
+                "agent": str(agent),
+                "model": str(model),
+                "call": RETRY_RECORD,
+                "reported": False,
+                "reason": str(reason),
+            }
+        )
+
+    def charge_failed_attempt(
+        self,
+        usage: dict[str, Any] | None,
+        *,
+        agent: str = "",
+        model: str = "",
+        call: str = "",
+        estimated: dict[str, Any] | None = None,
+    ) -> None:
+        """One failed attempt the provider billed: settled on the spend meter, and recorded.
+
+        Not a call: no call count moves. The record carries the usage the error
+        reported, or the stated estimate it was charged at
+        (``estimated``), and goes to the listener so a worker killed
+        afterwards keeps what the attempt cost.
+        """
+        if self.spend is not None:
+            self.spend.settle(usage, model, call, estimated=estimated)
+        row = call_record(usage, agent=agent, model=model, call=call)
+        if usage is None and estimated:
+            row["estimated"] = {
+                "input_tokens": int(estimated.get("input_tokens") or 0),
+                "output_tokens": int(estimated.get("output_tokens") or 0),
+                "source": str(estimated.get("source") or ""),
+            }
+        self._tell(row)
 
     @property
     def input_tokens(self) -> int:
