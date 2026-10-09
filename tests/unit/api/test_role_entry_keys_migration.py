@@ -142,14 +142,37 @@ class TestAnOwnAgentUnderARoleKey:
         assert stage["agents"] == ["mediator_custom", "helper"]
         assert set(rows["core.llm.agents"]) == {"mediator_custom", "helper"}
 
-    def test_a_role_entry_with_no_agent_of_that_name_stays_the_roles(self):
+    def test_an_entry_a_deleted_agent_left_behind_moves_too(self):
+        """No role read ``llm.agents.mediator`` before this revision.
+
+        So one stored then belonged to an agent, never to the role.
+        """
         conn = _connect()
-        _insert(conn, "core.llm.agents", {"mediator": {"provider": "openai", "model": "gpt-x"}})
-        before = _rows(conn)
+        _insert(
+            conn,
+            "core.llm.agents",
+            {
+                "mediator": {"provider": "openai", "model": "gpt-x"},
+                "summarizer": {"provider": "openai", "model": "gpt-s"},
+                "helper": {"provider": "openai", "model": "gpt-y"},
+            },
+        )
 
         _run(_module(), conn)
 
-        assert _rows(conn) == before
+        assert _rows(conn)["core.llm.agents"] == {
+            "mediator_custom": {"provider": "openai", "model": "gpt-x"},
+            "summarizer_custom": {"provider": "openai", "model": "gpt-s"},
+            "helper": {"provider": "openai", "model": "gpt-y"},
+        }
+
+    def test_a_downgrade_puts_a_left_behind_entry_back(self):
+        conn = _connect()
+        _insert(conn, "core.llm.agents", {"mediator": {"provider": "openai", "model": "gpt-x"}})
+        mod = _module()
+        _run(mod, conn)
+        _run(mod, conn, "downgrade")
+        assert set(_rows(conn)["core.llm.agents"]) == {"mediator"}
 
     def test_running_it_twice_changes_nothing_the_second_time(self):
         conn = _connect()

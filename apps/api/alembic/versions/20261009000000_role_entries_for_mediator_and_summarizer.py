@@ -21,8 +21,14 @@ name a seed took; the rewriting is that revision's, loaded from its file. The
 settings model performs the same rename on read, so a database that never
 runs this still loads.
 
-Downgrade puts a renamed definition back when nothing has since taken the old
-name, in the definitions or in ``llm.agents``. The deleted rows are not
+An ``llm.agents`` entry under either key with no definition beside it was
+left by an agent since deleted: no role read the key before this revision.
+It moves to ``<key>_custom`` as well, so the role does not adopt a model the
+operator never gave it. Only this revision can tell such an entry from a role
+entry, because every entry under the key written after it is the role's.
+
+Downgrade puts a renamed definition or entry back when nothing has since taken
+the old name, in the definitions or in ``llm.agents``. The deleted rows are not
 restored: they chose nothing.
 
 Revision ID: 20261009000000
@@ -74,14 +80,42 @@ def upgrade() -> None:
     earlier = _rename_revision()
     definitions = earlier._plain_value(conn, earlier.DEFINITIONS_KEY)
     agent_renames = earlier._rename_map(definitions, ROLE_KEYS, set())
-    if not agent_renames:
+    if agent_renames:
+        earlier._apply(conn, agent_renames, {})
+    moved = {f"agent {old}": new for old, new in agent_renames.items()}
+    moved.update(_move_left_behind_entries(earlier, conn))
+    if not moved:
         return
-    earlier._apply(conn, agent_renames, {})
     earlier.logger.warning(
         "runtime_settings: renamed off a key a model-calling role now reads: %s. "
         "Find them under the new names in Settings.",
-        "; ".join(f"agent {old} -> {new}" for old, new in sorted(agent_renames.items())),
+        "; ".join(f"{old} -> {new}" for old, new in sorted(moved.items())),
     )
+
+
+def _move_left_behind_entries(earlier: ModuleType, conn: sa.engine.Connection) -> dict:
+    """Move an entry under a role key that no definition holds, and say where it went.
+
+    Such an entry was left by an agent since deleted: no role read that key
+    before this revision, so it is never the role's, and it moves off the key
+    as its agent would have. Its new name is free in the definitions and in
+    the entries alike.
+    """
+    llm_agents = earlier._plain_value(conn, earlier.LLM_AGENTS_KEY)
+    if not isinstance(llm_agents, dict):
+        return {}
+    definitions = earlier._plain_value(conn, earlier.DEFINITIONS_KEY)
+    taken = set(llm_agents) | set(definitions if isinstance(definitions, dict) else {})
+    taken |= set(ROLE_KEYS)
+    left_behind = {}
+    for key in ROLE_KEYS:
+        if key in llm_agents:
+            new_key = earlier.free_key(key, taken)
+            taken.add(new_key)
+            left_behind[key] = new_key
+    if left_behind:
+        earlier._store(conn, earlier.LLM_AGENTS_KEY, earlier._rekey(llm_agents, left_behind))
+    return {f"entry {old}": new for old, new in left_behind.items()}
 
 
 def downgrade() -> None:
@@ -100,3 +134,16 @@ def downgrade() -> None:
                 agent_renames[renamed] = original
     if agent_renames:
         earlier._apply(conn, agent_renames, {})
+
+    # An entry this revision moved on its own, with no definition beside it.
+    llm_agents = earlier._plain_value(conn, earlier.LLM_AGENTS_KEY)
+    definitions = earlier._plain_value(conn, earlier.DEFINITIONS_KEY)
+    held = set(definitions) if isinstance(definitions, dict) else set()
+    if isinstance(llm_agents, dict):
+        back = {}
+        for original in ROLE_KEYS:
+            renamed = f"{original}{earlier.RENAME_SUFFIX}"
+            if renamed in llm_agents and renamed not in held and original not in llm_agents:
+                back[renamed] = original
+        if back:
+            earlier._store(conn, earlier.LLM_AGENTS_KEY, earlier._rekey(llm_agents, back))
