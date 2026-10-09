@@ -416,8 +416,10 @@ class RetryRecorder(BaseCallbackHandler):
         connection) generated nothing and is charged nothing. A failure after
         pieces streamed is charged the usage the error carries where it carries
         one, and otherwise a stated estimate: the prompt at
-        ``CHARS_PER_TOKEN`` characters a token, priced as uncached input, and
-        the pieces that streamed as output.
+        ``CHARS_PER_TOKEN`` characters a token, priced with the share of the
+        model's input this job measured read from the cache (as uncached input,
+        said to overstate, where none is measured), and the pieces that
+        streamed as output.
         """
         spend = getattr(self.ledger, "spend", None)
         settle = getattr(spend, "settle", None)
@@ -431,12 +433,16 @@ class RetryRecorder(BaseCallbackHandler):
             pieces = int(getattr(exc, PIECES_ATTRIBUTE, 0) or 0)
             if pieces <= 0:
                 return
+            from maljan.core.spend import AT_CACHED_SHARE
             from maljan.llm.context_window import CHARS_PER_TOKEN
 
             estimate = {
                 "input_tokens": -(-max(0, _prompt_chars(prompt)) // CHARS_PER_TOKEN),
                 "output_tokens": pieces,
                 "source": FAILED_ATTEMPT_ESTIMATE,
+                # A long conversation reads most of its prompt from the cache:
+                # priced at the share the job measured, where it measured one.
+                AT_CACHED_SHARE: True,
             }
             settle(None, self.model, FAILED_ATTEMPT_CALL, estimated=estimate)
 
