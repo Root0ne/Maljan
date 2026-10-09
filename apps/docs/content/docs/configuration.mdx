@@ -1081,7 +1081,14 @@ Appendix B prints it as `narrative:round`. The worker log prints one line per se
 section's wait ("Output budget of `composer:section`: 393216 tokens — the
 model's declared maximum output of 393216 (the vendored table's
 'deepseek-flash' row, from …)"). A fixed budget dropped a live report's
-section when the model's answer outgrew it.
+section when the model's answer outgrew it. The run summary keeps one
+`composer:section` row, the wait last sized: written one after another, that
+is the last section's, sized from the pace measured over the sections before
+it; written at once, every section is sized before any has answered, so the
+row is the last section's wait at the pace measured before the sections began
+(or a later re-sizing of a wait still running). The row describes the wait
+that section got; it is read off wall-clock rates and was never the same
+between two runs, and nothing in the report body reads it.
 
 So each of those calls waits `max(configured, derived)`. Where the model's reading rate is
 measured and the call gives its prompt size (a composer section, the verdict),
