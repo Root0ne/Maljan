@@ -3545,16 +3545,15 @@ _RANSOMWARE_TECHNIQUE = "T1486"
 
 
 def _states_ransomware(report: MalwareReport) -> bool:
-    """Whether the run's own verdict says ransomware.
+    """Whether the run's own verdict says ransomware: the report publishes Data
+    Encrypted for Impact.
 
-    Two facts say it: the category the judge assessed names ransomware, or the
-    judge published Data Encrypted for Impact. What the report model wrote in
-    its encryption table does not: a loader's string cipher fills the same
-    fields, and a model filling "none" into them is still writing.
+    The judge's category is free text ("loader (delivers ransomware)", "loader,
+    not ransomware") and says nothing a word in it can be read for. What the
+    report model wrote in its encryption table does not say it either: a
+    loader's string cipher fills the same fields, and a model filling "none"
+    into them is still writing.
     """
-    category = re.split(r"[^a-z]+", str(report.malware_category or "").lower())
-    if "ransomware" in category:
-        return True
     return any(
         str(row.technique_id).strip().upper().split(".")[0] == _RANSOMWARE_TECHNIQUE
         for row in report.ttp_mappings
