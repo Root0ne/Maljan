@@ -105,6 +105,30 @@ def analyst_keys(settings: Settings) -> list[str]:
     return list(active_profile(settings).analysis_agents)
 
 
+def role_entries_called(settings: Settings, stages: Sequence[Any] | None = None) -> list[str]:
+    """The roles with no definition whose own ``llm.agents`` entry a run calls.
+
+    The mediator runs in a debate stage and the function summariser while
+    ``preprocessing.use_function_summarizer`` is on. Only a role with an entry
+    of its own is named: with none it runs on the global expert model, and
+    what is asked about a run's models — the probe gate, the window — asks
+    about it exactly as it did before the role could have one. ``stages``
+    defaults to the active profile's.
+    """
+    from maljan.core.config import MEDIATOR_AGENT_KEY, SUMMARIZER_AGENT_KEY
+
+    entries = settings.llm.agents
+    run_stages = list(active_profile(settings).stages if stages is None else stages)
+    called: list[str] = []
+    if MEDIATOR_AGENT_KEY in entries and any(
+        getattr(stage, "kind", "") == "debate" for stage in run_stages
+    ):
+        called.append(MEDIATOR_AGENT_KEY)
+    if SUMMARIZER_AGENT_KEY in entries and settings.preprocessing.use_function_summarizer:
+        called.append(SUMMARIZER_AGENT_KEY)
+    return called
+
+
 def stages(settings: Settings) -> list[Any]:
     """The active profile's stages, in the order it declares them."""
     return list(active_profile(settings).stages)

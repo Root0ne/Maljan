@@ -74,7 +74,7 @@ from maljan.agents.tool_fence import (
     json_view,
     needs_fence,
 )
-from maljan.core.config import get_settings
+from maljan.core.config import MEDIATOR_AGENT_KEY, get_settings
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import TokenLedger, structured_answer
@@ -1613,10 +1613,10 @@ class JudgeAgent(BudgetMeter):
         # only the last round's calls while the earlier ones consumed ids.
         self._evidence_entries: list[LedgerEntry] = []
         # Which of the container's models this instance was built on: the
-        # verdict's judge model, or the expert model the mediator runs on. A
-        # call is recorded under the model that answered it, and the
-        # mediator's answers are the expert model's whatever an entry for the
-        # judge says.
+        # verdict's judge model, or the mediator's (``llm.agents.mediator``,
+        # else the expert model). A call is recorded under the model that
+        # answered it, and the mediator's answers are its own model's whatever
+        # an entry for the judge says.
         self._runs_on: str = "judge"
         # What the tool definitions of the current loop weigh with each
         # request, for the budget record and the ticks; none before a loop.
@@ -1701,14 +1701,14 @@ class JudgeAgent(BudgetMeter):
 
     def _model_label(self) -> str:
         """The label of the model this instance calls first, or ``""`` outside a job."""
-        if getattr(self, "_runs_on", "judge") != "expert":
+        if getattr(self, "_runs_on", "judge") != MEDIATOR_AGENT_KEY:
             return super()._model_label()
         config = getattr(getattr(self, "_container", None), "config", None)
         if config is None:
             return ""
-        from maljan.core.model_assignments import global_model_label
+        from maljan.core.model_assignments import model_label_for
 
-        return global_model_label(config, "expert")
+        return model_label_for(config, MEDIATOR_AGENT_KEY)
 
     def _publish_questions(self, conversation: list[Any], already: set[str]) -> None:
         """Publish each question the judge has asked and not published yet.

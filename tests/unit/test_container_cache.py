@@ -100,14 +100,14 @@ class TestServiceContainerCache:
         assert mock_load.call_count == 2
 
     def test_llm_cache_returns_same_object(self) -> None:
-        """Expert LLM cache returns the same object on consecutive calls."""
+        """The mediator LLM cache returns the same object on consecutive calls."""
         container = self._make_container()
         fake_llm = MagicMock()
 
-        # Bypass the mock-mode guard by patching get_expert_llm at the method level
-        with patch.object(container, "get_expert_llm", return_value=fake_llm) as mock_method:
-            llm_a = container.get_expert_llm()
-            llm_b = container.get_expert_llm()
+        # Bypass the mock-mode guard by patching get_mediator_llm at the method level
+        with patch.object(container, "get_mediator_llm", return_value=fake_llm) as mock_method:
+            llm_a = container.get_mediator_llm()
+            llm_b = container.get_mediator_llm()
 
         assert llm_a is llm_b
         assert mock_method.call_count == 2  # called twice, both return same object

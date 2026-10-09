@@ -92,6 +92,47 @@ class TestAStoredAgentUnderASeededName:
         assert cfg.agents.definitions["dynamic"].enabled is False
 
 
+class TestAStoredAgentUnderARoleKey:
+    """``mediator`` and ``summarizer`` are the keys two roles read in ``llm.agents``.
+
+    An operator's own agent under either name had its model entry under the
+    same key, so leaving it there would hand that entry to the role as well.
+    """
+
+    @pytest.mark.parametrize("key", ["mediator", "summarizer"])
+    def test_it_moves_and_its_model_entry_moves_with_it(self, key: str) -> None:
+        cfg = _settings(
+            agents={"definitions": {key: {"role": "generic", "prompt": "mine"}}},
+            llm={"agents": {key: {"provider": "openai", "model": "gpt-x"}}},
+        )
+
+        assert key not in cfg.agents.definitions
+        assert cfg.agents.definitions[f"{key}_custom"].prompt == "mine"
+        assert key not in cfg.llm.agents
+        assert cfg.llm.agents[f"{key}_custom"].model == "gpt-x"
+
+    def test_the_new_name_is_never_an_entry_that_already_exists(self) -> None:
+        cfg = _settings(
+            agents={"definitions": {"mediator": {"role": "generic", "prompt": "mine"}}},
+            llm={
+                "agents": {
+                    "mediator": {"provider": "openai", "model": "the-agents"},
+                    "mediator_custom": {"provider": "openai", "model": "already-there"},
+                }
+            },
+        )
+
+        assert cfg.agents.definitions["mediator_custom_2"].prompt == "mine"
+        assert cfg.llm.agents["mediator_custom_2"].model == "the-agents"
+        assert cfg.llm.agents["mediator_custom"].model == "already-there"
+
+    def test_a_role_entry_with_no_agent_of_that_name_is_the_roles(self) -> None:
+        cfg = _settings(llm={"agents": {"mediator": {"provider": "openai", "model": "gpt-x"}}})
+
+        assert cfg.llm.agents["mediator"].model == "gpt-x"
+        assert "mediator" not in cfg.agents.definitions
+
+
 class TestAStoredTeamUnderASeededName:
     def test_the_configuration_still_loads(self) -> None:
         cfg = _settings(agents={"profiles": {"mobile": {"label": "Mine", "analysts": ["static"]}}})

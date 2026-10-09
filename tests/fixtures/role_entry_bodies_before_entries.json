@@ -1,0 +1,548 @@
+{
+ "anthropic-mediator/framed": {
+  "max_tokens": 128000,
+  "messages": [
+   {
+    "content": [
+     {
+      "cache_control": {
+       "type": "ephemeral"
+      },
+      "text": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+      "type": "text"
+     }
+    ],
+    "role": "user"
+   },
+   {
+    "content": [
+     {
+      "id": "call_0",
+      "input": {
+       "what": "a"
+      },
+      "name": "lookup",
+      "type": "tool_use"
+     }
+    ],
+    "role": "assistant"
+   },
+   {
+    "content": [
+     {
+      "cache_control": {
+       "type": "ephemeral"
+      },
+      "content": "answer for a\n\n=== RUN STATE (derived from the ledger; regenerated each turn) ===\nsample: c\nbudget remaining: 3 model turns\n=== END RUN STATE ===",
+      "is_error": false,
+      "tool_use_id": "call_0",
+      "type": "tool_result"
+     }
+    ],
+    "role": "user"
+   }
+  ],
+  "model": "claude-haiku-5-5",
+  "output_config": {
+   "effort": "max"
+  },
+  "system": "You are an analyst.",
+  "tools": [
+   {
+    "description": "Look it up.",
+    "input_schema": {
+     "properties": {
+      "what": {
+       "default": "",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "lookup"
+   }
+  ]
+ },
+ "anthropic-mediator/plain": {
+  "max_tokens": 128000,
+  "messages": [
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   },
+   {
+    "content": [
+     {
+      "id": "call_0",
+      "input": {
+       "what": "a"
+      },
+      "name": "lookup",
+      "type": "tool_use"
+     }
+    ],
+    "role": "assistant"
+   },
+   {
+    "content": [
+     {
+      "cache_control": {
+       "type": "ephemeral"
+      },
+      "content": "answer for a",
+      "is_error": false,
+      "tool_use_id": "call_0",
+      "type": "tool_result"
+     }
+    ],
+    "role": "user"
+   },
+   {
+    "content": [
+     {
+      "id": "call_1",
+      "input": {
+       "what": "b"
+      },
+      "name": "lookup",
+      "type": "tool_use"
+     }
+    ],
+    "role": "assistant"
+   },
+   {
+    "content": [
+     {
+      "content": "No reply was recorded for this call.",
+      "tool_use_id": "call_1",
+      "type": "tool_result"
+     },
+     {
+      "text": "Write your report now.",
+      "type": "text"
+     }
+    ],
+    "role": "user"
+   }
+  ],
+  "model": "claude-haiku-5-5",
+  "output_config": {
+   "effort": "max"
+  },
+  "system": "You are an analyst."
+ },
+ "anthropic-mediator/tools": {
+  "max_tokens": 128000,
+  "messages": [
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   },
+   {
+    "content": [
+     {
+      "id": "call_0",
+      "input": {
+       "what": "a"
+      },
+      "name": "lookup",
+      "type": "tool_use"
+     }
+    ],
+    "role": "assistant"
+   },
+   {
+    "content": [
+     {
+      "cache_control": {
+       "type": "ephemeral"
+      },
+      "content": "answer for a",
+      "is_error": false,
+      "tool_use_id": "call_0",
+      "type": "tool_result"
+     }
+    ],
+    "role": "user"
+   },
+   {
+    "content": [
+     {
+      "id": "call_1",
+      "input": {
+       "what": "b"
+      },
+      "name": "lookup",
+      "type": "tool_use"
+     }
+    ],
+    "role": "assistant"
+   },
+   {
+    "content": [
+     {
+      "content": "No reply was recorded for this call.",
+      "tool_use_id": "call_1",
+      "type": "tool_result"
+     },
+     {
+      "text": "Write your report now.",
+      "type": "text"
+     }
+    ],
+    "role": "user"
+   }
+  ],
+  "model": "claude-haiku-5-5",
+  "output_config": {
+   "effort": "max"
+  },
+  "system": "You are an analyst.",
+  "tools": [
+   {
+    "description": "Look it up.",
+    "input_schema": {
+     "properties": {
+      "what": {
+       "default": "",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "lookup"
+   }
+  ]
+ },
+ "anthropic-summarizer/plain": {
+  "max_tokens": 4096,
+  "messages": [
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   },
+   {
+    "content": [
+     {
+      "id": "call_0",
+      "input": {
+       "what": "a"
+      },
+      "name": "lookup",
+      "type": "tool_use"
+     }
+    ],
+    "role": "assistant"
+   },
+   {
+    "content": [
+     {
+      "cache_control": {
+       "type": "ephemeral"
+      },
+      "content": "answer for a",
+      "is_error": false,
+      "tool_use_id": "call_0",
+      "type": "tool_result"
+     }
+    ],
+    "role": "user"
+   },
+   {
+    "content": [
+     {
+      "id": "call_1",
+      "input": {
+       "what": "b"
+      },
+      "name": "lookup",
+      "type": "tool_use"
+     }
+    ],
+    "role": "assistant"
+   },
+   {
+    "content": [
+     {
+      "content": "No reply was recorded for this call.",
+      "tool_use_id": "call_1",
+      "type": "tool_result"
+     },
+     {
+      "text": "Write your report now.",
+      "type": "text"
+     }
+    ],
+    "role": "user"
+   }
+  ],
+  "model": "claude-haiku-5-5",
+  "model_override": "llama3.2:3b",
+  "output_config": {
+   "effort": "max"
+  },
+  "provider_override": "ollama",
+  "system": "You are an analyst."
+ },
+ "deepseek-mediator/framed": {
+  "extra_body": {
+   "max_tokens": 8192
+  },
+  "max_completion_tokens": 8192,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   },
+   {
+    "content": null,
+    "reasoning_content": "first I look",
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"a\"}",
+       "name": "lookup"
+      },
+      "id": "call_0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "answer for a\n\n=== RUN STATE (derived from the ledger; regenerated each turn) ===\nsample: c\nbudget remaining: 3 model turns\n=== END RUN STATE ===",
+    "role": "tool",
+    "tool_call_id": "call_0"
+   }
+  ],
+  "model": "deepseek-flash",
+  "reasoning_effort": "max",
+  "stream": false,
+  "temperature": 0.1,
+  "tools": [
+   {
+    "function": {
+     "description": "Look it up.",
+     "name": "lookup",
+     "parameters": {
+      "properties": {
+       "what": {
+        "default": "",
+        "type": "string"
+       }
+      },
+      "type": "object"
+     }
+    },
+    "type": "function"
+   }
+  ]
+ },
+ "deepseek-mediator/plain": {
+  "extra_body": {
+   "max_tokens": 8192
+  },
+  "max_completion_tokens": 8192,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"a\"}",
+       "name": "lookup"
+      },
+      "id": "call_0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "answer for a",
+    "role": "tool",
+    "tool_call_id": "call_0"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"b\"}",
+       "name": "lookup"
+      },
+      "id": "call_1",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "No reply was recorded for this call.",
+    "role": "tool",
+    "tool_call_id": "call_1"
+   },
+   {
+    "content": "Write your report now.",
+    "role": "user"
+   }
+  ],
+  "model": "deepseek-flash",
+  "reasoning_effort": "max",
+  "stream": false,
+  "temperature": 0.1
+ },
+ "deepseek-mediator/tools": {
+  "extra_body": {
+   "max_tokens": 8192
+  },
+  "max_completion_tokens": 8192,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   },
+   {
+    "content": null,
+    "reasoning_content": "first I look",
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"a\"}",
+       "name": "lookup"
+      },
+      "id": "call_0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "answer for a",
+    "role": "tool",
+    "tool_call_id": "call_0"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"b\"}",
+       "name": "lookup"
+      },
+      "id": "call_1",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "No reply was recorded for this call.",
+    "role": "tool",
+    "tool_call_id": "call_1"
+   },
+   {
+    "content": "Write your report now.",
+    "role": "user"
+   }
+  ],
+  "model": "deepseek-flash",
+  "reasoning_effort": "max",
+  "stream": false,
+  "temperature": 0.1,
+  "tools": [
+   {
+    "function": {
+     "description": "Look it up.",
+     "name": "lookup",
+     "parameters": {
+      "properties": {
+       "what": {
+        "default": "",
+        "type": "string"
+       }
+      },
+      "type": "object"
+     }
+    },
+    "type": "function"
+   }
+  ]
+ },
+ "deepseek-summarizer/plain": {
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"a\"}",
+       "name": "lookup"
+      },
+      "id": "call_0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "answer for a",
+    "role": "tool",
+    "tool_call_id": "call_0"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"b\"}",
+       "name": "lookup"
+      },
+      "id": "call_1",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "No reply was recorded for this call.",
+    "role": "tool",
+    "tool_call_id": "call_1"
+   },
+   {
+    "content": "Write your report now.",
+    "role": "user"
+   }
+  ],
+  "model": "deepseek-flash",
+  "model_override": "llama3.2:3b",
+  "provider_override": "ollama",
+  "reasoning_effort": "max",
+  "stream": false,
+  "temperature": 0.1
+ }
+}

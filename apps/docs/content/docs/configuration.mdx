@@ -134,6 +134,32 @@ temperature, base URL and reasoning effort — so the analysts and the judge nee
 not share a single model. It is a JSON leaf of its own and is ordinarily edited from the
 Agents page, one agent at a time.
 
+Two keys of it belong to model-calling roles that are no agent definition:
+`mediator`, the debate stage's mediator, and `summarizer`, the function
+summariser. The Agents page lists both under **Roles with a model entry only**,
+with the same model fields and a **Test model** button that asks each model of
+the entry for one short answer and files it for the probe gate. With no entry
+either runs on the global expert model at the global effort, exactly as before
+the keys existed. The mediator does not fall back to `llm.agents.judge`: a judge
+entry moves the verdict calls and never the mediation. No agent definition may
+take either key; one stored under it before is renamed to `<key>_custom` with
+every reference, its own `llm.agents` entry included.
+
+The function summariser used to name its model with
+`preprocessing.summarizer_provider` and `preprocessing.summarizer_model`. Neither
+ever reached a model — the summariser ran on the global expert model whatever
+they held, and the two values travelled as top-level fields of every summariser
+request. The Anthropic Messages API refuses a field it does not know, as does an
+OpenAI-compatible server that refuses unknown parameters, so on those endpoints
+every summary request failed and the summariser passed its raw input to the
+analysts. Its requests now carry neither field, so there it summarises on the
+expert model and the analysts receive summaries where they used to receive raw
+text. Both settings are gone and their stored rows deleted; no entry
+is made from them, since that would move a summariser onto a model it has
+never called. `llm.agents.summarizer` is what sets it now, and its model is
+still built with no output cap of its own, each call held to what its window
+leaves.
+
 The base URL is per agent, and applies to the `openai` and `ollama` providers
 only: Anthropic and Gemini are vendor APIs with no endpoint to override, and an
 override set against them is rejected on save. Two agents can therefore sit on
@@ -317,13 +343,19 @@ is the one sent before. An `ollama` or `gemini` entry that names one is refused
 on save: neither provider sends a reasoning effort. Nothing sets a level by
 default.
 
-Two model-calling roles have no entry of their own and run on the global
-expert model at the global effort: the negotiation mediator and the function
-summariser. Every other role is set by an entry: each analyst by its own key
-(its revision round runs on the same model), `judge` for the verdict calls and
-`reporter` for the narrative and the composer sections, which run on the judge
-role's global model while `reporter` has no entry (the build line then says
-`role=judge`).
+Every model-calling role reads an entry: each analyst its own key (its
+revision round runs on the same model), `judge` the verdict calls, `reporter`
+the narrative and the composer sections, `mediator` the debate stage's
+mediation and `summarizer` the function summariser. An absent entry falls back
+to a global role model: `judge` for the reporter (the build line then says
+`role=judge`), `expert` for every other key, the mediator included. What
+follows an entry follows these two as well — the output cap derived from the
+entry's model and logged as `Output cap for mediator`, the model each ledger
+row and `run_summary.models` records the call under, the `Building dedicated
+LLM for agent 'mediator'` line, the run's window, and the probe gate, which
+checks a role's entry when the run calls the role (a debate stage, the
+summariser switched on) and leaves a role with no entry to the global expert
+model as before.
 
 The Agents page offers the field once an entry names a model, with the levels
 the backend serves for that provider and model (`GET
@@ -2723,8 +2755,12 @@ sets `Content-Disposition: attachment; filename=maljan-settings.json`:
 `POST /api/v1/settings/import` (admin) accepts the same document. A `format`
 other than `maljan-settings/1` is rejected with 422; unknown or read-only keys
 are rejected with 422 and a per-key error, and nothing is applied when any key
-fails. A successful import writes one audit row (`settings.import`) naming the
-applied keys. The console previews the document against the current
+fails. A key of a setting retired with no effect — `core.preprocessing.summarizer_provider`,
+`core.preprocessing.summarizer_model`, `core.reporting.narrative_max_tokens` —
+is refused the same way, and its error says it is retired, what replaced it and
+to delete that key from the file and import again; an export written before the
+retirement carries it only if the setting had been saved. A successful import
+writes one audit row (`settings.import`) naming the applied keys. The console previews the document against the current
 configuration before sending it.
 
 ## Secrets

@@ -278,22 +278,6 @@ def model_label_for(settings: object, agent: str, *, role: str = "expert") -> st
         return ""
 
 
-def global_model_label(settings: object, role: str = "expert") -> str:
-    """The label of the global model for ``role``, whatever any agent's entry says.
-
-    For a caller built on the role's model directly rather than through an
-    agent's entry — the mediator runs on the expert model — so its calls are
-    recorded under the model that answered them. ``""`` when it cannot be read.
-    """
-    try:
-        llm = settings.llm  # type: ignore[attr-defined]
-        provider = str(llm.provider)
-        model = str(llm.judge_model if role == "judge" else llm.expert_model)
-        return _assignment(settings, "", provider, model, None, 0).label
-    except Exception:  # noqa: BLE001 — a label is never worth a lost turn
-        return ""
-
-
 def configured_endpoint_labels(settings: object) -> set[str]:
     """The model endpoints the settings configure, each as a run records it (its label).
 

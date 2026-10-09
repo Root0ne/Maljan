@@ -71,7 +71,7 @@ def _on_new_loop(call: Any) -> Any:
     return result[0]
 
 
-ACCESSORS = ["get_expert_llm", "get_judge_llm", "get_reporter_llm", "get_summarizer_llm"]
+ACCESSORS = ["get_mediator_llm", "get_judge_llm", "get_reporter_llm", "get_summarizer_llm"]
 
 
 class TestOneModelPerLoop:
@@ -130,7 +130,7 @@ class TestWhatRetirementDrops:
         from maljan.core import container as module
 
         container, registry = _container()
-        container.get_expert_llm()
+        container.get_mediator_llm()
         container.get_judge_llm()
         container.get_reporter_llm()
         container.get_summarizer_llm()
@@ -149,7 +149,7 @@ class TestWhatRetirementDrops:
 
         module._drop_llm_caches_on_retirement(object())
 
-        assert len(container._expert_llm_cache) == 0
+        assert len(container._mediator_llm_cache) == 0
         assert len(container._judge_llm_cache) == 0
         assert len(container._reporter_llm_cache) == 0
         assert len(container._summarizer_llm_cache) == 0

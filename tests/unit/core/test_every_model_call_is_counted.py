@@ -36,7 +36,7 @@ from maljan.agents.network_analyst import NetworkAnalyst
 from maljan.agents.static_analyst import StaticAnalyst
 from maljan.analysis.function_summarizer import FunctionSummarizer
 from maljan.core.config import REPORTER_AGENT_KEY, Settings
-from maljan.core.model_assignments import global_model_label, model_label_for
+from maljan.core.model_assignments import model_label_for
 from maljan.core.token_ledger import TokenLedger
 from maljan.llm.fallback import FallbackChatModel
 from maljan.pipeline.mediation_models import MediatorVerdict
@@ -121,19 +121,19 @@ MEDIATION = "CONTRADICTIONS: NONE\nagreement_confidence: 0.95"
 
 
 class TestTheJudge:
-    def test_the_mediator_s_fast_path_is_counted_against_the_expert_model(self) -> None:
+    def test_the_mediator_s_fast_path_is_counted_against_the_mediator_s_model(self) -> None:
         llm, ledger = _model(MEDIATION), TokenLedger()
-        judge = _judge(llm, ledger, runs_on="expert")
+        judge = _judge(llm, ledger, runs_on="mediator")
 
         asyncio.run(judge.mediate(reports={"static": "text"}, history=[]))
 
         assert len(llm.asked) == 1
         assert _calls(ledger, "judge") == 1
-        assert _models(ledger, "judge") == {global_model_label(SETTINGS, "expert"): 1}
+        assert _models(ledger, "judge") == {model_label_for(SETTINGS, "mediator"): 1}
 
     def test_the_question_for_a_missing_contradictions_block_is_counted(self) -> None:
         llm, ledger = _model(), TokenLedger()
-        judge = _judge(llm, ledger, runs_on="expert")
+        judge = _judge(llm, ledger, runs_on="mediator")
 
         asyncio.run(judge.mediate(reports={"static": "text"}, history=[]))
 
@@ -144,7 +144,7 @@ class TestTheJudge:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         llm, ledger = _model(MEDIATION), TokenLedger()
-        judge = _judge(llm, ledger, runs_on="expert")
+        judge = _judge(llm, ledger, runs_on="mediator")
         monkeypatch.setattr(judge, "_supports_structured_output", lambda: True)
 
         asyncio.run(judge.mediate(reports={"static": "text"}, history=[]))
@@ -256,7 +256,7 @@ def test_the_ledger_is_the_sum_of_every_path(monkeypatch: pytest.MonkeyPatch) ->
         return served[-1]
 
     asyncio.run(
-        _judge(model(), ledger, runs_on="expert").mediate(reports={"static": "t"}, history=[])
+        _judge(model(), ledger, runs_on="mediator").mediate(reports={"static": "t"}, history=[])
     )
     asyncio.run(_judge(model("x"), ledger).give_verdict(reports={"static": "t"}, history=[]))
     for cls, name in ((StaticAnalyst, "static"), (DynamicAnalyst, "dynamic")):

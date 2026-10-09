@@ -40,7 +40,13 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from maljan.agents.registry import AgentRegistry
 from maljan.agents.run_evidence_corpus import RunEvidenceCorpus
 from maljan.core.cancellation import Cancellation
-from maljan.core.config import PROMPT_ROLES, REPORTER_AGENT_KEY, Settings
+from maljan.core.config import (
+    MEDIATOR_AGENT_KEY,
+    PROMPT_ROLES,
+    REPORTER_AGENT_KEY,
+    SUMMARIZER_AGENT_KEY,
+    Settings,
+)
 from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger
@@ -113,7 +119,7 @@ def _drop_llm_caches_on_retirement(loop: object) -> None:
     for container in list(_LIVE_CONTAINERS):
         with container._lock:
             for cache in (
-                container._expert_llm_cache,
+                container._mediator_llm_cache,
                 container._judge_llm_cache,
                 container._reporter_llm_cache,
                 container._summarizer_llm_cache,
@@ -226,7 +232,7 @@ def _swap_healed_llm(replaced: object, healed: object) -> None:
     for container in list(_LIVE_CONTAINERS):
         with container._lock:
             for cache in (
-                container._expert_llm_cache,
+                container._mediator_llm_cache,
                 container._judge_llm_cache,
                 container._reporter_llm_cache,
                 container._summarizer_llm_cache,
@@ -403,7 +409,7 @@ class ServiceContainer:
         # to both is the "bound to a different event loop" failure that cost
         # the judge its first verdict request and the narrative round its
         # first attempt on every run.
-        self._expert_llm_cache = PerLoopModels()
+        self._mediator_llm_cache = PerLoopModels()
         self._judge_llm_cache = PerLoopModels()
         self._reporter_llm_cache = PerLoopModels()
         self._summarizer_llm_cache = PerLoopModels()
@@ -549,7 +555,7 @@ class ServiceContainer:
     # LLM accessors
     # ------------------------------------------------------------------
 
-    def _expert_token_cap(self, agent: str = "") -> Any:
+    def _expert_token_cap(self, agent: str) -> Any:
         """The output cap an analyst-role model is built with: the operator's, or derived.
 
         The analyst path was the only unbounded LLM call in the system while
@@ -557,7 +563,7 @@ class ServiceContainer:
         a 19-tool-call static loop produced a forced-synthesis call that ran 19+
         minutes against its 25-minute wall clock. Mirrors ``get_judge_llm``.
         """
-        return self._built_cap("expert_max_tokens", agent or "expert")
+        return self._built_cap("expert_max_tokens", agent)
 
     def _output_cap(self, setting: str, agent: str, *, role: str = "expert") -> int:
         """The output cap one agent's model is built with, in tokens (``_built_cap``)."""
@@ -624,18 +630,29 @@ class ServiceContainer:
         )
         return int(best.tokens)
 
-    def get_expert_llm(self) -> BaseChatModel:
+    def get_mediator_llm(self) -> BaseChatModel:
+        """The model the debate stage's mediator runs on.
+
+        Through the per-agent path, like the judge and the reporter: a
+        configured ``llm.agents.mediator`` decides provider, model,
+        temperature, fallbacks and effort, and with no such entry the expert
+        role picks the model exactly as it did before the entry existed. A
+        judge entry does not move it. Its output cap is derived from the
+        model it calls and recorded under its own name.
+        """
         if self._llm_registry is None:
             raise ConfigurationError("Cannot build LLM in mock mode.")
         loop = _current_loop()
         with self._lock:
-            cached = self._expert_llm_cache.lookup(loop)
+            cached = self._mediator_llm_cache.lookup(loop)
             if cached is None:
-                cap = self._expert_token_cap()
-                cached = self._llm_registry.build_model(role="expert", max_tokens=cap.tokens)
+                cap = self._expert_token_cap(MEDIATOR_AGENT_KEY)
+                cached = self._llm_registry.build_model_for_agent(
+                    MEDIATOR_AGENT_KEY, fallback_role="expert", max_tokens=cap.tokens
+                )
                 record_built_cap(cached, cap)
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
-                self._expert_llm_cache.put(loop, "", cached)
+                self._mediator_llm_cache.put(loop, "", cached)
             return cached
 
     def get_judge_llm(self) -> BaseChatModel:
@@ -690,9 +707,11 @@ class ServiceContainer:
     def get_summarizer_llm(self) -> BaseChatModel:
         """The model the function summariser runs on, per loop like the rest.
 
-        It has its own provider/model overrides, so it is its own accessor
-        rather than the expert one with arguments; what it shares with the
-        others is that its pool belongs to the loop that first awaits it.
+        Through the per-agent path: a configured ``llm.agents.summarizer``
+        decides provider, model, temperature, fallbacks and effort, and with
+        no such entry it is the global expert model, which is what it always
+        ran on. It is built with no output cap, as it always was; each call
+        is held to what its window leaves (``generation_rate``).
         """
         if self._llm_registry is None:
             raise ConfigurationError("Cannot build FunctionSummarizer LLM in mock mode.")
@@ -700,10 +719,8 @@ class ServiceContainer:
         with self._lock:
             cached = self._summarizer_llm_cache.lookup(loop)
             if cached is None:
-                cached = self._llm_registry.build_model(
-                    role="expert",
-                    provider_override=self.config.preprocessing.summarizer_provider,
-                    model_override=self.config.preprocessing.summarizer_model,
+                cached = self._llm_registry.build_model_for_agent(
+                    SUMMARIZER_AGENT_KEY, fallback_role="expert"
                 )
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._summarizer_llm_cache.put(loop, "", cached)
@@ -948,10 +965,10 @@ class ServiceContainer:
         held = self._context_budget
         if held is not None:
             return held
-        from maljan.agents.composition import analyst_keys
+        from maljan.agents.composition import analyst_keys, role_entries_called
         from maljan.llm.context_window import budget_for_settings
 
-        agents = [*analyst_keys(self.config), "judge"]
+        agents = [*analyst_keys(self.config), "judge", *role_entries_called(self.config)]
         budget = budget_for_settings(
             self.config, agents, probe=self._cap_is_derived() and not self.mock
         )
@@ -1212,7 +1229,7 @@ class ServiceContainer:
             if cached is None:
                 from maljan.agents.judge_agent import JudgeAgent
 
-                llm = self.get_judge_llm() if role == "judge" else self.get_expert_llm()
+                llm = self.get_judge_llm() if role == "judge" else self.get_mediator_llm()
                 cached = JudgeAgent(
                     llm=llm,
                     # Without this the judge's structured-output capability
@@ -1221,9 +1238,10 @@ class ServiceContainer:
                     config=self.config,
                 )
                 cached._job_id = self.job_key()
-                # The mediator's instance is built on the expert model, and its
+                # The mediator's instance is built on the mediator's model
+                # (``llm.agents.mediator``, else the expert model), and its
                 # calls are recorded under that model.
-                cached._runs_on = "judge" if role == "judge" else "expert"
+                cached._runs_on = "judge" if role == "judge" else MEDIATOR_AGENT_KEY
                 cached.token_ledger = getattr(self, "_token_ledger", None)
                 cached.generation_rates = getattr(self, "_generation_rates", None)
                 cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
@@ -1500,16 +1518,10 @@ class ServiceContainer:
         return model_label_for(self.config, REPORTER_AGENT_KEY, role="judge")
 
     def _summarizer_model_label(self) -> str:
-        """The label of the model ``get_summarizer_llm`` builds, or ``""``."""
-        from maljan.core.model_assignments import endpoint_for, model_label
+        """The label of the model ``get_summarizer_llm`` builds first, or ``""``."""
+        from maljan.core.model_assignments import model_label_for
 
-        try:
-            pre = self.config.preprocessing
-            provider = str(pre.summarizer_provider or self.config.llm.provider)
-            model = str(pre.summarizer_model or self.config.llm.expert_model)
-            return model_label(provider, model, endpoint_for(self.config, provider))
-        except Exception:  # noqa: BLE001 — a label is never worth a lost summary
-            return ""
+        return model_label_for(self.config, SUMMARIZER_AGENT_KEY)
 
     def get_report_composer(self) -> Any | None:
         """Return the singleton section-wise ReportComposer, or ``None``.
@@ -1764,9 +1776,8 @@ class ServiceContainer:
                     truncation_ledger=getattr(self, "_truncation_ledger", None),
                 )
                 logger.info(
-                    "FunctionSummarizer initialized (%s / %s, max_words=%d).",
-                    self.config.preprocessing.summarizer_provider,
-                    self.config.preprocessing.summarizer_model,
+                    "FunctionSummarizer initialized (%s, max_words=%d).",
+                    self._summarizer_model_label(),
                     self.config.preprocessing.summarizer_max_words,
                 )
             return self._function_summarizer_cache
