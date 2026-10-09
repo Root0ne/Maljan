@@ -1544,21 +1544,28 @@ class ReportComposer:
         enter = getattr(getattr(self, "llm", None), "enter_loop", None)
         if not callable(enter) or seconds <= 0:
             return
-        fan_out = getattr(self, "_fan_out_clock", None)
-        if fan_out is not None:
-            # The sections share one model list: one written at once may
-            # extend its clock, never cut it short for the others.
-            ends = time.monotonic() + float(seconds)
-            if ends <= fan_out:
-                return
-            self._fan_out_clock = ends
         share = getattr(self, "turn_share", None)
         if not isinstance(share, int | float):
             from maljan.llm.fallback import _configured_share
 
             share = _configured_share()
-        if share > 0:
-            enter(float(seconds), float(share))
+        if share <= 0:
+            return
+        fan_out = getattr(self, "_fan_out_clock", None)
+        if fan_out is not None:
+            # The sections share one model list. Written at once, each keeps
+            # a clock of its own where the list offers one, so no section's
+            # first-model deadline outlasts its own wait; otherwise the
+            # shared clock may only be extended, never cut short for others.
+            own = getattr(getattr(self, "llm", None), "enter_task_loop", None)
+            if callable(own):
+                own(float(seconds), float(share))
+                return
+            ends = time.monotonic() + float(seconds)
+            if ends <= fan_out:
+                return
+            self._fan_out_clock = ends
+        enter(float(seconds), float(share))
 
     def _cap_said(self, answer: Any) -> str:
         """The limit a call sent with no held cap ran to, in words."""

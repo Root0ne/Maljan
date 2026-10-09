@@ -436,6 +436,65 @@ def test_a_job_cancelled_inside_one_section_ends_every_other_before_compose_retu
     assert asyncio.run(_run()) == []
 
 
+class TestEachSectionKeepsItsOwnTurnDeadline:
+    @staticmethod
+    def _list() -> Any:
+        from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+
+        from maljan.llm.fallback import FallbackChatModel
+
+        models = [FakeMessagesListChatModel(responses=[AIMessage(content="{}")]) for _ in range(2)]
+        return FallbackChatModel(models=models, labels=["first", "second"], agent="reporter")
+
+    def test_a_short_section_s_first_model_deadline_is_within_its_own_wait(self) -> None:
+        llm = self._list()
+
+        async def _section(seconds: float) -> float:
+            llm.enter_task_loop(seconds, 0.5)
+            await asyncio.sleep(0.01)
+            return float(llm._deadline(0))
+
+        async def _both() -> list[float]:
+            return list(await asyncio.gather(_section(1.0), _section(100.0)))
+
+        short, long = asyncio.run(_both())
+        assert short <= 0.5
+        assert long > 40
+
+    def test_a_task_s_clock_reaches_the_call_it_waits_on_when_it_grows(self) -> None:
+        llm = self._list()
+
+        async def _run() -> float:
+            llm.enter_task_loop(1.0, 0.5)
+
+            async def _call() -> float:
+                await asyncio.sleep(0.02)
+                return float(llm._deadline(0))
+
+            inner = asyncio.ensure_future(_call())
+            llm.enter_task_loop(100.0, 0.5)
+            return await inner
+
+        assert asyncio.run(_run()) > 40
+
+    def test_the_sections_written_at_once_each_start_their_own_clock(self) -> None:
+        entered: list[tuple[str, float]] = []
+
+        class _Listed(_Recorder):
+            def enter_loop(self, seconds: float, share: float) -> None:
+                entered.append(("shared", seconds))
+
+            def enter_task_loop(self, seconds: float, share: float) -> None:
+                entered.append(("own", seconds))
+
+        composer = ReportComposer(llm=_Listed(), per_section_timeout=30, turn_share=0.5)
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            asyncio.run(composer.compose(_report(), _isr(), concurrent=True))
+        assert entered and {kind for kind, _seconds in entered} == {"own"}
+
+
 def test_a_model_that_does_not_cache_is_sent_no_head_note() -> None:
     from maljan.llm.anthropic_history import SHARED_HEAD
 

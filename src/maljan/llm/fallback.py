@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from contextvars import ContextVar
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -207,6 +208,12 @@ def _duration(seconds: float) -> str:
 # answer in rather than none.
 MIN_TURN_DEADLINE_SECONDS = 1.0
 
+# A loop clock one task keeps for itself on a list several tasks call at once
+# (the report composer's sections): ``[list id, ends, share, whole-loop
+# deadline]``. A list, so a clock that grows reaches the call already waiting
+# on it, which runs in a copy of the task's context.
+_TASK_LOOP: ContextVar[list[Any] | None] = ContextVar("maljan_fallback_task_loop", default=None)
+
 
 class FallbackChatModel(BaseChatModel):
     """An agent's models, the next one asked only when the one before failed as a provider.
@@ -315,6 +322,22 @@ class FallbackChatModel(BaseChatModel):
             self._share = float(share)
         self.turn_deadline = float(loop_seconds) * float(share)
 
+    def enter_task_loop(self, loop_seconds: float, share: float) -> None:
+        """Measure this task's turns against its own loop of ``loop_seconds`` starting now.
+
+        For a list several tasks call at once, each with a clock of its own:
+        another task's longer loop never stretches this task's turn deadline
+        past its own wait, and this task's shorter one never cuts another's.
+        Called again in the same task, the clock is moved, and a call already
+        waiting on it reads the new one.
+        """
+        ends = time.monotonic() + float(loop_seconds)
+        clock = _TASK_LOOP.get()
+        if clock is not None and clock[0] == id(self):
+            clock[1:] = [ends, float(share), float(loop_seconds) * float(share)]
+            return
+        _TASK_LOOP.set([id(self), ends, float(share), float(loop_seconds) * float(share)])
+
     def _deadline(self, index: int) -> float | None:
         """This turn's deadline, or ``None`` for the last model on the list.
 
@@ -328,6 +351,11 @@ class FallbackChatModel(BaseChatModel):
         """
         if index + 1 >= len(self.models):
             return None
+        own = _TASK_LOOP.get()
+        if own is not None and own[0] == id(self) and own[2] > 0:
+            _owner, ends, share, whole = own
+            floor = min(MIN_TURN_DEADLINE_SECONDS, whole)
+            return float(max(floor, share * max(0.0, ends - time.monotonic())))
         with self._lock:
             ends, share = self._loop_ends, self._share
         if ends is not None and share > 0:
