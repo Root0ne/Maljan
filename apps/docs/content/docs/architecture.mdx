@@ -1000,7 +1000,8 @@ Two producers use it:
   read no claim), unless it was cut at the output cap, which is described
   rather than repeated. The analyst's closing line
   (`ANALYST_FEEDBACK_CLOSING`) names the block format the parser reads in place
-  of "the same format". The retry's text is logged at debug, and its claim
+  of "the same format"; when the retry is merged by claim number it asks for
+  the claims changed alone (`ANALYST_FEEDBACK_CLOSING_BY_NUMBER`, below). The retry's text is logged at debug, and its claim
   count beside the first answer's, with which one was kept, goes on the loop's
   budget record (`validation_retry`). A retry's findings block travels on the
   retry's own ISR: findings and artifacts follow the answer that is kept, and a
@@ -1594,6 +1595,77 @@ decides.
    and in the report's section 13 (`validation.retry_drop_row`): every value
    masked as model text in the record is, in the case the claim wrote it,
    and the sentence defanged after the mask.
+   **A retry changes only what it writes** (`pipeline.retry_merge`). A claim
+   is named by its block number everywhere: its block's place among the
+   answer's claim blocks, counted from 1 (`validation.claim_block_indexes`),
+   which is what a flag's path (`claims[<block>]`, the function-claim check's
+   included) and every question's "claim N" name. When the answer being fixed
+   was read from one written answer with every block it began read, none set
+   aside by the consistency gate, and any number its headings wrote equal to
+   the block's place (`retry_merge.numbering_unsettled`), and no whole answer
+   is asked for (a cut or repeating answer, a chunk's cut), the retry is asked
+   to write again only the claims it changes, under their numbers, a new claim
+   under a number the answer did not use, `WITHDRAW CLAIM <number>: <reason>`
+   to take one out, and its findings block with only the findings it changes
+   or adds, `WITHDRAW FINDING "<title>": <reason>` taking one out
+   (`ANALYST_FEEDBACK_CLOSING_BY_NUMBER`). WITHDRAW lines are read in any case,
+   with lists and ranges (`WITHDRAW CLAIMS 3, 5 and 7-9`), each block taking
+   the reason of the first line that names it with one and no other; any
+   other line that holds both a claim number and a withdrawing word (withdraw,
+   retract, remove, drop, delete), in either order ("I withdraw claim 2",
+   "Claim 5 is withdrawn", "CLAIM 2 is withdrawn", "Drop claim 2"), is a
+   doubt, the own number of a line the reader reads as a claim heading aside.
+   A heading that withdraws its own claim is a doubt too: a withdrawing word
+   in its note (`CLAIM 2 (withdrawn):`), "withdraw" or "retract" in any form
+   anywhere in its sentence (`CLAIM 2: This claim is withdrawn because …`), or
+   a bare "removed", "dropped" or "deleted" opening its sentence before a
+   mark, the line's end or a reason (`CLAIM 2: [Removed] as unsupported`), so
+   "Drops a.exe" and "Dropped payload a.exe runs" describe a claim. The retry is then
+   merged into the answer by block number (`retry_merge.merge_retry`): the
+   merged answer is the first answer with only the retry's changes, so its
+   disputes and every field the retry does not write stay; a block written
+   again replaces the block of that number, every claim its TECHNIQUE line
+   reads at once; a withdrawn one is out; a new number is added after the
+   answer's claims; every other claim stays as written; a finding is
+   replaced, withdrawn, added or kept by its title the same way. The merge
+   chooses which version of each claim stands and writes no word. Each item a
+   WITHDRAW line names is recorded with the line's reason in
+   `run_summary.validation.retry_withdrawals` (`validation.retry_withdrawn_row`),
+   listed in the run summary and in the report's section 13 under "Items a
+   validation retry withdrew", on every path. One question
+   (`validation.retry_unplaced_question`) is then put about what the merge
+   left as it was and may not be: each claim a question was about that the
+   retry neither wrote again nor withdrew — by the flags' paths, and for the
+   questions that name no path, the claims their checks found (library-only
+   claims, claims a function's facts do not hold, claims whose TECHNIQUE line
+   was not read) — and each finding the retry did not write again while it
+   wrote findings under new titles, which may be the one it renamed. It is
+   read and recorded in `run_summary.validation.retry_drops` as above, a row
+   carrying `merged` and saying the merged retry neither wrote again nor
+   withdrew the item; a claim no question was about that the retry does not
+   mention is no drop. Where the numbers do not place the retry beyond doubt,
+   nothing is merged and the analyst is asked once for its whole corrected
+   answer (`validation.whole_answer_after_retry_question`, naming why), which
+   is read as a whole answer always was, with the kept-retry question; the
+   items its retry withdrew are not asked about again, and with no whole
+   answer the first answer is kept without them. A whole answer stands as
+   written: a withdrawal is recorded only for an item it no longer states (by
+   its values, or for a claim with none, by its sentence), so the record never
+   says an item it publishes was withdrawn. A retry read whole as written that
+   both writes an item again and withdraws it is a doubt too. The doubts: a
+   retry block with no number or a number written twice, a block left unread,
+   a WITHDRAW line not read exactly or naming what the answer has not, a
+   number both written and withdrawn, a retry with nothing to read, a retry
+   cut at the output cap, a sentence written as written under another number,
+   a claim no question was about written again with no value
+   (`claim_drops.claim_values`) in common with the claim whose number it took
+   or with no value on either side, and a retry that wrote again a claim no
+   question was about while it left a claim a question was about neither
+   written nor withdrawn. A retry that numbered none of its blocks and wrote
+   at least as many blocks as the answer is a whole answer as written and is
+   read whole without the extra question, its WITHDRAW lines applied the same
+   way. The loop's record says which (`validation_retry.merge`: what the merge
+   did, or why it merged nothing and whether the whole answer was asked for).
    **A claim that does not describe its technique**
    (`attck.claim_does_not_describe`). A claim whose sentence shares no term
    with the technique it carries — no capability term listing the id, no word

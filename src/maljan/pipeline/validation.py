@@ -52,6 +52,7 @@ from maljan.pipeline.events import (
     safe_finding_value,
     unparsed_answer_kept_sentence,
 )
+from maljan.pipeline.retry_merge import folded_title
 from maljan.schemas.evidence import answer_not_shown, entry_ids_in
 from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
 from maljan.schemas.stix_pattern import read_comparisons
@@ -98,6 +99,22 @@ ANALYST_FEEDBACK_CLOSING = (
     "separated by a line of three dashes (---), then your fenced maljan-findings block if "
     "your answer had one. Only CLAIM blocks are read as claims: a claim written another "
     "way, or left out, is not in the answer."
+)
+# The closing when the answer being fixed numbers each claim by its place in
+# it (``retry_merge.numbering_unsettled``): the retry changes only what it
+# writes, and is merged into that answer by claim number
+# (``retry_merge.merge_retry``).
+ANALYST_FEEDBACK_CLOSING_BY_NUMBER = (
+    "Fix them by writing again only the claims you change. Your claims are numbered in the "
+    "order you wrote them, counted from 1: write each claim you change under its number "
+    "(CLAIM 7:) as its own block of CLAIM, EVIDENCE:, CONFIDENCE: and TECHNIQUE: lines, the "
+    "blocks separated by a line of three dashes (---), and a new claim under a number your "
+    "answer did not use. A claim you do not write again stays in your answer as you wrote "
+    "it. To take a claim out, write a line WITHDRAW CLAIM <number>: <reason>. Your fenced "
+    "maljan-findings block is kept the same way by each finding's title: write it with only "
+    'the findings you change or add, and a line WITHDRAW FINDING "<title>": <reason> takes '
+    "one out; a finding written under a new title is a new finding. Only CLAIM blocks are "
+    "read as claims."
 )
 
 
@@ -8646,8 +8663,7 @@ class RetryDrops:
         return rows
 
 
-def _folded_title(value: Any) -> str:
-    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).split())
+_folded_title = folded_title
 
 
 def retry_drops(
@@ -8669,9 +8685,10 @@ def retry_drops(
     from maljan.pipeline.claim_drops import dropped_claims
 
     asked = {str(value).strip().upper() for value in asked_about if str(value).strip()}
+    aside = {id(item) for item in set_aside}
     claims: list[tuple[Any, tuple[str, ...]]] = []
     for claim, missing in dropped_claims(first, retried, answer):
-        if any(claim is other for other in set_aside):
+        if id(claim) in aside:
             continue
         kept_values = tuple(value for value in missing if value.upper() not in asked)
         if kept_values:
@@ -8682,7 +8699,7 @@ def retry_drops(
     findings = tuple(
         finding
         for finding in getattr(first, "findings", None) or []
-        if _folded_title(getattr(finding, "title", "")) not in titles
+        if _folded_title(getattr(finding, "title", "")) not in titles and id(finding) not in aside
     )
     return RetryDrops(claims=tuple(claims), findings=findings)
 
@@ -8708,6 +8725,51 @@ def retry_drop_question(drops: RetryDrops) -> str:
         + "\nFor each item, write one line: KEEP <label>: <reason> to keep it in your answer "
         "as your first answer wrote it, or WITHDRAW <label>: <reason> to leave it out. Write "
         "nothing else."
+    )
+
+
+def retry_unplaced_question(drops: RetryDrops) -> str:
+    """The one question about what a merged retry left as it was, item by item.
+
+    The claims a question was about that the retry neither wrote again nor
+    withdrew, each named with its claim number, and the findings it did not
+    write again while it wrote findings under new titles. The answer is read
+    as :func:`retry_drop_question`'s is (:func:`read_retry_drop_answers`).
+    """
+    lines = []
+    for label, kind, item, _missing in drops.labelled():
+        if kind == "claim":
+            block = getattr(item, "block", None)
+            number = f" {int(block) + 1}" if block is not None else ""
+            technique = str(getattr(item, "technique_id", "") or "")
+            on_line = f", TECHNIQUE {safe_finding_value(technique)}" if technique else ""
+            lines.append(f"{label}. CLAIM{number}: {safe_finding_value(item.claim)}{on_line}")
+        else:
+            detail = str(getattr(item, "detail", "") or "").strip()
+            said = f": {detail}" if detail else ""
+            lines.append(f"{label}. FINDING: {safe_finding_value(f'{item.title}{said}')}")
+    return (
+        "Your retry neither wrote again nor withdrew these items of your answer: the claims "
+        "you were asked to fix, and the findings your findings block did not write again "
+        "while it wrote findings under new titles. Each stands as your first answer wrote it:\n"
+        + "\n".join(lines)
+        + "\nFor each item, write one line: KEEP <label>: <reason> to keep it in your answer "
+        "as your first answer wrote it, or WITHDRAW <label>: <reason> to leave it out. Write "
+        "nothing else."
+    )
+
+
+# Asked for its whole answer after a retry the claim numbers did not place
+# (``retry_merge.merge_retry``): the opening line, then the reason, then the
+# analysts' closing.
+WHOLE_ANSWER_AFTER_RETRY_LEAD = "Your retry could not be merged into your answer by claim number"
+
+
+def whole_answer_after_retry_question(why: str) -> str:
+    """The one question for the whole answer, after a retry the claim numbers did not place."""
+    return (
+        f"{WHOLE_ANSWER_AFTER_RETRY_LEAD}: {why}. Your answer is now read whole. "
+        f"{ANALYST_FEEDBACK_CLOSING}"
     )
 
 
@@ -8789,8 +8851,15 @@ def retry_drop_row(
     missing: Sequence[str],
     state: str,
     reason: str,
+    *,
+    merged: bool = False,
 ) -> dict[str, str]:
-    """One item a kept retry left out, as the run record keeps it, with its sentence."""
+    """One item a kept retry left out, as the run record keeps it, with its sentence.
+
+    ``merged`` is an item a retry merged into the answer by claim number
+    neither wrote again nor withdrew (``retry_merge``): it never left the
+    answer, and its sentence says so. The row then carries ``merged``.
+    """
     # Masked first, as model text in the record is, then the sentence a
     # reader sees defanged: a mask run over a defanged URL rewrites it.
     from maljan.reporting.renderers.markdown import _defanged_text
@@ -8807,15 +8876,52 @@ def retry_drop_row(
         "missing": stated,
         "state": state,
         "reason": said,
-        "sentence": _defanged_text(_retry_drop_sentence(agent, kind, item, stated, state, said)),
+        **({"merged": "true"} if merged else {}),
+        "sentence": _defanged_text(
+            _retry_drop_sentence(agent, kind, item, stated, state, said, merged=merged)
+        ),
+    }
+
+
+# An item of the first answer a validation retry withdrew with a WITHDRAW
+# line, with the reason the line gave (``retry_merge.read_withdrawals``).
+RETRY_WITHDRAWN_RECORD = "retry_withdrawn"
+
+
+def retry_withdrawn_row(
+    agent: str, revision_round: int, kind: str, text: str, reason: str
+) -> dict[str, str]:
+    """One item a retry withdrew, as the run record keeps it, with its sentence."""
+    from maljan.reporting.renderers.markdown import _defanged_text
+
+    item = safe_answer_text(text)
+    said = safe_answer_text(reason)
+    why = f" ({said})" if said else ", with no reason given"
+    sentence = (
+        f"The {agent} analyst's validation retry withdrew the {kind} "
+        f'"{item}" of its first answer{why}.'
+    )
+    return {
+        "record": RETRY_WITHDRAWN_RECORD,
+        "agent": str(agent),
+        "round": str(int(revision_round or 0)),
+        "kind": str(kind),
+        "item": item,
+        "reason": said,
+        "sentence": _defanged_text(sentence),
     }
 
 
 def _retry_drop_sentence(
-    agent: str, kind: str, item: str, stated: str, state: str, said: str
+    agent: str, kind: str, item: str, stated: str, state: str, said: str, *, merged: bool = False
 ) -> str:
     values = f", stating {stated}," if stated else ""
     why = f" ({said})" if said else ""
+    if merged:
+        return (
+            f"The {agent} analyst's merged validation retry neither wrote again nor withdrew "
+            f'the {kind} "{item}"{values} of its first answer: {state}{why}.'
+        )
     return (
         f"The {agent} analyst's kept validation retry left out the {kind} "
         f'"{item}"{values} of its first answer: {state}{why}.'
@@ -8840,7 +8946,8 @@ def retry_drop_sentences(rows: Sequence[Mapping[str, Any]]) -> list[str]:
             key: tuple[str, ...] = ("sentence", str(row.get("sentence") or ""))
         else:
             key = tuple(
-                str(row.get(field) or "") for field in ("agent", "kind", "item", "missing", "state")
+                str(row.get(field) or "")
+                for field in ("agent", "kind", "item", "missing", "state", "merged")
             )
         groups.setdefault(key, []).append(row)
     out: list[str] = []
@@ -8866,6 +8973,7 @@ def retry_drop_sentences(rows: Sequence[Mapping[str, Any]]) -> list[str]:
             str(first.get("missing") or ""),
             str(first.get("state") or ""),
             "; ".join(reasons),
+            merged=bool(first.get("merged")),
         )
         where = (
             f"revision round {rounds[0]}"
@@ -8960,6 +9068,15 @@ def validation_metrics(
     # each when the analyst was asked (``retry_drop_row``).
     if drops:
         out["retry_drops"] = drops
+    # The items a retry withdrew with a WITHDRAW line, with its reason
+    # (``retry_withdrawn_row``).
+    withdrawn = [
+        {k: v for k, v in row.items() if k != "record"}
+        for row in rows_kept
+        if row.get("record") == RETRY_WITHDRAWN_RECORD
+    ]
+    if withdrawn:
+        out["retry_withdrawals"] = withdrawn
     return out
 
 
