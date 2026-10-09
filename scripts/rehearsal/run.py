@@ -1,30 +1,46 @@
 """Rehearse an analysis at zero cost, and check it against the written checklist.
 
-Against the locally running stack (API + worker, mock sandbox), with every
-model call going to the loopback stub model this script starts (or one already
-running, ``--stub-url``)::
+**The gate** — the operator's own paid configuration, against the running
+stack, with only the model endpoints pointed at the loopback stub this script
+starts::
 
     REHEARSAL_LOGIN=... python scripts/rehearsal/run.py \\
         --api http://127.0.0.1:8000 --email operator@example.org \\
-        --scenario normal --repeat 3 --out rehearsal-results
+        --configure gate --scenario normal --repeat 3
 
-Without the stack, the same pipeline inside this process (``--in-process``)::
+``--configure gate`` reads the stack's settings (``GET /settings``) and saves
+them to ``<out>/settings-snapshot.json``. It then changes only what must
+change for the calls to reach the stub: the OpenAI base URL (and every
+per-agent OpenAI endpoint) or the Anthropic base URL. Where an ``auto``
+setting would resolve differently against a loopback address than against
+the paid endpoint, it is pinned to what it resolves to for the paid endpoint:
+``llm.openai.compat`` to ``standard``, ``llm.parallel_analysts`` to ``true``.
+Nothing may reach a third party: the sandbox becomes the mock, enrichment is
+off and tool servers that answer from outside this machine are disabled.
+Models, efforts, caps, timeouts, agents and keys stay as the operator set
+them, and the checklist expects exactly them in force. The connection test
+runs before anything is saved, and a failed one stops the rehearsal. Every
+change is put back when the rehearsal ends — on success, on failure and on
+Ctrl-C or SIGTERM — and ``--restore <snapshot>`` puts back a snapshot left by
+a run that could not.
+
+``--configure harness`` rehearses the harness's own fixed models and settings
+instead (the in-process ones), with the same snapshot and restore. Without
+``--configure`` nothing on the stack is changed and ``--expect key=value``
+names what to find in force; a run with nothing to compare fails.
+
+Without the stack, the same pipeline inside this process (``--in-process``;
+``scripts/rehearsal/inprocess.py`` says how its setup differs from a paid
+run)::
 
     python scripts/rehearsal/run.py --in-process --scenario normal --repeat 3
 
 Each run submits the synthetic sample (``scripts/rehearsal/sample.py``), waits
-for the job, collects the job, the stored report, its run summary, its STIX
-bundles and markdown and the job's events, and checks them
-(``scripts/rehearsal/checklist.py``). One JSON and one markdown file per run,
-and a summary comparing the runs of a ``--repeat``. The exit code is non-zero
-when any check of any run fails or when repeated runs differ.
-
-The stack must already send its model calls to the stub. ``--configure`` does
-it through the settings API — the OpenAI base URL (or, with ``--provider
-anthropic``, the Anthropic base URL), the models, the effort and the caps the
-checklist then expects in force — and runs the connection test so the probe
-gate admits the job; it prints every key it changed. Without it nothing on the
-stack is changed, and ``--expect key=value`` names what to find in force.
+for the job (and cancels it when the wait runs out), collects the job, the
+stored report, its run summary, its STIX bundles and markdown and the job's
+events, and checks them (``scripts/rehearsal/checklist.py``). One JSON and one
+markdown file per run, and a summary comparing the runs of a ``--repeat``. The
+exit code is non-zero when any check of any run fails or repeated runs differ.
 
 The account's sign-in is read from the environment variable named by
 ``--login-env``; it is never taken on the command line or printed.
@@ -34,8 +50,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import json
 import os
+import signal
 import sys
 import time
 from pathlib import Path
@@ -55,9 +73,13 @@ from scripts.rehearsal.checklist import (  # noqa: E402
 )
 from scripts.rehearsal.roles import SCENARIOS, Brain  # noqa: E402
 from scripts.rehearsal.sample import sample_bytes  # noqa: E402
-from scripts.rehearsal.stub_model import ModelFacts, Pace, StubServer, StubState  # noqa: E402
+from scripts.rehearsal.stub_model import Pace, StubServer, StubState  # noqa: E402
 
 TERMINAL = {"completed", "failed", "cancelled", "canceled"}
+SNAPSHOT_NAME = "settings-snapshot.json"
+# Providers the stub cannot stand in for: a rehearsal that would send one of
+# their calls to the real service is refused rather than run.
+UNREACHABLE_PROVIDERS = {"gemini", "ollama"}
 
 
 def _parse_expect(pairs: list[str]) -> dict[str, Any]:
@@ -89,11 +111,22 @@ class StackClient:
         answer.raise_for_status()
         self._http.headers["Authorization"] = f"Bearer {answer.json()['access_token']}"
 
-    def configure(self, changes: dict[str, Any]) -> list[str]:
+    def values(self) -> dict[str, dict[str, Any]]:
+        """Every setting as the stack holds it: value (secrets masked) and source."""
+        answer = self._http.get("/settings")
+        answer.raise_for_status()
+        return dict(answer.json().get("values") or {})
+
+    def save(self, changes: dict[str, Any]) -> list[str]:
         answer = self._http.patch("/settings", json={"changes": changes})
         if answer.status_code >= 400:
             raise RuntimeError(f"the settings were refused: {answer.text[:500]}")
         return list(answer.json().get("applied") or [])
+
+    def reset(self, key: str) -> None:
+        answer = self._http.delete(f"/settings/{key}")
+        if answer.status_code >= 400 and answer.status_code != 404:
+            raise RuntimeError(f"{key} could not be reset: {answer.text[:300]}")
 
     def probe_models(self, staged: dict[str, Any]) -> dict[str, Any]:
         """The connection test over ``staged`` values, which files a probe row per model.
@@ -118,16 +151,27 @@ class StackClient:
             raise RuntimeError(f"the job was refused: {answer.text[:500]}")
         return str(answer.json()["id"])
 
+    def cancel(self, job_id: str) -> None:
+        self._http.delete(f"/jobs/{job_id}")
+
     def job(self, job_id: str) -> dict[str, Any]:
         answer = self._http.get(f"/jobs/{job_id}")
         answer.raise_for_status()
         return dict(answer.json())
 
     def wait(self, job_id: str, timeout_s: float, poll_s: float = 5.0) -> dict[str, Any]:
+        """The job once it ends; a job still running when the wait runs out is cancelled."""
         deadline = time.monotonic() + timeout_s
         while True:
             job = self.job(job_id)
-            if str(job.get("status")) in TERMINAL or time.monotonic() > deadline:
+            if str(job.get("status")) in TERMINAL:
+                return job
+            if time.monotonic() > deadline:
+                self.cancel(job_id)
+                job = self.job(job_id)
+                job["error_message"] = (
+                    f"the rehearsal stopped waiting after {timeout_s:.0f}s and cancelled the job"
+                )
                 return job
             time.sleep(poll_s)
 
@@ -166,44 +210,221 @@ class StackClient:
         return bundle if isinstance(bundle, dict) else {}
 
 
-def stack_settings(provider: str, stub_root: str, effort: str, judge_max_tokens: int) -> dict:
-    """The settings ``--configure`` writes: the stub's address, the models, effort and caps."""
-    from scripts.rehearsal.inprocess import API_KEY, EXPERT_MODEL, JUDGE_MODEL
+# ---------------------------------------------------------------- configuration
 
-    changes: dict[str, Any] = {
-        "core.llm.provider": provider,
-        "core.llm.judge_max_tokens": judge_max_tokens,
-        "core.sandbox.provider": "mock",
-    }
-    if provider == "anthropic":
-        changes.update(
-            {
-                "core.llm.anthropic.base_url": stub_root,
-                "core.llm.anthropic.api_key": API_KEY,
-                "core.llm.anthropic.expert_model": EXPERT_MODEL,
-                "core.llm.anthropic.judge_model": EXPERT_MODEL,
-                "core.llm.anthropic.effort": effort,
-                "core.llm.agents": {"judge": {"provider": "anthropic", "model": JUDGE_MODEL}},
-            }
+
+def _value(values: dict[str, dict[str, Any]], key: str, default: Any = None) -> Any:
+    row = values.get(key) or {}
+    return row.get("value", default) if isinstance(row, dict) else default
+
+
+def _entries(agents: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every model entry of ``llm.agents``: each agent's own and each of its fallbacks."""
+    out: list[dict[str, Any]] = []
+    for entry in agents.values():
+        if isinstance(entry, dict):
+            out.append(entry)
+            out.extend(f for f in entry.get("fallbacks") or [] if isinstance(f, dict))
+    return out
+
+
+def gate_changes(values: dict[str, dict[str, Any]], stub_root: str) -> dict[str, Any]:
+    """The fewest changes that send the operator's own configuration's calls to the stub.
+
+    Refused when a provider in use is one the stub cannot stand in for.
+    """
+    from maljan.llm.openai_provider import is_local_endpoint
+
+    provider = str(_value(values, "core.llm.provider", "openai"))
+    agents = copy.deepcopy(_value(values, "core.llm.agents", {}) or {})
+    providers = {provider} | {str(e.get("provider")) for e in _entries(agents)}
+    unreachable = sorted(providers & UNREACHABLE_PROVIDERS)
+    if unreachable:
+        raise SystemExit(
+            f"the configuration calls {', '.join(unreachable)}, which the stub cannot stand in "
+            "for; a rehearsal would reach the real service"
         )
-    else:
-        changes.update(
-            {
-                "core.llm.openai.base_url": f"{stub_root}/v1",
-                "core.llm.openai.api_key": API_KEY,
-                "core.llm.openai.expert_model": EXPERT_MODEL,
-                "core.llm.openai.judge_model": EXPERT_MODEL,
-                "core.llm.openai.reasoning_effort": effort,
-                "core.llm.agents": {
-                    "judge": {
-                        "provider": "openai",
-                        "model": JUDGE_MODEL,
-                        "base_url": f"{stub_root}/v1",
-                    }
-                },
-            }
-        )
+    changes: dict[str, Any] = {}
+    if "anthropic" in providers:
+        changes["core.llm.anthropic.base_url"] = stub_root
+    if "openai" in providers:
+        paid = _value(values, "core.llm.openai.base_url")
+        changes["core.llm.openai.base_url"] = f"{stub_root}/v1"
+        if str(
+            _value(values, "core.llm.openai.compat", "auto")
+        ) == "auto" and not is_local_endpoint(paid):
+            changes["core.llm.openai.compat"] = "standard"
+        moved = False
+        for entry in _entries(agents):
+            if entry.get("provider") == "openai" and entry.get("base_url"):
+                entry["base_url"] = f"{stub_root}/v1"
+                moved = True
+        if moved:
+            changes["core.llm.agents"] = agents
+        if str(_value(values, "core.llm.parallel_analysts", "auto")) == "auto" and not (
+            is_local_endpoint(paid)
+        ):
+            changes["core.llm.parallel_analysts"] = "true"
+    changes.update(third_party_off(values))
     return changes
+
+
+def third_party_off(values: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """What keeps a rehearsal from reaching any third party beside the model.
+
+    The sandbox becomes the mock, the threat-intel enrichment is switched off,
+    and every tool server that answers from outside this machine (VirusTotal,
+    the threat-intel lookups, any HTTP server not on loopback) is disabled for
+    the rehearsal. The server map comes back masked and goes back masked; a
+    masked token in a PATCH means "unchanged", so no token is lost.
+    """
+    from maljan.llm.openai_provider import is_local_endpoint
+
+    changes: dict[str, Any] = {}
+    if str(_value(values, "core.sandbox.provider", "mock")) != "mock":
+        changes["core.sandbox.provider"] = "mock"
+    if _value(values, "api.enrichment_enabled", False):
+        changes["api.enrichment_enabled"] = False
+    servers = copy.deepcopy(_value(values, "core.mcp.servers", {}) or {})
+    moved = False
+    for key, server in servers.items():
+        if not isinstance(server, dict) or not server.get("enabled", True):
+            continue
+        remote = str(server.get("transport") or "stdio") != "stdio" and not is_local_endpoint(
+            server.get("url")
+        )
+        if key in ("virustotal", "threatintel") or remote:
+            server["enabled"] = False
+            moved = True
+    if moved:
+        changes["core.mcp.servers"] = servers
+    return changes
+
+
+def gate_expected(values: dict[str, dict[str, Any]], changes: dict[str, Any]) -> dict[str, Any]:
+    """What the run must have in force: the operator's own models, efforts, caps and limits."""
+    provider = str(_value(values, "core.llm.provider", "openai"))
+    agents = _value(values, "core.llm.agents", {}) or {}
+    expert = _value(values, f"core.llm.{provider}.expert_model")
+    effort_key = "effort" if provider == "anthropic" else "reasoning_effort"
+    effort = str(_value(values, f"core.llm.{provider}.{effort_key}", "") or "")
+    expected: dict[str, Any] = {}
+
+    def own(agent: str) -> tuple[Any, Any]:
+        entry = agents.get(agent) if isinstance(agents, dict) else None
+        if isinstance(entry, dict) and entry.get("model"):
+            return entry.get("model"), entry.get("effort") or effort
+        return expert, effort
+
+    for group, agent in (("static", "static"), ("judge", "judge"), ("reporter", "reporter")):
+        model, its_effort = own(agent)
+        if model:
+            expected[f"model.{group}"] = model
+        expected[f"effort.{group}"] = its_effort
+    if expert:
+        expected["model.mediator"] = expert
+    expected["effort.mediator"] = effort
+    cap = _value(values, "core.llm.judge_max_tokens", 0)
+    if cap:
+        expected["max_tokens.judge"] = cap
+    for key in ("react_agent_max_steps", "react_agent_timeout"):
+        if _value(values, f"core.{key}") is not None:
+            expected["max_steps" if key.endswith("steps") else "timeout_s"] = _value(
+                values, f"core.{key}"
+            )
+    for key in (
+        "llm.provider",
+        f"llm.{provider}.expert_model",
+        f"llm.{provider}.judge_model",
+        "llm.judge_max_tokens",
+        "llm.expert_max_tokens",
+        "llm.max_spend_usd_per_job",
+    ):
+        expected[f"settings.{key}"] = changes.get(f"core.{key}", _value(values, f"core.{key}"))
+    for key, value in changes.items():
+        if not key.startswith("core.") or key == "core.mcp.servers":
+            # Not in the run summary's settings snapshot (API settings, the server map).
+            continue
+        name = key.removeprefix("core.")
+        if name == "llm.agents" and isinstance(value, dict):
+            # The run summary's settings snapshot holds an agent entry field by field.
+            for agent, entry in value.items():
+                for field in ("provider", "model", "base_url", "effort"):
+                    if isinstance(entry, dict) and field in entry:
+                        expected[f"settings.llm.agents.{agent}.{field}"] = entry[field]
+            continue
+        expected[f"settings.{name}"] = value
+    return expected
+
+
+def harness_changes(provider: str, stub_root: str) -> dict[str, Any]:
+    """The harness's own fixed settings (the in-process ones) on the stack, sandbox the mock."""
+    from scripts.rehearsal.inprocess import Rehearsal, settings_for
+
+    fixed = settings_for(Rehearsal(provider=provider), stub_root)
+    changes = {f"core.{key}": value for key, value in fixed.items()}
+    # The stack keeps its own static provider, memory and keys: only the sandbox
+    # is the mock, and no secret is touched (a masked value cannot be put back).
+    for key in ("core.static.provider", "core.memory.backend"):
+        changes.pop(key, None)
+    for key in [k for k in changes if k.endswith(".api_key")]:
+        changes.pop(key)
+    return changes
+
+
+class SettingsGuard:
+    """The stack's settings before the rehearsal, saved to a file and put back afterwards."""
+
+    def __init__(self, client: StackClient, snapshot: Path) -> None:
+        self.client = client
+        self.snapshot = snapshot
+        self.saved: dict[str, dict[str, Any]] = {}
+
+    def keep(self, values: dict[str, dict[str, Any]], keys: list[str]) -> None:
+        self.saved = {
+            key: {
+                "source": (values.get(key) or {}).get("source", "default"),
+                "value": (values.get(key) or {}).get("value"),
+            }
+            for key in keys
+        }
+        self.snapshot.parent.mkdir(parents=True, exist_ok=True)
+        self.snapshot.write_text(json.dumps(self.saved, indent=1, default=str), encoding="utf-8")
+
+    def restore(self) -> list[str]:
+        """Put every kept key back; answer what could not be (the snapshot stays for it)."""
+        failed = restore_snapshot(self.client, self.saved)
+        if not failed:
+            self.snapshot.unlink(missing_ok=True)
+        return failed
+
+
+def restore_snapshot(client: StackClient, saved: dict[str, dict[str, Any]]) -> list[str]:
+    """Each key back to its value, or to its default where the operator had set none."""
+    failed: list[str] = []
+    overridden = {k: v["value"] for k, v in saved.items() if v.get("source") == "ui"}
+    if overridden:
+        try:
+            client.save(overridden)
+        except Exception as exc:  # noqa: BLE001 — every key is tried, every failure said
+            failed.append(f"{', '.join(sorted(overridden))}: {exc}")
+    for key, row in saved.items():
+        if row.get("source") != "ui":
+            try:
+                client.reset(key)
+            except Exception as exc:  # noqa: BLE001
+                failed.append(f"{key}: {exc}")
+    return failed
+
+
+def _sigterm_is_interrupt() -> None:
+    def handler(_signum: int, _frame: Any) -> None:
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, handler)
+
+
+# ------------------------------------------------------------------------ runs
 
 
 def _normal_event(event: dict[str, Any]) -> dict[str, Any]:
@@ -220,32 +441,44 @@ def record_from_stack(
     expected: dict[str, Any],
     scenario_params: dict[str, Any],
     elapsed: float,
+    *,
+    api: str = "",
+    probe: dict[str, Any] | None = None,
 ) -> RunRecord:
     """A run's record, read back from the API the way the console reads it."""
+    from scripts.rehearsal.inprocess import claims_from_events, empty_evidence_sections
+
     report = client.report(job_id) or {}
     report_id = str(report.get("id") or "")
-    claims: dict[str, list[str]] = {}
-    for finding in report.get("agent_findings") or []:
-        texts = [
-            str(c.get("claim"))
-            for c in finding.get("claims") or []
-            if isinstance(c, dict) and c.get("claim")
-        ]
-        claims[str(finding.get("agent_name"))] = texts
+    events = [_normal_event(e) for e in client.events(job_id)]
+    malware_report = dict(report.get("malware_report") or {})
+    rows = {
+        str(f.get("agent_name")): [c for c in f.get("claims") or [] if isinstance(c, dict)]
+        for f in report.get("agent_findings") or []
+    }
+    empty: list[str] | None = None
+    if malware_report:
+        try:
+            empty = empty_evidence_sections(malware_report, rows)
+        except Exception:  # noqa: BLE001 — sections nothing can vouch for are not excused
+            empty = None
     return RunRecord(
         scenario=scenario,
+        api=api,
         job_status=str(job.get("status") or ""),
         job_error=str(job.get("error_message") or ""),
         verdict=str(report.get("verdict") or ""),
         run_summary=dict(report.get("run_summary") or {}),
-        malware_report=dict(report.get("malware_report") or {}),
+        malware_report=malware_report,
         markdown=client.markdown(report_id) if report_id else "",
         stix_bundle=client.judge_bundle(report_id) if report_id else {},
         stix_extended=dict(report.get("stix_bundle") or {}),
-        claims_in_force=claims,
-        events=[_normal_event(e) for e in client.events(job_id)],
+        claims_in_force=claims_from_events(events),
+        events=events,
         stub_log=stub_log,
         expected=expected,
+        empty_evidence_sections=empty,
+        probe=dict(probe or {}),
         scenario_params=scenario_params,
         elapsed_s=elapsed,
     )
@@ -272,51 +505,68 @@ def _reset_stub(stub_url: str | None, server: StubServer | None) -> None:
         httpx.post(f"{stub_url.rstrip('/')}/_stub/reset", timeout=10).raise_for_status()
 
 
+def _job_timeout(args: argparse.Namespace, values: dict[str, dict[str, Any]]) -> float | None:
+    if args.job_timeout:
+        return float(args.job_timeout)
+    for key, row in values.items():
+        if "job_timeout" in key and isinstance(row, dict) and row.get("value"):
+            return float(row["value"])
+    return None
+
+
 def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
     password = os.environ.get(args.login_env, "")
     if not password:
         raise SystemExit(f"{args.login_env} is empty: it holds the account's sign-in")
+    if not args.configure and not args.stub_url and not args.stub_port:
+        raise SystemExit("without --configure the stack must already call a stub: name --stub-port")
+    _sigterm_is_interrupt()
     brain = Brain(
-        scenario=args.scenario,
-        loop_steps=args.loop_steps,
-        slow_seconds=args.slow_seconds,
+        scenario=args.scenario, loop_steps=args.loop_steps, slow_seconds=args.slow_seconds
     )
     server: StubServer | None = None
     if not args.stub_url:
         state = StubState(
             brain=brain,
             pace=Pace(args.first_token_seconds, args.tokens_per_second),
-            facts=ModelFacts(window=args.window, slots=args.slots),
+            window=args.window,
+            slots=args.slots,
         )
         server = StubServer(state, args.stub_port).start()
     stub_root = args.stub_url.rstrip("/") if args.stub_url else server.root  # type: ignore[union-attr]
     client = StackClient(args.api)
+    guard = SettingsGuard(client, Path(args.out) / SNAPSHOT_NAME)
     records: list[RunRecord] = []
+    probe: dict[str, Any] = {}
     try:
         client.login(args.email, password)
+        values = client.values()
         expected = _parse_expect(args.expect)
         if args.configure:
-            changes = stack_settings(args.provider, stub_root, args.effort, args.judge_max_tokens)
-            probe = client.probe_models(changes)
-            print(f"connection test: {'ok' if probe.get('ok') else probe.get('detail')}")
-            applied = client.configure(changes)
-            print(f"configured {len(applied)} setting(s) on the stack", flush=True)
-            from scripts.rehearsal.inprocess import EXPERT_MODEL, JUDGE_MODEL
+            if args.configure == "gate":
+                changes = gate_changes(values, stub_root)
+                expected = {**gate_expected(values, changes), **expected}
+            else:
+                from scripts.rehearsal.inprocess import Rehearsal, expected_for
 
-            expected = {
-                "model.static": EXPERT_MODEL,
-                "model.judge": JUDGE_MODEL,
-                "model.mediator": EXPERT_MODEL,
-                "model.reporter": EXPERT_MODEL,
-                "effort": args.effort,
-                "max_tokens.judge": args.judge_max_tokens,
-                **expected,
-            }
+                changes = {**harness_changes(args.provider, stub_root), **third_party_off(values)}
+                expected = {**expected_for(Rehearsal(provider=args.provider)), **expected}
+            answer = client.probe_models(changes)
+            probe = {"ok": bool(answer.get("ok")), "detail": str(answer.get("detail") or "")}
+            print(f"connection test: {'passed' if probe['ok'] else 'failed'}", flush=True)
+            if not probe["ok"]:
+                raise SystemExit(
+                    f"the connection test failed, nothing was changed: {probe['detail']}"
+                )
+            guard.keep(values, list(changes))
+            applied = client.save(changes)
+            print(f"pointed {len(applied)} setting(s) at the stub: {', '.join(sorted(applied))}")
         params = {
             "loop_steps": brain.loop_steps,
             "slow_seconds": brain.slow_seconds,
-            "job_timeout_s": args.job_timeout,
+            "job_timeout_s": _job_timeout(args, values),
         }
+        api = str(_value(values, "core.llm.provider", args.provider))
         for _ in range(args.repeat):
             _reset_stub(args.stub_url, server)
             started = time.monotonic()
@@ -335,13 +585,43 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
                     expected,
                     params,
                     elapsed,
+                    api=api,
+                    probe=probe if args.configure else {"ok": True, "detail": "not asked"},
                 )
             )
     finally:
+        if guard.saved:
+            failed = guard.restore()
+            if failed:
+                print(
+                    f"settings NOT restored ({'; '.join(failed)}); run --restore {guard.snapshot}",
+                    flush=True,
+                )
+            else:
+                print(f"restored {len(guard.saved)} setting(s)", flush=True)
         client.close()
         if server is not None:
             server.stop()
     return records
+
+
+def run_restore(args: argparse.Namespace) -> int:
+    password = os.environ.get(args.login_env, "")
+    if not password:
+        raise SystemExit(f"{args.login_env} is empty: it holds the account's sign-in")
+    saved = json.loads(Path(args.restore).read_text(encoding="utf-8"))
+    client = StackClient(args.api)
+    try:
+        client.login(args.email, password)
+        failed = restore_snapshot(client, saved)
+    finally:
+        client.close()
+    if failed:
+        print("not restored: " + "; ".join(failed))
+        return 1
+    Path(args.restore).unlink(missing_ok=True)
+    print(f"restored {len(saved)} setting(s)")
+    return 0
 
 
 def run_in_process(args: argparse.Namespace) -> list[RunRecord]:
@@ -357,9 +637,8 @@ def run_in_process(args: argparse.Namespace) -> list[RunRecord]:
             first_token_seconds=args.first_token_seconds,
             loop_steps=args.loop_steps,
             slow_seconds=args.slow_seconds,
-            job_timeout_s=args.job_timeout or args.timeout,
-            effort=args.effort,
-            judge_max_tokens=args.judge_max_tokens,
+            job_timeout_s=args.job_timeout or None,
+            chars_per_token=args.chars_per_token,
         )
         records.append(asyncio.run(rehearse(rehearsal)))
     return records
@@ -395,7 +674,7 @@ def write_results(records: list[RunRecord], out: Path) -> int:
     if len(records) > 1:
         listed = "\n  ".join(differences)
         print("runs identical" if not differences else f"runs differ:\n  {listed}")
-    return 1 if failed or differences else 0
+    return 1 if failed or differences or not records else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -408,16 +687,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--email", default="")
     parser.add_argument("--login-env", default="REHEARSAL_LOGIN")
     parser.add_argument("--stub-url", default="", help="a stub already running; else one starts")
-    parser.add_argument("--stub-port", type=int, default=8765)
-    parser.add_argument("--configure", action="store_true", help="point the stack at the stub")
+    parser.add_argument("--stub-port", type=int, default=0, help="0 takes a free port")
+    parser.add_argument(
+        "--configure",
+        choices=["gate", "harness"],
+        default=None,
+        help="point the stack at the stub (gate: the operator's own configuration), then restore",
+    )
+    parser.add_argument("--restore", default="", help="put back a settings snapshot and exit")
     parser.add_argument("--provider", default="openai", choices=["openai", "anthropic"])
-    parser.add_argument("--effort", default="high")
-    parser.add_argument("--judge-max-tokens", type=int, default=9000)
     parser.add_argument("--expect", action="append", default=[], help="key=value in force")
     parser.add_argument("--tokens-per-second", type=float, default=0.0)
     parser.add_argument("--first-token-seconds", type=float, default=0.0)
-    parser.add_argument("--window", type=int, default=200_000)
+    parser.add_argument("--window", type=int, default=None)
     parser.add_argument("--slots", type=int, default=1)
+    parser.add_argument("--chars-per-token", type=int, default=4)
     parser.add_argument("--loop-steps", type=int, default=None)
     parser.add_argument("--slow-seconds", type=float, default=None)
     parser.add_argument("--timeout", type=float, default=3600.0, help="seconds to wait per job")
@@ -425,9 +709,13 @@ def main(argv: list[str] | None = None) -> int:
         "--job-timeout",
         type=float,
         default=None,
-        help="the worker's job timeout, to report how far inside it a run finished",
+        help="the worker's job timeout, when the settings do not carry one",
     )
     args = parser.parse_args(argv)
+    if args.restore:
+        if not args.email:
+            parser.error("--email is required to restore")
+        return run_restore(args)
     if args.repeat < 1:
         parser.error("--repeat is at least 1")
     print(f"scenario {args.scenario}: {SCENARIOS[args.scenario]}", flush=True)
