@@ -666,7 +666,11 @@ _VALUE_RUN = re.compile(r"[^\s\"'`<>;:{}\[\](),=!\\\x80-\U0010ffff]+")
 # The host segment admits ``:`` and ``@`` because a UNC path carries
 # credentials in front of its host exactly as a URL does, and one that did
 # not match the marker was left in the text whole — password included.
-_UNC = r"\\{2,}[A-Za-z0-9._:@-]+\\+."
+# At most eight backslashes in the marker: a JSON escape doubles them, and no
+# UNC path carries more. Unbounded, the marker retried every start inside a long
+# run of backslashes and gave each one back, which is quadratic in the run; a
+# longer run is still read, from its last eight.
+_UNC = r"\\{2,8}[A-Za-z0-9._:@-]+\\+."
 _PATH_RUN = re.compile(
     _AFTER
     + r"(?P<run>(?:/(?!/)|\./|\.\./|~/|[A-Za-z]:(?:\\|/(?!/))|"
@@ -768,7 +772,7 @@ def _is_a_token(run: str) -> bool:
     return decoded.lstrip().startswith(b"{")
 
 
-def _looks_like_a_credential(token: str, *, whole: bool = False) -> bool:
+def _looks_like_a_credential(token: str, *, whole: bool = False, alphabet: bool = True) -> bool:
     """Whether this run of characters is a key rather than a word or a digest.
 
     In this order, and the order is the argument. A digest and an identifier
@@ -818,7 +822,7 @@ def _looks_like_a_credential(token: str, *, whole: bool = False) -> bool:
         return False
     if _PATH_SHAPED.match(token) or _is_words(token):
         return False
-    if _is_api_name(token):
+    if _is_api_name(token, alphabet=alphabet):
         return False
     if _CREDENTIAL_RUN.match(token) or _is_a_token(token):
         return True
@@ -827,8 +831,12 @@ def _looks_like_a_credential(token: str, *, whole: bool = False) -> bool:
     # A key joined to other text by a slash, a bar, a plus or an ampersand is
     # still a key: ``<jwt>/name`` failed every rule anchored to the whole run.
     # ``whole`` asks only the rules that read the run as one.
+    if _glued_token(token) is not None:
+        return True
     pieces = [piece for piece in _JOINS.split(token) if piece]
-    return len(pieces) > 1 and any(_looks_like_a_credential(piece) for piece in pieces)
+    return len(pieces) > 1 and any(
+        _looks_like_a_credential(piece, alphabet=False) for piece in pieces
+    )
 
 
 # The Windows function names and hash-algorithm ids the scrub leaves as
@@ -906,17 +914,113 @@ def _is_a_catalogue_name(name: str) -> bool:
     return name in _RESOLVED_NAMES or name in _catalogue_names() or name in _algorithm_ids()
 
 
-def _is_api_name(token: str) -> bool:
+def _module_names() -> frozenset[str]:
+    """The vendored catalogue's module names, folded to lower case; empty when unread."""
+    global _MODULES
+    if _MODULES is None:
+        try:
+            document = _read_data(_EXPORT_NAMES_FILE)
+            names = (document.get("modules") or {}).get("names") or []
+            _MODULES = frozenset(
+                str(name).lower() for name in [*names, *(document.get("dlls") or {})]
+            )
+        except Exception as exc:  # noqa: BLE001 — the shape rules still run
+            logger.warning(
+                "The module-name catalogue was not read for the scrub (%s).", type(exc).__name__
+            )
+            _MODULES = frozenset()
+    return _MODULES
+
+
+# What a tool writes that the length rule read as a key, each by its exact
+# form: an address or a decimal number (a list of them joined by ``/`` is one
+# run) and a stretch of a base64 alphabet itself (the table a decoder is built
+# from). None is a key's form: a key is not a short number or the alphabet it
+# is written in.
+_MODULES: frozenset[str] | None = None
+_NUMBER_PIECE = re.compile(r"\A(?:0[xX][0-9A-Fa-f]{1,8}|[0-9]{1,8})\Z")
+# Hex is read as the base rules read it: a run holding more hex digits in a row
+# than a number above (eleven or more) is never one of these forms, so a hex
+# dump, a digest in a list or a name ending in long hex is masked as before.
+_LONG_HEX = re.compile(r"[0-9A-Fa-f]{11}")
+# A stretch of an alphabet is that table only at a key's own length floor: a
+# short piece of a key is a stretch of its alphabet too.
+_ALPHABET_SLICE_FLOOR = 24
+_BASE64_ALPHABETS = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+)
+
+
+def _is_a_written_name(token: str, *, alphabet: bool = True) -> bool:
+    """Whether ``token`` is a module name or a stretch of a base64 alphabet: what the
+    scrub keeps by its exact form beside the catalogue."""
+    return bool(token.lower() in _module_names() or (alphabet and _is_an_alphabet_stretch(token)))
+
+
+def _is_an_alphabet_stretch(token: str) -> bool:
+    """Whether ``token`` is, whole, a stretch of 24 or more characters of a base64 alphabet.
+
+    Only a whole run or a whole stretch is read this way, never a piece beside
+    others: a piece of a run is read as the rules always read it, so a key next
+    to the alphabet is masked with the stretch as it was.
+    """
+    return len(token) >= _ALPHABET_SLICE_FLOOR and any(token in a for a in _BASE64_ALPHABETS)
+
+
+def _completes_a_name(piece: str, named: str) -> str:
+    """The catalogue name ``piece`` completes after a head of ``named``, or ``""``.
+
+    How a list abbreviates a name it repeats: ``FindFirstFileA/W`` for the A
+    and W forms, ``NtQueryInformationProcess/Thread`` for the process and the
+    thread form. The completion must itself be a catalogue name.
+    """
+    if not named or not piece[:1].isupper():
+        return ""
+    for end in range(len(named) - 1, 0, -1):
+        whole = named[:end] + piece
+        if _is_a_catalogue_name(whole):
+            return whole
+    return ""
+
+
+def _is_api_name(token: str, *, alphabet: bool = True) -> bool:
     """Whether ``token`` is a Windows function name or a hash-algorithm id, alone or
     several joined by ``/``, ``|``, ``+`` or ``&``.
 
     A module in front of a name (``kernel32.dll!Name``) is split off by the
-    value run itself, so the name is asked alone.
+    value run itself, so the name is asked alone. In a list, a piece may also
+    be a module name the catalogue lists (in any case), an address or a number,
+    or an abbreviation that completes the name before it to a catalogue name
+    (``FindFirstFileA/W``). A run with eleven hex digits in a row is left to the
+    rules as they were.
     """
+    # The catalogue first, alone and over every piece, as before the exact
+    # forms existed: those are asked only of a run long enough to be read as a
+    # key (no piece of a shorter run is one), and only after the catalogue.
     if _is_a_catalogue_name(token):
         return True
     pieces = [piece for piece in _JOINS.split(token) if piece]
-    return len(pieces) > 1 and all(_is_a_catalogue_name(piece) for piece in pieces)
+    if len(pieces) > 1 and all(_is_a_catalogue_name(piece) for piece in pieces):
+        return True
+    if len(token) < _ALPHABET_SLICE_FLOOR:
+        return False
+    if _LONG_HEX.search(token):
+        return False
+    if len(pieces) < 2:
+        return _is_a_written_name(token, alphabet=alphabet)
+    named = ""
+    for piece in pieces:
+        if _is_a_catalogue_name(piece):
+            named = piece
+            continue
+        if _is_a_written_name(piece, alphabet=False) or _NUMBER_PIECE.match(piece):
+            continue
+        completed = _completes_a_name(piece, named)
+        if not completed:
+            return False
+        named = completed
+    return True
 
 
 def remember_resolved_names(answer: Any) -> None:
@@ -1066,19 +1170,19 @@ def _hide_credentials(found: re.Match[str]) -> str:
     if _looks_like_a_credential(value, whole=True):
         return _REDACTED
     head = ""
-    tail = _TRAILING_STRETCH.search(value)
+    # Padding first: it is one anchored match, and the stretch is read only
+    # where padding follows the run.
     padding = _PADDING.match(found.string, found.end())
+    tail_start = _stretch_start(value, _BASE64_CHARS) if padding is not None else len(value)
+    tail = value[tail_start:]
     if (
-        tail is not None
+        tail
         and padding is not None
-        and len(tail.group(0)) >= 24
-        and not _names_only(tail.group(0))
-        and (
-            padding.group("end") is not None
-            or (len(tail.group(0)) + len(padding.group("signs"))) % 4 == 0
-        )
+        and len(tail) >= 24
+        and not _names_only(tail)
+        and (padding.group("end") is not None or (len(tail) + len(padding.group("signs"))) % 4 == 0)
     ):
-        head, value = value[: tail.start()], ""
+        head, value = value[:tail_start], ""
     if not value:
         return f"{_hide_in_run(head)}{_REDACTED}" if head else _REDACTED
     return _hide_in_run(value)
@@ -1114,13 +1218,24 @@ def _kept_name(token: str) -> bool:
 
 
 def _hide_in_run(value: str) -> str:
-    """The rest of ``_hide_credentials`` for a run with no padding after it."""
-    if not value or _readable(value) or not _looks_like_a_credential(value):
+    """The rest of ``_hide_credentials`` for a run with no padding after it.
+
+    The run is read whole and, when a character outside base64 (``.``, ``@``,
+    ``%``) splits it, stretch by stretch: ``hello.<key>`` holds a key no rule
+    over the whole run sees, and a kept name in front of a key never covers it.
+    """
+    if not value or _readable(value):
         return value
+    if not _looks_like_a_credential(value) and not _a_stretch_holds_a_key(value):
+        return value
+    # A token glued to a word in front of it (``name_<jwt>``): its head is
+    # found where it starts, wherever that is in the run.
+    value = _masked_spans(value, _apart(_glued_tokens(value)))
     # A token inside the run: its dots end every stretch, so it is found as
     # itself first and masked with the stretches on either side of it.
-    value = _JWT_INSIDE.sub(
-        lambda token: _REDACTED if _is_a_token(token.group(0)) else token.group(0), value
+    value = _masked_spans(
+        value,
+        _apart([span for span in _dotted_triples(value) if _is_a_token(value[span[0] : span[1]])]),
     )
     return _BASE64_STRETCH.sub(
         lambda stretch: _REDACTED if _stretch_holds_a_key(stretch.group(0)) else stretch.group(0),
@@ -1128,11 +1243,152 @@ def _hide_in_run(value: str) -> str:
     )
 
 
+def _masked_spans(value: str, spans: list[tuple[int, int]]) -> str:
+    """``value`` with each span (in order, not overlapping) replaced by the mark, in one pass."""
+    if not spans:
+        return value
+    out: list[str] = []
+    at = 0
+    for start, end in spans:
+        out.append(value[at:start])
+        out.append(_REDACTED)
+        at = end
+    out.append(value[at:])
+    return "".join(out)
+
+
+# A run of base64 characters with no other character inside it.
+_PLAIN_STRETCH = re.compile(r"[A-Za-z0-9+/_\-]+")
+
+
+def _a_stretch_holds_a_key(value: str) -> bool:
+    """Whether a run with a character outside base64 in it (``hello.<key>``,
+    ``name@<key>``) holds a key in one of its stretches.
+
+    Two shapes decide here, neither by length alone: a vendor prefix with a
+    key's body after it, and a lowercase key body (24 or more lowercase
+    letters and digits, at least one digit and four letters past ``f``, so no
+    hex run is one, nor a hex run behind an escape's letter such as ``\\n``).
+    A stretch read by its length alone would take a separator line, a dump's
+    file name or a scanner's label behind a dot for a key; those are read by
+    the whole-run rules as before.
+    """
+    # A key of either shape is 24 characters at least, and a run that holds
+    # one beside another character is longer still.
+    if len(value) <= _ALPHABET_SLICE_FLOOR or _PLAIN_STRETCH.fullmatch(value):
+        return False
+    for found in _LOWER_BODY.finditer(value):
+        body = found.group(0)
+        if any(char.isdigit() for char in body) and sum("g" <= char <= "z" for char in body) >= 4:
+            return True
+    lowered = value.lower()
+    if not any(
+        prefix in lowered
+        for prefix in (*_CREDENTIAL_PREFIXES, *_PREFIXED_KEY_FORMATS, _MAILGUN_PREFIX)
+    ):
+        return False
+    return any(
+        _has_a_vendor_prefix(piece)
+        for stretch in _PLAIN_STRETCH.findall(value)
+        for piece in re.split(r"[/+]", stretch)
+        if piece
+    )
+
+
+# A lowercase key body standing as a whole piece of a stretch: bounded by a
+# character outside base64 or by ``/`` or ``+``, never by another letter, digit,
+# ``_`` or ``-`` (so a piece of a longer name is not one).
+_LOWER_BODY = re.compile(r"(?<![A-Za-z0-9_\-])[a-z0-9]{24,}(?![A-Za-z0-9_\-])")
+
+
+def _has_a_vendor_prefix(token: str) -> bool:
+    """Whether ``token`` begins with a vendor key prefix and carries a key's body after it."""
+    lowered = token.lower()
+    if any(lowered.startswith(prefix) for prefix in _CREDENTIAL_PREFIXES):
+        return True
+    if any(
+        lowered.startswith(prefix) and len(token) - len(prefix) >= PREFIXED_KEY_BODY_FLOOR
+        for prefix in _PREFIXED_KEY_FORMATS
+    ):
+        return True
+    return (
+        lowered.startswith(_MAILGUN_PREFIX)
+        and len(token) - len(_MAILGUN_PREFIX) >= PREFIXED_KEY_BODY_FLOOR
+        and not _is_words(token)
+    )
+
+
 # A stretch of base64 or base64url characters, and one next to the mark a token
 # was masked with.
 _BASE64_STRETCH = re.compile(r"[A-Za-z0-9+/_\-]*\*\*\*[A-Za-z0-9+/_\-]*|[A-Za-z0-9+/_\-]+")
-# The stretch of base64 characters a run ends with.
-_TRAILING_STRETCH = re.compile(r"[A-Za-z0-9+/_\-]+\Z")
+# The characters of base64 and of base64url. A stretch a run ends with is
+# found by a scan from the end (``_stretch_start``): a search for a pattern
+# anchored at the end retries it from every start, which is quadratic in a
+# long run that does not end with the stretch.
+_BASE64_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/_-")
+_URLSAFE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-")
+
+
+def _stretch_start(text: str, alphabet: frozenset[str]) -> int:
+    """Where the stretch of ``alphabet`` that ``text`` ends with starts; ``len(text)`` for none."""
+    start = len(text)
+    while start > 0 and text[start - 1] in alphabet:
+        start -= 1
+    return start
+
+
+def _stretch_end(text: str, alphabet: frozenset[str]) -> int:
+    """Where the stretch of ``alphabet`` that ``text`` begins with ends."""
+    end = 0
+    while end < len(text) and text[end] in alphabet:
+        end += 1
+    return end
+
+
+def _dotted_triples(run: str) -> list[tuple[int, int]]:
+    """Every place three base64url segments of 8 or more stand joined by dots, in order.
+
+    The first is the stretch a dot-separated part ends with, the second a whole
+    part, the third the stretch the next part begins with: a token's shape, as
+    the pattern it replaces found it. One pass over the parts, linear in ``run``.
+    """
+    if run.count(".") < 2:
+        return []
+    parts = run.split(".")
+    starts = [0]
+    for part in parts[:-1]:
+        starts.append(starts[-1] + len(part) + 1)
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index + 2 < len(parts):
+        head, middle, tail = parts[index], parts[index + 1], parts[index + 2]
+        head_start = _stretch_start(head, _URLSAFE_CHARS)
+        tail_end = _stretch_end(tail, _URLSAFE_CHARS)
+        if (
+            len(head) - head_start < 8
+            or len(middle) < 8
+            or _stretch_end(middle, _URLSAFE_CHARS) != len(middle)
+            or tail_end < 8
+        ):
+            index += 1
+            continue
+        spans.append((starts[index] + head_start, starts[index + 2] + tail_end))
+        # Every three consecutive parts are a candidate, overlapping ones too:
+        # a shape that is no token (a name in front of a token's header) must
+        # not hide the token that starts at the next part.
+        index += 1
+    return spans
+
+
+def _apart(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """``spans`` in order with each one that overlaps an earlier kept one left out."""
+    kept: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if not kept or start >= kept[-1][1]:
+            kept.append((start, end))
+    return kept
+
+
 # Base64 padding after a run: one or two ``=`` that end the value. What may
 # follow them is the end of the text or a character no value starts with:
 # whitespace; a closing quote, bracket or brace, or ``</`` of a closing tag;
@@ -1148,8 +1404,51 @@ _PADDING = re.compile(
     r"(?P<signs>={1,2})(?!=)"
     r"(?P<end>\Z|(?=[\s)\]}>,;:.\/|+&!])|(?=</)|(?=\\?[\"'`](?:\Z|[\s)\]}>,;:.\/|&!])))?"
 )
-# A token's shape anywhere in a run: three base64url segments with dots between.
-_JWT_INSIDE = re.compile(r"[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}")
+# A token glued to other text inside a longer run: three dot-separated
+# base64url segments whose first is the run's trailing stretch from some point
+# on. A JOSE header is a JSON object, and base64url of ``{`` begins with ``e``
+# and one of ``w``-``z``, a digit, ``-`` or ``_``; the first four characters
+# decode to three bytes, and the first being ``{`` is what ``_is_a_token``'s
+# decode would find, so each start is decided from those four alone.
+
+
+def _glued_tokens(run: str, *, first: bool = False) -> list[tuple[int, int]]:
+    """Where tokens stand inside ``run`` behind other text, in order. Linear in ``run``.
+
+    ``first`` stops at the first.
+    """
+    spans: list[tuple[int, int]] = []
+    for start, end in _dotted_triples(run):
+        head_end = run.index(".", start)
+        at = next(
+            (
+                offset
+                for offset in range(start, head_end - 7)
+                if run[offset] == "e" and _opens_an_object(run[offset : offset + 8])
+            ),
+            None,
+        )
+        if at is not None:
+            spans.append((at, end))
+            if first:
+                break
+    return spans
+
+
+def _opens_an_object(eight: str) -> bool:
+    """Whether eight base64url characters decode to a JSON object's opening and the
+    quote of its first key: ``{"`` or ``{`` and spaces then ``"``."""
+    try:
+        head = base64.urlsafe_b64decode(eight)
+    except (ValueError, binascii.Error):
+        return False
+    return head.startswith(b"{") and head[1:].lstrip(b" \t\r\n").startswith(b'"')
+
+
+def _glued_token(run: str) -> tuple[int, int] | None:
+    """Where the first token stands inside ``run`` behind other text, or ``None``."""
+    spans = _glued_tokens(run, first=True)
+    return spans[0] if spans else None
 
 
 def _readable(token: str, *, path: bool = True) -> bool:
@@ -1168,7 +1467,13 @@ def _stretch_holds_a_key(stretch: str) -> bool:
     of it between ``/`` and ``+`` that reads as a key."""
     if _REDACTED in stretch:
         return True
-    return any(_looks_like_a_credential(piece) for piece in re.split(r"[/+]", stretch) if piece)
+    if _is_an_alphabet_stretch(stretch):
+        return False
+    return any(
+        _looks_like_a_credential(piece, alphabet=False)
+        for piece in re.split(r"[/+]", stretch)
+        if piece
+    )
 
 
 def scrub(text: Any) -> str:

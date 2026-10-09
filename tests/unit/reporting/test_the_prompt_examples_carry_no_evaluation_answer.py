@@ -1692,6 +1692,22 @@ PROMPTS: dict[str, str] = {
             _r2._open_first("/srv/samples/r2-work/x.exe"),
         ]
     ),
+    "an r2 function tool at an address radare2 has not analysed, before and after af": " ".join(
+        str((_r2.r2_error_reply(tool, reply, analysed=analysed) or {})["error"]["remediation"])
+        for tool, reply, analysed in (
+            (
+                "decompile_function",
+                "<log>\n[ERROR] Cannot find function in 0x401000\n</log>",
+                False,
+            ),
+            (
+                "disassemble_function",
+                "<log>\n[ERROR] Cannot find function at 0x401000\n</log>",
+                True,
+            ),
+        )
+    ),
+    "the line an r2 answer carries when the adapter ran af first": _r2.af_ran_note("0x401000"),
     "the function map block": _function_map_text(),
     "the function index as the pack, the run state and the map say it": _function_index_text(),
     "a tool answer the conversation had no room for, as told and as recorded": " ".join(

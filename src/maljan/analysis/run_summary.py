@@ -165,6 +165,28 @@ def unresolved_total(rows: list[dict[str, str]]) -> int:
     return total(rows)
 
 
+def summary_counts_line(summary: Any) -> str:
+    """The stored summary's headline counts, each read from the field it is stored in.
+
+    The verdict (``final_decision``), the negotiation rounds, the techniques
+    an analyst claimed (``corroboration`` rows with a ``claimed_by``), the
+    feedback retries and the unresolved findings (``validation``). A log line
+    built from these says what the stored summary and the report say.
+    """
+    stored = dict(summary or {})
+    negotiation = stored.get("negotiation") or {}
+    validation = stored.get("validation") or {}
+    corroborated = stored.get("corroboration") or {}
+    claimed = sum(1 for row in corroborated.values() if corroboration_row(row)["claimed_by"])
+    return (
+        f"verdict={stored.get('final_decision')}, "
+        f"rounds={int(negotiation.get('rounds_completed') or 0)}, "
+        f"claimed techniques={claimed}, "
+        f"validation retries={int(validation.get('retries') or 0)}, "
+        f"unresolved={unresolved_total(list(validation.get('unresolved') or []))}"
+    )
+
+
 @dataclass
 class ValidationMetrics:
     """What the validation loop found, and what it could not get fixed.
@@ -1138,7 +1160,9 @@ class RunSummary:
             drops = v.answers.get("retry_drops") or []
             if drops:
                 lines += ["**Items a kept validation retry left out:**", ""]
-                lines += [f"- {row.get('sentence', '')}" for row in drops]
+                from maljan.pipeline.validation import retry_drop_sentences
+
+                lines += [f"- {sentence}" for sentence in retry_drop_sentences(drops)]
                 lines.append("")
             if v.unresolved:
                 lines.append("**Still wrong after the retry:**")

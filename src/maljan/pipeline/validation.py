@@ -8798,12 +8798,6 @@ def retry_drop_row(
     item = safe_answer_text(text)
     stated = safe_answer_text(", ".join(missing))
     said = safe_answer_text(reason)
-    values = f", stating {stated}," if stated else ""
-    why = f" ({said})" if said else ""
-    sentence = (
-        f"The {agent} analyst's kept validation retry left out the {kind} "
-        f'"{item}"{values} of its first answer: {state}{why}.'
-    )
     return {
         "record": RETRY_DROP_RECORD,
         "agent": str(agent),
@@ -8813,8 +8807,75 @@ def retry_drop_row(
         "missing": stated,
         "state": state,
         "reason": said,
-        "sentence": _defanged_text(sentence),
+        "sentence": _defanged_text(_retry_drop_sentence(agent, kind, item, stated, state, said)),
     }
+
+
+def _retry_drop_sentence(
+    agent: str, kind: str, item: str, stated: str, state: str, said: str
+) -> str:
+    values = f", stating {stated}," if stated else ""
+    why = f" ({said})" if said else ""
+    return (
+        f"The {agent} analyst's kept validation retry left out the {kind} "
+        f'"{item}"{values} of its first answer: {state}{why}.'
+    )
+
+
+def retry_drop_sentences(rows: Sequence[Mapping[str, Any]]) -> list[str]:
+    """One sentence per distinct item a kept retry left out, in the record's order.
+
+    The first answer can hold one text several times (one claim per evidence
+    line), and each is named and answered on its own, so the record holds a
+    row for each. The same agent, kind, text, values and outcome are one
+    item: printed once, with every distinct reason the analyst gave and how
+    many rows of which revision rounds it stands for. A row alone prints its
+    own sentence as it was recorded.
+    """
+    from maljan.reporting.renderers.markdown import _defanged_text
+
+    groups: dict[tuple[str, ...], list[Mapping[str, Any]]] = {}
+    for row in rows:
+        if row.get("item") is None:
+            key: tuple[str, ...] = ("sentence", str(row.get("sentence") or ""))
+        else:
+            key = tuple(
+                str(row.get(field) or "") for field in ("agent", "kind", "item", "missing", "state")
+            )
+        groups.setdefault(key, []).append(row)
+    out: list[str] = []
+    for same in groups.values():
+        first = same[0]
+        if len(same) == 1 or first.get("item") is None:
+            out.append(str(first.get("sentence") or ""))
+            continue
+        reasons: list[str] = []
+        for row in same:
+            reason = str(row.get("reason") or "")
+            if reason and reason not in reasons:
+                reasons.append(reason)
+        rounds: list[str] = []
+        for row in same:
+            number = str(row.get("round") or "0")
+            if number not in rounds:
+                rounds.append(number)
+        sentence = _retry_drop_sentence(
+            str(first.get("agent") or ""),
+            str(first.get("kind") or ""),
+            str(first.get("item") or ""),
+            str(first.get("missing") or ""),
+            str(first.get("state") or ""),
+            "; ".join(reasons),
+        )
+        where = (
+            f"revision round {rounds[0]}"
+            if len(rounds) == 1
+            else "revision rounds " + ", ".join(rounds)
+        )
+        out.append(
+            _defanged_text(f"{sentence} The record holds it {len(same)} times, from {where}.")
+        )
+    return out
 
 
 def unresolved_total(rows: Sequence[Mapping[str, Any]]) -> int:
