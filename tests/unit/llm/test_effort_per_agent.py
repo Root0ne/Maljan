@@ -200,6 +200,51 @@ class TestAnthropic:
         with pytest.raises(LLMError, match=r"llm\.agents\.reporter\.effort is 'max'"):
             LLMProviderRegistry(settings).build_model_for_agent("reporter", fallback_role="judge")
 
+    def test_a_fallback_s_refused_level_names_the_fallback(self) -> None:
+        model_capabilities.note_model_description(
+            {"capabilities": {"effort": {"supported": True, "max": {"supported": False}}}},
+            MODEL,
+            "test",
+        )
+        settings = Settings(
+            _env_file=None,
+            llm={
+                "provider": "openai",
+                "openai": {"api_key": "sk-test"},
+                "anthropic": {"api_key": "test-anthropic-key"},
+                "agents": {
+                    "static": {
+                        "provider": "openai",
+                        "model": "a",
+                        "fallbacks": [{"provider": "anthropic", "model": MODEL, "effort": "max"}],
+                    }
+                },
+            },
+        )
+        with pytest.raises(LLMError, match=r"llm\.agents\.static\.fallbacks\[0\]\.effort is 'max'"):
+            LLMProviderRegistry(settings).build_model_for_agent("static")
+
+    def test_an_anthropic_fallback_carries_its_effort_under_an_openai_primary(self) -> None:
+        settings = Settings(
+            _env_file=None,
+            llm={
+                "provider": "openai",
+                "openai": {"api_key": "sk-test", "reasoning_effort": "max"},
+                "anthropic": {"api_key": "test-anthropic-key"},
+                "agents": {
+                    "static": {
+                        "provider": "openai",
+                        "model": "a",
+                        "fallbacks": [{"provider": "anthropic", "model": MODEL, "effort": "low"}],
+                    }
+                },
+            },
+        )
+        built = LLMProviderRegistry(settings).build_model_for_agent("static")
+        first, second = built.models  # type: ignore[attr-defined]
+        assert first.reasoning_effort == "max"
+        assert second.output_config == {"effort": "low"}
+
     def test_the_global_refusal_keeps_its_message(self) -> None:
         model_capabilities.note_model_description(
             {"capabilities": {"effort": {"supported": True, "max": {"supported": False}}}},
@@ -360,6 +405,30 @@ class TestTheBuildLine:
         )
         LLMProviderRegistry(settings).build_model_for_agent("static")
         assert "effort=max from llm.openai.reasoning_effort" in self._lines(caplog)[-1]
+
+    def test_a_fallback_names_its_own_field(self, caplog: pytest.LogCaptureFixture) -> None:
+        settings = _openai_settings(
+            {
+                "static": {
+                    "provider": "openai",
+                    "model": "deepseek-flash",
+                    "effort": "high",
+                    "fallbacks": [
+                        {"provider": "openai", "model": "a"},
+                        {"provider": "openai", "model": "b", "effort": "low"},
+                    ],
+                }
+            },
+            reasoning_effort="max",
+        )
+        LLMProviderRegistry(settings).build_model_for_agent("static")
+        line = {
+            m: next(x for x in self._lines(caplog) if f"openai/{m} " in x)
+            for m in ("deepseek-flash", "a", "b")
+        }
+        assert "effort=high from llm.agents.static.effort" in line["deepseek-flash"]
+        assert "effort=max from llm.openai.reasoning_effort" in line["a"]
+        assert "effort=low from llm.agents.static.fallbacks[1].effort" in line["b"]
 
     def test_ollama_has_none(self, caplog: pytest.LogCaptureFixture) -> None:
         settings = Settings(_env_file=None, llm={"provider": "ollama"})

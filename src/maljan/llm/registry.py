@@ -194,7 +194,7 @@ class LLMProviderRegistry:
             return self.build_model(role=fallback_role, **kwargs)
 
         fallbacks = list(getattr(agent_cfg, "fallbacks", None) or [])
-        primary = self._build_choice(agent_name, agent_cfg, None, **kwargs)
+        primary = self._build_choice(agent_name, agent_cfg, None, 0, **kwargs)
         if not fallbacks:
             return primary
         from maljan.core.model_assignments import assignment_chain_for
@@ -205,7 +205,7 @@ class LLMProviderRegistry:
         # key — is a configuration mistake, and the job should say so before
         # it starts rather than on the one turn it was meant to rescue.
         models: list[Any] = [primary]
-        for choice in fallbacks:
+        for position, choice in enumerate(fallbacks, 1):
             if choice.provider not in _PROVIDER_REGISTRY:
                 available = ", ".join(_PROVIDER_REGISTRY.keys()) or "(none)"
                 raise LLMError(
@@ -213,7 +213,9 @@ class LLMProviderRegistry:
                     f"'{choice.provider}' (available: {available})."
                 )
             models.append(
-                self._build_choice(agent_name, choice, agent_cfg.temperature, **dict(kwargs))
+                self._build_choice(
+                    agent_name, choice, agent_cfg.temperature, position, **dict(kwargs)
+                )
             )
         labels = [a.label for a in assignment_chain_for(self._config, agent_name.lower())]
         logger.info("Agent '%s' falls back through: %s.", agent_name, " -> ".join(labels))
@@ -229,9 +231,15 @@ class LLMProviderRegistry:
         agent_name: str,
         choice: Any,
         inherited_temperature: float | None,
+        position: int = 0,
         **kwargs: Any,
     ) -> BaseChatModel:
-        """One model of an agent's list, at its own endpoint and temperature."""
+        """One model of an agent's list, at its own endpoint and temperature.
+
+        ``position`` is its place in the list (0 the first model, 1 and on its
+        fallbacks), so an effort of its own is named by the field it was read
+        from.
+        """
         provider_cls = _PROVIDER_REGISTRY[choice.provider]
         if choice.temperature is not None:
             temp = choice.temperature
@@ -243,11 +251,12 @@ class LLMProviderRegistry:
         # The model's own effort, else the provider's global one, which the
         # provider reads itself: only an entry's own value is handed over, so
         # a model with none is built exactly as it was before the field.
-        from maljan.llm.effort import effort_in_force
+        from maljan.llm.effort import effort_in_force, effort_setting_of
 
         own_effort = getattr(choice, "effort", None) or None
+        own_setting = effort_setting_of(agent_name, position)
         _, effort_said = effort_in_force(
-            self._config, str(choice.provider), own_effort, agent_name.lower()
+            self._config, str(choice.provider), own_effort, own_setting
         )
         logger.info(
             "Building dedicated LLM for agent '%s': %s/%s (temp=%.2f, base_url=%s, effort=%s)",
@@ -260,8 +269,8 @@ class LLMProviderRegistry:
         )
         if own_effort and str(choice.provider) not in EFFORT_SETTING_OF_PROVIDER:
             raise LLMError(
-                f"Agent '{agent_name}' sets effort {own_effort!r} on {choice.provider}/"
-                f"{choice.model}, a provider that sends no reasoning effort."
+                f"{own_setting} is {own_effort!r} on {choice.provider}/{choice.model}, "
+                "a provider that sends no reasoning effort."
             )
 
         _cap_for_provider(kwargs, str(choice.provider))
@@ -273,7 +282,7 @@ class LLMProviderRegistry:
             kwargs["base_url"] = agent_base_url
         if own_effort:
             kwargs["effort"] = own_effort
-            kwargs["effort_setting"] = f"llm.agents.{agent_name.lower()}.effort"
+            kwargs["effort_setting"] = own_setting
         built = provider.build_model(model=choice.model, temperature=temp, **kwargs)
         return self._with_window(built, str(choice.provider), choice.model, agent_base_url)
 

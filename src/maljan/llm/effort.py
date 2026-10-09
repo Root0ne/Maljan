@@ -28,19 +28,30 @@ def global_effort(settings: Any, provider: str) -> str | None:
     return value or None
 
 
+def effort_setting_of(agent: str, position: int = 0) -> str:
+    """The field a model of an agent's list reads its own effort from.
+
+    ``position`` 0 is the entry's first model (``llm.agents.<key>.effort``);
+    1 and on are its fallbacks, named by their index in ``fallbacks``.
+    """
+    key = str(agent).lower()
+    if position <= 0:
+        return f"llm.agents.{key}.effort"
+    return f"llm.agents.{key}.fallbacks[{position - 1}].effort"
+
+
 def effort_in_force(
-    settings: Any, provider: str, own: str | None = None, agent: str | None = None
+    settings: Any, provider: str, own: str | None = None, setting: str | None = None
 ) -> tuple[str | None, str]:
     """The effort a model is built with, and a phrase saying where it came from.
 
-    ``own`` is the model's own entry value and wins when set; ``agent`` names
-    the entry for the phrase.
+    ``own`` is the model's own value and wins when set; ``setting`` is the
+    field it was read from (``effort_setting_of``), named in the phrase.
     """
     if str(provider) not in EFFORT_SETTING_OF_PROVIDER:
         return None, "none for this provider"
     if own:
-        where = f"llm.agents.{agent}.effort" if agent else "the agent entry"
-        return own, f"{own} from {where}"
+        return own, f"{own} from {setting or 'the agent entry'}"
     value = global_effort(settings, provider)
     if value is None:
         return None, "unset, the provider's default"
