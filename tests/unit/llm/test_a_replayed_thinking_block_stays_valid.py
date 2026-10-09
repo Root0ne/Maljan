@@ -370,6 +370,16 @@ class TestEachEditMaljanMakes:
         _ = nudge_turns  # the turn rebuild the analysts skip on such a model
 
 
+def _text_of(turn: dict[str, Any]) -> str:
+    """The text a user turn ends with: its string, or its last part's."""
+    content = turn["content"]
+    if isinstance(content, str):
+        return content
+    last = content[-1]
+    inner = last.get("text") if last.get("type") == "text" else last.get("content")
+    return inner if isinstance(inner, str) else str(inner[-1].get("text"))
+
+
 class TestTheRunStateBlock:
     def _framed_loop(self, model: Any, bodies: list[str]) -> None:
         bound = model.bind_tools([_lookup()])
@@ -380,30 +390,25 @@ class TestTheRunStateBlock:
             history += [turn, ToolMessage(content=f"answer {index}", tool_call_id=call_id)]
         bound.invoke(frame_messages(history, run_state=bodies[-1]))
 
-    def test_the_history_only_grows_and_an_unchanged_block_sends_its_budget_line(
+    def test_the_history_only_grows_and_the_newest_turn_ends_with_the_whole_block(
         self, wire: Wire
     ) -> None:
-        self._framed_loop(
-            _model(),
-            [
-                "sample: c\nbudget remaining: 10 model turns",
-                "sample: c\nbudget remaining: 9 model turns",
-                "sample: c, now packed\nbudget remaining: 8 model turns",
-            ],
-        )
+        bodies = [
+            "sample: c\nbudget remaining: 10 model turns",
+            "sample: c\nbudget remaining: 9 model turns",
+            "sample: c, now packed\nbudget remaining: 8 model turns",
+        ]
+        self._framed_loop(_model(), bodies)
         assert wire.refused == []
-        first, second, third = (anthropic_history._without_markers(b) for b in wire.bodies)
-        assert second["messages"][: len(first["messages"])] == first["messages"]
-        assert third["messages"][: len(second["messages"])] == second["messages"]
+        sent = [anthropic_history._without_markers(b) for b in wire.bodies]
+        for earlier, later in zip(sent, sent[1:], strict=False):
+            assert later["messages"][: len(earlier["messages"])] == earlier["messages"]
         assert all(m["role"] != "system" for body in wire.bodies for m in body["messages"])
-        newest = [json.dumps(body["messages"][-1]) for body in (first, second, third)]
-        assert "sample: c" in newest[0] and "10 model turns" in newest[0]
-        # Nothing but the budget changed: the turn carries the budget line alone.
-        assert "sample: c" not in newest[1] and "9 model turns" in newest[1]
-        assert RUN_STATE_BEGIN in newest[1] and RUN_STATE_END in newest[1]
-        # A line changed: the whole block again.
-        assert "now packed" in newest[2]
-        assert _sent_thinking(third) == [_thinking(0), _thinking(1)]
+        # Every request ends with the whole current block, as on every provider.
+        for body, run_state in zip(sent, bodies, strict=True):
+            whole = f"{RUN_STATE_BEGIN}\n{run_state}\n{RUN_STATE_END}"
+            assert _text_of(body["messages"][-1]).endswith(whole)
+        assert _sent_thinking(sent[-1]) == [_thinking(0), _thinking(1)]
 
     def test_a_model_not_documented_so_keeps_the_block_on_the_turn(self, wire: Wire) -> None:
         self._framed_loop(
@@ -539,6 +544,55 @@ class TestTheAnalystsLoopAgainstTheCheck:
 
 def _job_of(body: dict[str, Any]) -> str:
     return "job-A" if "job-A" in json.dumps(body["messages"][-1]) else "job-B"
+
+
+class TestTheEarlierBlocksAreCounted:
+    def _loop(self, monkeypatch: pytest.MonkeyPatch, name: str) -> tuple[Any, list[int]]:
+        from maljan.agents import base_agent
+
+        wire = Wire(_answer)
+        install(monkeypatch, wire)
+        monkeypatch.setattr(base_agent, "loop_limits", lambda *_a, **_k: (None, 20))
+        agent = _Analyst(llm=_model(name), name="static")
+        agent.run_state_block = "sample: c"
+        agent.tools = [_lookup()]
+        counted: list[int] = []
+        monkeypatch.setattr(
+            agent,
+            "_note_conversation",
+            lambda _sent: counted.append(agent._replayed_run_state_chars()),
+        )
+        agent.execute_tool_loop([("system", "You are a static analyst."), ("human", "Analyse.")])
+        return agent, counted
+
+    def test_each_request_is_measured_with_the_earlier_copies(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        agent, counted = self._loop(monkeypatch, MODEL)
+        # None on the first request, one earlier copy more on each later one.
+        assert counted[0] == 0 and 0 < counted[1] < counted[2]
+        # Each step adds the one block the request before it carried.
+        assert counted[2] - counted[1] > 100
+        # After the loop every copy is an earlier one, and the spend measure counts them.
+        after = agent._replayed_run_state_chars()
+        assert after > counted[2]
+
+        seen: dict[str, Any] = {}
+
+        class _Meter:
+            def admit(self, **kwargs: Any) -> None:
+                seen.update(kwargs)
+
+        monkeypatch.setattr(agent, "_spend_meter", lambda: _Meter())
+        agent._spend_admits("final-answer nudge", [HumanMessage(content="x")])
+        assert seen["prompt_chars"] == 1 + agent._definitions_sent() + after
+
+    def test_a_provider_that_sends_one_block_counts_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        agent, counted = self._loop(monkeypatch, "claude-sonnet-4-20250514")
+        assert set(counted) == {0}
+        assert agent._replayed_run_state_chars() == 0
 
 
 class TestTwoJobsAtOnce:

@@ -50,6 +50,7 @@ from maljan.llm.anthropic_history import (
     RUN_STATE_ATTACHED,
     TOOL_LOOP_TURN,
     keeps_turns_as_received,
+    replays_earlier_blocks,
 )
 from maljan.llm.context_window import (
     CHARS_PER_TOKEN,
@@ -3899,12 +3900,43 @@ class BaseAnalyst(BudgetMeter, ABC):
                 self.name,
                 request_chars(
                     messages,
-                    int(getattr(self, "_tool_definition_chars", 0) or 0),
+                    int(getattr(self, "_tool_definition_chars", 0) or 0)
+                    + self._replayed_run_state_chars(),
                     int(getattr(budget, "chars_per_token", CHARS_PER_TOKEN) or CHARS_PER_TOKEN),
                 ),
             )
         except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
             self.logger.debug("%s: the conversation size was not recorded (%s).", self.name, exc)
+
+    def _note_replayed_run_state(self, messages: list, sent: list) -> None:
+        """Note the block this request carries and where the earlier ones stand. Never raises."""
+        try:
+            self._replay_upto: int | None = len(messages)
+            if not replays_earlier_blocks(getattr(self, "llm", None)) or not sent:
+                return
+            block = (getattr(sent[-1], "response_metadata", None) or {}).get(RUN_STATE_ATTACHED)
+            if isinstance(block, str) and block:
+                blocks: dict[int, int] | None = getattr(self, "_replayed_blocks", None)
+                if blocks is None:
+                    blocks = {}
+                    self._replayed_blocks: dict[int, int] = blocks
+                # The separator in front of a block added to text included.
+                blocks[len(messages)] = len(block) + 2
+        except Exception as exc:  # noqa: BLE001 — a measure never costs a turn
+            self.logger.debug("%s: earlier run-state blocks not counted (%s).", self.name, exc)
+
+    def _replayed_run_state_chars(self) -> int:
+        """Characters of earlier run-state blocks the next request sends again, or ``0``.
+
+        Only where the model's provider keeps its history append-only
+        (``anthropic_history.replays_earlier_blocks``); every other provider
+        sends one block, the current one, which the messages already hold.
+        """
+        blocks = getattr(self, "_replayed_blocks", None) or {}
+        if not blocks or not replays_earlier_blocks(getattr(self, "llm", None)):
+            return 0
+        upto = getattr(self, "_replay_upto", None)
+        return sum(size for at, size in blocks.items() if upto is None or at < upto)
 
     def _forget_conversation(self) -> None:
         """Let go of this loop's size, so a finished loop stops binding the cap."""
@@ -4284,6 +4316,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                     sent = messages
             # And what the request weighs, block included, which is what the
             # next tool answer's cap is measured against.
+            # The blocks earlier turns were sent with, where the model's
+            # provider sends them again (``anthropic_history``): counted in
+            # every measure of this request, never hidden.
+            self._note_replayed_run_state(messages, sent)
             self._note_conversation(sent)
             # The spend ceiling's word on the turn about to be sent: held to
             # what the spend it may use pays for, or not sent, and then the
@@ -4470,6 +4506,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         # puts the current one on the latest message, every turn, and the
         # messages the loop keeps are the ones each request is built from.
         messages = without_run_state(prebuilt)
+        # This loop's run-state blocks, by the turn count of the request that
+        # carried each; earlier loops' are not this one's.
+        self._replayed_blocks = {}
+        self._replay_upto = 0
 
         # The loop's budget, readable by an ask made from inside it and
         # charged by the delegation when the callee returns.
@@ -5221,6 +5261,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # API needs back as it was received, and the tool-reply completion
         # answers each unrun call with a reply saying it did not run.
         kept, unrun = without_unanswered_calls(msgs)
+        # The loop is over: a turn sent after it (the nudge, the salvage)
+        # carries every block the loop's turns were sent with.
+        self._replay_upto = None
         if not keeps_turns_as_received(getattr(self, "llm", None)):
             msgs = kept
         if unrun:
@@ -5340,7 +5383,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             meter.admit(
                 kind=kind,
                 model=self._model_label() or _model_label(self.llm),
-                prompt_chars=sum(_message_chars(m) for m in messages) + self._definitions_sent(),
+                prompt_chars=sum(_message_chars(m) for m in messages)
+                + self._definitions_sent()
+                + self._replayed_run_state_chars(),
                 cap_tokens=self.output_cap_tokens(),
                 slot=slot,
                 holdable=accepts_output_bound(target) if holdable is None else holdable,

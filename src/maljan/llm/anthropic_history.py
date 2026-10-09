@@ -15,13 +15,11 @@ the one before it plus its new turns:
   every other provider; nothing of it is ever sent with a system role. The
   platform notes the exact block it attached on the message
   (:data:`RUN_STATE_ATTACHED`); only that block is recognised, never text that
-  merely ends with the markers. Every earlier user turn is sent again exactly
-  as it was sent, block and all, so the history only grows. To keep the model
-  from re-reading a copy of every line on every turn, a turn whose block says
-  nothing new but its budget line carries the budget line alone, between the
-  same markers; the model reads the run's other lines in the newest turn that
-  carried them. That costs one budget line a turn, and a whole block on a turn
-  where something else in it changed.
+  merely ends with the markers. The newest turn carries the whole current
+  block, as on every other provider, and every earlier user turn is sent again
+  exactly as it was sent, block and all, so the history only grows. The earlier
+  copies are counted by the callers' window, room and spend measures
+  (:func:`replays_earlier_blocks`), never hidden.
 
 * **Assistant turns are sent as they were received.** The callers keep a
   ``[thinking, tool_use]`` turn whole on this provider, and a call that never
@@ -61,7 +59,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import threading
 from contextvars import ContextVar
 from pathlib import Path
@@ -79,11 +76,6 @@ TOOL_LOOP_TURN = "maljan_tool_loop_turn"
 
 _THINKING_KINDS = ("thinking", "redacted_thinking")
 
-# The budget line ``pipeline.run_state.budget_line`` writes, and nothing else.
-_BUDGET_LINE = re.compile(
-    r"\Abudget remaining: (?:\d+ model turns|no step limit)?(?:, )?(?:\d+ s|no time limit)?\Z"
-)
-
 # Where a chat model keeps its memory, in its own ``__dict__``.
 _MEMORY_ATTR = "_maljan_preserved_thinking"
 
@@ -98,8 +90,6 @@ class Memory:
         # digest of a user turn as it reads without its run-state block -> the
         # turn as it was sent.
         self.sent_turns: dict[str, dict[str, Any]] = {}
-        # conversation digest -> the run-state lines last sent in it, budget aside.
-        self.lines_sent: dict[str, str] = {}
         # digests of the first user turns sent as a one-block list.
         self.listed_first: set[str] = set()
         # signature digests of blocks the API was asked to drop.
@@ -109,7 +99,6 @@ class Memory:
         with self.lock:
             self.produced_after.clear()
             self.sent_turns.clear()
-            self.lines_sent.clear()
             self.listed_first.clear()
             self.stale.clear()
 
@@ -164,6 +153,36 @@ def binds_thinking_to_prefix(model: object) -> bool:
 
     family = model_family(model)
     return bool(family) and any(family.startswith(key) for key in _prefix_bound_rows())
+
+
+def _models_of(llm: Any) -> list[Any]:
+    """``llm`` and every model it binds or falls back to."""
+    found: list[Any] = []
+    pending = [llm]
+    while pending and len(found) < 16:
+        current = pending.pop()
+        if current is None:
+            continue
+        found.append(current)
+        pending.append(getattr(current, "bound", None))
+        inner = getattr(current, "models", None)
+        if isinstance(inner, list):
+            pending.extend(inner)
+    return found
+
+
+def replays_earlier_blocks(llm: Any) -> bool:
+    """Whether a request to ``llm`` re-sends the run-state blocks of its earlier turns.
+
+    True where any model it may send to keeps its history append-only (a model
+    in ``prefix_bound_thinking`` on this provider): such a request weighs those
+    copies too, and the callers' measures count them.
+    """
+    return any(
+        getattr(type(model), "_maljan_keeps_turns", False)
+        and binds_thinking_to_prefix(getattr(model, "model", ""))
+        for model in _models_of(llm)
+    )
 
 
 def keeps_turns_as_received(llm: Any) -> bool:
@@ -265,34 +284,16 @@ def _with_block_replaced(message: dict[str, Any], block: str, replacement: str) 
     return message
 
 
-def _budget_only(block: str) -> tuple[str, str] | None:
-    """``(the block's lines other than its budget line, the block with the budget line alone)``.
-
-    ``None`` where the block has no budget line the platform wrote.
-    """
-    from maljan.pipeline.run_state import RUN_STATE_BEGIN, RUN_STATE_END, run_state_block
-
-    if not (block.startswith(RUN_STATE_BEGIN) and block.endswith(RUN_STATE_END)):
-        return None
-    lines = block[len(RUN_STATE_BEGIN) : len(block) - len(RUN_STATE_END)].strip("\n").split("\n")
-    budget = [i for i, line in enumerate(lines) if _BUDGET_LINE.match(line)]
-    if not budget:
-        return None
-    keep = budget[-1]
-    rest = "\n".join(line for i, line in enumerate(lines) if i != keep)
-    return rest, run_state_block(lines[keep])
-
-
 def _user_indexes(messages: list[Any]) -> list[int]:
     return [i for i, m in enumerate(messages) if isinstance(m, dict) and m.get("role") == "user"]
 
 
-def _keep_run_state_appended(
-    memory: Memory, payload: dict[str, Any], messages: list[Any], attached: str
-) -> list[Any]:
-    """Earlier user turns as they were sent; the newest one's block cut to its budget line where
-    nothing else in it changed. Only ``attached``, the exact block the platform put on the
-    newest turn, is ever touched.
+def _keep_run_state_appended(memory: Memory, messages: list[Any], attached: str) -> list[Any]:
+    """Earlier user turns as they were sent, the newest one as framed, noted for later requests.
+
+    ``attached`` is the exact block the platform put on the newest turn; the
+    turn is remembered as it reads without it, so the next request, which
+    frames that turn without its block, sends it as it was sent here.
     """
     users = _user_indexes(messages)
     if not users:
@@ -310,19 +311,6 @@ def _keep_run_state_appended(
         bare = _with_block_replaced(out[newest], attached, "")
         if bare is not out[newest]:
             sent_turn = out[newest]
-            split = _budget_only(attached)
-            conversation = _digest({"system": payload.get("system"), "first": out[users[0]]})
-            if split is not None and newest != users[0]:
-                lines, short = split
-                with memory.lock:
-                    unchanged = memory.lines_sent.get(conversation) == lines
-                    memory.lines_sent[conversation] = lines
-                if unchanged:
-                    sent_turn = _with_block_replaced(out[newest], attached, short)
-            elif split is not None:
-                with memory.lock:
-                    memory.lines_sent[conversation] = split[0]
-            out[newest] = sent_turn
             # The turn as it reads once the platform takes its block off, the
             # separator in front of a block added to text included.
             stripped = _with_block_replaced(bare, "\n\n", "")
@@ -506,7 +494,7 @@ def prepared(
         payload = dict(payload)
         messages = _first_turn_listed(memory, messages, loop)
         if bound:
-            messages = _keep_run_state_appended(memory, payload, messages, attached)
+            messages = _keep_run_state_appended(memory, messages, attached)
             messages, ask_to_drop, whole = _settle_thinking(memory, payload, messages)
             if ask_to_drop:
                 _drop_mismatched(payload)
