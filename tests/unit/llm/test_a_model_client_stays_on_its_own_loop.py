@@ -320,6 +320,33 @@ class TestTheAnthropicModel:
         # Only the last retired loop can still be held: the next send forgets it.
         assert len(model._async_client._client._loop_bound_clients) <= 1
 
+    def test_a_retired_loops_client_is_let_go_without_a_task_error(
+        self, server: ThreadingHTTPServer
+    ) -> None:
+        # The client a retired loop leaves behind is collected on another
+        # loop's thread; nothing may try to close its connections there.
+        model = _anthropic(server)
+
+        async def call() -> str:
+            return str((await model.ainvoke("hello")).content)
+
+        retired = _LoopThread()
+        assert retired.run(call()) == "answered"
+        retired.close()
+        reported: list[dict[str, Any]] = []
+
+        async def after() -> str:
+            asyncio.get_running_loop().set_exception_handler(lambda _l, c: reported.append(c))
+            answer = await call()
+            for _ in range(3):
+                gc.collect()
+                await asyncio.sleep(0.05)
+            return answer
+
+        assert asyncio.run(after()) == "answered"
+        gc.collect()
+        assert reported == []
+
     def test_loops_on_many_threads_at_once_each_get_their_own_connections(
         self, server: ThreadingHTTPServer
     ) -> None:

@@ -20,9 +20,11 @@ and proxies are what they were.
 A loop's client is closed on that loop when the loop shuts its asynchronous
 generators down, which ``asyncio.run`` and every ``asyncio.Runner`` do before
 closing. A loop closed without that (a retired agent loop) is forgotten the
-next time any loop sends through the same adapter, and the operating system
-sockets of its connections are closed when they are collected, as asyncio
-closes any transport it is no longer given a loop to close on.
+next time any loop sends through the same adapter: its client is marked
+closed with no I/O, so nothing tries to close it on another loop, and the
+operating system sockets of its connections are closed when they are
+collected, as asyncio closes any transport it is no longer given a loop to
+close on (with a ``ResourceWarning`` for each).
 """
 
 from __future__ import annotations
@@ -54,9 +56,15 @@ class PerLoop[T]:
     ever reads its own entry, and the map is guarded by a lock.
     """
 
-    def __init__(self, build: Callable[[], T], close: Callable[[T], Awaitable[Any]]) -> None:
+    def __init__(
+        self,
+        build: Callable[[], T],
+        close: Callable[[T], Awaitable[Any]],
+        abandon: Callable[[T], None] | None = None,
+    ) -> None:
         self._build = build
         self._close = close
+        self._abandon = abandon
         self._lock = threading.Lock()
         self._by_loop: dict[asyncio.AbstractEventLoop, _Entry[T]] = {}
 
@@ -67,7 +75,18 @@ class PerLoop[T]:
     def _forget_closed_loops(self) -> None:
         """Drop every entry whose loop is closed. Called with the lock held."""
         for loop in [loop for loop in self._by_loop if loop.is_closed()]:
-            del self._by_loop[loop]
+            self._let_go(self._by_loop.pop(loop))
+
+    def _let_go(self, entry: _Entry[T]) -> None:
+        """Release a value whose loop is closed, with no I/O: nothing can run it there."""
+        if entry.closed:
+            return
+        entry.closed = True
+        if self._abandon is not None:
+            try:
+                self._abandon(entry.value)
+            except Exception as exc:  # noqa: BLE001 — a value let go is let go
+                logger.debug("a loop-bound client could not be marked closed: %s", exc)
 
     async def get(self) -> T:
         """The value for the running loop, built on first use."""
@@ -123,7 +142,9 @@ class PerLoop[T]:
                 try:
                     asyncio.run_coroutine_threadsafe(self._close_entry(entry), loop)
                 except RuntimeError:
-                    continue
+                    self._let_go(entry)
+            elif loop.is_closed():
+                self._let_go(entry)
 
 
 def _client_base(client: Any) -> type:
@@ -192,6 +213,22 @@ def _routing_class(base: type) -> type:
         return routing
 
 
+def _mark_closed(client: Any) -> None:
+    """Mark an httpx client closed without touching its connections.
+
+    For a client whose loop is closed: its connections can only be closed on
+    that loop. Marked closed, a library's ``__del__`` (langchain's and
+    google-genai's wrappers schedule ``aclose`` on whatever loop is running
+    when they are collected) leaves it alone instead of failing a task with
+    "Event loop is closed" on another loop; the sockets are closed when their
+    transports are collected.
+    """
+    state = getattr(client, "_state", None)
+    closed = getattr(type(state), "CLOSED", None)
+    if closed is not None:
+        client._state = closed
+
+
 def loop_bound_async_client(build: Callable[[], Any], *, template: Any = None) -> Any:
     """An ``httpx``/``httpx2`` ``AsyncClient`` whose connections never cross event loops.
 
@@ -217,7 +254,7 @@ def loop_bound_async_client(build: Callable[[], Any], *, template: Any = None) -
     client: Any = object.__new__(routing)
     client._loop_bound_template = template
     client._loop_bound_closed = False
-    client._loop_bound_clients = PerLoop(build_for_loop, lambda c: c.aclose())
+    client._loop_bound_clients = PerLoop(build_for_loop, lambda c: c.aclose(), _mark_closed)
     return client
 
 
