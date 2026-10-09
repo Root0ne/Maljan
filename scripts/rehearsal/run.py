@@ -4,7 +4,7 @@ Against the locally running stack (API + worker, mock sandbox), with every
 model call going to the loopback stub model this script starts (or one already
 running, ``--stub-url``)::
 
-    REHEARSAL_PASSWORD=... python scripts/rehearsal/run.py \\
+    REHEARSAL_LOGIN=... python scripts/rehearsal/run.py \\
         --api http://127.0.0.1:8000 --email operator@example.org \\
         --scenario normal --repeat 3 --out rehearsal-results
 
@@ -26,8 +26,8 @@ checklist then expects in force — and runs the connection test so the probe
 gate admits the job; it prints every key it changed. Without it nothing on the
 stack is changed, and ``--expect key=value`` names what to find in force.
 
-The password is read from the environment variable named by
-``--password-env``; it is never taken on the command line or printed.
+The account's sign-in is read from the environment variable named by
+``--login-env``; it is never taken on the command line or printed.
 """
 
 from __future__ import annotations
@@ -273,9 +273,9 @@ def _reset_stub(stub_url: str | None, server: StubServer | None) -> None:
 
 
 def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
-    password = os.environ.get(args.password_env, "")
+    password = os.environ.get(args.login_env, "")
     if not password:
-        raise SystemExit(f"set the account's password in the environment as {args.password_env}")
+        raise SystemExit(f"{args.login_env} is empty: it holds the account's sign-in")
     brain = Brain(
         scenario=args.scenario,
         loop_steps=args.loop_steps,
@@ -300,7 +300,7 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             probe = client.probe_models(changes)
             print(f"connection test: {'ok' if probe.get('ok') else probe.get('detail')}")
             applied = client.configure(changes)
-            print(f"configured: {', '.join(sorted(applied)) or 'nothing new'}", flush=True)
+            print(f"configured {len(applied)} setting(s) on the stack", flush=True)
             from scripts.rehearsal.inprocess import EXPERT_MODEL, JUDGE_MODEL
 
             expected = {
@@ -402,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--in-process", action="store_true", help="no stack: run in this process")
     parser.add_argument("--api", default="http://127.0.0.1:8000")
     parser.add_argument("--email", default="")
-    parser.add_argument("--password-env", default="REHEARSAL_PASSWORD")
+    parser.add_argument("--login-env", default="REHEARSAL_LOGIN")
     parser.add_argument("--stub-url", default="", help="a stub already running; else one starts")
     parser.add_argument("--stub-port", type=int, default=8765)
     parser.add_argument("--configure", action="store_true", help="point the stack at the stub")

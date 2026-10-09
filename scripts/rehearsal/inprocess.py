@@ -31,7 +31,7 @@ from scripts.rehearsal.roles import Brain  # noqa: E402
 from scripts.rehearsal.sample import write_sample  # noqa: E402
 from scripts.rehearsal.stub_model import ModelFacts, Pace, StubServer, StubState  # noqa: E402
 
-API_KEY = "rehearsal-key-not-a-secret"
+API_KEY = "rehearsal-stub-key"
 EXPERT_MODEL = "rehearsal-expert"
 JUDGE_MODEL = "rehearsal-judge"
 

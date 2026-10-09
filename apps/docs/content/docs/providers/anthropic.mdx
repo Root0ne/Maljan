@@ -13,6 +13,7 @@ Claude Haiku 5.5 (`claude-haiku-5-5`) included.
 | :-- | :-- | :-- |
 | `core.llm.provider` | `openai` | Set to `anthropic`. |
 | `core.llm.anthropic.api_key` | — | Required; the provider refuses to build a model without it. Stored encrypted. |
+| `core.llm.anthropic.base_url` | empty | Where every Anthropic request goes — a job's calls, the Models API question and the connection test — written without `/v1`: a proxy, or the loopback stub of a [rehearsal](/usage/rehearsal/). Empty is the Anthropic API. |
 | `core.llm.anthropic.expert_model` | `claude-sonnet-4-20250514` | The analysts' model. Name the model you run, such as `claude-haiku-5-5`. |
 | `core.llm.anthropic.judge_model` | `claude-sonnet-4-20250514` | The judge's model. |
 | `core.llm.anthropic.effort` | empty | Sent as `output_config.effort` on every request: `low`, `medium`, `high`, `xhigh` or `max`. Empty sends nothing and keeps the model's own default (`medium` on Claude Haiku 5.5). |
@@ -28,8 +29,10 @@ core.llm.anthropic.effort       = max
 
 ## How it behaves
 
-- **No endpoint to override.** Anthropic is a vendor API here: a per-agent entry
-  on `anthropic` takes no `base_url`, and one set is rejected on save.
+- **One endpoint for every agent.** A per-agent entry on `anthropic` takes no
+  `base_url`, and one set is rejected on save; `core.llm.anthropic.base_url`
+  moves every Anthropic request at once, and a probe is filed under that
+  address.
 - **Sampling parameters.** Claude Haiku 5.5 and the other models of its
   generation refuse a non-default `temperature`, `top_p` or `top_k` with a 400.
   The vendored model table's `fixed_sampling` rows name those models, each with
