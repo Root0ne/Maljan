@@ -1290,23 +1290,30 @@ def remove_job_staging(job_id: str) -> list[Path]:
     return removed
 
 
-async def hold_queue_claim(redis_conn: Any, arq_job_id: str | None) -> None:
+async def hold_queue_claim(redis_conn: Any, arq_job_id: str | None) -> bool:
     """Give arq's in-progress key for this job the owner heartbeat's life. Never raises.
 
-    arq writes that key once, when it starts the job, to live for the job
+    arq writes that key once, when it starts a job, to live for the job
     timeout plus ten seconds. With no job timeout (``WorkerSettings``) that is
     as good as for ever, and a worker killed mid-job would leave its job's
-    queue entry claimed for good. Refreshed beside the owner heartbeat to the
-    same TTL, the claim lives exactly as long as a live worker holds the job:
-    a killed worker's claim expires within ``JOB_OWNER_TTL_SECONDS`` and arq
-    then ends the queue entry (``max_tries`` is one) instead of keeping it.
+    queue entry claimed for good. Set to the owner TTL, the claim is a
+    liveness lease: it lives exactly as long as a live worker renews it, and a
+    killed worker's claim expires within ``JOB_OWNER_TTL_SECONDS``, after
+    which arq ends the queue entry (``max_tries`` is one) instead of keeping
+    it. PEXPIRE never creates a key.
+
+    False when the key is gone (the job finished and arq removed it), which
+    ends the renewal; True otherwise, a Redis that could not answer included,
+    so a blip does not end a lease that is still wanted.
     """
     if not arq_job_id:
-        return
+        return False
     try:
         from arq.constants import in_progress_key_prefix
 
-        await redis_conn.pexpire(in_progress_key_prefix + arq_job_id, JOB_OWNER_TTL_SECONDS * 1000)
+        held = await redis_conn.pexpire(
+            in_progress_key_prefix + arq_job_id, JOB_OWNER_TTL_SECONDS * 1000
+        )
     except Exception as exc:  # noqa: BLE001 — the claim lives on its own TTL
         logger.debug(
             "Could not refresh the queue claim for job %s (%s).",
@@ -1314,14 +1321,57 @@ async def hold_queue_claim(redis_conn: Any, arq_job_id: str | None) -> None:
             type(exc).__name__,
             extra={"job_id": arq_job_id},
         )
+        return True
+    return bool(held)
 
 
-async def hold_job_owner(redis_conn: Any, job_id: str, arq_job_id: str | None = None) -> None:
+# Where a job's queue-lease renewal is kept in its arq context, from the job's
+# start hook to its end hook.
+_QUEUE_LEASE = "maljan_queue_lease"
+
+
+async def _renew_queue_claim(redis_conn: Any, arq_job_id: str) -> None:
+    """Renew the lease twice per TTL until the job ends or its key is gone."""
+    while True:
+        await asyncio.sleep(JOB_OWNER_REFRESH_SECONDS)
+        if not await hold_queue_claim(redis_conn, arq_job_id):
+            return
+
+
+async def lease_queue_claim(ctx: dict) -> None:
+    """arq ``on_job_start``: turn every job's queue claim into a lease, from its first moment.
+
+    Every function on this worker — the analysis, an enrichment queued here,
+    the nightly purge — runs under the no-deadline job timeout, so each one's
+    in-progress key would otherwise live for years. The key is set to the
+    owner TTL before the function is called and renewed by a task of its own
+    until ``release_queue_claim`` ends it. Never raises.
+    """
+    redis_conn = ctx.get("redis")
+    arq_job_id = ctx.get("job_id")
+    if redis_conn is None or not arq_job_id:
+        return
+    await hold_queue_claim(redis_conn, str(arq_job_id))
+    ctx[_QUEUE_LEASE] = asyncio.create_task(_renew_queue_claim(redis_conn, str(arq_job_id)))
+
+
+async def release_queue_claim(ctx: dict) -> None:
+    """arq ``on_job_end``: stop renewing the job's lease, before arq finishes it. Never raises."""
+    task = ctx.pop(_QUEUE_LEASE, None)
+    if task is None:
+        return
+    task.cancel()
+    with suppress(asyncio.CancelledError, Exception):
+        await task
+
+
+async def hold_job_owner(redis_conn: Any, job_id: str) -> None:
     """Refresh this job's claim until the task running this is cancelled.
 
     Two refreshes inside one TTL, so a missed write — a Redis blip, a loop that
     was busy — does not expire the claim on its own. arq's own claim on the
-    queue entry is refreshed with it (``hold_queue_claim``).
+    queue entry is a lease of the same life, held for every job by
+    ``lease_queue_claim``.
 
     The job's staging directory is touched beside the claim, and for the same
     reason said differently: a sidecar sweeping the shared base has no way to
@@ -1334,7 +1384,6 @@ async def hold_job_owner(redis_conn: Any, job_id: str, arq_job_id: str | None = 
     while True:
         await asyncio.sleep(JOB_OWNER_REFRESH_SECONDS)
         await claim_job(redis_conn, job_id)
-        await hold_queue_claim(redis_conn, arq_job_id)
         staging.touch_job_staging(job_id)
 
 
@@ -1910,9 +1959,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # the id as it parsed, which is the spelling the sweep reads back out
         # of the database.
         await claim_job(redis_conn, str(job_uuid))
-        owner_task = asyncio.create_task(
-            hold_job_owner(redis_conn, str(job_uuid), arq_job_id=ctx.get("job_id"))
-        )
+        owner_task = asyncio.create_task(hold_job_owner(redis_conn, str(job_uuid)))
 
         # Everything this run needs out of the database before the models
         # start, in one short session that is closed again before the
@@ -3484,9 +3531,11 @@ async def _recycle_if_bloated(ctx: dict, *args: Any, **kwargs: Any) -> None:
 # purge — so the longest duration Python's ``timedelta`` holds stands in for
 # none (about 2.7 million years; ``test_the_job_timeout_is_a_setting`` proves
 # arq accepts it and that Redis can carry the in-progress key it derives). The
-# in-progress key itself is re-pointed at the owner heartbeat
-# (``hold_queue_claim``), so the stand-in never decides how long a dead
-# worker's claim lingers. A job's real limit, when an operator sets one, is
+# in-progress key of every job on this worker is turned into a lease of the
+# owner heartbeat's life before its function is called (``lease_queue_claim``,
+# the ``on_job_start`` hook), so the stand-in never decides how long a dead
+# worker's claim lingers; only the milliseconds between arq writing the key and
+# calling the hook are not covered. A job's real limit, when an operator sets one, is
 # ``core.job_timeout``, enforced by ``run_analysis``.
 ARQ_NO_JOB_TIMEOUT = timedelta.max.total_seconds()
 
@@ -3501,6 +3550,10 @@ class WorkerSettings:
     cron_jobs = [cron(purge_old_job_events, hour=3, minute=17)]
     on_startup = startup
     on_shutdown = shutdown
+    # Every job's queue claim is a lease of the owner heartbeat's life, from
+    # before its function is called until it ends (``lease_queue_claim``).
+    on_job_start = lease_queue_claim
+    on_job_end = release_queue_claim
     after_job_end = _recycle_if_bloated
 
     redis_settings = build_redis_settings(settings.redis_url)

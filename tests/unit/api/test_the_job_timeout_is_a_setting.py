@@ -31,6 +31,8 @@ from app.worker.analysis_worker import (
     build_job_settings,
     hold_queue_claim,
     job_timeout_reached,
+    lease_queue_claim,
+    release_queue_claim,
     stop_note,
 )
 
@@ -177,7 +179,67 @@ class TestTheQueueClaim:
         redis.pexpire.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_a_redis_that_refuses_never_raises(self) -> None:
+    async def test_a_redis_that_refuses_never_raises_and_keeps_the_lease_going(self) -> None:
         redis = MagicMock()
         redis.pexpire = AsyncMock(side_effect=ConnectionError("down"))
-        await hold_queue_claim(redis, "job-1")
+        assert await hold_queue_claim(redis, "job-1") is True
+
+
+class _ExpiringRedis:
+    """The two expiry commands, with each key's remaining life in milliseconds."""
+
+    def __init__(self) -> None:
+        self.ttl_ms: dict[str, int] = {}
+        self.renewals = 0
+
+    async def psetex(self, key: str, ms: int, value: bytes) -> None:
+        self.ttl_ms[key] = int(ms)
+
+    async def pexpire(self, key: str, ms: int) -> int:
+        if key not in self.ttl_ms:
+            return 0
+        self.ttl_ms[key] = int(ms)
+        self.renewals += 1
+        return 1
+
+
+class TestTheQueueClaimIsALease:
+    """A killed worker's claim on any job of this worker expires within one owner TTL."""
+
+    def test_the_hooks_are_on_the_worker_so_every_function_has_them(self) -> None:
+        kwargs = get_kwargs(WorkerSettings)
+        assert kwargs["on_job_start"] is lease_queue_claim
+        assert kwargs["on_job_end"] is release_queue_claim
+
+    @pytest.mark.asyncio
+    async def test_from_the_job_s_first_moment_the_claim_lives_one_owner_ttl(self) -> None:
+        redis = _ExpiringRedis()
+        key = in_progress_key_prefix + "enrich:q:report-1"
+        worker = Worker(**get_kwargs(WorkerSettings))
+        # What arq writes when it takes the job: the stand-in's life, in years.
+        await redis.psetex(key, int(worker.in_progress_timeout_s * 1000), b"1")
+        ctx: dict = {"redis": redis, "job_id": "enrich:q:report-1"}
+        await lease_queue_claim(ctx)
+        # A kill now, before any renewal, leaves a claim that expires in 90 s.
+        assert redis.ttl_ms[key] == JOB_OWNER_TTL_SECONDS * 1000
+        await release_queue_claim(ctx)
+        assert "maljan_queue_lease" not in ctx
+
+    @pytest.mark.asyncio
+    async def test_the_lease_is_renewed_and_ends_when_the_key_is_gone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.worker import analysis_worker as worker_module
+
+        monkeypatch.setattr(worker_module, "JOB_OWNER_REFRESH_SECONDS", 0.01)
+        redis = _ExpiringRedis()
+        key = in_progress_key_prefix + "job-2"
+        await redis.psetex(key, 10**15, b"1")
+        ctx: dict = {"redis": redis, "job_id": "job-2"}
+        await lease_queue_claim(ctx)
+        await asyncio.sleep(0.05)
+        assert redis.renewals >= 3
+        del redis.ttl_ms[key]
+        task = ctx["maljan_queue_lease"]
+        await asyncio.wait_for(task, 1.0)
+        assert task.done() and not task.cancelled()
