@@ -1497,9 +1497,15 @@ worker.
 
 When a change takes effect: the value is read from the job's own settings when
 the job starts. A value you save applies to every job started after it, with
-no worker restart; a job already running keeps the value it started with. The
-worker checks the clock on the same 15-second poll it reads the cancel flag
-on, so a job is stopped within one poll of its limit.
+no worker restart; a job already running keeps the value it started with.
+
+What it measures: the time since the worker started the job — its database
+reads, the sample download and the pipeline all count — on one monotonic
+clock, the same one the stop note's "N s into the run" is read from. The
+worker checks it on the same 15-second poll it reads the cancel flag on, which
+runs while the pipeline runs, so a job is stopped within one poll of its limit
+(at the pipeline's first poll if setup alone took longer). Storing a finished
+run's report after the pipeline returns is not interrupted.
 
 A job that is stopped — by the job timeout, by your cancel, or by its worker
 shutting down — keeps what it produced:

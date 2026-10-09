@@ -1252,7 +1252,8 @@ ANNOTATIONS: dict[str, Annotation] = {
     "job_timeout": {
         "title": "Seconds per job",
         "description": (
-            "How long one analysis job may run, in seconds, before the worker stops it. "
+            "How long one analysis job may run, in seconds, before the worker stops it, "
+            "counted from when the worker starts the job (setup and the pipeline both count). "
             "Empty, the default, is no limit. A number set here applies to every job started "
             "after it is saved, with no worker restart; a job already running keeps the value "
             "it started with. A job stopped by it keeps its run summary and a partial report "

@@ -1940,6 +1940,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
     # status change below — because a feed that starts late starts at the
     # wrong ``seq``.
     _start_event_feed(job_id, db_session)
+    # The instant this job started, on the clock its timeout is measured on:
+    # the job timeout covers the whole job — the reads, the sample download and
+    # the pipeline — and a stop note's "seconds into the run" is read off the
+    # same clock from the same instant, so the two numbers cannot disagree.
+    job_started = job_clock()
     try:
         # ── 1. Load job ──────────────────────────────────────
         from app.models.job import AnalysisJob
@@ -2450,7 +2455,6 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # timeout. The operator's cancel has ``cancelled_by_user``; a stop
         # neither of them made is the worker shutting down.
         stopped_by_timeout = False
-        job_started = job_clock()
 
         async def _heartbeat() -> None:
             # The heartbeat is also the cancellation
@@ -2554,7 +2558,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # one stopped it, otherwise the nodes that were running when the
             # task was cancelled under them.
             _stopped = app.container.cancellation.where_stopped()
-            _into = max(0.0, time.time() - start_time)
+            _into = max(0.0, job_clock() - job_started)
             _note = stop_note(_kind, seconds=_into, where=_stopped, limit=_job_timeout)
             logger.info(
                 "Pipeline stopped (%s): job=%s (stopped %s, %.0f s into the run)",

@@ -168,7 +168,11 @@ async def test_the_job_timeout_stops_the_run_and_keeps_what_it_produced(
 
     assert result["status"] == "failed"
     note = result["error"]
-    assert note.startswith("Stopped by the job timeout (28800 s, core.job_timeout) ")
+    # Measured from the job's start on the timeout's own clock, so the number
+    # the note gives is the number the limit was compared with.
+    assert note.startswith(
+        "Stopped by the job timeout (28800 s, core.job_timeout) 28801 s into the run, "
+    )
     assert "The report kept is partial" in note
 
     failed = [u for u in _job_updates(factory) if u.get("status") == "failed"]
