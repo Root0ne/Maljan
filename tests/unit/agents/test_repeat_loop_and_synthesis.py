@@ -183,26 +183,6 @@ class TestTheGuardEndsTheLoop:
         assert "the answer above" not in answers[1], "what is above is a failure"
         assert (guard.served_repeats, guard.ending_the_loop()) == (3, True)
 
-    def test_a_replayed_conversation_starts_the_count_again(self) -> None:
-        """A connection error re-sends the conversation from the first message.
-
-        The model then re-makes the calls it already made, and counting those
-        ended an analyst for a dropped socket — the retry exists to stop
-        exactly that.
-        """
-        guard = RepeatGuard()
-        tool = self._wrapped(guard, [])[0]
-        args = {"path": "/tmp/s.bin"}
-        tool.invoke(args)
-        tool.invoke(args)
-        assert guard.served_repeats == 1
-
-        guard.reset()
-
-        tool.invoke(args)
-        assert guard.served_repeats == 0, "the replayed call is the first one again"
-        assert guard.ending_the_loop() is False
-
     def test_the_analyst_loop_ends_and_synthesises_on_it(self) -> None:
         """The wiring: the stream is broken and the salvage is the same one a
         spent step budget takes."""
@@ -567,16 +547,6 @@ class TestAnEarlierChunksCallIsNotRunAgain:
         assert "[ev_0001]" in retried
         assert "the result is in [ev_0001]" in refused
 
-    def test_a_replayed_conversation_keeps_the_seeds(self) -> None:
-        guard = RepeatGuard()
-        guard.seed("decompile_function", {"path": "0x3c7c"}, "ev_0003")
-        guard.reset()
-        calls: list[str] = []
-
-        self._wrapped(guard, calls).invoke({"path": "0x3c7c"})
-
-        assert calls == []
-
 
 class TestSeededRefusalsDoNotEndTheLoop:
     """The chunk-2 shape: earlier calls asked once each, then new work."""
@@ -622,12 +592,3 @@ class TestSeededRefusalsDoNotEndTheLoop:
         assert calls == ["decompile_function"]
         assert "You already called decompile_function" in refused
         assert guard.served_repeats == 1
-
-    def test_a_replay_forgets_what_the_loop_was_told(self) -> None:
-        guard, calls, tool = self._setup([("0x1", False)])
-        tool.invoke({"path": "0x1"})
-        guard.reset()
-
-        tool.invoke({"path": "0x1"})
-        assert guard.served_repeats == 0
-        assert calls == []

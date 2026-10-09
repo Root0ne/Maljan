@@ -527,7 +527,6 @@ class RepeatGuard:
         # can shape (a forged or a shared name), so a call is a repeat only
         # when its listing is the held one, or a prefix of it.
         self._functions: dict[tuple[str, Any], list[tuple[str, str]]] = {}
-        self._seeded_functions: dict[tuple[str, Any], list[tuple[str, str]]] = {}
 
     def _seeded_count(self, key: str) -> int:
         """Where a seeded call's count starts: one served retry for a failure or an unkept result."""
@@ -594,16 +593,12 @@ class RepeatGuard:
         self._told.add(key)
         return True
 
-    def note_function(
-        self, key: tuple[str, Any] | None, entry_id: str, listing: str, *, seeded: bool = False
-    ) -> None:
+    def note_function(self, key: tuple[str, Any] | None, entry_id: str, listing: str) -> None:
         """Record that ``entry_id`` holds ``listing``, a listing of the function ``key`` names."""
         body = listing_body(listing)
         if key is None or not entry_id or not body:
             return
         self._functions.setdefault(key, []).append((str(entry_id), body))
-        if seeded:
-            self._seeded_functions.setdefault(key, []).append((str(entry_id), body))
 
     def function_entry(self, key: tuple[str, Any] | None, listing: str) -> str | None:
         """The entry whose listing already holds all of ``listing``, or ``None``.
@@ -671,20 +666,6 @@ class RepeatGuard:
         """
         self.served_repeats += 1
 
-    def reset(self) -> None:
-        """Forget this loop's calls, for a conversation that is starting again.
-
-        A connection error replays the whole conversation from the first
-        message, and the model then re-makes the calls it already made. Those
-        are not repeats: from the model's point of view it is asking for the
-        first time, and counting them ended an analyst for a dropped socket.
-        """
-        self._first = dict(self._seeded)
-        self._count = {key: self._seeded_count(key) for key in self._seeded}
-        self._told = set()
-        self._functions = {key: list(rows) for key, rows in self._seeded_functions.items()}
-        self.served_repeats = 0
-
     def ending_the_loop(self) -> bool:
         """Whether this loop has repeated itself often enough to be ended."""
         return self.served_repeats >= self.ENDS_AT
@@ -735,7 +716,7 @@ def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
         output = str(getattr(entry, "output", "") or "")
         guard.seed(tool, args, entry_id, recorded=output)
         if decompiles(tool):
-            guard.note_function(listed_function(output), entry_id, output, seeded=True)
+            guard.note_function(listed_function(output), entry_id, output)
     return guard
 
 
