@@ -58,6 +58,8 @@ MODELS = {
 JUDGE_EFFORT = {"anthropic": "medium", "openai": "max"}
 # The deadline ``deadline_hit`` is held to, short enough that it fires.
 DEADLINE_HIT_S = 12.0
+# How long a run stopped at its deadline is given for its in-flight work to see the stop.
+STRAGGLER_WAIT_S = 5.0
 
 
 @dataclass
@@ -326,6 +328,11 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
                 status = "failed"
                 error = f"the run passed its {rehearsal.deadline_s}s deadline"
                 result = dict(app.built_report or {})
+                # Stop the run's own work the way the worker stops a job, and
+                # let what is still in flight see it while the stub answers,
+                # so nothing of this run outlives it.
+                app.container.cancellation.cancel(error)
+                await asyncio.sleep(STRAGGLER_WAIT_S)
             except Exception as exc:  # noqa: BLE001 — a failed run is a record, not a crash
                 status, error = "failed", f"{type(exc).__name__}: {exc}"
             finally:

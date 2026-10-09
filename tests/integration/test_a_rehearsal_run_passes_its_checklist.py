@@ -21,6 +21,7 @@ tool sidecars speak, or a loopback port to bind. No Docker, no network beyond
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import socket
 from collections.abc import Iterator
@@ -55,31 +56,15 @@ pytestmark = [
 JOB_DEADLINE_S = 600.0
 WIRES = ("openai", "anthropic")
 
-# the judge reads a ChatAnthropic answer as str(content), so an
-# answer with a thinking block before its JSON is never read as the bundle
-# (judge_agent._answer_text, _bundle_from_response).
-JUDGE_MISREADS_THINKING = {"verdict stated by the judge": "read as fallback"}
-# one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its
-# whole tool loop (base_agent retries only a connection error; the OpenAI
-# client is built with max_retries=0; a mid-stream error is not retried on
-# either wire); what the run lacks then follows from it.
-ONE_ERROR_LOSES_AN_ANALYST = {
-    "every analyst answered": "static: failed",
-    "no claim lost on the way to the report": "no answer in force",
-    "settings in force as configured": "max_steps: expected 40",
-}
-KNOWN_DEFECTS: dict[tuple[str, str], dict[str, str]] = {
-    **{(s, "anthropic"): dict(JUDGE_MISREADS_THINKING) for s in SCENARIOS if s != "deadline_hit"},
-    **{
-        (s, "openai"): dict(ONE_ERROR_LOSES_AN_ANALYST)
-        for s in ("server_error_once", "rate_limited", "overloaded", "stream_error")
-    },
-    ("stream_error", "anthropic"): {
-        **JUDGE_MISREADS_THINKING,
-        **ONE_ERROR_LOSES_AN_ANALYST,
-        "every stage of the profile ran": "debate: failed",
-    },
-}
+# The checks each scenario fails today, each with the exact detail it fails
+# with and the product defect behind it (``tests/fixtures/rehearsal/
+# known_defects.json``). A pin matches only its whole detail: the same check
+# failing for one more reason is a new failure, and a defect fixed is a test
+# asking to strike its rows.
+PINS_FILE = Path(__file__).resolve().parents[1] / "fixtures" / "rehearsal" / "known_defects.json"
+KNOWN_DEFECTS: dict[tuple[str, str], dict[str, str]] = {}
+for _row in json.loads(PINS_FILE.read_text(encoding="utf-8"))["pins"]:
+    KNOWN_DEFECTS.setdefault((_row["scenario"], _row["wire"]), {})[_row["check"]] = _row["detail"]
 # A revision's validation cannot cite the analyst's own round-0 tool
 # entries, so each restated technique claim draws a retry. An empty
 # or cut mediator answer reads as disagreement, so revision rounds repeat.
@@ -125,11 +110,11 @@ def test_every_check_passes_but_a_known_defect(tmp_path: Path, scenario: str, wi
     known = KNOWN_DEFECTS.get((scenario, wire), {})
     for name, pinned in known.items():
         assert name in failed, (
-            f"known defect {scenario}/{wire} '{name}' no longer reproduces: remove it from "
-            "KNOWN_DEFECTS"
+            f"known defect {scenario}/{wire} '{name}' no longer reproduces: strike it from "
+            f"{PINS_FILE.name}"
         )
-        assert pinned in failed[name], (
-            f"'{name}' fails for a reason the pin does not name: {failed[name]}"
+        assert failed[name] == pinned, (
+            f"'{name}' fails with a detail the pin does not hold: {failed[name]}"
         )
     unexpected = {name: detail for name, detail in failed.items() if name not in known}
     assert unexpected == {}
