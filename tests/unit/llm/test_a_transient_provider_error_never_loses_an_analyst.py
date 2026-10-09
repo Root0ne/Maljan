@@ -32,10 +32,12 @@ import anthropic
 import httpx
 import openai
 import pytest
+from langchain_anthropic.chat_models import AnthropicTimeoutError
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
+from langchain_openai.chat_models.base import OpenAITimeoutError
 
 from maljan.agents.base_agent import BaseAnalyst
 from maljan.analysis.run_summary import RunSummaryBuilder
@@ -85,6 +87,11 @@ def _openai_stream_error() -> Exception:
         request=_REQUEST,
         body={"type": "server_error", "code": "server_error", "message": "try again"},
     )
+
+
+def _caused_by(exc: Exception, cause: Exception) -> Exception:
+    exc.__cause__ = cause
+    return exc
 
 
 def _connection_reset() -> Exception:
@@ -142,6 +149,26 @@ class TestWhatIsTransient:
     )
     def test_a_refusal_a_stall_or_a_schema_error_is_not(self, failure: Exception) -> None:
         assert transient_failure(failure) is None
+
+    @pytest.mark.parametrize(
+        "stall",
+        [
+            openai.APITimeoutError(request=_REQUEST),
+            anthropic.APITimeoutError(request=_REQUEST),
+            OpenAITimeoutError(request=_REQUEST),
+            AnthropicTimeoutError(request=_REQUEST),
+            _caused_by(openai.APIConnectionError(request=_REQUEST), httpx.ReadTimeout("silence")),
+        ],
+        ids=[
+            "openai",
+            "anthropic",
+            "langchain-openai",
+            "langchain-anthropic",
+            "read-timeout-cause",
+        ],
+    )
+    def test_a_stall_is_never_retried_whichever_class_says_it(self, stall: Exception) -> None:
+        assert transient_failure(stall) is None
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +291,14 @@ class TestTheAnalystCompletes:
         first, second = _no_real_backoff
         assert 0.5 <= first <= 1.5
         assert 1.0 <= second <= 3.0
+
+    def test_a_stall_on_the_first_call_is_asked_once(self) -> None:
+        agent, llm, _ledger = _analyst([openai.APITimeoutError(request=_REQUEST)])
+
+        with pytest.raises(AnalystError):
+            agent.execute_tool_loop([("system", "s"), ("human", "h")])
+
+        assert len(llm.asked) == 1
 
     def test_a_400_is_asked_once_and_fails_the_analyst(self) -> None:
         agent, llm, _ledger = _analyst([_openai_status(400)])

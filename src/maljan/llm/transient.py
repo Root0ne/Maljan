@@ -148,6 +148,24 @@ def _transport_failure(exc: BaseException) -> bool:
     return transport_failure(exc)
 
 
+def _a_stall(exc: BaseException) -> bool:
+    """Whether ``exc`` is a request that went silent until a timeout ended it.
+
+    ``TimeoutError`` (``ModelCallDeadline`` among them), and the SDKs' own
+    timeout classes, which both SDKs derive from ``APIConnectionError`` and
+    LangChain derives again (``langchain_openai``'s ``OpenAITimeoutError``):
+    asking a stalled request again is the storm ``max_retries=0`` prevents.
+    """
+    if isinstance(exc, TimeoutError):
+        return True
+    names = _class_names(exc)
+    if any((package, "APITimeoutError") in names for package in ("openai", "anthropic")):
+        return True
+    from maljan.llm.generation_rate import _transport_read_timeout
+
+    return _transport_read_timeout(exc)
+
+
 def transient_failure(exc: BaseException) -> str | None:
     """What transient provider failure ``exc`` is, in a few words, or ``None``.
 
@@ -155,7 +173,7 @@ def transient_failure(exc: BaseException) -> str | None:
     the caller exactly as it did before.
     """
     try:
-        if isinstance(exc, TimeoutError):
+        if _a_stall(exc):
             return None
         names = _class_names(exc)
         if any((package, "APIConnectionError") in names for package in ("openai", "anthropic")):
