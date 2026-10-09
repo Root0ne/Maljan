@@ -1,6 +1,6 @@
 ---
 title: "Rehearsal before a paid run"
-description: "Prove the whole pipeline healthy at zero cost: a loopback stub model, scripted answers, fault scenarios and a written checklist."
+description: "Prove the whole pipeline healthy at zero cost: a loopback stub model that refuses what the paid API refuses, fault scenarios, and a checklist that fails closed."
 ---
 
 A paid run that fails hours in costs the model calls it already made. A
@@ -13,107 +13,188 @@ Everything lives in `scripts/rehearsal/` and none of it ships in the product.
 Maljan reaches the stub only through its own settings: the OpenAI base URL, or
 `core.llm.anthropic.base_url` for the Anthropic wire.
 
-## What the stub answers
+## The gate: your own paid configuration, against the stub
 
-The stub speaks the Anthropic Messages API (streamed or whole, thinking blocks,
-`tool_use` and `tool_result`, usage with its cache fields, every stop reason
-including `max_tokens`, the Models API's description of a model) and the
-OpenAI-compatible chat completions API (streamed or whole, tool calls,
-`reasoning_content`, usage, the model list and llama.cpp's `/props`). It reads
-each request's role from the request itself — the system prompt's words, the
-negotiation framing, the tools offered — and answers it as that role would:
+```bash
+REHEARSAL_LOGIN=... python scripts/rehearsal/run.py \
+  --api http://127.0.0.1:8000 --email operator@example.org \
+  --configure gate --scenario normal --repeat 3 --out rehearsal-results
+```
 
-- an **analyst** calls the tools it was given against the run's own sample and
-  then writes `CLAIM` blocks citing ledger ids the request carries;
-- a **revision** restates its own claims and disputes nothing;
-- the **mediator** names one blocking contradiction in the first round, so a
-  revision round runs, and none after;
-- the **judge** answers a STIX bundle with its assessment and leaves one
-  claimed technique off, so the technique question is asked and answered;
-- the **narrative** and each **composer section** answer the JSON object their
-  request shows, citing ids the request carries, and leave empty what nothing
-  supports.
+`--configure gate` is the rehearsal to pass before a paid run. It reads the
+stack's settings and saves them to `rehearsal-results/settings-snapshot.json`
+before it changes anything. It then changes only what must change for the
+calls to reach the stub:
 
-A simulated pace — time to first token and tokens per second — makes each
-answer take the time a real model would, so a change meant to save wall-clock
-time can be measured at zero cost.
+- the OpenAI base URL and every per-agent OpenAI endpoint (fallbacks included),
+  or the Anthropic base URL;
+- an `auto` setting that would resolve differently against a loopback address
+  than against your paid endpoint is pinned to what it resolves to for the paid
+  one: `llm.openai.compat` to `standard`, `llm.parallel_analysts` to `true`;
+- nothing may reach a third party: the sandbox becomes the mock, the
+  threat-intel enrichment is switched off, and every tool server that answers
+  from outside this machine (VirusTotal, the threat-intel lookups, any HTTP
+  server not on loopback) is disabled for the rehearsal. Server tokens come
+  back masked and go back masked, which the settings API reads as unchanged.
 
-## Scenarios
+Your models, efforts, output caps, timeouts, agents and keys stay as you set
+them, and the checklist expects exactly them in force. Your API key is sent to
+the stub, on this machine, with every request. A configuration that calls
+Gemini or Ollama is refused, because the stub cannot stand in for them and the
+calls would reach the real service.
 
-| Scenario | What happens |
-|---|---|
-| `normal` | Every role answers well-formed. |
-| `cut_at_cap` | Each role's first call is cut at its output cap with only thinking and no text. |
-| `empty_answer` | Each role's first call answers with no text at all. |
-| `schema_break` | Each role's first call answers in a form its reader cannot parse. |
-| `long_loop` | Every analyst calls tools for many steps (`--loop-steps`) before answering. |
-| `slow_model` | Every call waits a fixed time (`--slow-seconds`), so a run can be held near a job deadline. |
-| `server_error_once` | Each role's first call is a 500; the client retries and the next call is answered. |
-| `cross_loop` | Normal answers; the report stage's calls follow the analysts' calls on the same client. Run it with `--provider anthropic`. |
+The connection test runs before anything is saved; if it fails, nothing is
+changed and the rehearsal stops. Every key it changed is put back when the
+rehearsal ends, on success, on failure, and on Ctrl-C or SIGTERM, and the
+runner prints which keys it changed and that they were restored. If a run is
+killed so hard that it cannot restore them, the snapshot stays and puts them
+back:
 
-## Running it
+```bash
+REHEARSAL_LOGIN=... python scripts/rehearsal/run.py --api http://127.0.0.1:8000 \
+  --email operator@example.org --restore rehearsal-results/settings-snapshot.json
+```
 
-Without the stack, the pipeline runs inside the runner's own process (the
-default profile, the mock sandbox, the tool sidecars over stdio):
+The stub runs on a free loopback port. The stack's worker must be able to reach
+`127.0.0.1` on the host, so a worker inside a container needs host networking,
+or a stub it can reach (`--stub-url`). A job the wait gives up on
+(`--timeout`) is cancelled. `--job-timeout` gives the worker's job timeout,
+and a run that finishes within 20% of it fails.
+
+`--configure harness` rehearses the harness's own fixed models and settings
+instead, with the same snapshot and restore; it touches no key. Without
+`--configure` nothing on the stack is changed: the stack must already call a
+stub (`--stub-port` or `--stub-url`), and `--expect key=value` names what to
+find in force. A run with nothing to compare fails.
+
+## Without the stack
 
 ```bash
 python scripts/rehearsal/run.py --in-process --scenario normal --repeat 3
 ```
 
-Against the running stack (API and worker, the mock sandbox), the runner starts
-the stub on `--stub-port` (8765 by default) and submits the synthetic sample as
-the console would. `--configure` points the stack at the stub through the
-settings API — it runs the connection test first, so the probe gate admits the
-models, and prints every key it changed; without it nothing on the stack is
-changed and `--expect key=value` names what to find in force:
+The same pipeline runs inside the runner's process: the default profile, the
+mock sandbox, the tool sidecars over stdio, the product's own connection test
+asked against the stub first. Its setup differs from a paid run on the stack:
 
-```bash
-REHEARSAL_LOGIN=... python scripts/rehearsal/run.py \
-  --api http://127.0.0.1:8000 --email operator@example.org \
-  --configure --scenario normal --repeat 3 --out rehearsal-results
-```
+- no API, queue or worker, so no job bookkeeping, no probe gate a job is
+  submitted through, no stored report, and the deadline is the runner's own,
+  not the worker's job timeout;
+- the static provider is `none` (no Ghidra or radare2) and long-term memory
+  is in memory (no Qdrant);
+- its own settings: `claude-haiku-5-5` on the Anthropic wire,
+  `deepseek-v4-flash` with a `deepseek-v4-pro` judge on the OpenAI wire, effort
+  `high` (judge `medium` or `max`), a judge cap, step and time limits, a spend
+  ceiling so the run summary carries its spend.
 
-The stub can also run on its own, for the worker to reach while the runner
-uses `--stub-url`:
+The in-process run is a quick health check. The gate is the rehearsal that
+stands for a paid run.
 
-```bash
-python scripts/rehearsal/stub_model.py --port 8765 --scenario normal \
-  --tokens-per-second 240 --first-token-seconds 2
-```
+## What the stub does
 
-The sample is a small benign PE built in memory, never a real program, written
-as `sample_1.exe` so the mock sandbox's recorded fixture answers for it.
+It speaks the Anthropic Messages API and the OpenAI-compatible chat completions
+API, streamed (with `ping` events) or whole, and holds every request to the
+rules the real API holds it to. A request the paid API would refuse is refused
+here with the same status and error body, and fails the rehearsal:
+
+- a missing or wrong credential or version header;
+- `max_tokens` above the model's output cap, or a prompt past its window;
+- sampling parameters a model refuses, an effort level or thinking type its
+  description does not list, a forced tool choice while it thinks;
+- a `tool_use` with no `tool_result` after it, a result with no call, and the
+  same for OpenAI tool calls;
+- more than four `cache_control` breakpoints;
+- a `thinking` or `redacted_thinking` block sent back changed. For a model
+  whose blocks are bound to everything before them, such as Claude Haiku 5.5,
+  the block is also refused after the history before it changed, unless the
+  request asks the API to drop it.
+
+The facts per model are data: the Anthropic Models API's stored answer for
+Claude Haiku 5.5 (`scripts/rehearsal/model_descriptions/`), and otherwise the
+repository's vendored model table. The stub cuts every answer at the request's
+own `max_tokens`, signs every thinking block, and reports cache reads and
+writes as the provider would: Anthropic at the request's breakpoints, with the
+write's lifetime, and OpenAI-compatible automatically on a repeated prefix.
+`--chars-per-token 3` counts tokens the way a real tokenizer counts a
+JSON-heavy prompt, so an estimate that runs short shows up.
+
+Each request's role is read from the product's own prompt constants: analyst,
+revision, mediator and its structured extraction, judge, technique question,
+narrative, and each composer section. A request the stub cannot place is
+answered as `other`, and that fails the rehearsal.
+
+## Scenarios
+
+Every scenario runs on both wires. A fault on "first calls" hits the first call
+of every instance of a role: each analyst, each composer section, and each
+single-call role once.
+
+| Scenario | What happens |
+|---|---|
+| `normal` | Every role answers well-formed. |
+| `cut_at_cap` | Every first call is cut at its output cap with only thinking and no text. |
+| `empty_answer` | Every first call answers with no text at all. |
+| `schema_break` | Every first call answers in a form its reader cannot parse. |
+| `long_loop` | Every analyst calls tools for many steps (`--loop-steps`) before answering. |
+| `slow_model` | Every call waits a fixed time (`--slow-seconds`). |
+| `server_error_once` | Every first call is a 500. The Anthropic client retries it. An OpenAI analyst's call is not retried today, and that analyst is lost. |
+| `rate_limited` | Every first call is a 429 with `retry-after`. |
+| `overloaded` | Every first call is a 529 (503 on the OpenAI wire). |
+| `stream_error` | Every first streamed answer breaks off with an overloaded error mid-stream. |
+| `redacted_thinking` | Every answer that thinks also carries a `redacted_thinking` block (Anthropic only). |
+| `unusual_stop` | Every first call stops as `refusal`, `pause_turn` or `model_context_window_exceeded`. |
+| `prose_instead_of_tool` | Every first structured call answers in prose instead of calling its schema tool (Anthropic only). |
+| `deadline_hit` | Every call is slow enough that the run's deadline fires. It must end as a failed job with the reason said. |
+| `cross_loop` | Normal answers, with the report stage's calls after the analysts' calls on the same client. |
 
 ## What it checks
 
-Each run writes `<scenario>-runN.json` and `<scenario>-runN.md`, and the runner
-exits non-zero when any check fails or repeated runs differ:
+Each run writes `<scenario>-runN.json` and `<scenario>-runN.md`. The runner
+exits non-zero when any check fails or repeated runs differ. Every check fails
+closed: what it cannot confirm is a failure.
 
-- the job completed;
-- every stage that started finished, and none failed;
-- every analyst answered: none failed or was lost to an error;
-- each of the composer's sixteen sections is written, marked not written by a
-  degradation reason, answered empty by the model, or never asked because its
-  evidence was empty — never lost between an answer and the report;
-- the narrative is written or marked;
-- the run summary is present and its token totals are the provider-reported
-  usage, call for call;
-- the STIX bundles and the markdown are rendered;
-- no claim of an answer in force is missing from the report;
-- the settings in force are the ones configured: the model per role, the
-  effort, the output caps, the analysts' step and time limits, and any
-  settings-snapshot key named with `--expect settings.<key>=<value>`;
-- the judge stated the verdict;
-- the scenario's fault really happened, so a fault run cannot pass vacuously.
+- The job completed.
+- The model refused no request.
+- Every model call was recognised.
+- The connection test passed.
+- Every stage of the profile in force ran.
+- Every analyst the profile names answered with at least one claim.
+- Each of the sixteen composer sections is written, or accounted for in one of
+  three ways:
+  - marked not written by a degradation reason;
+  - excused by the product's own bundling, which finds its evidence empty;
+  - left empty on purpose by the stub, because the sample holds nothing for it.
+- The narrative was written by the model.
+- The token totals are the provider-reported usage, call for call, and no call
+  is unreported.
+- The spend equals that usage priced from the vendored table.
+- The STIX bundles and the markdown are rendered.
+- No claim is lost: every claim the model wrote is in an answer in force or
+  recorded as dropped, and every claim in force is discussed in the report's
+  body.
+- The settings in force are the ones configured.
+- The judge stated the verdict.
+- The run finished well inside its deadline.
+- The scenario's fault really happened.
 
-`--repeat N` compares the runs' structure — verdict, stages, section statuses,
-claims per agent, STIX object types, markdown headings, model calls per role,
-check results — and lists every difference. Each result also records what no
-check judges: negotiation rounds, validation retries by code, degradation
-reasons, model calls by role and the wall time, the numbers a speed change
-moves.
+`--repeat N` compares the runs' structure and lists every difference:
 
-The same pipeline runs per scenario in the test suite
-(`tests/integration/test_a_rehearsal_run_passes_its_checklist.py`), skipped
-only where `starlette`, `uvicorn` or `mcp` is not installed or no loopback
+- verdict and stages;
+- section statuses and claims per agent;
+- STIX object types and markdown headings;
+- model calls per role and check results.
+
+Each result also records what no check judges, the numbers a speed change
+moves:
+
+- negotiation rounds;
+- validation retries by code;
+- degradation reasons;
+- model calls by role;
+- cache reads and writes, the priced cost, and the wall time.
+
+The same pipeline runs per scenario and per wire in the test suite
+(`tests/integration/test_a_rehearsal_run_passes_its_checklist.py`). The defects
+the rehearsal has found are pinned there until they are fixed. It is skipped
+only where `starlette`, `uvicorn` or `mcp` is not installed, or no loopback
 port can be bound.
