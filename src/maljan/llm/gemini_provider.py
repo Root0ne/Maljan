@@ -59,7 +59,7 @@ class GeminiProvider:
         chat_class = with_answered_tool_calls(
             with_sized_request_timeout(ChatGoogleGenerativeAI), "gemini"
         )
-        return chat_class(  # type: ignore[no-any-return]
+        built = chat_class(
             model=model,
             temperature=temperature,
             google_api_key=SecretStr(api_key.get_secret_value()),
@@ -69,3 +69,40 @@ class GeminiProvider:
             max_retries=6,
             **kwargs,
         )
+        _bind_async_client_per_loop(built)
+        return built  # type: ignore[no-any-return]
+
+
+def _bind_async_client_per_loop(built: Any) -> None:
+    """Give ``built``'s Gemini client async connections of each event loop's own.
+
+    The google-genai client builds one httpx async client per model, and one
+    model is awaited on the agent loop and on the worker's own; a pooled
+    connection reused across the two fails with "bound to a different event
+    loop". The client is rebuilt per loop from the arguments it was built with
+    (``maljan.llm.loop_clients``); every request is still built by the original.
+    A client that sends through aiohttp (per loop already) is left as it is;
+    one this SDK no longer lays out this way is too, and a warning says so once.
+    """
+    from maljan.llm.loop_clients import layout_not_recognised, loop_bound_async_client
+
+    api_client: Any = getattr(getattr(built, "client", None), "_api_client", None)
+    if api_client is None or not (
+        hasattr(api_client, "_async_httpx_client")
+        and hasattr(api_client, "_async_httpx_client_args")
+    ):
+        layout_not_recognised("gemini", "no _api_client with an async httpx client and its args")
+        return
+    original = api_client._async_httpx_client
+    if original is None:
+        # The google-auth path, which sends through aiohttp sessions the SDK
+        # already keeps one per loop.
+        return
+    args = api_client._async_httpx_client_args or {}
+    build_class = type(original)
+    try:
+        api_client._async_httpx_client = loop_bound_async_client(
+            lambda: build_class(**args), template=original
+        )
+    except TypeError as exc:
+        layout_not_recognised("gemini", str(exc))

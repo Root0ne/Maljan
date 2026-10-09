@@ -181,6 +181,47 @@ def with_watched_streams(chat_class: Any) -> Any:
     return watched_class
 
 
+def _bind_async_client_per_loop(built: Any) -> None:
+    """Give ``built``'s Ollama client async connections of each event loop's own.
+
+    ``ChatOllama`` builds one ``ollama.AsyncClient`` (one httpx pool) per
+    model, and one model is awaited on the agent loop and on the worker's own;
+    a pooled connection reused across the two fails with "bound to a different
+    event loop". Each loop gets an httpx client built by ``ollama.AsyncClient``
+    from the same host and arguments ``ChatOllama`` used, so headers, the
+    request timeout and the proxies httpx reads from the environment are what
+    they were (``maljan.llm.loop_clients``); every request is still built by
+    the original client.
+    """
+    from maljan.llm.loop_clients import layout_not_recognised, loop_bound_async_client
+
+    holder: Any = getattr(built, "_async_client", None)
+    import httpx
+
+    original = getattr(holder, "_client", None)
+    if not isinstance(original, httpx.AsyncClient):
+        layout_not_recognised(
+            "ollama", "ChatOllama holds no ollama.AsyncClient with an httpx client"
+        )
+        return
+    try:
+        from langchain_ollama._utils import merge_auth_headers, parse_url_with_auth
+    except ImportError as exc:
+        layout_not_recognised("ollama", f"langchain_ollama's URL helpers moved ({exc})")
+        return
+    client_class: Any = type(holder)
+    client_kwargs = dict(built.client_kwargs or {})
+    host, auth_headers = parse_url_with_auth(built.base_url)
+    merge_auth_headers(client_kwargs, auth_headers)
+    async_kwargs = {**client_kwargs, **(built.async_client_kwargs or {})}
+    try:
+        holder._client = loop_bound_async_client(
+            lambda: client_class(host=host, **async_kwargs)._client, template=original
+        )
+    except TypeError as exc:
+        layout_not_recognised("ollama", str(exc))
+
+
 @register_provider("ollama")
 class OllamaProvider:
     """Builds LangChain ChatOllama instances for local models."""
@@ -240,7 +281,7 @@ class OllamaProvider:
         chat_class = with_answered_tool_calls(
             with_sized_request_timeout(with_watched_streams(ChatOllama)), "ollama"
         )
-        return chat_class(  # type: ignore[no-any-return]
+        built = chat_class(
             model=model,
             client_kwargs=client_kwargs,
             base_url=base_url,
@@ -249,3 +290,6 @@ class OllamaProvider:
             num_ctx=self._config.llm.ollama.num_ctx,
             **kwargs,
         )
+        # Its async connections never cross event loops.
+        _bind_async_client_per_loop(built)
+        return built  # type: ignore[no-any-return]

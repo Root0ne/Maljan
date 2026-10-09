@@ -183,7 +183,7 @@ def forget_standard_only(base_url: str | None = None) -> None:
 
 
 def unshared_async_client(base_url: str | None, timeout: Any) -> Any | None:
-    """An httpx async pool this model alone owns, or ``None`` if it cannot be built.
+    """An httpx async client this model alone owns, or ``None`` if it cannot be built.
 
     ``langchain_openai`` caches its async client with ``@lru_cache`` keyed on
     ``(base_url, timeout, socket_options)``, so every model this provider builds
@@ -195,25 +195,31 @@ def unshared_async_client(base_url: str | None, timeout: Any) -> Any | None:
     ``APIConnectionError("Connection error.")`` — the fault diagnosed for the
     judge and then seen again on the narrative round.
 
-    Owning the pool is what makes the container's per-loop model cache mean
-    anything: two models for two loops must not share one set of connections.
-    The keepalive socket options langchain applies are kept by reusing its own
+    The client is the model's own, and it keeps one pool per event loop it
+    sends on (``maljan.llm.loop_clients``), so a model held across two loops —
+    the narrative agent, the composer — never crosses them either. The
+    keepalive socket options langchain applies are kept by reusing its own
     builder; a version that no longer exposes it falls back to a plain client
     rather than to the shared one.
     """
+    from maljan.llm.loop_clients import loop_bound_async_client  # noqa: PLC0415
+
     try:
         from langchain_openai.chat_models._client_utils import (  # noqa: PLC0415
             _build_async_httpx_client,
             _default_socket_options,
         )
 
-        return _build_async_httpx_client(base_url, timeout, _default_socket_options())
+        options = _default_socket_options()
+        return loop_bound_async_client(
+            lambda: _build_async_httpx_client(base_url, timeout, options)
+        )
     except Exception as exc:  # noqa: BLE001 — a private helper is allowed to move
         logger.debug("openai provider: langchain's client builder is unavailable (%s).", exc)
     try:
         import httpx  # noqa: PLC0415
 
-        return httpx.AsyncClient(timeout=timeout)
+        return loop_bound_async_client(lambda: httpx.AsyncClient(timeout=timeout))
     except Exception as exc:  # noqa: BLE001 — no client at all means the shared one
         logger.warning(
             "openai provider: could not build a private httpx pool (%s); this model "
