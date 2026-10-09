@@ -266,12 +266,13 @@ class Wire:
                     )
         binding = (body.get("thinking") or {}).get("block_binding") or {}
         dropping = binding.get("prefix_mismatch_behavior") == "drop_block"
+        rendered = self.render(body)
         for index in assistants:
             for block in messages[index].get("content") or []:
                 if not isinstance(block, dict) or block.get("type") != "thinking":
                     continue
                 written = self.issued.get(str(block.get("signature")))
-                if written is None or written == _prefix(body, messages[:index]):
+                if written is None or written == _prefix(body, rendered[:index]):
                     continue
                 if dropping:
                     self.dropped.append(str(block.get("signature")))
@@ -281,6 +282,36 @@ class Wire:
                     "The block is bound to a different conversation."
                 )
         return ""
+
+    def render(self, body: dict[str, Any]) -> list[Any]:
+        """The messages as the model reads them: with ``drop_block``, the failing blocks out.
+
+        A block fails when the history rendered before it is not the one it was
+        written after; one dropped changes what every later block is checked
+        against, as the page says.
+        """
+        messages = list(body.get("messages") or [])
+        binding = (body.get("thinking") or {}).get("block_binding") or {}
+        if binding.get("prefix_mismatch_behavior") != "drop_block":
+            return messages
+        out: list[Any] = []
+        for turn in messages:
+            content = turn.get("content")
+            if turn.get("role") != "assistant" or not isinstance(content, list):
+                out.append(turn)
+                continue
+            kept = []
+            for block in content:
+                written = (
+                    self.issued.get(str(block.get("signature")))
+                    if isinstance(block, dict) and block.get("type") == "thinking"
+                    else None
+                )
+                if written is not None and written != _prefix(body, out):
+                    continue
+                kept.append(block)
+            out.append({**turn, "content": kept})
+        return out
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
         body = json.loads(request.content) if request.content else {}
@@ -299,7 +330,7 @@ class Wire:
                 },
             )
         answer = self.answer(body)
-        prefix = _prefix(body, body.get("messages") or [])
+        prefix = _prefix(body, self.render(body))
         thinking = [b for b in answer["content"] if b.get("type") == "thinking"]
         for block in thinking:
             self.issued[str(block["signature"])] = prefix

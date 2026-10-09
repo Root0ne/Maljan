@@ -238,21 +238,21 @@
     }
   },
   "prefix_bound_thinking": {
-    "_comment": "The model families whose vendor documents that a thinking block is bound to everything sent before it (the system prompt, the tools and every earlier message), so a request whose history was edited is refused, and that take a turn-scoped mid-conversation system message (clear_at next_user_message). The Anthropic provider sends such a model's run-state block as that message and checks every thinking block it sends back; a model not listed is sent its history as before.",
+    "_comment": "The model families whose vendor documents that a thinking block is bound to everything sent before it (the system prompt, the tools and every earlier message), so a request whose history was edited is refused. The Anthropic provider keeps such a model's history append-only (earlier user turns sent again as they were sent) and checks every thinking block it sends back; a model not listed is sent its history as before.",
     "claude-fable-5-1": {
-      "source": "https://platform.claude.com/docs/en/build-with-claude/preserved-thinking (the conversation check); https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages (supported models)"
+      "source": "https://platform.claude.com/docs/en/build-with-claude/preserved-thinking (the conversation check)"
     },
     "claude-haiku-5-5": {
-      "source": "https://platform.claude.com/docs/en/build-with-claude/preserved-thinking (the conversation check); https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages (supported models)"
+      "source": "https://platform.claude.com/docs/en/build-with-claude/preserved-thinking (the conversation check)"
     },
     "claude-mythos-5-1": {
-      "source": "https://platform.claude.com/docs/en/build-with-claude/preserved-thinking (the conversation check); https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages (supported models)"
+      "source": "https://platform.claude.com/docs/en/build-with-claude/preserved-thinking (the conversation check)"
     },
     "claude-opus-5-5": {
-      "source": "https://platform.claude.com/docs/en/build-with-claude/preserved-thinking (the conversation check); https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages (supported models)"
+      "source": "https://platform.claude.com/docs/en/build-with-claude/preserved-thinking (the conversation check)"
     },
     "claude-sonnet-5-5": {
-      "source": "https://platform.claude.com/docs/en/build-with-claude/preserved-thinking (the conversation check); https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages (supported models)"
+      "source": "https://platform.claude.com/docs/en/build-with-claude/preserved-thinking (the conversation check)"
     }
   }
 }

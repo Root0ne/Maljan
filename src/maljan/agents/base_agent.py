@@ -46,7 +46,11 @@ from maljan.core.logger import logger
 from maljan.core.spend import LOOP_TURN_CALL, SPEND_CAP, SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.llm.answer_text import answer_text
-from maljan.llm.anthropic_history import keeps_turns_as_received
+from maljan.llm.anthropic_history import (
+    RUN_STATE_ATTACHED,
+    TOOL_LOOP_TURN,
+    keeps_turns_as_received,
+)
 from maljan.llm.context_window import (
     CHARS_PER_TOKEN,
     NO_ROOM_RUN_STATE,
@@ -2907,14 +2911,28 @@ def _carries_run_state(message: Any) -> bool:
 
 
 def _with_run_state_on(message: Any, body: str) -> Any:
-    """``message`` with the block for ``body`` at its end: text appended, or a text part."""
+    """``message`` with the block for ``body`` at its end: text appended, or a text part.
+
+    The exact block attached is noted in the message's ``response_metadata``
+    (:data:`RUN_STATE_ATTACHED`), which no client sends: a provider that
+    treats the platform's block apart from the text around it
+    (``anthropic_history``) recognises it by that note, never by its markers,
+    which any text can carry.
+    """
     from maljan.pipeline.run_state import run_state_block, with_run_state_tail
 
+    block = run_state_block(body)
+    noted = {**(message.response_metadata or {}), RUN_STATE_ATTACHED: block}
     content = message.content
     if isinstance(content, list):
-        part = {"type": "text", "text": run_state_block(body)}
-        return message.model_copy(update={"content": [*content, part]})
-    return message.model_copy(update={"content": with_run_state_tail(str(content or ""), body)})
+        part = {"type": "text", "text": block}
+        return message.model_copy(update={"content": [*content, part], "response_metadata": noted})
+    return message.model_copy(
+        update={
+            "content": with_run_state_tail(str(content or ""), body),
+            "response_metadata": noted if block else message.response_metadata,
+        }
+    )
 
 
 def _without_run_state_on(message: Any) -> Any:
@@ -2923,6 +2941,9 @@ def _without_run_state_on(message: Any) -> Any:
 
     if not _carries_run_state(message):
         return message
+    if RUN_STATE_ATTACHED in (message.response_metadata or {}):
+        kept = {k: v for k, v in message.response_metadata.items() if k != RUN_STATE_ATTACHED}
+        message = message.model_copy(update={"response_metadata": kept})
     content = message.content
     if isinstance(content, list):
         last = content[-1] if content else None
@@ -4290,6 +4311,13 @@ class BaseAnalyst(BudgetMeter, ABC):
                     messages,
                     ledger_entries=len(getattr(recorder, "entries", None) or []),
                 )
+            # Each turn of a tool loop says so, for a provider that caches a
+            # conversation it will send again (``anthropic_history``); the
+            # note rides the request alone, never the loop's own messages.
+            if sent:
+                last = sent[-1]
+                noted = {**(last.response_metadata or {}), TOOL_LOOP_TURN: True}
+                sent = [*sent[:-1], last.model_copy(update={"response_metadata": noted})]
             return sent
 
         return refresh

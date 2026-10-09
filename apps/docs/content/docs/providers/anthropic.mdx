@@ -50,32 +50,37 @@ core.llm.anthropic.effort       = max
 - **Streaming.** A request whose output cap is past what the Anthropic SDK
   sends unstreamed by its own rule (over 21,333 tokens) is streamed and joined
   into the same answer, so a long answer never sits on an idle connection.
-- **Prompt caching** is asked for only where a prefix is sent again. A request
-  that continues a conversation (a tool loop's second step on) carries two
-  explicit breakpoints: on the last block of its newest user turn, written now
-  and read next step, and on the turn the previous request ended with, so the
-  read is always found. A single-shot call (a report section, a revision, a
-  verdict) carries none and pays no write premium. The run summary counts the
-  input read from the cache and the input written to it.
+- **Prompt caching** is asked for only where a prefix is sent again. A tool
+  loop's first request carries a breakpoint on its task turn (sent as a
+  one-block list on every request of the loop, so its shape never changes),
+  and every later request carries two: on the last block of its newest user
+  turn, written now and read next step, and on the turn the previous request
+  ended with, so the read is always found. A single-shot call (a report
+  section, a revision, a verdict) carries none and pays no write premium. The
+  run summary counts the input read from the cache and the input written to it.
 - **The history only grows.** A thinking block is bound to everything sent
   before it, and an account created on or after 2026-08-31 gets a 400 for an
   edited prefix. On a model documented so (the vendored table's
   `prefix_bound_thinking` rows, Claude Haiku 5.5 among them):
-  - the run-state block a tool loop regenerates each turn is sent as a
-    turn-scoped mid-conversation system message (`clear_at:
-    next_user_message`, beta `mid-conversation-system-clear-at-2026-08-21`)
-    after the newest user turn; it renders until the next tool result and is
-    then sent again verbatim, cleared, rendering nothing and costing nothing,
-    so the model reads one block, the current one;
+  - the run-state block stays in the user turn, as on every other provider,
+    and no message is ever sent with a system role; every earlier user turn is
+    sent again exactly as it was sent. A turn whose block says nothing new but
+    its budget line carries that line alone, between the block's markers, and
+    the model reads the run's other lines in the newest turn that carried
+    them: one budget line a turn, and the whole block again when another line
+    changes. Only the exact block the platform attached is ever shortened;
+    text that merely ends with the markers is sent as written;
   - an assistant turn is sent as it was received: a call the clock ended
     before it ran, or whose arguments never parsed, is answered with a reply
     saying it was not run rather than taken off its turn;
   - the final-answer nudge and the forced synthesis keep the loop's system
     prompt and tools and send `tool_choice: {"type": "none"}`;
   - where a history is still changed (a salvage cut to fit), every thinking
-    block goes back as received and the request asks the API to drop the ones
-    whose prefix changed (`block_binding: drop_block`, beta
-    `thinking-binding-controls-2026-08-01`), the documented recovery.
+    block goes back as received once and the request asks the API to drop the
+    ones whose prefix changed (`block_binding: drop_block`, beta
+    `thinking-binding-controls-2026-08-01`), the documented recovery; later
+    requests leave the dropped blocks out, so the reasoning written after them
+    stays.
 - **No forced tool choice, no prefill.** Structured output offers the schema's
   tool without forcing it, and an answer that calls no tool is asked again in
   text. Maljan's requests end on a user turn; a request that ended on an

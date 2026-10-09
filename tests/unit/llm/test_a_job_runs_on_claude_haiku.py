@@ -13,9 +13,9 @@ asserted of each body:
 * the configured effort as ``output_config.effort``, and no ``thinking``
   field, so no ``budget_tokens``;
 * prompt-cache breakpoints only on a request that re-sends a prefix: none on
-  a single-shot call or a loop's first request, two on each later one;
-* the run-state block as a turn-scoped system message (``clear_at``) with its
-  beta, sent again verbatim on every later request;
+  a single-shot call, one on a loop's first request, two on each later one;
+* no message with a system role: the run-state block stays in the user turn,
+  and every earlier user turn is sent again exactly as it was sent;
 * streamed when the output cap is past what the SDK sends unstreamed;
 * every ``thinking`` block replayed exactly as it was received, and every
   request of the loop the one before it plus its new turns (preserved
@@ -40,7 +40,7 @@ from maljan.core.token_ledger import turn_usage
 from maljan.llm.anthropic_history import _without_markers
 from maljan.llm.anthropic_provider import AnthropicProvider
 
-from .anthropic_wire import CLEAR_AT_BETA, MODEL, Wire, install, message
+from .anthropic_wire import MODEL, Wire, install, message
 
 REPORT = "CLAIM: it reads a file\nEVIDENCE: ev_0001\nCONFIDENCE: 0.6\nTECHNIQUE: T1005\n"
 USAGE = {
@@ -190,16 +190,18 @@ class TestTheAnalystsLoop:
             assert later["system"] == earlier["system"]
             assert later["tools"] == earlier["tools"]
             assert later["messages"][: len(earlier["messages"])] == earlier["messages"]
-        assert all(CLEAR_AT_BETA in betas for betas in wire.betas)
-        assert [m["role"] for m in bodies[0]["messages"]] == ["user", "system"]
+        assert all(m["role"] != "system" for body in bodies for m in body["messages"])
+        assert [m["role"] for m in bodies[0]["messages"]] == ["user"]
 
     def test_only_a_re_sent_prefix_is_cached(self, monkeypatch: pytest.MonkeyPatch) -> None:
         wire = self._run(monkeypatch, prompt_cache_ttl="1h")
         marks = [_markers(body) for body in wire.bodies]
-        assert marks[0] == []
-        # The task turn is a string, which is sent as it was rather than marked.
-        assert marks[1] == [{"type": "ephemeral", "ttl": "1h"}]
-        assert marks[2] == [{"type": "ephemeral", "ttl": "1h"}] * 2
+        hour = {"type": "ephemeral", "ttl": "1h"}
+        # The loop's first request writes its prefix; each later one reads the
+        # previous request's write and writes its own.
+        assert marks == [[hour], [hour, hour], [hour, hour]]
+        # The loop's first user turn is a one-block list on every request.
+        assert all(isinstance(b["messages"][0]["content"], list) for b in wire.bodies)
         assert all("cache_control" not in body for body in wire.bodies)
 
     def test_the_thinking_blocks_go_back_exactly_as_they_came(
