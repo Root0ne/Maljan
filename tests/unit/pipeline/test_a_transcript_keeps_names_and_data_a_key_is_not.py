@@ -84,6 +84,38 @@ def test_a_hex_run_after_a_label_or_a_credential_word_is_masked(length: int) -> 
 
 
 @pytest.mark.parametrize("length", [30, 48, 50])
+def test_a_credential_word_anywhere_in_the_object_or_its_keys_keeps_the_run_a_key(
+    length: int,
+) -> None:
+    run = _hex_run(length)
+    far = "x" * 120
+    texts = [
+        f'{{"hex": "{run}", "kind": "api_key"}}',
+        f'{{"label": "signing", "{far}": 1, "hex": "{run}"}}',
+        f'{{"api_token_{far}": {{"meta": 1, "hex": "{run}"}}}}',
+        f'{{"outer": {{"session": {{"meta": {{"n": 1}}, "hex": "{run}"}}}}}}',
+        f'{{"hex": "{run}", "meta": {{"note": "an iv"}}}}',
+    ]
+    texts += [
+        f'{{"{name}": {{"hex": "{run}"}}}}'
+        for name in ("hmac", "seed", "salt", "private", "nonce", "iv", "mnemonic")
+    ]
+    for text in texts:
+        assert run not in scrub(text), text
+        assert run not in scrub_keeping_layout(text), text
+
+
+@pytest.mark.parametrize("length", [30, 48, 50])
+def test_a_tool_s_hex_field_in_a_list_of_reads_is_kept(length: int) -> None:
+    run = _hex_run(length)
+    text = (
+        f'{{"reads": [{{"address": "0x401000", "hex": "{run}"}}, '
+        f'{{"address": "0x401100", "hex": "{run}"}}], "archive": "derived.bin"}}'
+    )
+    assert scrub(text) == text
+
+
+@pytest.mark.parametrize("length", [30, 48, 50])
 def test_a_tool_s_own_hex_field_is_kept(length: int) -> None:
     run = _hex_run(length)
     for text in (

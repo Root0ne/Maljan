@@ -1173,25 +1173,105 @@ def _hide_credentials(found: re.Match[str]) -> str:
 # byte range): data the tool read, which the length rule took for a key.
 # Only the JSON key form, the quotes required: ``"hex": "…"`` (or its escaped
 # form inside a JSON string). A prose label (``secret hex = …``, ``hex: …``) is
-# not a tool's field, and a credential word in front of the field
-# (``{"token": {"hex": "…"}}``) keeps the run a key.
+# not a tool's field, and a credential word anywhere in the object that holds
+# the field, or in the key of that object or of any object around it
+# (``{"token": {"hex": "…"}}``, ``{"hex": "…", "kind": "api_key"}``), keeps the
+# run a key.
 _HEX_FIELD_BEFORE_RE = re.compile(r"(?<![A-Za-z0-9_])\\?[\"']hex\\?[\"']\s*:\s*\\?[\"']\Z")
 _HEX_DATA = re.compile(r"\A(?:[0-9A-Fa-f]{2})+\Z")
-# The words a credential is named by, anywhere in the stretch before the field.
+# The words a credential or key material is named by. ``iv`` and ``pwd`` only as
+# a whole word: as letters inside another word they name nothing. The scrub's
+# own mark counts too: a key name an earlier pass masked named something the
+# scrub read as a credential.
 _CREDENTIAL_WORD_RE = re.compile(
-    r"(?i)api|auth|bearer|cookie|credential|key|passphrase|passwd|password|pwd|secret"
-    r"|session|token"
+    r"(?i)api|auth|bearer|cookie|credential|hmac|key|mnemonic|nonce|passphrase|passwd"
+    r"|password|priv|salt|secret|seed|session|signing|token"
+    r"|(?<![a-z])(?:iv|pwd)(?![a-z])|\*\*\*"
 )
-# How far before the field a credential word is looked for.
-_HEX_FIELD_WINDOW = 48
+# How far before the value the ``"hex":`` key itself is looked for.
+_HEX_FIELD_WINDOW = 16
+# The text between an object's opening brace and the delimiter before it, read
+# for the key that names the object, at most this long.
+_OBJECT_KEY_WINDOW = 80
+# The braces of one string, read once (``_Braces``) and kept for the next field
+# in the same string: the scrub masks run by run over one text.
+_BRACES_CACHE: list[Any] = [None, None]
+
+
+class _Braces:
+    """For every position of a text, the innermost ``{`` around it, and each
+    ``{``'s matching ``}`` and enclosing ``{``. One pass, linear in the text.
+
+    An unclosed brace closes at the end of the text; a stray ``}`` closes
+    nothing. Braces inside a JSON string are counted too, which can only widen
+    the object read for a credential word.
+    """
+
+    def __init__(self, text: str) -> None:
+        from array import array
+
+        size = len(text)
+        self.inner = array("i", [-1]) * (size + 1)
+        self.close: dict[int, int] = {}
+        self.parent: dict[int, int] = {}
+        stack: list[int] = []
+        for index, char in enumerate(text):
+            if char == "{":
+                self.parent[index] = stack[-1] if stack else -1
+                stack.append(index)
+                self.inner[index] = stack[-2] if len(stack) > 1 else -1
+                continue
+            if char == "}" and stack:
+                self.close[stack.pop()] = index
+            self.inner[index] = stack[-1] if stack else -1
+        self.inner[size] = stack[-1] if stack else -1
+        for opened in stack:
+            self.close[opened] = size
+
+
+def _braces(text: str) -> _Braces:
+    if _BRACES_CACHE[0] is not text:
+        _BRACES_CACHE[0], _BRACES_CACHE[1] = text, _Braces(text)
+    read: _Braces = _BRACES_CACHE[1]
+    return read
+
+
+def _object_key(text: str, opened: int) -> str:
+    """The text that names the object opening at ``opened``: back to the delimiter before it."""
+    head = text[max(0, opened - _OBJECT_KEY_WINDOW) : opened]
+    cut = max(head.rfind(mark) for mark in ",{[}")
+    return head[cut + 1 :]
 
 
 def _under_a_hex_field(found: re.Match[str]) -> bool:
     """Whether the run is the value of a tool's own ``"hex"`` JSON field, with no
-    credential word in front of that field."""
-    before = found.string[max(0, found.start() - _HEX_FIELD_WINDOW) : found.start()]
-    field = _HEX_FIELD_BEFORE_RE.search(before)
-    return field is not None and not _CREDENTIAL_WORD_RE.search(before[: field.start()])
+    credential word in the object that holds it or in the keys of the objects
+    around it.
+
+    The object is read from its ``{`` to its ``}``, whatever its length; with no
+    object around the field, the whole text is read.
+    """
+    text = found.string
+    before = text[max(0, found.start() - _HEX_FIELD_WINDOW) : found.start()]
+    if _HEX_FIELD_BEFORE_RE.search(before) is None:
+        return False
+    braces = _braces(text)
+    opened = braces.inner[found.start()]
+    if opened < 0:
+        return not (
+            _CREDENTIAL_WORD_RE.search(text, 0, found.start())
+            or _CREDENTIAL_WORD_RE.search(text, found.end())
+        )
+    closed = braces.close.get(opened, len(text))
+    if _CREDENTIAL_WORD_RE.search(text, opened, found.start()) or _CREDENTIAL_WORD_RE.search(
+        text, found.end(), closed + 1
+    ):
+        return False
+    while opened >= 0:
+        if _CREDENTIAL_WORD_RE.search(_object_key(text, opened)):
+            return False
+        opened = braces.parent.get(opened, -1)
+    return True
 
 
 def _names_only(stretch: str) -> bool:

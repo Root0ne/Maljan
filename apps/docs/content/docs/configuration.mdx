@@ -2158,11 +2158,16 @@ by its exact form:
   alphabet itself, the table a decoder is built from;
 - an even-length run of hex digits that is the value of a JSON `"hex"` key,
   quoted (`"hex": "0011…"`, or its escaped form inside a JSON string), the
-  bytes a memory or byte-range read returned, when no credential word (`key`,
-  `secret`, `token`, `password`, `credential`, `auth`, `api` and the like)
-  stands in the 48 characters before that key. A prose label (`hex: …`,
-  `secret hex = …`) is no such field, and a long hex run anywhere else is still
-  read as a key.
+  bytes a memory or byte-range read returned, when no credential word stands
+  anywhere in the object that holds the field (from its `{` to its `}`,
+  whatever its length) or in the key of that object or of any object around
+  it. The words are `api`, `auth`, `bearer`, `cookie`, `credential`, `hmac`,
+  `key`, `mnemonic`, `nonce`, `passphrase`, `passwd`, `password`, `priv`,
+  `salt`, `secret`, `seed`, `session`, `signing`, `token`, `iv` and `pwd` as
+  whole words, and the scrub's own `***` (a key name an earlier pass masked).
+  `{"hex": "…", "kind": "api_key"}` and `{"salt": {"hex": "…"}}` are masked. A
+  prose label (`hex: …`, `secret hex = …`) is no such field, and a long hex
+  run anywhere else is still read as a key.
 
 A piece that is none of these keeps the whole run a key, so a key inside such
 a list is still masked with its stretch.
