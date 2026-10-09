@@ -3101,9 +3101,10 @@ records: an analyst's tool loop (including the turns of a loop its hard cap or
 a failure stopped), its revision rounds, a delegated ask, the forced synthesis
 and the final-answer nudge under the analyst; the mediator's fast path, tool
 loop, reasoning salvage and structured extraction, and the verdict with its
-retry, under `judge` (the mediator's against the expert model it runs on); the
-narrative and every composer section, on the structured path as well as the
-manual one, under `reporter`; and the function summariser under `summarizer`.
+retry, under `judge` (the mediator's against its own model, `llm.agents.mediator`
+or else the expert model); the narrative and every composer section, on the
+structured path as well as the manual one, under `reporter`; and the function
+summariser under `summarizer`, against its own model.
 A structured call asks for the raw turn beside the parsed answer, because the
 parser hides the usage. A call whose answer names no model is recorded under
 the model its caller was built on. `run_summary.tokens` holds the sums
