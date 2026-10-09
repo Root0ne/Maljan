@@ -382,8 +382,9 @@ async def test_a_cancelled_run_still_flushes_its_feed(redis_stub: MagicMock) -> 
     api_config._settings = None
 
     assert flushed == [str(job.id)]
-    # A cancellation is not a failure: nothing marked the row failed.
-    assert [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "failed"] == []
+    # Nobody asked for it, so it is the worker's stop, and the row says so.
+    [failed] = [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "failed"]
+    assert failed["error_message"].startswith("Stopped because the worker running it shut down")
 
 
 @pytest.mark.asyncio
@@ -616,13 +617,14 @@ async def test_a_cancel_request_writes_its_row_even_between_two_polls(
 
 
 @pytest.mark.asyncio
-async def test_a_shutdown_cancellation_writes_no_row(redis_stub: MagicMock) -> None:
-    """Nobody asked, so nothing is claimed.
+async def test_a_shutdown_cancellation_is_recorded_as_a_stop_not_a_cancel(
+    redis_stub: MagicMock,
+) -> None:
+    """Nobody asked, so no cancel is claimed; the row says the worker stopped it.
 
-    arq cancels the task on its own job timeout and on SIGTERM. The process is
-    going away, writing a row on the way out races its own teardown, and the
-    heartbeat dies with it — so the periodic sweep repairs the row within ten
-    minutes, and the ``CancelledError`` travels on untouched.
+    arq cancels the task on SIGTERM. What the run produced is kept and the row
+    is marked failed with the stop's reason on a session of its own, and the
+    ``CancelledError`` travels on so the shutdown is not held.
     """
     job = fake_job()
     sample = fake_sample(job.sample_id)
@@ -644,14 +646,16 @@ async def test_a_shutdown_cancellation_writes_no_row(redis_stub: MagicMock) -> N
     api_config._settings = None
 
     assert [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "cancelled"] == []
-    assert [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "failed"] == []
+    [failed] = [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "failed"]
+    assert failed["error_message"].startswith("Stopped because the worker running it shut down")
+    assert_every_session_has_ended(factory)
 
 
 @pytest.mark.asyncio
 async def test_a_redis_that_cannot_answer_is_read_as_a_shutdown(
     redis_stub: MagicMock,
 ) -> None:
-    """The run is going down either way; the sweep repairs what nobody claimed."""
+    """The run is going down either way, and it is recorded as the worker's stop."""
     job = fake_job()
     sample = fake_sample(job.sample_id)
     factory = SessionFactory(rows_for(job, sample))
@@ -671,9 +675,13 @@ async def test_a_redis_that_cannot_answer_is_read_as_a_shutdown(
         await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
     api_config._settings = None
 
-    assert updates_to(factory, "analysis_jobs") == [
-        u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "running"
+    assert [u.get("status") for u in updates_to(factory, "analysis_jobs")] == [
+        "running",
+        "failed",
     ]
+    assert updates_to(factory, "analysis_jobs")[-1]["error_message"].startswith(
+        "Stopped because the worker running it shut down"
+    )
 
 
 @pytest.mark.asyncio

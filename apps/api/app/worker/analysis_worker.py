@@ -14,14 +14,13 @@ import json
 import os
 import platform
 import signal
-import sys
 import threading
 import time
 import traceback
 import uuid
 from collections.abc import Callable, Iterable
 from contextlib import suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +31,7 @@ from maljan.core.cancellation import Cancellation, JobCancelled
 from maljan.core.config import Settings as _CoreSettings
 from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import build_settings, public_snapshot
+from maljan.pipeline.events import MODEL_USAGE as MODEL_USAGE_EVENT
 from maljan.pipeline.outcome import absent_analysis_message
 from pydantic import ValidationError
 from sqlalchemy import Select, delete, func, select, update
@@ -800,6 +800,13 @@ async def _publish_event(
     buffer = _EVENT_BUFFERS.get(job_id)
     if buffer is not None:
         await buffer.add(seq, event_type, stamped, ts)
+        if event_type == MODEL_USAGE_EVENT:
+            # A model call's usage is written the moment it arrives, with
+            # whatever is queued before it: the run summary that would carry
+            # it is built only at the end of the run, and a process killed
+            # before then would otherwise take what the run spent with it.
+            # One transaction per model call, which takes seconds anyway.
+            await buffer.flush()
     await redis_conn.publish(f"analysis:{job_id}", message)
     # Persist into the bounded Stream so the live page can replay missed
     # events when it mounts after the worker already started publishing.
@@ -1035,8 +1042,8 @@ EXIT_GRACE = CANCEL_DELIVERY_GRACE
 async def await_the_pipeline(task: asyncio.Task[Any], cancellation: Cancellation) -> Any:
     """The pipeline task's result, and a stop that reaches all of it when this job is cancelled.
 
-    The job's own task being cancelled — the worker shutting down on SIGTERM,
-    or arq's job timeout — used to reach the pipeline only as a cancellation of
+    The job's own task being cancelled — the worker shutting down on SIGTERM —
+    used to reach the pipeline only as a cancellation of
     the task it awaited, and a pipeline that turned the cancellation into an
     ordinary error ran on: the worker ignored SIGTERM for three minutes, and
     arq's shutdown waited on it. Now the job's cancellation is set first, which
@@ -1283,11 +1290,38 @@ def remove_job_staging(job_id: str) -> list[Path]:
     return removed
 
 
-async def hold_job_owner(redis_conn: Any, job_id: str) -> None:
+async def hold_queue_claim(redis_conn: Any, arq_job_id: str | None) -> None:
+    """Give arq's in-progress key for this job the owner heartbeat's life. Never raises.
+
+    arq writes that key once, when it starts the job, to live for the job
+    timeout plus ten seconds. With no job timeout (``WorkerSettings``) that is
+    as good as for ever, and a worker killed mid-job would leave its job's
+    queue entry claimed for good. Refreshed beside the owner heartbeat to the
+    same TTL, the claim lives exactly as long as a live worker holds the job:
+    a killed worker's claim expires within ``JOB_OWNER_TTL_SECONDS`` and arq
+    then ends the queue entry (``max_tries`` is one) instead of keeping it.
+    """
+    if not arq_job_id:
+        return
+    try:
+        from arq.constants import in_progress_key_prefix
+
+        await redis_conn.pexpire(in_progress_key_prefix + arq_job_id, JOB_OWNER_TTL_SECONDS * 1000)
+    except Exception as exc:  # noqa: BLE001 — the claim lives on its own TTL
+        logger.debug(
+            "Could not refresh the queue claim for job %s (%s).",
+            arq_job_id,
+            type(exc).__name__,
+            extra={"job_id": arq_job_id},
+        )
+
+
+async def hold_job_owner(redis_conn: Any, job_id: str, arq_job_id: str | None = None) -> None:
     """Refresh this job's claim until the task running this is cancelled.
 
     Two refreshes inside one TTL, so a missed write — a Redis blip, a loop that
-    was busy — does not expire the claim on its own.
+    was busy — does not expire the claim on its own. arq's own claim on the
+    queue entry is refreshed with it (``hold_queue_claim``).
 
     The job's staging directory is touched beside the claim, and for the same
     reason said differently: a sidecar sweeping the shared base has no way to
@@ -1300,6 +1334,7 @@ async def hold_job_owner(redis_conn: Any, job_id: str) -> None:
     while True:
         await asyncio.sleep(JOB_OWNER_REFRESH_SECONDS)
         await claim_job(redis_conn, job_id)
+        await hold_queue_claim(redis_conn, arq_job_id)
         staging.touch_job_staging(job_id)
 
 
@@ -1381,7 +1416,8 @@ def cancel_flag_key(job_id: str) -> str:
 
     ``AnalysisService.cancel_job`` sets it and the heartbeat polls it. It is
     also how a ``CancelledError`` is told apart: an operator's cancel leaves
-    this key behind, a worker shutting down or arq's own job timeout does not.
+    this key behind, a worker shutting down does not, and the job timeout is
+    the heartbeat's own reading of its clock.
     """
     return f"analysis:{canonical_job_id(job_id)}:cancel"
 
@@ -1409,23 +1445,29 @@ async def cancel_was_requested(redis_conn: Any, job_id: str) -> bool:
         return False
 
 
-async def mark_job_cancelled(db_session: async_sessionmaker, job_uuid: uuid.UUID) -> bool:
+async def mark_job_cancelled(
+    db_session: async_sessionmaker, job_uuid: uuid.UUID, *, reason: str | None = None
+) -> bool:
     """Record the operator's cancellation on a session of its own. Never raises.
 
     The same rule the failure marker follows, for the same reason: the session
     the run was writing through is the one a lost connection leaves unusable,
     and a cancelled job whose row still says ``running`` is the phantom this
     work exists to remove. Only a job that was still running is touched — a run
-    that finished while the cancel was in flight keeps its result.
+    that finished while the cancel was in flight keeps its result. ``reason``,
+    when given, is what the row says about where the run was when it stopped.
     """
     from app.models.job import AnalysisJob
 
+    values: dict[str, Any] = {"status": "cancelled", "completed_at": datetime.now(UTC)}
+    if reason:
+        values["error_message"] = reason[:2000]
     try:
         async with db_session() as db:
             await db.execute(
                 update(AnalysisJob)
                 .where(AnalysisJob.id == job_uuid, AnalysisJob.status.in_(("pending", "running")))
-                .values(status="cancelled", completed_at=datetime.now(UTC))
+                .values(**values)
             )
             await db.commit()
         return True
@@ -1521,6 +1563,127 @@ async def keep_the_built_report(
     except Exception as exc:  # noqa: BLE001 — the run has already failed
         logger.error(
             "Could not keep the report the failed run built (%s); job=%s.",
+            type(exc).__name__,
+            job_id,
+            exc_info=True,
+            extra={"job_id": job_id, "component": "report"},
+        )
+        return False
+
+
+# ── A run stopped part-way ──────────────────────────────────────
+
+# Why a run stopped before it finished, as the job row and the report say it.
+STOP_TIMEOUT = "timeout"
+STOP_CANCEL = "cancel"
+STOP_SHUTDOWN = "shutdown"
+
+# The clock a job's timeout is measured on, from the moment its pipeline
+# starts. A name rather than a call written inline, so a test can move it hours
+# ahead without waiting for them.
+job_clock: Callable[[], float] = time.monotonic
+
+
+def job_timeout_reached(limit: int | None, started: float, now: float) -> bool:
+    """Whether a job that started at ``started`` has run for its whole ``limit``.
+
+    ``None`` is no limit, and no length of run reaches it.
+    """
+    return limit is not None and now - started >= limit
+
+
+def stop_note(kind: str, *, seconds: float, where: str, limit: int | None = None) -> str:
+    """What a stopped job and its partial report say about the stop.
+
+    Why it stopped, how far into the run, and where the pipeline was, in words
+    this module wrote: ``where`` is ``Cancellation.where_stopped``, which names
+    graph nodes and nothing a model or a tool wrote.
+    """
+    if kind == STOP_TIMEOUT:
+        why = f"Stopped by the job timeout ({limit} s, core.job_timeout)"
+    elif kind == STOP_CANCEL:
+        why = "Cancelled by the operator"
+    else:
+        why = "Stopped because the worker running it shut down"
+    return (
+        f"{why} {seconds:.0f} s into the run, {where}. The report kept is partial: it holds "
+        "what the run produced before it stopped, and nothing the run would have done "
+        "after it."
+    )
+
+
+async def keep_the_stopped_run(
+    db_session: async_sessionmaker,
+    *,
+    job_uuid: uuid.UUID,
+    job_id: str,
+    app: Any,
+    note: str,
+    transcript: list[dict[str, Any]],
+    core_settings: Any,
+    override_keys: Any,
+    hash_mismatch_reason: str | None,
+) -> bool:
+    """Store what a stopped run produced: its run summary and a partial report. Never raises.
+
+    The state is what the run had when it stopped (``stopped_run.stopped_state``);
+    the run summary is read as of the stop and the report is the one the run
+    built or was building, or the deterministic one from the state
+    (``stopped_run.partial_report``). Both carry ``note`` among their
+    degradation reasons and the report row carries it as ``incomplete_reason``,
+    so every surface that shows a degraded or incomplete run shows this one.
+    The findings, the evidence ledger and the transcript are stored with it as
+    a completed run's are. The job row is not touched here.
+    """
+    if app is None:
+        return False
+    try:
+        from maljan.pipeline.stopped_run import (
+            NO_VERDICT_DECISION,
+            judge_ran,
+            partial_report,
+            stopped_run_summary,
+            stopped_state,
+        )
+
+        state = stopped_state(app)
+        container = getattr(app, "container", None)
+        summary = stopped_run_summary(state, container, note=note)
+        report_dump = partial_report(state, container, note=note)
+        state["run_summary"] = summary
+        state["malware_report"] = report_dump
+        if not judge_ran(state):
+            state["final_decision"] = NO_VERDICT_DECISION
+        stix_bundle, run_summary = _report_inputs(
+            state,
+            core_settings=core_settings,
+            override_keys=override_keys,
+            hash_mismatch_reason=hash_mismatch_reason,
+        )
+        async with db_session() as db:
+            report = await _store_the_report(
+                db,
+                job_uuid=job_uuid,
+                job_id=job_id,
+                pipeline_result=state,
+                stix_bundle=stix_bundle,
+                run_summary=run_summary,
+                transcript=transcript,
+                incomplete_reason=note,
+            )
+            await db.commit()
+            report_id = report.id
+        logger.warning(
+            "Kept what the stopped run produced: report=%s job=%s. %s",
+            report_id,
+            job_id,
+            note,
+            extra={"job_id": job_id, "component": "report"},
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001 — the stop is recorded whatever happens
+        logger.error(
+            "Could not keep what the stopped run produced (%s); job=%s.",
             type(exc).__name__,
             job_id,
             exc_info=True,
@@ -1732,7 +1895,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # the id as it parsed, which is the spelling the sweep reads back out
         # of the database.
         await claim_job(redis_conn, str(job_uuid))
-        owner_task = asyncio.create_task(hold_job_owner(redis_conn, str(job_uuid)))
+        owner_task = asyncio.create_task(
+            hold_job_owner(redis_conn, str(job_uuid), arq_job_id=ctx.get("job_id"))
+        )
 
         # Everything this run needs out of the database before the models
         # start, in one short session that is closed again before the
@@ -1939,6 +2104,14 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # install its own.
         install_settings(core_settings)
         remember_configured_secrets(core_settings)
+        # Read once, from this job's own settings: a value saved while the job
+        # runs applies to the next job, and this one keeps what it started with.
+        _job_timeout: int | None = getattr(core_settings, "job_timeout", None)
+        logger.info(
+            "Job timeout: %s.",
+            "none (no limit)" if _job_timeout is None else f"{_job_timeout} s",
+            extra={"job_id": job_id},
+        )
         if overrides:
             logger.info(
                 "Applying %d runtime setting override(s) from the UI.",
@@ -2211,6 +2384,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         heartbeat_stop_event = asyncio.Event()
         pipeline_task: asyncio.Task | None = None
         cancelled_by_user = False
+        # Set by the heartbeat when it is what stopped the run: the job
+        # timeout. The operator's cancel has ``cancelled_by_user``; a stop
+        # neither of them made is the worker shutting down.
+        stopped_by_timeout = False
+        job_started = job_clock()
 
         async def _heartbeat() -> None:
             # The heartbeat is also the cancellation
@@ -2220,7 +2398,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # job status exactly once (before starting), so a cancel issued
             # mid-run was ignored and the finished pipeline overwrote the
             # `cancelled` row with `completed`/`failed`.
-            nonlocal cancelled_by_user
+            #
+            # It is also the job timeout's clock, read on the same poll: a
+            # job with a ``core.job_timeout`` is stopped the way an operator's
+            # cancel stops it, so it keeps what it produced, within one poll of
+            # its limit. A job with none is never stopped here.
+            nonlocal cancelled_by_user, stopped_by_timeout
             while not heartbeat_stop_event.is_set():
                 try:
                     await asyncio.wait_for(heartbeat_stop_event.wait(), timeout=CANCEL_POLL_SECONDS)
@@ -2242,6 +2425,20 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                             return
                     except Exception as exc:  # noqa: BLE001 — polling must never kill the run
                         logger.debug("Cancel-flag poll failed: %s", exc)
+                    if job_timeout_reached(_job_timeout, job_started, job_clock()):
+                        stopped_by_timeout = True
+                        logger.warning(
+                            "Job timeout reached for job=%s (%s s) — stopping pipeline.",
+                            job_id,
+                            _job_timeout,
+                            extra={"job_id": job_id, "component": "heartbeat"},
+                        )
+                        app.container.cancellation.cancel(
+                            f"the job timeout of {_job_timeout} s was reached"
+                        )
+                        if pipeline_task is not None:
+                            pipeline_task.cancel()
+                        return
                     logger.info(
                         "Pipeline heartbeat: job=%s still running...",
                         job_id,
@@ -2275,65 +2472,103 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 )
             )
             pipeline_result = await await_the_pipeline(pipeline_task, app.container.cancellation)
-        except (asyncio.CancelledError, JobCancelled):
-            # Two things cancel this task and they end differently. An
-            # operator's cancel leaves its flag in Redis — the heartbeat may
-            # have read it already, or the cancel may have arrived between two
-            # of its polls — and that run owes the operator a row saying
-            # ``cancelled``. A worker shutting down and arq's own job timeout
-            # leave no flag: the process is going away, writing a row on the
-            # way out is a race with its own teardown, and the periodic sweep
-            # repairs the row within ten minutes because the heartbeat dies
-            # with the process.
-            if not cancelled_by_user:
+        except (asyncio.CancelledError, JobCancelled) as stop_exc:
+            # Three things stop a run before it finishes, and each keeps what
+            # the run produced. The job timeout is the heartbeat's own reading
+            # of its clock. An operator's cancel leaves its flag in Redis — the
+            # heartbeat may have read it already, or the cancel may have
+            # arrived between two of its polls. Anything else is the worker
+            # shutting down, which cancels this task and waits for it.
+            heartbeat_stop_event.set()
+            if not stopped_by_timeout and not cancelled_by_user:
                 cancelled_by_user = await cancel_was_requested(redis_conn, job_id)
-            if not cancelled_by_user:
-                # arq finishes a job it cancelled only on ``CancelledError``; a
-                # ``JobCancelled`` reaching it would leave the job unfinished in
-                # its bookkeeping, since it is no ``Exception`` either.
-                if not isinstance(sys.exc_info()[1], asyncio.CancelledError):
-                    raise asyncio.CancelledError from sys.exc_info()[1]
-                raise
+            if stopped_by_timeout:
+                _kind = STOP_TIMEOUT
+            elif cancelled_by_user:
+                _kind = STOP_CANCEL
+            else:
+                _kind = STOP_SHUTDOWN
             # Worded from where the pipeline was: a check's own record when
             # one stopped it, otherwise the nodes that were running when the
             # task was cancelled under them.
             _stopped = app.container.cancellation.where_stopped()
             _into = max(0.0, time.time() - start_time)
+            _note = stop_note(_kind, seconds=_into, where=_stopped, limit=_job_timeout)
             logger.info(
-                "Pipeline cancelled by user request: job=%s (stopped %s, %.0f s into the run)",
+                "Pipeline stopped (%s): job=%s (stopped %s, %.0f s into the run)",
+                _kind,
                 job_id,
                 _stopped,
                 _into,
                 extra={"job_id": job_id},
             )
-            await _publish_event(
-                redis_conn,
-                job_id,
-                "cancelled",
-                {"stopped": _stopped, "seconds_into_run": round(_into, 1)},
-            )
-            # On a session of its own, like every other outcome this task
-            # records: the one it was working through may be the one the
-            # cancellation came with.
+            # What the run produced is stored before the row says how it
+            # ended: a console that sees the terminal status fetches the
+            # report once, and must find it there. On sessions of its own,
+            # like every other outcome this task records: the one it was
+            # working through may be the one the cancellation came with.
             if job_uuid is not None:
-                await mark_job_cancelled(db_session, job_uuid)
-            # How this job ends depends on who cancelled what. The operator's
-            # cancel reaches the pipeline task, not this one: nothing outside
-            # is waiting for a ``CancelledError`` here, and raising one puts
-            # arq on its retry branch — the job goes back in the queue, is
-            # popped again and ends with "max retries exceeded", which reads
-            # like a failure for something somebody asked for. A finished job
+                await keep_the_stopped_run(
+                    db_session,
+                    job_uuid=job_uuid,
+                    job_id=job_id,
+                    app=app,
+                    note=_note,
+                    transcript=transcript,
+                    core_settings=core_settings,
+                    override_keys=overrides.keys(),
+                    hash_mismatch_reason=_report_hash_mismatch_reason,
+                )
+            if _kind == STOP_CANCEL:
+                await _publish_event(
+                    redis_conn,
+                    job_id,
+                    "cancelled",
+                    {"stopped": _stopped, "seconds_into_run": round(_into, 1)},
+                )
+                if job_uuid is not None:
+                    await mark_job_cancelled(db_session, job_uuid, reason=_note)
+            else:
+                await _publish_event(
+                    redis_conn,
+                    job_id,
+                    "error",
+                    {
+                        "status": "failed",
+                        "stopped_by": _kind,
+                        "stopped": _stopped,
+                        "seconds_into_run": round(_into, 1),
+                        "message": _note,
+                    },
+                )
+                if job_uuid is not None:
+                    await mark_job_failed(
+                        db_session, job_uuid, reason=_note, error_id=uuid.uuid4().hex
+                    )
+            # How this job ends depends on who stopped what. The operator's
+            # cancel and the job timeout reach the pipeline task, not this
+            # one: nothing outside is waiting for a ``CancelledError`` here,
+            # and raising one puts arq on its retry branch — the job goes back
+            # in the queue, is popped again and ends with "max retries
+            # exceeded", which reads like a failure nobody had. A finished job
             # is what this is, so it returns like one.
             #
             # A worker shutting down cancels *this* task and waits for it, and
             # ``cancelling()`` is how a task knows that has happened. Then the
             # cancellation must carry on, or the shutdown waits for a task that
-            # decided not to end. The ``finally`` below runs on both paths, so
-            # the feed is flushed and the claim released either way.
+            # decided not to end. arq finishes a job it cancelled only on
+            # ``CancelledError``; a ``JobCancelled`` reaching it would leave the
+            # job unfinished in its bookkeeping, since it is no ``Exception``
+            # either. The ``finally`` below runs on every path, so the feed is
+            # flushed and the claim released either way.
             current = asyncio.current_task()
-            if current is not None and current.cancelling():
+            if _kind == STOP_SHUTDOWN or (current is not None and current.cancelling()):
+                if not isinstance(stop_exc, asyncio.CancelledError):
+                    raise asyncio.CancelledError from stop_exc
                 raise
-            return {"status": "cancelled", "job_id": job_id}
+            if _kind == STOP_CANCEL:
+                return {"status": "cancelled", "job_id": job_id}
+            return {"status": "failed", "job_id": job_id, "error": _note}
         finally:
             heartbeat_stop_event.set()
             try:
@@ -3224,6 +3459,23 @@ async def _recycle_if_bloated(ctx: dict, *args: Any, **kwargs: Any) -> None:
         os.kill(os.getpid(), signal.SIGTERM)
 
 
+# What this worker hands arq as its job timeout: none that a job can reach.
+#
+# arq reads ``job_timeout=None`` as "no deadline" (``asyncio.wait_for`` with no
+# timeout), but only on a worker with exactly one function: its constructor
+# takes ``max()`` over every function's timeout to size the in-progress key,
+# and ``None`` beside ``None`` raises ``TypeError``. This worker has three —
+# ``run_analysis``, ``enrich_threat_intel`` and the nightly ``job_events``
+# purge — so the longest duration Python's ``timedelta`` holds stands in for
+# none (about 2.7 million years; ``test_the_job_timeout_is_a_setting`` proves
+# arq accepts it and that Redis can carry the in-progress key it derives). The
+# in-progress key itself is re-pointed at the owner heartbeat
+# (``hold_queue_claim``), so the stand-in never decides how long a dead
+# worker's claim lingers. A job's real limit, when an operator sets one, is
+# ``core.job_timeout``, enforced by ``run_analysis``.
+ARQ_NO_JOB_TIMEOUT = timedelta.max.total_seconds()
+
+
 class WorkerSettings:
     """ARQ worker settings — configure connection and task functions."""
 
@@ -3247,22 +3499,16 @@ class WorkerSettings:
 
     # Worker tuning
     # Phase A fix: max_jobs=1 prevents zombie threads from starving other jobs.
-    # job_timeout=28800 (8h) — 2026-07-13 deep-analysis restore. The outer ARQ
-    # ceiling must sit ABOVE the sum of the inner per-loop safety nets, or it
-    # fires while a run is still legitimately progressing ("a timeout is a bug").
-    # Static now runs a full-depth ReAct loop PER CHUNK (~8-10 chunks, up to
-    # 1530s each) plus dynamic/CAPE, network, up to 5 revision rounds, judge and
-    # the report Composer; a realistic-slow cold-cache run is ~2-4h. 8h is a
-    # never-fires safety net: a single-slot LLM can't run two jobs at once so a
-    # high ceiling costs nothing, and every LLM/CAPE path is bounded by its own
-    # inner timeout, so this only trips on a true hang outside those paths. Was
-    # 3600 (60 min), sized for the pre-restore shallow static pass.
     #
     # ``max_jobs`` is arq's CONCURRENCY limit — how many jobs run at once — not
     # a "recycle the worker after N jobs" counter. arq has no such counter;
     # ``after_job_end`` above is what bounds process lifetime here.
     max_jobs = 1
-    job_timeout = 28800
+    # No job timeout at arq's level: a job's limit is the operator's
+    # ``core.job_timeout``, empty by default, which ``run_analysis`` reads from
+    # the job's own settings and enforces itself, so a job stopped by it keeps
+    # its run summary and a partial report. See ``ARQ_NO_JOB_TIMEOUT``.
+    job_timeout = ARQ_NO_JOB_TIMEOUT
     max_tries = 1  # Don't retry failed analyses automatically
     health_check_interval = 30
 

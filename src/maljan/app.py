@@ -97,6 +97,11 @@ class MaljanApp:
         # Where the graph failed, when it did: ``node <name>``, or the step
         # whose writes could not be applied. ``None`` on a run that returned.
         self.failed_step: str | None = None
+        # The state after the last complete graph step, kept as each step
+        # lands: what a run stopped part-way (a job timeout, the operator's
+        # cancel, the worker shutting down) had produced when it stopped. An
+        # empty dict until the first step completes.
+        self.latest_state: dict[str, Any] = {}
 
     async def aclose(self) -> None:
         """Release the container's agents, toolkits and per-job caches.
@@ -535,6 +540,7 @@ class MaljanApp:
 
         self.built_report = None
         self.failed_step = None
+        self.latest_state = {}
         latest: dict[str, Any] = {}
         # The nodes whose output arrived since the last complete step.
         step: list[str] = []
@@ -546,6 +552,7 @@ class MaljanApp:
             ):
                 if mode == "values":
                     latest = cast("dict[str, Any]", payload)
+                    self.latest_state = latest
                     step = []
                     continue
                 updates = payload if isinstance(payload, dict) else {}

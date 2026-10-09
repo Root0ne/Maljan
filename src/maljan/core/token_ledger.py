@@ -33,6 +33,7 @@ answered because the first one failed as a provider — is kept with its reason.
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from typing import Any
 
 
@@ -250,6 +251,42 @@ class _Tally:
         }
 
 
+# The parts of a call's usage a durable record of it carries, where the
+# provider reported them.
+_CALL_PARTS: tuple[str, ...] = (
+    "input_tokens",
+    "output_tokens",
+    "cached_input_tokens",
+    "cache_write_input_tokens",
+    "reasoning_tokens",
+    "cost",
+)
+
+
+def call_record(
+    usage: dict[str, Any] | None, *, agent: str = "", model: str = "", call: str = ""
+) -> dict[str, Any]:
+    """One call as the ledger recorded it: who made it, which model answered, what it reported.
+
+    ``reported`` is false for a call whose provider reported no usage, and the
+    record then carries no figure: an absent figure is not a zero. A part the
+    provider did not report is left out for the same reason.
+    """
+    row: dict[str, Any] = {
+        "agent": str(agent),
+        "model": str(model),
+        "call": str(call),
+        "reported": usage is not None,
+    }
+    if usage is None:
+        return row
+    for part in _CALL_PARTS:
+        value = usage.get(part)
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            row[part] = float(value) if part == "cost" else int(value)
+    return row
+
+
 class TokenLedger:
     """Thread-safe tally of what one run's model calls spent, per agent and per model."""
 
@@ -262,6 +299,12 @@ class TokenLedger:
         self._agents: dict[str, _Tally] = {}
         self._fallbacks: list[dict[str, str]] = []
         self._unreported: list[dict[str, str]] = []
+        # Told of every recorded call as it is recorded, with the call's own
+        # figures (``call_record``): the worker writes each one to the job's
+        # durable event record, so what a run spent is known call by call even
+        # when its process dies before any summary is built. ``None`` where
+        # nothing listens.
+        self.on_call: Callable[[dict[str, Any]], None] | None = None
 
     def add(
         self,
@@ -312,6 +355,12 @@ class TokenLedger:
                 self._fallbacks.append({"agent": agent, "model": model, "reason": fallback})
         if self.spend is not None:
             self.spend.settle(usage, model, call, estimated=estimated)
+        listener = self.on_call
+        if listener is not None:
+            try:
+                listener(call_record(usage, agent=agent, model=model, call=call))
+            except Exception:  # noqa: BLE001 — recording never raises
+                pass
 
     @property
     def input_tokens(self) -> int:

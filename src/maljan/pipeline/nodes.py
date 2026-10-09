@@ -5154,6 +5154,19 @@ def make_judge_node(
 # ---------------------------------------------------------------------------
 
 
+def hold_the_report_in_progress(container: Any, report: Any) -> None:
+    """Keep the report being built on the container, for a run stopped before it is done.
+
+    The report node returns its report only once every round has run; a run
+    stopped inside the narrative or the composer would otherwise lose the
+    deterministic report and every section already written. Never raises.
+    """
+    try:
+        container.report_in_progress = report
+    except Exception as exc:  # noqa: BLE001 — a stand-in container may refuse it
+        logger.debug("report_node: the report in progress was not held (%s).", exc)
+
+
 def make_report_node(
     container: ServiceContainer,
     *,
@@ -5396,6 +5409,7 @@ def make_report_node(
             1 for section in report.sections if not section_is_grounded(section)
         )
         report.run_summary = _summary
+        hold_the_report_in_progress(container, report)
         if _summary["sections_without_evidence"]:
             logger.warning(
                 "report_node: %d report section(s) carry no evidence id and no source.",
@@ -5505,6 +5519,8 @@ def make_report_node(
             )
         else:
             report = MalwareReportBuilder.apply_fallback_narrative(report, no_summary_because)
+        # The composer writes its sections into this object, one by one.
+        hold_the_report_in_progress(container, report)
         # What the narrative's prompt could not hold, said where the report says
         # what it is missing.
         for _reason in getattr(narrative_agent, "degradations", None) or []:

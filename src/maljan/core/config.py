@@ -3605,12 +3605,22 @@ class Settings(BaseSettings):
     # default: a loop ends when its model answers, when it only repeats itself
     # (``RepeatGuard``), when its conversation has no room left for a tool
     # answer, or when the operator's spend ceiling
-    # (``llm.max_spend_usd_per_job``) is reached — and the arq job timeout is
-    # the last resort. Each model call still waits only as long as its answer
-    # takes at the model's measured pace (``llm.generation_rate``). An
+    # (``llm.max_spend_usd_per_job``) is reached — and the job timeout below
+    # is the last resort. Each model call still waits only as long as its
+    # answer takes at the model's measured pace (``llm.generation_rate``). An
     # operator's number, here or on an agent's definition, is a limit the loop
     # keeps to.
     react_agent_timeout: Annotated[int, Field(ge=1)] | None = None
+
+    # How long one analysis job may run, in seconds, before the worker stops
+    # it. ``None``, the default, is no limit: a job ends when its pipeline
+    # does, when the operator cancels it, or when the worker shuts down. A
+    # number set here is read from the job's own settings when the job starts,
+    # so it applies to every job started after it is saved, with no worker
+    # restart; a job already running keeps the value it started with. A job
+    # stopped by it keeps what it produced: its run summary and a partial
+    # report, marked as such (``app.worker.analysis_worker``).
+    job_timeout: Annotated[int, Field(ge=1)] | None = None
     react_agent_max_steps: Annotated[int, Field(ge=1)] | None = None
     # How many cumulative tool calls of one loop are logged as a warning. A
     # signal for an operator reading the log, never a limit: nothing about the

@@ -123,6 +123,11 @@ TOOL_SERVER_RESTED = "tool_server_rested"
 # An agent's model list moved on to its next model because the one before it
 # failed as a provider (``maljan.llm.fallback``). Once per switch.
 MODEL_FALLBACK = "model_fallback"
+# One model call as the job's token ledger recorded it: the agent, the model
+# that answered and the figures its provider reported (``token_ledger.call_record``).
+# The worker writes each one to the job's event record as it arrives, so what a
+# run spent survives a process that dies before its run summary is built.
+MODEL_USAGE = "model_usage"
 BUDGET_TICK_EVERY = 5
 CAPS: tuple[str, ...] = ("steps", "time", "repeats", "no_room", "spend", "budget_seconds")
 
