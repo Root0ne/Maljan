@@ -38,6 +38,7 @@ core.llm.anthropic.effort       = max
   temperature it is built with.
 - **Thinking.** The provider configures none: a model that thinks by default
   thinks as it would, and no `budget_tokens` is ever sent. How deep it goes is
+  the agent entry's own `effort` (`llm.agents.<key>.effort`), else
   `core.llm.anthropic.effort`. A level the Models API says the model does not
   take refuses the job before it starts.
 - **Window and output cap.** The window probe asks the Anthropic Models API
