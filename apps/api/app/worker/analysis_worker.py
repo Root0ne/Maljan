@@ -1031,12 +1031,27 @@ CANCEL_POLL_SECONDS = 15.0
 # goes on without it, and how long the process waits at exit for threads still
 # blocked in a call nothing can cancel — a synchronous model call in flight on a
 # thread — before it leaves them. The grace a cancellation is given to be
-# delivered anywhere else (``base_agent.CANCEL_DELIVERY_GRACE``). SIGTERM ends
-# the worker within these two, the job's teardown (``WORKER_TEARDOWN_TIMEOUT``)
-# and the closing of its two connections, each held to the same grace:
-# 10 s + 60 s + 2 × 10 s + 10 s as shipped.
+# delivered anywhere else (``base_agent.CANCEL_DELIVERY_GRACE``).
 PIPELINE_STOP_GRACE = CANCEL_DELIVERY_GRACE
 EXIT_GRACE = CANCEL_DELIVERY_GRACE
+# How long a worker shutting down gives the stopped job to keep what it
+# produced — its partial report and run summary — before it goes on without
+# them; the same grace. Measured at about 0.1 s of work on run 7 (a 342-entry
+# ledger and a 2.1 MB report) plus one commit. A keep that does not fit leaves
+# the row to the orphan sweep, as before.
+STOP_KEEP_GRACE = CANCEL_DELIVERY_GRACE
+
+
+def shutdown_budget_seconds() -> float:
+    """The longest SIGTERM takes to end this worker with a job in flight.
+
+    The pipeline's stop grace, keeping the stopped run, the job's teardown
+    (``WORKER_TEARDOWN_TIMEOUT``), the closing of its two connections and the
+    exit guard, in that order: 10 s + 10 s + 60 s + 2 × 10 s + 10 s as
+    shipped. The compose file's ``stop_grace_period`` for the worker is this
+    sum, so ``docker stop`` does not kill the worker inside it.
+    """
+    return PIPELINE_STOP_GRACE + STOP_KEEP_GRACE + _TEARDOWN_BUDGET + 2 * EXIT_GRACE + EXIT_GRACE
 
 
 async def await_the_pipeline(task: asyncio.Task[Any], cancellation: Cancellation) -> Any:
@@ -2574,7 +2589,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # like every other outcome this task records: the one it was
             # working through may be the one the cancellation came with.
             if job_uuid is not None:
-                await keep_the_stopped_run(
+                _keep = keep_the_stopped_run(
                     db_session,
                     job_uuid=job_uuid,
                     job_id=job_id,
@@ -2585,6 +2600,21 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     override_keys=overrides.keys(),
                     hash_mismatch_reason=_report_hash_mismatch_reason,
                 )
+                if _kind == STOP_SHUTDOWN:
+                    # A shutdown is waited on by ``docker stop``, whose grace
+                    # is the sum of these bounds (``shutdown_budget_seconds``).
+                    try:
+                        await asyncio.wait_for(_keep, timeout=STOP_KEEP_GRACE)
+                    except TimeoutError:
+                        logger.error(
+                            "Keeping the stopped run exceeded %.0fs on shutdown and was "
+                            "abandoned; job=%s.",
+                            STOP_KEEP_GRACE,
+                            job_id,
+                            extra={"job_id": job_id, "component": "report"},
+                        )
+                else:
+                    await _keep
             if _kind == STOP_CANCEL:
                 await _publish_event(
                     redis_conn,

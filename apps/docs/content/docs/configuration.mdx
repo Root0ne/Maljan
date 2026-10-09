@@ -1526,6 +1526,14 @@ shutting down — keeps what it produced:
 - **The job status**: `failed` for the job timeout and a worker shutdown,
   `cancelled` for your cancel, with `error_message` giving the same reason.
 
+On a worker shutdown, keeping the stopped run is held to a 10 s grace (it
+measured about 0.1 s of work on a 342-entry ledger and a 2.1 MB report, plus
+one commit). The compose file gives the analysis worker a `stop_grace_period`
+of 110 s, the sum of its shutdown bounds (pipeline stop 10 s, keeping the
+stopped run 10 s, teardown 60 s, two connections 10 s each, exit guard 10 s),
+so `docker stop` does not kill it before the stop is recorded. A deployment
+that runs the worker some other way should give it the same grace.
+
 What a node that was still running had gathered is not in the state yet and is
 not in the partial report; its tool calls and messages are in the run's feed.
 
