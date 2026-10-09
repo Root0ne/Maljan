@@ -69,9 +69,11 @@ class AgentArgument(BaseModel):
     status: str = Field(
         default="complete",
         description=(
-            "``complete`` | ``failed`` | ``timeout``. Whether this contribution "
-            "was actually produced. A mediation that *errored* and one where the "
-            "agents simply did not converge both leave ``is_consensus=False`` "
+            "``complete`` | ``failed`` | ``timeout`` | ``no_answer``. Whether this "
+            "contribution was actually produced; ``no_answer`` is a mediator that "
+            "wrote no answer (empty, or cut at the output cap before any text). "
+            "A mediation that *errored* and one where the agents simply did not "
+            "converge both leave ``is_consensus=False`` "
             "with a 0.0 confidence, and until this field existed the only thing "
             "telling them apart anywhere in the system was the literal prefix "
             "'[ERROR] Mediation ' inside ``finding`` — sniffed independently by "

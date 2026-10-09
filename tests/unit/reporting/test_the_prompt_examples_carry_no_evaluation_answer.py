@@ -117,6 +117,7 @@ from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
     CONTRADICTIONS_BLOCK_MIXED_NOTE,
     MediatorVerdict,
+    mediator_no_answer_note,
 )
 from maljan.pipeline.nodes import (
     NO_SANDBOX_DATA_REASON,
@@ -1468,6 +1469,15 @@ PROMPTS: dict[str, str] = {
             MEDIATOR_HUMAN_CLOSING,
             CONTRADICTIONS_BLOCK_MISSING_NOTE,
             CONTRADICTIONS_BLOCK_MIXED_NOTE,
+        ]
+    ),
+    "a mediation round whose mediator wrote no answer": " ".join(
+        [
+            mediator_no_answer_note("the answer was empty"),
+            mediator_no_answer_note(
+                "the answer was cut at 4096 tokens with no text, also when asked once more"
+            ),
+            mediator_no_answer_note("the call was not admitted under the job's spend ceiling"),
         ]
     ),
     "a chunk still cut after its question": chunk_cut_unread_sentence("chunk 1 of 2"),

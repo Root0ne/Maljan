@@ -69,7 +69,7 @@ from maljan.pipeline.events import (
 )
 from maljan.pipeline.evidence_summary import collect as collect_technique_sources
 from maljan.pipeline.evidence_summary import summarise, technique_evidence
-from maljan.pipeline.mediation_models import consensus_applies
+from maljan.pipeline.mediation_models import MEDIATOR_NO_ANSWER, consensus_applies
 from maljan.pipeline.outcome import (
     VERDICT_READ_FALLBACK,
     corrected_reasons,
@@ -3340,6 +3340,13 @@ _NO_CONSENSUS_MEASURED: dict[str, Any] = {
     "consensus_applicable": False,
     "confidence_history": [],
 }
+# What a round whose mediator wrote no answer writes: consensus applies and is
+# neither reached nor refused; the router reads the argument's status.
+_NOT_MEDIATED: dict[str, Any] = {
+    "is_consensus": None,
+    "consensus_applicable": True,
+    "confidence_history": [],
+}
 
 
 def _ledger_counts(state: AnalysisState, agent_names: Sequence[str], argument: Any) -> list[str]:
@@ -3565,7 +3572,9 @@ def make_negotiation_node(
                 container.event_sink,
                 speaker=ROOM_SPEAKER,
                 role="negotiator",
-                text=f"Mediator: {argument.finding}",
+                # A mediator that wrote no answer has no words: the room is
+                # told the platform's sentence saying so.
+                text=f"Mediator: {argument.finding or argument.note}",
                 round_index=iteration + 1,
                 status="complete",
                 confidence=argument.confidence_score,
@@ -3619,6 +3628,11 @@ def make_negotiation_node(
                         "confidence_history": [mean_conf],
                     }
                     if measured
+                    # A mediator that wrote no answer measured nothing while
+                    # consensus still applies: like a failed round, it is
+                    # neither agreement nor disagreement.
+                    else _NOT_MEDIATED
+                    if applies and argument.status == MEDIATOR_NO_ANSWER
                     else _NO_CONSENSUS_MEASURED
                 ),
                 "sycophancy_detected": syco,

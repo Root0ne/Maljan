@@ -4,7 +4,9 @@ Determines whether to continue iterating (revision) or proceed to the judge.
 
 Decision priority (highest to lowest), in ``debate_route``:
   1. Hard iteration limit — unconditional judge.
-  2. A mediation that failed, or consensus that does not apply — judge.
+  2. A mediation that failed, one whose mediator wrote no answer (empty, or
+     cut at the output cap before any text), or consensus that does not
+     apply — judge.
   3. Convergence — every revision of the round right before this mediation is
      the answer in force again, whitespace aside: another round would argue
      over the same answers. Judge.
@@ -107,6 +109,8 @@ CONSENSUS = "consensus"
 CONVERGED = "converged"
 CONVERGENCE = "convergence"
 MEDIATION_FAILED = "mediation_failed"
+# The last mediation's mediator wrote no answer: the round was not mediated.
+NOT_MEDIATED = "not_mediated"
 NOT_APPLICABLE = "not_applicable"
 # Why a revision round opens.
 SYCOPHANCY = "sycophancy"
@@ -165,6 +169,17 @@ def route_within_limit(
             iteration,
         )
         return "judge", MEDIATION_FAILED
+
+    # The mediator wrote no answer (``mediation_models.MEDIATOR_NO_ANSWER``):
+    # it stated neither agreement nor a contradiction, so there is nothing for
+    # a revision round to answer. The answers in force go to the judge.
+    if bool(last) and getattr(last, "status", "complete") == "no_answer":
+        say(
+            "The mediator wrote no answer at round %d — routing to judge with the "
+            "answers in force.",
+            iteration,
+        )
+        return "judge", NOT_MEDIATED
 
     # Fewer than two analysts produced claims, or the debate did not run:
     # there is no agreement to reach, and a revision round would ask the

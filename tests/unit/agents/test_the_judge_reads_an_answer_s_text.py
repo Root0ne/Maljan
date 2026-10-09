@@ -4,8 +4,9 @@
 ``redacted_thinking``) as the list of blocks the API returned. Read with
 ``str()``, that list is its own repr, signature and all: the judge never found
 the bundle in it, asked once more at its output cap and ended in the text
-fallback on every verdict. Every reader now goes through
-``maljan.llm.answer_text.answer_text``; a string answer (OpenAI-compatible
+fallback on every verdict. The judge's readers now go through
+``maljan.llm.answer_text.answer_text`` (the narrative's own reader already
+skipped every block without text); a string answer (OpenAI-compatible
 providers, which keep reasoning apart) is read exactly as before.
 """
 
