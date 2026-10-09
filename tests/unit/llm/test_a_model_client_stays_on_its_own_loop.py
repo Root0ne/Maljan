@@ -82,8 +82,11 @@ class _Handler(BaseHTTPRequestHandler):
         if length:
             self.rfile.read(length)
         self.server.requests += 1  # type: ignore[attr-defined]
+        self.server.cookies.append(self.headers.get("cookie"))  # type: ignore[attr-defined]
         body = json.dumps(self._answer()).encode()
         self.send_response(200)
+        # As a CDN in front of a hosted API sets one, to be sent back.
+        self.send_header("set-cookie", "__cf_bm=abc; Path=/")
         self.send_header("content-type", "application/json")
         self.send_header("content-length", str(len(body)))
         self.end_headers()
@@ -99,6 +102,7 @@ def server() -> Iterator[ThreadingHTTPServer]:
     httpd.daemon_threads = True
     httpd.opened = 0  # type: ignore[attr-defined]
     httpd.requests = 0  # type: ignore[attr-defined]
+    httpd.cookies = []  # type: ignore[attr-defined]
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
@@ -274,6 +278,20 @@ class TestTheAnthropicModel:
         assert errors == []
         assert answers == ["answered"] * 24
         assert len(model._async_client._client._loop_bound_clients) == 0
+
+    def test_a_cookie_the_server_sets_is_sent_back_on_every_loop(
+        self, server: ThreadingHTTPServer, agent_loop: _LoopThread
+    ) -> None:
+        # The jar is the one every request is built from, whichever loop sent
+        # the answer that set the cookie.
+        model = _anthropic(server)
+
+        async def call() -> str:
+            return str((await model.ainvoke("hello")).content)
+
+        _on_both(agent_loop, call)
+        asyncio.run(call())
+        assert server.cookies == [None, "__cf_bm=abc", "__cf_bm=abc", "__cf_bm=abc"]  # type: ignore[attr-defined]
 
 
 class TestTheOpenAIModel:

@@ -206,10 +206,21 @@ def loop_bound_async_client(build: Callable[[], Any], *, template: Any = None) -
     """
     template = build() if template is None else template
     routing = _routing_class(_client_base(template))
+
+    def build_for_loop() -> Any:
+        built = build()
+        # One cookie jar for all of them: a client stores a response's cookies
+        # in the jar of the client that sent it, and a request is given the
+        # jar of the client that built it — the template. Shared, a cookie the
+        # server set on any loop is sent back as it was by the one client.
+        if hasattr(template, "_cookies") and hasattr(built, "_cookies"):
+            built._cookies = template._cookies
+        return built
+
     client: Any = object.__new__(routing)
     client._loop_bound_template = template
     client._loop_bound_closed = False
-    client._loop_bound_clients = PerLoop(build, lambda c: c.aclose())
+    client._loop_bound_clients = PerLoop(build_for_loop, lambda c: c.aclose())
     return client
 
 
