@@ -14,7 +14,7 @@ Tests cover:
       mock mode raises RuntimeError
       delegates to registry
   - ServiceContainer.get_agent():
-      uses get_agent_llm() not get_expert_llm()
+      uses get_agent_llm() not get_mediator_llm()
   - Settings env var parsing (LLM__AGENTS__STATIC)
 """
 
@@ -382,7 +382,7 @@ class TestContainerGetAgentLLM:
         container = ServiceContainer.__new__(ServiceContainer)
         container.config = Settings(llm=LLMConfig(agents=agents or {}))
         container.mock = False
-        container._expert_llm_cache = PerLoopModels()
+        container._mediator_llm_cache = PerLoopModels()
         container._judge_llm_cache = PerLoopModels()
         container._agent_llm_cache = PerLoopModels()
         container._agent_cache = {}
@@ -473,12 +473,12 @@ class TestContainerGetAgentUsesAgentLLM:
 
         dedicated_llm = MagicMock()
         container.get_agent_llm = MagicMock(return_value=dedicated_llm)
-        container.get_expert_llm = MagicMock()
+        container.get_mediator_llm = MagicMock()
 
         agent = container.get_agent("static")
 
         container.get_agent_llm.assert_called_once_with("static")
-        container.get_expert_llm.assert_not_called()
+        container.get_mediator_llm.assert_not_called()
         assert isinstance(agent, StaticAnalyst)
         assert agent.llm is dedicated_llm
 

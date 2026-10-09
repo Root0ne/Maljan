@@ -744,10 +744,8 @@ class PreprocessingConfig(BaseModel):
 
     use_function_summarizer:
         Set to True to enable chunk pre-summarization. Off by default.
-    summarizer_provider:
-        LLM provider for the summarizer (prefer a small local model).
-    summarizer_model:
-        Model identifier for the summarizer LLM.
+        The summariser's model is ``llm.agents.summarizer``, else the
+        global expert model.
     summarizer_max_words:
         Maximum words in each chunk summary.
     max_tool_output_chars:
@@ -757,8 +755,6 @@ class PreprocessingConfig(BaseModel):
     """
 
     use_function_summarizer: bool = False
-    summarizer_provider: Literal["openai", "anthropic", "ollama", "gemini"] = "ollama"
-    summarizer_model: str = "llama3.2:3b"
     summarizer_max_words: Annotated[int, Field(ge=1)] = 150
     # Zero means "derive it", and zero is the default.
     #
@@ -1258,6 +1254,14 @@ JUDGE_AGENT_KEY = "judge"
 # report stage names an agent like every other stage does.
 REPORTER_AGENT_KEY = "reporter"
 BUILTIN_AGENTS: tuple[str, ...] = ("static", "dynamic", "network", "judge", "reporter")
+# The two model-calling roles that are no agent definition, each with an
+# ``llm.agents`` entry of its own: the debate stage's mediator and the function
+# summariser. With no entry either runs on the global expert model, as it
+# always has; a judge entry does not move the mediator. No definition may take
+# either key, because its ``llm.agents`` entry would then be read twice.
+MEDIATOR_AGENT_KEY = "mediator"
+SUMMARIZER_AGENT_KEY = "summarizer"
+ROLE_ENTRY_KEYS: tuple[str, ...] = (MEDIATOR_AGENT_KEY, SUMMARIZER_AGENT_KEY)
 
 
 # The generic agents the seeded ``mobile`` and ``deep_static`` teams are built

@@ -88,8 +88,13 @@ async def _unprobed_models_for(db: AsyncSession, config: dict[str, Any]) -> list
         # An unknown profile is refused a few lines further on, with the list
         # of the ones that exist; saying it twice, differently, helps nobody.
         return []
+    from maljan.agents.composition import role_entries_called
+
     named = [agent for stage in team.stages for agent in stage.agents]
-    return await unprobed_models(db, settings, _everyone_the_run_can_reach(settings, named))
+    reached = _everyone_the_run_can_reach(settings, named)
+    return await unprobed_models(
+        db, settings, [*reached, *role_entries_called(settings, team.stages)]
+    )
 
 
 async def _unready_providers_for(db: AsyncSession, config: dict[str, Any]) -> list[str]:

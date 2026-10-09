@@ -784,7 +784,7 @@ async def context_window_facts(settings: Any) -> dict[str, Any]:
     ``setting`` is what ``core.preprocessing.max_tool_output_chars`` holds, so
     the console can say whether the window decides at all.
     """
-    from maljan.agents.composition import analyst_keys
+    from maljan.agents.composition import analyst_keys, role_entries_called
     from maljan.llm.context_window import (
         ANSWER_SHARE,
         UNKNOWN_WINDOW_REMEDY,
@@ -795,7 +795,7 @@ async def context_window_facts(settings: Any) -> dict[str, Any]:
 
     configured = int(getattr(settings.preprocessing, "max_tool_output_chars", 0) or 0)
     try:
-        agents = [*analyst_keys(settings), "judge"]
+        agents = [*analyst_keys(settings), "judge", *role_entries_called(settings)]
         window = await awindow_for_settings(settings, agents, probe=configured <= 0)
     except Exception as exc:  # noqa: BLE001 — a window is never worth a failed page
         logger.warning("the context window could not be learned: %s", type(exc).__name__)
@@ -1133,6 +1133,117 @@ async def run_mcp_probe(server: str, values: dict[str, Any], stored: dict[str, A
     return await in_probe_loop(lambda: probe_mcp({"name": server, "entry": entry}))
 
 
+async def _ask_each_model(
+    settings: Any, name: str
+) -> tuple[bool, str, list[dict[str, Any]], dict[str, Any]]:
+    """Ask every model ``llm.agents.<name>`` lists for one short answer, in order.
+
+    ``(answered, detail, completions, llm)``: whether every model answered,
+    what each said, the completions to file under the pair each was asked at,
+    and the first model's provider, model and endpoint. With no entry the
+    global expert model is the one asked, which is what the run calls. Shared
+    by an agent definition's probe and a role's (``mediator``, ``summarizer``),
+    whose entry is read the same way.
+    """
+    agent_llm = settings.llm.agents.get(name)
+    llm_provider = agent_llm.provider if agent_llm else settings.llm.provider
+    # No per-agent override means the agent inherits the global expert
+    # model; reporting "" left the operator to work out which provider
+    # block that came from. ``expert_model`` already picks the leaf the
+    # selected provider uses.
+    llm_model = agent_llm.model if agent_llm else settings.llm.expert_model
+    # The model is the one thing resolution cannot answer for. Listing a
+    # provider's catalogue is not enough either: a server can offer a name
+    # it will not load, a key can be refused for one model and not
+    # another, and a misspelling can land on a name the catalogue happens
+    # to hold. Submitting a job refuses a team on the strength of this
+    # probe, so the probe makes the call the job will make — one turn,
+    # eight tokens, at the agent's own endpoint and on its own model.
+    endpoint = endpoint_for(
+        settings, llm_provider, getattr(agent_llm, "base_url", None) if agent_llm else None
+    )
+
+    async def _ask(
+        provider: str, where: str, model: str, own_effort: str | None = None
+    ) -> tuple[bool | None, str]:
+        from maljan.llm.effort import effort_in_force
+
+        effort, _ = effort_in_force(settings, provider, own_effort)
+        return await complete_one_turn(
+            provider,
+            endpoint=where,
+            model=model,
+            api_key=_provider_key(settings, provider),
+            # An agent's own endpoint gets the body its own run would carry.
+            # Each provider is asked about its own thinking switch — the two
+            # are spelled differently and read by different code — and
+            # ``compat`` belongs to the OpenAI block alone.
+            disable_thinking=(
+                bool(settings.llm.ollama.disable_thinking)
+                if provider == "ollama"
+                else bool(settings.llm.openai.disable_thinking)
+            ),
+            compat=str(settings.llm.openai.compat or "auto"),
+            # The model's own effort (``llm.agents.<key>.effort``), else
+            # the provider's global one, as the run sends it.
+            reasoning_effort=effort or "",
+            # Ollama loads a model at the window and for the keep-alive the
+            # request names; asked the way the job asks, the probe leaves
+            # loaded the instance the job's first call will find.
+            num_ctx=int(settings.llm.ollama.num_ctx) if provider == "ollama" else None,
+            keep_alive=str(settings.llm.ollama.keep_alive) if provider == "ollama" else None,
+        )
+
+    own_effort = getattr(agent_llm, "effort", None) if agent_llm else None
+    answered, said = await _ask(llm_provider, endpoint, str(llm_model or ""), own_effort)
+    detail = said
+    # A call that ran out of time proves nothing either way, so the probe
+    # reports it as a failure the operator can act on and files no row —
+    # a cold model is not a missing one.
+    completions = (
+        []
+        if answered is None
+        else [
+            _with_own_effort(
+                {
+                    "endpoint": endpoint,
+                    "model": str(llm_model or ""),
+                    "provider": llm_provider,
+                    "ok": bool(answered),
+                    "detail": said,
+                },
+                own_effort,
+            )
+        ]
+    )
+    # Each model the agent falls back to is asked the same one turn, one
+    # after another, and filed under its own pair: the gate refuses a job
+    # whose fallback no probe has reached, and this is the probe that
+    # reaches it. The agent passes only when every model on its list did.
+    for position, choice in enumerate(getattr(agent_llm, "fallbacks", None) or [], 1):
+        where = endpoint_for(settings, choice.provider, choice.base_url)
+        reached, told = await _ask(
+            choice.provider, where, str(choice.model), getattr(choice, "effort", None)
+        )
+        detail = f"{detail}; fallback {position} {choice.provider}/{choice.model}: {told}"
+        if reached is not None:
+            completions.append(
+                _with_own_effort(
+                    {
+                        "endpoint": where,
+                        "model": str(choice.model),
+                        "provider": choice.provider,
+                        "ok": bool(reached),
+                        "detail": told,
+                    },
+                    getattr(choice, "effort", None),
+                )
+            )
+        answered = bool(answered) and bool(reached)
+    llm = {"provider": llm_provider, "model": llm_model, "endpoint": endpoint}
+    return bool(answered), detail, completions, llm
+
+
 async def probe_agent(v: dict[str, Any]) -> ProbeResult:
     """Resolve one agent definition against the given settings, without running it.
 
@@ -1153,8 +1264,26 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
     except ValidationError as exc:
         fields = _validation_detail(exc)
         return ProbeResult(False, _ms(t0), f"invalid agent settings: {fields}")
+    from maljan.core.config import ROLE_ENTRY_KEYS
+
+    if name in ROLE_ENTRY_KEYS:
+        # A role with no definition (the mediator, the function summariser)
+        # has no prompt or tools to resolve; what a run needs of it is that
+        # its models answer.
+        try:
+            answered, said, completions, llm = await _ask_each_model(settings, name)
+        except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
+            return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
+        return ProbeResult(
+            answered,
+            _ms(t0),
+            f"a role with no tools; {said}",
+            None,
+            [],
+            {"completions": completions, "llm": llm},
+        )
     if name not in settings.agents.definitions:
-        available = ", ".join(sorted(settings.agents.definitions)) or "(none)"
+        available = ", ".join(sorted([*settings.agents.definitions, *ROLE_ENTRY_KEYS]))
         return ProbeResult(False, _ms(t0), f"unknown agent: {name!r}. Available: {available}")
 
     from maljan.agents.composition import aresolve_agent
@@ -1241,103 +1370,10 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                     "status": next((r for r in reasons if f"'{key}" in r), "ok"),
                 }
             )
-        agent_llm = settings.llm.agents.get(name)
-        llm_provider = agent_llm.provider if agent_llm else settings.llm.provider
-        # No per-agent override means the agent inherits the global expert
-        # model; reporting "" left the operator to work out which provider
-        # block that came from. ``expert_model`` already picks the leaf the
-        # selected provider uses.
-        llm_model = agent_llm.model if agent_llm else settings.llm.expert_model
         listed = ", ".join(tools[:8]) + ("…" if len(tools) > 8 else "")
-        detail = f"{len(tools)} tools: {listed}" if tools else "resolved; no tools"
-        # The model is the one thing resolution cannot answer for. Listing a
-        # provider's catalogue is not enough either: a server can offer a name
-        # it will not load, a key can be refused for one model and not
-        # another, and a misspelling can land on a name the catalogue happens
-        # to hold. Submitting a job refuses a team on the strength of this
-        # probe, so the probe makes the call the job will make — one turn,
-        # eight tokens, at the agent's own endpoint and on its own model.
-        endpoint = endpoint_for(
-            settings, llm_provider, getattr(agent_llm, "base_url", None) if agent_llm else None
-        )
-
-        async def _ask(
-            provider: str, where: str, model: str, own_effort: str | None = None
-        ) -> tuple[bool | None, str]:
-            from maljan.llm.effort import effort_in_force
-
-            effort, _ = effort_in_force(settings, provider, own_effort)
-            return await complete_one_turn(
-                provider,
-                endpoint=where,
-                model=model,
-                api_key=_provider_key(settings, provider),
-                # An agent's own endpoint gets the body its own run would carry.
-                # Each provider is asked about its own thinking switch — the two
-                # are spelled differently and read by different code — and
-                # ``compat`` belongs to the OpenAI block alone.
-                disable_thinking=(
-                    bool(settings.llm.ollama.disable_thinking)
-                    if provider == "ollama"
-                    else bool(settings.llm.openai.disable_thinking)
-                ),
-                compat=str(settings.llm.openai.compat or "auto"),
-                # The model's own effort (``llm.agents.<key>.effort``), else
-                # the provider's global one, as the run sends it.
-                reasoning_effort=effort or "",
-                # Ollama loads a model at the window and for the keep-alive the
-                # request names; asked the way the job asks, the probe leaves
-                # loaded the instance the job's first call will find.
-                num_ctx=int(settings.llm.ollama.num_ctx) if provider == "ollama" else None,
-                keep_alive=str(settings.llm.ollama.keep_alive) if provider == "ollama" else None,
-            )
-
-        own_effort = getattr(agent_llm, "effort", None) if agent_llm else None
-        answered, said = await _ask(llm_provider, endpoint, str(llm_model or ""), own_effort)
-        detail = f"{detail}; {said}"
-        # A call that ran out of time proves nothing either way, so the probe
-        # reports it as a failure the operator can act on and files no row —
-        # a cold model is not a missing one.
-        completions = (
-            []
-            if answered is None
-            else [
-                _with_own_effort(
-                    {
-                        "endpoint": endpoint,
-                        "model": str(llm_model or ""),
-                        "provider": llm_provider,
-                        "ok": bool(answered),
-                        "detail": said,
-                    },
-                    own_effort,
-                )
-            ]
-        )
-        # Each model the agent falls back to is asked the same one turn, one
-        # after another, and filed under its own pair: the gate refuses a job
-        # whose fallback no probe has reached, and this is the probe that
-        # reaches it. The agent passes only when every model on its list did.
-        for position, choice in enumerate(getattr(agent_llm, "fallbacks", None) or [], 1):
-            where = endpoint_for(settings, choice.provider, choice.base_url)
-            reached, told = await _ask(
-                choice.provider, where, str(choice.model), getattr(choice, "effort", None)
-            )
-            detail = f"{detail}; fallback {position} {choice.provider}/{choice.model}: {told}"
-            if reached is not None:
-                completions.append(
-                    _with_own_effort(
-                        {
-                            "endpoint": where,
-                            "model": str(choice.model),
-                            "provider": choice.provider,
-                            "ok": bool(reached),
-                            "detail": told,
-                        },
-                        getattr(choice, "effort", None),
-                    )
-                )
-            answered = bool(answered) and bool(reached)
+        resolved_detail = f"{len(tools)} tools: {listed}" if tools else "resolved; no tools"
+        answered, said, completions, llm = await _ask_each_model(settings, name)
+        detail = f"{resolved_detail}; {said}"
         return ProbeResult(
             bool(answered),
             _ms(t0),
@@ -1357,13 +1393,9 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                 # agent's tools, which is what a clone copies: the clone gets a
                 # sentence of its own, for its own tool list.
                 "authored_prompt": resolved.authored_prompt or resolved.prompt,
-                "llm": {
-                    "provider": llm_provider,
-                    "model": llm_model,
-                    # Where the call went, so the probe's answer is filed
-                    # under the pair it was taken against.
-                    "endpoint": endpoint,
-                },
+                # Where the call went, so the probe's answer is filed under the
+                # pair it was taken against.
+                "llm": llm,
                 "static_provider": resolved.static_provider_id,
                 "servers": servers,
             },

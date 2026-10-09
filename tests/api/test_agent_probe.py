@@ -188,6 +188,88 @@ async def test_each_model_is_asked_at_the_effort_its_run_sends(monkeypatch):
     assert [c.get("effort") for c in result.details["completions"]] == ["high", None, None]
 
 
+class TestARoleWithNoDefinition:
+    """The mediator and the summariser are probed by their key, as an agent is.
+
+    They have no prompt and no tools to resolve, so the probe is the call
+    alone: each model of the role's entry asked at the effort its run sends,
+    or the global expert model while the role has no entry.
+    """
+
+    @pytest.mark.asyncio
+    async def test_each_model_of_its_entry_is_asked_at_its_own_effort(self, monkeypatch):
+        asked: list[tuple[str, str]] = []
+
+        async def _answered(
+            provider: str, *, endpoint: str, model: str, api_key: str = "", **body: Any
+        ):
+            asked.append((model, body.get("reasoning_effort")))
+            return (True, f"{model!r} answered")
+
+        monkeypatch.setattr(settings_probes, "complete_one_turn", _answered)
+        staged = {
+            "llm.openai.reasoning_effort": "max",
+            "llm.agents": {
+                "mediator": {
+                    "provider": "openai",
+                    "model": "first",
+                    "effort": "high",
+                    "fallbacks": [{"provider": "openai", "model": "second"}],
+                }
+            },
+        }
+
+        result = await probe_agent({"name": "mediator", "settings": staged})
+
+        assert result.ok is True
+        assert asked == [("first", "high"), ("second", "max")]
+        completions = result.details["completions"]
+        assert [(c["model"], c.get("effort")) for c in completions] == [
+            ("first", "high"),
+            ("second", None),
+        ]
+        assert result.details["llm"]["model"] == "first"
+        assert result.tools == []
+
+    @pytest.mark.asyncio
+    async def test_with_no_entry_it_asks_the_global_expert_model(self, monkeypatch):
+        asked: list[str] = []
+
+        async def _answered(
+            provider: str, *, endpoint: str, model: str, api_key: str = "", **body: Any
+        ):
+            asked.append(model)
+            return (True, f"{model!r} answered")
+
+        monkeypatch.setattr(settings_probes, "complete_one_turn", _answered)
+        staged = {"llm.provider": "ollama", "llm.ollama.expert_model": "qwen-global"}
+
+        result = await probe_agent({"name": "summarizer", "settings": staged})
+
+        assert result.ok is True
+        assert asked == ["qwen-global"]
+        assert result.details["llm"] == {
+            "provider": "ollama",
+            "model": "qwen-global",
+            "endpoint": "http://localhost:11434",
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_model_that_did_not_answer_fails_the_probe(self, monkeypatch):
+        async def _refused(
+            provider: str, *, endpoint: str, model: str, api_key: str = "", **body: Any
+        ):
+            return (False, "no such model")
+
+        monkeypatch.setattr(settings_probes, "complete_one_turn", _refused)
+        staged = {"llm.agents": {"mediator": {"provider": "ollama", "model": "gone"}}}
+
+        result = await probe_agent({"name": "mediator", "settings": staged})
+
+        assert result.ok is False
+        assert "no such model" in result.detail
+
+
 @pytest.mark.asyncio
 async def test_an_unknown_agent_is_a_legible_failure_not_a_stack_trace():
     result = await probe_agent({"name": "ghost", "settings": {}})

@@ -377,7 +377,7 @@ class TestTheSelfHeal:
                 import threading
 
                 self._lock = threading.RLock()
-                self._expert_llm_cache = cache
+                self._mediator_llm_cache = cache
                 self._judge_llm_cache = cache
                 self._reporter_llm_cache = PerLoopModels()
                 self._summarizer_llm_cache = PerLoopModels()

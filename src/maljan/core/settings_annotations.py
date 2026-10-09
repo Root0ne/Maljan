@@ -208,7 +208,10 @@ ANNOTATIONS: dict[str, Annotation] = {
             "reasoning_effort as written. Left empty it inherits llm.anthropic.effort "
             "or llm.openai.reasoning_effort; ollama and gemini entries take none. The "
             "reporter entry sets the narrative and composer calls, the judge entry the "
-            "verdict calls. "
+            "verdict calls, the mediator entry the debate stage's mediation and the "
+            "summarizer entry the function summariser. With no mediator or summarizer "
+            "entry those two run on the global expert model; a judge entry does not "
+            "move the mediator. "
             "An entry may list fallbacks, models tried in order only when the one "
             "before fails as a provider (a refused connection, a timeout, a server "
             "error, a model the server does not have) and never because of what a "
@@ -970,20 +973,6 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Function summarizer",
     },
-    "preprocessing.summarizer_model": {
-        "title": "Summarizer model",
-        "description": ("Model identifier for the summarizer LLM, e.g. a small Ollama model tag."),
-        "subgroup": "Function summarizer",
-    },
-    "preprocessing.summarizer_provider": {
-        "title": "Summarizer provider",
-        "description": (
-            "LLM provider used for the function summarizer when use_function_summarizer "
-            "is enabled. Prefer a small, cheap local model since this runs as a "
-            "pre-pass, not the main analysis."
-        ),
-        "subgroup": "Function summarizer",
-    },
     "preprocessing.use_api_attck_map": {
         "title": "Use API-to-ATT&CK map",
         "description": (
@@ -1030,8 +1019,9 @@ ANNOTATIONS: dict[str, Annotation] = {
     "preprocessing.use_function_summarizer": {
         "title": "Use function summarizer",
         "description": (
-            "Enables a small/local LLM pre-summarization pass over large function lists "
-            "or decompiled blocks before they reach the expensive expert LLM. Off by "
+            "Enables an LLM pre-summarization pass over large function lists or "
+            "decompiled blocks before they reach the analysts. Its model is the "
+            "llm.agents.summarizer entry, else the global expert model. Off by "
             "default — it adds latency and only pays off on huge inputs."
         ),
         "subgroup": "Feature switches",
