@@ -436,6 +436,49 @@ def test_a_job_cancelled_inside_one_section_ends_every_other_before_compose_retu
     assert asyncio.run(_run()) == []
 
 
+class TestAgainstTheSequentialBase:
+    """The sections written at once send and write what d92a76fc did one after another.
+
+    ``tests/fixtures/composer_requests_before_concurrency.json`` was captured
+    from that commit's tree by ``scripts/goldens/capture_composer_requests.py``,
+    with a shared head (pack facts and run state) on every request.
+    """
+
+    def test_the_requests_and_the_report_are_those_of_the_base(self) -> None:
+        import hashlib
+        from pathlib import Path
+
+        fixture = Path(__file__).resolve().parents[2] / "fixtures"
+        base = json.loads((fixture / "composer_requests_before_concurrency.json").read_text())
+        llm = _Recorder(delay=0.005)
+        report = _report()
+        composer = ReportComposer(llm=llm, per_section_timeout=60)
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            asyncio.run(
+                composer.compose(
+                    report,
+                    _isr(),
+                    facts_block=(
+                        "DETERMINISTIC FACTS (complete list):\n- file_type: PE32 executable"
+                    ),
+                    run_state="Stages run: triage, static. Stages not run: dynamic.",
+                    concurrent=True,
+                )
+            )
+
+        def digest(text: str) -> str:
+            return hashlib.sha256(text.encode()).hexdigest()
+
+        assert sorted(llm.requests) == base["requests"]
+        assert digest(report.model_dump_json()) == base["report_sha256"]
+        assert digest(MarkdownRenderer().render(report)) == base["markdown_sha256"]
+        assert digest(HtmlRenderer().render(report)) == base["html_sha256"]
+        assert composer.degradations == base["degradations"]
+        assert composer.validation_tally.to_dict() == base["tally"]
+
+
 class TestEachSectionKeepsItsOwnTurnDeadline:
     @staticmethod
     def _list() -> Any:
