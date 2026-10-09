@@ -114,6 +114,17 @@ from maljan.core.logger import logger
 
 MILLION = 1_000_000
 
+# How much larger a prompt is counted when its price tier is chosen before the
+# call, over the platform's measure (``CHARS_PER_TOKEN``, three characters a
+# token). Anthropic documents its current tokenizer at about 2.5 characters a
+# token (the models overview: 1M tokens is roughly 2.5M characters), so a
+# prompt measured at three is short of what the API counts; the tier is chosen
+# as if each token were two characters, below either, so a call whose prompt
+# the API may count past a tier's threshold is admitted at that tier. Only the
+# tier is chosen so; the tokens priced are the measure's. A row without tiers
+# is admitted exactly as before.
+TIER_COUNT_MARGIN = 1.5
+
 # The cap name a loop the ceiling ended records, beside ``steps``, ``time``,
 # ``repeats`` and ``no_room``.
 SPEND_CAP = "spend"
@@ -420,9 +431,12 @@ class Price:
         A prompt token is uncached input, or written to the prompt cache where
         a write costs more; which one it will be is not known before the call.
         An hour's write is counted only where the deployment asks for one
-        (``hour_writes``): no request writes for an hour otherwise.
+        (``hour_writes``): no request writes for an hour otherwise. The tier is
+        chosen from the prompt counted with :data:`TIER_COUNT_MARGIN`.
         """
-        tier = self.for_prompt(prompt_tokens)
+        tier = self.for_prompt(
+            math.ceil(int(prompt_tokens) * TIER_COUNT_MARGIN) if self.tiers else prompt_tokens
+        )
         dearest = max(tier.input, tier.written, tier.written_1h if hour_writes else 0.0)
         if dearest == tier.input and tier is self:
             return self
@@ -528,6 +542,11 @@ def _price_from(row: Any, source: str = "") -> Price | None:
             logger.debug("a price tier that is not one was left out: %r", tier)
             continue
         tiers.append(found_tier)
+    # A window that names no tiers of its own keeps the row's: a long prompt
+    # sent inside a window is still priced at the long prompt's tier.
+    for window in windows:
+        if tiers and not window.price.tiers:
+            window.price.tiers = tuple(sorted(tiers, key=lambda tier: tier[0]))
     return Price(
         given_in,
         given_out,
@@ -777,6 +796,15 @@ class SpendMeter:
         if price is None:
             return None
         in_force = price.at(_sent_at(usage, self._clock()))
+        if (
+            self.hour_writes
+            and usage.get("cache_write_input_tokens")
+            and "cache_write_1h_input_tokens" not in usage
+        ):
+            # A streamed Anthropic answer reports its cache writes without the
+            # split by lifetime (``message_delta``'s usage carries none); where
+            # every write is an hour's, it is settled as one.
+            usage = {**usage, "cache_write_1h_input_tokens": usage["cache_write_input_tokens"]}
         return in_force.cost(usage), in_force.source
 
     def _cost(self, usage: Mapping[str, Any] | None, model: str) -> float | None:

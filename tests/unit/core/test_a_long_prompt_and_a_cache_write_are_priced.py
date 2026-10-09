@@ -194,3 +194,41 @@ class TestTheLedgerReadsAnthropicUsage:
         sentence = tokens_sentence(snapshot)
         assert sentence is not None
         assert "120 of the input written to the prompt cache" in sentence
+
+
+class TestTheReviewedEdges:
+    def test_the_tier_is_chosen_from_a_cautious_count_of_the_prompt(self) -> None:
+        """Measured at three characters a token, a prompt Claude counts at about 2.5."""
+        row = table_prices()[HAIKU]
+        assert row.for_admission(80_000).output == 2.5
+        assert row.for_admission(66_000).output == 0.5
+
+    def test_an_unsplit_write_is_an_hour_s_where_every_write_is(self) -> None:
+        """A streamed answer's usage carries its writes without the split by lifetime."""
+        meter = SpendMeter(100.0, hour_writes=True)
+        meter.settle({"input_tokens": 10_000, "cache_write_input_tokens": 10_000}, HAIKU)
+        assert meter.spent() == pytest.approx(10_000 * 0.2 / MILLION)
+
+    def test_a_window_keeps_the_row_s_tiers(self) -> None:
+        from datetime import UTC, datetime
+
+        row = {
+            "input_usd_per_mtok": 1.0,
+            "output_usd_per_mtok": 1.0,
+            "tiers": [
+                {"over_prompt_tokens": 10, "input_usd_per_mtok": 5.0, "output_usd_per_mtok": 5.0}
+            ],
+            "windows": [
+                {
+                    "utc_from": "00:00",
+                    "utc_to": "12:00",
+                    "input_usd_per_mtok": 2.0,
+                    "output_usd_per_mtok": 2.0,
+                }
+            ],
+        }
+        meter = SpendMeter(
+            10.0, {"m": row}, table={}, clock=lambda: datetime(2026, 10, 6, 3, 0, tzinfo=UTC)
+        )
+        meter.settle({"input_tokens": 20, "output_tokens": 0}, "m")
+        assert meter.spent() == pytest.approx(20 * 5.0 / MILLION)
