@@ -292,39 +292,72 @@ def distinct_processes(nodes: list[Any]) -> list[Any]:
     child in another root's tree (a reading that lacked its parent) is that
     child, and joins it there. The rows are copies: the report's own tree is
     left as it was stored.
+
+    Linear in the number of processes: one identity map of every process below
+    a root, read once per root, and each merge visits a process once.
     """
     roots = _distinct_level(nodes)
-    while True:
-        for index, root in enumerate(roots):
-            key = process_identity(root)
-            others = [other for other in roots if other is not root]
-            below = next(
-                (
-                    node
-                    for other in others
-                    for node in _descendants(other)
-                    if process_identity(node) == key
-                ),
-                None,
-            )
-            if below is None:
+    below: dict[tuple[int, int, str, str], tuple[Any, int]] = {}
+    for index, root in enumerate(roots):
+        for node in _descendants(root):
+            below.setdefault(process_identity(node), (node, index))
+    # Which root's tree each folded root went into, and which node stands for
+    # a node a merge folded into another.
+    home = list(range(len(roots)))
+    merged_into: dict[int, Any] = {}
+    folded: set[int] = set()
+    for index, root in enumerate(roots):
+        hit = below.get(process_identity(root))
+        if hit is None:
+            continue
+        node, owner = hit
+        if _home(home, owner) == index:
+            continue
+        while id(node) in merged_into:
+            node = merged_into[id(node)]
+        _merge(node, root, merged_into)
+        home[index] = _home(home, owner)
+        folded.add(index)
+    return [root for index, root in enumerate(roots) if index not in folded]
+
+
+def _home(home: list[int], index: int) -> int:
+    """The root whose tree ``index``'s tree now stands in."""
+    while home[index] != index:
+        home[index] = home[home[index]]
+        index = home[index]
+    return index
+
+
+def _merge(target: Any, source: Any, merged_into: dict[int, Any]) -> None:
+    """``source``'s children and injections joined into ``target``, level by level."""
+    pending = [(target, source)]
+    while pending:
+        kept, arriving = pending.pop()
+        injected = set(kept.injected_into)
+        for pid in arriving.injected_into:
+            if pid not in injected:
+                injected.add(pid)
+                kept.injected_into.append(pid)
+        children = {process_identity(child): child for child in reversed(kept.children)}
+        for child in arriving.children:
+            same = children.get(process_identity(child))
+            if same is None:
+                kept.children.append(child)
+                children[process_identity(child)] = child
                 continue
-            below.children = _distinct_level([*below.children, *root.children])
-            below.injected_into.extend(
-                pid for pid in root.injected_into if pid not in below.injected_into
-            )
-            del roots[index]
-            break
-        else:
-            return roots
+            merged_into[id(child)] = same
+            pending.append((same, child))
 
 
 def _descendants(node: Any) -> list[Any]:
     """Every process below ``node``, depth first."""
     out: list[Any] = []
-    for child in node.children:
+    pending = list(reversed(node.children))
+    while pending:
+        child = pending.pop()
         out.append(child)
-        out.extend(_descendants(child))
+        pending.extend(reversed(child.children))
     return out
 
 
@@ -332,6 +365,7 @@ def _distinct_level(nodes: list[Any]) -> list[Any]:
     """``nodes`` with each identity once at this level, every level below likewise."""
     kept: dict[tuple[int, int, str, str], Any] = {}
     children: dict[tuple[int, int, str, str], list[Any]] = {}
+    injected: dict[tuple[int, int, str, str], set[int]] = {}
     for node in nodes:
         key = process_identity(node)
         first = kept.get(key)
@@ -340,11 +374,13 @@ def _distinct_level(nodes: list[Any]) -> list[Any]:
                 update={"children": [], "injected_into": list(node.injected_into)}
             )
             children[key] = list(node.children)
+            injected[key] = set(node.injected_into)
             continue
         children[key].extend(node.children)
-        first.injected_into.extend(
-            pid for pid in node.injected_into if pid not in first.injected_into
-        )
+        for pid in node.injected_into:
+            if pid not in injected[key]:
+                injected[key].add(pid)
+                first.injected_into.append(pid)
     for key, node in kept.items():
         node.children = _distinct_level(children[key])
     return list(kept.values())

@@ -266,3 +266,54 @@ class TestALeftOutItem:
     def test_a_row_alone_prints_its_recorded_sentence(self) -> None:
         row = self._row("a")
         assert retry_drop_sentences([row]) == [row["sentence"]]
+
+
+class TestAHostileStoredTree:
+    """Every root is the child of the one before it, and every root is stored twice.
+
+    Every root but the first folds into the tree before it: the case a fold
+    that rescans the other roots after each fold turns cubic.
+    """
+
+    @staticmethod
+    def _chain(count: int) -> list[ProcessNode]:
+        roots = [
+            ProcessNode(
+                pid=1000 + index,
+                ppid=999 + index,
+                name="C:\\example\\step.exe",
+                children=[
+                    ProcessNode(pid=1001 + index, ppid=1000 + index, name="C:\\example\\step.exe")
+                ],
+            )
+            for index in range(count)
+        ]
+        return roots + roots
+
+    @staticmethod
+    def _measure(count: int) -> tuple[float, int, list[ProcessNode]]:
+        import time
+        import tracemalloc
+
+        stored = TestAHostileStoredTree._chain(count)
+        took = []
+        for _ in range(3):
+            started = time.perf_counter()
+            roots = distinct_processes(stored)
+            took.append(time.perf_counter() - started)
+        tracemalloc.start()
+        distinct_processes(stored)
+        peak = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+        return min(took), peak, roots
+
+    def test_ten_times_the_roots_costs_about_ten_times(self) -> None:
+        from maljan.reporting.dedupe import _descendants
+
+        small_time, small_peak, small = self._measure(1_000)
+        large_time, large_peak, large = self._measure(10_000)
+        for roots, count in ((small, 1_000), (large, 10_000)):
+            assert [root.pid for root in roots] == [1000]
+            assert len(_descendants(roots[0])) == count
+        assert large_peak <= small_peak * 15, (small_peak, large_peak)
+        assert large_time <= small_time * 20, (small_time, large_time)
