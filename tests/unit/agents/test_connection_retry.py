@@ -213,7 +213,7 @@ class TestATransientProviderAnswerIsRetried:
             return "ok"
 
         assert await retry_on_connection_error(_rate_limited, what="x") == "ok"
-        assert waits == [5]
+        assert len(waits) == 1 and 5 <= waits[0] <= 5.5, "never shorter than asked"
 
     @pytest.mark.asyncio
     async def test_an_unreasonable_retry_after_falls_back_to_the_backoff(
@@ -266,7 +266,7 @@ class TestATransientProviderAnswerIsRetried:
             return "ok"
 
         assert await retry_on_connection_error(_rate_limited, what="x") == "ok"
-        assert waits and 4 <= waits[0] <= 6, waits
+        assert waits and 4 <= waits[0] <= 6.6, waits
 
     @pytest.mark.asyncio
     async def test_a_date_in_the_past_falls_back_to_the_backoff(

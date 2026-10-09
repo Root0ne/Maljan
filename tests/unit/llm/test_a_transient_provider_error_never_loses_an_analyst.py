@@ -73,6 +73,12 @@ def _anthropic_status(status: int, body: Any = None) -> Exception:
     return anthropic.APIStatusError(f"Error code: {status}", response=_response(status), body=body)
 
 
+def _anthropic_status_headers(status: int, headers: dict[str, str]) -> Exception:
+    return anthropic.APIStatusError(
+        f"Error code: {status}", response=_response(status, headers), body=None
+    )
+
+
 def _overloaded_in_the_stream() -> Exception:
     """What the Anthropic SDK raises for an ``error`` event after the stream began: status 200."""
     return _anthropic_status(
@@ -310,7 +316,32 @@ class TestTheAnalystCompletes:
 
         agent.execute_tool_loop([("system", "s"), ("human", "h")])
 
-        assert _no_real_backoff == [7]
+        (waited,) = _no_real_backoff
+        assert 7 <= waited <= 7.7, "the wait asked for, lengthened a little, never shortened"
+
+    def test_a_wait_in_milliseconds_is_honoured(self, _no_real_backoff: list[float]) -> None:
+        agent, _llm, _ledger = _analyst(
+            [_anthropic_status_headers(529, {"retry-after-ms": "2500"}), "CLAIM: x"]
+        )
+
+        agent.execute_tool_loop([("system", "s"), ("human", "h")])
+
+        (waited,) = _no_real_backoff
+        assert 2.5 <= waited <= 2.75
+
+    def test_a_provider_saying_do_not_retry_is_answered_once(self) -> None:
+        agent, llm, _ledger = _analyst(
+            [_anthropic_status_headers(500, {"x-should-retry": "false"})]
+        )
+
+        with pytest.raises(AnalystError):
+            agent.execute_tool_loop([("system", "s"), ("human", "h")])
+
+        assert len(llm.asked) == 1
+
+    def test_a_provider_saying_retry_is_asked_again_whatever_the_status(self) -> None:
+        failure = _anthropic_status_headers(400, {"x-should-retry": "true"})
+        assert transient_failure(failure) == "HTTP 400"
 
     def test_the_backoff_is_jittered(self, _no_real_backoff: list[float]) -> None:
         agent, _llm, _ledger = _analyst([_openai_status(500), _openai_status(500), "CLAIM: x"])
@@ -379,7 +410,8 @@ class TestOnePolicyNotTwo:
 
         assert answer.content == "from the second"
         assert len(first.asked) == 3
-        assert _no_real_backoff == [4, 4], "the first model's own two waits, and no third"
+        assert len(_no_real_backoff) == 2, "the first model's own two waits, and no third"
+        assert all(4 <= waited <= 4.4 for waited in _no_real_backoff)
 
     @pytest.mark.asyncio
     async def test_a_model_list_moves_on_after_an_error_in_the_stream(self) -> None:

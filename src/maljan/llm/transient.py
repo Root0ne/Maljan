@@ -186,7 +186,11 @@ def transient_failure(exc: BaseException) -> str | None:
         if any((package, "APIConnectionError") in names for package in ("openai", "anthropic")):
             return "connection error"
         status = _status(exc)
-        if status is not None and status in RETRYABLE_STATUSES:
+        # The provider's own word on this answer, as the Anthropic SDK read it.
+        told = should_retry_header(exc) if _from_a_provider(exc) else None
+        if told is False:
+            return None
+        if status is not None and (status in RETRYABLE_STATUSES or told):
             return f"HTTP {status}"
         if status is not None and status >= 400:
             # A refusal about the request: asking again cannot change it.
@@ -291,16 +295,62 @@ def _seconds_until(http_date: str) -> int:
     return int((when - datetime.now(UTC)).total_seconds())
 
 
-def _wait_for(exc: BaseException, attempt: int) -> float:
-    """The delay before the next attempt: the provider's ``Retry-After``, else jittered backoff.
+# The most a provider's own wait is lengthened by, as a share of it: enough
+# that analysts told the same wait by one provider do not all ask again in the
+# same instant, never so much that the wait is shorter than it asked.
+RETRY_AFTER_JITTER = 0.1
 
-    The backoff is 1 s then 2 s, each drawn from half to one and a half times
-    itself, so analysts that failed together do not ask again together.
+
+def _header(exc: BaseException, name: str) -> str:
+    headers = getattr(getattr(exc, "response", None), "headers", None)
+    if headers is None:
+        return ""
+    with contextlib.suppress(Exception):
+        return str(headers.get(name) or "").strip()
+    return ""
+
+
+def asked_wait(exc: BaseException) -> float | None:
+    """The wait the provider asked for, in seconds, or ``None`` when it asked for none usable.
+
+    ``retry-after-ms`` first, as the Anthropic SDK read it, then
+    ``Retry-After`` (:func:`retry_after`). A wait past
+    :data:`MAX_RETRY_AFTER_SECONDS` is no usable answer.
     """
-    backoff = float(2**attempt)
+    raw = _header(exc, "retry-after-ms")
+    if raw:
+        try:
+            seconds = float(raw) / 1000.0
+        except ValueError:
+            seconds = 0.0
+        if 0 < seconds <= MAX_RETRY_AFTER_SECONDS:
+            return seconds
     asked = retry_after(exc, 0)
-    if asked:
-        return float(asked)
+    return float(asked) if asked else None
+
+
+def should_retry_header(exc: BaseException) -> bool | None:
+    """The provider's ``x-should-retry`` answer, as the Anthropic SDK read it, or ``None``."""
+    raw = _header(exc, "x-should-retry").lower()
+    if raw == "true":
+        return True
+    if raw == "false":
+        return False
+    return None
+
+
+def _wait_for(exc: BaseException, attempt: int) -> float:
+    """The delay before the next attempt: the provider's own wait, else jittered backoff.
+
+    The provider's wait is honoured and lengthened by up to
+    :data:`RETRY_AFTER_JITTER` of itself, never shortened. The backoff is 1 s
+    then 2 s, each drawn from half to one and a half times itself, so analysts
+    that failed together do not ask again together.
+    """
+    asked = asked_wait(exc)
+    if asked is not None:
+        return asked * (1.0 + RETRY_AFTER_JITTER * random.random())  # noqa: S311 — spacing
+    backoff = float(2**attempt)
     return backoff * (0.5 + random.random())  # noqa: S311 — spacing, not security
 
 
