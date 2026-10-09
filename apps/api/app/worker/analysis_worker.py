@@ -1469,6 +1469,21 @@ async def mark_job_cancelled(
                 .where(AnalysisJob.id == job_uuid, AnalysisJob.status.in_(("pending", "running")))
                 .values(**values)
             )
+            if reason:
+                # The API's cancel writes ``cancelled`` itself before it sets
+                # the flag this worker reads, so the row is usually already
+                # cancelled here and the statement above matches nothing. The
+                # reason still belongs on it: written to a cancelled row that
+                # carries none, and never over a message already there.
+                await db.execute(
+                    update(AnalysisJob)
+                    .where(
+                        AnalysisJob.id == job_uuid,
+                        AnalysisJob.status == "cancelled",
+                        AnalysisJob.error_message.is_(None),
+                    )
+                    .values(error_message=reason[:2000])
+                )
             await db.commit()
         return True
     except Exception as exc:  # noqa: BLE001 — the run is already stopping

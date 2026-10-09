@@ -25,7 +25,13 @@ import pytest_asyncio
 
 from app.worker import analysis_worker as worker_module
 from app.worker.analysis_worker import run_analysis
-from tests.integration._session_probe import SessionFactory, fake_job, fake_sample, rows_for
+from tests.integration._session_probe import (
+    JobRow,
+    SessionFactory,
+    fake_job,
+    fake_sample,
+    rows_for,
+)
 from tests.integration._session_probe import updates_to as _updates_to
 
 EIGHT_HOURS = 28_800
@@ -236,28 +242,32 @@ async def test_a_report_stopped_in_the_making_keeps_its_written_sections(
 @pytest.mark.asyncio
 async def test_the_operators_cancel_keeps_what_the_run_produced(redis_stub: MagicMock) -> None:
     job = fake_job()
-    factory = SessionFactory(rows_for(job, fake_sample(job.sample_id)))
-    redis_stub.get = AsyncMock(return_value=b"1")
+    row = JobRow(job)
+    factory = SessionFactory(rows_for(job, fake_sample(job.sample_id)), on_execute=row)
 
-    async def _waits_to_be_cancelled(self: Any, **_: Any) -> dict[str, Any]:
+    async def _cancelled_by_the_api(self: Any, **_: Any) -> dict[str, Any]:
         self.latest_state = _state(self)
         _spend(self)
+        # What ``AnalysisService.cancel_job`` does: the row turns
+        # ``cancelled`` first, then the flag the worker polls is set.
+        row.row.status = "cancelled"
+        redis_stub.get = AsyncMock(return_value=b"1")
         await asyncio.sleep(3600)
         return {}
 
     with (
-        patch("maljan.app.MaljanApp.arun", new=_waits_to_be_cancelled),
+        patch("maljan.app.MaljanApp.arun", new=_cancelled_by_the_api),
         patch.object(worker_module, "CANCEL_POLL_SECONDS", 0.01),
     ):
         result = await _run(factory, redis_stub, job)
 
     assert result["status"] == "cancelled"
-    [cancelled] = [u for u in _job_updates(factory) if u.get("status") == "cancelled"]
-    assert cancelled["error_message"].startswith("Cancelled by the operator ")
+    assert row.row.status == "cancelled"
+    assert row.row.error_message.startswith("Cancelled by the operator ")
     [report] = _stored_reports(factory)
-    assert report.incomplete_reason == cancelled["error_message"]
+    assert report.incomplete_reason == row.row.error_message
     assert report.run_summary["tokens"]["llm_calls"] == 2
-    assert report.malware_report["degradation_reasons"][-1] == cancelled["error_message"]
+    assert report.malware_report["degradation_reasons"][-1] == row.row.error_message
 
 
 @pytest.mark.asyncio
@@ -319,3 +329,35 @@ async def test_with_no_job_timeout_a_run_longer_than_eight_hours_is_not_cut(
     assert [u["status"] for u in _job_updates(factory)] == ["running", "completed"]
     [report] = _stored_reports(factory)
     assert report.incomplete_reason is None
+
+
+class TestTheCancelReasonReachesTheRow:
+    """The reason is written whoever turned the row ``cancelled`` first, and never over another."""
+
+    async def _mark(self, status: str, message: str | None = None) -> Any:
+        job = fake_job(status=status)
+        job.error_message = message
+        row = JobRow(job)
+        factory = SessionFactory(rows_for(job, fake_sample(job.sample_id)), on_execute=row)
+        await worker_module.mark_job_cancelled(factory, job.id, reason="the reason")
+        return row.row
+
+    @pytest.mark.asyncio
+    async def test_a_row_the_api_already_cancelled_gets_the_reason(self) -> None:
+        row = await self._mark("cancelled")
+        assert (row.status, row.error_message) == ("cancelled", "the reason")
+
+    @pytest.mark.asyncio
+    async def test_a_running_row_is_cancelled_with_the_reason(self) -> None:
+        row = await self._mark("running")
+        assert (row.status, row.error_message) == ("cancelled", "the reason")
+
+    @pytest.mark.asyncio
+    async def test_a_message_already_on_the_row_is_kept(self) -> None:
+        row = await self._mark("cancelled", "written before")
+        assert row.error_message == "written before"
+
+    @pytest.mark.asyncio
+    async def test_a_finished_row_is_left_alone(self) -> None:
+        row = await self._mark("completed")
+        assert (row.status, row.error_message) == ("completed", None)
