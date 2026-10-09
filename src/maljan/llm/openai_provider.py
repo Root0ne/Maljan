@@ -1372,6 +1372,11 @@ def _with_standard_retry(
             from maljan.llm.generation_rate import carry_rate_meter
 
             carry_rate_meter(model_obj, replacement)
+            # And the job's retry recorder, so the healed model's retries are
+            # rows and its failed attempts charged, as the original's were.
+            from maljan.llm.transient import carry_retry_recorder
+
+            carry_retry_recorder(model_obj, replacement)
             healed.append(replacement)
         _close_sync_client(model_obj)
         _announce_healed(model_obj, replacement)

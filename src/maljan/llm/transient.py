@@ -514,6 +514,18 @@ def attach_retry_recorder(llm: Any, ledger: Any, agent: str) -> Any:
     return llm
 
 
+def carry_retry_recorder(source: Any, target: Any) -> Any:
+    """Attach ``source``'s recorder to ``target`` as well, when it has one; returns ``target``.
+
+    For a model rebuilt in place of another (the llama.cpp self-heal), as the
+    rate meter is carried (``generation_rate.carry_rate_meter``).
+    """
+    recorder = recorder_of(source)
+    if recorder is None:
+        return target
+    return attach_retry_recorder(target, recorder.ledger, recorder.agent)
+
+
 # The recorders of the models a policy around them asked, set while it runs:
 # the policy writes its retries through the model that failed.
 _ASKED: contextvars.ContextVar[list[RetryRecorder] | None] = contextvars.ContextVar(
