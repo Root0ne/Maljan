@@ -375,6 +375,17 @@ class TestTheRoundIsNotMediated:
 
         assert debate_route(state, max_rounds=5) == ("judge", NOT_MEDIATED)
 
+    def test_no_answer_at_the_round_limit_is_still_not_mediated(self) -> None:
+        state = {
+            **CLAIMING_STATE,
+            **self._round(),
+            "iteration_count": 3,
+        }
+
+        assert debate_route(state, max_rounds=3) == ("judge", NOT_MEDIATED)
+        summary = RunSummaryBuilder(start_time=0.0).set_negotiation(state, max_iterations=3).build()
+        assert summary.to_dict()["negotiation"]["termination_reason"] == NOT_MEDIATED
+
     def test_the_run_summary_and_the_report_say_the_mediator_wrote_no_answer(self) -> None:
         from maljan.reporting.models import MalwareReport
         from maljan.reporting.renderers.markdown import MarkdownRenderer
