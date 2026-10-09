@@ -18,15 +18,17 @@ description of the model — and nothing else:
   How deep it goes is ``llm.anthropic.effort``, sent as
   ``output_config.effort`` when set; a level the Models API says the model does
   not take is refused here, before the job spends anything.
-* **Prompt caching.** Every request carries the top-level automatic
-  ``cache_control`` (``{"type": "ephemeral"}``, with ``"ttl": "1h"`` where
-  ``llm.anthropic.prompt_cache_ttl`` asks for it). The API places the
-  breakpoint on the last cacheable block itself, so what the model reads is
-  unchanged; a tool loop's request is the previous one plus its new turns
-  (``anthropic_history``), so each step reads the stable prefix from the cache.
-* **Streaming.** A request whose output cap the Anthropic SDK would refuse to
-  send without streaming (its own rule: one that may run past ten minutes) is
-  streamed and joined into the same answer.
+* **Prompt caching** is asked for only where a prefix is sent again — a
+  request that continues a conversation — with explicit breakpoints on its
+  newest user turn and on the turn the previous request ended with
+  (``anthropic_history``); a single-shot call carries no marker and pays no
+  write premium. ``llm.anthropic.prompt_cache_ttl`` sets the lifetime.
+* **Streaming.** A request whose output cap is past what the Anthropic SDK
+  sends unstreamed by its own rule (an answer it expects to run past ten
+  minutes) is streamed and joined into the same answer. The SDK would not
+  refuse it here — the provider always names a request timeout, which skips
+  that check — but a long request that sends nothing until it ends is the one
+  a network drops as idle (the API errors page, "Long requests").
 * **The history.** Every request keeps the thinking blocks it replays valid
   (``anthropic_history.with_preserved_thinking``) and never sends a
   ``tool_use`` without its ``tool_result`` (``tool_replies``).
@@ -91,12 +93,15 @@ def fixed_sampling_source(model: object) -> str:
 
 
 def needs_streaming(model: str, max_tokens: object) -> bool:
-    """Whether the Anthropic SDK would refuse to send a request with this cap unstreamed.
+    """Whether a request with this cap is past what the Anthropic SDK sends unstreamed.
 
-    The SDK's own rule, asked rather than copied: it refuses a non-streaming
-    request it expects to run past ten minutes (by its reckoning, an output
-    cap over 21,333 tokens, or over a model's own non-streaming limit). An SDK
-    that moved the rule streams every capped request, which is never refused.
+    The SDK's own rule, asked rather than copied: a non-streaming request it
+    expects to run past ten minutes (by its reckoning, an output cap over
+    21,333 tokens, or over a model's own non-streaming limit). The SDK applies
+    it only to a client left at its default timeout, which this provider never
+    is, so nothing would be refused; the rule is read as the line past which a
+    request is long enough that an idle connection may be dropped. An SDK that
+    moved the rule streams every capped request.
     """
     if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens <= 0:
         return False
@@ -117,7 +122,7 @@ def needs_streaming(model: str, max_tokens: object) -> bool:
 
 
 def cache_control(ttl: str) -> dict[str, str]:
-    """The top-level automatic ``cache_control`` every request carries."""
+    """The ``cache_control`` marker a breakpoint carries, at the configured lifetime."""
     marker = {"type": "ephemeral"}
     if str(ttl) == "1h":
         marker["ttl"] = "1h"
@@ -128,7 +133,10 @@ _UNFORCED_CLASSES: dict[type, type] = {}
 
 
 def with_unforced_structured_output(chat_class: Any) -> Any:
-    """``chat_class`` whose structured output never forces a tool choice.
+    """``chat_class`` whose structured output never forces a tool choice, and whose ``none`` is one.
+
+    A ``tool_choice="none"`` binding (the analysts' nudge with the loop's tools
+    withheld) is sent as Anthropic's ``{"type": "none"}``.
 
     ``ChatAnthropic.with_structured_output`` forces the schema's tool
     (``tool_choice`` ``tool``) unless thinking is configured, and several
@@ -188,8 +196,18 @@ def with_unforced_structured_output(chat_class: Any) -> Any:
         )
         return RunnableMap(raw=llm) | parsed
 
+    def bind_tools(self: Any, tools: Any, *, tool_choice: Any = None, **kwargs: Any) -> Any:
+        # ``ChatAnthropic`` reads a string choice as a tool's name, so the
+        # ``"none"`` every other client takes would force a tool called
+        # "none"; Anthropic spells it ``{"type": "none"}``.
+        if tool_choice == "none":
+            tool_choice = {"type": "none"}
+        return base.bind_tools(self, tools, tool_choice=tool_choice, **kwargs)
+
     unforced = type(
-        chat_class.__name__, (chat_class,), {"with_structured_output": with_structured_output}
+        chat_class.__name__,
+        (chat_class,),
+        {"with_structured_output": with_structured_output, "bind_tools": bind_tools},
     )
     unforced.__module__ = __name__
     unforced.__qualname__ = chat_class.__qualname__
@@ -253,12 +271,6 @@ class AnthropicProvider:
             output_config.setdefault("effort", effort)
             kwargs["output_config"] = output_config
 
-        model_kwargs = dict(kwargs.pop("model_kwargs", None) or {})
-        model_kwargs.setdefault(
-            "cache_control", cache_control(str(getattr(settings, "prompt_cache_ttl", "5m")))
-        )
-        kwargs["model_kwargs"] = model_kwargs
-
         if needs_streaming(model, kwargs.get("max_tokens")):
             kwargs.setdefault("streaming", True)
             kwargs.setdefault("stream_usage", True)
@@ -274,7 +286,8 @@ class AnthropicProvider:
 
         chat_class = with_answered_tool_calls(
             with_preserved_thinking(
-                with_unforced_structured_output(with_sized_request_timeout(ChatAnthropic))
+                with_unforced_structured_output(with_sized_request_timeout(ChatAnthropic)),
+                str(getattr(settings, "prompt_cache_ttl", "5m") or "5m"),
             ),
             "anthropic",
         )

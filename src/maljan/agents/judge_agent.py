@@ -80,6 +80,7 @@ from maljan.core.spend import SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import TokenLedger, structured_answer
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
 from maljan.llm.answer_text import answer_text
+from maljan.llm.anthropic_history import keeps_turns_as_received
 from maljan.llm.context_window import (
     ContextBudget,
     tool_definition_chars,
@@ -2230,6 +2231,18 @@ class JudgeAgent(BudgetMeter):
                 with contextlib.suppress(Exception):
                     room.forget_conversation(recorder.agent)
 
+    def _salvage_model(self, keeps_turns: bool) -> Any:
+        """The judge's model for its salvage: its loop's tools withheld where turns are kept."""
+        tools = list(getattr(self, "tools", None) or [])
+        bind = getattr(self.llm, "bind_tools", None)
+        if not keeps_turns or not tools or bind is None:
+            return self.llm
+        try:
+            return bind(tools, tool_choice="none")
+        except Exception as exc:  # noqa: BLE001 — the unbound model is the salvage's fallback
+            self.logger.debug("JudgeAgent: tools not bound for the salvage (%s).", exc)
+            return self.llm
+
     async def _reasoning_from_what_was_gathered(
         self, msgs: list[Any], timeout: float | None, settings: Any, window_tokens: int = 0
     ) -> str:
@@ -2244,7 +2257,11 @@ class JudgeAgent(BudgetMeter):
         if timeout is not None and timeout < 1.0:
             self.logger.warning("JudgeAgent reasoning salvage skipped: no time left.")
             return ""
-        sendable, _dropped = nudge_turns(msgs)
+        # Kept whole where the model binds its thinking to the turns before it
+        # (``anthropic_history``); the tool-reply completion answers an
+        # unparsed call as not run.
+        keeps_turns = keeps_turns_as_received(getattr(self, "llm", None))
+        sendable, _dropped = (msgs, False) if keeps_turns else nudge_turns(msgs)
         trimmed = _trim_for_synthesis(
             sendable, synthesis_budget_chars(settings, "judge", window_tokens)
         )
@@ -2268,7 +2285,10 @@ class JudgeAgent(BudgetMeter):
         try:
             # Asked at the end of the last user turn when the trim left one
             # last, rather than as a second user turn after it.
-            response = await asyncio.wait_for(self.llm.ainvoke(asked, **held), timeout)
+            # With the turns kept whole, the loop's tools go with it, withheld
+            # (``tool_choice`` none), so the re-sent history is the loop's.
+            model = self._salvage_model(keeps_turns)
+            response = await asyncio.wait_for(model.ainvoke(asked, **held), timeout)
             self._record_usage(response, call="reasoning salvage")
         except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves no reasoning
             self.logger.warning("JudgeAgent reasoning salvage failed (%s).", type(exc).__name__)

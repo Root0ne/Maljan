@@ -101,9 +101,10 @@ class TestTheBody:
         body = _first_body(monkeypatch, "claude-sonnet-4-20250514", 0.1)
         assert body["temperature"] == 0.1
 
-    def test_every_request_asks_for_the_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        body = _first_body(monkeypatch, "claude-sonnet-4-20250514", 0.1)
-        assert body["cache_control"] == {"type": "ephemeral"}
+    def test_a_single_shot_call_asks_for_no_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A write is 1.25 times an input token and pays off only on a read."""
+        body = _first_body(monkeypatch, "claude-haiku-5-5", 0.1)
+        assert "cache_control" not in json.dumps(body)
         assert cache_control("1h") == {"type": "ephemeral", "ttl": "1h"}
 
 

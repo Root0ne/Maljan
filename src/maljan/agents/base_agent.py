@@ -46,6 +46,7 @@ from maljan.core.logger import logger
 from maljan.core.spend import LOOP_TURN_CALL, SPEND_CAP, SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.llm.answer_text import answer_text
+from maljan.llm.anthropic_history import keeps_turns_as_received
 from maljan.llm.context_window import (
     CHARS_PER_TOKEN,
     NO_ROOM_RUN_STATE,
@@ -5187,7 +5188,13 @@ class BaseAnalyst(BudgetMeter, ABC):
         # after the model answers — leaves calls nothing answered, which a
         # hosted provider refuses to be sent. They go; the turn's text stays,
         # and the record says they did not run.
-        msgs, unrun = without_unanswered_calls(msgs)
+        # A provider whose model binds its thinking to the turns before it
+        # keeps the turn whole: taking a call off it would rebuild the turn the
+        # API needs back as it was received, and the tool-reply completion
+        # answers each unrun call with a reply saying it did not run.
+        kept, unrun = without_unanswered_calls(msgs)
+        if not keeps_turns_as_received(getattr(self, "llm", None)):
+            msgs = kept
         if unrun:
             note = f"{unrun} tool call(s) of the last turn were not run"
             why = f"{why}; {note}" if why else note
@@ -5584,7 +5591,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             "%s: the loop's last message was not a final report; asking once for one.",
             self.name,
         )
-        sendable, dropped = nudge_turns(msgs)
+        # Kept whole where the model binds its thinking to the turns before it
+        # (``anthropic_history``): the unparsed call is answered as not run by
+        # the tool-reply completion instead of being taken off its turn.
+        keeps_turns = keeps_turns_as_received(getattr(self, "llm", None))
+        sendable, dropped = (msgs, False) if keeps_turns else nudge_turns(msgs)
         modes: list[str] = ["invalid_tool_calls_dropped"] if dropped else []
         if dropped:
             self.logger.warning(
@@ -5634,10 +5645,22 @@ class BaseAnalyst(BudgetMeter, ABC):
             finally:
                 self._spend_release(slot)
 
+        # The same model with the loop's tools withheld is the first way asked
+        # where the turns are kept whole: the system turn and the tools stay as
+        # the loop sent them, which is what keeps its thinking valid.
+        first_withheld = self._llm_with_tools_withheld() if keeps_turns else None
         try:
-            answer = _ask_with(self.llm, f"nudge:{self.name}")
+            if first_withheld is not None:
+                answer = _ask_with(first_withheld, f"nudge-tools-none:{self.name}", loop_turns)
+                modes.append("tool_choice_none")
+            else:
+                answer = _ask_with(self.llm, f"nudge:{self.name}")
         except Exception as exc:  # noqa: BLE001 — a nudge that fails is asked one other way
             self.logger.warning("%s: the final-answer nudge failed (%s).", self.name, exc)
+            if first_withheld is not None:
+                # The withheld shape was the one asked; asking it again changes nothing.
+                self._nudge_retry_mode = "+".join(modes) or None
+                return None
             # The other shape the server accepts: the loop's own tools bound
             # and forbidden, so the transcript renders as the loop rendered
             # it and the model still has to answer in prose.
@@ -5661,7 +5684,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return None
             modes.append("tool_choice_none")
         self._nudge_retry_mode = "+".join(modes) or None
-        text = str(getattr(answer, "content", "") or "")
+        text = answer_text(getattr(answer, "content", "") or "")
         return text or None
 
     def _llm_with_tools_withheld(self) -> Any | None:
@@ -5878,7 +5901,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         budget = window_budget if paced is None else min(window_budget, paced)
         # The same transcript rule the nudge follows: a tool call whose
         # arguments never parsed is not sent back to the server.
-        sendable, _dropped = nudge_turns(msgs)
+        keeps_turns = keeps_turns_as_received(getattr(self, "llm", None))
+        sendable, _dropped = (msgs, False) if keeps_turns else nudge_turns(msgs)
         conversation = sum(_message_chars(m) for m in sendable)
         framing = sum(_message_chars(m) for m in _framing_of(sendable))
         rates = self._rates_sentence(generation_rate, prompt_rate)
@@ -5930,14 +5954,22 @@ class BaseAnalyst(BudgetMeter, ABC):
             "budget_chars": budget,
             "sized_by": "window" if paced is None or window_budget <= paced else "pace",
         }
+        # Where the turns are kept whole, the loop's own system turn and tools
+        # go with the salvage, the tools withheld (``tool_choice`` none), so the
+        # history it re-sends is the loop's and its thinking stays valid.
+        withheld = self._llm_with_tools_withheld() if keeps_turns else None
         try:
             answer = self._invoke_llm_with_timeout(
                 self._with_current_run_state(
-                    with_question(tool_free_turns(trimmed), str(directive.content)),
+                    with_question(
+                        trimmed if withheld is not None else tool_free_turns(trimmed),
+                        str(directive.content),
+                    ),
                     None,
                     NO_LIMIT if remaining is None else remaining,
                 ),
                 remaining,
+                model=withheld,
                 what="step-cap salvage",
             )
         except Exception as exc:  # noqa: BLE001 - best-effort salvage

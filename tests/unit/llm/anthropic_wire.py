@@ -5,7 +5,8 @@ real ``ChatAnthropic`` the provider builds sends them through an ``httpx2``
 mock transport, and no request leaves the process. A streamed answer is sent
 as the server sends one — ``message_start``, each block's start, deltas and
 stop (a thinking block's text, then its ``signature_delta``), ``message_delta``
-with the usage, ``message_stop``.
+with the usage totals (no split of the cache writes by lifetime, as the API
+streams them), ``message_stop``.
 """
 
 from __future__ import annotations
@@ -119,7 +120,9 @@ def streamed(answer: dict[str, Any]) -> bytes:
             "message_delta",
             {
                 "delta": {"stop_reason": answer["stop_reason"], "stop_sequence": None},
-                "usage": usage,
+                # ``MessageDeltaUsage``: the totals, without the split of the
+                # cache writes by lifetime that ``message_start`` carries.
+                "usage": {k: v for k, v in usage.items() if k != "cache_creation"},
             },
         )
     )
@@ -142,13 +145,42 @@ def _prefix(body: dict[str, Any], messages: list[Any]) -> str:
     )
 
 
-def refusal(body: dict[str, Any]) -> str:
+CLEAR_AT_BETA = "mid-conversation-system-clear-at-2026-08-21"
+BINDING_BETA = "thinking-binding-controls-2026-08-01"
+
+
+def _system_placement(messages: list[Any], betas: set[str]) -> str:
+    """The mid-conversation system message rules, as the page documents them."""
+    for index, turn in enumerate(messages):
+        if turn.get("role") != "system":
+            continue
+        if "clear_at" in turn and CLEAR_AT_BETA not in betas:
+            return f"messages.{index}.clear_at: Extra inputs are not permitted"
+        if index == 0:
+            return "messages.0: a system message cannot be the first message"
+        # Consecutive system messages are one section.
+        start = index
+        while start > 0 and messages[start - 1].get("role") == "system":
+            start -= 1
+        if start == 0 or messages[start - 1].get("role") != "user":
+            return f"messages.{index}: a system message must follow a user message"
+        after = index + 1
+        while after < len(messages) and messages[after].get("role") == "system":
+            after += 1
+        if after < len(messages) and messages[after].get("role") != "assistant":
+            return f"messages.{index}: a system message must be last or followed by an assistant"
+    return ""
+
+
+def refusal(body: dict[str, Any], betas: set[str] = frozenset()) -> str:  # type: ignore[assignment]
     """What the Messages API refuses in ``body`` on Claude Haiku 5.5, as documented, or ``""``.
 
     Sampling parameters at a non-default value, ``budget_tokens``, a request
     ending on an assistant turn (a prefill, refused while thinking is on), a
-    ``tool_use`` without its ``tool_result`` at the front of the next user turn.
-    The preserved-thinking prefix check is :meth:`Wire.stale_block`.
+    message other than the last with empty content, a mid-conversation system
+    message out of place or turn-scoped without its beta, a ``tool_use``
+    without its ``tool_result`` at the front of the next user turn. The
+    preserved-thinking checks are :meth:`Wire.thinking_refusal`.
     """
     # The sampling rule is Claude Haiku 5.5's; an older model the tests name
     # still takes a temperature.
@@ -158,9 +190,18 @@ def refusal(body: dict[str, Any]) -> str:
     thinking = body.get("thinking")
     if isinstance(thinking, dict) and "budget_tokens" in thinking:
         return "thinking.budget_tokens is not supported on this model"
+    if isinstance(thinking, dict) and "block_binding" in thinking and BINDING_BETA not in betas:
+        return "thinking.block_binding: Extra inputs are not permitted"
     messages = body.get("messages") or []
     if messages and messages[-1].get("role") == "assistant":
         return "assistant message prefill is not supported while thinking is on"
+    for index, turn in enumerate(messages[:-1]):
+        content = turn.get("content")
+        if content in ([], "") and not turn.get("clear_at"):
+            return f"messages.{index}: all messages must have non-empty content"
+    placed = _system_placement(messages, betas)
+    if placed:
+        return placed
     for index, turn in enumerate(messages):
         if turn.get("role") != "assistant" or not isinstance(turn.get("content"), list):
             continue
@@ -179,41 +220,75 @@ class Wire:
     """Answers every request with ``answer(body)`` and keeps each body it was sent.
 
     Refuses, with the API's 400, what the documentation says Claude Haiku 5.5
-    refuses (:func:`refusal`), and checks every thinking block sent back
-    against the request it was written after, as the API's prefix check does
-    on the accounts the API enforces it for by default.
+    refuses (:func:`refusal`, :meth:`thinking_refusal`). A request that asks
+    for ``drop_block`` (with its beta) has the blocks that fail the prefix
+    check dropped instead, and each is noted in ``dropped``.
     """
 
     def __init__(self, answer: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
         self.answer = answer
         self.bodies: list[dict[str, Any]] = []
         self.paths: list[str] = []
+        self.betas: list[set[str]] = []
         self.refused: list[str] = []
+        self.dropped: list[str] = []
         # signature -> the prefix of the request the block was written after.
         self.issued: dict[str, str] = {}
+        # tool_use id -> the thinking blocks of the answer that called it.
+        self.thinking_of_call: dict[str, list[dict[str, Any]]] = {}
 
-    def stale_block(self, body: dict[str, Any]) -> str:
-        """The first thinking block sent back whose prefix changed, said as the API says it."""
+    def thinking_refusal(self, body: dict[str, Any], betas: set[str]) -> str:
+        """The preserved-thinking checks, said as the API says them, or ``""``.
+
+        * The latest assistant turn, when tool results follow it, carries its
+          thinking blocks exactly as they were returned (the API errors page,
+          "Thinking blocks cannot be modified").
+        * Every block sent back was written after exactly the history before
+          it in this request (the prefix check). A block written while an
+          earlier one was gone passes while that one stays gone; putting a
+          removed block back fails the blocks written without it.
+        """
+        if body.get("model") != MODEL:
+            # Models before the current generation run no prefix check.
+            return ""
         messages = body.get("messages") or []
-        for index, turn in enumerate(messages):
-            if turn.get("role") != "assistant" or not isinstance(turn.get("content"), list):
-                continue
-            for block in turn["content"]:
-                if block.get("type") != "thinking":
+        assistants = [i for i, m in enumerate(messages) if m.get("role") == "assistant"]
+        if assistants:
+            latest = messages[assistants[-1]]
+            content = latest.get("content") if isinstance(latest.get("content"), list) else []
+            calls = [b.get("id") for b in content if b.get("type") == "tool_use"]
+            if calls and calls[0] in self.thinking_of_call:
+                sent = [b for b in content if b.get("type") in ("thinking", "redacted_thinking")]
+                if _unmarked(sent) != self.thinking_of_call[calls[0]]:
+                    return (
+                        f"messages.{assistants[-1]}.content: thinking blocks in the latest "
+                        "assistant message cannot be modified"
+                    )
+        binding = (body.get("thinking") or {}).get("block_binding") or {}
+        dropping = binding.get("prefix_mismatch_behavior") == "drop_block"
+        for index in assistants:
+            for block in messages[index].get("content") or []:
+                if not isinstance(block, dict) or block.get("type") != "thinking":
                     continue
                 written = self.issued.get(str(block.get("signature")))
-                if written is not None and written != _prefix(body, messages[:index]):
-                    return (
-                        f"messages.{index}.content.0: Invalid `signature` in `thinking` block. "
-                        "The block is bound to a different conversation."
-                    )
+                if written is None or written == _prefix(body, messages[:index]):
+                    continue
+                if dropping:
+                    self.dropped.append(str(block.get("signature")))
+                    continue
+                return (
+                    f"messages.{index}.content.0: Invalid `signature` in `thinking` block. "
+                    "The block is bound to a different conversation."
+                )
         return ""
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
         body = json.loads(request.content) if request.content else {}
+        betas = {b.strip() for b in request.headers.get("anthropic-beta", "").split(",") if b}
         self.bodies.append(body)
         self.paths.append(request.url.path)
-        refused = refusal(body) or self.stale_block(body)
+        self.betas.append(betas)
+        refused = refusal(body, betas) or self.thinking_refusal(body, betas)
         if refused:
             self.refused.append(refused)
             return httpx2.Response(
@@ -225,9 +300,12 @@ class Wire:
             )
         answer = self.answer(body)
         prefix = _prefix(body, body.get("messages") or [])
+        thinking = [b for b in answer["content"] if b.get("type") == "thinking"]
+        for block in thinking:
+            self.issued[str(block["signature"])] = prefix
         for block in answer["content"]:
-            if block.get("type") == "thinking":
-                self.issued[str(block["signature"])] = prefix
+            if block.get("type") == "tool_use":
+                self.thinking_of_call[str(block["id"])] = [dict(b) for b in thinking]
         if body.get("stream"):
             return httpx2.Response(
                 200, headers={"content-type": "text/event-stream"}, content=streamed(answer)
