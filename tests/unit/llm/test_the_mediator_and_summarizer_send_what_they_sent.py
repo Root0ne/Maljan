@@ -12,9 +12,12 @@ The summariser's are the same but for two keys. Its model was built with
 ``provider_override`` and ``model_override`` keyword arguments that no
 provider reads; both providers passed them on as model kwargs, so every
 summariser request carried ``"provider_override": "ollama"`` and
-``"model_override": "llama3.2:3b"`` beside the real model. They named a model
-nothing called, and the Anthropic API refuses a request with a field it does
-not know. Those two keys, and nothing else, are gone.
+``"model_override": "llama3.2:3b"`` as top-level fields beside the real model.
+They named a model nothing called. The Anthropic Messages API refuses a field
+it does not know, and so does an OpenAI-compatible server that refuses unknown
+parameters, so there every summary request failed and the summariser passed
+its raw input through; dropping them is a behaviour fix on those endpoints,
+not only a body change. Those two keys, and nothing else, are gone.
 """
 
 from __future__ import annotations

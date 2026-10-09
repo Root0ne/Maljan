@@ -148,8 +148,13 @@ every reference, its own `llm.agents` entry included.
 The function summariser used to name its model with
 `preprocessing.summarizer_provider` and `preprocessing.summarizer_model`. Neither
 ever reached a model — the summariser ran on the global expert model whatever
-they held, and the two values only travelled in its request body as fields no
-provider reads. Both settings are gone and their stored rows deleted; no entry
+they held, and the two values travelled as top-level fields of every summariser
+request. The Anthropic Messages API refuses a field it does not know, as does an
+OpenAI-compatible server that refuses unknown parameters, so on those endpoints
+every summary request failed and the summariser passed its raw input to the
+analysts. Its requests now carry neither field, so there it summarises on the
+expert model and the analysts receive summaries where they used to receive raw
+text. Both settings are gone and their stored rows deleted; no entry
 is made from them, since that would move a summariser onto a model it has
 never called. `llm.agents.summarizer` is what sets it now, and its model is
 still built with no output cap of its own, each call held to what its window
