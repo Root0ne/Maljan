@@ -105,7 +105,7 @@ class TestTheMediatorRecordsNoAnswer:
         assert argument.contradictions == []
         assert argument.finding == ""
         assert argument.note == mediator_no_answer_note(
-            "the answer was empty, also when asked once more"
+            "the answer was empty; asked once more, the answer was empty again"
         )
         # Asked once more, then nothing is asked to extract a verdict from nothing.
         extract.assert_not_called()
@@ -117,7 +117,8 @@ class TestTheMediatorRecordsNoAnswer:
         assert consensus is None
         assert argument.status == MEDIATOR_NO_ANSWER
         assert argument.note == mediator_no_answer_note(
-            "the answer was cut at 4096 tokens with no text"
+            "the answer was cut at 4096 tokens with no text; not asked again, as the same call "
+            "would be cut again"
         )
         # The same call at the same budget would be cut again: it is not repeated.
         assert model.calls == 1
@@ -148,9 +149,70 @@ class TestTheMediatorRecordsNoAnswer:
             )
 
         assert argument.note == mediator_no_answer_note(
-            "the answer was cut at 512 tokens with no text"
+            "the answer was cut at 512 tokens with no text; not asked again, as the same call "
+            "would be cut again"
         )
         assert model.calls == 1
+
+    def test_a_second_ask_the_spend_ceiling_refuses_is_stated_as_refused(self) -> None:
+        from maljan.core.spend import SpendCeilingStop
+
+        model = _Says(_empty())
+        judge = JudgeAgent(llm=model)  # type: ignore[arg-type]
+        admitted = iter([None])
+
+        def _admit(*_args: Any, **_kw: Any) -> None:
+            if next(admitted, "refused") == "refused":
+                raise SpendCeilingStop("the ceiling is reached")
+
+        with patch.object(judge, "_spend_admits", side_effect=_admit):
+            argument, _consensus = asyncio.run(
+                judge.mediate(
+                    CLAIMING_STATE["reports"], [], isr_reports=CLAIMING_STATE["isr_reports"]
+                )
+            )
+
+        assert model.calls == 1
+        assert argument.note == mediator_no_answer_note(
+            "the answer was empty; asking once more was refused by the job's spend ceiling"
+        )
+
+    def test_a_second_ask_that_fails_is_stated_as_failed(self) -> None:
+        class _ThenFails(_Says):
+            async def ainvoke(self, _messages: Any, **_kw: Any) -> AIMessage:
+                self.calls += 1
+                if self.calls > 1:
+                    raise RuntimeError("the server went away")
+                return _empty()
+
+        model = _ThenFails(_empty())
+        judge = JudgeAgent(llm=model)  # type: ignore[arg-type]
+        argument, _consensus = asyncio.run(
+            judge.mediate(CLAIMING_STATE["reports"], [], isr_reports=CLAIMING_STATE["isr_reports"])
+        )
+
+        assert model.calls == 2
+        assert argument.note == mediator_no_answer_note(
+            "the answer was empty; asking once more failed (RuntimeError)"
+        )
+
+    def test_a_first_call_the_spend_ceiling_refuses_is_stated_as_not_admitted(self) -> None:
+        from maljan.core.spend import SpendCeilingStop
+
+        model = _Says(_empty())
+        judge = JudgeAgent(llm=model)  # type: ignore[arg-type]
+        with patch.object(judge, "_spend_admits", side_effect=SpendCeilingStop("reached")):
+            argument, consensus = asyncio.run(
+                judge.mediate(
+                    CLAIMING_STATE["reports"], [], isr_reports=CLAIMING_STATE["isr_reports"]
+                )
+            )
+
+        assert model.calls == 0
+        assert consensus is None
+        assert argument.note == mediator_no_answer_note(
+            "the call was not admitted under the job's spend ceiling"
+        )
 
     def test_an_empty_answer_then_an_answer_is_mediated(self) -> None:
         (argument, consensus), model, extract = _mediate(

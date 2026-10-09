@@ -1473,8 +1473,17 @@ PROMPTS: dict[str, str] = {
     ),
     "a mediation round whose mediator wrote no answer": " ".join(
         [
-            mediator_no_answer_note("the answer was empty"),
-            mediator_no_answer_note("the answer was cut at 4096 tokens with no text"),
+            mediator_no_answer_note(
+                "the answer was empty; asked once more, the answer was empty again"
+            ),
+            mediator_no_answer_note(
+                "the answer was cut at 4096 tokens with no text; not asked again, as the same "
+                "call would be cut again"
+            ),
+            mediator_no_answer_note(
+                "the answer was empty; asking once more was refused by the job's spend ceiling"
+            ),
+            mediator_no_answer_note("the answer was empty; asking once more failed (TimeoutError)"),
             mediator_no_answer_note("the call was not admitted under the job's spend ceiling"),
         ]
     ),

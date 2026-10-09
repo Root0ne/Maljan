@@ -2595,22 +2595,32 @@ class JudgeAgent(BudgetMeter):
         # router sends the answers in force to the judge rather than reading
         # the silence as disagreement and opening a revision round of every
         # analyst.
-        asked_again = False
-        if (
-            not reasoning_text.strip()
-            and fast_answered
-            and self._cut_reason(answered_by, answered_cap or self._built_cap_tokens()) is None
-        ):
-            self.logger.warning("Mediator wrote no answer; asking once more.")
-            asked_again = True
-            again, again_cap = await self._ask_mediation_again(direct_messages, fast_timeout)
-            if again is not None:
-                answered_by, answered_cap = again, again_cap
-                reasoning_text = answer_text(again.content)
+        # What became of a second ask, stated as it happened.
+        second_ask = ""
+        if not reasoning_text.strip() and fast_answered:
+            first = self._no_answer_reason(answered_by, answered_cap)
+            if self._cut_reason(answered_by, answered_cap or self._built_cap_tokens()):
+                second_ask = f"{first}; not asked again, as the same call would be cut again"
+            else:
+                self.logger.warning("Mediator wrote no answer; asking once more.")
+                again, again_cap, outcome = await self._ask_mediation_again(
+                    direct_messages, fast_timeout
+                )
+                if again is not None:
+                    answered_by, answered_cap = again, again_cap
+                    reasoning_text = answer_text(again.content)
+                    again_reason = self._no_answer_reason(answered_by, answered_cap)
+                    second_ask = f"{first}; asked once more, " + (
+                        "the answer was empty again"
+                        if again_reason == "the answer was empty"
+                        else again_reason
+                    )
+                else:
+                    second_ask = f"{first}; {outcome}"
         if not reasoning_text.strip():
-            reason = self._no_answer_reason(answered_by, answered_cap, not_asked=not_asked)
-            if asked_again:
-                reason = f"{reason}, also when asked once more"
+            reason = second_ask or self._no_answer_reason(
+                answered_by, answered_cap, not_asked=not_asked
+            )
             self.logger.warning(
                 "Mediator wrote no answer; the round is not mediated (the round's note says why)."
             )
@@ -2747,10 +2757,11 @@ class JudgeAgent(BudgetMeter):
 
     async def _ask_mediation_again(
         self, messages: list[Any], timeout: float | None
-    ) -> tuple[Any, int | None]:
-        """The mediation's single call made once more, as it was sent, and the bound it was sent with.
+    ) -> tuple[Any, int | None, str]:
+        """The mediation's single call made once more, as it was sent.
 
-        ``(None, None)`` when it was not made or failed.
+        ``(answer, the bound it was sent with, "")``; ``(None, None, what
+        happened)`` when the spend ceiling refused it or it failed.
         """
         from maljan.llm.context_window import output_bound_kwargs
 
@@ -2759,7 +2770,7 @@ class JudgeAgent(BudgetMeter):
             bound = self._spend_admits("mediation", messages, slot=slot, deadline_s=timeout)
         except SpendCeilingStop as stop:
             self.logger.warning("Mediator not asked once more: %s.", stop)
-            return None, None
+            return None, None, "asking once more was refused by the job's spend ceiling"
         held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
         try:
             response = await asyncio.wait_for(
@@ -2771,10 +2782,10 @@ class JudgeAgent(BudgetMeter):
                 timeout=timeout,
             )
             self._record_usage(response, call="mediation")
-            return response, (bound if held else None)
+            return response, (bound if held else None), ""
         except Exception as exc:  # noqa: BLE001 — a second ask that fails leaves no answer
             self.logger.warning("Mediator asked once more failed (%s).", type(exc).__name__)
-            return None, None
+            return None, None, f"asking once more failed ({type(exc).__name__})"
         finally:
             self._spend_release(slot)
 
