@@ -175,6 +175,13 @@ def transient_failure(exc: BaseException) -> str | None:
     try:
         if _a_stall(exc):
             return None
+        # A server saying the request did not fit its window (some llama.cpp
+        # builds answer it as 500): asking again cannot fit it, and the loop's
+        # own window handling is what reads it.
+        from maljan.llm.context_window import window_full_error
+
+        if window_full_error(exc):
+            return None
         names = _class_names(exc)
         if any((package, "APIConnectionError") in names for package in ("openai", "anthropic")):
             return "connection error"

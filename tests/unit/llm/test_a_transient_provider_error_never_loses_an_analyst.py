@@ -37,7 +37,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
-from langchain_openai.chat_models.base import OpenAITimeoutError
+from langchain_openai.chat_models.base import OpenAIAPIError, OpenAITimeoutError
 
 from maljan.agents.base_agent import BaseAnalyst
 from maljan.analysis.run_summary import RunSummaryBuilder
@@ -169,6 +169,35 @@ class TestWhatIsTransient:
     )
     def test_a_stall_is_never_retried_whichever_class_says_it(self, stall: Exception) -> None:
         assert transient_failure(stall) is None
+
+
+_WINDOW_FULL = "the request exceeds the available context size, try increasing it"
+
+
+def _window_full_as_500(wrapped: bool) -> Exception:
+    body = {"error": {"message": _WINDOW_FULL, "type": "server_error"}}
+    if wrapped:
+        return OpenAIAPIError(message=_WINDOW_FULL, response=_response(500), body=body)
+    return openai.InternalServerError(_WINDOW_FULL, response=_response(500), body=body)
+
+
+class TestAFullWindowIsNotRetried:
+    def test_a_full_window_answered_as_500_is_left_to_the_loop(self) -> None:
+        from maljan.llm.context_window import window_full_error
+
+        for wrapped in (False, True):
+            failure = _window_full_as_500(wrapped)
+            assert window_full_error(failure), "the loop's window handling reads it"
+            assert transient_failure(failure) is None
+
+    @pytest.mark.asyncio
+    async def test_it_is_sent_once(self) -> None:
+        llm = _Retrying(script=[_window_full_as_500(True)], served=[], asked=[])
+
+        with pytest.raises(openai.InternalServerError):
+            await llm.ainvoke("hi")
+
+        assert len(llm.asked) == 1
 
 
 # ---------------------------------------------------------------------------
