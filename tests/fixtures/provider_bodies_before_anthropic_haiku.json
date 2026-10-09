@@ -1,0 +1,827 @@
+{
+ "deepseek/plain": {
+  "extra_body": {
+   "max_tokens": 4096
+  },
+  "max_completion_tokens": 4096,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"a\"}",
+       "name": "lookup"
+      },
+      "id": "call_0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "answer for a",
+    "role": "tool",
+    "tool_call_id": "call_0"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"b\"}",
+       "name": "lookup"
+      },
+      "id": "call_1",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "No reply was recorded for this call.",
+    "role": "tool",
+    "tool_call_id": "call_1"
+   },
+   {
+    "content": "Write your report now.",
+    "role": "user"
+   }
+  ],
+  "model": "m",
+  "reasoning_effort": "max",
+  "stream": false,
+  "temperature": 0.1
+ },
+ "deepseek/structured": {
+  "extra_body": {
+   "max_tokens": 4096
+  },
+  "ls_structured_output_format": {
+   "kwargs": {
+    "method": "json_schema",
+    "strict": null
+   },
+   "schema": {
+    "function": {
+     "description": "",
+     "name": "_Section",
+     "parameters": {
+      "properties": {
+       "summary": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "summary"
+      ],
+      "type": "object"
+     }
+    },
+    "type": "function"
+   }
+  },
+  "max_completion_tokens": 4096,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   }
+  ],
+  "model": "m",
+  "reasoning_effort": "max",
+  "response_format": "_Section",
+  "stream": false,
+  "temperature": 0.1
+ },
+ "deepseek/tools": {
+  "extra_body": {
+   "max_tokens": 4096
+  },
+  "max_completion_tokens": 4096,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   },
+   {
+    "content": null,
+    "reasoning_content": "first I look",
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"a\"}",
+       "name": "lookup"
+      },
+      "id": "call_0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "answer for a",
+    "role": "tool",
+    "tool_call_id": "call_0"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"b\"}",
+       "name": "lookup"
+      },
+      "id": "call_1",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "No reply was recorded for this call.",
+    "role": "tool",
+    "tool_call_id": "call_1"
+   },
+   {
+    "content": "Write your report now.",
+    "role": "user"
+   }
+  ],
+  "model": "m",
+  "reasoning_effort": "max",
+  "stream": false,
+  "temperature": 0.1,
+  "tools": [
+   {
+    "function": {
+     "description": "Look it up.",
+     "name": "lookup",
+     "parameters": {
+      "properties": {
+       "what": {
+        "default": "",
+        "type": "string"
+       }
+      },
+      "type": "object"
+     }
+    },
+    "type": "function"
+   }
+  ]
+ },
+ "llama/plain": {
+  "extra_body": {
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "max_tokens": 4096,
+   "n_predict": 4096,
+   "repeat_penalty": 1.1,
+   "repetition_penalty": 1.1
+  },
+  "max_completion_tokens": 4096,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"a\"}",
+       "name": "lookup"
+      },
+      "id": "call_0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "answer for a",
+    "role": "tool",
+    "tool_call_id": "call_0"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"b\"}",
+       "name": "lookup"
+      },
+      "id": "call_1",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "No reply was recorded for this call.",
+    "role": "tool",
+    "tool_call_id": "call_1"
+   },
+   {
+    "content": "Write your report now.",
+    "role": "user"
+   }
+  ],
+  "model": "m",
+  "stream": false,
+  "temperature": 0.1
+ },
+ "llama/structured": {
+  "extra_body": {
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "max_tokens": 4096,
+   "n_predict": 4096,
+   "repeat_penalty": 1.1,
+   "repetition_penalty": 1.1
+  },
+  "ls_structured_output_format": {
+   "kwargs": {
+    "method": "json_schema",
+    "strict": null
+   },
+   "schema": {
+    "function": {
+     "description": "",
+     "name": "_Section",
+     "parameters": {
+      "properties": {
+       "summary": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "summary"
+      ],
+      "type": "object"
+     }
+    },
+    "type": "function"
+   }
+  },
+  "max_completion_tokens": 4096,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   }
+  ],
+  "model": "m",
+  "response_format": "_Section",
+  "stream": false,
+  "temperature": 0.1
+ },
+ "llama/tools": {
+  "extra_body": {
+   "chat_template_kwargs": {
+    "enable_thinking": false
+   },
+   "max_tokens": 4096,
+   "n_predict": 4096,
+   "repeat_penalty": 1.1,
+   "repetition_penalty": 1.1
+  },
+  "max_completion_tokens": 4096,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"a\"}",
+       "name": "lookup"
+      },
+      "id": "call_0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "answer for a",
+    "role": "tool",
+    "tool_call_id": "call_0"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"b\"}",
+       "name": "lookup"
+      },
+      "id": "call_1",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "No reply was recorded for this call.",
+    "role": "tool",
+    "tool_call_id": "call_1"
+   },
+   {
+    "content": "Write your report now.",
+    "role": "user"
+   }
+  ],
+  "model": "m",
+  "stream": false,
+  "temperature": 0.1,
+  "tools": [
+   {
+    "function": {
+     "description": "Look it up.",
+     "name": "lookup",
+     "parameters": {
+      "properties": {
+       "what": {
+        "default": "",
+        "type": "string"
+       }
+      },
+      "type": "object"
+     }
+    },
+    "type": "function"
+   }
+  ]
+ },
+ "ollama/plain": {
+  "format": null,
+  "keep_alive": "30m",
+  "logprobs": null,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "images": [],
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "images": [],
+    "role": "user"
+   },
+   {
+    "content": "",
+    "images": [],
+    "role": "assistant",
+    "thinking": "first I look",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": {
+        "what": "a"
+       },
+       "name": "lookup"
+      },
+      "id": "call_0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "answer for a",
+    "images": [],
+    "role": "tool",
+    "tool_call_id": "call_0"
+   },
+   {
+    "content": "",
+    "images": [],
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": {
+        "what": "b"
+       },
+       "name": "lookup"
+      },
+      "id": "call_1",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "No reply was recorded for this call.",
+    "images": [],
+    "role": "tool",
+    "tool_call_id": "call_1"
+   },
+   {
+    "content": "Write your report now.",
+    "images": [],
+    "role": "user"
+   }
+  ],
+  "model": "qwen3:8b",
+  "options": {
+   "num_ctx": 32768,
+   "num_predict": 4096,
+   "temperature": 0.1
+  },
+  "stream": true,
+  "think": false,
+  "top_logprobs": null
+ },
+ "ollama/structured": {
+  "format": {
+   "properties": {
+    "summary": {
+     "title": "Summary",
+     "type": "string"
+    }
+   },
+   "required": [
+    "summary"
+   ],
+   "title": "_Section",
+   "type": "object"
+  },
+  "keep_alive": "30m",
+  "logprobs": null,
+  "ls_structured_output_format": {
+   "kwargs": {
+    "method": "json_schema"
+   },
+   "schema": "_Section"
+  },
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "images": [],
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "images": [],
+    "role": "user"
+   }
+  ],
+  "model": "qwen3:8b",
+  "options": {
+   "num_ctx": 32768,
+   "num_predict": 4096,
+   "temperature": 0.1
+  },
+  "stream": true,
+  "think": false,
+  "top_logprobs": null
+ },
+ "ollama/tools": {
+  "format": null,
+  "keep_alive": "30m",
+  "logprobs": null,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "images": [],
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "images": [],
+    "role": "user"
+   },
+   {
+    "content": "",
+    "images": [],
+    "role": "assistant",
+    "thinking": "first I look",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": {
+        "what": "a"
+       },
+       "name": "lookup"
+      },
+      "id": "call_0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "answer for a",
+    "images": [],
+    "role": "tool",
+    "tool_call_id": "call_0"
+   },
+   {
+    "content": "",
+    "images": [],
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": {
+        "what": "b"
+       },
+       "name": "lookup"
+      },
+      "id": "call_1",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "No reply was recorded for this call.",
+    "images": [],
+    "role": "tool",
+    "tool_call_id": "call_1"
+   },
+   {
+    "content": "Write your report now.",
+    "images": [],
+    "role": "user"
+   }
+  ],
+  "model": "qwen3:8b",
+  "options": {
+   "num_ctx": 32768,
+   "num_predict": 4096,
+   "temperature": 0.1
+  },
+  "stream": true,
+  "think": false,
+  "tools": [
+   {
+    "function": {
+     "description": "Look it up.",
+     "name": "lookup",
+     "parameters": {
+      "properties": {
+       "what": {
+        "default": "",
+        "type": "string"
+       }
+      },
+      "type": "object"
+     }
+    },
+    "type": "function"
+   }
+  ],
+  "top_logprobs": null
+ },
+ "standard/plain": {
+  "max_completion_tokens": 4096,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"a\"}",
+       "name": "lookup"
+      },
+      "id": "call_0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "answer for a",
+    "role": "tool",
+    "tool_call_id": "call_0"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"b\"}",
+       "name": "lookup"
+      },
+      "id": "call_1",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "No reply was recorded for this call.",
+    "role": "tool",
+    "tool_call_id": "call_1"
+   },
+   {
+    "content": "Write your report now.",
+    "role": "user"
+   }
+  ],
+  "model": "m",
+  "stream": false,
+  "temperature": 0.1
+ },
+ "standard/structured": {
+  "ls_structured_output_format": {
+   "kwargs": {
+    "method": "json_schema",
+    "strict": null
+   },
+   "schema": {
+    "function": {
+     "description": "",
+     "name": "_Section",
+     "parameters": {
+      "properties": {
+       "summary": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "summary"
+      ],
+      "type": "object"
+     }
+    },
+    "type": "function"
+   }
+  },
+  "max_completion_tokens": 4096,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   }
+  ],
+  "model": "m",
+  "response_format": "_Section",
+  "stream": false,
+  "temperature": 0.1
+ },
+ "standard/tools": {
+  "max_completion_tokens": 4096,
+  "messages": [
+   {
+    "content": "You are an analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse the sample.\n\n=== RUN STATE ===\nx\n=== END RUN STATE ===",
+    "role": "user"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"a\"}",
+       "name": "lookup"
+      },
+      "id": "call_0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "answer for a",
+    "role": "tool",
+    "tool_call_id": "call_0"
+   },
+   {
+    "content": null,
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"b\"}",
+       "name": "lookup"
+      },
+      "id": "call_1",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "No reply was recorded for this call.",
+    "role": "tool",
+    "tool_call_id": "call_1"
+   },
+   {
+    "content": "Write your report now.",
+    "role": "user"
+   }
+  ],
+  "model": "m",
+  "stream": false,
+  "temperature": 0.1,
+  "tools": [
+   {
+    "function": {
+     "description": "Look it up.",
+     "name": "lookup",
+     "parameters": {
+      "properties": {
+       "what": {
+        "default": "",
+        "type": "string"
+       }
+      },
+      "type": "object"
+     }
+    },
+    "type": "function"
+   }
+  ]
+ },
+ "usage": {
+  "ledger": {
+   "agents": {
+    "static": {
+     "cached_calls": 1,
+     "cached_input_tokens": 300,
+     "input_tokens": 500,
+     "llm_calls": 1,
+     "models": {
+      "deepseek-flash": 1
+     },
+     "output_tokens": 40,
+     "reasoning_calls": 1,
+     "reasoning_tokens": 12,
+     "total_tokens": 540,
+     "unreported_calls": 0
+    }
+   },
+   "cached_calls": 1,
+   "cached_input_tokens": 300,
+   "fallbacks": [],
+   "input_tokens": 500,
+   "llm_calls": 1,
+   "output_tokens": 40,
+   "reasoning_calls": 1,
+   "reasoning_tokens": 12,
+   "total_tokens": 540,
+   "unreported_calls": 0
+  },
+  "spent": 0.0004356,
+  "usage": {
+   "cached_input_tokens": 300,
+   "input_tokens": 500,
+   "output_tokens": 40,
+   "reasoning_tokens": 12
+  },
+  "worst": {
+   "deepseek-flash": 0.0648,
+   "deepseek-v4-flash": 0.0648,
+   "deepseek-v4-pro": 0.27984
+  }
+ }
+}

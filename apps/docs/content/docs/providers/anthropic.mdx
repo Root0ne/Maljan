@@ -4,7 +4,8 @@ description: "Settings for the anthropic provider."
 ---
 
 The `anthropic` provider calls Anthropic's Messages API through LangChain's
-`ChatAnthropic`.
+`ChatAnthropic`. Every request it sends is one the current Claude models take,
+Claude Haiku 5.5 (`claude-haiku-5-5`) included.
 
 ## Settings
 
@@ -12,21 +13,62 @@ The `anthropic` provider calls Anthropic's Messages API through LangChain's
 | :-- | :-- | :-- |
 | `core.llm.provider` | `openai` | Set to `anthropic`. |
 | `core.llm.anthropic.api_key` | — | Required; the provider refuses to build a model without it. Stored encrypted. |
-| `core.llm.anthropic.expert_model` | `claude-sonnet-4-20250514` | The analysts' model. |
+| `core.llm.anthropic.expert_model` | `claude-sonnet-4-20250514` | The analysts' model. Name the model you run, such as `claude-haiku-5-5`. |
 | `core.llm.anthropic.judge_model` | `claude-sonnet-4-20250514` | The judge's model. |
+| `core.llm.anthropic.effort` | empty | Sent as `output_config.effort` on every request: `low`, `medium`, `high`, `xhigh` or `max`. Empty sends nothing and keeps the model's own default (`medium` on Claude Haiku 5.5). |
+| `core.llm.anthropic.prompt_cache_ttl` | `5m` | How long the prompt cache keeps what a request writes: `5m`, or `1h`, which costs more to write. |
 
 ```
 core.llm.provider               = anthropic
 core.llm.anthropic.api_key      = <your key>
-core.llm.anthropic.expert_model = claude-sonnet-4-20250514
-core.llm.anthropic.judge_model  = claude-sonnet-4-20250514
+core.llm.anthropic.expert_model = claude-haiku-5-5
+core.llm.anthropic.judge_model  = claude-haiku-5-5
+core.llm.anthropic.effort       = max
 ```
 
 ## How it behaves
 
 - **No endpoint to override.** Anthropic is a vendor API here: a per-agent entry
   on `anthropic` takes no `base_url`, and one set is rejected on save.
-- **Structured output** is used where a caller asks for it.
+- **Sampling parameters.** Claude Haiku 5.5 and the other models of its
+  generation refuse a non-default `temperature`, `top_p` or `top_k` with a 400.
+  The vendored model table's `fixed_sampling` rows name those models, each with
+  the page that documents it (the Models API states no such capability), and
+  such a model is sent no sampling parameter. Any other model is sent the
+  temperature it is built with.
+- **Thinking.** The provider configures none: a model that thinks by default
+  thinks as it would, and no `budget_tokens` is ever sent. How deep it goes is
+  `core.llm.anthropic.effort`. A level the Models API says the model does not
+  take refuses the job before it starts.
+- **Window and output cap.** The window probe asks the Anthropic Models API
+  (`GET /v1/models/{model}`, free, and only with a key) for the model's
+  `max_input_tokens` and `max_tokens`, and the run summary names it as the
+  source ("the Anthropic Models API reported 1,000,000 tokens"). A derived
+  output cap is the smaller of a quarter of the window and that maximum
+  (128,000 on Claude Haiku 5.5). When the API cannot be asked, the vendored
+  table's row answers and the summary says so.
+- **Streaming.** A request whose output cap the Anthropic SDK would refuse to
+  send unstreamed (one it expects to run past ten minutes, over 21,333 tokens)
+  is streamed and joined into the same answer.
+- **Prompt caching.** Every request carries the top-level automatic
+  `cache_control`, so the API caches up to the last cacheable block itself and
+  the model reads the same request. A tool loop's request is the previous one
+  plus its new turns, so each step reads the system prompt, the tools and the
+  conversation so far from the cache. The run summary counts the input read
+  from the cache and the input written to it.
+- **The history only grows.** A thinking block is bound to everything sent
+  before it, and an account created on or after 2026-08-31 gets a 400 for an
+  edited prefix. The run-state block a tool loop moves to its newest turn is
+  sent again on each earlier turn exactly as that turn was first sent, so a
+  loop's history is append-only. Where Maljan does rewrite a history it re-sends
+  — a salvage without tools, a trimmed conversation, a re-ask that adds a
+  question — the thinking blocks written after the change are left out of that
+  request, which the API takes; the conversation Maljan keeps is not touched.
+- **No forced tool choice, no prefill.** Structured output offers the schema's
+  tool without forcing it, and an answer that calls no tool is asked again in
+  text. Maljan's requests end on a user turn; a request that ended on an
+  assistant turn (a prefill, which a thinking model refuses) would be named in
+  the log.
 - **Tool replies.** A turn's `tool_use` blocks are each answered by a
   `tool_result` block at the front of the next user turn, as the API requires;
   a call the history left unanswered gets a reply saying none was recorded.
@@ -35,6 +77,21 @@ core.llm.anthropic.judge_model  = claude-sonnet-4-20250514
 - **Request timeout.** 1800 s until the model's pace is measured, then sized per
   request.
 
-The probe for this provider asks through `/v1/messages`. A per-agent entry may
-put one agent on Anthropic while the rest run elsewhere; see [Per-agent models
-and fallbacks](/providers/#per-agent-models-and-fallbacks).
+## Spend
+
+With `core.llm.max_spend_usd_per_job` set, a call is charged its reported usage
+at the vendored table's documented prices, unless `core.llm.model_prices` names
+the model. Claude Haiku 5.5 is priced by prompt length, each request on its
+own: $0.10 input, $0.01 cache read, $0.125 five-minute and $0.20 one-hour cache
+write and $0.50 output per million tokens for a prompt up to 100,000 tokens,
+and $0.50, $0.05, $0.625, $1 and $2.50 for a prompt over it, the prompt counted
+whole, cache reads and writes included
+([pricing](https://platform.claude.com/docs/en/about-claude/pricing)). A price
+row in `core.llm.model_prices` takes the same fields: `cache_write_input_usd_per_mtok`,
+`cache_write_1h_input_usd_per_mtok` and `tiers`, each tier with its
+`over_prompt_tokens`.
+
+The connection test asks through `/v1/messages` with the configured effort, and
+a model that answers only with a thinking block has answered. A per-agent entry
+may put one agent on Anthropic while the rest run elsewhere; see [Per-agent
+models and fallbacks](/providers/#per-agent-models-and-fallbacks).

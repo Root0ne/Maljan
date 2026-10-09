@@ -1645,8 +1645,9 @@ def _section_text_envelope(payload: Any, schema: type[BaseModel], section: str) 
 
 
 def _message_text(msg: Any) -> str:
-    content = getattr(msg, "content", msg)
-    return content if isinstance(content, str) else str(content)
+    from maljan.llm.answer_text import answer_text
+
+    return answer_text(getattr(msg, "content", msg))
 
 
 def _has_content(model: BaseModel) -> bool:

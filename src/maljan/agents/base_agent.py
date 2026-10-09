@@ -45,6 +45,7 @@ from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOp
 from maljan.core.logger import logger
 from maljan.core.spend import LOOP_TURN_CALL, SPEND_CAP, SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import TokenLedger, record_response_usage
+from maljan.llm.answer_text import answer_text
 from maljan.llm.context_window import (
     CHARS_PER_TOKEN,
     NO_ROOM_RUN_STATE,
@@ -5144,7 +5145,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
 
         final_message = msgs[-1]
-        content = str(final_message.content)
+        content = answer_text(final_message.content)
         # The first answer stands as written: the model replied KEEP to the
         # question about its tools, or nothing answered the question.
         if tool_ask.get("followed") in ("kept_first_answer", "no_answer"):
@@ -6085,7 +6086,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 call, timeout=None if timeout is None else float(timeout)
             )
             self._record_usage(response, call=what, held=bound if bound_kwargs else None)
-            return str(response.content)
+            return answer_text(response.content)
 
         _t0 = _time.monotonic()
         hard_timeout = hard_cap(timeout, getattr(self, "_budget_ceiling", None))

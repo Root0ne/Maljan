@@ -79,6 +79,7 @@ from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import TokenLedger, structured_answer
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
+from maljan.llm.answer_text import answer_text
 from maljan.llm.context_window import (
     ContextBudget,
     tool_definition_chars,
@@ -1917,7 +1918,7 @@ class JudgeAgent(BudgetMeter):
                 # ``finish_reason: "stop"`` — so the count is the only evidence.
                 cap=self._output_cap().tokens,
             )
-            return str(response.content)
+            return answer_text(response.content)
 
         self.logger.info("JudgeAgent starting ReAct agent loop with %d tools...", len(self.tools))
 
@@ -2182,7 +2183,7 @@ class JudgeAgent(BudgetMeter):
             if _msgs and is_the_graph_s_step_stop(_msgs[-1]):
                 cap = "steps"
                 return ""
-            return str(_msgs[-1].content) if _msgs else ""
+            return answer_text(_msgs[-1].content) if _msgs else ""
         except ModelCallDeadline:
             # A model call's own deadline with nothing gathered: that call
             # failed, recorded as the call deadline it was, not the loop's clock.
@@ -2513,7 +2514,7 @@ class JudgeAgent(BudgetMeter):
                 ]
                 reasoning_text = await self.execute_tool_loop(prompt_messages)
             else:
-                reasoning_text = "" if response is None else str(response.content)
+                reasoning_text = "" if response is None else answer_text(response.content)
             finally:
                 self._spend_release(fast_slot)
 

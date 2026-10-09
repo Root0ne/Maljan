@@ -37,6 +37,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
+from maljan.llm.answer_text import answer_text
 
 if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
@@ -189,7 +190,7 @@ class FunctionSummarizer:
 
         try:
             response, cut_at = self._ask(messages)
-            summary: str = response.content  # type: ignore[assignment,union-attr]
+            summary = answer_text(getattr(response, "content", response))
             word_count = len(summary.split())
             logger.debug(
                 "FunctionSummarizer: chunk summarized — %d chars -> %d words.",
@@ -402,7 +403,7 @@ class FunctionSummarizer:
 
         try:
             response, cut_at = self._ask(messages)
-            result: str = response.content  # type: ignore[assignment,union-attr]
+            result = answer_text(getattr(response, "content", response))
             return self._said_whole_or_cut(result.strip(), cut_at)
         except Exception as exc:
             logger.warning(
