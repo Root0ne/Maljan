@@ -81,20 +81,28 @@ def _bind_async_client_per_loop(built: Any) -> None:
     connection reused across the two fails with "bound to a different event
     loop". The client is rebuilt per loop from the arguments it was built with
     (``maljan.llm.loop_clients``); every request is still built by the original.
-    A client that sends through aiohttp (per loop already) or one this SDK no
-    longer lays out this way is left as it is.
+    A client that sends through aiohttp (per loop already) is left as it is;
+    one this SDK no longer lays out this way is too, and a warning says so once.
     """
-    api_client: Any = getattr(getattr(built, "client", None), "_api_client", None)
-    original = getattr(api_client, "_async_httpx_client", None)
-    args = getattr(api_client, "_async_httpx_client_args", None)
-    if original is None or args is None:
-        return
-    from maljan.llm.loop_clients import loop_bound_async_client
+    from maljan.llm.loop_clients import layout_not_recognised, loop_bound_async_client
 
+    api_client: Any = getattr(getattr(built, "client", None), "_api_client", None)
+    if api_client is None or not (
+        hasattr(api_client, "_async_httpx_client")
+        and hasattr(api_client, "_async_httpx_client_args")
+    ):
+        layout_not_recognised("gemini", "no _api_client with an async httpx client and its args")
+        return
+    original = api_client._async_httpx_client
+    if original is None:
+        # The google-auth path, which sends through aiohttp sessions the SDK
+        # already keeps one per loop.
+        return
+    args = api_client._async_httpx_client_args or {}
     build_class = type(original)
     try:
         api_client._async_httpx_client = loop_bound_async_client(
             lambda: build_class(**args), template=original
         )
-    except TypeError:
-        return
+    except TypeError as exc:
+        layout_not_recognised("gemini", str(exc))

@@ -443,6 +443,24 @@ class TestTheGeminiModel:
         assert server.requests == 3  # type: ignore[attr-defined]
 
 
+def test_a_gemini_client_laid_out_otherwise_is_named_in_one_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from types import SimpleNamespace
+
+    from maljan.llm import gemini_provider, loop_clients
+
+    monkeypatch.setattr(loop_clients, "_UNRECOGNISED", set())
+    moved = SimpleNamespace(client=SimpleNamespace(_api_client=SimpleNamespace()))
+    with caplog.at_level("WARNING"):
+        gemini_provider._bind_async_client_per_loop(moved)
+        gemini_provider._bind_async_client_per_loop(moved)
+    lines = [r.getMessage() for r in caplog.records if "gemini provider" in r.getMessage()]
+    assert len(lines) == 1
+    assert "left one per model" in lines[0]
+    assert "test-value" not in lines[0]
+
+
 def test_the_stub_server_keeps_its_connections_alive(server: ThreadingHTTPServer) -> None:
     """The reuse the tests above depend on: two requests, one connection."""
     with socket.create_connection(server.server_address[:2]) as conn:
