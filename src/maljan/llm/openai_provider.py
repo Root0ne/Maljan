@@ -1047,6 +1047,13 @@ class OpenAIProvider:
         # the endpoint. Every local-server branch below keys off this resolved
         # value, so a per-agent server gets the same llama.cpp treatment.
         base_url = kwargs.pop("base_url", None) or self._config.llm.openai.base_url
+        # An agent entry's own effort (``llm.agents.<key>.effort``) is sent in
+        # place of the global ``llm.openai.reasoning_effort``; ``_build`` only
+        # fills the global one in where none is already named.
+        own_effort = str(kwargs.pop("effort", None) or "").strip()
+        kwargs.pop("effort_setting", None)
+        if own_effort:
+            kwargs["reasoning_effort"] = own_effort
         return self._build(model, temperature, base_url, dict(kwargs))
 
     def _build(

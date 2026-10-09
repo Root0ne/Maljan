@@ -19,7 +19,7 @@ from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from maljan.core.config import Settings
+from maljan.core.config import EFFORT_SETTING_OF_PROVIDER, Settings
 from maljan.core.exceptions import LLMError
 from maljan.core.logger import logger
 
@@ -128,7 +128,13 @@ class LLMProviderRegistry:
 
         temp = temperature if temperature is not None else default_temp
 
-        logger.info(f"Building {provider_name}/{model_name} (role={role}, temp={temp})")
+        from maljan.llm.effort import effort_in_force
+
+        _, effort_said = effort_in_force(self._config, provider_name)
+        logger.info(
+            f"Building {provider_name}/{model_name} (role={role}, temp={temp}, "
+            f"effort={effort_said})"
+        )
         _cap_for_provider(kwargs, provider_name)
         provider = provider_cls(config=self._config)
         built = provider.build_model(model=model_name, temperature=temp, **kwargs)
@@ -234,14 +240,29 @@ class LLMProviderRegistry:
         else:
             temp = 0.1
         agent_base_url = getattr(choice, "base_url", None)
+        # The model's own effort, else the provider's global one, which the
+        # provider reads itself: only an entry's own value is handed over, so
+        # a model with none is built exactly as it was before the field.
+        from maljan.llm.effort import effort_in_force
+
+        own_effort = getattr(choice, "effort", None) or None
+        _, effort_said = effort_in_force(
+            self._config, str(choice.provider), own_effort, agent_name.lower()
+        )
         logger.info(
-            "Building dedicated LLM for agent '%s': %s/%s (temp=%.2f, base_url=%s)",
+            "Building dedicated LLM for agent '%s': %s/%s (temp=%.2f, base_url=%s, effort=%s)",
             agent_name,
             choice.provider,
             choice.model,
             temp,
             agent_base_url or "(global)",
+            effort_said,
         )
+        if own_effort and str(choice.provider) not in EFFORT_SETTING_OF_PROVIDER:
+            raise LLMError(
+                f"Agent '{agent_name}' sets effort {own_effort!r} on {choice.provider}/"
+                f"{choice.model}, a provider that sends no reasoning effort."
+            )
 
         _cap_for_provider(kwargs, str(choice.provider))
         provider = provider_cls(config=self._config)
@@ -250,6 +271,9 @@ class LLMProviderRegistry:
         # a None passed through would land in the model's own kwargs.
         if agent_base_url:
             kwargs["base_url"] = agent_base_url
+        if own_effort:
+            kwargs["effort"] = own_effort
+            kwargs["effort_setting"] = f"llm.agents.{agent_name.lower()}.effort"
         built = provider.build_model(model=choice.model, temperature=temp, **kwargs)
         return self._with_window(built, str(choice.provider), choice.model, agent_base_url)
 

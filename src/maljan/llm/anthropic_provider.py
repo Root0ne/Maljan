@@ -15,9 +15,10 @@ description of the model — and nothing else:
   with, as before.
 * **Thinking** is not configured: a model that thinks by default thinks as it
   would, and no ``budget_tokens`` is ever sent (a 400 on these models).
-  How deep it goes is ``llm.anthropic.effort``, sent as
-  ``output_config.effort`` when set; a level the Models API says the model does
-  not take is refused here, before the job spends anything.
+  How deep it goes is the agent entry's own ``effort``, else
+  ``llm.anthropic.effort``, sent as ``output_config.effort`` when set; a level
+  the Models API says the model does not take is refused here, before the job
+  spends anything.
 * **Prompt caching** is asked for only where a prefix is sent again — a tool
   loop's requests, its first one included, and any request that continues a
   conversation — with explicit breakpoints on the newest user turn and on the
@@ -259,13 +260,24 @@ class AnthropicProvider:
         else:
             kwargs["temperature"] = temperature
 
-        effort = str(getattr(settings, "effort", "") or "")
+        # An agent entry's own effort (``llm.agents.<key>.effort``) arrives
+        # as a keyword with the setting it was read from; without one the
+        # global ``llm.anthropic.effort`` is sent, as it always was.
+        own_effort = str(kwargs.pop("effort", None) or "")
+        own_setting = str(kwargs.pop("effort_setting", None) or "the agent entry's effort")
+        if own_effort:
+            effort, effort_setting = own_effort, own_setting
+        else:
+            effort, effort_setting = (
+                str(getattr(settings, "effort", "") or ""),
+                ("llm.anthropic.effort"),
+            )
         if effort:
             from maljan.llm.model_capabilities import takes_effort
 
             if takes_effort(model, effort) is False:
                 raise LLMError(
-                    f"llm.anthropic.effort is {effort!r}, which the Anthropic Models API says "
+                    f"{effort_setting} is {effort!r}, which the Anthropic Models API says "
                     f"{model} does not take."
                 )
             output_config = dict(kwargs.pop("output_config", None) or {})
