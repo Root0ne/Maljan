@@ -8190,10 +8190,18 @@ def _with_feedback(
     """
     from langchain_core.messages import AIMessage
 
+    from maljan.llm.answer_text import answer_text
     from maljan.pipeline.turns import with_question
 
     content = getattr(answer, "content", None)
     turns = list(messages)
+    # A block list with no text in it (thinking alone, or thinking and a tool
+    # call) holds nothing to correct, and an assistant turn of thinking alone
+    # is not a shape any request here is known to be accepted with: it is left
+    # out like a described answer, and the correction is asked at the end of
+    # the user turn before it.
+    if isinstance(content, list) and not answer_text(content).strip():
+        keep_answer = False
     if keep_answer:
         # A block list (a thinking model's answer on ``ChatAnthropic``) goes back
         # as it came: its thinking block has to reach the API unchanged, and its

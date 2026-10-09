@@ -172,6 +172,18 @@ class TestTheOtherReadersReadTheText:
 
         assert turns[1].content == [_THINKING, _text(_BUNDLE)]
 
+    def test_an_answer_with_no_text_is_never_replayed_as_a_turn_of_thinking_alone(self) -> None:
+        from maljan.pipeline.validation import _with_feedback
+
+        call = {"type": "tool_use", "id": "t1", "name": "x", "input": {}}
+        for answer in (_blocks(_THINKING), _blocks(_THINKING, call), _blocks(_REDACTED)):
+            turns = _with_feedback([HumanMessage(content="ask")], answer, [])
+
+            # The correction rides at the end of the user turn; no assistant turn is sent.
+            assert [t.type for t in turns] == ["human"], answer.content
+            assert str(turns[0].content).startswith("ask")
+            assert len(str(turns[0].content)) > len("ask")
+
     def test_a_correction_turn_after_a_string_answer_is_unchanged(self) -> None:
         from maljan.pipeline.validation import _with_feedback
 
