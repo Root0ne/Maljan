@@ -25,54 +25,156 @@ the role it read, the reply, and the fault it applied, for the stub's log.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import threading
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 from scripts.rehearsal import wire
 
-# The scenarios a run can select, each with the sentence the runner prints.
+# The scenarios a run can select, each with the sentence the runner prints. A
+# fault that hits "first calls" hits the first call of every instance of a role:
+# each analyst (told apart by its own system prompt), each composer section,
+# and each single-call role once.
 SCENARIOS: dict[str, str] = {
     "normal": "every role answers well-formed, citing the run's own ledger ids",
-    "cut_at_cap": (
-        "each role's first call is cut at its output cap with only thinking and no text"
-    ),
-    "empty_answer": "each role's first call answers with no text at all",
-    "schema_break": "each role's first call answers in a form its reader cannot parse",
+    "cut_at_cap": "every first call is cut at its output cap with only thinking and no text",
+    "empty_answer": "every first call answers with no text at all",
+    "schema_break": "every first call answers in a form its reader cannot parse",
     "long_loop": "every analyst calls tools for many steps before answering",
     "slow_model": "every call takes a fixed time before it answers",
-    "server_error_once": "each role's first call is a 500, and the call after it is answered",
+    "server_error_once": "every first call is a 500, and the call after it is answered",
+    "rate_limited": "every first call is a 429 with retry-after, and the call after it is answered",
+    "overloaded": "every first call is a 529 (503 on the OpenAI wire)",
+    "stream_error": "every first streamed answer breaks off with an overloaded error mid-stream",
+    "redacted_thinking": "every answer that thinks also carries a redacted_thinking block",
+    "unusual_stop": (
+        "every first call stops as refusal, pause_turn or model_context_window_exceeded"
+    ),
+    "prose_instead_of_tool": (
+        "every first structured call answers in prose instead of calling its schema tool"
+    ),
+    "deadline_hit": "every call is slow enough that the run's configured deadline fires",
     "cross_loop": (
         "the report stage's calls follow the analysts' calls on one client; answers are normal"
     ),
 }
 
-# The faults that hit a role's first call only.
-_FIRST_CALL_FAULTS = {"cut_at_cap", "empty_answer", "schema_break", "server_error_once"}
+# The faults that hit the first call of each role instance.
+_FIRST_CALL_FAULTS = {
+    "cut_at_cap",
+    "empty_answer",
+    "schema_break",
+    "server_error_once",
+    "rate_limited",
+    "overloaded",
+    "stream_error",
+    "unusual_stop",
+    "prose_instead_of_tool",
+}
+# The scenarios that only one wire can carry; on the other they run as normal.
+SCENARIO_WIRES: dict[str, set[str]] = {
+    "redacted_thinking": {"anthropic"},
+    "prose_instead_of_tool": {"anthropic"},
+}
+# How each role stops in ``unusual_stop``.
+_UNUSUAL_STOPS = {
+    "analyst": "context_window",
+    "revision": "pause_turn",
+    "mediator": "refusal",
+    "mediator_extract": "refusal",
+    "judge": "refusal",
+    "technique_question": "refusal",
+    "narrative": "pause_turn",
+    "composer": "pause_turn",
+}
+_STRUCTURED_ROLES = {"mediator_extract", "judge", "technique_question", "narrative", "composer"}
 
-# Role markers, read from the system prompt, most specific first.
-_SYSTEM_MARKERS: tuple[tuple[str, str], ...] = (
-    ("technique_question", "Your verdict is given."),
-    ("mediator_extract", "Extract the final structured verdict from the mediator's"),
-    ("mediator", "Lead Cyber Security Mediator"),
-    ("judge", "Chief Malware Judge"),
-    ("narrative", "producing a CTI analyst report"),
-    ("composer", "writing ONE section of a technical analysis report"),
-)
-_REVISION_MARKER = "You are in a negotiation round."
-_FEEDBACK_MARKER = "Your previous answer had these problems:"
-_NO_TOOL_NUDGE = "written without calling any tool"
-_KEEP_QUESTION = "KEEP <label>: <reason>"
+
+@dataclass(frozen=True)
+class Markers:
+    """The product's own words a request's role is read from, taken from its prompt constants."""
+
+    technique_question: str
+    mediator_extract: str
+    mediator: str
+    judge: str
+    narrative: str
+    composer: str
+    revision: str
+    feedback: str
+    no_tool_nudge: str
+    keep_question: str
+    sample_path: str
+    section: re.Pattern[str]
+    contract: str
+
+
+def _head(text: str, width: int = 60) -> str:
+    return text.strip().splitlines()[0][:width]
+
+
+@lru_cache(maxsize=1)
+def markers() -> Markers:
+    """Every marker, read from the product's prompt constants and builders.
+
+    A product that rewords a prompt moves the marker with it; a prompt the
+    product no longer builds the way a marker expects shows up as a request
+    answered as ``other``, which the checklist fails.
+    """
+    from maljan.agents import configurable_analyst
+    from maljan.agents.base_agent import _REVISION_ISR_FRAMING
+    from maljan.agents.judge_agent import (
+        JUDGE_VERDICT_SYSTEM,
+        MEDIATION_EXTRACTION_SYSTEM,
+        MEDIATOR_SYSTEM_HEAD,
+        TECHNIQUE_QUESTION_SYSTEM,
+    )
+    from maljan.agents.prompt_fragments import no_tool_call_question
+    from maljan.agents.static_analyst import _extract_load_hint
+    from maljan.pipeline.validation import FEEDBACK_PREAMBLE, RetryDrops, retry_drop_question
+    from maljan.reporting import composer, narrative_agent
+
+    keep = re.search(r"KEEP <label>: <reason>", retry_drop_question(RetryDrops()))
+    if keep is None:
+        raise RuntimeError("the retry-drops question no longer asks for KEEP <label>: <reason>")
+    probe = "/rehearsal-marker-path"
+    hint = _extract_load_hint(json.dumps({"analysis_file_path": probe}), frozenset({"tool"}))
+    sentinel = "rehearsalsection"
+    header = composer._bundle_text(sentinel, {}, None).splitlines()[0]
+    before, _, after = header.partition(sentinel)
+    contract = composer.section_contract(
+        "introduction", composer.SECTION_SCHEMAS["introduction"]
+    ).splitlines()[0]
+    return Markers(
+        technique_question=_head(TECHNIQUE_QUESTION_SYSTEM),
+        mediator_extract=_head(MEDIATION_EXTRACTION_SYSTEM),
+        mediator=_head(MEDIATOR_SYSTEM_HEAD),
+        judge=_head(JUDGE_VERDICT_SYSTEM),
+        narrative=_head(narrative_agent._SYSTEM_PROMPT),
+        composer=_head(composer._SYSTEM),
+        revision=_head(_REVISION_ISR_FRAMING),
+        feedback=FEEDBACK_PREAMBLE,
+        no_tool_nudge=no_tool_call_question(["tool"]).split(".")[0],
+        keep_question=keep.group(0),
+        sample_path=os.path.commonprefix(
+            [hint.split(probe)[0], configurable_analyst._PATH_HEADER.split("{path}")[0]]
+        ),
+        section=re.compile(re.escape(before) + r"([a-z_]+)" + re.escape(after)),
+        contract=contract,
+    )
+
 
 _EVIDENCE_ID = re.compile(r"\bev_\d{4,}\b")
 _PACK_LINE = re.compile(r"^\[(ev_\d{4,})\]\s+([^:\n]+):\s*(.+)$", re.MULTILINE)
 _TECHNIQUE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
 _URL = re.compile(r"https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+")
-_SAMPLE_PATH = re.compile(r"Sample path \(use exactly this string[^)]*\):\s*(\S+)")
 _SHA256 = re.compile(r"\b[0-9a-f]{64}\b")
-_COMPOSER_SECTION = re.compile(r"The evidence for the ([a-z_]+) section follows\.")
+_CLAIM_LABEL = re.compile(r"\[([a-z][a-z0-9_]* claim \d+)\]")
 
 # What a step of a tool loop prefers to call, in order. Each is a tool the
 # platform's own sidecars or sandbox closures serve offline.
@@ -139,7 +241,7 @@ def _facts(request: wire.Request) -> _Facts:
     ids = list(dict.fromkeys(_EVIDENCE_ID.findall(text)))
     lines = list(dict.fromkeys(_PACK_LINE.findall(text)))
     urls = list(dict.fromkeys(url.rstrip(".,);'\"") for url in _URL.findall(text)))
-    path = _SAMPLE_PATH.search(text)
+    path = re.search(re.escape(markers().sample_path) + r"[^)]*\):\s*(\S+)", text)
     sha = _SHA256.search(text)
     return _Facts(
         ids=ids,
@@ -153,10 +255,13 @@ def _facts(request: wire.Request) -> _Facts:
 def role_of(request: wire.Request) -> str:
     """The role a request is answered as, read from the request alone."""
     system = request.system
-    for role, marker in _SYSTEM_MARKERS:
-        if marker in system:
+    found = markers()
+    for role in ("technique_question", "mediator_extract", "mediator", "judge", "narrative"):
+        if getattr(found, role) in system:
             return role
-    if _REVISION_MARKER in system:
+    if found.composer in system:
+        return "composer"
+    if found.revision in system:
         return "revision"
     if request.tools or "CLAIM:" in request.all_text:
         return "analyst"
@@ -165,8 +270,18 @@ def role_of(request: wire.Request) -> str:
 
 def composer_section(request: wire.Request) -> str:
     """The composer section a request asks for, as the prompt names it."""
-    found = _COMPOSER_SECTION.search(request.all_text)
+    found = markers().section.search(request.all_text)
     return found.group(1) if found else ""
+
+
+def instance_of(role: str, request: wire.Request) -> str:
+    """Which instance of ``role`` asked: an analyst by its own system prompt, a section by name."""
+    if role in ("analyst", "revision"):
+        head = request.system.split("\n", 1)[0][:120]
+        return f"{role}:{hashlib.sha256(head.encode()).hexdigest()[:10]}"
+    if role == "composer":
+        return f"composer:{composer_section(request)}"
+    return role
 
 
 class Brain:
@@ -175,20 +290,17 @@ class Brain:
     def __init__(
         self,
         scenario: str = "normal",
-        model_name: str = "rehearsal-model",
         loop_steps: int | None = None,
         slow_seconds: float | None = None,
     ) -> None:
         if scenario not in SCENARIOS:
             raise ValueError(f"unknown scenario {scenario!r}; one of {sorted(SCENARIOS)}")
         self.scenario = scenario
-        self.model_name = model_name
         self.loop_steps = (
             loop_steps if loop_steps is not None else (12 if scenario == "long_loop" else 2)
         )
-        self.slow_seconds = (
-            slow_seconds if slow_seconds is not None else (1.0 if scenario == "slow_model" else 0.0)
-        )
+        default_slow = {"slow_model": 1.0, "deadline_hit": 2.0}.get(scenario, 0.0)
+        self.slow_seconds = slow_seconds if slow_seconds is not None else default_slow
         self._lock = threading.Lock()
         self.reset()
 
@@ -201,31 +313,66 @@ class Brain:
 
     def answer(self, request: wire.Request) -> tuple[str, wire.Reply, str]:
         role = role_of(request)
-        fault = self._fault_for(role)
-        reply = self._faulted_reply(role, fault) if fault else self._scripted(role, request)
+        fault = self._fault_for(role, request)
+        reply = (
+            self._faulted_reply(role, fault, request) if fault else self._scripted(role, request)
+        )
+        if self.scenario == "redacted_thinking" and request.api == "anthropic" and reply.thinking:
+            reply.redacted = True
+            reply.note = {**reply.note, "redacted": True}
         reply.delay = self.slow_seconds
         return role, reply, fault
 
-    def _fault_for(self, role: str) -> str:
+    def _fault_for(self, role: str, request: wire.Request) -> str:
         if self.scenario not in _FIRST_CALL_FAULTS:
             return ""
+        if request.api not in SCENARIO_WIRES.get(self.scenario, {request.api}):
+            return ""
+        if self.scenario == "prose_instead_of_tool" and not (
+            role in _STRUCTURED_ROLES and len(request.tools) == 1
+        ):
+            return ""
+        if self.scenario == "stream_error" and not request.stream:
+            return ""
+        key = instance_of(role, request)
         with self._lock:
-            if role in self._faulted:
+            if key in self._faulted:
                 return ""
-            self._faulted.add(role)
+            self._faulted.add(key)
         return self.scenario
 
-    @staticmethod
-    def _faulted_reply(role: str, fault: str) -> wire.Reply:
+    def _faulted_reply(self, role: str, fault: str, request: wire.Request) -> wire.Reply:
+        thinking = "Weighing the evidence before writing the answer. " * 40
         if fault == "cut_at_cap":
-            return wire.Reply(
-                thinking="Weighing the evidence before writing the answer. " * 40,
-                stop="max_tokens",
-            )
+            return wire.Reply(thinking=thinking, stop="max_tokens")
         if fault == "empty_answer":
             return wire.Reply(text="", stop="end")
         if fault == "server_error_once":
-            return wire.Reply(status=500, error="the rehearsal server failed this call once")
+            return wire.Reply(status=500, error="Internal server error")
+        if fault == "rate_limited":
+            return wire.Reply(
+                status=429,
+                error="This request would exceed your rate limit; retry after the time given.",
+                headers={"retry-after": "1"},
+            )
+        if fault == "overloaded":
+            status = 529 if request.api == "anthropic" else 503
+            return wire.Reply(status=status, error="Overloaded")
+        if fault == "unusual_stop":
+            stop = _UNUSUAL_STOPS.get(role, "refusal")
+            return wire.Reply(thinking="Considering the request.", stop=stop)
+        if fault in ("stream_error", "prose_instead_of_tool"):
+            reply = self._scripted(role, request)
+            if fault == "stream_error":
+                reply.stream_error = True
+                return reply
+            # The answer written as text, the schema tool left uncalled.
+            text = reply.text or "".join(json.dumps(call.args) for call in reply.tool_calls)
+            return wire.Reply(
+                thinking="I will state the answer directly.",
+                text=f"Here is the answer.\n{text}",
+                note=reply.note,
+            )
         # schema_break: a reply its reader cannot take, in the role's own medium.
         if role in ("analyst", "revision"):
             return wire.Reply(text="The sample looks interesting but I will not list findings.")
@@ -254,11 +401,17 @@ class Brain:
         if role == "technique_question":
             return _as_schema_call(request, self._technique_answer(request))
         if role == "narrative":
-            return _as_schema_call(request, self._narrative(facts))
+            labels = list(dict.fromkeys(_CLAIM_LABEL.findall(request.all_text)))
+            return _as_schema_call(request, self._narrative(facts, labels))
         if role == "composer":
             text, content = self._composer(request, facts)
             reply = _as_schema_call(request, text)
-            reply.note = {"section": composer_section(request), "content": content}
+            section = composer_section(request)
+            reply.note = {
+                "section": section,
+                "content": content,
+                "deliberately_empty": self.deliberately_empty(section, request),
+            }
             return reply
         return wire.Reply(text=self._previous_or(request, "No further answer."))
 
@@ -295,13 +448,18 @@ class Brain:
 
     def _analyst(self, request: wire.Request, facts: _Facts) -> wire.Reply:
         last = request.turns[-1] if request.turns else wire.Turn(role="user")
-        if _KEEP_QUESTION in last.text:
+        if markers().keep_question in last.text:
             return wire.Reply(text=_keep_every_item(last.text))
-        if _FEEDBACK_MARKER in last.text:
+        if markers().feedback in last.text:
             return wire.Reply(text=_corrected(self._previous_or(request, ""), last.text))
         calls_made = len(request.tool_calls_made)
-        wants_tools = bool(request.tools) and calls_made < self.loop_steps
-        if wants_tools or (request.tools and _NO_TOOL_NUDGE in last.text):
+        choice = request.raw.get("tool_choice")
+        tools_withheld = choice == "none" or (
+            isinstance(choice, dict) and choice.get("type") == "none"
+        )
+        wants_tools = bool(request.tools) and calls_made < self.loop_steps and not tools_withheld
+        nudged = markers().no_tool_nudge in last.text and not tools_withheld
+        if wants_tools or (request.tools and nudged):
             call = _next_call(request, facts, calls_made)
             if call is not None:
                 return wire.Reply(
@@ -310,7 +468,11 @@ class Brain:
                     tool_calls=[call],
                 )
         text = self._isr(request, facts)
-        return wire.Reply(thinking="Writing the findings from the cited entries.", text=text)
+        return wire.Reply(
+            thinking="Writing the findings from the cited entries.",
+            text=text,
+            note={"claims": claims_in(text), "answer": "final"},
+        )
 
     def _isr(self, request: wire.Request, facts: _Facts) -> str:
         """Claims from this analyst's own tool answers first, then from the pack's lines.
@@ -362,13 +524,16 @@ class Brain:
     def _revision(self, request: wire.Request, facts: _Facts) -> wire.Reply:
         """Its own claims, as the request shows them, restated whole; no dispute."""
         last = request.turns[-1] if request.turns else wire.Turn(role="user")
-        if _KEEP_QUESTION in last.text:
+        if markers().keep_question in last.text:
             return wire.Reply(text=_keep_every_item(last.text))
-        if _FEEDBACK_MARKER in last.text:
+        if markers().feedback in last.text:
             return wire.Reply(text=_corrected(self._previous_or(request, ""), last.text))
         mine = _original_claims(request.last_user_text)
         body = "\n".join(mine) if mine else self._isr(request, facts)
-        return wire.Reply(text=f"{body}\nDISPUTES: NONE")
+        return wire.Reply(
+            text=f"{body}\nDISPUTES: NONE",
+            note={"claims": claims_in(body), "answer": "revision"},
+        )
 
     # ------------------------------------------------------------------ judge
 
@@ -442,7 +607,7 @@ class Brain:
     # ---------------------------------------------------------------- reports
 
     @staticmethod
-    def _narrative(facts: _Facts) -> str:
+    def _narrative(facts: _Facts, labels: list[str]) -> str:
         cite = facts.ids[:3] or []
         first = f" [{cite[0]}]" if cite else ""
         summary = (
@@ -456,7 +621,9 @@ class Brain:
                 "evidence_ids": cite[:1],
             },
             {
-                "text": "The analysts cited the run's own ledger for each claim.",
+                "text": "The analysts cited the run's own ledger for each claim"
+                + (" (" + ", ".join(labels) + ")" if labels else "")
+                + ".",
                 "evidence_ids": cite[1:2],
             },
         ]
@@ -505,11 +672,13 @@ class Brain:
         ids = list(dict.fromkeys(_EVIDENCE_ID.findall(evidence))) or facts.ids
         cite = ids[:1]
         urls = list(dict.fromkeys(url.rstrip(".,);'\"]") for url in _URL.findall(evidence)))
+        labels = ", ".join(dict.fromkeys(_CLAIM_LABEL.findall(evidence)))
+        readings = f" The analysts' readings stand as written ({labels})." if labels else ""
         grounded = _Grounding(
             sentence=(
-                f"The run recorded what its tools read from the sample [{cite[0]}]."
+                f"The run recorded what its tools read from the sample [{cite[0]}].{readings}"
                 if cite
-                else "The run recorded what its tools read from the sample."
+                else f"The run recorded what its tools read from the sample.{readings}"
             ),
             cite=cite,
             url=urls[0] if urls else "",
@@ -519,6 +688,19 @@ class Brain:
             return json.dumps({"text": grounded.sentence}), True
         answer = _fill(template, grounded, section)
         return json.dumps(answer), _has_content(answer)
+
+    @staticmethod
+    def deliberately_empty(section: str, request: wire.Request) -> bool:
+        """Whether the script leaves ``section`` empty on purpose: the sample has nothing for it."""
+        if section in _EMPTY_LISTS or section in _EMPTY_OBJECTS:
+            return True
+        if section in _VALUE_LISTS:
+            evidence = _section_evidence(request)
+            urls = [
+                u for u in _URL.findall(evidence) if _entry_holding(u.rstrip(".,);'\"]"), evidence)
+            ]
+            return not urls
+        return False
 
 
 def _body_of(text: str, limit: int | None = 200) -> str:
@@ -566,6 +748,14 @@ def _claim(sentence: str, ident: str, text: str, confidence: float, technique: s
         f"CONFIDENCE: {confidence}\n"
         f"TECHNIQUE: {technique}\n---"
     )
+
+
+_CLAIM_LINE = re.compile(r"^CLAIM(?: \d+)?:\s*(.+?)\s*$", re.MULTILINE)
+
+
+def claims_in(text: str) -> list[str]:
+    """The claim sentences an answer writes, each without its closing full stop."""
+    return [found.rstrip(".") for found in _CLAIM_LINE.findall(text or "")]
 
 
 def _without_techniques(answer: str) -> str:
@@ -681,6 +871,17 @@ def _fillable(tool: dict[str, Any], facts: _Facts) -> dict[str, Any] | None:
     return args
 
 
+def _varied(args: dict[str, Any], tool: dict[str, Any], step: int) -> dict[str, Any]:
+    """``args`` made different from the same tool's earlier calls, where its schema allows."""
+    properties = (tool.get("schema") or {}).get("properties") or {}
+    for name in ("offset", "k", "packet_limit", "limit"):
+        if name in properties and name not in args and step:
+            kind = (properties.get(name) or {}).get("type")
+            if kind in ("integer", None, "number"):
+                return {**args, name: step if name == "offset" else step + 1}
+    return args
+
+
 def _next_call(request: wire.Request, facts: _Facts, step: int) -> wire.ToolCall | None:
     tools = {str(tool.get("name") or ""): tool for tool in request.tools}
     order = [name for name in _TOOL_PREFERENCE if name in tools]
@@ -694,11 +895,13 @@ def _next_call(request: wire.Request, facts: _Facts, step: int) -> wire.ToolCall
             candidates.append(wire.ToolCall(name=name, args=args))
     if not candidates:
         return None
-    return candidates[step % len(candidates)]
+    chosen = candidates[step % len(candidates)]
+    rounds = step // len(candidates)
+    return wire.ToolCall(chosen.name, _varied(chosen.args, tools[chosen.name], rounds))
 
 
 def _answer_template(text: str) -> Any:
-    marker = "Answer with exactly this JSON object, these keys and no others:\n"
+    marker = markers().contract + "\n"
     if marker not in text:
         return None
     line = text.split(marker, 1)[1].split("\n", 1)[0]
@@ -720,7 +923,7 @@ class _Grounding:
 
 def _section_evidence(request: wire.Request) -> str:
     text = request.all_text
-    found = _COMPOSER_SECTION.search(text)
+    found = markers().section.search(text)
     return text[found.end() :] if found else text
 
 

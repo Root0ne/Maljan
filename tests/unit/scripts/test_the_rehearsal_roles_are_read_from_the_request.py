@@ -1,14 +1,19 @@
-"""The stub's scripted answers: each role read from the request, each answer in its role's form.
+"""The stub's scripted answers: each role read from the product's own prompts, in its own form.
 
-A role is read from the request's own words and tools, never from an agent's
-configured name; each scenario faults a role's first call only; an analyst
-calls the tools it was given against the run's sample before it answers with
-claims citing ids the request carries.
+Every role marker is taken from the product's prompt constants and builders,
+and every test here builds its request from those same constants, so a
+reworded prompt moves the marker and these tests together; a prompt the
+product no longer builds the way the stub reads it is answered as ``other``,
+which the checklist fails. Each scenario faults the first call of every role
+instance — each analyst, each composer section — and an analyst calls the
+tools it was given before it answers with claims citing ids its request
+carries.
 """
 
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from scripts.rehearsal import wire
@@ -19,16 +24,32 @@ from scripts.rehearsal.roles import (
     _corrected,
     _keep_every_item,
     _original_claims,
+    claims_in,
     composer_section,
+    instance_of,
+    markers,
     role_of,
 )
 
+from maljan.agents.base_agent import _REVISION_ISR_FRAMING
+from maljan.agents.judge_agent import (
+    JUDGE_VERDICT_SYSTEM,
+    MEDIATION_EXTRACTION_SYSTEM,
+    MEDIATOR_SYSTEM_HEAD,
+    TECHNIQUE_QUESTION_SYSTEM,
+)
+from maljan.agents.prompt_fragments import no_tool_call_question
+from maljan.agents.static_analyst import _extract_load_hint
+from maljan.pipeline.validation import FEEDBACK_PREAMBLE, RetryDrops, retry_drop_question
+from maljan.reporting import composer, narrative_agent
+
+SAMPLE = "/w/sample_1.exe"
 PACK = (
     "Facts established before analysis (ledger ids in brackets; cite them)\n"
     "[ev_0001] identity: pe windows, 3,584 bytes\n"
     "[ev_0006] iocs: 1 domain, 1 url (http://rehearsal.example.net/beacon, rehearsal.example.net)\n"
-    "Sample path (use exactly this string wherever a tool asks for a file): /w/sample_1.exe\n"
-    "Format each finding as:\nCLAIM: <claim text>\n"
+    + _extract_load_hint(json.dumps({"analysis_file_path": SAMPLE}), frozenset({"pe_info"}))
+    + "Format each finding as:\nCLAIM: <claim text>\n"
 )
 PE_INFO = {
     "name": "pe_info",
@@ -37,9 +58,15 @@ PE_INFO = {
 }
 
 
-def _request(system: str, user: str, tools: list | None = None, turns: list | None = None):
+def _request(
+    system: str,
+    user: str,
+    tools: list | None = None,
+    turns: list | None = None,
+    api: str = "openai",
+):
     return wire.Request(
-        api="openai",
+        api=api,
         model="m",
         system=system,
         turns=turns or [wire.Turn(role="user", text=user)],
@@ -50,39 +77,45 @@ def _request(system: str, user: str, tools: list | None = None, turns: list | No
     )
 
 
-class TestTheRole:
+def _section_request(section: str, contract: str) -> wire.Request:
+    evidence = composer._bundle_text(section, {"claims": [], "tool_outputs": [], "facts": {}}, None)
+    return _request(composer._SYSTEM, f"{contract}\n\n{evidence}")
+
+
+class TestTheRoleComesFromTheProductsOwnPrompts:
     @pytest.mark.parametrize(
         ("system", "role"),
         [
-            (
-                "You are the Chief Malware Judge. Your verdict is given. The analysts",
-                "technique_question",
-            ),
-            ("You are the Lead Cyber Security Mediator. Your ONLY task", "mediator"),
-            (
-                "Extract the final structured verdict from the mediator's reasoning log.",
-                "mediator_extract",
-            ),
-            ("You are the Chief Malware Judge. Based on the expert reports", "judge"),
-            (
-                "You are a senior malware reverse engineer producing a CTI analyst report.",
-                "narrative",
-            ),
-            (
-                "You are writing ONE section of a technical analysis report.",
-                "composer",
-            ),
-            ("You are an expert analyst.\n\nYou are in a negotiation round. You MUST:", "revision"),
+            (TECHNIQUE_QUESTION_SYSTEM, "technique_question"),
+            (MEDIATION_EXTRACTION_SYSTEM, "mediator_extract"),
+            (MEDIATOR_SYSTEM_HEAD + "HARD RULES: ...", "mediator"),
+            (JUDGE_VERDICT_SYSTEM, "judge"),
+            (narrative_agent._SYSTEM_PROMPT, "narrative"),
+            (composer._SYSTEM, "composer"),
+            ("You are an expert analyst.\n\n" + _REVISION_ISR_FRAMING, "revision"),
         ],
     )
-    def test_is_read_from_the_system_prompt(self, system: str, role: str) -> None:
+    def test_each_role(self, system: str, role: str) -> None:
         assert role_of(_request(system, "x")) == role
 
     def test_an_agent_with_tools_is_an_analyst_whatever_it_is_called(self) -> None:
         assert role_of(_request("You are Someone New.", "x", tools=[PE_INFO])) == "analyst"
 
-    def test_a_composer_section_is_named_by_its_evidence_line(self) -> None:
-        request = _request("x", "The evidence for the execution_flow section follows.\n...")
+    def test_a_request_no_script_knows_is_other(self) -> None:
+        assert role_of(_request("A prompt nobody wrote.", "hello")) == "other"
+
+    def test_the_markers_are_the_product_s_words(self) -> None:
+        found = markers()
+        assert found.feedback == FEEDBACK_PREAMBLE
+        assert found.no_tool_nudge in no_tool_call_question(["x"])
+        assert found.keep_question in retry_drop_question(RetryDrops())
+        assert PACK.count(found.sample_path) == 1
+
+    def test_a_composer_section_is_named_by_the_composer_s_own_header(self) -> None:
+        schema = composer.SECTION_SCHEMAS["execution_flow"]
+        request = _section_request(
+            "execution_flow", composer.section_contract("execution_flow", schema)
+        )
         assert composer_section(request) == "execution_flow"
 
 
@@ -97,22 +130,59 @@ class TestTheScenarios:
             ("cut_at_cap", lambda r: r.stop == "max_tokens" and r.thinking and not r.text),
             ("empty_answer", lambda r: r.text == "" and not r.tool_calls),
             ("server_error_once", lambda r: r.status == 500),
-            ("schema_break", lambda r: "CLAIM" not in r.text),
+            ("rate_limited", lambda r: r.status == 429 and r.headers.get("retry-after")),
+            ("overloaded", lambda r: r.status == 503),
+            ("schema_break", lambda r: "agreement_confidence" not in r.text),
+            ("unusual_stop", lambda r: r.stop == "refusal"),
         ],
     )
-    def test_faults_a_role_s_first_call_only(self, scenario: str, check) -> None:
+    def test_faults_a_role_instance_s_first_call_only(self, scenario: str, check) -> None:
         brain = Brain(scenario=scenario)
-        request = _request("You are the Lead Cyber Security Mediator.", "--- STATIC ---")
+        request = _request(MEDIATOR_SYSTEM_HEAD, "--- STATIC ---")
         role, first, fault = brain.answer(request)
         assert (role, fault) == ("mediator", scenario)
         assert check(first)
         _role, second, fault = brain.answer(request)
         assert fault == "" and second.status == 200 and "agreement_confidence" in second.text
 
-    def test_a_slow_model_delays_every_reply(self) -> None:
-        _role, reply, _fault = Brain(scenario="slow_model", slow_seconds=0.5).answer(
-            _request("You are the Lead Cyber Security Mediator.", "x")
-        )
+    def test_every_analyst_and_every_section_sees_its_own_first_call_faulted(self) -> None:
+        brain = Brain(scenario="empty_answer")
+        static = _request("You are the static analyst.", PACK, tools=[PE_INFO])
+        dynamic = _request("You are the dynamic analyst.", PACK, tools=[PE_INFO])
+        assert instance_of("analyst", static) != instance_of("analyst", dynamic)
+        assert brain.answer(static)[2] == "empty_answer"
+        assert brain.answer(dynamic)[2] == "empty_answer"
+        assert brain.answer(static)[2] == ""
+
+    def test_overloaded_is_529_on_the_anthropic_wire(self) -> None:
+        reply = Brain(scenario="overloaded").answer(
+            _request(MEDIATOR_SYSTEM_HEAD, "x", api="anthropic")
+        )[1]
+        assert reply.status == 529
+
+    def test_prose_instead_of_tool_answers_a_schema_request_in_text(self) -> None:
+        tool = {"name": "NarrativeOutput", "description": "", "schema": {"properties": {}}}
+        request = _request(narrative_agent._SYSTEM_PROMPT, "x", tools=[tool], api="anthropic")
+        _role, reply, fault = Brain(scenario="prose_instead_of_tool").answer(request)
+        assert fault == "prose_instead_of_tool"
+        assert not reply.tool_calls and "executive_summary" in reply.text
+
+    def test_a_wire_a_scenario_cannot_carry_runs_as_normal(self) -> None:
+        tool = {"name": "NarrativeOutput", "description": "", "schema": {"properties": {}}}
+        request = _request(narrative_agent._SYSTEM_PROMPT, "x", tools=[tool], api="openai")
+        assert Brain(scenario="prose_instead_of_tool").answer(request)[2] == ""
+
+    def test_redacted_thinking_marks_anthropic_answers_that_think(self) -> None:
+        reply = Brain(scenario="redacted_thinking").answer(
+            _request(MEDIATOR_SYSTEM_HEAD, "x", api="anthropic")
+        )[1]
+        assert reply.redacted and reply.note["redacted"]
+
+    @pytest.mark.parametrize("scenario", ["slow_model", "deadline_hit"])
+    def test_a_slow_scenario_delays_every_reply(self, scenario: str) -> None:
+        reply = Brain(scenario=scenario, slow_seconds=0.5).answer(
+            _request(MEDIATOR_SYSTEM_HEAD, "x")
+        )[1]
         assert reply.delay == 0.5
 
     def test_every_scenario_has_a_sentence(self) -> None:
@@ -122,9 +192,7 @@ class TestTheScenarios:
 class TestTheAnalyst:
     def test_calls_a_tool_on_the_run_s_sample_first(self) -> None:
         _role, reply, _ = Brain().answer(_request("An analyst.", PACK, tools=[PE_INFO]))
-        assert [(c.name, c.args) for c in reply.tool_calls] == [
-            ("pe_info", {"path": "/w/sample_1.exe"})
-        ]
+        assert [(c.name, c.args) for c in reply.tool_calls] == [("pe_info", {"path": SAMPLE})]
 
     def test_answers_with_claims_citing_the_request_s_ids_after_its_steps(self) -> None:
         turns = [wire.Turn(role="user", text=PACK)]
@@ -140,13 +208,19 @@ class TestTheAnalyst:
             )
         _role, reply, _ = Brain().answer(_request("An analyst.", "", [PE_INFO], turns))
         assert not reply.tool_calls
-        assert "CLAIM:" in reply.text
-        cited = set(__import__("re").findall(r"ev_\d{4}", reply.text))
+        cited = set(re.findall(r"ev_\d{4}", reply.text))
         assert cited <= {"ev_0001", "ev_0006", "ev_0030", "ev_0031"}
         assert "TECHNIQUE: T1071.001" in reply.text
+        assert reply.note["answer"] == "final" and reply.note["claims"] == claims_in(reply.text)
+
+    def test_writes_its_answer_when_the_tools_are_withheld(self) -> None:
+        request = _request("An analyst.", PACK, tools=[PE_INFO])
+        request.raw["tool_choice"] = {"type": "none"}
+        reply = Brain().answer(request)[1]
+        assert not reply.tool_calls and "CLAIM:" in reply.text
 
     def test_a_drops_question_keeps_every_item(self) -> None:
-        question = "C1. CLAIM: one\nF2. FINDING: two\nwrite one line: KEEP <label>: <reason>"
+        question = "C1. CLAIM: one\nF2. FINDING: two\n" + markers().keep_question
         assert _keep_every_item(question).splitlines() == [
             "KEEP C1: the cited entry still shows it",
             "KEEP F2: the cited entry still shows it",
@@ -176,7 +250,7 @@ class TestTheAnalyst:
 class TestTheJudgeAndTheReport:
     def test_the_mediator_blocks_once_then_agrees(self) -> None:
         brain = Brain()
-        request = _request("You are the Lead Cyber Security Mediator.", "--- STATIC ANALYST ---")
+        request = _request(MEDIATOR_SYSTEM_HEAD, "--- STATIC ANALYST ---")
         first = brain.answer(request)[1].text
         second = brain.answer(request)[1].text
         assert "[blocking:" in first and first.rstrip().endswith("agreement_confidence: 0.6")
@@ -184,7 +258,7 @@ class TestTheJudgeAndTheReport:
 
     def test_the_bundle_carries_the_assessment_and_leaves_the_last_technique_out(self) -> None:
         user = PACK + "Expert Reports:\nTECHNIQUE: T1055\nTECHNIQUE: T1071.001\n"
-        reply = Brain().answer(_request("You are the Chief Malware Judge. Based on", user))[1]
+        reply = Brain().answer(_request(JUDGE_VERDICT_SYSTEM, user))[1]
         bundle = json.loads(reply.text)
         assert bundle["x_maljan_assessment"]["verdict"] == "Malware"
         carried = [
@@ -194,34 +268,24 @@ class TestTheJudgeAndTheReport:
         ]
         assert carried == ["T1055"]
 
-    def test_a_configuration_row_holds_a_value_its_cited_entry_holds(self) -> None:
-        user = (
-            "Answer with exactly this JSON object, these keys and no others:\n"
-            '{"items": [{"key": "...", "value": "...", "how_obtained": "decrypted or observed '
-            'or static-string or inferred", "evidence_refs": ["..."]}]}\n'
-            "The evidence for the configuration section follows.\n"
-            "- [static claim 1] It talks HTTP. — [ev_0006] iocs: 1 url "
-            "(http://rehearsal.example.net/beacon)\n"
+    def test_a_prose_section_cites_the_claims_it_was_shown_by_their_labels(self) -> None:
+        schema = composer.SECTION_SCHEMAS["prose"]
+        contract = composer.section_contract("payloads", schema)
+        evidence = (
+            composer._bundle_text("payloads", {}, None).splitlines()[0]
+            + "\n- [static claim 1] It talks HTTP. — [ev_0006] iocs\n"
         )
-        reply = Brain().answer(
-            _request("writing ONE section of a technical analysis report", user)
-        )[1]
-        (row,) = json.loads(reply.text)["items"]
-        assert row["value"] == "http://rehearsal.example.net/beacon"
-        assert row["evidence_refs"] == ["ev_0006"]
-        assert reply.note == {"section": "configuration", "content": True}
+        reply = Brain().answer(_request(composer._SYSTEM, f"{contract}\n\n{evidence}"))[1]
+        body = json.loads(reply.text)["body"]
+        assert "static claim 1" in body and "[static claim 1]" not in body
+        assert reply.note["section"] == "payloads" and reply.note["content"] is True
 
-    def test_a_section_nothing_supports_is_answered_empty(self) -> None:
-        user = (
-            "Answer with exactly this JSON object, these keys and no others:\n"
-            '{"flags": [{"flag": "...", "description": "...", "evidence_ref": "..."}]}\n'
-            "The evidence for the cli_flags section follows.\n"
-        )
-        reply = Brain().answer(
-            _request("writing ONE section of a technical analysis report", user)
-        )[1]
+    def test_a_section_the_sample_cannot_fill_is_answered_empty_on_purpose(self) -> None:
+        schema = composer.SECTION_SCHEMAS["cli_flags"]
+        request = _section_request("cli_flags", composer.section_contract("cli_flags", schema))
+        reply = Brain().answer(request)[1]
         assert json.loads(reply.text) == {"flags": []}
-        assert reply.note["content"] is False
+        assert reply.note == {"section": "cli_flags", "content": False, "deliberately_empty": True}
 
     def test_a_structured_request_is_answered_through_its_schema_tool(self) -> None:
         tool = {"name": "NarrativeOutput", "description": "", "schema": {"properties": {}}}
